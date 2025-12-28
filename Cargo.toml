@@ -1,0 +1,27 @@
+[package]
+name = "mtt-file-manager"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eframe = "0.31"
+rayon = "1.10"
+walkdir = "2.5"
+rfd = "0.15"
+lru = "0.12"
+
+[dependencies.windows]
+version = "0.58"
+features = [
+    "Win32_UI_Shell",
+    "Win32_System_Com",
+    "Win32_Graphics_Gdi",
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_UI_WindowsAndMessaging",
+]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
