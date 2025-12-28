@@ -1138,42 +1138,52 @@ impl ImageViewerApp {
                             ).rect
                         };
 
-                        // DRAW PREVIEW OVERLAY
+                        // DRAW PREVIEW OVERLAY (Windows Explorer Style "Content Fill")
                         if let Some(cover_path) = &item.folder_cover {
                             if let Some(tex) = self.texture_cache.get(cover_path) {
-                                // Define margens para parecer "dentro" da pasta
-                                let margin_x = rect.width() * 0.15;
-                                let margin_y_top = rect.height() * 0.25;
-                                let margin_y_bottom = rect.height() * 0.10;
+                                // A. Definir a "Área Útil" da pasta (Onde a foto pode aparecer)
+                                // Pula a aba superior (~18% da altura)
+                                let content_top_offset = rect.height() * 0.18; 
+                                // Margem lateral pequena (~4%)
+                                let content_side_margin = rect.width() * 0.04; 
+                                // Margem inferior pequena (~4%)
+                                let content_bottom_margin = rect.height() * 0.04;
 
-                                let preview_rect = egui::Rect::from_min_max(
-                                    egui::pos2(rect.min.x + margin_x, rect.min.y + margin_y_top),
-                                    egui::pos2(rect.max.x - margin_x, rect.max.y - margin_y_bottom),
+                                let view_rect = egui::Rect::from_min_max(
+                                    egui::pos2(rect.min.x + content_side_margin, rect.min.y + content_top_offset),
+                                    egui::pos2(rect.max.x - content_side_margin, rect.max.y - content_bottom_margin),
                                 );
 
-                                // Aspect Ratio Match
+                                // B. Cálculo de UV para "Object-Fit: Cover" (Corta excesso, não distorce)
                                 let size = tex.size();
                                 let tex_size = egui::vec2(size[0] as f32, size[1] as f32);
                                 
                                 if tex_size.x > 0.0 && tex_size.y > 0.0 {
-                                    let aspect = tex_size.x / tex_size.y;
-                                    let box_aspect = preview_rect.width() / preview_rect.height();
-                                    
-                                    let final_preview_rect = if aspect > box_aspect {
-                                        // Imagem mais larga que o box -> limita largura
-                                        let h = preview_rect.width() / aspect;
-                                        egui::Rect::from_center_size(preview_rect.center(), egui::vec2(preview_rect.width(), h))
-                                    } else {
-                                        // Imagem mais alta -> limita altura
-                                        let w = preview_rect.height() * aspect;
-                                        egui::Rect::from_center_size(preview_rect.center(), egui::vec2(w, preview_rect.height()))
-                                    };
+                                    let aspect_img = tex_size.x / tex_size.y;
+                                    let aspect_view = view_rect.width() / view_rect.height();
 
-                                    // Desenha a imagem de capa por cima (overlay)
+                                    let uv_rect;
+                                    
+                                    if aspect_img > aspect_view {
+                                        // Imagem é mais larga que a área (Wide): Corta as laterais
+                                        // Mantém altura 100% (0.0 a 1.0), calcula largura proporcional
+                                        let scale = aspect_view / aspect_img; 
+                                        let offset = (1.0 - scale) / 2.0;
+                                        uv_rect = egui::Rect::from_min_max(egui::pos2(offset, 0.0), egui::pos2(1.0 - offset, 1.0));
+                                    } else {
+                                        // Imagem é mais alta que a área (Tall): Corta topo/base
+                                        // Mantém largura 100%, calcula altura
+                                        let scale = aspect_img / aspect_view;
+                                        let offset = (1.0 - scale) / 2.0;
+                                        // Centraliza verticalmente
+                                        uv_rect = egui::Rect::from_min_max(egui::pos2(0.0, offset), egui::pos2(1.0, 1.0 - offset));
+                                    }
+
+                                    // Desenha a imagem cortada dentro da área útil
                                     ui.painter().image(
                                         tex.id(),
-                                        final_preview_rect,
-                                        egui::Rect::from_min_max(egui::pos2(0.0,0.0), egui::pos2(1.0,1.0)),
+                                        view_rect,
+                                        uv_rect,
                                         egui::Color32::WHITE
                                     );
                                 }
