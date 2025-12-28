@@ -1133,10 +1133,12 @@ impl ImageViewerApp {
             }
 
             if let Some(tex) = item.folder_cover.as_ref().and_then(|p| self.texture_cache.get(p)) {
-                // Área onde o preview pode aparecer
+                // Área onde o preview pode aparecer (com margens)
+                let margin_x = 6.0;
+                let margin_top = 4.0;
                 let preview_area = egui::Rect::from_min_max(
-                    egui::pos2(folder_rect.min.x, folder_rect.min.y + tab_h),
-                    egui::pos2(folder_rect.max.x, folder_rect.max.y - front_h)
+                    egui::pos2(folder_rect.min.x + margin_x, folder_rect.min.y + tab_h + margin_top),
+                    egui::pos2(folder_rect.max.x - margin_x, folder_rect.max.y - front_h)
                 );
 
                 let size = tex.size();
