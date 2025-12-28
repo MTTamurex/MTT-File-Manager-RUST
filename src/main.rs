@@ -1,4 +1,4 @@
-use eframe::egui;
+use eframe::egui::{self, UiStackInfo};
 use lru::LruCache;
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -18,7 +18,61 @@ use windows::{
 };
 
 // Imports adicionaisexplícitos para APIs de ícones
-use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_LARGEICON, SHGFI_USEFILEATTRIBUTES};
+use windows::Win32::UI::Shell::{
+    SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_LARGEICON, 
+    SHGFI_USEFILEATTRIBUTES
+};
+
+// ...
+
+
+/// Extrai ícone de "Este Computador" (This PC) usando PIDL (método robusto)
+fn extract_computer_icon(size: IconSize) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
+    unsafe {
+        // 1. Obtém o PIDL do "Meu Computador" (CSIDL_DRIVES)
+        let pidl = match SHGetSpecialFolderLocation(HWND(std::ptr::null_mut()), CSIDL_DRIVES as i32) {
+            Ok(p) => p,
+            Err(_) => {
+                println!("DEBUG: SHGetSpecialFolderLocation failed");
+                return Err("Failed to get PIDL for My Computer".into());
+            }
+        };
+        
+        let mut shfi = SHFILEINFOW::default();
+        
+        // 2. Flags com SHGFI_PIDL (CRÍTICO!)
+        let flags = SHGFI_PIDL | SHGFI_ICON | match size {
+            IconSize::Small => SHGFI_SMALLICON,
+            IconSize::Large => SHGFI_LARGEICON,
+        };
+        
+        // 3. Pede o ícone usando o PIDL (cast para PCWSTR como exigido pela API)
+        let result = SHGetFileInfoW(
+            PCWSTR(pidl as *const u16),
+            FILE_ATTRIBUTE_NORMAL,
+            Some(&mut shfi),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            flags,
+        );
+        
+        // 4. Limpa o PIDL (SEMPRE! Para evitar memory leak)
+        CoTaskMemFree(Some(pidl as *const std::ffi::c_void));
+        
+        if result == 0 || shfi.hIcon.is_invalid() {
+            println!("DEBUG: SHGetFileInfoW failed for PIDL");
+            return Err("Failed to get computer icon".into());
+        }
+        
+        // 5. Converte e limpa o ícone
+        let hicon = shfi.hIcon;
+        let conversion_result = hicon_to_rgba(hicon);
+        
+        let _ = DestroyIcon(hicon);
+        
+        conversion_result
+    }
+}
+
 use windows::Win32::UI::WindowsAndMessaging::{GetIconInfo, DestroyIcon, ICONINFO, HICON};
 use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, GetVolumeInformationW};
 
@@ -42,23 +96,51 @@ enum IconSize {
     Large,  // 32x32 ou 48x48
 }
 
-// Tipo de item
-#[derive(Debug, Clone)]
-enum FileSystemItem {
-    Directory(PathBuf),
-    File(PathBuf),
+// Modo de ordenação
+#[derive(PartialEq, Clone, Copy, Debug)]
+enum SortMode {
+    Name,
+    Date,
+    Size,
 }
 
-impl FileSystemItem {
-    fn path(&self) -> &Path {
-        match self {
-            FileSystemItem::Directory(p) => p,
-            FileSystemItem::File(p) => p,
-        }
+// Entry de arquivo/pasta com metadados cacheados para ordenação
+#[derive(Clone, Debug)]
+struct FileEntry {
+    path: PathBuf,
+    name: String,      // Cache do nome para sort rápido
+    is_dir: bool,      // Pastas primeiro
+    size: u64,         // Tamanho em bytes (0 para diretórios)
+    modified: u64,     // Timestamp (segundos desde UNIX_EPOCH)
+}
+
+impl FileEntry {
+    fn from_path(path: PathBuf, is_dir: bool) -> Self {
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+        
+        // Tenta ler metadata, usa defaults em caso de erro (arquivos travados, etc)
+        let (size, modified) = std::fs::metadata(&path)
+            .ok()
+            .map(|m| {
+                let size = if is_dir { 0 } else { m.len() };
+                let modified = m.modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                (size, modified)
+            })
+            .unwrap_or((0, 0));
+        
+        Self { path, name, is_dir, size, modified }
     }
     
-    fn is_directory(&self) -> bool {
-        matches!(self, FileSystemItem::Directory(_))
+    fn path(&self) -> &Path {
+        &self.path
     }
 }
 
@@ -77,14 +159,19 @@ struct ImageViewerApp {
     image_receiver: Receiver<ThumbnailData>,
     
     // File system
-    items: Vec<FileSystemItem>,
+    items: Vec<FileEntry>,  // Agora com metadados cacheados
     texture_cache: LruCache<PathBuf, egui::TextureHandle>,
     loading_set: HashSet<PathBuf>,
     
     // Icon cache (novo: extensão → texture)
     icon_cache: LruCache<String, egui::TextureHandle>,
     folder_icon_texture: Option<egui::TextureHandle>,
+    computer_icon: Option<egui::TextureHandle>,  // Ícone "Este Computador"
     drive_icon_cache: LruCache<String, egui::TextureHandle>,  // path → icon
+    
+    // Sorting state
+    sort_mode: SortMode,
+    sort_descending: bool,  // true = Z-A, Mais Novo, Maior
     
     // Navigation state (histórico linear)
     navigation_history: Vec<String>,  // Histórico completo de paths
@@ -114,7 +201,11 @@ impl Default for ImageViewerApp {
             loading_set: HashSet::new(),
             icon_cache: LruCache::new(NonZeroUsize::new(ICON_CACHE_SIZE).unwrap()),
             folder_icon_texture: None,
+            computer_icon: None,
             drive_icon_cache: LruCache::new(NonZeroUsize::new(10).unwrap()),  // Poucos drives
+            // Sorting - padrão: Nome, Ascendente
+            sort_mode: SortMode::Name,
+            sort_descending: false,
             // Navigation - começa com path inicial no histórico
             navigation_history: vec![PATH_PADRAO.to_string()],
             history_index: 0,
@@ -519,6 +610,8 @@ fn extract_drive_icon(
 
 
 
+
+
 fn open_with_shell(path: &Path) {
     unsafe {
         let path_str = path.to_string_lossy().to_string();
@@ -536,6 +629,34 @@ fn open_with_shell(path: &Path) {
 }
 
 impl ImageViewerApp {
+    /// Ordena itens baseado no modo atual (mantém pastas sempre primeiro)
+    fn sort_items(&mut self) {
+        self.items.sort_by(|a, b| {
+            // 1. Pastas sempre primeiro (a menos que ambos sejam pastas ou ambos arquivos)
+            if a.is_dir != b.is_dir {
+                return if a.is_dir {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                };
+            }
+            
+            // 2. Ordena por modo selecionado
+            let ordering = match self.sort_mode {
+                SortMode::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                SortMode::Date => a.modified.cmp(&b.modified),
+                SortMode::Size => a.size.cmp(&b.size),
+            };
+            
+            // 3. Inverte se descending está ativo
+            if self.sort_descending {
+                ordering.reverse()
+            } else {
+                ordering
+            }
+        });
+    }
+    
     fn load_folder(&mut self) {
         self.items.clear();
         self.texture_cache.clear();
@@ -548,7 +669,7 @@ impl ImageViewerApp {
         let sender = self.image_sender.clone();
         
         std::thread::spawn(move || {
-            let mut entries: Vec<FileSystemItem> = WalkDir::new(&path)
+            let mut entries: Vec<FileEntry> = WalkDir::new(&path)
                 .max_depth(1)
                 .into_iter()
                 .filter_map(|e| e.ok())
@@ -592,31 +713,17 @@ impl ImageViewerApp {
                 })
                 .map(|e| {
                     let path = e.path().to_path_buf();
-                    if e.file_type().is_dir() {
-                        FileSystemItem::Directory(path)
-                    } else {
-                        FileSystemItem::File(path)
-                    }
+                    let is_dir = e.file_type().is_dir();
+                    // Cria FileEntry com metadados cacheados
+                    FileEntry::from_path(path, is_dir)
                 })
                 .collect();
             
-            // SORTING: Folders first, then alphabetically
-            entries.sort_by(|a, b| {
-                match (a, b) {
-                    (FileSystemItem::Directory(_), FileSystemItem::File(_)) => Ordering::Less,
-                    (FileSystemItem::File(_), FileSystemItem::Directory(_)) => Ordering::Greater,
-                    _ => {
-                        let a_name = a.path().file_name().unwrap_or_default();
-                        let b_name = b.path().file_name().unwrap_or_default();
-                        a_name.to_string_lossy().to_lowercase()
-                            .cmp(&b_name.to_string_lossy().to_lowercase())
-                    }
-                }
-            });
+            // Sorting será feito no main thread via sort_items() (usa app state)
             
             for item in entries {
                 let _ = sender.send(ThumbnailData {
-                    path: item.path().to_path_buf(),
+                    path: item.path.clone(),  // FileEntry tem path como campo direto
                     image_data: Vec::new(),
                     width: 0,
                     height: 0,
@@ -784,19 +891,38 @@ impl ImageViewerApp {
         }
     }
     
+    /// Garante que ícone de "Este Computador" está carregado.
+    fn ensure_computer_icon(&mut self, ctx: &egui::Context) {
+        if self.computer_icon.is_some() {
+            return;
+        }
+        
+        if let Ok((data, width, height)) = extract_computer_icon(IconSize::Small) {
+            let image = egui::ColorImage::from_rgba_unmultiplied(
+                [width as usize, height as usize],
+                &data,
+            );
+            
+            self.computer_icon = Some(ctx.load_texture(
+                "computer_icon",
+                image,
+                egui::TextureOptions::LINEAR,
+            ));
+        }
+    }
+    
     fn process_incoming_messages(&mut self, ctx: &egui::Context) {
         let mut received_any = false;
+        let mut new_items_added = false;
         
         while let Ok(thumbnail_data) = self.image_receiver.try_recv() {
             received_any = true;
             
             if thumbnail_data.image_data.is_empty() {
                 let path = thumbnail_data.path.clone();
-                if path.is_dir() {
-                    self.items.push(FileSystemItem::Directory(path));
-                } else {
-                    self.items.push(FileSystemItem::File(path));
-                }
+                let is_dir = path.is_dir();
+                self.items.push(FileEntry::from_path(path, is_dir));
+                new_items_added = true;
                 self.total_items = self.items.len();
             } else {
                 self.loading_set.remove(&thumbnail_data.path);
@@ -814,6 +940,11 @@ impl ImageViewerApp {
             }
         }
         
+        // Ordena items após carregar todos
+        if new_items_added {
+            self.sort_items();
+        }
+        
         if received_any {
             ctx.request_repaint();
         }
@@ -824,12 +955,12 @@ impl ImageViewerApp {
             return;
         }
         
-        let item = &self.items[idx];
+        let item = self.items[idx].clone();  // Clone para evitar borrow conflicts
         let is_selected = self.selected_item == Some(idx);
         
-        match item {
-            FileSystemItem::Directory(path) => {
-                let path_clone = path.clone();
+        // ==== DIRECTORY RENDERING ====
+        if item.is_dir {
+            let path_clone = item.path.clone();
                 
                 // Compact folder card with NO padding
                 let frame = egui::Frame::none()
@@ -866,20 +997,18 @@ impl ImageViewerApp {
                             );
                         }
                         
-                        if let Some(name) = path_clone.file_name() {
-                            // Espaço fixo para texto (sempre 2 linhas de altura)
-                            ui.set_min_height(20.0);
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(name.to_string_lossy())
-                                        .size(9.0)  // Smaller text for folders
-                                        .color(egui::Color32::BLACK)
-                                )
-                                .wrap()
-                                .truncate()
-                                .selectable(false)
-                            );
-                        }
+                        // PERFORMANCE: Usa item.name (já cacheado) em vez de path.file_name()
+                        ui.set_min_height(20.0);
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(&item.name)
+                                    .size(9.0)  // Smaller text for folders
+                                    .color(egui::Color32::BLACK)
+                            )
+                            .wrap()
+                            .truncate()
+                            .selectable(false)
+                        );
                     });
                 }).response;
                 
@@ -893,12 +1022,13 @@ impl ImageViewerApp {
                 if interact.double_clicked() {
                     self.navigate_to(&path_clone.to_string_lossy().to_string());
                 }
-            }
-            FileSystemItem::File(path) => {
-                let path_clone = path.clone();
+            } 
+            // ==== FILE RENDERING ====
+            else {
+                let path_clone = item.path.clone();
                 
                 // Detecta se é arquivo de mídia
-                let is_media_file = if let Some(ext) = path.extension() {
+                let is_media_file = if let Some(ext) = path_clone.extension() {
                     let ext_lower = ext.to_string_lossy().to_lowercase();
                     matches!(ext_lower.as_str(),
                         "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" |
@@ -923,7 +1053,7 @@ impl ImageViewerApp {
                 
                 // PRÉ-CARREGA ícone para arquivos não-mídia ANTES de entrar no closure
                 let file_icon = if !is_media_file {
-                    if let Some(ext) = path.extension() {
+                    if let Some(ext) = path_clone.extension() {
                         let ext_str = format!(".{}", ext.to_string_lossy());
                         self.get_or_load_icon(ui.ctx(), &ext_str)
                     } else {
@@ -992,20 +1122,18 @@ impl ImageViewerApp {
                             }
                         }
                         
-                        if let Some(filename) = path_clone.file_name() {
-                            // Espaço fixo para texto (sempre 2 linhas de altura)
-                            ui.set_min_height(20.0);
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(filename.to_string_lossy())
-                                        .size(10.0)
-                                        .color(egui::Color32::BLACK)
-                                )
-                                .wrap()
-                                .truncate()
-                                .selectable(false)
-                            );
-                        }
+                        // PERFORMANCE: Usa item.name (já cacheado) em vez de path.file_name()
+                        ui.set_min_height(20.0);
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(&item.name)
+                                    .size(10.0)
+                                    .color(egui::Color32::BLACK)
+                            )
+                            .wrap()
+                            .truncate()
+                            .selectable(false)
+                        );
                     });
                 }).response;
                 
@@ -1022,12 +1150,12 @@ impl ImageViewerApp {
             }
         }
     }
-}
 
 impl eframe::App for ImageViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.process_incoming_messages(ctx);
-        self.ensure_folder_icon(ctx);  // Carrega ícone de pasta uma vez
+        self.ensure_folder_icon(ctx);
+        self.ensure_computer_icon(ctx);  // Carrega ícone "Este Computador"
 
         
         // Windows 11 style sidebar
@@ -1036,7 +1164,16 @@ impl eframe::App for ImageViewerApp {
             .show(ctx, |ui| {
                 ui.add_space(10.0);
                 
-                ui.heading("💾 Discos");
+                // Header "Este Computador" com ícone nativo
+                ui.horizontal(|ui| {
+                    if let Some(icon) = &self.computer_icon {
+                        ui.add(egui::Image::new(icon)
+                            .max_size(egui::vec2(16.0, 16.0))
+                            .maintain_aspect_ratio(true));
+                    }
+                    ui.label(egui::RichText::new("Este Computador").strong().size(16.0));
+                });
+                
                 ui.separator();
                 
                 ui.add_space(5.0);  // Espaçamento superior
@@ -1105,6 +1242,35 @@ impl eframe::App for ImageViewerApp {
                 
                 ui.separator();
                 
+                // Sorting controls (BEFORE address bar to ensure visibility)
+                ui.label("Ordenar:");
+                egui::ComboBox::from_id_source("sort_mode")
+                    .selected_text(match self.sort_mode {
+                        SortMode::Name => "Nome",
+                        SortMode::Date => "Data",
+                        SortMode::Size => "Tamanho",
+                    })
+                    .show_ui(ui, |ui| {
+                        if ui.selectable_value(&mut self.sort_mode, SortMode::Name, "Nome").clicked() { 
+                            self.sort_items(); 
+                        }
+                        if ui.selectable_value(&mut self.sort_mode, SortMode::Date, "Data").clicked() { 
+                            self.sort_items(); 
+                        }
+                        if ui.selectable_value(&mut self.sort_mode, SortMode::Size, "Tamanho").clicked() { 
+                            self.sort_items(); 
+                        }
+                    });
+                
+                // Toggle ascending/descending
+                let sort_icon = if self.sort_descending { "⬇" } else { "⬆" };
+                if ui.button(sort_icon).clicked() {
+                    self.sort_descending = !self.sort_descending;
+                    self.sort_items();
+                }
+                
+                ui.separator();
+                
                 // Barra de endereço editável
                 let response = ui.add_sized(
                     egui::vec2(ui.available_width() - 10.0, 20.0),
@@ -1136,6 +1302,7 @@ impl eframe::App for ImageViewerApp {
                 ui.label(format!("Itens: {}", self.total_items));
                 
                 ui.separator();
+                
                 
                 let memory_usage: usize = self.texture_cache.iter()
                     .map(|(_, tex)| {
@@ -1227,9 +1394,10 @@ impl eframe::App for ImageViewerApp {
                                     continue; // Não carrega thumbnail nem renderiza
                                 }
                                 
-                                // Desenha o card naquela posição EXATA usando child_ui
-                                let mut child = ui.child_ui(rect, egui::Layout::top_down(egui::Align::Center), None);
-                                self.render_item_slot(&mut child, index);
+                                // Desenha o card naquela posição EXATA
+                                ui.allocate_ui_at_rect(rect, |ui| {
+                                    self.render_item_slot(ui, index);
+                                }).response;
                             }
                         }
                     });
