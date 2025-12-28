@@ -1616,8 +1616,15 @@ impl eframe::App for ImageViewerApp {
                                                 };
                                                 img_height + 4.0 + 20.0_f32.max(text_h) + 4.0
                                             } else {
-                                                // Arquivo: ícone (50% centralizado) + texto
-                                                self.thumbnail_size + 4.0 + 20.0_f32.max(text_h) + 4.0
+                                                // Arquivo não-mídia: ícone 50% centralizado verticalmente
+                                                // render_item_slot usa:
+                                                //   add_space((thumbnail_size - icon_display_size) / 2.0) = 25% espaço antes
+                                                //   ícone de 50% do thumbnail
+                                                //   (não tem espaço depois, o texto vem logo abaixo)
+                                                let icon_display_size = self.thumbnail_size * 0.5;
+                                                let top_space = (self.thumbnail_size - icon_display_size) / 2.0;
+                                                // Altura real: espaço_superior + ícone + gap + texto
+                                                top_space + icon_display_size + 4.0 + 20.0_f32.max(text_h) + 4.0
                                             };
                                             
                                             let content_h = content_h.min(rect.height());
