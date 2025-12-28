@@ -177,6 +177,35 @@ if !ui.is_rect_visible(rect) {
 ```
 Isso garante que thumbnails nunca sejam solicitados para itens que o usuário "pulou" ao rolar rápido.
 
+### 2.1 Seleção Shrink-Wrap (Windows Explorer Style)
+Para manter a UX fiel ao Windows Explorer, o realce de seleção não ocupa toda a célula do grid. Em vez disso, ele "abraça" apenas o conteúdo efetivo: ícone/thumbnail + nome (até 2 linhas), com altura dinâmica.
+
+```rust
+// Determina altura do ícone por tipo
+let icon_h = if item.is_dir { thumb * 0.6 } else if is_media { thumb } else { thumb * 0.5 };
+
+// Mede o texto com wrap/truncate (máx. 2 linhas)
+let text_galley = ui.fonts(|f| f.layout_job(egui::text::LayoutJob {
+    text: item.name.clone(),
+    sections: vec![egui::text::LayoutSection { /* font size por tipo */ }],
+    wrap: egui::text::TextWrapping { max_width: cell_rect.width() - 8.0, max_rows: 2, break_anywhere: true, ..Default::default() },
+    ..Default::default()
+}));
+
+// Altura final da seleção (limitada à célula)
+let content_h = (icon_h + 7.0 + text_galley.rect.height() + 8.0).min(cell_rect.height());
+let selection_rect = egui::Rect::from_min_size(cell_rect.min, egui::vec2(cell_rect.width(), content_h));
+
+// Pintura do realce
+ui.painter().rect_stroke(selection_rect, 2.0, egui::Stroke::new(2.0, egui::Color32::from_rgb(0,120,215)), egui::StrokeKind::Outside);
+ui.painter().rect_filled(selection_rect, 0.0, egui::Color32::from_rgba_unmultiplied(0,120,215,30));
+```
+
+Benefícios:
+- Seleção visualmente precisa e limitada ao conteúdo
+- Mantém alinhamento do grid e evita "caixas vazias" grandes
+- Sem impacto de performance perceptível (medição de texto leve)
+
 ### 3. VRAM Budgeting
 O gerenciamento de memória de vídeo é proativo, não reativo:
 - **Hard Cap**: 200 texturas máximas
