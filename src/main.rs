@@ -85,6 +85,8 @@ const PATH_PADRAO: &str = "C:\\";
 // LRU cache - reduzido para limitar VRAM (~50-100MB)
 const CACHE_SIZE: usize = 200;
 const MAX_CONCURRENT_LOADS: usize = 30;  // Reduzido de 50
+const PRELOAD_ROWS: usize = 5;  // Pre-fetch: carrega 5 linhas antes/depois da viewport
+
 
 // Icon cache (menor pois ícones são compartilhados por extensão)
 const ICON_CACHE_SIZE: usize = 100;
@@ -187,6 +189,8 @@ struct ImageViewerApp {
     disks: Vec<(String, String)>,  // (path, label)
     thumbnail_size: f32,        // Zoom: 64-512
     selected_item: Option<usize>,
+    selected_file: Option<FileEntry>,
+    show_preview_panel: bool,
     
     total_items: usize,
 }
@@ -215,6 +219,9 @@ impl Default for ImageViewerApp {
             // Sorting - padrão: Nome, Ascendente
             sort_mode: SortMode::Name,
             sort_descending: false,
+            // Selection & Preview
+            selected_file: None,
+            show_preview_panel: true,  // Mostrar por padrão
             // Navigation - começa com path inicial no histórico
             navigation_history: vec![PATH_PADRAO.to_string()],
             history_index: 0,
@@ -636,6 +643,49 @@ fn open_with_shell(path: &Path) {
     }
 }
 
+// Helper functions for preview pane
+fn format_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    
+    if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.2} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.2} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} bytes", bytes)
+    }
+}
+
+fn format_date(timestamp: u64) -> String {
+    if timestamp == 0 {
+        return "Desconhecido".to_string();
+    }
+    
+    use std::time::{UNIX_EPOCH, Duration, SystemTime};
+    
+    let datetime = UNIX_EPOCH + Duration::from_secs(timestamp);
+    
+    // Simple formatting (ideally use chrono)
+    if let Ok(duration) = SystemTime::now().duration_since(datetime) {
+        let days = duration.as_secs() / 86400;
+        if days == 0 {
+            "Hoje".to_string()
+        } else if days == 1 {
+            "Ontem".to_string()
+        } else if days < 7 {
+            format!("{} dias atrás", days)
+        } else {
+            format!("{} semanas atrás", days / 7)
+        }
+    } else {
+        "Futuro".to_string()
+    }
+}
+
 impl ImageViewerApp {
     /// Ordena itens baseado no modo atual (mantém pastas sempre primeiro)
     fn sort_items(&mut self) {
@@ -1014,16 +1064,7 @@ impl ImageViewerApp {
                     });
                 }).response;
                 
-                // FIXED: Use interact() with click sense for proper cursor
-                let interact = response.interact(egui::Sense::click());
-                
-                if interact.clicked() {
-                    self.selected_item = Some(idx);
-                }
-                
-                if interact.double_clicked() {
-                    self.navigate_to(&path_clone.to_string_lossy().to_string());
-                }
+
             } 
             // ==== FILE RENDERING ====
             else {
@@ -1139,16 +1180,7 @@ impl ImageViewerApp {
                     });
                 }).response;
                 
-                // FIXED: Use interact() for proper double-click
-                let interact = response.interact(egui::Sense::click());
-                
-                if interact.clicked() {
-                    self.selected_item = Some(idx);
-                }
-                
-                if interact.double_clicked() {
-                    open_with_shell(&path_clone);
-                }
+
             }
         }
     }
@@ -1161,66 +1193,8 @@ impl eframe::App for ImageViewerApp {
 
         
         // Windows 11 style sidebar
-        egui::SidePanel::left("sidebar")
-            .min_width(200.0)
-            .show(ctx, |ui| {
-                ui.add_space(10.0);
-                
-                // Header "Este Computador" com ícone nativo
-                ui.horizontal(|ui| {
-                    if let Some(icon) = &self.computer_icon {
-                        ui.add(egui::Image::new(icon)
-                            .max_size(egui::vec2(16.0, 16.0))
-                            .maintain_aspect_ratio(true));
-                    }
-                    ui.label(egui::RichText::new("Este Computador").strong().size(16.0));
-                });
-                
-                ui.separator();
-                
-                ui.add_space(5.0);  // Espaçamento superior
-                
-                
-                for (disk_path, disk_label) in &self.disks.clone() {
-                    // Pré-carrega ícone do drive se não estiver no cache
-                    let drive_icon = if let Some(icon) = self.drive_icon_cache.get(disk_path) {
-                        Some(icon.clone())
-                    } else {
-                        // Tenta carregar ícone real do drive
-                        if let Ok((rgba_data, width, height)) = extract_drive_icon(disk_path, IconSize::Small) {
-                            let texture = ui.ctx().load_texture(
-                                format!("drive_{}", disk_path),
-                                egui::ColorImage::from_rgba_unmultiplied(
-                                    [width as usize, height as usize],
-                                    &rgba_data,
-                                ),
-                                egui::TextureOptions::LINEAR,
-                            );
-                            let cloned = texture.clone();
-                            self.drive_icon_cache.put(disk_path.clone(), texture);
-                            Some(cloned)
-                        } else {
-                            None
-                        }
-                    };
-                    
-                    // Renderiza drive com ícone + label
-                    let response = ui.horizontal(|ui| {
-                        if let Some(icon) = drive_icon {
-                            ui.add(egui::Image::new(&icon).max_size(egui::vec2(16.0, 16.0)));
-                        } else {
-                            ui.label("💾");  // Fallback
-                        }
-                        ui.selectable_label(false, disk_label)
-                    }).inner;
-                    
-                    if response.clicked() {
-                        self.navigate_to(disk_path);
-                    }
-                    
-                    ui.add_space(3.0);  // Espaçamento entre drives
-                }
-            });
+        // Left Sidebar moved to after TopPanels for correct layout
+
         
         // Top navigation bar
         egui::TopBottomPanel::top("nav_bar").show(ctx, |ui| {
@@ -1273,6 +1247,13 @@ impl eframe::App for ImageViewerApp {
                 
                 ui.separator();
                 
+                // Toggle preview pane
+                if ui.button("👁").on_hover_text("Preview").clicked() {
+                    self.show_preview_panel = !self.show_preview_panel;
+                }
+                
+                ui.separator();
+                
                 // Barra de endereço editável
                 let response = ui.add_sized(
                     egui::vec2(ui.available_width() - 10.0, 20.0),
@@ -1318,12 +1299,128 @@ impl eframe::App for ImageViewerApp {
                     memory_usage as f64 / 1024.0 / 1024.0
                 ));
                 
-                if !self.loading_set.is_empty() {
-                    ui.separator();
-                    ui.spinner();
-                }
             });
         });
+        
+        // Windows 11 style sidebar (Restored)
+        egui::SidePanel::left("sidebar")
+            .min_width(200.0)
+            .show(ctx, |ui| {
+                ui.add_space(10.0);
+                
+                // Header "Este Computador" com ícone nativo
+                ui.horizontal(|ui| {
+                    if let Some(icon) = &self.computer_icon {
+                        ui.add(egui::Image::new(icon)
+                            .max_size(egui::vec2(16.0, 16.0))
+                            .maintain_aspect_ratio(true));
+                    }
+                    ui.label(egui::RichText::new("Este Computador").strong().size(16.0));
+                });
+                
+                ui.separator();
+                
+                ui.add_space(5.0);
+                
+                for (disk_path, disk_label) in &self.disks.clone() {
+                    // Pré-carrega ícone do drive se não estiver no cache
+                    let drive_icon = if let Some(icon) = self.drive_icon_cache.get(disk_path) {
+                        Some(icon.clone())
+                    } else {
+                        // Tenta carregar ícone real do drive
+                        if let Ok((rgba_data, width, height)) = extract_drive_icon(disk_path, IconSize::Small) {
+                            let texture = ui.ctx().load_texture(
+                                format!("drive_{}", disk_path),
+                                egui::ColorImage::from_rgba_unmultiplied(
+                                    [width as usize, height as usize],
+                                    &rgba_data,
+                                ),
+                                egui::TextureOptions::LINEAR,
+                            );
+                            let cloned = texture.clone();
+                            self.drive_icon_cache.put(disk_path.clone(), texture);
+                            Some(cloned)
+                        } else {
+                            None
+                        }
+                    };
+                    
+                    // Renderiza drive com ícone + label
+                    let response = ui.horizontal(|ui| {
+                        if let Some(icon) = drive_icon {
+                            ui.add(egui::Image::new(&icon).max_size(egui::vec2(16.0, 16.0)));
+                        } else {
+                            ui.label("💾");
+                        }
+                        ui.selectable_label(false, disk_label)
+                    }).inner;
+                    
+                    if response.clicked() {
+                        self.navigate_to(disk_path);
+                    }
+                    
+                    ui.add_space(3.0);
+                }
+            });
+        
+
+        
+        // Preview Pane (Windows Explorer style) - ANTES do CentralPanel
+        if self.show_preview_panel {
+            egui::SidePanel::right("preview_panel")
+                .resizable(true)
+                .default_width(300.0)
+                .min_width(250.0)
+                .show(ctx, |ui| {
+                    if let Some(file) = &self.selected_file {
+                        ui.heading("Pré-visualização");
+                        ui.separator();
+                        
+                        // Preview de imagem (se houver thumbnail)
+                        if let Some(texture) = self.texture_cache.peek(&file.path) {
+                            ui.centered_and_justified(|ui| {
+                                ui.add(egui::Image::new(texture).max_size(egui::vec2(280.0, 280.0)));
+                            });
+                            ui.separator();
+                        }
+                        
+                        // Tabela de detalhes
+                        egui::Grid::new("details_grid")
+                            .num_columns(2)
+                            .spacing([10.0, 4.0])
+                            .show(ui, |ui| {
+                                ui.label("Nome:");
+                                ui.label(&file.name);
+                                ui.end_row();
+                                
+                                ui.label("Tamanho:");
+                                ui.label(format_size(file.size));
+                                ui.end_row();
+                                
+                                ui.label("Tipo:");
+                                if file.is_dir {
+                                    ui.label("Pasta");
+                                } else {
+                                    let ext = file.path.extension()
+                                        .and_then(|e| e.to_str())
+                                        .unwrap_or("Arquivo");
+                                    ui.label(ext.to_uppercase());
+                                }
+                                ui.end_row();
+                                
+                                ui.label("Data:");
+                                ui.label(format_date(file.modified));
+                                ui.end_row();
+                            });
+                    } else {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(100.0);
+                            ui.label("Selecione um arquivo");
+                            ui.label("para ver detalhes");
+                        });
+                    }
+                });
+        }
         
         // Central grid
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -1377,12 +1474,16 @@ impl eframe::App for ImageViewerApp {
                         let start_y = (clip_rect.top() - content_min.y).max(0.0);
                         let end_y = start_y + clip_rect.height();
                         
-                        // C) Calcula quais linhas desenhar (otimização)
-                        let min_row = (start_y / (item_h + padding)).floor() as usize;
-                        let max_row = ((end_y / (item_h + padding)).ceil() as usize + 1).min(rows);
+                        // C) Viewport visível (para cálculo do buffer)
+                        let visible_min_row = (start_y / (item_h + padding)).floor() as usize;
+                        let visible_max_row = ((end_y / (item_h + padding)).ceil() as usize + 1).min(rows);
                         
-                        // D) Loop de desenho absoluto - posição matemática exata
-                        for row in min_row..max_row {
+                        // D) Expande range para PRE-FETCHING (buffer zone)
+                        let loop_min_row = visible_min_row.saturating_sub(PRELOAD_ROWS);
+                        let loop_max_row = (visible_max_row + PRELOAD_ROWS).min(rows);
+                        
+                        // E) Loop com look-ahead: itera além da viewport
+                        for row in loop_min_row..loop_max_row {
                             for col in 0..cols {
                                 let index = row * cols + col;
                                 if index >= count { break; }
@@ -1397,15 +1498,58 @@ impl eframe::App for ImageViewerApp {
                                     egui::vec2(item_w, item_h)
                                 );
                                 
-                                // CULLING ESTRITO: Pula items fora do viewport
-                                if !ui.is_rect_visible(rect) {
-                                    continue; // Não carrega thumbnail nem renderiza
-                                }
                                 
-                                // Desenha o card naquela posição EXATA
-                                ui.allocate_ui_at_rect(rect, |ui| {
-                                    self.render_item_slot(ui, index);
-                                }).response;
+                                // Verifica se está visível
+                                let is_visible = ui.is_rect_visible(rect);
+                                
+                                // Só desenha se visível (culling)
+                                if is_visible {
+                                    // 1. Cria a interação UMA VEZ
+                                    let response = ui.interact(rect, ui.id().with(index), egui::Sense::click());
+
+                                    // 2. Lógica de Seleção (Clique Esquerdo)
+                                    if response.clicked() {
+                                        if index < self.items.len() {
+                                            self.selected_file = Some(self.items[index].clone());
+                                        }
+                                    }
+
+                                    // 3. Lógica de Menu (Clique Direito)
+                                    response.context_menu(|ui| {
+                                        if ui.button("Abrir").clicked() {
+                                            ui.close_menu();
+                                        }
+                                        if ui.button("Renomear").clicked() {
+                                            ui.close_menu();
+                                        }
+                                    });
+
+                                    // 4. Lógica de Abrir (Clique Duplo)
+                                    if response.double_clicked() {
+                                        if index < self.items.len() {
+                                            let item = self.items[index].clone();
+                                            if item.is_dir {
+                                                self.navigate_to(&item.path.to_string_lossy());
+                                            } else {
+                                                open_with_shell(&item.path);
+                                            }
+                                        }
+                                    }
+
+                                    // 5. Feedback Visual de Seleção
+                                    if let Some(selected) = &self.selected_file {
+                                        if index < self.items.len() && selected.path == self.items[index].path {
+                                            ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 215)), egui::StrokeKind::Outside);
+                                            ui.painter().rect_filled(rect, 0.0, egui::Color32::from_rgba_unmultiplied(0, 120, 215, 30));
+                                        }
+                                    }
+                                    
+                                    ui.allocate_ui_at_rect(rect, |ui| {
+                                        self.render_item_slot(ui, index);
+                                    });
+                                }
+                                // Thumbnails são carregados dentro de render_item_slot,
+                                // que verifica cache antes de disparar I/O
                             }
                         }
                     });
