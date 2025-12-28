@@ -1,22 +1,95 @@
-# Rust build artifacts
+# ============================================
+# Rust Build Artifacts
+# ============================================
 /target/
+Cargo.lock
 
-# Cargo lock file (optional, include if you want)
-# Cargo.lock
-
-# IDE files
+# ============================================
+# IDE / Editor
+# ============================================
+# VS Code
 .vscode/
+*.code-workspace
+
+# IntelliJ IDEA / CLion / RustRover
 .idea/
+*.iml
+
+# Visual Studio
+.vs/
+
+# ============================================
+# System Files
+# ============================================
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+.directory
+
+# ============================================
+# Logs
+# ============================================
+*.log
+logs/
+*.log.*
+
+# ============================================
+# Environment & Configuration
+# ============================================
+.env
+.env.local
+.env.*.local
+config.local.json
+
+# ============================================
+# Temporary & Cache
+# ============================================
+*.tmp
+*.temp
+*.bak
 *.swp
 *.swo
 *~
 
-# OS files
-.DS_Store
-Thumbs.db
-
-# Debug symbols
+# ============================================
+# Distribution / Release
+# ============================================
+/dist/
+/release/
+*.exe.config
 *.pdb
 
-# Error logs
+# ============================================
+# Testing
+# ============================================
+coverage/
+*.profraw
+*.profdata
+
+# ============================================
+# Documentation Build
+# ============================================
+/book/
+/mdbook-output/
+
+# ============================================
+# Dependências Locais (se houver)
+# ============================================
+/vendor/
+
+# ============================================
+# Outros Arquivos Específicos do Projeto
+# ============================================
 errors.txt
+debug_output.txt
