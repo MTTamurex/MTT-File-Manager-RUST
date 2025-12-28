@@ -28,9 +28,9 @@ use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBU
 // Caminho padrão
 const PATH_PADRAO: &str = "C:\\";
 
-// LRU cache
-const CACHE_SIZE: usize = 500;
-const MAX_CONCURRENT_LOADS: usize = 50;
+// LRU cache - reduzido para limitar VRAM (~50-100MB)
+const CACHE_SIZE: usize = 200;
+const MAX_CONCURRENT_LOADS: usize = 30;  // Reduzido de 50
 
 // Icon cache (menor pois ícones são compartilhados por extensão)
 const ICON_CACHE_SIZE: usize = 100;
@@ -1133,6 +1133,11 @@ impl eframe::App for ImageViewerApp {
                                     content_min + egui::vec2(x_pos, y_pos),
                                     egui::vec2(item_w, item_h)
                                 );
+                                
+                                // CULLING ESTRITO: Pula items fora do viewport
+                                if !ui.is_rect_visible(rect) {
+                                    continue; // Não carrega thumbnail nem renderiza
+                                }
                                 
                                 // Desenha o card naquela posição EXATA usando child_ui
                                 let mut child = ui.child_ui(rect, egui::Layout::top_down(egui::Align::Center), None);
