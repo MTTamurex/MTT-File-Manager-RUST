@@ -2,7 +2,18 @@
 
 ## Visão Geral
 
-O **MTT File Manager** é um gerenciador de arquivos nativo para Windows desenvolvido em **Rust** com foco em **ultra-performance** para visualização de thumbnails de imagens e vídeos. A aplicação utiliza APIs nativas do Windows para garantir máxima eficiência e integração com o sistema operacional.
+**MTT File Manager** é um explorador de arquivos moderno para Windows, desenvolvido em Rust com foco em **performance extrema** (60 FPS garantidos) e **experiência desktop nativa**.
+
+### 🎯 Features Principais:
+- **Grid virtualizado** com posicionamento absoluto (zero jitter)
+- **Thumbnails assíncronos** com cache LRU inteligente
+- **Ícones nativos do Windows** (SHGetFileInfoW)
+- **Navegação completa** (histórico, Enter para abrir, botões)
+- **Ordenação performática** (Nome/Data/Tamanho com cache)
+- **Seleção shrink-wrap** (estilo Windows Explorer)
+- **Busca em tempo real** (filtragem instantânea por nome)
+- **Navegação por teclado** (setas para percorrer grid)
+- **Tooltips informativos** (nome, tamanho, data ao passar mouse)
 
 ---
 
