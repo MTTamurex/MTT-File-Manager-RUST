@@ -1,5 +1,35 @@
 # 🗺️ Roadmap Técnico - MTT File Manager
 
+## ✅ Features Implementadas (2025-12-28)
+
+### Ícones Nativos do Windows
+- **SHGetFileInfoW** para ícones de arquivos por extensão (SHGFI_USEFILEATTRIBUTES)
+- **SHGetFileInfoW** para ícones de pastas (dummy path + FILE_ATTRIBUTE_DIRECTORY)
+- **SHGetFileInfoW** para ícones reais de drives (path real, sem USEFILEATTRIBUTES)
+- **GetVolumeInformationW** para labels de volumes (ex: "Sistema (C:)")
+- **Cache LRU**: icon_cache, folder_icon_texture, drive_icon_cache
+
+### Grid com Posicionamento Absoluto (Game Engine Style)
+- Substituído `egui::Grid` por cálculo manual de coordenadas
+- Altura de célula RÍGIDA: `thumbnail_size + 40px`
+- Virtualização via `clip_rect()` e cálculo de `min_row/max_row`
+- Culling estrito com `is_rect_visible()` antes de renderizar
+- Rolagem butter-smooth sem jitter
+
+### Sistema de Navegação Completo
+- **navigation_history**: Vec<String> com histórico completo
+- **history_index**: Posição atual na linha do tempo
+- **path_input**: Barra de endereço editável
+- Botões: Voltar (⬅), Avançar (➡), Subir (⬆)
+- Botões desabilitados quando não aplicável
+
+### Otimização de VRAM
+- CACHE_SIZE reduzido de 500 → 200
+- MAX_CONCURRENT_LOADS reduzido de 50 → 30
+- Culling estrito impede carregamento de thumbnails fora da tela
+
+---
+
 ## Débitos Técnicos Identificados
 
 ### 🔴 Crítico

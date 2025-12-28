@@ -135,11 +135,48 @@ render_item_slot()
 
 ```
 LruCache<PathBuf, TextureHandle>
-  ├── Capacidade: 500 itens
-  ├── Por texture: ~256KB (256x256x4 bytes)
-  ├── Máximo teórico: ~125 MB VRAM
-  └── Eviction automática quando cache enche
+  ├── Capacidade: 200 itens (Otimizado)
+  ├── Max Concurrent Loads: 30
+  ├── Objetivo: Manter VRAM < 100MB
+  └── Eviction automática agressiva
 ```
+
+---
+
+## 🚀 Arquitetura de Performance (O Secredo da Fluidez)
+
+O MTT File Manager utiliza técnicas de **Game Engine** para garantir 60 FPS estáveis, superior ao Windows Explorer.
+
+### 1. Posicionamento Absoluto (Zero Jitter)
+Diferente de frameworks UI tradicionais que usam layout engines pesados (flexbox, grid), nós calculamos a posição de cada pixel matematicamente:
+
+```rust
+// Math-based Positioning
+let x_pos = col * (item_w + padding);
+let y_pos = row * (item_h + padding);
+let rect = Rect::from_min_size(pos, size);
+
+// Renderização direta
+ui.put(rect, |ui| render_item(ui));
+```
+Isso elimina 100% do "layout shift" e jitter durante a rolagem.
+
+### 2. Strict Visibility Culling (Frustum Culling 2D)
+Nós não apenas usamos virtualização de lista, mas implementamos **Culling Estrito** antes de qualquer operação pesada:
+
+```rust
+// Se o retângulo não toca o viewport atual, ABORTA IMEDIATAMENTE.
+if !ui.is_rect_visible(rect) {
+    continue; 
+}
+```
+Isso garante que thumbnails nunca sejam solicitados para itens que o usuário "pulou" ao rolar rápido.
+
+### 3. VRAM Budgeting
+O gerenciamento de memória de vídeo é proativo, não reativo:
+- **Hard Cap**: 200 texturas máximas
+- **Texture Recycling**: Handles do egui são reutilizados
+- **Drop RAII**: Texturas fora de uso são liberadas imediatamente pelo LRU
 
 ---
 

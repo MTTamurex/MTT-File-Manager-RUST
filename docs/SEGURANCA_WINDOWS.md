@@ -399,6 +399,11 @@ fn extract_windows_thumbnail(path: &PathBuf)
 | `get_all_drives()` | FFI para `GetLogicalDriveStringsW` | Baixo - buffer fixo |
 | `extract_windows_thumbnail()` | FFI para COM APIs | Médio - requer validação |
 | `hbitmap_to_rgba()` | FFI para GDI | Médio - pointer manipulation |
+| `hicon_to_rgba()` | FFI para GDI/GetIconInfo | Médio - converte HICON para RGBA |
+| `extract_file_icon()` | FFI para SHGetFileInfoW | Baixo - usa dummy path + USEFILEATTRIBUTES |
+| `extract_folder_icon_internal()` | FFI para SHGetFileInfoW | Baixo - usa dummy path |
+| `extract_drive_icon()` | FFI para SHGetFileInfoW | Baixo - usa path real do drive |
+| `get_volume_label()` | FFI para GetVolumeInformationW | Baixo - read-only |
 | `open_with_shell()` | FFI para `ShellExecuteW` | Alto - execução de código |
 | `load_folder()` (GetFileAttributesW) | FFI para filesystem APIs | Baixo - read-only |
 | `CoInitializeEx/CoUninitialize` | COM initialization | Baixo - padrão documentado |
