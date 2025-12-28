@@ -540,3 +540,8 @@ src/
 ## Próximos Passos
 
 Ver [ROADMAP_TECNICO.md](ROADMAP_TECNICO.md) para detalhes completos.
+
+---
+
+*Última atualização: 2025-12-28*
+*Responsável: Arquiteto de Software*
