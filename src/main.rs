@@ -193,6 +193,11 @@ struct ImageViewerApp {
     show_preview_panel: bool,
     
     total_items: usize,
+    
+    // Search & Navigation (NEW)
+    all_items: Vec<FileEntry>,  // Cache mestre para busca
+    search_query: String,       // Texto da busca
+    last_grid_cols: usize,      // Memória para navegação vertical (teclado)
 }
 
 impl Default for ImageViewerApp {
@@ -230,6 +235,10 @@ impl Default for ImageViewerApp {
             thumbnail_size: 128.0,  // Default zoom
             selected_item: None,
             total_items: 0,
+            // Search & Navigation (NEW)
+            all_items: Vec::new(),
+            search_query: String::new(),
+            last_grid_cols: 1,
         };
         
         app.load_folder();
@@ -687,6 +696,20 @@ fn format_date(timestamp: u64) -> String {
 }
 
 impl ImageViewerApp {
+    /// Filtra itens baseado na query de busca
+    fn filter_items(&mut self) {
+        if self.search_query.is_empty() {
+            self.items = self.all_items.clone();
+        } else {
+            let query = self.search_query.to_lowercase();
+            self.items = self.all_items.iter()
+                .filter(|item| item.name.to_lowercase().contains(&query))
+                .cloned()
+                .collect();
+        }
+        self.total_items = self.items.len();
+    }
+    
     /// Ordena itens baseado no modo atual (mantém pastas sempre primeiro)
     fn sort_items(&mut self) {
         self.items.sort_by(|a, b| {
@@ -965,9 +988,10 @@ impl ImageViewerApp {
     fn process_incoming_messages(&mut self, ctx: &egui::Context) {
         // 1. Batch FileEntry loading (evita freeze)
         if let Ok(entries) = self.file_entry_receiver.try_recv() {
-            self.items = entries;
+            self.all_items = entries;  // Salva backup mestre
+            self.search_query.clear(); // Limpa busca ao mudar de pasta
+            self.filter_items();       // Aplica filtro (copia all_items → items)
             self.sort_items();
-            self.total_items = self.items.len();
             self.is_loading_folder = false;
             ctx.request_repaint();
         }
@@ -1218,6 +1242,20 @@ impl eframe::App for ImageViewerApp {
                 
                 ui.separator();
                 
+                // Search field (NEW)
+                ui.label("🔍");
+                let search_response = ui.add_sized(
+                    egui::vec2(150.0, 20.0),
+                    egui::TextEdit::singleline(&mut self.search_query)
+                        .hint_text("Buscar...")
+                );
+                if search_response.changed() {
+                    self.filter_items();
+                    self.sort_items();
+                }
+                
+                ui.separator();
+                
                 // Sorting controls (BEFORE address bar to ensure visibility)
                 ui.label("Ordenar:");
                 egui::ComboBox::from_id_source("sort_mode")
@@ -1463,6 +1501,39 @@ impl eframe::App for ImageViewerApp {
                 let available_w = ui.available_width();
                 let cols = ((available_w - padding) / (item_w + padding)).floor().max(1.0) as usize;
                 
+                // NOVO: Salva cols para navegação por teclado
+                self.last_grid_cols = cols;
+                
+                // NOVO: Navegação por teclado (setas)
+                let current_index = self.items.iter().position(|x| {
+                    self.selected_file.as_ref().map_or(false, |f| f.path == x.path)
+                });
+                
+                ctx.input(|i| {
+                    let mut new_index: Option<usize> = None;
+                    
+                    if i.key_pressed(egui::Key::ArrowRight) {
+                        new_index = current_index.map(|i| i.saturating_add(1)).or(Some(0));
+                    }
+                    if i.key_pressed(egui::Key::ArrowLeft) {
+                        new_index = current_index.map(|i| i.saturating_sub(1));
+                    }
+                    if i.key_pressed(egui::Key::ArrowDown) {
+                        new_index = current_index.map(|i| i + cols).or(Some(0));
+                    }
+                    if i.key_pressed(egui::Key::ArrowUp) {
+                        new_index = current_index.map(|i| i.saturating_sub(cols));
+                    }
+                    
+                    if let Some(idx) = new_index {
+                        let clamped = idx.min(self.items.len().saturating_sub(1));
+                        if let Some(item) = self.items.get(clamped) {
+                            self.selected_file = Some(item.clone());
+                            self.selected_item = Some(clamped);  // Para auto-scroll
+                        }
+                    }
+                });
+                
                 // 2. CÁLCULO DA ALTURA TOTAL (Virtual Scroll)
                 let count = self.items.len();
                 let rows = (count as f32 / cols as f32).ceil() as usize;
@@ -1523,6 +1594,12 @@ impl eframe::App for ImageViewerApp {
                                             self.selected_file = Some(self.items[index].clone());
                                         }
                                     }
+                                    
+                                    // Auto-scroll para item selecionado via teclado
+                                    if self.selected_item == Some(index) {
+                                        response.scroll_to_me(Some(egui::Align::Center));
+                                        self.selected_item = None;  // Reseta após scroll
+                                    }
 
                                     // 3. Lógica de Menu (Clique Direito)
                                     response.context_menu(|ui| {
@@ -1546,106 +1623,112 @@ impl eframe::App for ImageViewerApp {
                                         }
                                     }
 
-                                    // 5. Feedback Visual de Seleção (Shrink-wrap: limita ao conteúdo)
-                                    if let Some(selected) = &self.selected_file {
-                                        if index < self.items.len() && selected.path == self.items[index].path {
-                                            let item_ref = &self.items[index];
-                                            // Determina altura do ícone conforme tipo (pasta, mídia, arquivo)
-                                            let is_media_file_sel = if let Some(ext) = item_ref.path.extension() {
-                                                let ext_lower = ext.to_string_lossy().to_lowercase();
-                                                matches!(ext_lower.as_str(),
-                                                    "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" |
-                                                    "tiff" | "tif" | "ico" | "heic" | "heif" | "avif" |
-                                                    "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" |
-                                                    "webm" | "m4v" | "mpg" | "mpeg" | "3gp" | "ts"
-                                                )
-                                            } else { false };
+                                    // 5. Cálculo do Shrink-Wrap (para TODOS os itens - usado por tooltip e seleção)
+                                    let content_rect = if index < self.items.len() {
+                                        let item_ref = &self.items[index];
+                                        // Determina se é mídia
+                                        let is_media_file_sel = if let Some(ext) = item_ref.path.extension() {
+                                            let ext_lower = ext.to_string_lossy().to_lowercase();
+                                            matches!(ext_lower.as_str(),
+                                                "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" |
+                                                "tiff" | "tif" | "ico" | "heic" | "heif" | "avif" |
+                                                "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" |
+                                                "webm" | "m4v" | "mpg" | "mpeg" | "3gp" | "ts"
+                                            )
+                                        } else { false };
 
-                                            // Mede texto para calcular altura real do conteúdo
-                                            let wrap_width = rect.width() - 8.0;
-                                            let text_galley = ui.fonts(|fonts| {
-                                                fonts.layout_job(egui::text::LayoutJob {
-                                                    text: item_ref.name.clone(),
-                                                    sections: vec![egui::text::LayoutSection {
-                                                        leading_space: 0.0,
-                                                        byte_range: 0..item_ref.name.len(),
-                                                        format: egui::TextFormat {
-                                                            font_id: egui::FontId::proportional(if item_ref.is_dir { 9.0 } else { 10.0 }),
-                                                            color: egui::Color32::BLACK,
-                                                            ..Default::default()
-                                                        },
-                                                    }],
-                                                    wrap: egui::text::TextWrapping {
-                                                        max_width: wrap_width,
-                                                        max_rows: 2,
-                                                        break_anywhere: true,
+                                        // Mede texto
+                                        let wrap_width = rect.width() - 8.0;
+                                        let text_galley = ui.fonts(|fonts| {
+                                            fonts.layout_job(egui::text::LayoutJob {
+                                                text: item_ref.name.clone(),
+                                                sections: vec![egui::text::LayoutSection {
+                                                    leading_space: 0.0,
+                                                    byte_range: 0..item_ref.name.len(),
+                                                    format: egui::TextFormat {
+                                                        font_id: egui::FontId::proportional(if item_ref.is_dir { 9.0 } else { 10.0 }),
+                                                        color: egui::Color32::BLACK,
                                                         ..Default::default()
                                                     },
+                                                }],
+                                                wrap: egui::text::TextWrapping {
+                                                    max_width: wrap_width,
+                                                    max_rows: 2,
+                                                    break_anywhere: true,
                                                     ..Default::default()
-                                                })
-                                            });
-
-                                            let text_h = text_galley.rect.height();
-                                            
-                                            // Calcula altura baseado no tipo (valores exatos do render_item_slot)
-                                            let content_h = if item_ref.is_dir {
-                                                // Pasta: folder_icon_size + 14.0 (altura do container) + 20.0 (min_height texto) + margem
-                                                let folder_icon_size = self.thumbnail_size * 0.6;
-                                                folder_icon_size + 14.0 + 20.0_f32.max(text_h) + 4.0
-                                            } else if is_media_file_sel {
-                                                // Mídia: calcula altura REAL baseada na proporção da imagem
-                                                // Se temos a textura, usamos sua proporção real
-                                                // Se não, usamos thumbnail_size (spinner/placeholder)
-                                                let img_height = if let Some(texture) = self.texture_cache.get(&item_ref.path) {
-                                                    // Calcula altura respeitando maintain_aspect_ratio
-                                                    let tex_size = texture.size_vec2();
-                                                    let aspect = tex_size.x / tex_size.y;
-                                                    // max_size é (thumbnail_size, thumbnail_size)
-                                                    // Se imagem é mais larga que alta (landscape), altura < thumbnail_size
-                                                    // Se imagem é mais alta que larga (portrait), altura = thumbnail_size (limitada)
-                                                    if aspect > 1.0 {
-                                                        // Landscape: largura = thumbnail_size, altura = thumbnail_size / aspect
-                                                        self.thumbnail_size / aspect
-                                                    } else {
-                                                        // Portrait ou quadrada: altura = thumbnail_size
-                                                        self.thumbnail_size
-                                                    }.min(self.thumbnail_size)
+                                                },
+                                                ..Default::default()
+                                            })
+                                        });
+                                        let text_h = text_galley.rect.height();
+                                        
+                                        // Calcula altura do conteúdo
+                                        let content_h = if item_ref.is_dir {
+                                            let folder_icon_size = self.thumbnail_size * 0.6;
+                                            folder_icon_size + 14.0 + 20.0_f32.max(text_h) + 4.0
+                                        } else if is_media_file_sel {
+                                            let img_height = if let Some(texture) = self.texture_cache.get(&item_ref.path) {
+                                                let tex_size = texture.size_vec2();
+                                                let aspect = tex_size.x / tex_size.y;
+                                                if aspect > 1.0 {
+                                                    self.thumbnail_size / aspect
                                                 } else {
-                                                    // Spinner usa set_min_size(thumbnail_size, thumbnail_size)
                                                     self.thumbnail_size
-                                                };
-                                                img_height + 4.0 + 20.0_f32.max(text_h) + 4.0
+                                                }.min(self.thumbnail_size)
                                             } else {
-                                                // Arquivo não-mídia: ícone 50% centralizado verticalmente
-                                                // render_item_slot usa:
-                                                //   add_space((thumbnail_size - icon_display_size) / 2.0) = 25% espaço antes
-                                                //   ícone de 50% do thumbnail
-                                                //   (não tem espaço depois, o texto vem logo abaixo)
-                                                let icon_display_size = self.thumbnail_size * 0.5;
-                                                let top_space = (self.thumbnail_size - icon_display_size) / 2.0;
-                                                // Altura real: espaço_superior + ícone + gap + texto
-                                                top_space + icon_display_size + 4.0 + 20.0_f32.max(text_h) + 4.0
+                                                self.thumbnail_size
                                             };
-                                            
-                                            let content_h = content_h.min(rect.height());
+                                            img_height + 4.0 + 20.0_f32.max(text_h) + 4.0
+                                        } else {
+                                            let icon_display_size = self.thumbnail_size * 0.5;
+                                            let top_space = (self.thumbnail_size - icon_display_size) / 2.0;
+                                            top_space + icon_display_size + 4.0 + 20.0_f32.max(text_h) + 4.0
+                                        }.min(rect.height());
 
-                                            let selection_rect = egui::Rect::from_min_size(
-                                                rect.min,
-                                                egui::vec2(rect.width(), content_h)
+                                        Some(egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), content_h)))
+                                    } else {
+                                        None
+                                    };
+                                    
+                                    // 6. Tooltip (usa área shrink-wrap, não célula inteira)
+                                    if let Some(shrink_rect) = content_rect {
+                                        if index < self.items.len() {
+                                            let item = &self.items[index];
+                                            // Cria interação no rect de conteúdo para hover
+                                            let hover_response = ui.interact(
+                                                shrink_rect, 
+                                                ui.id().with(("hover", index)), 
+                                                egui::Sense::hover()
                                             );
+                                            hover_response.on_hover_ui_at_pointer(|ui| {
+                                                ui.label(egui::RichText::new(&item.name).strong());
+                                                ui.separator();
+                                                if item.is_dir {
+                                                    ui.label("Tipo: Pasta");
+                                                } else {
+                                                    ui.label(format!("Tamanho: {}", format_size(item.size)));
+                                                }
+                                                ui.label(format!("Modificado: {}", format_date(item.modified)));
+                                            });
+                                        }
+                                    }
 
-                                            // Sempre aplica shrink-wrap, independente do tipo
-                                            ui.painter().rect_stroke(
-                                                selection_rect,
-                                                2.0,
-                                                egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 215)),
-                                                egui::StrokeKind::Outside
-                                            );
-                                            ui.painter().rect_filled(
-                                                selection_rect,
-                                                0.0,
-                                                egui::Color32::from_rgba_unmultiplied(0, 120, 215, 30)
-                                            );
+                                    // 7. Desenha seleção visual (se item está selecionado)
+                                    if let Some(selected) = &self.selected_file {
+                                        if index < self.items.len() && selected.path == self.items[index].path {
+                                            if let Some(selection_rect) = content_rect {
+                                                ui.painter().rect_stroke(
+                                                    selection_rect,
+                                                    2.0,
+                                                    egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 215)),
+                                                    egui::StrokeKind::Outside
+                                                );
+                                                ui.painter().rect_filled(
+                                                    selection_rect,
+                                                    0.0,
+                                                    egui::Color32::from_rgba_unmultiplied(0, 120, 215, 30)
+                                                );
+                                            }
                                         }
                                     }
                                     
