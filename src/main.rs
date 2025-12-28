@@ -1,8 +1,8 @@
-use eframe::egui::{self, UiStackInfo};
+use eframe::egui;
 use lru::LruCache;
 use std::cmp::Ordering;
 use std::collections::HashSet;
-use std::env;
+// use std::env;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -1052,7 +1052,7 @@ impl ImageViewerApp {
         
         // 2. Individual thumbnails
         let mut received_any = false;
-        let mut new_items_added = false;
+        let mut _new_items_added = false;
         
         while let Ok(thumbnail_data) = self.image_receiver.try_recv() {
             received_any = true;
@@ -1090,210 +1090,117 @@ impl ImageViewerApp {
         
         // ==== DIRECTORY RENDERING ====
         if item.is_dir {
-            // TRIGGER PREVIEW LOAD
+            // GEOMETRIA
+            let folder_w = self.thumbnail_size * 0.60;
+            let folder_h = folder_w * 0.85;
+            
+            let start_pos = ui.cursor().min;
+            let folder_rect = egui::Rect::from_min_size(start_pos, egui::vec2(folder_w, folder_h));
+
+            // CORES
+            let color_back = egui::Color32::from_rgb(200, 160, 50);
+            let color_front = egui::Color32::from_rgb(255, 210, 70);
+
+            // Dimensões
+            let tab_h = folder_h * 0.15;
+            let tab_w = folder_w * 0.40;
+            let front_h = folder_h * 0.50;
+
+            // === DESENHO 1: BASE SÓLIDA (evita qualquer gap) ===
+            // Desenha TODO o corpo como uma única forma sólida
+            ui.painter().rect_filled(
+                egui::Rect::from_min_size(folder_rect.min, egui::vec2(tab_w, tab_h)),
+                egui::CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 },
+                color_back
+            );
+            ui.painter().rect_filled(
+                egui::Rect::from_min_max(
+                    egui::pos2(folder_rect.min.x, folder_rect.min.y + tab_h),
+                    folder_rect.max
+                ),
+                egui::CornerRadius { nw: 0, ne: 3, sw: 4, se: 4 },
+                color_back
+            );
+
+            // === DESENHO 2: PREVIEW (com clipping para não escapar) ===
             if let Some(cover_path) = &item.folder_cover {
-                let has_texture = self.texture_cache.contains(cover_path);
-                let is_loading = self.loading_set.contains(cover_path);
-                
-                if !has_texture && !is_loading && self.loading_set.len() < MAX_CONCURRENT_LOADS {
-                    self.loading_set.insert(cover_path.clone());
-                    self.request_thumbnail_load(cover_path.clone());
+                if !self.texture_cache.contains(cover_path) && !self.loading_set.contains(cover_path) {
+                    if self.loading_set.len() < MAX_CONCURRENT_LOADS {
+                        self.loading_set.insert(cover_path.clone());
+                        self.request_thumbnail_load(cover_path.clone());
+                    }
                 }
             }
 
-            let path_clone = item.path.clone();
-                
-                // Compact folder card with NO padding
-                let frame = egui::Frame::none()
-                    .fill(if is_selected {
-                        egui::Color32::from_rgb(191, 228, 255)  // More visible Windows 11 blue
-                    } else {
-                        egui::Color32::from_gray(250)
-                    })
-                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(220)))
-                    .rounding(4.0)
-                    .inner_margin(0.0);  // NO padding!
-                
-                let response = frame.show(ui, |ui| {
-                    ui.vertical_centered(|ui| {
-                        // Folders are SMALLER - like Windows Explorer
-                        let folder_icon_size = self.thumbnail_size * 0.6;
-                        // Use full width for centering, but content is smaller
-                        ui.set_width(self.thumbnail_size);
-                        ui.set_height(folder_icon_size + 14.0);
-                        
-                        // DRAW FOLDER (3 Camadas: Fundo → Preview → Frente)
-                        let has_preview = item.folder_cover.as_ref()
-                            .and_then(|p| self.texture_cache.get(p))
-                            .is_some();
-                        
-                        if has_preview && item.folder_cover.is_some() {
-                            // MODO 3 CAMADAS (com preview)
-                            let start_pos = ui.cursor().min;
-                            
-                            // Dimensões da pasta
-                            let w = folder_icon_size;
-                            let h = folder_icon_size;
-                            
-                            // === CAMADA 1: FUNDO (Parte de trás + Aba) ===
-                            // Aba no topo esquerdo
-                            let tab_w = w * 0.35;
-                            let tab_h = h * 0.10;
-                            let tab_rect = egui::Rect::from_min_size(
-                                start_pos,
-                                egui::vec2(tab_w, tab_h)
-                            );
-                            ui.painter().rect_filled(
-                                tab_rect,
-                                2.0,
-                                egui::Color32::from_rgb(245, 180, 50)  // Amarelo escuro da aba
-                            );
-                            
-                            // Corpo de trás (fundo completo da pasta)
-                            let back_y = start_pos.y + tab_h * 0.6;  // Overlap com aba
-                            let back_rect = egui::Rect::from_min_size(
-                                egui::pos2(start_pos.x, back_y),
-                                egui::vec2(w, h - tab_h * 0.6)
-                            );
-                            ui.painter().rect_filled(
-                                back_rect,
-                                3.0,
-                                egui::Color32::from_rgb(255, 206, 84)  // Amarelo claro do corpo
-                            );
-                            
-                            // === CAMADA 2: PREVIEW (Imagem no meio) ===
-                            if let Some(cover_path) = &item.folder_cover {
-                                if let Some(tex) = self.texture_cache.get(cover_path) {
-                                    // Área do preview: centralizada, ocupa ~60% altura do corpo
-                                    let preview_margin = w * 0.12;
-                                    let preview_top = back_y + h * 0.08;
-                                    let preview_h = back_rect.height() * 0.60;
-                                    
-                                    let preview_rect = egui::Rect::from_min_size(
-                                        egui::pos2(start_pos.x + preview_margin, preview_top),
-                                        egui::vec2(w - preview_margin * 2.0, preview_h)
-                                    );
-                                    
-                                    // Calcula UV crop (object-fit: cover)
-                                    let size = tex.size();
-                                    let tex_size = egui::vec2(size[0] as f32, size[1] as f32);
-                                    
-                                    if tex_size.x > 0.0 && tex_size.y > 0.0 {
-                                        let aspect_img = tex_size.x / tex_size.y;
-                                        let aspect_view = preview_rect.width() / preview_rect.height();
-                                        
-                                        let uv_rect = if aspect_img > aspect_view {
-                                            let scale = aspect_view / aspect_img;
-                                            let offset = (1.0 - scale) / 2.0;
-                                            egui::Rect::from_min_max(
-                                                egui::pos2(offset, 0.0),
-                                                egui::pos2(1.0 - offset, 1.0)
-                                            )
-                                        } else {
-                                            let scale = aspect_img / aspect_view;
-                                            let offset = (1.0 - scale) / 2.0;
-                                            egui::Rect::from_min_max(
-                                                egui::pos2(0.0, offset),
-                                                egui::pos2(1.0, 1.0 - offset)
-                                            )
-                                        };
-                                        
-                                        ui.painter().image(
-                                            tex.id(),
-                                            preview_rect,
-                                            uv_rect,
-                                            egui::Color32::WHITE
-                                        );
-                                    }
-                                }
-                            }
-                            
-                            // === CAMADA 3: MOLDURA DA FRENTE (Por cima da imagem) ===
-                            // Desenha bordas amarelas que cobrem as laterais e parte inferior
-                            let frame_thickness = w * 0.10;  // 10% de espessura da moldura
-                            let frame_color = egui::Color32::from_rgb(255, 206, 84);
-                            
-                            // Borda ESQUERDA (cobre lateral esquerda da imagem)
-                            ui.painter().rect_filled(
-                                egui::Rect::from_min_size(
-                                    egui::pos2(start_pos.x, back_y),
-                                    egui::vec2(frame_thickness, back_rect.height())
-                                ),
-                                0.0,
-                                frame_color
-                            );
-                            
-                            // Borda DIREITA (cobre lateral direita da imagem)
-                            ui.painter().rect_filled(
-                                egui::Rect::from_min_size(
-                                    egui::pos2(start_pos.x + w - frame_thickness, back_y),
-                                    egui::vec2(frame_thickness, back_rect.height())
-                                ),
-                                0.0,
-                                frame_color
-                            );
-                            
-                            // Borda INFERIOR (cobre parte de baixo - mais espessa)
-                            let bottom_height = back_rect.height() * 0.40;  // 40% da altura
-                            ui.painter().rect_filled(
-                                egui::Rect::from_min_size(
-                                    egui::pos2(start_pos.x, back_y + back_rect.height() - bottom_height),
-                                    egui::vec2(w, bottom_height)
-                               ),
-                                egui::Rounding { nw: 0, ne: 0, sw: 3, se: 3 },  // Cantos inferiores arredondados
-                                frame_color
-                            );
-                            
-                            // Borda externa da pasta (contorno)
-                            ui.painter().rect_stroke(
-                                back_rect,
-                                3.0,
-                                egui::Stroke::new(1.0, egui::Color32::from_rgb(218, 165, 32)),
-                                egui::StrokeKind::Outside
-                            );
-                            
-                            // Aloca espaço visual
-                            ui.allocate_rect(
-                                egui::Rect::from_min_size(start_pos, egui::vec2(w, h)),
-                                egui::Sense::hover()
-                            );
-                        } else {
-                            // SEM PREVIEW: Ícone normal
-                            if let Some(icon_texture) = &self.folder_icon_texture {
-                                ui.add(egui::Image::new(icon_texture)
-                                    .max_size(egui::vec2(folder_icon_size, folder_icon_size))
-                                    .maintain_aspect_ratio(true));
-                            } else {
-                                ui.add(
-                                    egui::Label::new(
-                                        egui::RichText::new("📁")
-                                            .size(folder_icon_size * 0.7)
-                                            .color(egui::Color32::from_rgb(255, 193, 7))
-                                    ).selectable(false)
-                                );
-                            }
-                        }
-                        
-                        // PERFORMANCE: Usa item.name (já cacheado) em vez de path.file_name()
-                        ui.set_min_height(20.0);
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(&item.name)
-                                    .size(9.0)  // Smaller text for folders
-                                    .color(egui::Color32::BLACK)
-                            )
-                            .wrap()
-                            .truncate()
-                            .selectable(false)
-                        );
-                    });
-                }).response;
-                
+            if let Some(tex) = item.folder_cover.as_ref().and_then(|p| self.texture_cache.get(p)) {
+                // Área onde o preview pode aparecer
+                let preview_area = egui::Rect::from_min_max(
+                    egui::pos2(folder_rect.min.x, folder_rect.min.y + tab_h),
+                    egui::pos2(folder_rect.max.x, folder_rect.max.y - front_h)
+                );
 
-            } 
+                let size = tex.size();
+                let tex_size = egui::vec2(size[0] as f32, size[1] as f32);
+                let aspect_img = tex_size.x / tex_size.y;
+                let aspect_view = preview_area.width() / preview_area.height();
+
+                let uv_rect = if aspect_img > aspect_view {
+                    let scale = aspect_view / aspect_img;
+                    let offset = (1.0 - scale) / 2.0;
+                    egui::Rect::from_min_max(egui::pos2(offset, 0.0), egui::pos2(1.0 - offset, 1.0))
+                } else {
+                    let scale = aspect_img / aspect_view;
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, scale))
+                };
+
+                // Usa push_clip_rect para garantir que a imagem não escape
+                ui.painter().with_clip_rect(preview_area).image(tex.id(), preview_area, uv_rect, egui::Color32::WHITE);
+            }
+
+            // === DESENHO 3: BOLSO FRONTAL (sobrepõe preview) ===
+            let front_rect = egui::Rect::from_min_max(
+                egui::pos2(folder_rect.min.x, folder_rect.max.y - front_h),
+                folder_rect.max
+            );
+            ui.painter().rect_filled(front_rect, egui::CornerRadius { nw: 0, ne: 0, sw: 4, se: 4 }, color_front);
+
+            // Borda sutil
+            ui.painter().rect_stroke(
+                front_rect,
+                egui::CornerRadius { nw: 0, ne: 0, sw: 4, se: 4 },
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 150, 30)),
+                egui::StrokeKind::Inside
+            );
+
+            // Aloca espaço
+            ui.allocate_rect(folder_rect, egui::Sense::hover());
+
+            // TEXTO: Posição exata centralizada sob a pasta
+            let text_y = folder_rect.max.y + 6.0;
+            let text_x = folder_rect.min.x + folder_w / 2.0;
+            
+            // Trunca nome se muito longo
+            let display_name = if item.name.len() > 20 {
+                format!("{}...", &item.name[..17])
+            } else {
+                item.name.clone()
+            };
+            
+            ui.painter().text(
+                egui::pos2(text_x, text_y),
+                egui::Align2::CENTER_TOP,
+                &display_name,
+                egui::FontId::proportional(11.0),
+                egui::Color32::BLACK
+            );
+            
+            // Avança cursor para incluir texto no layout
+            ui.add_space(folder_h + 20.0);
+        }
             // ==== FILE RENDERING ====
             else {
                 let path_clone = item.path.clone();
+                let is_selected = self.selected_item == Some(idx);
                 
                 // Detecta se é arquivo de mídia
                 let is_media_file = if let Some(ext) = path_clone.extension() {
@@ -1331,34 +1238,32 @@ impl ImageViewerApp {
                     None
                 };
 
-                
                 // Compact file card with NO padding
-                let frame = egui::Frame::none()
+                let frame = egui::Frame::NONE
                     .fill(if is_selected {
-                        egui::Color32::from_rgb(191, 228, 255)  // More visible Windows 11 blue
+                        egui::Color32::from_rgb(191, 228, 255)
                     } else {
                         egui::Color32::from_gray(250)
                     })
                     .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(220)))
-                    .rounding(4.0)
+                    .corner_radius(4)
                     .inner_margin(0.0);  // NO padding!
                 
-                let response = frame.show(ui, |ui| {
+                let _ = frame.show(ui, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.set_width(self.thumbnail_size);
                         
                         if is_media_file {
-                            // EXISTING: Lógica de thumbnail para arquivos de mídia
                             if let Some(texture) = self.texture_cache.get(&path_clone) {
                                 ui.add(egui::Image::new(texture)
                                     .max_size(egui::vec2(self.thumbnail_size, self.thumbnail_size))
                                     .maintain_aspect_ratio(true)
-                                    .rounding(4.0));
+                                    .corner_radius(4));
                             } else {
                                 // Loading spinner
-                                egui::Frame::none()
+                                egui::Frame::NONE
                                     .fill(egui::Color32::from_gray(240))
-                                    .rounding(4.0)
+                                    .corner_radius(4)
                                     .show(ui, |ui| {
                                         ui.set_min_size(egui::vec2(self.thumbnail_size, self.thumbnail_size));
                                         ui.centered_and_justified(|ui| {
@@ -1367,16 +1272,15 @@ impl ImageViewerApp {
                                     });
                             }
                         } else {
-                            // NEW: Arquivo não-mídia → ícone do sistema (pré-carregado)
+                            // Arquivo não-mídia → ícone do sistema
                             if let Some(icon_texture) = file_icon {
-                                // Ícones são pequenos, centraliza
                                 let icon_display_size = self.thumbnail_size * 0.5;
                                 ui.add_space((self.thumbnail_size - icon_display_size) / 2.0);
                                 ui.add(egui::Image::new(&icon_texture)
                                     .max_size(egui::vec2(icon_display_size, icon_display_size))
                                     .maintain_aspect_ratio(true));
                             } else {
-                                // Fallback: emoji genérico
+                                // Fallback: emoji
                                 ui.set_min_height(self.thumbnail_size);
                                 ui.centered_and_justified(|ui| {
                                     ui.add(
@@ -1390,7 +1294,6 @@ impl ImageViewerApp {
                             }
                         }
                         
-                        // PERFORMANCE: Usa item.name (já cacheado) em vez de path.file_name()
                         ui.set_min_height(20.0);
                         ui.add(
                             egui::Label::new(
@@ -1403,12 +1306,11 @@ impl ImageViewerApp {
                             .selectable(false)
                         );
                     });
-                }).response;
-                
-
+                });
             }
         }
     }
+
 
 impl eframe::App for ImageViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -1459,7 +1361,7 @@ impl eframe::App for ImageViewerApp {
                 
                 // Sorting controls (BEFORE address bar to ensure visibility)
                 ui.label("Ordenar:");
-                egui::ComboBox::from_id_source("sort_mode")
+                egui::ComboBox::from_id_salt("sort_mode")
                     .selected_text(match self.sort_mode {
                         SortMode::Name => "Nome",
                         SortMode::Date => "Data",
@@ -1899,8 +1801,9 @@ impl eframe::App for ImageViewerApp {
                                         
                                         // Calcula altura do conteúdo
                                         let content_h = if item_ref.is_dir {
-                                            let folder_icon_size = self.thumbnail_size * 0.6;
-                                            folder_icon_size + 14.0 + 20.0_f32.max(text_h) + 4.0
+                                            let folder_w_sel = self.thumbnail_size * 0.6;
+                                            let folder_h_sel = folder_w_sel * 0.85;
+                                            folder_h_sel + 4.0 + 20.0_f32.max(text_h)
                                         } else if is_media_file_sel {
                                             let img_height = if let Some(texture) = self.texture_cache.get(&item_ref.path) {
                                                 let tex_size = texture.size_vec2();
@@ -1920,7 +1823,13 @@ impl eframe::App for ImageViewerApp {
                                             top_space + icon_display_size + 4.0 + 20.0_f32.max(text_h) + 4.0
                                         }.min(rect.height());
 
-                                        Some(egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), content_h)))
+                                        // Para diretórios, usar a largura da pasta (não da célula inteira)
+                                        if item_ref.is_dir {
+                                            let folder_w_rect = self.thumbnail_size * 0.6;
+                                            Some(egui::Rect::from_min_size(rect.min, egui::vec2(folder_w_rect, content_h)))
+                                        } else {
+                                            Some(egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), content_h)))
+                                        }
                                     } else {
                                         None
                                     };
@@ -1967,7 +1876,7 @@ impl eframe::App for ImageViewerApp {
                                         }
                                     }
                                     
-                                    ui.allocate_ui_at_rect(rect, |ui| {
+                                    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), |ui| {
                                         self.render_item_slot(ui, index);
                                     });
                                 }
