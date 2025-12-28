@@ -1593,8 +1593,28 @@ impl eframe::App for ImageViewerApp {
                                                 let folder_icon_size = self.thumbnail_size * 0.6;
                                                 folder_icon_size + 14.0 + 20.0_f32.max(text_h) + 4.0
                                             } else if is_media_file_sel {
-                                                // Mídia: thumbnail + espaço + texto
-                                                self.thumbnail_size + 4.0 + 20.0_f32.max(text_h) + 4.0
+                                                // Mídia: calcula altura REAL baseada na proporção da imagem
+                                                // Se temos a textura, usamos sua proporção real
+                                                // Se não, usamos thumbnail_size (spinner/placeholder)
+                                                let img_height = if let Some(texture) = self.texture_cache.get(&item_ref.path) {
+                                                    // Calcula altura respeitando maintain_aspect_ratio
+                                                    let tex_size = texture.size_vec2();
+                                                    let aspect = tex_size.x / tex_size.y;
+                                                    // max_size é (thumbnail_size, thumbnail_size)
+                                                    // Se imagem é mais larga que alta (landscape), altura < thumbnail_size
+                                                    // Se imagem é mais alta que larga (portrait), altura = thumbnail_size (limitada)
+                                                    if aspect > 1.0 {
+                                                        // Landscape: largura = thumbnail_size, altura = thumbnail_size / aspect
+                                                        self.thumbnail_size / aspect
+                                                    } else {
+                                                        // Portrait ou quadrada: altura = thumbnail_size
+                                                        self.thumbnail_size
+                                                    }.min(self.thumbnail_size)
+                                                } else {
+                                                    // Spinner usa set_min_size(thumbnail_size, thumbnail_size)
+                                                    self.thumbnail_size
+                                                };
+                                                img_height + 4.0 + 20.0_f32.max(text_h) + 4.0
                                             } else {
                                                 // Arquivo: ícone (50% centralizado) + texto
                                                 self.thumbnail_size + 4.0 + 20.0_f32.max(text_h) + 4.0
