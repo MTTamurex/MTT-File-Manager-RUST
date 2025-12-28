@@ -86,6 +86,11 @@ struct ImageViewerApp {
     folder_icon_texture: Option<egui::TextureHandle>,
     drive_icon_cache: LruCache<String, egui::TextureHandle>,  // path → icon
     
+    // Navigation state (histórico linear)
+    navigation_history: Vec<String>,  // Histórico completo de paths
+    history_index: usize,             // Posição atual no histórico
+    path_input: String,               // Barra de endereço editável
+    
     // UI state
     disks: Vec<(String, String)>,  // (path, label)
     thumbnail_size: f32,        // Zoom: 64-512
@@ -110,6 +115,10 @@ impl Default for ImageViewerApp {
             icon_cache: LruCache::new(NonZeroUsize::new(ICON_CACHE_SIZE).unwrap()),
             folder_icon_texture: None,
             drive_icon_cache: LruCache::new(NonZeroUsize::new(10).unwrap()),  // Poucos drives
+            // Navigation - começa com path inicial no histórico
+            navigation_history: vec![PATH_PADRAO.to_string()],
+            history_index: 0,
+            path_input: PATH_PADRAO.to_string(),
             disks,
             thumbnail_size: 128.0,  // Default zoom
             selected_item: None,
@@ -616,16 +625,65 @@ impl ImageViewerApp {
         });
     }
     
+    /// Navega para um caminho, adicionando ao histórico (corta histórico futuro)
     fn navigate_to(&mut self, path: &str) {
+        // Se já estamos nesse caminho, não faz nada
+        if self.current_path == path {
+            return;
+        }
+        
+        // Corta histórico "futuro" (se voltamos e navegamos para outro lugar)
+        if self.history_index < self.navigation_history.len().saturating_sub(1) {
+            self.navigation_history.truncate(self.history_index + 1);
+        }
+        
+        // Adiciona novo caminho ao histórico
+        self.navigation_history.push(path.to_string());
+        self.history_index = self.navigation_history.len() - 1;
+        
         self.current_path = path.to_string();
+        self.path_input = path.to_string();
         self.load_folder();
     }
     
-    fn go_up_one_level(&mut self) {
-        if let Some(parent) = Path::new(&self.current_path).parent() {
-            self.current_path = parent.to_string_lossy().to_string();
+    /// Volta no histórico (sem adicionar ao histórico)
+    fn go_back(&mut self) {
+        if self.can_go_back() {
+            self.history_index -= 1;
+            self.current_path = self.navigation_history[self.history_index].clone();
+            self.path_input = self.current_path.clone();
             self.load_folder();
         }
+    }
+    
+    /// Avança no histórico
+    fn go_forward(&mut self) {
+        if self.can_go_forward() {
+            self.history_index += 1;
+            self.current_path = self.navigation_history[self.history_index].clone();
+            self.path_input = self.current_path.clone();
+            self.load_folder();
+        }
+    }
+    
+    /// Sobe um nível (adiciona ao histórico)
+    fn go_up_one_level(&mut self) {
+        if let Some(parent) = Path::new(&self.current_path).parent() {
+            let parent_str = parent.to_string_lossy().to_string();
+            if !parent_str.is_empty() {
+                self.navigate_to(&parent_str);
+            }
+        }
+    }
+    
+    /// Pode voltar no histórico?
+    fn can_go_back(&self) -> bool {
+        self.history_index > 0
+    }
+    
+    /// Pode avançar no histórico?
+    fn can_go_forward(&self) -> bool {
+        self.history_index < self.navigation_history.len().saturating_sub(1)
     }
     
     fn request_thumbnail_load(&self, path: PathBuf) {
@@ -1028,12 +1086,42 @@ impl eframe::App for ImageViewerApp {
         // Top navigation bar
         egui::TopBottomPanel::top("nav_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                if ui.button("⬅").clicked() {
+                // Botão Voltar (desabilitado se não pode voltar)
+                let can_back = self.can_go_back();
+                if ui.add_enabled(can_back, egui::Button::new("⬅")).clicked() {
+                    self.go_back();
+                }
+                
+                // Botão Avançar (desabilitado se não pode avançar)
+                let can_forward = self.can_go_forward();
+                if ui.add_enabled(can_forward, egui::Button::new("➡")).clicked() {
+                    self.go_forward();
+                }
+                
+                // Botão Subir
+                if ui.button("⬆").clicked() {
                     self.go_up_one_level();
                 }
                 
                 ui.separator();
-                ui.label(format!("📂 {}", self.current_path));
+                
+                // Barra de endereço editável
+                let response = ui.add_sized(
+                    egui::vec2(ui.available_width() - 10.0, 20.0),
+                    egui::TextEdit::singleline(&mut self.path_input)
+                        .font(egui::TextStyle::Monospace)
+                );
+                
+                // Enter para navegar
+                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    let path = self.path_input.clone();
+                    if Path::new(&path).exists() {
+                        self.navigate_to(&path);
+                    } else {
+                        // Restaura o path atual se inválido
+                        self.path_input = self.current_path.clone();
+                    }
+                }
             });
         });
         
