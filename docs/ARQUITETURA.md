@@ -311,6 +311,147 @@ ui.painter().rect_filled(selection_rect, 0.0,
 - ✅ Funciona com imagens de qualquer proporção
 - ✅ Sem impacto de performance perceptível (medição de texto é O(1))
 
+### 2.2 Renderização de Pastas com Preview (Folder Thumbnail)
+
+**Data de Implementação:** 2024-12-28  
+**Complexidade:** Alta (múltiplas camadas gráficas com anti-aliasing)
+
+#### O Problema
+
+Renderizar pastas estilo Windows Explorer com preview interno apresenta desafios sutis:
+
+1. **Gaps de Anti-Aliasing**: Quando duas formas retangulares se tocam exatamente na mesma coordenada, o anti-aliasing pode criar uma linha visível de 1px entre elas.
+2. **Overflow de Imagem**: A imagem do preview pode "escapar" dos limites da pasta se não for corretamente restringida.
+3. **Alinhamento de Texto**: O texto do nome da pasta deve ficar centralizado sob a forma, não sob a célula da grid.
+4. **Seleção Proporcional**: A caixa de seleção deve envolver apenas a pasta, não a célula inteira.
+
+#### A Solução: Camadas Sobrepostas com Clipping
+
+**Princípio:** Desenhar uma base sólida única, depois sobrepor os elementos visuais com clipping para forçar limites.
+
+```
+┌─────┐                    ◄── Tab (aba superior esquerda)
+├─────────────────────────┐
+│     ┌─────────────┐     │   ◄── Preview Image (com clip_rect)
+│     │   🖼️ IMG    │     │
+│     └─────────────┘     │
+├─────────────────────────┤   ◄── Front Pocket (sobrepõe acima)
+│      FRONT POCKET       │
+└─────────────────────────┘
+         "Nome"               ◄── Texto com painter.text() centralizado
+```
+
+#### Implementação em Camadas
+
+**Camada 1 - Base Sólida (elimina gaps)**
+```rust
+// Tab (aba)
+ui.painter().rect_filled(
+    Rect::from_min_size(folder_rect.min, vec2(tab_w, tab_h)),
+    CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 },
+    color_back
+);
+
+// Corpo completo (uma única forma evita gaps)
+ui.painter().rect_filled(
+    Rect::from_min_max(
+        pos2(folder_rect.min.x, folder_rect.min.y + tab_h),
+        folder_rect.max
+    ),
+    CornerRadius { nw: 0, ne: 3, sw: 4, se: 4 },
+    color_back
+);
+```
+
+**Camada 2 - Preview com Clipping**
+```rust
+// Área restrita com margens
+let margin_x = 6.0;
+let margin_top = 4.0;
+let preview_area = Rect::from_min_max(
+    pos2(folder_rect.min.x + margin_x, folder_rect.min.y + tab_h + margin_top),
+    pos2(folder_rect.max.x - margin_x, folder_rect.max.y - front_h)
+);
+
+// with_clip_rect() FORÇA a imagem a ficar dentro dos limites
+ui.painter().with_clip_rect(preview_area)
+    .image(tex.id(), preview_area, uv_rect, Color32::WHITE);
+```
+
+> **🔑 Insight Chave:** `with_clip_rect()` é essencial. Sem ele, mesmo passando `preview_area` como destino, a imagem pode "sangrar" além dos limites devido a como o GPU rasteriza texturas.
+
+**Camada 3 - Front Pocket (sobrepõe)**
+```rust
+// Front pocket cobre a parte inferior, escondendo qualquer artefato
+let front_rect = Rect::from_min_max(
+    pos2(folder_rect.min.x, folder_rect.max.y - front_h),
+    folder_rect.max
+);
+ui.painter().rect_filled(front_rect, CornerRadius { nw: 0, ne: 0, sw: 4, se: 4 }, color_front);
+```
+
+**Camada 4 - Texto com Posição Exata**
+```rust
+// painter.text() permite controle pixel-perfect
+let text_x = folder_rect.min.x + folder_w / 2.0;  // Centro horizontal
+let text_y = folder_rect.max.y + 6.0;              // Abaixo da pasta
+
+ui.painter().text(
+    pos2(text_x, text_y),
+    Align2::CENTER_TOP,
+    &item.name,
+    FontId::proportional(11.0),
+    Color32::BLACK
+);
+```
+
+#### Armadilhas Comuns (Lessons Learned)
+
+| Problema | Causa | Solução |
+|----------|-------|---------|
+| **Linha branca entre layers** | Anti-aliasing + coordenadas exatas | Usar base sólida única |
+| **Highlight branco visível** | `rect_filled` com alpha transparente | Remover highlight ou usar cor sólida |
+| **Preview escapando limites** | GPU rasterization não respeita rect | Usar `with_clip_rect()` |
+| **Texto desalinhado** | `ui.label()` usa layout da célula | Usar `painter.text()` com coordenadas calculadas |
+| **Seleção desproporcional** | `content_rect` usa largura da célula | Usar largura da pasta para diretórios |
+
+#### Cálculo de Seleção para Pastas
+
+```rust
+// A seleção deve usar a LARGURA DA PASTA, não da célula
+if item_ref.is_dir {
+    let folder_w_rect = self.thumbnail_size * 0.6;
+    let folder_h_rect = folder_w_rect * 0.85;
+    let content_h = folder_h_rect + 4.0 + text_h.max(20.0);
+    Some(Rect::from_min_size(rect.min, vec2(folder_w_rect, content_h)))
+} else {
+    Some(Rect::from_min_size(rect.min, vec2(rect.width(), content_h)))
+}
+```
+
+#### Constantes de Proporção
+
+```rust
+// Geometria da pasta (valores otimizados visualmente)
+let folder_w = self.thumbnail_size * 0.60;  // 60% da célula
+let folder_h = folder_w * 0.85;             // Proporção 85%
+let tab_h = folder_h * 0.15;                // Aba: 15% da altura
+let tab_w = folder_w * 0.40;                // Aba: 40% da largura
+let front_h = folder_h * 0.50;              // Bolso: 50% da altura
+
+// Margens do preview
+let margin_x = 6.0;   // Lateral
+let margin_top = 4.0; // Superior
+```
+
+#### Benefícios da Abordagem
+
+- ✅ Zero gaps visuais (base sólida elimina anti-aliasing artifacts)
+- ✅ Preview nunca escapa (clipping no nível do painter)
+- ✅ Texto perfeitamente centralizado (coordenadas calculadas)
+- ✅ Seleção proporcional (usa dimensões da pasta, não da célula)
+- ✅ Performance mantida (apenas chamadas de desenho, sem layout engine)
+
 ### 3. VRAM Budgeting
 O gerenciamento de memória de vídeo é proativo, não reativo:
 - **Hard Cap**: 200 texturas máximas
