@@ -1,0 +1,28 @@
+// Helper functions for preview pane
+fn format_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    
+    if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.2} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.2} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} bytes", bytes)
+    }
+}
+
+fn format_date(timestamp: u64) -> String {
+    use std::time::{UNIX_EPOCH, Duration};
+    
+    if timestamp == 0 {
+        return "Desconhecido".to_string();
+    }
+    
+    let datetime = UNIX_EPOCH + Duration::from_secs(timestamp);
+    // Simplified formatting (ideally use chrono crate)
+    format!("{:?}", datetime)
+}

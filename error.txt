@@ -1,0 +1,151 @@
+    Checking mtt-file-manager v0.1.0 (C:\MTT File Manager)
+warning: unused import: `UiStackInfo`
+ --> src\main.rs:1:26
+  |
+1 | use eframe::egui::{self, UiStackInfo};
+  |                          ^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `std::env`
+ --> src\main.rs:5:5
+  |
+5 | use std::env;
+  |     ^^^^^^^^
+
+warning: use of deprecated associated function `eframe::egui::Frame::none`: Use `Frame::NONE` or `Frame::new()` instead.
+    --> src\main.rs:1018:42
+     |
+1018 |                 let frame = egui::Frame::none()
+     |                                          ^^^^
+     |
+     = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated method `eframe::egui::Frame::rounding`: Renamed to `corner_radius`
+    --> src\main.rs:1025:22
+     |
+1025 |                     .rounding(4.0)
+     |                      ^^^^^^^^
+
+warning: use of deprecated associated function `eframe::egui::Frame::none`: Use `Frame::NONE` or `Frame::new()` instead.
+    --> src\main.rs:1111:42
+     |
+1111 |                 let frame = egui::Frame::none()
+     |                                          ^^^^
+
+warning: use of deprecated method `eframe::egui::Frame::rounding`: Renamed to `corner_radius`
+    --> src\main.rs:1118:22
+     |
+1118 |                     .rounding(4.0)
+     |                      ^^^^^^^^
+
+warning: use of deprecated method `eframe::egui::Image::<'a>::rounding`: Renamed to `corner_radius`
+    --> src\main.rs:1131:38
+     |
+1131 | ...                   .rounding(4.0));
+     |                        ^^^^^^^^
+
+warning: use of deprecated associated function `eframe::egui::Frame::none`: Use `Frame::NONE` or `Frame::new()` instead.
+    --> src\main.rs:1134:46
+     |
+1134 | ...                   egui::Frame::none()
+     |                                    ^^^^
+
+warning: use of deprecated method `eframe::egui::Frame::rounding`: Renamed to `corner_radius`
+    --> src\main.rs:1136:38
+     |
+1136 | ...                   .rounding(4.0)
+     |                        ^^^^^^^^
+
+warning: use of deprecated associated function `eframe::egui::ComboBox::from_id_source`: Renamed id_salt
+    --> src\main.rs:1223:33
+     |
+1223 |                 egui::ComboBox::from_id_source("sort_mode")
+     |                                 ^^^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+    --> src\main.rs:1532:66
+     |
+1532 | ...                   self.navigate_to(&item.path);
+     |                            ----------- ^^^^^^^^^^ expected `&str`, found `&PathBuf`
+     |                            |
+     |                            arguments to this method are incorrect
+     |
+     = note: expected reference `&str`
+                found reference `&PathBuf`
+note: method defined here
+    --> src\main.rs:787:8
+     |
+ 787 |     fn navigate_to(&mut self, path: &str) {
+     |        ^^^^^^^^^^^            ----------
+
+error[E0433]: failed to resolve: use of unresolved module or unlinked crate `open`
+    --> src\main.rs:1534:65
+     |
+1534 | ...                   if let Err(e) = open::that(&item.path) {
+     |                                       ^^^^ use of unresolved module or unlinked crate `open`
+     |
+     = help: if you wanted to use a crate named `open`, use `cargo add open` to add it to your `Cargo.toml`
+
+error[E0061]: this method takes 4 arguments but 3 arguments were supplied
+    --> src\main.rs:1544:58
+     |
+1544 | ...                   ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 215)));
+     |                                    ^^^^^^^^^^^------------------------------------------------------------------------- argument #4 of type `StrokeKind` is missing
+     |
+note: method defined here
+    --> C:\Users\mtamu\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\egui-0.31.1\src\painter.rs:438:12
+     |
+ 438 |     pub fn rect_stroke(
+     |            ^^^^^^^^^^^
+help: provide the argument
+     |
+1544 |                                             ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 215)), /* StrokeKind */);
+     |                                                                                                                                             ++++++++++++++++++
+
+warning: use of deprecated method `eframe::egui::Ui::allocate_ui_at_rect`: Use `allocate_new_ui` instead
+    --> src\main.rs:1549:40
+     |
+1549 | ...                   ui.allocate_ui_at_rect(rect, |ui| {
+     |                          ^^^^^^^^^^^^^^^^^^^
+
+warning: variable does not need to be mutable
+   --> src\main.rs:977:13
+    |
+977 |         let mut new_items_added = false;
+    |             ----^^^^^^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `new_items_added`
+   --> src\main.rs:977:13
+    |
+977 |         let mut new_items_added = false;
+    |             ^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_new_items_added`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `path_clone`
+    --> src\main.rs:1015:17
+     |
+1015 |             let path_clone = item.path.clone();
+     |                 ^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_path_clone`
+
+warning: unused variable: `response`
+    --> src\main.rs:1028:21
+     |
+1028 |                 let response = frame.show(ui, |ui| {
+     |                     ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_response`
+
+warning: unused variable: `response`
+    --> src\main.rs:1121:21
+     |
+1121 |                 let response = frame.show(ui, |ui| {
+     |                     ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_response`
+
+Some errors have detailed explanations: E0061, E0308, E0433.
+For more information about an error, try `rustc --explain E0061`.
+warning: `mtt-file-manager` (bin "mtt-file-manager") generated 16 warnings
+error: could not compile `mtt-file-manager` (bin "mtt-file-manager") due to 3 previous errors; 16 warnings emitted

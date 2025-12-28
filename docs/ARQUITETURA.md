@@ -24,10 +24,15 @@ O **MTT File Manager** é um gerenciador de arquivos nativo para Windows desenvo
 ```mermaid
 graph TB
     subgraph "UI Layer (egui)"
-        A[ImageViewerApp] --> B[SidePanel - Discos/Atalhos]
-        A --> C[TopPanel - Navegação]
-        A --> D[TopPanel - Toolbar]
-        A --> E[CentralPanel - Grid de Itens]
+        direction TB
+        A[ImageViewerApp] --> TOP[TopPanels Area]
+        TOP --> NAV[Nav Bar]
+        TOP --> TOOL[Toolbar]
+        
+        A --> HORIZ[Horizontal Layout Area]
+        HORIZ --> SIDE_L[SidePanel Left (Disks)]
+        HORIZ --> CENTER[CentralPanel (Grid)]
+        HORIZ --> SIDE_R[SidePanel Right (Preview)]
     end
     
     subgraph "Business Logic Layer"
@@ -199,6 +204,37 @@ O gerenciamento de memória de vídeo é proativo, não reativo:
 
 - Thumbnails só são carregados quando visíveis no viewport
 - Controle de concorrência: `MAX_CONCURRENT_LOADS = 50`
+
+### ✅ Look-Ahead Pre-Fetching (2024-12-28)
+
+**Buffer Zone de 5 Linhas:**
+- Expande range de iteração além do viewport visível
+- Thumbnails carregados ~200ms ANTES de aparecer na tela
+- Elimina "pop-in" durante scroll normal
+
+```rust
+const PRELOAD_ROWS: usize = 5;
+let loop_min_row = visible_min_row.saturating_sub(PRELOAD_ROWS);
+let loop_max_row = (visible_max_row + PRELOAD_ROWS).min(rows);
+// Itera no buffer expandido, mas só desenha se visível
+```
+
+**Resultado:** UX fluida similar a apps nativos AAA
+
+### ✅ Windows Explorer Layout Architecture (2024-12-28)
+
+Adotamos o layout padrão **"Windows Explorer"** para familiaridade e eficiência:
+
+1. **Top-Down Flow**: 
+   - `TopBottomPanel`s (NavBar, Toolbar) são renderizados PRIMEIRO, ocupando 100% da largura.
+   
+2. **Three-Column Body**:
+   - **Left**: Árvore de Discos (SidePanel Left) - Navegação rápida.
+   - **Right**: Painel de Detalhes/Preview (SidePanel Right) - toggleable via toolbar.
+   - **Center**: Grid de Arquivos (CentralPanel) - Ocupa o espaço restante automaticamente.
+
+Isso corrige problemas de layout onde o Sidebar cortava a Toolbar ("VS Code Style") e garante uma hierarquia visual correta.
+
 
 ### ✅ Memory Management
 
