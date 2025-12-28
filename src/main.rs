@@ -163,6 +163,11 @@ struct ImageViewerApp {
     texture_cache: LruCache<PathBuf, egui::TextureHandle>,
     loading_set: HashSet<PathBuf>,
     
+    // Async loading (evita freeze da UI ao ler metadata)
+    file_entry_receiver: Receiver<Vec<FileEntry>>,
+    file_entry_sender: Sender<Vec<FileEntry>>,
+    is_loading_folder: bool,
+    
     // Icon cache (novo: extensão → texture)
     icon_cache: LruCache<String, egui::TextureHandle>,
     folder_icon_texture: Option<egui::TextureHandle>,
@@ -183,13 +188,13 @@ struct ImageViewerApp {
     thumbnail_size: f32,        // Zoom: 64-512
     selected_item: Option<usize>,
     
-    loading: bool,
     total_items: usize,
 }
 
 impl Default for ImageViewerApp {
     fn default() -> Self {
         let (sender, receiver) = mpsc::channel();
+        let (file_entry_sender, file_entry_receiver) = mpsc::channel();
         let disks = get_all_drives();
         
         let mut app = Self {
@@ -199,6 +204,10 @@ impl Default for ImageViewerApp {
             items: Vec::new(),
             texture_cache: LruCache::new(NonZeroUsize::new(CACHE_SIZE).unwrap()),
             loading_set: HashSet::new(),
+            // Async loading
+            file_entry_receiver,
+            file_entry_sender,
+            is_loading_folder: false,
             icon_cache: LruCache::new(NonZeroUsize::new(ICON_CACHE_SIZE).unwrap()),
             folder_icon_texture: None,
             computer_icon: None,
@@ -213,7 +222,6 @@ impl Default for ImageViewerApp {
             disks,
             thumbnail_size: 128.0,  // Default zoom
             selected_item: None,
-            loading: false,
             total_items: 0,
         };
         
@@ -662,14 +670,15 @@ impl ImageViewerApp {
         self.texture_cache.clear();
         self.loading_set.clear();
         self.selected_item = None;
-        self.loading = true;
+        self.is_loading_folder = true;  // Mudou de loading
         self.total_items = 0;
         
         let path = self.current_path.clone();
-        let sender = self.image_sender.clone();
+        let file_entry_sender = self.file_entry_sender.clone();
         
+        // Background thread: lê metadata SEM bloquear UI
         std::thread::spawn(move || {
-            let mut entries: Vec<FileEntry> = WalkDir::new(&path)
+            let entries: Vec<FileEntry> = WalkDir::new(&path)
                 .max_depth(1)
                 .into_iter()
                 .filter_map(|e| e.ok())
@@ -719,16 +728,8 @@ impl ImageViewerApp {
                 })
                 .collect();
             
-            // Sorting será feito no main thread via sort_items() (usa app state)
-            
-            for item in entries {
-                let _ = sender.send(ThumbnailData {
-                    path: item.path.clone(),  // FileEntry tem path como campo direto
-                    image_data: Vec::new(),
-                    width: 0,
-                    height: 0,
-                });
-            }
+            // Envia batch completo (já com metadata) para UI thread
+            let _ = file_entry_sender.send(entries);
         });
     }
     
@@ -912,19 +913,24 @@ impl ImageViewerApp {
     }
     
     fn process_incoming_messages(&mut self, ctx: &egui::Context) {
+        // 1. Batch FileEntry loading (evita freeze)
+        if let Ok(entries) = self.file_entry_receiver.try_recv() {
+            self.items = entries;
+            self.sort_items();
+            self.total_items = self.items.len();
+            self.is_loading_folder = false;
+            ctx.request_repaint();
+        }
+        
+        // 2. Individual thumbnails
         let mut received_any = false;
         let mut new_items_added = false;
         
         while let Ok(thumbnail_data) = self.image_receiver.try_recv() {
             received_any = true;
             
-            if thumbnail_data.image_data.is_empty() {
-                let path = thumbnail_data.path.clone();
-                let is_dir = path.is_dir();
-                self.items.push(FileEntry::from_path(path, is_dir));
-                new_items_added = true;
-                self.total_items = self.items.len();
-            } else {
+            // Só processa thumbnails (image_data não vazio)
+            if !thumbnail_data.image_data.is_empty() {
                 self.loading_set.remove(&thumbnail_data.path);
                 
                 let texture = ctx.load_texture(
@@ -939,11 +945,7 @@ impl ImageViewerApp {
                 self.texture_cache.put(thumbnail_data.path, texture);
             }
         }
-        
-        // Ordena items após carregar todos
-        if new_items_added {
-            self.sort_items();
-        }
+
         
         if received_any {
             ctx.request_repaint();
@@ -1325,17 +1327,23 @@ impl eframe::App for ImageViewerApp {
         
         // Central grid
         egui::CentralPanel::default().show(ctx, |ui| {
-            if self.items.is_empty() {
+            // 1. PRIORIDADE: Carregando? Mostra spinner
+            if self.is_loading_folder {
                 ui.vertical_centered(|ui| {
                     ui.add_space(100.0);
-                    if self.loading {
-                        ui.spinner();
-                        ui.label("Carregando...");
-                    } else {
-                        ui.label("Pasta vazia");
-                    }
+                    ui.spinner();
+                    ui.label("Carregando...");
                 });
-            } else {
+            }
+            // 2. Lista vazia (e não carregando)? Mostra mensagem
+            else if self.items.is_empty() {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(100.0);
+                    ui.label("Pasta vazia");
+                });
+            }
+            // 3. Tem items? Renderiza grid
+            else {
                 // ============================================
                 // POSICIONAMENTO ABSOLUTO (Game Engine Style)
                 // Elimina 100% do jitter usando coordenadas matemáticas
