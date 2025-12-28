@@ -1371,6 +1371,7 @@ impl eframe::App for ImageViewerApp {
                 .resizable(true)
                 .default_width(300.0)
                 .min_width(250.0)
+                .max_width(500.0)
                 .show(ctx, |ui| {
                     if let Some(file) = &self.selected_file {
                         ui.heading("Pré-visualização");
@@ -1378,8 +1379,15 @@ impl eframe::App for ImageViewerApp {
                         
                         // Preview de imagem (se houver thumbnail)
                         if let Some(texture) = self.texture_cache.peek(&file.path) {
-                            ui.centered_and_justified(|ui| {
-                                ui.add(egui::Image::new(texture).max_size(egui::vec2(280.0, 280.0)));
+                            // Calcula tamanho máximo respeitando largura da sidebar
+                            let max_preview_width = ui.available_width() - 20.0;
+                            let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
+                            
+                            ui.vertical_centered(|ui| {
+                                ui.add(egui::Image::new(texture)
+                                    .max_size(max_preview_size)
+                                    .fit_to_original_size(1.0)
+                                    .shrink_to_fit());
                             });
                             ui.separator();
                         }
@@ -1390,7 +1398,9 @@ impl eframe::App for ImageViewerApp {
                             .spacing([10.0, 4.0])
                             .show(ui, |ui| {
                                 ui.label("Nome:");
-                                ui.label(&file.name);
+                                ui.add(egui::Label::new(&file.name)
+                                    .wrap()
+                                    .truncate());
                                 ui.end_row();
                                 
                                 ui.label("Tamanho:");
