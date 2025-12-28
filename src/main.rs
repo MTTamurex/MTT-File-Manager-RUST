@@ -20,7 +20,7 @@ use windows::{
 // Imports adicionaisexplícitos para APIs de ícones
 use windows::Win32::UI::Shell::{
     SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_LARGEICON, 
-    SHGFI_USEFILEATTRIBUTES
+    SHGFI_USEFILEATTRIBUTES, SHGFI_DISPLAYNAME
 };
 
 // ...
@@ -247,7 +247,8 @@ impl Default for ImageViewerApp {
 }
 
 /// Obtém o label (nome) de um volume do Windows.
-/// Retorna "Disco Local" se não houver label ou falhar.
+/// Usa Shell Display Name (suporta drives virtuais como Cryptomator).
+/// Fallback para GetVolumeInformationW se Shell falhar.
 fn get_volume_label(drive_path: &str) -> String {
     unsafe {
         let path_wide: Vec<u16> = drive_path
@@ -255,9 +256,35 @@ fn get_volume_label(drive_path: &str) -> String {
             .chain(std::iter::once(0))
             .collect();
         
-        let mut volume_name_buffer = vec![0u16; 256];
+        // Primeiro: tenta Shell Display Name (suporta Cryptomator, etc)
+        let mut shfi: SHFILEINFOW = std::mem::zeroed();
+        let result = SHGetFileInfoW(
+            PCWSTR(path_wide.as_ptr()),
+            FILE_ATTRIBUTE_DIRECTORY,
+            Some(&mut shfi),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            SHGFI_DISPLAYNAME,
+        );
         
-        let result = GetVolumeInformationW(
+        if result != 0 {
+            let display_name = String::from_utf16_lossy(&shfi.szDisplayName)
+                .trim_end_matches('\0')
+                .to_string();
+            
+            // Shell retorna "Label (X:)" - extraimos só o label
+            if let Some(paren_pos) = display_name.rfind(" (") {
+                let label = display_name[..paren_pos].trim();
+                if !label.is_empty() {
+                    return label.to_string();
+                }
+            } else if !display_name.is_empty() {
+                return display_name;
+            }
+        }
+        
+        // Fallback: GetVolumeInformationW (volume label real)
+        let mut volume_name_buffer = vec![0u16; 256];
+        let vol_result = GetVolumeInformationW(
             PCWSTR(path_wide.as_ptr()),
             Some(&mut volume_name_buffer),
             None,
@@ -266,7 +293,7 @@ fn get_volume_label(drive_path: &str) -> String {
             None,
         );
         
-        if result.is_ok() {
+        if vol_result.is_ok() {
             let volume_name = String::from_utf16_lossy(&volume_name_buffer)
                 .trim_end_matches('\0')
                 .to_string();
@@ -1384,13 +1411,35 @@ impl eframe::App for ImageViewerApp {
                     };
                     
                     // Renderiza drive com ícone + label
+                    let is_selected = self.current_path.starts_with(disk_path);
                     let response = ui.horizontal(|ui| {
                         if let Some(icon) = drive_icon {
                             ui.add(egui::Image::new(&icon).max_size(egui::vec2(16.0, 16.0)));
                         } else {
                             ui.label("💾");
                         }
-                        ui.selectable_label(false, disk_label)
+                        
+                        // Usa Label clicável (Labels respeitam o layout, Buttons centralizam)
+                        let label = egui::Label::new(
+                            egui::RichText::new(disk_label)
+                                .color(if is_selected { 
+                                    egui::Color32::from_rgb(0, 50, 100) 
+                                } else { 
+                                    ui.visuals().text_color() 
+                                })
+                        ).truncate();
+                        
+                        // Desenha background de seleção
+                        if is_selected {
+                            let rect = ui.available_rect_before_wrap();
+                            ui.painter().rect_filled(
+                                rect,
+                                2.0,
+                                egui::Color32::from_rgb(200, 220, 240)
+                            );
+                        }
+                        
+                        ui.add(label)
                     }).inner;
                     
                     if response.clicked() {
@@ -1533,6 +1582,18 @@ impl eframe::App for ImageViewerApp {
                         }
                     }
                 });
+                
+                // ENTER para abrir item selecionado (fora do closure para poder chamar navigate_to)
+                let enter_pressed = ctx.input(|i| i.key_pressed(egui::Key::Enter));
+                if enter_pressed {
+                    if let Some(selected) = &self.selected_file.clone() {
+                        if selected.is_dir {
+                            self.navigate_to(&selected.path.to_string_lossy());
+                        } else {
+                            open_with_shell(&selected.path);
+                        }
+                    }
+                }
                 
                 // 2. CÁLCULO DA ALTURA TOTAL (Virtual Scroll)
                 let count = self.items.len();
