@@ -106,6 +106,25 @@ enum SortMode {
     Size,
 }
 
+/// Busca primeira imagem em uma pasta para usar como preview
+/// Verifica apenas os primeiros 15 arquivos para performance
+fn find_first_image_in_folder(folder_path: &Path) -> Option<PathBuf> {
+    if let Ok(entries) = std::fs::read_dir(folder_path) {
+        for entry in entries.flatten().take(15) {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    match ext.to_lowercase().as_str() {
+                        "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" => return Some(path),
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 // Entry de arquivo/pasta com metadados cacheados para ordenação
 #[derive(Clone, Debug)]
 struct FileEntry {
@@ -114,6 +133,7 @@ struct FileEntry {
     is_dir: bool,      // Pastas primeiro
     size: u64,         // Tamanho em bytes (0 para diretórios)
     modified: u64,     // Timestamp (segundos desde UNIX_EPOCH)
+    folder_cover: Option<PathBuf>,  // Primeira imagem encontrada na pasta (para preview)
 }
 
 impl FileEntry {
@@ -138,7 +158,14 @@ impl FileEntry {
             })
             .unwrap_or((0, 0));
         
-        Self { path, name, is_dir, size, modified }
+        // Para pastas: busca primeira imagem para preview (limite 15 arquivos)
+        let folder_cover = if is_dir {
+            find_first_image_in_folder(&path)
+        } else {
+            None
+        };
+        
+        Self { path, name, is_dir, size, modified, folder_cover }
     }
     
     fn path(&self) -> &Path {
@@ -1063,6 +1090,17 @@ impl ImageViewerApp {
         
         // ==== DIRECTORY RENDERING ====
         if item.is_dir {
+            // TRIGGER PREVIEW LOAD
+            if let Some(cover_path) = &item.folder_cover {
+                let has_texture = self.texture_cache.contains(cover_path);
+                let is_loading = self.loading_set.contains(cover_path);
+                
+                if !has_texture && !is_loading && self.loading_set.len() < MAX_CONCURRENT_LOADS {
+                    self.loading_set.insert(cover_path.clone());
+                    self.request_thumbnail_load(cover_path.clone());
+                }
+            }
+
             let path_clone = item.path.clone();
                 
                 // Compact folder card with NO padding
@@ -1084,11 +1122,11 @@ impl ImageViewerApp {
                         ui.set_width(self.thumbnail_size);
                         ui.set_height(folder_icon_size + 14.0);
                         
-                        // NEW: Tenta usar ícone nativo, fallback para emoji
-                        if let Some(icon_texture) = &self.folder_icon_texture {
+                        // DRAW FOLDER ICON (Texture or Emoji)
+                        let rect = if let Some(icon_texture) = &self.folder_icon_texture {
                             ui.add(egui::Image::new(icon_texture)
                                 .max_size(egui::vec2(folder_icon_size, folder_icon_size))
-                                .maintain_aspect_ratio(true));
+                                .maintain_aspect_ratio(true)).rect
                         } else {
                             // Fallback: emoji atual
                             ui.add(
@@ -1097,7 +1135,49 @@ impl ImageViewerApp {
                                         .size(folder_icon_size * 0.7)
                                         .color(egui::Color32::from_rgb(255, 193, 7))
                                 ).selectable(false)
-                            );
+                            ).rect
+                        };
+
+                        // DRAW PREVIEW OVERLAY
+                        if let Some(cover_path) = &item.folder_cover {
+                            if let Some(tex) = self.texture_cache.get(cover_path) {
+                                // Define margens para parecer "dentro" da pasta
+                                let margin_x = rect.width() * 0.15;
+                                let margin_y_top = rect.height() * 0.25;
+                                let margin_y_bottom = rect.height() * 0.10;
+
+                                let preview_rect = egui::Rect::from_min_max(
+                                    egui::pos2(rect.min.x + margin_x, rect.min.y + margin_y_top),
+                                    egui::pos2(rect.max.x - margin_x, rect.max.y - margin_y_bottom),
+                                );
+
+                                // Aspect Ratio Match
+                                let size = tex.size();
+                                let tex_size = egui::vec2(size[0] as f32, size[1] as f32);
+                                
+                                if tex_size.x > 0.0 && tex_size.y > 0.0 {
+                                    let aspect = tex_size.x / tex_size.y;
+                                    let box_aspect = preview_rect.width() / preview_rect.height();
+                                    
+                                    let final_preview_rect = if aspect > box_aspect {
+                                        // Imagem mais larga que o box -> limita largura
+                                        let h = preview_rect.width() / aspect;
+                                        egui::Rect::from_center_size(preview_rect.center(), egui::vec2(preview_rect.width(), h))
+                                    } else {
+                                        // Imagem mais alta -> limita altura
+                                        let w = preview_rect.height() * aspect;
+                                        egui::Rect::from_center_size(preview_rect.center(), egui::vec2(w, preview_rect.height()))
+                                    };
+
+                                    // Desenha a imagem de capa por cima (overlay)
+                                    ui.painter().image(
+                                        tex.id(),
+                                        final_preview_rect,
+                                        egui::Rect::from_min_max(egui::pos2(0.0,0.0), egui::pos2(1.0,1.0)),
+                                        egui::Color32::WHITE
+                                    );
+                                }
+                            }
                         }
                         
                         // PERFORMANCE: Usa item.name (já cacheado) em vez de path.file_name()
