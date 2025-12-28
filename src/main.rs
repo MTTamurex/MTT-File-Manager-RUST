@@ -1094,7 +1094,13 @@ impl ImageViewerApp {
             let folder_w = self.thumbnail_size * 0.60;
             let folder_h = folder_w * 0.85;
             
-            let start_pos = ui.cursor().min;
+            // Adiciona margem superior para centralizar verticalmente
+            ui.add_space(4.0);
+            
+            // Centraliza a pasta horizontalmente na célula
+            let cell_width = ui.available_width();
+            let x_offset = (cell_width - folder_w) / 2.0;
+            let start_pos = ui.cursor().min + egui::vec2(x_offset.max(0.0), 0.0);
             let folder_rect = egui::Rect::from_min_size(start_pos, egui::vec2(folder_w, folder_h));
 
             // CORES
@@ -1174,30 +1180,18 @@ impl ImageViewerApp {
                 egui::StrokeKind::Inside
             );
 
-            // Aloca espaço
+            // Aloca espaço da pasta
             ui.allocate_rect(folder_rect, egui::Sense::hover());
 
-            // TEXTO: Posição exata centralizada sob a pasta
-            let text_y = folder_rect.max.y + 6.0;
-            let text_x = folder_rect.min.x + folder_w / 2.0;
-            
-            // Trunca nome se muito longo
-            let display_name = if item.name.len() > 20 {
-                format!("{}...", &item.name[..17])
-            } else {
-                item.name.clone()
-            };
-            
-            ui.painter().text(
-                egui::pos2(text_x, text_y),
-                egui::Align2::CENTER_TOP,
-                &display_name,
-                egui::FontId::proportional(11.0),
-                egui::Color32::BLACK
-            );
-            
-            // Avança cursor para incluir texto no layout
-            ui.add_space(folder_h + 20.0);
+            // TEXTO: Usa Label com truncate (igual aos arquivos) para respeitar limites
+            ui.add_space(6.0);  // Gap entre pasta e texto
+            ui.vertical_centered(|ui| {
+                ui.add(egui::Label::new(
+                    egui::RichText::new(&item.name)
+                        .size(11.0)
+                        .color(egui::Color32::BLACK)
+                ).truncate());
+            });
         }
             // ==== FILE RENDERING ====
             else {
@@ -1488,41 +1482,80 @@ impl eframe::App for ImageViewerApp {
                         }
                     };
                     
-                    // Renderiza drive com ícone + label
+                    
+                    // Renderiza drive com ícone + label usando interact() para controle total do cursor
                     let is_selected = self.current_path.starts_with(disk_path);
-                    let response = ui.horizontal(|ui| {
-                        if let Some(icon) = drive_icon {
-                            ui.add(egui::Image::new(&icon).max_size(egui::vec2(16.0, 16.0)));
-                        } else {
-                            ui.label("💾");
-                        }
-                        
-                        // Usa Label clicável (Labels respeitam o layout, Buttons centralizam)
-                        let label = egui::Label::new(
-                            egui::RichText::new(disk_label)
-                                .color(if is_selected { 
-                                    egui::Color32::from_rgb(0, 50, 100) 
-                                } else { 
-                                    ui.visuals().text_color() 
-                                })
-                        ).truncate();
-                        
-                        // Desenha background de seleção
+                    
+                    // Desenha conteúdo no horizontal layout
+                    let (mut rect, response) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), 24.0),
+                        egui::Sense::click()  // Captura cliques, sem texto selecionável
+                    );
+                    
+                    // Expande rect para preencher toda a largura da sidebar (remove gaps)
+                    rect.min.x = ui.clip_rect().min.x;
+                    rect.max.x = ui.clip_rect().max.x;
+                    
+                    // Só desenha se visível
+                    if ui.is_rect_visible(rect) {
+                        // Background de seleção
                         if is_selected {
-                            let rect = ui.available_rect_before_wrap();
                             ui.painter().rect_filled(
                                 rect,
-                                2.0,
+                                0.0,  // Sem cantos arredondados para ficar flush com as bordas
                                 egui::Color32::from_rgb(200, 220, 240)
                             );
                         }
                         
-                        ui.add(label)
-                    }).inner;
+                        // Hover effect
+                        if response.hovered() && !is_selected {
+                            ui.painter().rect_filled(
+                                rect,
+                                2.0,
+                                egui::Color32::from_rgba_unmultiplied(200, 220, 240, 50)
+                            );
+                        }
+                        
+                        // Desenha ícone e texto manualmente
+                        let mut cursor_x = rect.min.x + 5.0;
+                        
+                        // Ícone
+                        if let Some(icon) = drive_icon {
+                            let icon_rect = egui::Rect::from_min_size(
+                                egui::pos2(cursor_x, rect.center().y - 8.0),
+                                egui::vec2(16.0, 16.0)
+                            );
+                            ui.painter().image(icon.id(), icon_rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                            cursor_x += 20.0;
+                        } else {
+                            ui.painter().text(
+                                egui::pos2(cursor_x, rect.center().y),
+                                egui::Align2::LEFT_CENTER,
+                                "💾",
+                                egui::FontId::proportional(14.0),
+                                ui.visuals().text_color()
+                            );
+                            cursor_x += 20.0;
+                        }
+                        
+                        // Texto
+                        ui.painter().text(
+                            egui::pos2(cursor_x, rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            disk_label,
+                            egui::FontId::proportional(14.0),
+                            if is_selected { 
+                                egui::Color32::from_rgb(0, 50, 100) 
+                            } else { 
+                                ui.visuals().text_color() 
+                            }
+                        );
+                    }
                     
                     if response.clicked() {
                         self.navigate_to(disk_path);
                     }
+                    
                     
                     ui.add_space(3.0);
                 }
@@ -1825,10 +1858,13 @@ impl eframe::App for ImageViewerApp {
                                             top_space + icon_display_size + 4.0 + 20.0_f32.max(text_h) + 4.0
                                         }.min(rect.height());
 
-                                        // Para diretórios, usar a largura da pasta (não da célula inteira)
+                                        // Para diretórios: usar largura da célula (texto agora trunca corretamente)
                                         if item_ref.is_dir {
-                                            let folder_w_rect = self.thumbnail_size * 0.6;
-                                            Some(egui::Rect::from_min_size(rect.min, egui::vec2(folder_w_rect, content_h)))
+                                            let folder_w_sel = self.thumbnail_size * 0.6;
+                                            let folder_h_sel = folder_w_sel * 0.85;
+                                            // altura total = pasta + gap + texto + padding
+                                            let total_h = folder_h_sel + 6.0 + 14.0 + 8.0;  // +8px padding
+                                            Some(egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), total_h)))
                                         } else {
                                             Some(egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), content_h)))
                                         }
