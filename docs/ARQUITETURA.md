@@ -178,33 +178,127 @@ if !ui.is_rect_visible(rect) {
 Isso garante que thumbnails nunca sejam solicitados para itens que o usuário "pulou" ao rolar rápido.
 
 ### 2.1 Seleção Shrink-Wrap (Windows Explorer Style)
+
 Para manter a UX fiel ao Windows Explorer, o realce de seleção não ocupa toda a célula do grid. Em vez disso, ele "abraça" apenas o conteúdo efetivo: ícone/thumbnail + nome (até 2 linhas), com altura dinâmica.
 
-```rust
-// Determina altura do ícone por tipo
-let icon_h = if item.is_dir { thumb * 0.6 } else if is_media { thumb } else { thumb * 0.5 };
+#### O Problema
 
-// Mede o texto com wrap/truncate (máx. 2 linhas)
-let text_galley = ui.fonts(|f| f.layout_job(egui::text::LayoutJob {
-    text: item.name.clone(),
-    sections: vec![egui::text::LayoutSection { /* font size por tipo */ }],
-    wrap: egui::text::TextWrapping { max_width: cell_rect.width() - 8.0, max_rows: 2, break_anywhere: true, ..Default::default() },
-    ..Default::default()
-}));
+Em um Grid UI virtualizado:
+- Células têm **altura fixa** para garantir alinhamento e evitar layout shift
+- Mas o **conteúdo dentro** de cada célula tem altura variável (ícones diferentes, textos de tamanhos diferentes)
+- Se a seleção usar a altura da célula, aparece um "espaço vazio azul" embaixo do conteúdo
 
-// Altura final da seleção (limitada à célula)
-let content_h = (icon_h + 7.0 + text_galley.rect.height() + 8.0).min(cell_rect.height());
-let selection_rect = egui::Rect::from_min_size(cell_rect.min, egui::vec2(cell_rect.width(), content_h));
+#### A Solução: Bounding Box Decoupling
 
-// Pintura do realce
-ui.painter().rect_stroke(selection_rect, 2.0, egui::Stroke::new(2.0, egui::Color32::from_rgb(0,120,215)), egui::StrokeKind::Outside);
-ui.painter().rect_filled(selection_rect, 0.0, egui::Color32::from_rgba_unmultiplied(0,120,215,30));
+**Princípio:** Separar o retângulo estrutural (célula do grid) do retângulo visual (seleção).
+
+```
+┌─────────────────┐  ◄── cell_rect (altura fixa do grid)
+│  ┌───────────┐  │
+│  │   🖼️      │  │  ◄── selection_rect (altura do conteúdo)
+│  │  Arquivo  │  │
+│  └───────────┘  │
+│     ░░░░░░░░    │  ◄── Espaço vazio (NÃO incluído na seleção)
+└─────────────────┘
 ```
 
-Benefícios:
-- Seleção visualmente precisa e limitada ao conteúdo
-- Mantém alinhamento do grid e evita "caixas vazias" grandes
-- Sem impacto de performance perceptível (medição de texto leve)
+#### Implementação por Tipo de Item
+
+**1. Pastas (Folders)**
+```rust
+let folder_icon_size = self.thumbnail_size * 0.6;  // 60% do thumbnail
+let content_h = folder_icon_size + 14.0 + 20.0_f32.max(text_h) + 4.0;
+```
+
+**2. Arquivos de Mídia (Imagens/Vídeos) - Com Detecção de Aspect Ratio**
+```rust
+let img_height = if let Some(texture) = self.texture_cache.get(&item.path) {
+    let tex_size = texture.size_vec2();
+    let aspect = tex_size.x / tex_size.y;
+    
+    if aspect > 1.0 {
+        // Paisagem: altura proporcional à largura
+        self.thumbnail_size / aspect
+    } else {
+        // Retrato/Quadrado: altura = thumbnail_size
+        self.thumbnail_size
+    }.min(self.thumbnail_size)
+} else {
+    // Spinner (carregando): usa altura máxima
+    self.thumbnail_size
+};
+let content_h = img_height + 4.0 + 20.0_f32.max(text_h) + 4.0;
+```
+
+**3. Arquivos Não-Mídia (.exe, .zip, .iso, etc.)**
+```rust
+// Ícone é 50% do thumbnail, centralizado verticalmente com add_space
+let icon_display_size = self.thumbnail_size * 0.5;
+let top_space = (self.thumbnail_size - icon_display_size) / 2.0;  // 25% de espaço antes
+let content_h = top_space + icon_display_size + 4.0 + 20.0_f32.max(text_h) + 4.0;
+```
+
+#### Medição de Texto
+
+```rust
+let text_galley = ui.fonts(|fonts| {
+    fonts.layout_job(egui::text::LayoutJob {
+        text: item.name.clone(),
+        sections: vec![egui::text::LayoutSection {
+            format: egui::TextFormat {
+                font_id: egui::FontId::proportional(10.0),
+                ..Default::default()
+            },
+            ..Default::default()
+        }],
+        wrap: egui::text::TextWrapping {
+            max_width: cell_rect.width() - 8.0,
+            max_rows: 2,
+            break_anywhere: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    })
+});
+let text_h = text_galley.rect.height();
+```
+
+#### Criação e Pintura do Selection Rect
+
+```rust
+// Limita à altura da célula (segurança)
+let content_h = content_h.min(cell_rect.height());
+
+// Cria retângulo alinhado ao topo da célula
+let selection_rect = egui::Rect::from_min_size(
+    cell_rect.min,
+    egui::vec2(cell_rect.width(), content_h)
+);
+
+// Pintura
+ui.painter().rect_stroke(selection_rect, 2.0, 
+    egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 215)),
+    egui::StrokeKind::Outside);
+ui.painter().rect_filled(selection_rect, 0.0, 
+    egui::Color32::from_rgba_unmultiplied(0, 120, 215, 30));
+```
+
+#### Checklist de Troubleshooting
+
+| Sintoma | Causa Provável | Solução |
+|---------|----------------|---------|
+| Seleção muito grande | `content_h` não reflete render real | Verificar se render_item_slot usa mesmos valores |
+| Seleção corta conteúdo | Faltou margem/padding no cálculo | Adicionar gap (4.0px) entre elementos |
+| Inconsistência entre tipos | Branches do if/else com fórmulas diferentes | Unificar lógica de padding |
+| Imagens paisagem com espaço | Não detectou aspect ratio | Verificar se `texture_cache.get()` retorna textura |
+
+#### Benefícios
+
+- ✅ Seleção visualmente precisa e limitada ao conteúdo
+- ✅ Mantém alinhamento do grid (células de altura fixa)
+- ✅ Evita "caixas vazias" grandes na seleção
+- ✅ Funciona com imagens de qualquer proporção
+- ✅ Sem impacto de performance perceptível (medição de texto é O(1))
 
 ### 3. VRAM Budgeting
 O gerenciamento de memória de vídeo é proativo, não reativo:
