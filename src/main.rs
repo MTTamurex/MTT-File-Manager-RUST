@@ -1546,11 +1546,79 @@ impl eframe::App for ImageViewerApp {
                                         }
                                     }
 
-                                    // 5. Feedback Visual de Seleção
+                                    // 5. Feedback Visual de Seleção (Shrink-wrap: limita ao conteúdo)
                                     if let Some(selected) = &self.selected_file {
                                         if index < self.items.len() && selected.path == self.items[index].path {
-                                            ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 215)), egui::StrokeKind::Outside);
-                                            ui.painter().rect_filled(rect, 0.0, egui::Color32::from_rgba_unmultiplied(0, 120, 215, 30));
+                                            let item_ref = &self.items[index];
+                                            // Determina altura do ícone conforme tipo (pasta, mídia, arquivo)
+                                            let is_media_file_sel = if let Some(ext) = item_ref.path.extension() {
+                                                let ext_lower = ext.to_string_lossy().to_lowercase();
+                                                matches!(ext_lower.as_str(),
+                                                    "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" |
+                                                    "tiff" | "tif" | "ico" | "heic" | "heif" | "avif" |
+                                                    "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" |
+                                                    "webm" | "m4v" | "mpg" | "mpeg" | "3gp" | "ts"
+                                                )
+                                            } else { false };
+
+                                            // Mede texto para calcular altura real do conteúdo
+                                            let wrap_width = rect.width() - 8.0;
+                                            let text_galley = ui.fonts(|fonts| {
+                                                fonts.layout_job(egui::text::LayoutJob {
+                                                    text: item_ref.name.clone(),
+                                                    sections: vec![egui::text::LayoutSection {
+                                                        leading_space: 0.0,
+                                                        byte_range: 0..item_ref.name.len(),
+                                                        format: egui::TextFormat {
+                                                            font_id: egui::FontId::proportional(if item_ref.is_dir { 9.0 } else { 10.0 }),
+                                                            color: egui::Color32::BLACK,
+                                                            ..Default::default()
+                                                        },
+                                                    }],
+                                                    wrap: egui::text::TextWrapping {
+                                                        max_width: wrap_width,
+                                                        max_rows: 2,
+                                                        break_anywhere: true,
+                                                        ..Default::default()
+                                                    },
+                                                    ..Default::default()
+                                                })
+                                            });
+
+                                            let text_h = text_galley.rect.height();
+                                            
+                                            // Calcula altura baseado no tipo (valores exatos do render_item_slot)
+                                            let content_h = if item_ref.is_dir {
+                                                // Pasta: folder_icon_size + 14.0 (altura do container) + 20.0 (min_height texto) + margem
+                                                let folder_icon_size = self.thumbnail_size * 0.6;
+                                                folder_icon_size + 14.0 + 20.0_f32.max(text_h) + 4.0
+                                            } else if is_media_file_sel {
+                                                // Mídia: thumbnail + espaço + texto
+                                                self.thumbnail_size + 4.0 + 20.0_f32.max(text_h) + 4.0
+                                            } else {
+                                                // Arquivo: ícone (50% centralizado) + texto
+                                                self.thumbnail_size + 4.0 + 20.0_f32.max(text_h) + 4.0
+                                            };
+                                            
+                                            let content_h = content_h.min(rect.height());
+
+                                            let selection_rect = egui::Rect::from_min_size(
+                                                rect.min,
+                                                egui::vec2(rect.width(), content_h)
+                                            );
+
+                                            // Sempre aplica shrink-wrap, independente do tipo
+                                            ui.painter().rect_stroke(
+                                                selection_rect,
+                                                2.0,
+                                                egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 215)),
+                                                egui::StrokeKind::Outside
+                                            );
+                                            ui.painter().rect_filled(
+                                                selection_rect,
+                                                0.0,
+                                                egui::Color32::from_rgba_unmultiplied(0, 120, 215, 30)
+                                            );
                                         }
                                     }
                                     
