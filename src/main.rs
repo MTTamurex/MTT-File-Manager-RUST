@@ -1122,20 +1122,156 @@ impl ImageViewerApp {
                         ui.set_width(self.thumbnail_size);
                         ui.set_height(folder_icon_size + 14.0);
                         
-                        // DRAW FOLDER ICON (Simples - SEM preview)
-                        if let Some(icon_texture) = &self.folder_icon_texture {
-                            ui.add(egui::Image::new(icon_texture)
-                                .max_size(egui::vec2(folder_icon_size, folder_icon_size))
-                                .maintain_aspect_ratio(true));
-                        } else {
-                            // Fallback: emoji atual
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new("📁")
-                                        .size(folder_icon_size * 0.7)
-                                        .color(egui::Color32::from_rgb(255, 193, 7))
-                                ).selectable(false)
+                        // DRAW FOLDER (3 Camadas: Fundo → Preview → Frente)
+                        let has_preview = item.folder_cover.as_ref()
+                            .and_then(|p| self.texture_cache.get(p))
+                            .is_some();
+                        
+                        if has_preview && item.folder_cover.is_some() {
+                            // MODO 3 CAMADAS (com preview)
+                            let start_pos = ui.cursor().min;
+                            
+                            // Dimensões da pasta
+                            let w = folder_icon_size;
+                            let h = folder_icon_size;
+                            
+                            // === CAMADA 1: FUNDO (Parte de trás + Aba) ===
+                            // Aba no topo esquerdo
+                            let tab_w = w * 0.35;
+                            let tab_h = h * 0.10;
+                            let tab_rect = egui::Rect::from_min_size(
+                                start_pos,
+                                egui::vec2(tab_w, tab_h)
                             );
+                            ui.painter().rect_filled(
+                                tab_rect,
+                                2.0,
+                                egui::Color32::from_rgb(245, 180, 50)  // Amarelo escuro da aba
+                            );
+                            
+                            // Corpo de trás (fundo completo da pasta)
+                            let back_y = start_pos.y + tab_h * 0.6;  // Overlap com aba
+                            let back_rect = egui::Rect::from_min_size(
+                                egui::pos2(start_pos.x, back_y),
+                                egui::vec2(w, h - tab_h * 0.6)
+                            );
+                            ui.painter().rect_filled(
+                                back_rect,
+                                3.0,
+                                egui::Color32::from_rgb(255, 206, 84)  // Amarelo claro do corpo
+                            );
+                            
+                            // === CAMADA 2: PREVIEW (Imagem no meio) ===
+                            if let Some(cover_path) = &item.folder_cover {
+                                if let Some(tex) = self.texture_cache.get(cover_path) {
+                                    // Área do preview: centralizada, ocupa ~60% altura do corpo
+                                    let preview_margin = w * 0.12;
+                                    let preview_top = back_y + h * 0.08;
+                                    let preview_h = back_rect.height() * 0.60;
+                                    
+                                    let preview_rect = egui::Rect::from_min_size(
+                                        egui::pos2(start_pos.x + preview_margin, preview_top),
+                                        egui::vec2(w - preview_margin * 2.0, preview_h)
+                                    );
+                                    
+                                    // Calcula UV crop (object-fit: cover)
+                                    let size = tex.size();
+                                    let tex_size = egui::vec2(size[0] as f32, size[1] as f32);
+                                    
+                                    if tex_size.x > 0.0 && tex_size.y > 0.0 {
+                                        let aspect_img = tex_size.x / tex_size.y;
+                                        let aspect_view = preview_rect.width() / preview_rect.height();
+                                        
+                                        let uv_rect = if aspect_img > aspect_view {
+                                            let scale = aspect_view / aspect_img;
+                                            let offset = (1.0 - scale) / 2.0;
+                                            egui::Rect::from_min_max(
+                                                egui::pos2(offset, 0.0),
+                                                egui::pos2(1.0 - offset, 1.0)
+                                            )
+                                        } else {
+                                            let scale = aspect_img / aspect_view;
+                                            let offset = (1.0 - scale) / 2.0;
+                                            egui::Rect::from_min_max(
+                                                egui::pos2(0.0, offset),
+                                                egui::pos2(1.0, 1.0 - offset)
+                                            )
+                                        };
+                                        
+                                        ui.painter().image(
+                                            tex.id(),
+                                            preview_rect,
+                                            uv_rect,
+                                            egui::Color32::WHITE
+                                        );
+                                    }
+                                }
+                            }
+                            
+                            // === CAMADA 3: MOLDURA DA FRENTE (Por cima da imagem) ===
+                            // Desenha bordas amarelas que cobrem as laterais e parte inferior
+                            let frame_thickness = w * 0.10;  // 10% de espessura da moldura
+                            let frame_color = egui::Color32::from_rgb(255, 206, 84);
+                            
+                            // Borda ESQUERDA (cobre lateral esquerda da imagem)
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_size(
+                                    egui::pos2(start_pos.x, back_y),
+                                    egui::vec2(frame_thickness, back_rect.height())
+                                ),
+                                0.0,
+                                frame_color
+                            );
+                            
+                            // Borda DIREITA (cobre lateral direita da imagem)
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_size(
+                                    egui::pos2(start_pos.x + w - frame_thickness, back_y),
+                                    egui::vec2(frame_thickness, back_rect.height())
+                                ),
+                                0.0,
+                                frame_color
+                            );
+                            
+                            // Borda INFERIOR (cobre parte de baixo - mais espessa)
+                            let bottom_height = back_rect.height() * 0.40;  // 40% da altura
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_size(
+                                    egui::pos2(start_pos.x, back_y + back_rect.height() - bottom_height),
+                                    egui::vec2(w, bottom_height)
+                               ),
+                                egui::Rounding { nw: 0, ne: 0, sw: 3, se: 3 },  // Cantos inferiores arredondados
+                                frame_color
+                            );
+                            
+                            // Borda externa da pasta (contorno)
+                            ui.painter().rect_stroke(
+                                back_rect,
+                                3.0,
+                                egui::Stroke::new(1.0, egui::Color32::from_rgb(218, 165, 32)),
+                                egui::StrokeKind::Outside
+                            );
+                            
+                            // Aloca espaço visual
+                            ui.allocate_rect(
+                                egui::Rect::from_min_size(start_pos, egui::vec2(w, h)),
+                                egui::Sense::hover()
+                            );
+                        } else {
+                            // SEM PREVIEW: Ícone normal
+                            if let Some(icon_texture) = &self.folder_icon_texture {
+                                ui.add(egui::Image::new(icon_texture)
+                                    .max_size(egui::vec2(folder_icon_size, folder_icon_size))
+                                    .maintain_aspect_ratio(true));
+                            } else {
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new("📁")
+                                            .size(folder_icon_size * 0.7)
+                                            .color(egui::Color32::from_rgb(255, 193, 7))
+                                    ).selectable(false)
+                                );
+                            }
                         }
                         
                         // PERFORMANCE: Usa item.name (já cacheado) em vez de path.file_name()
