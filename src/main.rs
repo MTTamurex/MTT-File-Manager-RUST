@@ -1122,11 +1122,11 @@ impl ImageViewerApp {
                         ui.set_width(self.thumbnail_size);
                         ui.set_height(folder_icon_size + 14.0);
                         
-                        // DRAW FOLDER ICON (Texture or Emoji)
-                        let rect = if let Some(icon_texture) = &self.folder_icon_texture {
+                        // DRAW FOLDER ICON (Simples - SEM preview)
+                        if let Some(icon_texture) = &self.folder_icon_texture {
                             ui.add(egui::Image::new(icon_texture)
                                 .max_size(egui::vec2(folder_icon_size, folder_icon_size))
-                                .maintain_aspect_ratio(true)).rect
+                                .maintain_aspect_ratio(true));
                         } else {
                             // Fallback: emoji atual
                             ui.add(
@@ -1135,59 +1135,7 @@ impl ImageViewerApp {
                                         .size(folder_icon_size * 0.7)
                                         .color(egui::Color32::from_rgb(255, 193, 7))
                                 ).selectable(false)
-                            ).rect
-                        };
-
-                        // DRAW PREVIEW OVERLAY (Windows Explorer Style "Content Fill")
-                        if let Some(cover_path) = &item.folder_cover {
-                            if let Some(tex) = self.texture_cache.get(cover_path) {
-                                // A. Definir a "Área Útil" da pasta (Onde a foto pode aparecer)
-                                // Pula a aba superior (~18% da altura)
-                                let content_top_offset = rect.height() * 0.18; 
-                                // Margem lateral pequena (~4%)
-                                let content_side_margin = rect.width() * 0.04; 
-                                // Margem inferior pequena (~4%)
-                                let content_bottom_margin = rect.height() * 0.04;
-
-                                let view_rect = egui::Rect::from_min_max(
-                                    egui::pos2(rect.min.x + content_side_margin, rect.min.y + content_top_offset),
-                                    egui::pos2(rect.max.x - content_side_margin, rect.max.y - content_bottom_margin),
-                                );
-
-                                // B. Cálculo de UV para "Object-Fit: Cover" (Corta excesso, não distorce)
-                                let size = tex.size();
-                                let tex_size = egui::vec2(size[0] as f32, size[1] as f32);
-                                
-                                if tex_size.x > 0.0 && tex_size.y > 0.0 {
-                                    let aspect_img = tex_size.x / tex_size.y;
-                                    let aspect_view = view_rect.width() / view_rect.height();
-
-                                    let uv_rect;
-                                    
-                                    if aspect_img > aspect_view {
-                                        // Imagem é mais larga que a área (Wide): Corta as laterais
-                                        // Mantém altura 100% (0.0 a 1.0), calcula largura proporcional
-                                        let scale = aspect_view / aspect_img; 
-                                        let offset = (1.0 - scale) / 2.0;
-                                        uv_rect = egui::Rect::from_min_max(egui::pos2(offset, 0.0), egui::pos2(1.0 - offset, 1.0));
-                                    } else {
-                                        // Imagem é mais alta que a área (Tall): Corta topo/base
-                                        // Mantém largura 100%, calcula altura
-                                        let scale = aspect_img / aspect_view;
-                                        let offset = (1.0 - scale) / 2.0;
-                                        // Centraliza verticalmente
-                                        uv_rect = egui::Rect::from_min_max(egui::pos2(0.0, offset), egui::pos2(1.0, 1.0 - offset));
-                                    }
-
-                                    // Desenha a imagem cortada dentro da área útil
-                                    ui.painter().image(
-                                        tex.id(),
-                                        view_rect,
-                                        uv_rect,
-                                        egui::Color32::WHITE
-                                    );
-                                }
-                            }
+                            );
                         }
                         
                         // PERFORMANCE: Usa item.name (já cacheado) em vez de path.file_name()
