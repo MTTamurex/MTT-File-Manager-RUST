@@ -1383,7 +1383,7 @@ impl ImageViewerApp {
     fn render_grid_view(&mut self, ui: &mut egui::Ui) {
         let padding = 8.0;
         let item_w = self.thumbnail_size;
-        let item_h = self.thumbnail_size + 25.0;  // Altura: thumb + texto
+        let item_h = self.thumbnail_size + 20.0;  // Altura: thumb + texto
         let available_w = ui.available_width();
         let cols = ((available_w - padding) / (item_w + padding)).floor().max(1.0) as usize;
         self.last_grid_cols = cols;
@@ -1471,7 +1471,10 @@ impl ImageViewerApp {
                             ui.painter().rect_filled(rect, 4.0, egui::Color32::from_rgba_unmultiplied(0, 120, 215, 30));
                         }
                         
-                        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), |ui| {
+                        // Content area with margin for selection border visibility
+                        let content_margin = 3.0;
+                        let inner_rect = rect.shrink(content_margin);
+                        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
                             self.render_item_slot(ui, index);
                         });
                     }
@@ -1498,13 +1501,17 @@ impl ImageViewerApp {
             }
             
             // GEOMETRIA
+            let available_h = ui.available_height();
             let folder_w = self.thumbnail_size * 0.60;
             let folder_h = folder_w * 0.85;
+            let text_height = 18.0;
+            let content_h = folder_h + text_height;
+            let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
             
-            // Adiciona margem superior para centralizar verticalmente
-            ui.add_space(4.0);
+            // Margem superior para centralizar verticalmente
+            ui.add_space(vertical_margin);
             
-            // Centraliza a pasta horizontalmente na cÃ©lula
+            // Centraliza a pasta horizontalmente na celula
             let cell_width = ui.available_width();
             let x_offset = (cell_width - folder_w) / 2.0;
             let start_pos = ui.cursor().min + egui::vec2(x_offset.max(0.0), 0.0);
@@ -1605,7 +1612,7 @@ impl ImageViewerApp {
                 let path_clone = item.path.clone();
                 let is_selected = self.selected_item == Some(idx);
                 
-                // Detecta se Ã© arquivo de mÃ­dia
+                // Detecta se e arquivo de midia
                 let is_media_file = if let Some(ext) = path_clone.extension() {
                     let ext_lower = ext.to_string_lossy().to_lowercase();
                     matches!(ext_lower.as_str(),
@@ -1618,7 +1625,7 @@ impl ImageViewerApp {
                     false
                 };
                 
-                // Thumbnail loading apenas para arquivos de mÃ­dia
+                // Thumbnail loading para arquivos de midia
                 if is_media_file {
                     let has_texture = self.texture_cache.contains(&path_clone);
                     let is_loading = self.loading_set.contains(&path_clone);
@@ -1629,7 +1636,7 @@ impl ImageViewerApp {
                     }
                 }
                 
-                // PRÃ‰-CARREGA Ã­cone para arquivos nÃ£o-mÃ­dia ANTES de entrar no closure
+                // Pre-carrega icone para arquivos nao-midia
                 let file_icon = if !is_media_file {
                     if let Some(ext) = path_clone.extension() {
                         let ext_str = format!(".{}", ext.to_string_lossy());
@@ -1640,74 +1647,69 @@ impl ImageViewerApp {
                 } else {
                     None
                 };
-
-                // Compact file card with NO padding or borders
-                let frame = egui::Frame::NONE
-                    .fill(if is_selected {
-                        egui::Color32::from_rgb(191, 228, 255)
-                    } else {
-                        egui::Color32::from_gray(250)
-                    })
-                    .corner_radius(4)
-                    .inner_margin(0.0);  // NO padding!
                 
-                let _ = frame.show(ui, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.set_width(self.thumbnail_size);
-                        
-                        if is_media_file {
-                            if let Some(texture) = self.texture_cache.get(&path_clone) {
-                                ui.add(egui::Image::new(texture)
-                                    .max_size(egui::vec2(self.thumbnail_size, self.thumbnail_size))
-                                    .maintain_aspect_ratio(true)
-                                    .corner_radius(4));
-                            } else {
-                                // Loading spinner
-                                egui::Frame::NONE
-                                    .fill(egui::Color32::from_gray(240))
-                                    .corner_radius(4)
-                                    .show(ui, |ui| {
-                                        ui.set_min_size(egui::vec2(self.thumbnail_size, self.thumbnail_size));
-                                        ui.centered_and_justified(|ui| {
-                                            ui.spinner();
-                                        });
-                                    });
-                            }
+                // GEOMETRIA - reduz tamanho para caber na area com margem
+                let available_h = ui.available_height();
+                let available_w = ui.available_width();
+                let thumb_size = (self.thumbnail_size - 6.0).min(available_w - 4.0); // 6px margem total
+                let text_height = 18.0;
+                let content_h = thumb_size + text_height;
+                let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
+                
+                // Margem superior para centralizar verticalmente
+                ui.add_space(vertical_margin);
+                
+                // Centraliza horizontalmente na area disponivel
+                let x_offset = (available_w - thumb_size) / 2.0;
+                let start_pos = ui.cursor().min + egui::vec2(x_offset.max(0.0), 0.0);
+                let thumb_rect = egui::Rect::from_min_size(start_pos, egui::vec2(thumb_size, thumb_size));
+                
+                // Desenha thumbnail ou icone
+                if is_media_file {
+                    if let Some(texture) = self.texture_cache.get(&path_clone) {
+                        // Thumbnail carregado - mantem aspect ratio
+                        let tex_size = texture.size_vec2();
+                        let aspect = tex_size.x / tex_size.y;
+                        let (draw_w, draw_h) = if aspect > 1.0 {
+                            (thumb_size, thumb_size / aspect)
                         } else {
-                            // Arquivo nÃ£o-mÃ­dia â†’ Ã­cone do sistema
-                            if let Some(icon_texture) = file_icon {
-                                let icon_display_size = self.thumbnail_size * 0.5;
-                                ui.add_space((self.thumbnail_size - icon_display_size) / 2.0);
-                                ui.add(egui::Image::new(&icon_texture)
-                                    .max_size(egui::vec2(icon_display_size, icon_display_size))
-                                    .maintain_aspect_ratio(true));
-                            } else {
-                                // Fallback: emoji
-                                ui.set_min_height(self.thumbnail_size);
-                                ui.centered_and_justified(|ui| {
-                                    ui.add(
-                                        egui::Label::new(
-                                            egui::RichText::new("ðŸ“„")
-                                                .size(self.thumbnail_size * 0.4)
-                                                .color(egui::Color32::GRAY)
-                                        ).selectable(false)
-                                    );
-                                });
-                            }
-                        }
-                        
-                        ui.set_min_height(20.0);
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(&item.name)
-                                    .size(10.0)
-                                    .color(egui::Color32::BLACK)
-                            )
-                            .wrap()
-                            .truncate()
-                            .selectable(false)
+                            (thumb_size * aspect, thumb_size)
+                        };
+                        let offset_x = (thumb_size - draw_w) / 2.0;
+                        let offset_y = (thumb_size - draw_h) / 2.0;
+                        let draw_rect = egui::Rect::from_min_size(
+                            thumb_rect.min + egui::vec2(offset_x, offset_y),
+                            egui::vec2(draw_w, draw_h)
                         );
-                    });
+                        ui.painter().image(texture.id(), draw_rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                    } else {
+                        // Loading placeholder
+                        ui.painter().rect_filled(thumb_rect, 4.0, egui::Color32::from_gray(240));
+                        ui.painter().text(thumb_rect.center(), egui::Align2::CENTER_CENTER, "...", egui::FontId::proportional(20.0), egui::Color32::GRAY);
+                    }
+                } else {
+                    // Arquivo nao-midia - icone do Windows ou fallback
+                    ui.painter().rect_filled(thumb_rect, 4.0, egui::Color32::from_gray(248));
+                    if let Some(icon_texture) = file_icon {
+                        let icon_size = thumb_size * 0.5;
+                        let icon_rect = egui::Rect::from_center_size(thumb_rect.center(), egui::vec2(icon_size, icon_size));
+                        ui.painter().image(icon_texture.id(), icon_rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                    } else {
+                        ui.painter().text(thumb_rect.center(), egui::Align2::CENTER_CENTER, "[F]", egui::FontId::proportional(thumb_size * 0.3), egui::Color32::GRAY);
+                    }
+                }
+                
+                // Aloca espaco do thumbnail
+                ui.allocate_rect(thumb_rect, egui::Sense::hover());
+                
+                // Texto do nome - igual as pastas
+                ui.add_space(4.0);
+                ui.vertical_centered(|ui| {
+                    ui.add(egui::Label::new(
+                        egui::RichText::new(&item.name)
+                            .size(11.0)
+                            .color(egui::Color32::BLACK)
+                    ).truncate());
                 });
             }
         }
