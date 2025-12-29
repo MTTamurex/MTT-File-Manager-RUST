@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
-use notify::{Watcher, RecursiveMode, RecommendedWatcher, Config};
+use notify::{Watcher, RecursiveMode, RecommendedWatcher};
 use windows::{
     core::*,
     Win32::Foundation::*,
@@ -1204,19 +1204,15 @@ impl ImageViewerApp {
         let ctx_clone = self.ui_ctx.clone();
 
         let watcher_result = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            if let Ok(event) = &res {
-                println!("Watcher Event: {:?}", event.kind);
-            }
             let _ = tx.send(res);
             ctx_clone.request_repaint();
         });
 
         if let Ok(mut watcher) = watcher_result {
-            if let Err(e) = watcher.watch(&path_to_watch, RecursiveMode::NonRecursive) {
-                eprintln!("Erro ao monitorar pasta {}: {}", path_to_watch.display(), e);
+            if let Err(_e) = watcher.watch(&path_to_watch, RecursiveMode::NonRecursive) {
+                // Silently fail - watcher is optional
             } else {
                 self.watcher = Some(watcher);
-                println!("Monitorando: {}", path_to_watch.display());
             }
         }
     }
@@ -1405,14 +1401,12 @@ impl ImageViewerApp {
 
         // Executa reload apenas quando debounce permitir
         if self.pending_auto_reload {
-            println!("[DEBUG] Pending reload, elapsed: {}ms", self.last_auto_reload.elapsed().as_millis());
-            if self.last_auto_reload.elapsed() > Duration::from_millis(500) {
+            let elapsed = self.last_auto_reload.elapsed();
+            if elapsed > Duration::from_millis(500) {
                 // VALIDA SE O PATH ATUAL AINDA EXISTE (pode ter sido renomeado/deletado)
                 if Path::new(&self.current_path).exists() {
-                    println!("[DEBUG] Path exists, executing reload");
                     self.load_folder();
                 } else {
-                    println!("[DEBUG] Path no longer exists, navigating to parent");
                     self.go_up_one_level();
                 }
                 self.last_auto_reload = Instant::now();
