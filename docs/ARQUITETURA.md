@@ -5,6 +5,7 @@
 **MTT File Manager** é um explorador de arquivos moderno para Windows, desenvolvido em Rust com foco em **performance extrema** (60 FPS garantidos) e **experiência desktop nativa**.
 
 ### 🎯 Features Principais:
+- **Modos de visualização** (Grade com thumbnails / Lista com colunas)
 - **Grid virtualizado** com posicionamento absoluto (zero jitter)
 - **Thumbnails assíncronos** com cache LRU inteligente
 - **Ícones nativos do Windows** (SHGetFileInfoW)
