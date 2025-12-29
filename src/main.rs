@@ -1723,12 +1723,8 @@ impl ImageViewerApp {
                     }
                 }
                 
-                // Pre-carrega icone para arquivos nao-midia
-                let file_icon = if !is_media_file {
-                    self.get_or_load_icon(ui.ctx(), &path_clone)
-                } else {
-                    None
-                };
+                // Carrega icone (sempre, servira como fallback)
+                let file_icon = self.get_or_load_icon(ui.ctx(), &path_clone);
                 
                 // GEOMETRIA - reduz tamanho para caber na area com margem
                 let available_h = ui.available_height();
@@ -1747,6 +1743,7 @@ impl ImageViewerApp {
                 let thumb_rect = egui::Rect::from_min_size(start_pos, egui::vec2(thumb_size, thumb_size));
                 
                 // Desenha thumbnail ou icone
+                let mut drew_something = false;
                 if is_media_file {
                     if let Some(texture) = self.texture_cache.get(&path_clone) {
                         // Thumbnail carregado - mantem aspect ratio
@@ -1764,20 +1761,21 @@ impl ImageViewerApp {
                             egui::vec2(draw_w, draw_h)
                         );
                         ui.painter().image(texture.id(), draw_rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
-                    } else {
-                        // Loading placeholder
-                        ui.painter().rect_filled(thumb_rect, 4.0, egui::Color32::from_gray(240));
-                        ui.painter().text(thumb_rect.center(), egui::Align2::CENTER_CENTER, "...", egui::FontId::proportional(20.0), egui::Color32::GRAY);
+                        drew_something = true;
                     }
-                } else {
-                    // Arquivo nao-midia - icone do Windows ou fallback
+                }
+
+                if !drew_something {
+                    // Fallback para icone do Windows ou placeholder
                     ui.painter().rect_filled(thumb_rect, 4.0, egui::Color32::from_gray(248));
                     if let Some(icon_texture) = file_icon {
                         let icon_size = thumb_size * 0.5;
                         let icon_rect = egui::Rect::from_center_size(thumb_rect.center(), egui::vec2(icon_size, icon_size));
                         ui.painter().image(icon_texture.id(), icon_rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
                     } else {
-                        ui.painter().text(thumb_rect.center(), egui::Align2::CENTER_CENTER, "[F]", egui::FontId::proportional(thumb_size * 0.3), egui::Color32::GRAY);
+                        // Se nem o icone carregou, mostra "..." se for midia ou "[F]" se nao
+                        let text = if is_media_file { "..." } else { "[F]" };
+                        ui.painter().text(thumb_rect.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(thumb_size * 0.3), egui::Color32::GRAY);
                     }
                 }
                 
@@ -2067,23 +2065,53 @@ impl eframe::App for ImageViewerApp {
                 .min_width(250.0)
                 .max_width(500.0)
                 .show(ctx, |ui| {
-                    if let Some(file) = &self.selected_file {
+                    if let Some(file) = self.selected_file.clone() {
                         ui.heading("Detalhes");
                         ui.separator();
                         
-                        // Preview de imagem (se houver thumbnail)
-                        if let Some(texture) = self.texture_cache.peek(&file.path) {
-                            // Calcula tamanho mÃ¡ximo respeitando largura da sidebar
+                        // Preview de imagem/video (se houver thumbnail)
+                        let has_thumbnail = self.texture_cache.peek(&file.path).is_some();
+                        let is_media = file.path.extension()
+                            .and_then(|e| e.to_str())
+                            .map(|ext| {
+                                let ext_lower = ext.to_lowercase();
+                                matches!(ext_lower.as_str(),
+                                    "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" |
+                                    "tiff" | "tif" | "ico" | "heic" | "heif" | "avif" |
+                                    "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" |
+                                    "webm" | "m4v" | "mpg" | "mpeg" | "3gp" | "ts"
+                                )
+                            })
+                            .unwrap_or(false);
+                        
+                        let texture = self.texture_cache.peek(&file.path).cloned();
+
+                        if let (Some(tex), true) = (texture, is_media) {
+                            // Mostra thumbnail de imagem/video
                             let max_preview_width = ui.available_width() - 20.0;
                             let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
                             
                             ui.vertical_centered(|ui| {
-                                ui.add(egui::Image::new(texture)
+                                ui.add(egui::Image::new(&tex)
                                     .max_size(max_preview_size)
                                     .fit_to_original_size(1.0)
                                     .shrink_to_fit());
                             });
                             ui.separator();
+                        } else if !file.is_dir {
+                            // Arquivo sem thumbnail -> mostra icone do Windows
+                            // Aqui o self.get_or_load_icon pode ser chamado porque 'file' eh um clone
+                            if let Some(icon) = self.get_or_load_icon(ui.ctx(), &file.path) {
+                                let icon_display_size = 64.0;
+                                ui.vertical_centered(|ui| {
+                                    ui.add_space(20.0);
+                                    ui.add(egui::Image::new(&icon)
+                                        .max_size(egui::vec2(icon_display_size, icon_display_size))
+                                        .maintain_aspect_ratio(true));
+                                    ui.add_space(20.0);
+                                });
+                                ui.separator();
+                            }
                         }
                         
                         // Tabela de detalhes
