@@ -262,8 +262,10 @@ sequenceDiagram
 render_item_slot()
   ├── Verifica se texture já existe no cache
   ├── Se não: request_thumbnail_load()
-  │   ├── Spawna thread dedicada
-  │   ├── CoInitializeEx(COINIT_MULTITHREADED)
+  │   ├── Envia pedido para Worker Pool (mpsc channel)
+  │   ├── Worker Pool (4 threads fixas)
+  │   │   ├── Fast Cancel: ignora se Atomic Generation mudou
+  │   │   ├── CoInitializeEx(COINIT_MULTITHREADED)
   │   ├── SHCreateItemFromParsingName(path)
   │   ├── IShellItemImageFactory::GetImage(256x256)
   │   ├── HBITMAP → RGBA conversion (BGRA swap)
@@ -283,9 +285,10 @@ render_item_slot()
  
  Generational Validation (Anti-Leak)
    ├── `generation: usize` incrementado a cada `load_folder`
-   ├── Worker threads capturam a geração atual
-   ├── UI Thread descarta resultados de gerações passadas
-   └── Resolve: Bloat de memória em navegação rápida
+   ├── `Arc<AtomicUsize>` sincroniza Main e Worker Threads
+   ├── Fast Cancel: Workers descartam pedidos de gerações passadas antes de ler o disco
+   ├── UI Filtering: Resultados tardios são ignorados na Main Thread
+   └── Resolve: Thrashing de HDDs e bloat de memória em navegação rápida
  ```
 
 ---

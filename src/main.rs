@@ -5,6 +5,8 @@ use std::collections::HashSet;
 // use std::env;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use windows::{
     core::*,
@@ -207,8 +209,10 @@ struct ThumbnailData {
 // AplicaÃ§Ã£o principal
 struct ImageViewerApp {
     current_path: String,
-    image_sender: Sender<ThumbnailData>,
-    image_receiver: Receiver<ThumbnailData>,
+    
+    // --- SISTEMA DE THUMBNAILS OTIMIZADO ---
+    thumbnail_req_sender: Sender<(PathBuf, usize)>, // UI -> Worker Pool
+    image_receiver: Receiver<ThumbnailData>,       // Worker Pool -> UI
     
     // File system
     items: Vec<FileEntry>,  // Agora com metadados cacheados
@@ -256,12 +260,14 @@ struct ImageViewerApp {
     all_items: Vec<FileEntry>,  // Cache mestre para busca
     search_query: String,       // Texto da busca
     last_grid_cols: usize,      // Memória para navegação vertical (teclado)
-    generation: usize,          // Contador p/ invalidar tarefas assíncronas de pastas antigas
+    generation: usize,          // Contador local (Main Thread)
+    current_generation: Arc<AtomicUsize>, // Contador compartilhado (Workers)
+    ui_ctx: egui::Context,      // Referência ao contexto da UI para repaints assíncronos
 }
 
-impl Default for ImageViewerApp {
-    fn default() -> Self {
-        let (sender, receiver) = mpsc::channel();
+impl ImageViewerApp {
+    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let ctx = cc.egui_ctx.clone();
         let (file_entry_sender, file_entry_receiver) = mpsc::channel();
         
         // COVER WORKER: Worker Ãºnico para processar capas de pasta
@@ -279,13 +285,62 @@ impl Default for ImageViewerApp {
                 let _ = cover_res_tx.send((folder_path, cover));
             }
         });
+
+        // --- SISTEMA DE THUMBNAILS (WORKER POOL OTIMIZADO) ---
+        let (img_tx, img_rx) = mpsc::channel();
+        let (req_tx, req_rx) = mpsc::channel::<(PathBuf, usize)>();
+        let shared_req_rx = Arc::new(std::sync::Mutex::new(req_rx));
+        let shared_gen = Arc::new(AtomicUsize::new(0));
+
+        // 4 threads: equilÃ­brio ideal entre SSD e HDD USB
+        for _ in 0..4 {
+            let rx = shared_req_rx.clone();
+            let tx = img_tx.clone();
+            let gen_tracker = shared_gen.clone();
+            let ctx_clone = ctx.clone();
+            
+            std::thread::spawn(move || {
+                unsafe { let _ = CoInitializeEx(None, COINIT_MULTITHREADED); }
+                loop {
+                    let work = {
+                        match rx.lock() {
+                            Ok(lock) => lock.recv(),
+                            Err(_) => break, // App fechou
+                        }
+                    };
+                    
+                    match work {
+                        Ok((path, req_gen)) => {
+                            // FAST CANCEL: Se a geraÃ§Ã£o global jÃ¡ mudou, ignora antes de ler o disco
+                            if req_gen == gen_tracker.load(AtomicOrdering::Relaxed) {
+                                let (data, w, h) = extract_windows_thumbnail(&path)
+                                    .unwrap_or_else(|_| create_error_placeholder());
+                                
+                                let _ = tx.send(ThumbnailData {
+                                    path,
+                                    image_data: data,
+                                    width: w,
+                                    height: h,
+                                    generation: req_gen,
+                                });
+                                
+                                // ACORDA A UI: Informa que um novo thumbnail estÃ¡ pronto
+                                ctx_clone.request_repaint();
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+                unsafe { CoUninitialize(); }
+            });
+        }
         
         let disks = get_all_drives();
         
         let mut app = Self {
             current_path: PATH_PADRAO.to_string(),
-            image_sender: sender,
-            image_receiver: receiver,
+            thumbnail_req_sender: req_tx,
+            image_receiver: img_rx,
             items: Vec::new(),
             texture_cache: LruCache::new(NonZeroUsize::new(CACHE_SIZE).unwrap()),
             loading_set: HashSet::new(),
@@ -322,6 +377,8 @@ impl Default for ImageViewerApp {
             search_query: String::new(),
             last_grid_cols: 1,
             generation: 0,
+            current_generation: shared_gen,
+            ui_ctx: ctx,
         };
         
         app.load_folder();
@@ -923,7 +980,8 @@ impl ImageViewerApp {
     }
     
     fn load_folder(&mut self) {
-        self.generation += 1; // Incrementa a geração: invalida todos os worker threads anteriores
+        self.generation += 1; // Incrementa a geração local
+        self.current_generation.store(self.generation, AtomicOrdering::Relaxed); // Sincroniza com workers
         
         // 1. Limpeza de Estado (UI Thread)
         self.items.clear();
@@ -937,6 +995,7 @@ impl ImageViewerApp {
         
         let current_path = self.current_path.clone();
         let file_entry_sender = self.file_entry_sender.clone();
+        let ctx = self.ui_ctx.clone();
         
         // STREAMING BATCH LOADING: Envia lotes de 250 itens progressivamente
         std::thread::spawn(move || {
@@ -968,6 +1027,7 @@ impl ImageViewerApp {
                             let is_system = (attrs & FILE_ATTRIBUTE_SYSTEM.0) != 0;
                             let is_special = matches!(filename.to_lowercase().as_str(),
                                 "desktop.ini" | "thumbs.db" | "$recycle.bin" | "system volume information"
+                                // Re-adicionado "System Volume Information" para garantir compatibilidade
                             );
                             
                             if !is_hidden && !is_system && !is_special && !filename.starts_with('.') {
@@ -1004,6 +1064,7 @@ impl ImageViewerApp {
                                 if batch.len() >= 250 {
                                     let _ = file_entry_sender.send(batch.clone());
                                     batch.clear();
+                                    ctx.request_repaint(); // Acorda a UI para mostrar progresso
                                 }
                             }
                         }
@@ -1019,10 +1080,12 @@ impl ImageViewerApp {
             // Envia o restante (Ãºltimo lote) se sobrou algo
             if !batch.is_empty() {
                 let _ = file_entry_sender.send(batch);
+                ctx.request_repaint();
             }
             
             // Envia vetor VAZIO para sinalizar FIM do carregamento
             let _ = file_entry_sender.send(Vec::new());
+            ctx.request_repaint();
         });
     }
     
@@ -1088,29 +1151,8 @@ impl ImageViewerApp {
     }
     
     fn request_thumbnail_load(&self, path: PathBuf) {
-        let sender = self.image_sender.clone();
-        let current_generation = self.generation; // Captura a geração atual
-        
-        std::thread::spawn(move || {
-            unsafe {
-                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-            }
-            
-            let (thumbnail_data, width, height) = extract_windows_thumbnail(&path)
-                .unwrap_or_else(|_| create_error_placeholder());
-            
-            let _ = sender.send(ThumbnailData {
-                path,
-                image_data: thumbnail_data,
-                width,
-                height,
-                generation: current_generation,
-            });
-            
-            unsafe {
-                CoUninitialize();
-            }
-        });
+        // Envia pedido para o Worker Pool com a geraÃ§Ã£o atual
+        let _ = self.thumbnail_req_sender.send((path, self.generation));
     }
     
     /// Retorna icone para um arquivo, carregando sob demanda.
@@ -2302,7 +2344,7 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "MTT File Manager",
         options,
-        Box::new(|_cc| Ok(Box::new(ImageViewerApp::default()))),
+        Box::new(|cc| Ok(Box::new(ImageViewerApp::new(cc)))),
     )
 }
 

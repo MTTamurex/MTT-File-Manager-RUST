@@ -27,10 +27,10 @@
 - CACHE_SIZE reduzido de 500 → 200
 - MAX_CONCURRENT_LOADS reduzido de 50 → 30
 ### Estabilidade e Gerenciamento de Ciclo de Vida (Anti-Leak)
-- **Generational Validation**: Sistema de gerações que invalida tasks de thumbnails de pastas antigas.
-- **Immediate Eviction**: Limpeza de caches ao navegar para garantir VRAM estável.
-- **Zero-Ghost Background Tasks**: Resultados de worker threads antigas são descartados na borda da UI.
-- **Redução de Process Use**: Menor carga de CPU/GPU ao navegar rapidamente.
+- **Persistent Worker Pool**: Fila de 4 threads para evitar disk thrashing em HDDs externos.
+- **Atomic Generational Validation**: Sistema de gerações que invalida tasks de thumbnails via `Arc<AtomicUsize>`.
+- **Reactive Repaints**: Workers agora disparam `ctx.request_repaint()` imediatamente ao completar tarefas, garantindo fluidez sem depender de inputs do usuário.
+- **CreationContext Initialization**: Refatorada inicialização para captar o contexto egui nativamente.
 
 ---
 
