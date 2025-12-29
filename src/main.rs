@@ -6,7 +6,6 @@ use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
-use walkdir::WalkDir;
 use windows::{
     core::*,
     Win32::Foundation::*,
@@ -17,11 +16,18 @@ use windows::{
     Win32::UI::WindowsAndMessaging::*,
 };
 
-// Imports adicionaisexplícitos para APIs de ícones
+// Imports adicionais explícitos para APIs de ícones
 use windows::Win32::UI::Shell::{
     SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_LARGEICON, 
     SHGFI_USEFILEATTRIBUTES, SHGFI_DISPLAYNAME
 };
+
+// OTIMIZAÇÃO: Imports para Win32 FindFirst/NextFileW (metadata em UMA syscall)
+use windows::Win32::Storage::FileSystem::{
+    FindFirstFileW, FindNextFileW, FindClose, WIN32_FIND_DATAW, FILE_ATTRIBUTE_DIRECTORY
+};
+use windows::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
+use std::os::windows::ffi::OsStringExt;
 
 // ...
 
@@ -74,7 +80,8 @@ fn extract_computer_icon(size: IconSize) -> std::result::Result<(Vec<u8>, u32, u
 }
 
 use windows::Win32::UI::WindowsAndMessaging::{GetIconInfo, DestroyIcon, ICONINFO, HICON};
-use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, GetVolumeInformationW};
+// FILE_ATTRIBUTE_DIRECTORY já importado acima, GetVolumeInformationW mantido
+use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
 
 
 
@@ -158,12 +165,9 @@ impl FileEntry {
             })
             .unwrap_or((0, 0));
         
-        // Para pastas: busca primeira imagem para preview (limite 15 arquivos)
-        let folder_cover = if is_dir {
-            find_first_image_in_folder(&path)
-        } else {
-            None
-        };
+        // OTIMIZAÇÃO: Lazy loading - sempre None inicialmente.
+        // O scan será disparado por request_folder_scan() quando a pasta ficar visível.
+        let folder_cover = None;
         
         Self { path, name, is_dir, size, modified, folder_cover }
     }
@@ -196,6 +200,11 @@ struct ImageViewerApp {
     file_entry_receiver: Receiver<Vec<FileEntry>>,
     file_entry_sender: Sender<Vec<FileEntry>>,
     is_loading_folder: bool,
+    
+    // NOVO: Lazy loading de folder covers (otimização para HDD)
+    folder_scan_sender: Sender<(PathBuf, Option<PathBuf>)>,
+    folder_scan_receiver: Receiver<(PathBuf, Option<PathBuf>)>,
+    scanned_folders: HashSet<PathBuf>,  // Evita re-scan da mesma pasta
     
     // Icon cache (novo: extensão → texture)
     icon_cache: LruCache<String, egui::TextureHandle>,
@@ -231,6 +240,7 @@ impl Default for ImageViewerApp {
     fn default() -> Self {
         let (sender, receiver) = mpsc::channel();
         let (file_entry_sender, file_entry_receiver) = mpsc::channel();
+        let (fs_tx, fs_rx) = mpsc::channel();  // NOVO: Canal para folder scans
         let disks = get_all_drives();
         
         let mut app = Self {
@@ -244,6 +254,10 @@ impl Default for ImageViewerApp {
             file_entry_receiver,
             file_entry_sender,
             is_loading_folder: false,
+            // NOVO: Lazy folder scan infrastructure
+            folder_scan_sender: fs_tx,
+            folder_scan_receiver: fs_rx,
+            scanned_folders: HashSet::new(),
             icon_cache: LruCache::new(NonZeroUsize::new(ICON_CACHE_SIZE).unwrap()),
             folder_icon_texture: None,
             computer_icon: None,
@@ -792,70 +806,109 @@ impl ImageViewerApp {
         });
     }
     
+    /// Requisita scan assíncrono de uma pasta para descobrir primeira imagem.
+    /// Spawna thread leve dedicada que envia resultado via canal.
+    fn request_folder_scan(&self, folder_path: PathBuf) {
+        let sender = self.folder_scan_sender.clone();
+        
+        std::thread::spawn(move || {
+            let cover = find_first_image_in_folder(&folder_path);
+            let _ = sender.send((folder_path, cover));
+        });
+    }
+    
     fn load_folder(&mut self) {
+        // 1. Limpeza de Estado
         self.items.clear();
         self.texture_cache.clear();
         self.loading_set.clear();
+        self.scanned_folders.clear();
         self.selected_item = None;
-        self.is_loading_folder = true;  // Mudou de loading
+        self.is_loading_folder = true;
         self.total_items = 0;
         
-        let path = self.current_path.clone();
+        let current_path = self.current_path.clone();
         let file_entry_sender = self.file_entry_sender.clone();
         
-        // Background thread: lê metadata SEM bloquear UI
+        // OTIMIZAÇÃO Win32: FindFirstFileW retorna metadados em UMA syscall
         std::thread::spawn(move || {
-            let entries: Vec<FileEntry> = WalkDir::new(&path)
-                .max_depth(1)
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|e| e.path() != Path::new(&path))
-                .filter(|e| {
-                    let entry_path = e.path();
+            let mut entries = Vec::new();
+            
+            // 2. Prepara Path: "C:\Pasta\*"
+            let search_path = if current_path.ends_with('\\') {
+                format!("{}*", current_path)
+            } else {
+                format!("{}\\*", current_path)
+            };
+
+            let wide_path: Vec<u16> = search_path.encode_utf16().chain(std::iter::once(0)).collect();
+            let mut find_data = WIN32_FIND_DATAW::default();
+
+            unsafe {
+                // FindFirstFileW retorna Result<HANDLE>
+                if let Ok(handle) = FindFirstFileW(PCWSTR(wide_path.as_ptr()), &mut find_data) {
                     
-                    // Filter hidden/system files using Windows attributes
-                    unsafe {
-                        use windows::Win32::Storage::FileSystem::{GetFileAttributesW, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM, INVALID_FILE_ATTRIBUTES};
-                        
-                        let path_str = entry_path.to_string_lossy().to_string();
-                        let path_wide: Vec<u16> = path_str.encode_utf16().chain(std::iter::once(0)).collect();
-                        let attrs = GetFileAttributesW(PCWSTR(path_wide.as_ptr()));
-                        
-                        // Skip if hidden or system file
-                        if attrs != INVALID_FILE_ATTRIBUTES {
-                            if (attrs & FILE_ATTRIBUTE_HIDDEN.0) != 0 || (attrs & FILE_ATTRIBUTE_SYSTEM.0) != 0 {
-                                return false;
+                    loop {
+                        // Decodifica Nome do arquivo
+                        let len = find_data.cFileName.iter().position(|&c| c == 0).unwrap_or(find_data.cFileName.len());
+                        let filename = std::ffi::OsString::from_wide(&find_data.cFileName[0..len])
+                            .to_string_lossy()
+                            .into_owned();
+
+                        // Ignora "." e ".."
+                        if filename != "." && filename != ".." {
+                            let attrs = find_data.dwFileAttributes;
+                            
+                            // Filtros: hidden/system files
+                            let is_hidden = (attrs & FILE_ATTRIBUTE_HIDDEN.0) != 0;
+                            let is_system = (attrs & FILE_ATTRIBUTE_SYSTEM.0) != 0;
+                            let is_special = matches!(filename.to_lowercase().as_str(),
+                                "desktop.ini" | "thumbs.db" | "$recycle.bin" | "system volume information"
+                            );
+                            
+                            if !is_hidden && !is_system && !is_special && !filename.starts_with('.') {
+                                let is_dir = (attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
+                                let full_path = PathBuf::from(&current_path).join(&filename);
+
+                                // Extrai Tamanho - JÁ VEM PRONTO!
+                                let size = if is_dir { 
+                                    0 
+                                } else {
+                                    ((find_data.nFileSizeHigh as u64) << 32) | (find_data.nFileSizeLow as u64)
+                                };
+
+                                // Extrai Data de Modificação - JÁ VEM PRONTA!
+                                // Windows FileTime: 100ns desde 1601 → Unix: segundos desde 1970
+                                let ft = find_data.ftLastWriteTime;
+                                let windows_ticks = ((ft.dwHighDateTime as u64) << 32) | (ft.dwLowDateTime as u64);
+                                let modified = if windows_ticks > 116444736000000000 {
+                                    (windows_ticks - 116444736000000000) / 10_000_000
+                                } else {
+                                    0
+                                };
+
+                                entries.push(FileEntry {
+                                    path: full_path,
+                                    name: filename,
+                                    is_dir,
+                                    size,
+                                    modified,
+                                    folder_cover: None,  // Lazy load (já implementado)
+                                });
                             }
                         }
-                    }
-                    
-                    // Also filter by name (belt and suspenders)
-                    if let Some(name) = entry_path.file_name() {
-                        let name_str = name.to_string_lossy();
-                        // Skip hidden files (starts with .)
-                        if name_str.starts_with('.') {
-                            return false;
-                        }
-                        // Skip Windows system files
-                        if matches!(name_str.to_lowercase().as_str(), 
-                            "desktop.ini" | "thumbs.db" | "$recycle.bin" | "system volume information") {
-                            return false;
+
+                        // FindNextFileW retorna Result<()> - Err quando acabam os arquivos
+                        if FindNextFileW(handle, &mut find_data).is_err() {
+                            break;
                         }
                     }
-                    
-                    // NEW: Mostra TODOS os arquivos (ícones tratam visualização)
-                    // Pastas e arquivos de qualquer tipo passam pelo filtro
-                    true
-                })
-                .map(|e| {
-                    let path = e.path().to_path_buf();
-                    let is_dir = e.file_type().is_dir();
-                    // Cria FileEntry com metadados cacheados
-                    FileEntry::from_path(path, is_dir)
-                })
-                .collect();
-            
-            // Envia batch completo (já com metadata) para UI thread
+                    // Fecha o handle
+                    let _ = FindClose(handle);
+                }
+            }
+
+            // Envia batch completo para UI thread
             let _ = file_entry_sender.send(entries);
         });
     }
@@ -1050,7 +1103,31 @@ impl ImageViewerApp {
             ctx.request_repaint();
         }
         
-        // 2. Individual thumbnails
+        // 2. NOVO: Folder cover scan results (Lazy Load)
+        let mut folder_updates = false;
+        while let Ok((folder_path, cover_opt)) = self.folder_scan_receiver.try_recv() {
+            if let Some(cover) = cover_opt {
+                // Atualiza em items (lista filtrada/ordenada)
+                if let Some(item) = self.items.iter_mut().find(|i| i.path == folder_path) {
+                    item.folder_cover = Some(cover.clone());
+                    
+                    // Já requisita thumbnail da imagem encontrada
+                    if !self.texture_cache.contains(&cover) && !self.loading_set.contains(&cover) {
+                        self.request_thumbnail_load(cover.clone());
+                    }
+                    folder_updates = true;
+                }
+                // Também atualiza em all_items (persistência através de filtros)
+                if let Some(item) = self.all_items.iter_mut().find(|i| i.path == folder_path) {
+                    item.folder_cover = Some(cover);
+                }
+            }
+        }
+        if folder_updates {
+            ctx.request_repaint();
+        }
+        
+        // 3. Individual thumbnails
         let mut received_any = false;
         let mut _new_items_added = false;
         
@@ -1090,6 +1167,13 @@ impl ImageViewerApp {
         
         // ==== DIRECTORY RENDERING ====
         if item.is_dir {
+            // --- GATILHO LAZY LOAD ---
+            // Se não tem capa E ainda não foi escaneado: Dispara Scan.
+            if item.folder_cover.is_none() && !self.scanned_folders.contains(&item.path) {
+                self.scanned_folders.insert(item.path.clone());
+                self.request_folder_scan(item.path.clone());
+            }
+            
             // GEOMETRIA
             let folder_w = self.thumbnail_size * 0.60;
             let folder_h = folder_w * 0.85;
