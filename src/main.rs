@@ -201,6 +201,7 @@ struct ThumbnailData {
     image_data: Vec<u8>,
     width: u32,
     height: u32,
+    generation: usize, // Rastreia a validade da extração
 }
 
 // AplicaÃ§Ã£o principal
@@ -254,7 +255,8 @@ struct ImageViewerApp {
     // Search & Navigation (NEW)
     all_items: Vec<FileEntry>,  // Cache mestre para busca
     search_query: String,       // Texto da busca
-    last_grid_cols: usize,      // MemÃ³ria para navegaÃ§Ã£o vertical (teclado)
+    last_grid_cols: usize,      // Memória para navegação vertical (teclado)
+    generation: usize,          // Contador p/ invalidar tarefas assíncronas de pastas antigas
 }
 
 impl Default for ImageViewerApp {
@@ -319,6 +321,7 @@ impl Default for ImageViewerApp {
             all_items: Vec::new(),
             search_query: String::new(),
             last_grid_cols: 1,
+            generation: 0,
         };
         
         app.load_folder();
@@ -920,6 +923,8 @@ impl ImageViewerApp {
     }
     
     fn load_folder(&mut self) {
+        self.generation += 1; // Incrementa a geração: invalida todos os worker threads anteriores
+        
         // 1. Limpeza de Estado (UI Thread)
         self.items.clear();
         self.all_items.clear();  // Limpa backup mestre tambÃ©m
@@ -1084,6 +1089,7 @@ impl ImageViewerApp {
     
     fn request_thumbnail_load(&self, path: PathBuf) {
         let sender = self.image_sender.clone();
+        let current_generation = self.generation; // Captura a geração atual
         
         std::thread::spawn(move || {
             unsafe {
@@ -1098,6 +1104,7 @@ impl ImageViewerApp {
                 image_data: thumbnail_data,
                 width,
                 height,
+                generation: current_generation,
             });
             
             unsafe {
@@ -1265,6 +1272,13 @@ impl ImageViewerApp {
         let mut _new_items_added = false;
         
         while let Ok(thumbnail_data) = self.image_receiver.try_recv() {
+            // --- VALIDAÇÃO DE MEMÓRIA ---
+            // Se a imagem pertence a uma geração anterior (outra pasta), descarta.
+            if thumbnail_data.generation != self.generation {
+                continue;
+            }
+            // ----------------------------
+
             received_any = true;
             
             // SÃ³ processa thumbnails (image_data nÃ£o vazio)
