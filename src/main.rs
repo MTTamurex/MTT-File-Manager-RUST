@@ -1188,7 +1188,7 @@ impl ImageViewerApp {
         }
         
         let item = self.items[idx].clone();  // Clone para evitar borrow conflicts
-        let is_selected = self.selected_item == Some(idx);
+        let _is_selected = self.selected_item == Some(idx);
         
         // ==== DIRECTORY RENDERING ====
         if item.is_dir {

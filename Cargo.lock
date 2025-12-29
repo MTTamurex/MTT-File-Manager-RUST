@@ -1846,7 +1846,6 @@ dependencies = [
  "lru",
  "rayon",
  "rfd",
- "walkdir",
  "windows",
 ]
 

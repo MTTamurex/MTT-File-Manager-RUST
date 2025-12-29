@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 eframe = "0.31"
 rayon = "1.10"
-walkdir = "2.5"
 rfd = "0.15"
 lru = "0.12"
 
