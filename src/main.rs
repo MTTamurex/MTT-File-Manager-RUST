@@ -282,6 +282,7 @@ struct ImageViewerApp {
 impl ImageViewerApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let ctx = cc.egui_ctx.clone();
+        
         // 1. Canais para comunicação Workers → UI
         let (file_entry_sender, file_entry_receiver) = mpsc::channel::<(usize, Vec<FileEntry>)>();
         
@@ -2598,7 +2599,56 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "MTT File Manager",
         options,
-        Box::new(|cc| Ok(Box::new(ImageViewerApp::new(cc)))),
+        Box::new(|cc| {
+            // Carrega Segoe UI (fonte do Windows Explorer) + Symbol para Unicode completo
+            let mut fonts = egui::FontDefinitions::default();
+            let mut loaded_fonts = Vec::new();
+            
+            // 1. Segoe UI (fonte principal)
+            let segoe_path = std::path::PathBuf::from("C:\\Windows\\Fonts\\segoeui.ttf");
+            if let Ok(font_data) = std::fs::read(&segoe_path) {
+                fonts.font_data.insert(
+                    "segoe_ui".to_owned(),
+                    std::sync::Arc::new(egui::FontData::from_owned(font_data)),
+                );
+                loaded_fonts.push("segoe_ui".to_owned());
+            }
+            
+            // 2. Segoe UI Symbol (fallback 1 - símbolos)
+            let symbol_path = std::path::PathBuf::from("C:\\Windows\\Fonts\\seguisym.ttf");
+            if let Ok(font_data) = std::fs::read(&symbol_path) {
+                fonts.font_data.insert(
+                    "segoe_ui_symbol".to_owned(),
+                    std::sync::Arc::new(egui::FontData::from_owned(font_data)),
+                );
+                loaded_fonts.push("segoe_ui_symbol".to_owned());
+            }
+            
+            // 3. Arial Unicode MS (fallback 2 - se disponível)
+            let arial_path = std::path::PathBuf::from("C:\\Windows\\Fonts\\ARIALUNI.TTF");
+            if let Ok(font_data) = std::fs::read(&arial_path) {
+                fonts.font_data.insert(
+                    "arial_unicode".to_owned(),
+                    std::sync::Arc::new(egui::FontData::from_owned(font_data)),
+                );
+                loaded_fonts.push("arial_unicode".to_owned());
+            }
+            
+            // Adiciona apenas fontes carregadas
+            if !loaded_fonts.is_empty() {
+                fonts.families.get_mut(&egui::FontFamily::Proportional)
+                    .unwrap()
+                    .extend(loaded_fonts.clone());
+                
+                fonts.families.get_mut(&egui::FontFamily::Monospace)
+                    .unwrap()
+                    .extend(loaded_fonts.clone());
+            }
+            
+            cc.egui_ctx.set_fonts(fonts);
+            
+            Ok(Box::new(ImageViewerApp::new(cc)))
+        }),
     )
 }
 
