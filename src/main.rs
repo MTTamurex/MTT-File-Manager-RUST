@@ -1373,6 +1373,20 @@ impl ImageViewerApp {
                             ui.painter().rect_filled(rect, 0.0, egui::Color32::from_gray(245));
                         }
 
+                        // Tooltip on hover (consumes and returns response, last use)
+                        let _ = response.on_hover_ui(|ui| {
+                            ui.set_max_width(300.0);
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new(&item.name).strong());
+                                ui.separator();
+                                ui.label(format!("Tipo: {}", get_file_type_string(&item)));
+                                if !item.is_dir {
+                                    ui.label(format!("Tamanho: {}", format_size(item.size)));
+                                }
+                                ui.label(format!("Data: {}", format_date(item.modified)));
+                            });
+                        });
+
                         let text_color = egui::Color32::BLACK;
                         let secondary_color = egui::Color32::from_gray(100);
                         
@@ -1532,31 +1546,54 @@ impl ImageViewerApp {
             let loop_min_row = visible_min_row.saturating_sub(2);
             let loop_max_row = (visible_max_row + 2).min(rows);
             
-            for row in loop_min_row..loop_max_row {
+            'row_loop: for row in loop_min_row..loop_max_row {
                 for col in 0..cols {
                     let index = row * cols + col;
-                    if index >= count { break; }
+                    // Check bounds against current items length (prevents crash if navigate_to was called)
+                    if index >= self.items.len() { break; }
                     
                     let x_pos = col as f32 * (item_w + padding) + padding;
                     let y_pos = row as f32 * (item_h + padding) + padding;
                     let rect = egui::Rect::from_min_size(content_min + egui::vec2(x_pos, y_pos), egui::vec2(item_w, item_h));
                     
                     if ui.is_rect_visible(rect) {
+                        // Clone do item para uso seguro nesta iteração
+                        let item = self.items[index].clone();
+                        
                         let response = ui.interact(rect, ui.id().with(index), egui::Sense::click());
                         if response.clicked() {
-                            self.selected_file = Some(self.items[index].clone());
+                            self.selected_file = Some(item.clone());
                             self.selected_item = Some(index);
                         }
+                        
+                        let mut navigated = false;
                         if response.double_clicked() {
-                            let item = self.items[index].clone();
-                            if item.is_dir { self.navigate_to(&item.path.to_string_lossy()); }
+                            if item.is_dir { 
+                                self.navigate_to(&item.path.to_string_lossy()); 
+                                navigated = true;
+                            }
                             else { open_with_shell(&item.path); }
                         }
-                        
+
                         if self.selected_item == Some(index) {
                             ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 215)), egui::StrokeKind::Inside);
                             ui.painter().rect_filled(rect, 4.0, egui::Color32::from_rgba_unmultiplied(0, 120, 215, 30));
                         }
+
+                        // Tooltip on hover (consumes response, last use)
+                        let item_tooltip = item.clone();
+                        let _ = response.on_hover_ui(|ui| {
+                            ui.set_max_width(300.0);
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new(&item_tooltip.name).strong());
+                                ui.separator();
+                                ui.label(format!("Tipo: {}", get_file_type_string(&item_tooltip)));
+                                if !item_tooltip.is_dir {
+                                    ui.label(format!("Tamanho: {}", format_size(item_tooltip.size)));
+                                }
+                                ui.label(format!("Data: {}", format_date(item_tooltip.modified)));
+                            });
+                        });
                         
                         // Content area with margin for selection border visibility
                         let content_margin = 3.0;
@@ -1564,6 +1601,8 @@ impl ImageViewerApp {
                         ui.allocate_new_ui(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
                             self.render_item_slot(ui, index);
                         });
+
+                        if navigated { break 'row_loop; } // Escapa do loop se o contexto mudou
                     }
                 }
             }
@@ -1576,7 +1615,6 @@ impl ImageViewerApp {
         }
         
         let item = self.items[idx].clone();  // Clone para evitar borrow conflicts
-        let _is_selected = self.selected_item == Some(idx);
         
         // ==== DIRECTORY RENDERING ====
         if item.is_dir {
@@ -1697,7 +1735,6 @@ impl ImageViewerApp {
             // ==== FILE RENDERING ====
             else {
                 let path_clone = item.path.clone();
-                let is_selected = self.selected_item == Some(idx);
                 
                 // Detecta se e arquivo de midia
                 let is_media_file = if let Some(ext) = path_clone.extension() {
@@ -2070,7 +2107,7 @@ impl eframe::App for ImageViewerApp {
                         ui.separator();
                         
                         // Preview de imagem/video (se houver thumbnail)
-                        let has_thumbnail = self.texture_cache.peek(&file.path).is_some();
+                        let _has_thumbnail = self.texture_cache.peek(&file.path).is_some();
                         let is_media = file.path.extension()
                             .and_then(|e| e.to_str())
                             .map(|ext| {
