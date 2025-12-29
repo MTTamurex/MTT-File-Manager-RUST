@@ -1,0 +1,262 @@
+﻿cargo :    Compiling mtt-file-manager v0.1.0 
+(C:\MTT File Manager)
+At line:1 char:1
++ cargo build 2>&1 | Out-File -FilePath 
+"build_errors.txt" -Encoding ut ...
++ ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (  
+     Compiling mt...T File Manager):String) [  
+  ], RemoteException
+    + FullyQualifiedErrorId : NativeCommandErr 
+   or
+ 
+error[E0432]: unresolved import `windows::Win32
+::Storage::FileSystem::INVALID_HANDLE_VALUE`
+  --> src\main.rs:27:65
+   |
+27 |     FindFirstFileW, FindNextFileW, 
+FindClose, WIN32_FIND_DATAW, 
+INVALID_HANDLE_VALUE
+   |                                           
+                      ^^^^^^^^^^^^^^^^^^^^ no 
+`INVALID_HANDLE_VALUE` in 
+`Win32::Storage::FileSystem`
+
+error[E0599]: no method named `is_invalid` 
+found for enum `Result<T, E>` in the current 
+scope
+     --> src\main.rs:849:27
+      |
+  849 |                 if handle.is_invalid() 
+== false {
+      |                           ^^^^^^^^^^ 
+method not found in `Result<HANDLE, 
+windows_result::error::Error>`
+      |
+note: the method `is_invalid` exists on the 
+type `HANDLE`
+     --> C:\Users\mtamu\.cargo\registry\src\ind
+ex.crates.io-1949cf8c6b5b557f\windows-0.58.0\sr
+c\Windows\Win32\Foundation\mod.rs:10645:5
+      |
+10645 |     pub fn is_invalid(&self) -> bool {
+      |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: consider using `Result::expect` to 
+unwrap the `HANDLE` value, panicking if the 
+value is a `Result::Err`
+      |
+  849 |                 if 
+handle.expect("REASON").is_invalid() == false {
+      |                          
++++++++++++++++++
+
+error[E0271]: type mismatch resolving 
+`<Result<HANDLE, Error> as TypeKind>::TypeKind 
+== CopyType`
+   --> src\main.rs:906:42
+    |
+906 |                         if 
+FindNextFileW(handle, &mut 
+find_data).as_bool() == false {
+    |                            ------------- 
+^^^^^^ expected `CopyType`, found 
+`InterfaceType`
+    |                            |
+    |                            required by a 
+bound introduced by this call
+    |
+    = note: required for `Result<HANDLE, 
+windows_result::error::Error>` to implement 
+`Param<HANDLE, CopyType>`
+note: required by a bound in `FindNextFileW`
+   --> C:\Users\mtamu\.cargo\registry\src\index
+.crates.io-1949cf8c6b5b557f\windows-0.58.0\src\
+Windows\Win32\Storage\FileSystem\mod.rs:973:9
+    |
+971 | pub unsafe fn 
+FindNextFileW<P0>(hfindfile: P0, 
+lpfindfiledata: *mut WIN32_FIND_DATAW) -> 
+windows_core::Result<()>
+    |               ------------- required by 
+a bound in this function
+972 | where
+973 |     P0: windows_core::Param<super::super:
+:Foundation::HANDLE>,
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^ required by this bound in 
+`FindNextFileW`
+
+error[E0277]: the trait bound `Result<HANDLE, 
+windows_result::error::Error>: Param<HANDLE, 
+CopyType>` is not satisfied
+   --> src\main.rs:906:42
+    |
+906 |                         if 
+FindNextFileW(handle, &mut 
+find_data).as_bool() == false {
+    |                            ------------- 
+^^^^^^ the trait `CanInto<HANDLE>` is not 
+implemented for `Result<HANDLE, 
+windows_result::error::Error>`
+    |                            |
+    |                            required by a 
+bound introduced by this call
+    |
+    = help: the following other types 
+implement trait `CanInto<T>`:
+              `AsyncIAdviseSink` implements 
+`CanInto<IUnknown>`
+              `AsyncIAdviseSink2` implements 
+`CanInto<AsyncIAdviseSink>`
+              `AsyncIAdviseSink2` implements 
+`CanInto<IUnknown>`
+              `AsyncIMultiQI` implements 
+`CanInto<IUnknown>`
+              `AsyncIPipeByte` implements 
+`CanInto<IUnknown>`
+              `AsyncIPipeDouble` implements 
+`CanInto<IUnknown>`
+              `AsyncIPipeLong` implements 
+`CanInto<IUnknown>`
+              `AsyncIUnknown` implements 
+`CanInto<IUnknown>`
+            and 1115 others
+    = note: required for `Result<HANDLE, 
+windows_result::error::Error>` to implement 
+`Param<HANDLE, CopyType>`
+note: required by a bound in `FindNextFileW`
+   --> C:\Users\mtamu\.cargo\registry\src\index
+.crates.io-1949cf8c6b5b557f\windows-0.58.0\src\
+Windows\Win32\Storage\FileSystem\mod.rs:973:9
+    |
+971 | pub unsafe fn 
+FindNextFileW<P0>(hfindfile: P0, 
+lpfindfiledata: *mut WIN32_FIND_DATAW) -> 
+windows_core::Result<()>
+    |               ------------- required by 
+a bound in this function
+972 | where
+973 |     P0: windows_core::Param<super::super:
+:Foundation::HANDLE>,
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^ required by this bound in 
+`FindNextFileW`
+
+error[E0277]: the trait bound `Result<HANDLE, 
+windows_result::error::Error>: Param<HANDLE, 
+CopyType>` is not satisfied
+   --> src\main.rs:906:42
+    |
+906 |                         if 
+FindNextFileW(handle, &mut 
+find_data).as_bool() == false {
+    |                            ------------- 
+^^^^^^ the trait `core::interface::Interface` 
+is not implemented for `Result<HANDLE, 
+windows_result::error::Error>`
+    |                            |
+    |                            required by a 
+bound introduced by this call
+    |
+    = help: the following other types 
+implement trait `core::interface::Interface`:
+              AsyncIAdviseSink
+              AsyncIAdviseSink2
+              AsyncIMultiQI
+              AsyncIPipeByte
+              AsyncIPipeDouble
+              AsyncIPipeLong
+              AsyncIUnknown
+              CIE4ConnectionPoint
+            and 766 others
+    = note: required for `Result<HANDLE, 
+windows_result::error::Error>` to implement 
+`TypeKind`
+    = note: required for `Result<HANDLE, 
+windows_result::error::Error>` to implement 
+`Param<HANDLE, CopyType>`
+note: required by a bound in `FindNextFileW`
+   --> C:\Users\mtamu\.cargo\registry\src\index
+.crates.io-1949cf8c6b5b557f\windows-0.58.0\src\
+Windows\Win32\Storage\FileSystem\mod.rs:973:9
+    |
+971 | pub unsafe fn 
+FindNextFileW<P0>(hfindfile: P0, 
+lpfindfiledata: *mut WIN32_FIND_DATAW) -> 
+windows_core::Result<()>
+    |               ------------- required by 
+a bound in this function
+972 | where
+973 |     P0: windows_core::Param<super::super:
+:Foundation::HANDLE>,
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^ required by this bound in 
+`FindNextFileW`
+
+error[E0599]: no method named `as_bool` found 
+for enum `Result<T, E>` in the current scope
+   --> src\main.rs:906:66
+    |
+906 |                         if 
+FindNextFileW(handle, &mut 
+find_data).as_bool() == false {
+    |                                          
+                        ^^^^^^^ method not 
+found in `Result<(), 
+windows_result::error::Error>`
+
+error[E0308]: mismatched types
+   --> src\main.rs:910:39
+    |
+910 |                     let _ = 
+FindClose(handle);
+    |                             --------- 
+^^^^^^ expected `HANDLE`, found 
+`Result<HANDLE, Error>`
+    |                             |
+    |                             arguments to 
+this function are incorrect
+    |
+    = note: expected struct `HANDLE`
+                 found enum `Result<HANDLE, 
+windows_result::error::Error>`
+note: function defined here
+   --> C:\Users\mtamu\.cargo\registry\src\index
+.crates.io-1949cf8c6b5b557f\windows-0.58.0\src\
+Windows\Win32\Storage\FileSystem\mod.rs:782:15
+    |
+782 | pub unsafe fn FindClose(hfindfile: 
+super::super::Foundation::HANDLE) -> 
+windows_core::Result<()> {
+    |               ^^^^^^^^^
+help: consider using `Result::expect` to 
+unwrap the `Result<HANDLE, 
+windows_result::error::Error>` value, 
+panicking if the value is a `Result::Err`
+    |
+910 |                     let _ = 
+FindClose(handle.expect("REASON"));
+    |                                          
+   +++++++++++++++++
+
+warning: unused variable: `is_selected`
+    --> src\main.rs:1169:13
+     |
+1169 |         let is_selected = 
+self.selected_item == Some(idx);
+     |             ^^^^^^^^^^^ help: if this 
+is intentional, prefix it with an underscore: 
+`_is_selected`
+     |
+     = note: `#[warn(unused_variables)]` (part 
+of `#[warn(unused)]`) on by default
+
+Some errors have detailed explanations: E0271, 
+E0277, E0308, E0432, E0599.
+For more information about an error, try 
+`rustc --explain E0271`.
+warning: `mtt-file-manager` (bin 
+"mtt-file-manager") generated 1 warning
+error: could not compile `mtt-file-manager` 
+(bin "mtt-file-manager") due to 7 previous 
+errors; 1 warning emitted
