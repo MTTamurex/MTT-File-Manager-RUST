@@ -824,25 +824,31 @@ fn format_date(timestamp: u64) -> String {
         return "Desconhecido".to_string();
     }
     
-    use std::time::{UNIX_EPOCH, Duration, SystemTime};
-    
-    let datetime = UNIX_EPOCH + Duration::from_secs(timestamp);
-    
-    // Simple formatting (ideally use chrono)
-    if let Ok(duration) = SystemTime::now().duration_since(datetime) {
-        let days = duration.as_secs() / 86400;
-        if days == 0 {
-            "Hoje".to_string()
-        } else if days == 1 {
-            "Ontem".to_string()
-        } else if days < 7 {
-            format!("{} dias atras", days)
-        } else {
-            format!("{} semanas atras", days / 7)
-        }
-    } else {
-        "Futuro".to_string()
-    }
+    // Algoritmo simples para converter timestamp Unix em Data/Hora (UTC como base)
+    // Para simplificar e evitar dependências pesadas como chrono
+    let seconds_in_day = 86400u64;
+    let days_since_epoch = timestamp / seconds_in_day;
+    let seconds_of_day = timestamp % seconds_in_day;
+
+    let hour = (seconds_of_day / 3600) % 24;
+    let minute = (seconds_of_day / 60) % 60;
+
+    // Algoritmo de Howard Hinnant para converter dias desde a época em y/m/d
+    let z = (days_since_epoch as i64) + 719468;
+    let era = (if z >= 0 { z } else { z - 146096 }) / 146097;
+    let doe = (z - era * 146097) as u64;
+    let yoe = (doe * 2000 + 1) / 730485;
+    let y = (yoe as i64) + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let final_y = y + (if m <= 2 { 0 } else { 1 }); // Ajuste no ano bissexto/março
+
+    // Ajuste final para o ano corretp de acordo com o deslocamento de mp
+    let display_y = if m <= 2 { final_y + 1 } else { final_y };
+
+    format!("{:02}/{:02}/{:04} {:02}:{:02}", d, m, display_y, hour, minute)
 }
 
 impl ImageViewerApp {
@@ -1272,8 +1278,8 @@ impl ImageViewerApp {
         let available_w = ui.available_width();
         
         // Larguras das colunas
-        let w_name = (available_w - 380.0).max(200.0);
-        let w_date = 140.0;
+        let w_name = (available_w - 410.0).max(200.0);
+        let w_date = 170.0;
         let w_type = 120.0;
         let w_size = 100.0;
         
@@ -1321,7 +1327,7 @@ impl ImageViewerApp {
             };
 
             draw_header(ui, "Nome", w_name, SortMode::Name);
-            draw_header(ui, "Data", w_date, SortMode::Date);
+            draw_header(ui, "Última modificação", w_date, SortMode::Date);
             draw_header(ui, "Tipo", w_type, SortMode::Name); // Tipo usa Name sort secundÃ¡rio
             draw_header(ui, "Tamanho", w_size, SortMode::Size);
         });
@@ -1373,19 +1379,21 @@ impl ImageViewerApp {
                             ui.painter().rect_filled(rect, 0.0, egui::Color32::from_gray(245));
                         }
 
-                        // Tooltip on hover (consumes and returns response, last use)
-                        let _ = response.on_hover_ui(|ui| {
-                            ui.set_max_width(300.0);
-                            ui.vertical(|ui| {
-                                ui.label(egui::RichText::new(&item.name).strong());
-                                ui.separator();
-                                ui.label(format!("Tipo: {}", get_file_type_string(&item)));
-                                if !item.is_dir {
-                                    ui.label(format!("Tamanho: {}", format_size(item.size)));
-                                }
-                                ui.label(format!("Data: {}", format_date(item.modified)));
+                        // Tooltip at cursor
+                        if response.hovered() {
+                            egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), response.id, |ui: &mut egui::Ui| {
+                                ui.set_max_width(300.0);
+                                ui.vertical(|ui| {
+                                    ui.label(egui::RichText::new(&item.name).strong());
+                                    ui.separator();
+                                    ui.label(format!("Tipo: {}", get_file_type_string(&item)));
+                                    if !item.is_dir {
+                                        ui.label(format!("Tamanho: {}", format_size(item.size)));
+                                    }
+                                    ui.label(format!("Última modificação: {}", format_date(item.modified)));
+                                });
                             });
-                        });
+                        }
 
                         let text_color = egui::Color32::BLACK;
                         let secondary_color = egui::Color32::from_gray(100);
@@ -1580,20 +1588,22 @@ impl ImageViewerApp {
                             ui.painter().rect_filled(rect, 4.0, egui::Color32::from_rgba_unmultiplied(0, 120, 215, 30));
                         }
 
-                        // Tooltip on hover (consumes response, last use)
+                        // Tooltip at cursor
                         let item_tooltip = item.clone();
-                        let _ = response.on_hover_ui(|ui| {
-                            ui.set_max_width(300.0);
-                            ui.vertical(|ui| {
-                                ui.label(egui::RichText::new(&item_tooltip.name).strong());
-                                ui.separator();
-                                ui.label(format!("Tipo: {}", get_file_type_string(&item_tooltip)));
-                                if !item_tooltip.is_dir {
-                                    ui.label(format!("Tamanho: {}", format_size(item_tooltip.size)));
-                                }
-                                ui.label(format!("Data: {}", format_date(item_tooltip.modified)));
+                        if response.hovered() {
+                            egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), response.id, |ui: &mut egui::Ui| {
+                                ui.set_max_width(300.0);
+                                ui.vertical(|ui| {
+                                    ui.label(egui::RichText::new(&item_tooltip.name).strong());
+                                    ui.separator();
+                                    ui.label(format!("Tipo: {}", get_file_type_string(&item_tooltip)));
+                                    if !item_tooltip.is_dir {
+                                        ui.label(format!("Tamanho: {}", format_size(item_tooltip.size)));
+                                    }
+                                    ui.label(format!("Última modificação: {}", format_date(item_tooltip.modified)));
+                                });
                             });
-                        });
+                        }
                         
                         // Content area with margin for selection border visibility
                         let content_margin = 3.0;
@@ -1885,14 +1895,14 @@ impl eframe::App for ImageViewerApp {
                 egui::ComboBox::from_id_salt("sort_mode")
                     .selected_text(match self.sort_mode {
                         SortMode::Name => "Nome",
-                        SortMode::Date => "Data",
+                        SortMode::Date => "Última modificação",
                         SortMode::Size => "Tamanho",
                     })
                     .show_ui(ui, |ui| {
                         if ui.selectable_value(&mut self.sort_mode, SortMode::Name, "Nome").clicked() { 
                             self.sort_items(); 
                         }
-                        if ui.selectable_value(&mut self.sort_mode, SortMode::Date, "Data").clicked() { 
+                        if ui.selectable_value(&mut self.sort_mode, SortMode::Date, "Última modificação").clicked() { 
                             self.sort_items(); 
                         }
                         if ui.selectable_value(&mut self.sort_mode, SortMode::Size, "Tamanho").clicked() { 
