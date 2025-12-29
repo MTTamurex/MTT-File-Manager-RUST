@@ -289,6 +289,11 @@ render_item_slot()
    ├── Fast Cancel: Workers descartam pedidos de gerações passadas antes de ler o disco
    ├── UI Filtering: Resultados tardios são ignorados na Main Thread
    └── Resolve: Thrashing de HDDs e bloat de memória em navegação rápida
+ 
+ Operações Nativas (Shell)
+   ├── Rename (F2): `SHFileOperationW`
+   ├── Suporte Nativo: Permite "Undo" (Ctrl+Z) via Windows Explorer
+   └── Error Handling: Diálogos nativos do Windows (ex: arquivo em uso)
  ```
 
 ---

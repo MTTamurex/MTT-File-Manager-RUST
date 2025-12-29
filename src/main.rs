@@ -21,7 +21,8 @@ use windows::{
 // Imports adicionais explÃ­citos para APIs de Ã­cones
 use windows::Win32::UI::Shell::{
     SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_LARGEICON, 
-    SHGFI_USEFILEATTRIBUTES, SHGFI_DISPLAYNAME
+    SHGFI_USEFILEATTRIBUTES, SHGFI_DISPLAYNAME,
+    SHFileOperationW, SHFILEOPSTRUCTW, FO_RENAME, FOF_ALLOWUNDO
 };
 
 // OTIMIZAÃ‡ÃƒO: Imports para Win32 FindFirst/NextFileW (metadata em UMA syscall)
@@ -263,6 +264,10 @@ struct ImageViewerApp {
     generation: usize,          // Contador local (Main Thread)
     current_generation: Arc<AtomicUsize>, // Contador compartilhado (Workers)
     ui_ctx: egui::Context,      // Referência ao contexto da UI para repaints assíncronos
+    
+    // ESTADO DE RENOMEAÇÃO
+    renaming_state: Option<(usize, String)>, // (Index, Texto Editável)
+    focus_rename: bool,                      // Trigger para focar no input
 }
 
 impl ImageViewerApp {
@@ -379,6 +384,8 @@ impl ImageViewerApp {
             generation: 0,
             current_generation: shared_gen,
             ui_ctx: ctx,
+            renaming_state: None,
+            focus_rename: false,
         };
         
         app.load_folder();
@@ -1140,6 +1147,46 @@ impl ImageViewerApp {
         }
     }
     
+    /// Renomeia arquivo usando Shell API (suporta Undo/Ctrl+Z)
+    fn rename_with_shell(&mut self, idx: usize) {
+        if let Some((_, new_name)) = self.renaming_state.take() {
+            if let Some(item) = self.items.get(idx) {
+                let old_path = item.path.to_string_lossy().to_string();
+                if let Some(parent) = item.path.parent() {
+                    let new_path = parent.join(&new_name).to_string_lossy().to_string();
+
+                    // Regra da API: Strings devem terminar com DOIS nulls (\0\0)
+                    let mut from_vec: Vec<u16> = old_path.encode_utf16().collect();
+                    from_vec.push(0); 
+                    from_vec.push(0);
+
+                    let mut to_vec: Vec<u16> = new_path.encode_utf16().collect();
+                    to_vec.push(0); 
+                    to_vec.push(0);
+
+                    let mut op = SHFILEOPSTRUCTW {
+                        hwnd: HWND(std::ptr::null_mut()), 
+                        wFunc: FO_RENAME,
+                        pFrom: PCWSTR(from_vec.as_ptr()),
+                        pTo: PCWSTR(to_vec.as_ptr()),
+                        fFlags: FOF_ALLOWUNDO.0 as u16, 
+                        ..Default::default()
+                    };
+
+                    unsafe {
+                        let result = SHFileOperationW(&mut op);
+                        if result == 0 {
+                            // Sucesso: Recarrega a pasta para atualizar a UI
+                            self.load_folder();
+                        } else {
+                            eprintln!("Erro ao renomear via Shell: {}", result);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
     /// Pode voltar no histÃ³rico?
     fn can_go_back(&self) -> bool {
         self.history_index > 0
@@ -1506,21 +1553,53 @@ impl ImageViewerApp {
                             }
                         }
 
-                        // Nome (truncado para caber na coluna - safe UTF-8)
-                        let max_name_chars = ((w_name - 30.0) / 7.0) as usize;
-                        let display_name: String = if item.name.chars().count() > max_name_chars && max_name_chars > 3 {
-                            let truncated: String = item.name.chars().take(max_name_chars.saturating_sub(3)).collect();
-                            format!("{}...", truncated)
+                        // LÓGICA VISUAL DE RENOMEAR (LIST VIEW)
+                        let is_renaming_this = self.renaming_state.as_ref().map_or(false, |(idx, _)| *idx == i);
+                        if is_renaming_this {
+                            let mut text = self.renaming_state.as_mut().unwrap().1.clone();
+                            let name_rect = egui::Rect::from_min_size(
+                                rect.min + egui::vec2(24.0, 2.0),
+                                egui::vec2(w_name - 30.0, row_height - 4.0)
+                            );
+                            
+                            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(name_rect), |ui| {
+                                let response = ui.add(egui::TextEdit::singleline(&mut text)
+                                    .frame(true)
+                                    .horizontal_align(egui::Align::Min)
+                                    .id_source("rename_input_list"));
+                                
+                                self.renaming_state.as_mut().unwrap().1 = text;
+
+                                if self.focus_rename {
+                                    response.request_focus();
+                                    self.focus_rename = false;
+                                }
+
+                                if response.lost_focus() && ui.input(|i_in| i_in.key_pressed(egui::Key::Enter)) {
+                                    self.rename_with_shell(i);
+                                } else if ui.input(|i_in| i_in.key_pressed(egui::Key::Escape)) {
+                                    self.renaming_state = None;
+                                } else if response.clicked_elsewhere() {
+                                    self.renaming_state = None;
+                                }
+                            });
                         } else {
-                            item.name.clone()
-                        };
-                        ui.painter().text(
-                            rect.min + egui::vec2(24.0, 5.0),
-                            egui::Align2::LEFT_TOP,
-                            display_name,
-                            egui::FontId::proportional(12.0),
-                            text_color,
-                        );
+                            // Nome (truncado para caber na coluna - safe UTF-8)
+                            let max_name_chars = ((w_name - 30.0) / 7.0) as usize;
+                            let display_name: String = if item.name.chars().count() > max_name_chars && max_name_chars > 3 {
+                                let truncated: String = item.name.chars().take(max_name_chars.saturating_sub(3)).collect();
+                                format!("{}...", truncated)
+                            } else {
+                                item.name.clone()
+                            };
+                            ui.painter().text(
+                                rect.min + egui::vec2(24.0, 5.0),
+                                egui::Align2::LEFT_TOP,
+                                display_name,
+                                egui::FontId::proportional(12.0),
+                                text_color,
+                            );
+                        }
 
                         // 2. Data
                         ui.painter().text(
@@ -1597,8 +1676,8 @@ impl ImageViewerApp {
                 }
             }
             
-            // Enter para abrir
-            if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            // Enter para abrir (apenas se não estiver renomeando)
+            if self.renaming_state.is_none() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 if let Some(selected) = &self.selected_file.clone() {
                     if selected.is_dir {
                         self.navigate_to(&selected.path.to_string_lossy());
@@ -1808,13 +1887,40 @@ impl ImageViewerApp {
 
             // TEXTO: Usa Label com truncate (igual aos arquivos) para respeitar limites
             ui.add_space(6.0);  // Gap entre pasta e texto
-            ui.vertical_centered(|ui| {
-                ui.add(egui::Label::new(
-                    egui::RichText::new(&item.name)
-                        .size(11.0)
-                        .color(egui::Color32::BLACK)
-                ).truncate());
-            });
+            // LÓGICA VISUAL DE RENOMEAR (DIRETÓRIO)
+            let is_renaming_this = self.renaming_state.as_ref().map_or(false, |(i, _)| *i == idx);
+            ui.set_min_height(24.0);
+            
+            if is_renaming_this {
+                let mut text = self.renaming_state.as_mut().unwrap().1.clone();
+                let response = ui.add(egui::TextEdit::singleline(&mut text)
+                    .frame(true)
+                    .horizontal_align(egui::Align::Center)
+                    .id_source("rename_input_dir"));
+                
+                self.renaming_state.as_mut().unwrap().1 = text;
+
+                if self.focus_rename {
+                    response.request_focus();
+                    self.focus_rename = false;
+                }
+
+                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    self.rename_with_shell(idx);
+                } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    self.renaming_state = None;
+                } else if response.clicked_elsewhere() {
+                    self.renaming_state = None;
+                }
+            } else {
+                ui.vertical_centered(|ui| {
+                    ui.add(egui::Label::new(
+                        egui::RichText::new(&item.name)
+                            .size(11.0)
+                            .color(egui::Color32::BLACK)
+                    ).truncate());
+                });
+            }
         }
             // ==== FILE RENDERING ====
             else {
@@ -1905,13 +2011,40 @@ impl ImageViewerApp {
                 
                 // Texto do nome - igual as pastas
                 ui.add_space(4.0);
-                ui.vertical_centered(|ui| {
-                    ui.add(egui::Label::new(
-                        egui::RichText::new(&item.name)
-                            .size(11.0)
-                            .color(egui::Color32::BLACK)
-                    ).truncate());
-                });
+                // LÓGICA VISUAL DE RENOMEAR (ARQUIVO)
+                let is_renaming_this = self.renaming_state.as_ref().map_or(false, |(i, _)| *i == idx);
+                ui.set_min_height(24.0);
+                
+                if is_renaming_this {
+                    let mut text = self.renaming_state.as_mut().unwrap().1.clone();
+                    let response = ui.add(egui::TextEdit::singleline(&mut text)
+                        .frame(true)
+                        .horizontal_align(egui::Align::Center)
+                        .id_source("rename_input_file"));
+                    
+                    self.renaming_state.as_mut().unwrap().1 = text;
+
+                    if self.focus_rename {
+                        response.request_focus();
+                        self.focus_rename = false;
+                    }
+
+                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        self.rename_with_shell(idx);
+                    } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        self.renaming_state = None;
+                    } else if response.clicked_elsewhere() {
+                        self.renaming_state = None;
+                    }
+                } else {
+                    ui.vertical_centered(|ui| {
+                        ui.add(egui::Label::new(
+                            egui::RichText::new(&item.name)
+                                .size(11.0)
+                                .color(egui::Color32::BLACK)
+                        ).truncate());
+                    });
+                }
             }
         }
     }
@@ -2316,6 +2449,16 @@ impl eframe::App for ImageViewerApp {
                 match self.view_mode {
                     ViewMode::Grid => self.render_grid_view(ui),
                     ViewMode::List => self.render_list_view(ui),
+                }
+
+                // F2 -> INICIAR RENOMEAÇÃO (Global no CentralPanel)
+                if ui.input(|i| i.key_pressed(egui::Key::F2)) {
+                    if let Some(idx) = self.selected_item {
+                        if let Some(item) = self.items.get(idx) {
+                            self.renaming_state = Some((idx, item.name.clone()));
+                            self.focus_rename = true;
+                        }
+                    }
                 }
 
                 // Spinner pequeno no canto se ainda carregando

@@ -31,6 +31,7 @@
 - **Atomic Generational Validation**: Sistema de gerações que invalida tasks de thumbnails via `Arc<AtomicUsize>`.
 - **Reactive Repaints**: Workers agora disparam `ctx.request_repaint()` imediatamente ao completar tarefas, garantindo fluidez sem depender de inputs do usuário.
 - **CreationContext Initialization**: Refatorada inicialização para captar o contexto egui nativamente.
+- **Native Rename (F2)**: Implementado renomeação via `SHFileOperationW` com suporte a Undo (Ctrl+Z).
 
 ---
 
