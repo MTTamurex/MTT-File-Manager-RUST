@@ -1314,13 +1314,29 @@ impl ImageViewerApp {
                         let text_color = egui::Color32::BLACK;
                         let secondary_color = egui::Color32::from_gray(100);
                         
-                        // 1. Ãcone + Nome
-                        let icon_pos = rect.min + egui::vec2(4.0, 4.0);
+                        // 1. Icone + Nome
+                        let icon_size_px = 16.0;
+                        let icon_rect = egui::Rect::from_min_size(
+                            rect.min + egui::vec2(4.0, 4.0),
+                            egui::vec2(icon_size_px, icon_size_px)
+                        );
+                        
                         if item.is_dir {
-                            ui.painter().text(icon_pos, egui::Align2::LEFT_TOP, "[D]", egui::FontId::proportional(14.0), egui::Color32::from_rgb(255, 193, 7));
+                            // Pasta: icone nativo do Windows
+                            self.ensure_folder_icon(ui.ctx());
+                            if let Some(folder_icon) = &self.folder_icon_texture {
+                                ui.painter().image(
+                                    folder_icon.id(),
+                                    icon_rect,
+                                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                    egui::Color32::WHITE
+                                );
+                            } else {
+                                ui.painter().text(icon_rect.min, egui::Align2::LEFT_TOP, "[D]", egui::FontId::proportional(14.0), egui::Color32::from_rgb(255, 193, 7));
+                            }
                         } else {
-                            // Tenta carregar Ã­cone de arquivo cached ou genÃ©rico
-                            ui.painter().text(icon_pos, egui::Align2::LEFT_TOP, "[F]", egui::FontId::proportional(14.0), egui::Color32::GRAY);
+                            // Arquivo: placeholder por enquanto
+                            ui.painter().text(icon_rect.min, egui::Align2::LEFT_TOP, "[F]", egui::FontId::proportional(14.0), egui::Color32::GRAY);
                         }
 
                         // Nome (truncado para caber na coluna - safe UTF-8)
