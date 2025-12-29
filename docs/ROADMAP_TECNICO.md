@@ -32,6 +32,7 @@
 - **Reactive Repaints**: Workers agora disparam `ctx.request_repaint()` imediatamente ao completar tarefas, garantindo fluidez sem depender de inputs do usuário.
 - **CreationContext Initialization**: Refatorada inicialização para captar o contexto egui nativamente.
 - **Native Rename (F2)**: Implementado renomeação via `SHFileOperationW` com suporte a Undo (Ctrl+Z).
+- **Manual & Auto Refresh**: Sistema de recarga via F5 e monitoramento automático via `notify` crate com debounce de 500ms.
 
 ---
 

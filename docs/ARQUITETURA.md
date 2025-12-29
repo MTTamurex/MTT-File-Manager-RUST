@@ -294,6 +294,12 @@ render_item_slot()
    ├── Rename (F2): `SHFileOperationW`
    ├── Suporte Nativo: Permite "Undo" (Ctrl+Z) via Windows Explorer
    └── Error Handling: Diálogos nativos do Windows (ex: arquivo em uso)
+ 
+ Sistema de Refresh (Manual & Auto)
+   ├── F5: Gatilho direto para `load_folder()`
+   ├── Watcher (`notify`): Monitora `current_path` em tempo real
+   ├── Flow: `Event` → `MPSC` → `UI Repaint` → `Debounce (500ms)` → `Reload`
+   └── Benefício: UI sempre sincronizada com o disco
  ```
 
 ---

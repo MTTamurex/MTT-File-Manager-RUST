@@ -8,6 +8,7 @@ eframe = "0.31"
 rayon = "1.10"
 rfd = "0.15"
 lru = "0.12"
+notify = "6.1.1"
 
 [dependencies.windows]
 version = "0.58"

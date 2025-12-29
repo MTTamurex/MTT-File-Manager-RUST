@@ -116,9 +116,17 @@ WalkDir::new(&path)
     .filter(|e| /* custom filters */)
 ```
 
----
+### notify 6.1.1
 
-## Windows Native APIs
+**Categoria**: Cross-platform filesystem notification library  
+**Backend Windows**: ReadDirectoryChangesW (Async I/O)
+
+**Uso no Projeto**:
+- ✅ **Auto-Refresh**: Monitora a pasta atual para mudanças.
+- ✅ **Debounce**: Evita reloads excessivos em operações rápidas de I/O.
+- ✅ **Comunicação**: Thread do Watcher → Canal MPSC → Main Thread.
+
+---
 
 ### windows 0.58 (Microsoft Official Crate)
 
