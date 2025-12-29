@@ -690,7 +690,52 @@ fn extract_folder_icon_internal(
     }
 }
 
-/// Extrai Ã­cone REAL de um drive (C:\, D:\, etc.).
+/// Extrai icone de um arquivo REAL usando path completo.
+/// Usado para executaveis (.exe, .lnk, .ico) que tem icones unicos.
+fn extract_file_icon_by_path(
+    path: &Path,
+    size: IconSize,
+) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
+    unsafe {
+        let path_wide: Vec<u16> = path.to_string_lossy()
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        
+        let mut shfi = SHFILEINFOW::default();
+        
+        // SEM USEFILEATTRIBUTES - usa arquivo real
+        let flags = SHGFI_ICON 
+            | match size {
+                IconSize::Small => SHGFI_SMALLICON,
+                IconSize::Large => SHGFI_LARGEICON,
+            };
+        
+        // SAFETY: SHGetFileInfoW com path real
+        let result = SHGetFileInfoW(
+            PCWSTR(path_wide.as_ptr()),
+            FILE_ATTRIBUTE_NORMAL,
+            Some(&mut shfi),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            flags,
+        );
+        
+        if result == 0 || shfi.hIcon.is_invalid() {
+            return Err("Failed to get file icon".into());
+        }
+        
+        let hicon = shfi.hIcon;
+        let conversion_result = hicon_to_rgba(hicon);
+        
+        // SAFETY: Sempre libera HICON
+        let _ = DestroyIcon(hicon);
+        
+        conversion_result
+    }
+}
+
+/// Extrai icone REAL de um drive (C:\, D:\, etc.).
+
 /// 
 /// DIFERENÃ‡A: Usa path REAL (nÃ£o dummy) e SEM SHGFI_USEFILEATTRIBUTES.
 /// Isso forÃ§a o Windows a retornar o Ã­cone especÃ­fico do drive (HD, SSD, USB, etc.).
@@ -1037,21 +1082,31 @@ impl ImageViewerApp {
         });
     }
     
-    /// Retorna Ã­cone para uma extensÃ£o, carregando sob demanda.
+    /// Retorna icone para um arquivo, carregando sob demanda.
+    /// Executaveis (.exe, .lnk, .ico) sao cacheados por path completo.
+    /// Demais extensoes sao cacheadas por tipo.
     fn get_or_load_icon(
         &mut self, 
         ctx: &egui::Context,
-        extension: &str,
+        path: &Path,
     ) -> Option<egui::TextureHandle> {
-        let key = extension.to_lowercase();
+        let extension = path.extension()?.to_str()?.to_lowercase();
+        
+        // Decide cache key: path completo para executaveis, extensao para demais
+        let cache_key = if matches!(extension.as_str(), "exe" | "lnk" | "ico") {
+            // Cache por path completo - cada executavel tem icone unico
+            path.to_string_lossy().to_string()
+        } else {
+            // Cache por extensao - todos .txt compartilham icone
+            format!(".{}", extension)
+        };
         
         // Cache hit? Clone do handle (barato)
-        if let Some(texture) = self.icon_cache.get(&key) {
+        if let Some(texture) = self.icon_cache.get(&cache_key) {
             return Some(texture.clone());
         }
         
-        // Cache miss â†’ carrega Ã­cone
-        // Captura thumbnail_size antes de borrowar mutavelmente self
+        // Cache miss -> carrega icone
         let thumbnail_size = self.thumbnail_size;
         let icon_size = if thumbnail_size < 100.0 {
             IconSize::Small
@@ -1059,10 +1114,17 @@ impl ImageViewerApp {
             IconSize::Large
         };
         
-        match extract_file_icon(&key, icon_size) {
+        // Para executaveis, usa path real; para demais, usa extensao dummy
+        let icon_result = if matches!(extension.as_str(), "exe" | "lnk" | "ico") {
+            extract_file_icon_by_path(path, icon_size)
+        } else {
+            extract_file_icon(&format!(".{}", extension), icon_size)
+        };
+        
+        match icon_result {
             Ok((rgba_data, width, height)) => {
                 let texture = ctx.load_texture(
-                    format!("icon_{}", key),
+                    format!("icon_{}", cache_key),
                     egui::ColorImage::from_rgba_unmultiplied(
                         [width as usize, height as usize],
                         &rgba_data,
@@ -1071,10 +1133,10 @@ impl ImageViewerApp {
                 );
                 
                 let cloned = texture.clone();
-                self.icon_cache.put(key, texture);
+                self.icon_cache.put(cache_key, texture);
                 Some(cloned)
             }
-            Err(_) => None,  // Fallback: sem Ã­cone
+            Err(_) => None,  // Fallback: sem icone
         }
     }
     
@@ -1335,8 +1397,17 @@ impl ImageViewerApp {
                                 ui.painter().text(icon_rect.min, egui::Align2::LEFT_TOP, "[D]", egui::FontId::proportional(14.0), egui::Color32::from_rgb(255, 193, 7));
                             }
                         } else {
-                            // Arquivo: placeholder por enquanto
-                            ui.painter().text(icon_rect.min, egui::Align2::LEFT_TOP, "[F]", egui::FontId::proportional(14.0), egui::Color32::GRAY);
+                            // Arquivo: tenta carregar icone nativo
+                            if let Some(file_icon) = self.get_or_load_icon(ui.ctx(), &item.path) {
+                                ui.painter().image(
+                                    file_icon.id(),
+                                    icon_rect,
+                                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                    egui::Color32::WHITE
+                                );
+                            } else {
+                                ui.painter().text(icon_rect.min, egui::Align2::LEFT_TOP, "[F]", egui::FontId::proportional(14.0), egui::Color32::GRAY);
+                            }
                         }
 
                         // Nome (truncado para caber na coluna - safe UTF-8)
@@ -1654,12 +1725,7 @@ impl ImageViewerApp {
                 
                 // Pre-carrega icone para arquivos nao-midia
                 let file_icon = if !is_media_file {
-                    if let Some(ext) = path_clone.extension() {
-                        let ext_str = format!(".{}", ext.to_string_lossy());
-                        self.get_or_load_icon(ui.ctx(), &ext_str)
-                    } else {
-                        None
-                    }
+                    self.get_or_load_icon(ui.ctx(), &path_clone)
                 } else {
                     None
                 };
