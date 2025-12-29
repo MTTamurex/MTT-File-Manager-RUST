@@ -10,6 +10,11 @@ use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 use notify::{Watcher, RecursiveMode, RecommendedWatcher};
+
+// Import domain types
+use mtt_file_manager::domain::file_entry::*;
+use mtt_file_manager::domain::thumbnail::*;
+
 use windows::{
     core::*,
     Win32::Foundation::*,
@@ -98,116 +103,11 @@ const PATH_PADRAO: &str = "C:\\";
 // LRU cache - reduzido para limitar VRAM (~50-100MB)
 const CACHE_SIZE: usize = 200;
 const MAX_CONCURRENT_LOADS: usize = 30;  // Reduzido de 50
-const PRELOAD_ROWS: usize = 5;  // Pre-fetch: carrega 5 linhas antes/depois da viewport
+  // Pre-fetch: carrega 5 linhas antes/depois da viewport
 
 
 // Icon cache (menor pois Ã­cones sÃ£o compartilhados por extensÃ£o)
 const ICON_CACHE_SIZE: usize = 100;
-
-// Tamanho de Ã­cones
-#[derive(Copy, Clone)]
-enum IconSize {
-    Small,  // 16x16 ou 32x32 (depende do DPI)
-    Large,  // 32x32 ou 48x48
-}
-
-// Modo de ordenaÃ§Ã£o
-#[derive(PartialEq, Clone, Copy, Debug)]
-enum SortMode {
-    Name,
-    Date,
-    Size,
-}
-
-#[derive(PartialEq, Clone, Copy, Debug)]
-enum ViewMode {
-    Grid,
-    List,
-}
-
-/// Busca primeira imagem em uma pasta para usar como preview
-/// Verifica apenas os primeiros 15 arquivos para performance
-fn find_first_image_in_folder(folder_path: &Path) -> Option<PathBuf> {
-    if let Ok(entries) = std::fs::read_dir(folder_path) {
-        for entry in entries.flatten().take(15) {
-            let path = entry.path();
-            if path.is_file() {
-                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                    match ext.to_lowercase().as_str() {
-                        "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" => return Some(path),
-                        _ => {}
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
-// Entry de arquivo/pasta com metadados cacheados para ordenaÃ§Ã£o
-#[derive(Clone, Debug)]
-struct FileEntry {
-    path: PathBuf,
-    name: String,      // Cache do nome para sort rÃ¡pido
-    is_dir: bool,      // Pastas primeiro
-    size: u64,         // Tamanho em bytes (0 para diretÃ³rios)
-    modified: u64,     // Timestamp (segundos desde UNIX_EPOCH)
-    folder_cover: Option<PathBuf>,  // Primeira imagem encontrada na pasta (para preview)
-}
-
-/// Helper para exibir tipo do arquivo na Lista
-fn get_file_type_string(entry: &FileEntry) -> String {
-    if entry.is_dir {
-        return "Pasta".to_string();
-    }
-    if let Some(ext) = entry.path.extension() {
-        return format!("Arquivo {}", ext.to_string_lossy().to_uppercase());
-    }
-    "Arquivo".to_string()
-}
-
-impl FileEntry {
-    fn from_path(path: PathBuf, is_dir: bool) -> Self {
-        let name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
-            .to_string();
-        
-        // Tenta ler metadata, usa defaults em caso de erro (arquivos travados, etc)
-        let (size, modified) = std::fs::metadata(&path)
-            .ok()
-            .map(|m| {
-                let size = if is_dir { 0 } else { m.len() };
-                let modified = m.modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-                (size, modified)
-            })
-            .unwrap_or((0, 0));
-        
-        // OTIMIZAÃ‡ÃƒO: Lazy loading - sempre None inicialmente.
-        // O scan serÃ¡ disparado por request_folder_scan() quando a pasta ficar visÃ­vel.
-        let folder_cover = None;
-        
-        Self { path, name, is_dir, size, modified, folder_cover }
-    }
-    
-    fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-// Dados de thumbnail
-struct ThumbnailData {
-    path: PathBuf,
-    image_data: Vec<u8>,
-    width: u32,
-    height: u32,
-    generation: usize, // Rastreia a validade da extração
-}
 
 // AplicaÃ§Ã£o principal
 struct ImageViewerApp {
@@ -1193,7 +1093,7 @@ impl ImageViewerApp {
         };
 
         // Se o watcher já existe, apenas troca o path monitorado
-        if let Some(ref mut watcher) = self.watcher {
+        if let Some(ref mut _watcher) = self.watcher {
             // Para de monitorar todos os paths antigos (o watcher pode ter múltiplos)
             // Como não temos referência ao path antigo, vamos recriar o watcher
             // (notify não tem API para listar paths monitorados)
