@@ -35,6 +35,7 @@
 - **Manual & Auto Refresh**: Sistema de recarga via F5 e monitoramento automático via `notify` crate com debounce de 500ms.
 - **Delete to Recycle Bin**: Implementado via `SHFileOperationW` (`FO_DELETE`) com suporte nativo do SO.
 - **Create New Folder**: Fluxo instantâneo com auto-rename e resolução de conflitos de nome.
+- **Clipboard Operations (Ctrl+C/X/V)**: Copy, Cut e Paste via `Event::Copy/Cut/Paste` do egui e `SHFileOperationW` (`FO_COPY`/`FO_MOVE`).
 - **UI Refinements**: Ícones Remix Icon corrigidos, layout responsivo e botões frameless.
 
 ---
