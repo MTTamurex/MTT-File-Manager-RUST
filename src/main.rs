@@ -44,7 +44,7 @@ use windows::{
 use windows::Win32::UI::Shell::{
     SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_LARGEICON, 
     SHGFI_USEFILEATTRIBUTES, SHGFI_DISPLAYNAME,
-    SHFileOperationW, SHFILEOPSTRUCTW, FO_RENAME, FO_DELETE,
+    SHFileOperationW, SHFILEOPSTRUCTW, FO_RENAME, FO_DELETE, FO_COPY, FO_MOVE,
     FOF_ALLOWUNDO, FOF_WANTNUKEWARNING
 };
 
@@ -125,6 +125,13 @@ const MAX_CONCURRENT_LOADS: usize = 30;  // Reduzido de 50
 // Icon cache (menor pois Ã­cones sÃ£o compartilhados por extensÃ£o)
 const ICON_CACHE_SIZE: usize = 100;
 
+// Operações de Clipboard (Copiar/Recortar)
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum ClipboardOp {
+    Copy,
+    Move,
+}
+
 // AplicaÃ§Ã£o principal
 struct ImageViewerApp {
     current_path: String,
@@ -193,6 +200,10 @@ struct ImageViewerApp {
     fs_event_sender: Sender<notify::Result<notify::Event>>,
     last_auto_reload: Instant,
     pending_auto_reload: bool,
+    
+    // CLIPBOARD (Copiar/Recortar/Colar)
+    clipboard_file: Option<PathBuf>,
+    clipboard_op: Option<ClipboardOp>,
 }
 
 impl ImageViewerApp {
@@ -320,6 +331,10 @@ impl ImageViewerApp {
             fs_event_sender: fs_tx,
             last_auto_reload: Instant::now(),
             pending_auto_reload: false,
+            
+            // CLIPBOARD
+            clipboard_file: None,
+            clipboard_op: None,
         };
         
         // Inicia monitoramento inicial
@@ -948,7 +963,86 @@ impl ImageViewerApp {
         }
     }
     
-    // Helper para botÃµes \"Toggle\" (que ficam acesos se selecionados)
+    // ===== CLIPBOARD OPERATIONS (Ctrl+C, Ctrl+X, Ctrl+V) =====
+    
+    /// Copiar: Guarda o path do arquivo selecionado na memória
+    fn command_copy(&mut self) {
+        if let Some(idx) = self.selected_item {
+            if let Some(item) = self.items.get(idx) {
+                self.clipboard_file = Some(item.path.clone());
+                self.clipboard_op = Some(ClipboardOp::Copy);
+            }
+        }
+    }
+    
+    /// Recortar: Guarda o path do arquivo selecionado com flag de movimento
+    fn command_cut(&mut self) {
+        if let Some(idx) = self.selected_item {
+            if let Some(item) = self.items.get(idx) {
+                self.clipboard_file = Some(item.path.clone());
+                self.clipboard_op = Some(ClipboardOp::Move);
+            }
+        }
+    }
+    
+    /// Colar: Executa SHFileOperationW para copiar ou mover o arquivo
+    fn command_paste(&mut self) {
+        // 1. Validação: tem algo para colar?
+        let src_path = match &self.clipboard_file {
+            Some(p) => p.clone(),
+            None => { return; }
+        };
+        
+        let dest_folder = PathBuf::from(&self.current_path);
+        
+        // 2. Evita mover para a mesma pasta (redundante)
+        if let Some(ClipboardOp::Move) = self.clipboard_op {
+            if src_path.parent() == Some(&dest_folder) {
+                return;
+            }
+        }
+        
+        // 3. Prepara strings para Windows API (double-null terminated)
+        let mut from_vec: Vec<u16> = src_path.to_string_lossy().encode_utf16().collect();
+        from_vec.push(0);
+        from_vec.push(0);
+        
+        let mut to_vec: Vec<u16> = dest_folder.to_string_lossy().encode_utf16().collect();
+        to_vec.push(0);
+        to_vec.push(0);
+        
+        // 4. Define operação (FO_COPY ou FO_MOVE)
+        let w_func = match self.clipboard_op {
+            Some(ClipboardOp::Move) => FO_MOVE,
+            _ => FO_COPY,
+        };
+        
+        let mut op = SHFILEOPSTRUCTW {
+            hwnd: HWND(std::ptr::null_mut()),
+            wFunc: w_func,
+            pFrom: PCWSTR(from_vec.as_ptr()),
+            pTo: PCWSTR(to_vec.as_ptr()),
+            fFlags: (FOF_ALLOWUNDO).0 as u16,
+            ..Default::default()
+        };
+        
+        // 5. Executa operação
+        unsafe {
+            let result = SHFileOperationW(&mut op);
+            
+            if result == 0 {
+                // Se foi Recortar, limpa o clipboard
+                if let Some(ClipboardOp::Move) = self.clipboard_op {
+                    self.clipboard_file = None;
+                    self.clipboard_op = None;
+                }
+                // Recarrega a pasta para ver o resultado
+                self.load_folder();
+            }
+        }
+    }
+    
+    // Helper para botÃµes "Toggle" (que ficam acesos se selecionados)
     fn toggle_icon_button(&self, ui: &mut egui::Ui, icon: &str, active: bool, tooltip: &str) -> egui::Response {
         let color = if active { egui::Color32::from_rgb(0, 120, 215) } else { ui.visuals().text_color() };
         
@@ -2167,20 +2261,47 @@ impl ImageViewerApp {
 
 impl eframe::App for ImageViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        
+        // --- DETECÇÃO DE COMANDOS DE SISTEMA (Clipboard) ---
+        // O egui traduz Ctrl+C → Event::Copy, Ctrl+X → Event::Cut, Ctrl+V → Event::Paste
+        // Isso funciona porque são eventos do SO, não teclas interceptadas.
+        
+        if self.renaming_state.is_none() {
+            // Capturar eventos de clipboard do sistema
+            let mut do_copy = false;
+            let mut do_cut = false;
+            let mut do_paste = false;
+            
+            ctx.input(|i| {
+                for event in &i.events {
+                    match event {
+                        egui::Event::Copy => { do_copy = true; },
+                        egui::Event::Cut => { do_cut = true; },
+                        egui::Event::Paste(_) => { do_paste = true; },
+                        _ => {}
+                    }
+                }
+            });
+            
+            // Executar ações de clipboard
+            if do_copy { self.command_copy(); }
+            if do_cut { self.command_cut(); }
+            if do_paste { self.command_paste(); }
+            
+            // Delete: Excluir
+            if ctx.input(|i| i.key_pressed(egui::Key::Delete)) {
+                self.delete_with_shell();
+            }
+
+            // Ctrl + Shift + N: Nova Pasta
+            if ctx.input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::N)) {
+                self.create_new_folder();
+            }
+        }
+        
         self.process_incoming_messages(ctx);
         self.ensure_folder_icon(ctx);
         self.ensure_computer_icon(ctx);
-
-        // ATALHOS DE TECLADO
-        // Delete: Excluir (se não estiver renomeando)
-        if ctx.input(|i| i.key_pressed(egui::Key::Delete)) && self.renaming_state.is_none() {
-            self.delete_with_shell();
-        }
-
-        // Ctrl + Shift + N: Nova Pasta
-        if ctx.input(|i| i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::N)) {
-            self.create_new_folder();
-        }
 
         // Status Bar (Footer) - Definido primeiro para ocupar toda a largura
         egui::TopBottomPanel::bottom("status_bar")
