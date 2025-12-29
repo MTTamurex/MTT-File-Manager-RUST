@@ -26,7 +26,11 @@
 ### Otimização de VRAM
 - CACHE_SIZE reduzido de 500 → 200
 - MAX_CONCURRENT_LOADS reduzido de 50 → 30
-- Culling estrito impede carregamento de thumbnails fora da tela
+### Estabilidade e Gerenciamento de Ciclo de Vida (Anti-Leak)
+- **Generational Validation**: Sistema de gerações que invalida tasks de thumbnails de pastas antigas.
+- **Immediate Eviction**: Limpeza de caches ao navegar para garantir VRAM estável.
+- **Zero-Ghost Background Tasks**: Resultados de worker threads antigas são descartados na borda da UI.
+- **Redução de Process Use**: Menor carga de CPU/GPU ao navegar rapidamente.
 
 ---
 

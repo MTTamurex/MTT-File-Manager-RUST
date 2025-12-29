@@ -272,15 +272,21 @@ render_item_slot()
   └── UI recebe → ctx.load_texture() → insere no LRU Cache
 ```
 
-### 4️⃣ Gerenciamento de Memória (LRU Cache)
-
-```
-LruCache<PathBuf, TextureHandle>
-  ├── Capacidade: 200 itens (Otimizado)
-  ├── Max Concurrent Loads: 30
-  ├── Objetivo: Manter VRAM < 100MB
-  └── Eviction automática agressiva
-```
+### 4️⃣ Gerenciamento de Memória e Ciclo de Vida
+ 
+ ```
+ LruCache<PathBuf, TextureHandle>
+   ├── Capacidade: 200 itens (Otimizado)
+   ├── Max Concurrent Loads: 30
+   ├── Objetivo: Manter VRAM < 100MB
+   └── Eviction automática agressiva
+ 
+ Generational Validation (Anti-Leak)
+   ├── `generation: usize` incrementado a cada `load_folder`
+   ├── Worker threads capturam a geração atual
+   ├── UI Thread descarta resultados de gerações passadas
+   └── Resolve: Bloat de memória em navegação rápida
+ ```
 
 ---
 
