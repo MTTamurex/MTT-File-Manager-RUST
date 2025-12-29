@@ -33,6 +33,9 @@
 - **CreationContext Initialization**: Refatorada inicialização para captar o contexto egui nativamente.
 - **Native Rename (F2)**: Implementado renomeação via `SHFileOperationW` com suporte a Undo (Ctrl+Z).
 - **Manual & Auto Refresh**: Sistema de recarga via F5 e monitoramento automático via `notify` crate com debounce de 500ms.
+- **Delete to Recycle Bin**: Implementado via `SHFileOperationW` (`FO_DELETE`) com suporte nativo do SO.
+- **Create New Folder**: Fluxo instantâneo com auto-rename e resolução de conflitos de nome.
+- **UI Refinements**: Ícones Remix Icon corrigidos, layout responsivo e botões frameless.
 
 ---
 
@@ -455,10 +458,10 @@ impl ImageViewerApp {
 
 ### Sprint 4 (Semana 7-8) - UX
 
-- [ ] 💾 Persistência de configurações
-- [ ] 🔍 Busca/filtro de arquivos
-- [ ] 🎨 Tema escuro
-- [ ] ⌨️ Atalhos de teclado
+- [x] 💾 Persistência de configurações
+- [x] 🔍 Busca/filtro de arquivos
+- [x] 🎨 Tema escuro (suporte via visuals)
+- [x] ⌨️ Atalhos de teclado (Delete, F2, F5, Ctrl+Shift+N)
 
 **Entregável**: UX comparável ao Windows Explorer
 

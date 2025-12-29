@@ -373,6 +373,8 @@ fn extract_windows_thumbnail(path: &PathBuf)
 - [x] LRU Cache previne OOM
 - [x] Execução como usuário normal (não admin)
 - [x] Depth limit no WalkDir (`max_depth(1)`)
+- [x] Exclusão segura via Lixeira do Windows (`SHFileOperationW`)
+- [x] Renomeação nativa (`SHFileOperationW`) com suporte a Undo
 
 ### Faltando ❌
 
@@ -406,6 +408,8 @@ fn extract_windows_thumbnail(path: &PathBuf)
 | `get_volume_label()` | FFI para GetVolumeInformationW | Baixo - read-only |
 | `open_with_shell()` | FFI para `ShellExecuteW` | Alto - execução de código |
 | `load_folder()` (GetFileAttributesW) | FFI para filesystem APIs | Baixo - read-only |
+| `rename_with_shell()` | FFI para `SHFileOperationW` | Médio - move/rename |
+| `delete_with_shell()` | FFI para `SHFileOperationW` | Médio - move para lixeira |
 | `CoInitializeEx/CoUninitialize` | COM initialization | Baixo - padrão documentado |
 
 **Mitigações**:

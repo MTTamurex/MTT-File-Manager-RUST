@@ -13,7 +13,8 @@
 - **Ordenação performática** (Nome/Data/Tamanho com cache)
 - **Seleção shrink-wrap** (estilo Windows Explorer)
 - **Busca em tempo real** (filtragem instantânea por nome)
-- **Navegação por teclado** (setas para percorrer grid)
+- **Navegação por teclado** (setas, Delete, F2, F5, Ctrl+Shift+N)
+- **Operações de Arquivo** (Excluir para Lixeira, Criar Nova Pasta, Renomear)
 - **Tooltips informativos** (nome, tamanho, data ao passar mouse)
 
 ---
@@ -88,7 +89,7 @@ graph TB
 ```
 MTT File Manager/
 ├── src/
-│   └── main.rs              # Aplicação monolítica (675 linhas)
+│   └── main.rs              # Aplicação principal (~2700 linhas)
 │                            # ⚠️ Candidato a refatoração em módulos
 ├── target/                  # Build artifacts (ignorado no git)
 │   ├── debug/              # Debug builds
@@ -292,6 +293,8 @@ render_item_slot()
  
  Operações Nativas (Shell)
    ├── Rename (F2): `SHFileOperationW`
+   ├── Delete (Del): `SHFileOperationW` (Recycle Bin)
+   ├── New Folder (Ctrl+Shift+N): CreateDir + Instant Focus
    ├── Suporte Nativo: Permite "Undo" (Ctrl+Z) via Windows Explorer
    └── Error Handling: Diálogos nativos do Windows (ex: arquivo em uso)
  
