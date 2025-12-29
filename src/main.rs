@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::time::{Duration, Instant};
+use notify::{Watcher, RecursiveMode, RecommendedWatcher, Config};
 use windows::{
     core::*,
     Win32::Foundation::*,
@@ -221,8 +223,8 @@ struct ImageViewerApp {
     loading_set: HashSet<PathBuf>,
     
     // Async loading (evita freeze da UI ao ler metadata)
-    file_entry_receiver: Receiver<Vec<FileEntry>>,
-    file_entry_sender: Sender<Vec<FileEntry>>,
+    file_entry_receiver: Receiver<(usize, Vec<FileEntry>)>,
+    file_entry_sender: Sender<(usize, Vec<FileEntry>)>,
     is_loading_folder: bool,
     
     // COVER WORKER: Sistema de capas de pasta (Single Thread Worker)
@@ -268,16 +270,25 @@ struct ImageViewerApp {
     // ESTADO DE RENOMEAÇÃO
     renaming_state: Option<(usize, String)>, // (Index, Texto Editável)
     focus_rename: bool,                      // Trigger para focar no input
+    
+    // SISTEMA DE WATCHER (AUTO-REFRESH)
+    watcher: Option<RecommendedWatcher>,
+    fs_event_receiver: Receiver<notify::Result<notify::Event>>,
+    fs_event_sender: Sender<notify::Result<notify::Event>>,
+    last_auto_reload: Instant,
+    pending_auto_reload: bool,
 }
 
 impl ImageViewerApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let ctx = cc.egui_ctx.clone();
-        let (file_entry_sender, file_entry_receiver) = mpsc::channel();
+        // 1. Canais para comunicação Workers → UI
+        let (file_entry_sender, file_entry_receiver) = mpsc::channel::<(usize, Vec<FileEntry>)>();
         
         // COVER WORKER: Worker Ãºnico para processar capas de pasta
         let (cover_req_tx, cover_req_rx) = mpsc::channel::<PathBuf>();  // UI â†’ Worker
         let (cover_res_tx, cover_res_rx) = mpsc::channel();             // Worker â†’ UI
+        let (fs_tx, fs_rx) = mpsc::channel();
         
         // Spawna WORKER THREAD: fica em loop processando fila
         std::thread::spawn(move || {
@@ -386,7 +397,16 @@ impl ImageViewerApp {
             ui_ctx: ctx,
             renaming_state: None,
             focus_rename: false,
+            
+            watcher: None,
+            fs_event_receiver: fs_rx,
+            fs_event_sender: fs_tx,
+            last_auto_reload: Instant::now(),
+            pending_auto_reload: false,
         };
+        
+        // Inicia monitoramento inicial
+        app.watch_current_folder();
         
         app.load_folder();
         app
@@ -1000,6 +1020,8 @@ impl ImageViewerApp {
         self.is_loading_folder = true;
         self.total_items = 0;
         
+        let my_gen = self.generation;
+        let gen_clone = self.current_generation.clone();
         let current_path = self.current_path.clone();
         let file_entry_sender = self.file_entry_sender.clone();
         let ctx = self.ui_ctx.clone();
@@ -1021,6 +1043,9 @@ impl ImageViewerApp {
             unsafe {
                 if let Ok(handle) = FindFirstFileW(PCWSTR(wide_path.as_ptr()), &mut find_data) {
                     loop {
+                        // Verifica se a geração mudou -> Aborta scan antigo
+                        if gen_clone.load(AtomicOrdering::Relaxed) != my_gen { break; }
+
                         let len = find_data.cFileName.iter().position(|&c| c == 0).unwrap_or(find_data.cFileName.len());
                         let filename = std::ffi::OsString::from_wide(&find_data.cFileName[0..len])
                             .to_string_lossy()
@@ -1069,7 +1094,7 @@ impl ImageViewerApp {
 
                                 // SE o lote encheu (250 itens), envia e limpa
                                 if batch.len() >= 250 {
-                                    let _ = file_entry_sender.send(batch.clone());
+                                    let _ = file_entry_sender.send((my_gen, batch.clone()));
                                     batch.clear();
                                     ctx.request_repaint(); // Acorda a UI para mostrar progresso
                                 }
@@ -1084,15 +1109,17 @@ impl ImageViewerApp {
                 }
             }
 
-            // Envia o restante (Ãºltimo lote) se sobrou algo
-            if !batch.is_empty() {
-                let _ = file_entry_sender.send(batch);
+            // Envia o restante (Ãºltimo lote) se sobrou algo e a geraÃ§Ã£o ainda Ã© vÃ¡lida
+            if !batch.is_empty() && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+                let _ = file_entry_sender.send((my_gen, batch));
                 ctx.request_repaint();
             }
             
-            // Envia vetor VAZIO para sinalizar FIM do carregamento
-            let _ = file_entry_sender.send(Vec::new());
-            ctx.request_repaint();
+            // Envia vetor VAZIO para sinalizar FIM do carregamento (apenas se a geraÃ§Ã£o for a mesma)
+            if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+                let _ = file_entry_sender.send((my_gen, Vec::new()));
+                ctx.request_repaint();
+            }
         });
     }
     
@@ -1114,6 +1141,10 @@ impl ImageViewerApp {
         
         self.current_path = path.to_string();
         self.path_input = path.to_string();
+        
+        // ATUALIZA O VIGIA
+        self.watch_current_folder();
+        
         self.load_folder();
     }
     
@@ -1123,6 +1154,7 @@ impl ImageViewerApp {
             self.history_index -= 1;
             self.current_path = self.navigation_history[self.history_index].clone();
             self.path_input = self.current_path.clone();
+            self.watch_current_folder();  // Atualiza o watcher
             self.load_folder();
         }
     }
@@ -1133,6 +1165,7 @@ impl ImageViewerApp {
             self.history_index += 1;
             self.current_path = self.navigation_history[self.history_index].clone();
             self.path_input = self.current_path.clone();
+            self.watch_current_folder();  // Atualiza o watcher
             self.load_folder();
         }
     }
@@ -1143,6 +1176,46 @@ impl ImageViewerApp {
             let parent_str = parent.to_string_lossy().to_string();
             if !parent_str.is_empty() {
                 self.navigate_to(&parent_str);
+            }
+        }
+    }
+    
+    /// Configura o monitoramento da pasta atual
+    fn watch_current_folder(&mut self) {
+        let current_path = self.current_path.clone();
+
+        // Canonicaliza o path para compatibilidade com Windows
+        let path_to_watch = if let Ok(p) = Path::new(&current_path).canonicalize() {
+            p
+        } else {
+            PathBuf::from(&current_path)
+        };
+
+        // Se o watcher já existe, apenas troca o path monitorado
+        if let Some(ref mut watcher) = self.watcher {
+            // Para de monitorar todos os paths antigos (o watcher pode ter múltiplos)
+            // Como não temos referência ao path antigo, vamos recriar o watcher
+            // (notify não tem API para listar paths monitorados)
+        }
+
+        // Cria ou recria o watcher
+        let tx = self.fs_event_sender.clone();
+        let ctx_clone = self.ui_ctx.clone();
+
+        let watcher_result = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+            if let Ok(event) = &res {
+                println!("Watcher Event: {:?}", event.kind);
+            }
+            let _ = tx.send(res);
+            ctx_clone.request_repaint();
+        });
+
+        if let Ok(mut watcher) = watcher_result {
+            if let Err(e) = watcher.watch(&path_to_watch, RecursiveMode::NonRecursive) {
+                eprintln!("Erro ao monitorar pasta {}: {}", path_to_watch.display(), e);
+            } else {
+                self.watcher = Some(watcher);
+                println!("Monitorando: {}", path_to_watch.display());
             }
         }
     }
@@ -1313,9 +1386,45 @@ impl ImageViewerApp {
         }
     }
     
+    /// Processa mensagens que chegam dos canais de workers
     fn process_incoming_messages(&mut self, ctx: &egui::Context) {
-        // 1. STREAMING: Recebe lotes incrementais de FileEntry
-        while let Ok(new_batch) = self.file_entry_receiver.try_recv() {
+        // 1. CHECK DE REFRESH MANUAL (F5)
+        if ctx.input(|i| i.key_pressed(egui::Key::F5)) {
+            self.load_folder();
+        }
+
+
+        // 2. CHECK DE AUTO-REFRESH (WATCHER)
+        while let Ok(event) = self.fs_event_receiver.try_recv() {
+            match event {
+                Ok(_) => self.pending_auto_reload = true,
+                Err(e) => eprintln!("Erro de watch: {:?}", e),
+            }
+        }
+
+        // Executa reload apenas quando debounce permitir
+        if self.pending_auto_reload {
+            println!("[DEBUG] Pending reload, elapsed: {}ms", self.last_auto_reload.elapsed().as_millis());
+            if self.last_auto_reload.elapsed() > Duration::from_millis(500) {
+                // VALIDA SE O PATH ATUAL AINDA EXISTE (pode ter sido renomeado/deletado)
+                if Path::new(&self.current_path).exists() {
+                    println!("[DEBUG] Path exists, executing reload");
+                    self.load_folder();
+                } else {
+                    println!("[DEBUG] Path no longer exists, navigating to parent");
+                    self.go_up_one_level();
+                }
+                self.last_auto_reload = Instant::now();
+                self.pending_auto_reload = false;
+            }
+        }
+
+        // 1. STREAMING: Recebe lotes incrementais de FileEntry (Filtrado por geraÃ§Ã£o)
+        while let Ok((gen_id, new_batch)) = self.file_entry_receiver.try_recv() {
+            if gen_id != self.generation { 
+                continue; // Descarta dados de uma navegaÃ§Ã£o/refresh anterior
+            }
+
             if new_batch.is_empty() {
                 // Lote vazio = Sinal de "Fim do Carregamento" da thread
                 self.is_loading_folder = false;
@@ -1332,7 +1441,7 @@ impl ImageViewerApp {
             ctx.request_repaint();
         }
         
-        // 2. Cover Worker: Recebe resultados de capas de pasta
+        // 2. Cover Worker: Recebe resultados de capas de folder
         let mut folder_updates = false;
         while let Ok((folder_path, cover_opt)) = self.cover_worker_receiver.try_recv() {
             if let Some(cover) = cover_opt {
@@ -1362,7 +1471,7 @@ impl ImageViewerApp {
         
         while let Ok(thumbnail_data) = self.image_receiver.try_recv() {
             // --- VALIDAÇÃO DE MEMÓRIA ---
-            // Se a imagem pertence a uma geração anterior (outra pasta), descarta.
+            // Se a imagem pertence a uma geração anterior (outra folder), descarta.
             if thumbnail_data.generation != self.generation {
                 continue;
             }
@@ -1527,7 +1636,7 @@ impl ImageViewerApp {
                         );
                         
                         if item.is_dir {
-                            // Pasta: icone nativo do Windows
+                            // folder: icone nativo do Windows
                             self.ensure_folder_icon(ui.ctx());
                             if let Some(folder_icon) = &self.folder_icon_texture {
                                 ui.painter().image(
@@ -1653,26 +1762,28 @@ impl ImageViewerApp {
         // NavegaÃ§Ã£o Teclado
         if ui.input(|i| i.focused) {
             let current_index = self.items.iter().position(|x| self.selected_file.as_ref().map_or(false, |f| f.path == x.path));
-            let mut new_index: Option<usize> = None;
-            
-            if ui.input(|i| i.key_pressed(egui::Key::ArrowRight)) { 
-                new_index = current_index.map(|idx| idx.saturating_add(1)).or(Some(0)); 
-            }
-            else if ui.input(|i| i.key_pressed(egui::Key::ArrowLeft)) { 
-                new_index = current_index.map(|idx| idx.saturating_sub(1)); 
-            }
-            else if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) { 
-                new_index = current_index.map(|idx| idx + cols).or(Some(0)); 
-            }
-            else if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) { 
-                new_index = current_index.map(|idx| idx.saturating_sub(cols)); 
-            }
+            // Navegação por teclado (APENAS SE NÃO ESTIVER RENOMEANDO)
+            if self.renaming_state.is_none() {
+                let mut new_index = None;
+                if ui.input(|i| i.key_pressed(egui::Key::ArrowRight)) { 
+                    new_index = current_index.map(|idx| idx + 1); 
+                }
+                else if ui.input(|i| i.key_pressed(egui::Key::ArrowLeft)) { 
+                    new_index = current_index.map(|idx| idx.saturating_sub(1)); 
+                }
+                else if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) { 
+                    new_index = current_index.map(|idx| idx + cols).or(Some(0)); 
+                }
+                else if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) { 
+                    new_index = current_index.map(|idx| idx.saturating_sub(cols)); 
+                }
 
-            if let Some(idx) = new_index {
-                let clamped = idx.min(self.items.len().saturating_sub(1));
-                if let Some(item) = self.items.get(clamped) {
-                    self.selected_file = Some(item.clone());
-                    self.selected_item = Some(clamped);
+                if let Some(idx) = new_index {
+                    let clamped = idx.min(self.items.len().saturating_sub(1));
+                    if let Some(item) = self.items.get(clamped) {
+                        self.selected_file = Some(item.clone());
+                        self.selected_item = Some(clamped);
+                    }
                 }
             }
             
