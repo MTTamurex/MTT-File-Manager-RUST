@@ -26,7 +26,6 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::Storage::FileSystem::{
     FindFirstFileW, FindNextFileW, FindClose, WIN32_FIND_DATAW, FILE_ATTRIBUTE_DIRECTORY
 };
-use windows::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
 use std::os::windows::ffi::OsStringExt;
 
 // ...
@@ -201,10 +200,10 @@ struct ImageViewerApp {
     file_entry_sender: Sender<Vec<FileEntry>>,
     is_loading_folder: bool,
     
-    // NOVO: Lazy loading de folder covers (otimização para HDD)
-    folder_scan_sender: Sender<(PathBuf, Option<PathBuf>)>,
-    folder_scan_receiver: Receiver<(PathBuf, Option<PathBuf>)>,
-    scanned_folders: HashSet<PathBuf>,  // Evita re-scan da mesma pasta
+    // COVER WORKER: Sistema de capas de pasta (Single Thread Worker)
+    cover_worker_sender: Sender<PathBuf>,  // UI → Worker: Envia pasta para processar
+    cover_worker_receiver: Receiver<(PathBuf, Option<PathBuf>)>,  // Worker → UI: Resultado
+    scanned_folders: HashSet<PathBuf>,  // Cache: evita re-scan
     
     // Icon cache (novo: extensão → texture)
     icon_cache: LruCache<String, egui::TextureHandle>,
@@ -240,7 +239,23 @@ impl Default for ImageViewerApp {
     fn default() -> Self {
         let (sender, receiver) = mpsc::channel();
         let (file_entry_sender, file_entry_receiver) = mpsc::channel();
-        let (fs_tx, fs_rx) = mpsc::channel();  // NOVO: Canal para folder scans
+        
+        // COVER WORKER: Worker único para processar capas de pasta
+        let (cover_req_tx, cover_req_rx) = mpsc::channel::<PathBuf>();  // UI → Worker
+        let (cover_res_tx, cover_res_rx) = mpsc::channel();             // Worker → UI
+        
+        // Spawna WORKER THREAD: fica em loop processando fila
+        std::thread::spawn(move || {
+            // Loop infinito: consome requisições da fila
+            while let Ok(folder_path) = cover_req_rx.recv() {
+                // Executa busca (função já existente)
+                let cover = find_first_image_in_folder(&folder_path);
+                
+                // Devolve resultado para UI thread
+                let _ = cover_res_tx.send((folder_path, cover));
+            }
+        });
+        
         let disks = get_all_drives();
         
         let mut app = Self {
@@ -254,9 +269,9 @@ impl Default for ImageViewerApp {
             file_entry_receiver,
             file_entry_sender,
             is_loading_folder: false,
-            // NOVO: Lazy folder scan infrastructure
-            folder_scan_sender: fs_tx,
-            folder_scan_receiver: fs_rx,
+            // Cover Worker
+            cover_worker_sender: cover_req_tx,
+            cover_worker_receiver: cover_res_rx,
             scanned_folders: HashSet::new(),
             icon_cache: LruCache::new(NonZeroUsize::new(ICON_CACHE_SIZE).unwrap()),
             folder_icon_texture: None,
@@ -807,19 +822,16 @@ impl ImageViewerApp {
     }
     
     /// Requisita scan assíncrono de uma pasta para descobrir primeira imagem.
-    /// Spawna thread leve dedicada que envia resultado via canal.
+    /// OTIMIZADO: Envia mensagem para worker único (zero overhead de threads)
     fn request_folder_scan(&self, folder_path: PathBuf) {
-        let sender = self.folder_scan_sender.clone();
-        
-        std::thread::spawn(move || {
-            let cover = find_first_image_in_folder(&folder_path);
-            let _ = sender.send((folder_path, cover));
-        });
+        // Apenas envia para fila - worker processa em background
+        let _ = self.cover_worker_sender.send(folder_path);
     }
     
     fn load_folder(&mut self) {
-        // 1. Limpeza de Estado
+        // 1. Limpeza de Estado (UI Thread)
         self.items.clear();
+        self.all_items.clear();  // Limpa backup mestre também
         self.texture_cache.clear();
         self.loading_set.clear();
         self.scanned_folders.clear();
@@ -830,32 +842,28 @@ impl ImageViewerApp {
         let current_path = self.current_path.clone();
         let file_entry_sender = self.file_entry_sender.clone();
         
-        // OTIMIZAÇÃO Win32: FindFirstFileW retorna metadados em UMA syscall
+        // STREAMING BATCH LOADING: Envia lotes de 250 itens progressivamente
         std::thread::spawn(move || {
-            let mut entries = Vec::new();
+            // Buffer para envio em lotes
+            let mut batch = Vec::with_capacity(250);
             
-            // 2. Prepara Path: "C:\Pasta\*"
+            // Prepara busca Win32
             let search_path = if current_path.ends_with('\\') {
                 format!("{}*", current_path)
             } else {
                 format!("{}\\*", current_path)
             };
-
             let wide_path: Vec<u16> = search_path.encode_utf16().chain(std::iter::once(0)).collect();
             let mut find_data = WIN32_FIND_DATAW::default();
 
             unsafe {
-                // FindFirstFileW retorna Result<HANDLE>
                 if let Ok(handle) = FindFirstFileW(PCWSTR(wide_path.as_ptr()), &mut find_data) {
-                    
                     loop {
-                        // Decodifica Nome do arquivo
                         let len = find_data.cFileName.iter().position(|&c| c == 0).unwrap_or(find_data.cFileName.len());
                         let filename = std::ffi::OsString::from_wide(&find_data.cFileName[0..len])
                             .to_string_lossy()
                             .into_owned();
 
-                        // Ignora "." e ".."
                         if filename != "." && filename != ".." {
                             let attrs = find_data.dwFileAttributes;
                             
@@ -870,15 +878,12 @@ impl ImageViewerApp {
                                 let is_dir = (attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
                                 let full_path = PathBuf::from(&current_path).join(&filename);
 
-                                // Extrai Tamanho - JÁ VEM PRONTO!
                                 let size = if is_dir { 
                                     0 
                                 } else {
                                     ((find_data.nFileSizeHigh as u64) << 32) | (find_data.nFileSizeLow as u64)
                                 };
 
-                                // Extrai Data de Modificação - JÁ VEM PRONTA!
-                                // Windows FileTime: 100ns desde 1601 → Unix: segundos desde 1970
                                 let ft = find_data.ftLastWriteTime;
                                 let windows_ticks = ((ft.dwHighDateTime as u64) << 32) | (ft.dwLowDateTime as u64);
                                 let modified = if windows_ticks > 116444736000000000 {
@@ -887,29 +892,41 @@ impl ImageViewerApp {
                                     0
                                 };
 
-                                entries.push(FileEntry {
+                                let entry = FileEntry {
                                     path: full_path,
                                     name: filename,
                                     is_dir,
                                     size,
                                     modified,
-                                    folder_cover: None,  // Lazy load (já implementado)
-                                });
+                                    folder_cover: None,  // Lazy load
+                                };
+
+                                // Adiciona ao lote
+                                batch.push(entry);
+
+                                // SE o lote encheu (250 itens), envia e limpa
+                                if batch.len() >= 250 {
+                                    let _ = file_entry_sender.send(batch.clone());
+                                    batch.clear();
+                                }
                             }
                         }
 
-                        // FindNextFileW retorna Result<()> - Err quando acabam os arquivos
                         if FindNextFileW(handle, &mut find_data).is_err() {
                             break;
                         }
                     }
-                    // Fecha o handle
                     let _ = FindClose(handle);
                 }
             }
 
-            // Envia batch completo para UI thread
-            let _ = file_entry_sender.send(entries);
+            // Envia o restante (último lote) se sobrou algo
+            if !batch.is_empty() {
+                let _ = file_entry_sender.send(batch);
+            }
+            
+            // Envia vetor VAZIO para sinalizar FIM do carregamento
+            let _ = file_entry_sender.send(Vec::new());
         });
     }
     
@@ -1093,19 +1110,27 @@ impl ImageViewerApp {
     }
     
     fn process_incoming_messages(&mut self, ctx: &egui::Context) {
-        // 1. Batch FileEntry loading (evita freeze)
-        if let Ok(entries) = self.file_entry_receiver.try_recv() {
-            self.all_items = entries;  // Salva backup mestre
-            self.search_query.clear(); // Limpa busca ao mudar de pasta
-            self.filter_items();       // Aplica filtro (copia all_items → items)
-            self.sort_items();
-            self.is_loading_folder = false;
+        // 1. STREAMING: Recebe lotes incrementais de FileEntry
+        while let Ok(new_batch) = self.file_entry_receiver.try_recv() {
+            if new_batch.is_empty() {
+                // Lote vazio = Sinal de "Fim do Carregamento" da thread
+                self.is_loading_folder = false;
+                // Ordenação final para garantir tudo correto
+                self.sort_items();
+            } else {
+                // Chegou dados! Adiciona à lista mestre
+                self.all_items.extend(new_batch);
+                
+                // Reaplica filtro e ordenação incrementalmente
+                self.filter_items(); 
+                self.sort_items();
+            }
             ctx.request_repaint();
         }
         
-        // 2. NOVO: Folder cover scan results (Lazy Load)
+        // 2. Cover Worker: Recebe resultados de capas de pasta
         let mut folder_updates = false;
-        while let Ok((folder_path, cover_opt)) = self.folder_scan_receiver.try_recv() {
+        while let Ok((folder_path, cover_opt)) = self.cover_worker_receiver.try_recv() {
             if let Some(cover) = cover_opt {
                 // Atualiza em items (lista filtrada/ordenada)
                 if let Some(item) = self.items.iter_mut().find(|i| i.path == folder_path) {
@@ -1715,23 +1740,8 @@ impl eframe::App for ImageViewerApp {
         
         // Central grid
         egui::CentralPanel::default().show(ctx, |ui| {
-            // 1. PRIORIDADE: Carregando? Mostra spinner
-            if self.is_loading_folder {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(100.0);
-                    ui.spinner();
-                    ui.label("Carregando...");
-                });
-            }
-            // 2. Lista vazia (e não carregando)? Mostra mensagem
-            else if self.items.is_empty() {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(100.0);
-                    ui.label("Pasta vazia");
-                });
-            }
-            // 3. Tem items? Renderiza grid
-            else {
+            // PRIORIDADE: Mostra Grid se tiver items (mesmo se ainda carregando)
+            if !self.items.is_empty() {
                 // ============================================
                 // POSICIONAMENTO ABSOLUTO (Game Engine Style)
                 // Elimina 100% do jitter usando coordenadas matemáticas
@@ -2006,6 +2016,35 @@ impl eframe::App for ImageViewerApp {
                             }
                         }
                     });
+                
+                // Spinner pequeno no canto se ainda carregando mais lotes
+                if self.is_loading_folder {
+                    let screen_rect = ui.max_rect();
+                    let spinner_pos = screen_rect.right_bottom() - egui::vec2(70.0, 70.0);
+                    let spinner_rect = egui::Rect::from_min_size(spinner_pos, egui::vec2(60.0, 60.0));
+                    
+                    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(spinner_rect), |ui| {
+                        ui.vertical(|ui| {
+                            ui.spinner();
+                            ui.label("Lendo...");
+                        });
+                    });
+                }
+            }
+            // Carregando inicial (sem items ainda)
+            else if self.is_loading_folder {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(100.0);
+                    ui.spinner();
+                    ui.label("Acessando disco...");
+                });
+            }
+            // Pasta vazia (loading terminou, mas sem items)
+            else {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(100.0);
+                    ui.label("Pasta vazia");
+                });
             }
         });
     }
