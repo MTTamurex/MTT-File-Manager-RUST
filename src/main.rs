@@ -1234,14 +1234,13 @@ impl ImageViewerApp {
                     None
                 };
 
-                // Compact file card with NO padding
+                // Compact file card with NO padding or borders
                 let frame = egui::Frame::NONE
                     .fill(if is_selected {
                         egui::Color32::from_rgb(191, 228, 255)
                     } else {
                         egui::Color32::from_gray(250)
                     })
-                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_gray(220)))
                     .corner_radius(4)
                     .inner_margin(0.0);  // NO padding!
                 
