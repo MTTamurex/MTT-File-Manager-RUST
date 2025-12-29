@@ -27,6 +27,8 @@ use windows::Win32::Storage::FileSystem::{
     FindFirstFileW, FindNextFileW, FindClose, WIN32_FIND_DATAW, FILE_ATTRIBUTE_DIRECTORY
 };
 use std::os::windows::ffi::OsStringExt;
+use windows::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+use windows::Win32::System::Threading::GetCurrentProcess;
 
 // ...
 
@@ -816,6 +818,22 @@ fn format_size(bytes: u64) -> String {
         format!("{:.2} KB", bytes as f64 / KB as f64)
     } else {
         format!("{} bytes", bytes)
+    }
+}
+
+/// Obtém o uso de RAM atual do processo (RSS)
+fn get_ram_usage() -> u64 {
+    unsafe {
+        let mut counters = PROCESS_MEMORY_COUNTERS::default();
+        if K32GetProcessMemoryInfo(
+            GetCurrentProcess(),
+            &mut counters,
+            std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+        ).as_bool() {
+            counters.WorkingSetSize as u64
+        } else {
+            0
+        }
     }
 }
 
@@ -1849,6 +1867,49 @@ impl eframe::App for ImageViewerApp {
         self.ensure_folder_icon(ctx);
         self.ensure_computer_icon(ctx);  // Carrega Ã­cone "Este Computador"
 
+        // Status Bar (Footer) - Definido primeiro para ocupar toda a largura
+        egui::TopBottomPanel::bottom("status_bar")
+            .exact_height(24.0)
+            .show(ctx, |ui| {
+                ui.add_space(2.0);
+                ui.horizontal(|ui| {
+                    ui.style_mut().spacing.item_spacing.x = 12.0;
+                    
+                    ui.add_space(5.0);
+                    // Contagem de itens
+                    ui.label(format!("{} itens", self.total_items));
+                    
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_space(5.0);
+                        if self.is_loading_folder {
+                            ui.spinner();
+                            ui.label("Atualizando...");
+                        }
+
+                        ui.separator();
+
+                        // RAM Usage (RSS)
+                        let ram_usage = get_ram_usage();
+                        ui.label(format!("RAM: {}", format_size(ram_usage)));
+
+                        ui.separator();
+
+                        // Calculo de VRAM
+                        let vram_usage: usize = self.texture_cache.iter()
+                            .map(|(_, tex)| {
+                                let size = tex.size();
+                                size[0] * size[1] * 4
+                            })
+                            .sum();
+                        
+                        ui.label(format!(
+                            "Utilização de VRAM: {:.1} MB",
+                            vram_usage as f64 / 1024.0 / 1024.0
+                        ));
+                    });
+                });
+            });
+
         
         // Windows 11 style sidebar
         // Left Sidebar moved to after TopPanels for correct layout
@@ -1961,22 +2022,6 @@ impl eframe::App for ImageViewerApp {
                 
                 ui.separator();
                 ui.label(format!("Itens: {}", self.total_items));
-                
-                ui.separator();
-                
-                
-                let memory_usage: usize = self.texture_cache.iter()
-                    .map(|(_, tex)| {
-                        let size = tex.size();
-                        size[0] * size[1] * 4
-                    })
-                    .sum();
-                
-                ui.label(format!(
-                    "VRAM: {:.1} MB",
-                    memory_usage as f64 / 1024.0 / 1024.0
-                ));
-                
             });
         });
         
@@ -2200,6 +2245,7 @@ impl eframe::App for ImageViewerApp {
                     }
                 });
         }
+
         
         // Central Panel
         egui::CentralPanel::default().show(ctx, |ui| {
