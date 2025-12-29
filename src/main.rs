@@ -11,6 +11,21 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 use notify::{Watcher, RecursiveMode, RecommendedWatcher};
 
+// Mapeamento Remix Icon
+const ICON_ARROW_LEFT: &str = "\u{EA64}";  // Seta Esq
+const ICON_ARROW_RIGHT: &str = "\u{EA6E}"; // Seta Dir
+const ICON_ARROW_UP: &str = "\u{EA78}";    // Seta Cima
+const ICON_REFRESH: &str = "\u{F064}";     // Recarregar
+const ICON_HOME: &str = "\u{EE1B}";        // Casa/PC
+const ICON_GRID: &str = "\u{ED9E}";        // Grade (Nova sugestão)
+const ICON_LIST: &str = "\u{EF3E}";        // Lista
+const ICON_SEARCH: &str = "\u{F0D1}";      // Lupa
+const ICON_FOLDER_ADD: &str = "\u{ED5A}";  // Nova Pasta (Sugestão do usuário)
+const ICON_DETAILS: &str = "\u{ECEA}";     // Detalhes (file-info-line)
+const ICON_FOLDER: &str = "\u{ED9F}";      // Folder (folder-line)
+const ICON_FILE: &str = "\u{ECD3}";        // File (file-line)
+
+
 // Import domain types
 use mtt_file_manager::domain::file_entry::*;
 use mtt_file_manager::domain::thumbnail::*;
@@ -29,7 +44,8 @@ use windows::{
 use windows::Win32::UI::Shell::{
     SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_LARGEICON, 
     SHGFI_USEFILEATTRIBUTES, SHGFI_DISPLAYNAME,
-    SHFileOperationW, SHFILEOPSTRUCTW, FO_RENAME, FOF_ALLOWUNDO
+    SHFileOperationW, SHFILEOPSTRUCTW, FO_RENAME, FO_DELETE,
+    FOF_ALLOWUNDO, FOF_WANTNUKEWARNING
 };
 
 // OTIMIZAÃ‡ÃƒO: Imports para Win32 FindFirst/NextFileW (metadata em UMA syscall)
@@ -858,6 +874,94 @@ fn format_date(timestamp: u64) -> String {
 }
 
 impl ImageViewerApp {
+    // Helper para botÃµes de Ã­cone da Toolbar
+    fn icon_button(&self, ui: &mut egui::Ui, icon: &str, tooltip: &str) -> egui::Response {
+        let rich_text = egui::RichText::new(icon)
+            .family(egui::FontFamily::Name("icons".into()))
+            .size(22.0);
+
+        let btn = egui::Button::new(rich_text).frame(false);
+        ui.add(btn).on_hover_text(tooltip)
+    }
+
+    fn delete_with_shell(&mut self) {
+        if let Some(idx) = self.selected_item {
+            if let Some(item) = self.items.get(idx) {
+                let path = item.path.to_string_lossy().to_string();
+
+                // Double-null termination exigido pela API
+                let mut from_vec: Vec<u16> = path.encode_utf16().collect();
+                from_vec.push(0);
+                from_vec.push(0);
+
+                let mut op = SHFILEOPSTRUCTW {
+                    hwnd: HWND(std::ptr::null_mut()),
+                    wFunc: FO_DELETE,
+                    pFrom: PCWSTR(from_vec.as_ptr()),
+                    pTo: PCWSTR(std::ptr::null()),
+                    fFlags: (FOF_ALLOWUNDO | FOF_WANTNUKEWARNING).0 as u16,
+                    ..Default::default()
+                };
+
+                unsafe {
+                    let result = SHFileOperationW(&mut op);
+                    if result == 0 {
+                        // O watcher vai cuidar do refresh, mas podemos limpar a seleção
+                        self.selected_item = None;
+                        self.selected_file = None;
+                    }
+                }
+            }
+        }
+    }
+
+    fn create_new_folder(&mut self) {
+        let base_path = PathBuf::from(&self.current_path);
+        let mut new_folder_name = "Nova Pasta".to_string();
+        let mut counter = 1;
+
+        while base_path.join(&new_folder_name).exists() {
+            counter += 1;
+            new_folder_name = format!("Nova Pasta ({})", counter);
+        }
+
+        let full_path = base_path.join(&new_folder_name);
+
+        if std::fs::create_dir(&full_path).is_ok() {
+            // CRÍTICO: Para renomear imediatamente, usamos o helper from_path
+            let new_item = FileEntry::from_path(full_path.clone(), true);
+            
+            self.all_items.push(new_item);
+            self.filter_items();
+            self.sort_items();
+
+            // Acha o índice no vetor filtrado (items)
+            if let Some(idx) = self.items.iter().position(|i| i.path == full_path) {
+                self.selected_item = Some(idx);
+                self.selected_file = Some(self.items[idx].clone());
+                self.renaming_state = Some((idx, new_folder_name));
+                self.focus_rename = true;
+            }
+            
+            // Requisita load real em background para garantir sincronia com disco
+            self.load_folder();
+        }
+    }
+    
+    // Helper para botÃµes \"Toggle\" (que ficam acesos se selecionados)
+    fn toggle_icon_button(&self, ui: &mut egui::Ui, icon: &str, active: bool, tooltip: &str) -> egui::Response {
+        let color = if active { egui::Color32::from_rgb(0, 120, 215) } else { ui.visuals().text_color() };
+        
+        let rich_text = egui::RichText::new(icon)
+            .family(egui::FontFamily::Name("icons".into()))
+            .size(22.0)
+            .color(color);
+
+        // Removemos o .fill(bg) para retirar o "glow" azul
+        let btn = egui::Button::new(rich_text).frame(false);
+        ui.add(btn).on_hover_text(tooltip)
+    }
+
     /// Filtra itens baseado na query de busca
     fn filter_items(&mut self) {
         if self.search_query.is_empty() {
@@ -1541,7 +1645,7 @@ impl ImageViewerApp {
                                     egui::Color32::WHITE
                                 );
                             } else {
-                                ui.painter().text(icon_rect.min, egui::Align2::LEFT_TOP, "[D]", egui::FontId::proportional(14.0), egui::Color32::from_rgb(255, 193, 7));
+                                ui.painter().text(icon_rect.min, egui::Align2::LEFT_TOP, ICON_FOLDER, egui::FontId::new(14.0, egui::FontFamily::Name("icons".into())), egui::Color32::from_rgb(255, 193, 7));
                             }
                         } else {
                             // Arquivo: tenta carregar icone nativo
@@ -1553,7 +1657,7 @@ impl ImageViewerApp {
                                     egui::Color32::WHITE
                                 );
                             } else {
-                                ui.painter().text(icon_rect.min, egui::Align2::LEFT_TOP, "[F]", egui::FontId::proportional(14.0), egui::Color32::GRAY);
+                                ui.painter().text(icon_rect.min, egui::Align2::LEFT_TOP, ICON_FILE, egui::FontId::new(14.0, egui::FontFamily::Name("icons".into())), egui::Color32::GRAY);
                             }
                         }
 
@@ -2006,9 +2110,14 @@ impl ImageViewerApp {
                         let icon_rect = egui::Rect::from_center_size(thumb_rect.center(), egui::vec2(icon_size, icon_size));
                         ui.painter().image(icon_texture.id(), icon_rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
                     } else {
-                        // Se nem o icone carregou, mostra "..." se for midia ou "[F]" se nao
-                        let text = if is_media_file { "..." } else { "[F]" };
-                        ui.painter().text(thumb_rect.center(), egui::Align2::CENTER_CENTER, text, egui::FontId::proportional(thumb_size * 0.3), egui::Color32::GRAY);
+                        // Se nem o icone carregou, mostra "..." se for midia ou icone generico
+                        let text = if is_media_file { "..." } else { ICON_FILE };
+                        let font_id = if is_media_file { 
+                            egui::FontId::proportional(thumb_size * 0.3) 
+                        } else { 
+                            egui::FontId::new(thumb_size * 0.4, egui::FontFamily::Name("icons".into()))
+                        };
+                        ui.painter().text(thumb_rect.center(), egui::Align2::CENTER_CENTER, text, font_id, egui::Color32::GRAY);
                     }
                 }
                 
@@ -2060,7 +2169,18 @@ impl eframe::App for ImageViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.process_incoming_messages(ctx);
         self.ensure_folder_icon(ctx);
-        self.ensure_computer_icon(ctx);  // Carrega Ã­cone "Este Computador"
+        self.ensure_computer_icon(ctx);
+
+        // ATALHOS DE TECLADO
+        // Delete: Excluir (se não estiver renomeando)
+        if ctx.input(|i| i.key_pressed(egui::Key::Delete)) && self.renaming_state.is_none() {
+            self.delete_with_shell();
+        }
+
+        // Ctrl + Shift + N: Nova Pasta
+        if ctx.input(|i| i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::N)) {
+            self.create_new_folder();
+        }
 
         // Status Bar (Footer) - Definido primeiro para ocupar toda a largura
         egui::TopBottomPanel::bottom("status_bar")
@@ -2112,112 +2232,132 @@ impl eframe::App for ImageViewerApp {
         
         // Top navigation bar
         egui::TopBottomPanel::top("nav_bar").show(ctx, |ui| {
+            ui.add_space(4.0);
             ui.horizontal(|ui| {
-                // BotÃ£o Voltar (desabilitado se nÃ£o pode voltar)
+                ui.style_mut().spacing.item_spacing.x = 8.0;
+
+                // 1. NAVEGAÇÃO (ESQUERDA)
                 let can_back = self.can_go_back();
-                if ui.add_enabled(can_back, egui::Button::new("<")).clicked() {
+                if self.icon_button(ui, ICON_ARROW_LEFT, "Voltar").clicked() && can_back {
                     self.go_back();
                 }
                 
-                // BotÃ£o AvanÃ§ar (desabilitado se nÃ£o pode avanÃ§ar)
                 let can_forward = self.can_go_forward();
-                if ui.add_enabled(can_forward, egui::Button::new(">")).clicked() {
+                if self.icon_button(ui, ICON_ARROW_RIGHT, "Avançar").clicked() && can_forward {
                     self.go_forward();
                 }
                 
-                // BotÃ£o Subir
-                if ui.button("^").clicked() {
+                if self.icon_button(ui, ICON_ARROW_UP, "Subir um nível").clicked() {
                     self.go_up_one_level();
                 }
                 
-                ui.separator();
-                
-                // Search field (NEW)
-                // Search field
-                let search_response = ui.add_sized(
-                    egui::vec2(150.0, 20.0),
-                    egui::TextEdit::singleline(&mut self.search_query)
-                        .hint_text("Buscar...")
-                );
-                if search_response.changed() {
-                    self.filter_items();
-                    self.sort_items();
+                if self.icon_button(ui, ICON_REFRESH, "Recarregar").clicked() {
+                    self.load_folder();
                 }
-                
+
                 ui.separator();
+
+                // Botão de Nova Pasta mais visível (agora sem fundo para combinar)
+                let btn_text = egui::RichText::new(format!("+ {}", ICON_FOLDER_ADD))
+                    .family(egui::FontFamily::Name("icons".into()))
+                    .size(22.0);
                 
-                // Sorting controls (BEFORE address bar to ensure visibility)
-                ui.label("Ordenar:");
-                egui::ComboBox::from_id_salt("sort_mode")
-                    .selected_text(match self.sort_mode {
-                        SortMode::Name => "Nome",
-                        SortMode::Date => "Última modificação",
-                        SortMode::Size => "Tamanho",
-                    })
-                    .show_ui(ui, |ui| {
-                        if ui.selectable_value(&mut self.sort_mode, SortMode::Name, "Nome").clicked() { 
-                            self.sort_items(); 
-                        }
-                        if ui.selectable_value(&mut self.sort_mode, SortMode::Date, "Última modificação").clicked() { 
-                            self.sort_items(); 
-                        }
-                        if ui.selectable_value(&mut self.sort_mode, SortMode::Size, "Tamanho").clicked() { 
-                            self.sort_items(); 
-                        }
-                    });
-                
-                // Toggle ascending/descending
-                let sort_icon = if self.sort_descending { "v" } else { "^" };
-                if ui.button(sort_icon).clicked() {
-                    self.sort_descending = !self.sort_descending;
-                    self.sort_items();
+                let btn = egui::Button::new(btn_text).frame(false);
+                if ui.add(btn).on_hover_text("Criar Nova Pasta (Ctrl+Shift+N)").clicked() {
+                    self.create_new_folder();
                 }
 
                 ui.separator();
                 
-                // VIEW MODE (Grid vs List)
-                ui.selectable_value(&mut self.view_mode, ViewMode::Grid, "[#] Grade");
-                ui.selectable_value(&mut self.view_mode, ViewMode::List, "[=] Lista");
-                
-                ui.separator();
-                
-                // Toggle preview pane
-                if ui.button("[*]").on_hover_text("Preview").clicked() {
-                    self.show_preview_panel = !self.show_preview_panel;
+                if self.icon_button(ui, ICON_HOME, "Ir para C:\\").clicked() {
+                    self.navigate_to("C:\\");
                 }
-                
-                ui.separator();
-                
-                // Barra de endereÃ§o editÃ¡vel
-                let response = ui.add_sized(
-                    egui::vec2(ui.available_width() - 10.0, 20.0),
-                    egui::TextEdit::singleline(&mut self.path_input)
-                        .font(egui::TextStyle::Monospace)
-                );
-                
-                // Enter para navegar
-                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    let path = self.path_input.clone();
-                    if Path::new(&path).exists() {
-                        self.navigate_to(&path);
-                    } else {
-                        // Restaura o path atual se invÃ¡lido
-                        self.path_input = self.current_path.clone();
+
+                // 2. ELEMENTOS DA DIREITA (DIREITA -> ESQUERDA)
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_space(4.0);
+                    
+                    // Zoom
+                    ui.add_sized(
+                        egui::vec2(80.0, 20.0),
+                        egui::Slider::new(&mut self.thumbnail_size, 64.0..=256.0).show_value(false)
+                    );
+                    ui.label("Zoom");
+                    
+                    ui.separator();
+
+                    // Detalhes (Antigo Preview)
+                    if self.toggle_icon_button(ui, ICON_DETAILS, self.show_preview_panel, "Detalhes").clicked() {
+                        self.show_preview_panel = !self.show_preview_panel;
                     }
-                }
+
+                    ui.separator();
+
+                    // Modo de Visualização
+                    if self.toggle_icon_button(ui, ICON_LIST, self.view_mode == ViewMode::List, "Lista").clicked() {
+                        self.view_mode = ViewMode::List;
+                    }
+                    if self.toggle_icon_button(ui, ICON_GRID, self.view_mode == ViewMode::Grid, "Grade").clicked() {
+                        self.view_mode = ViewMode::Grid;
+                    }
+
+                    ui.separator();
+
+                    // Ordenação
+                    let sort_symbol = if self.sort_descending { "▾" } else { "▴" };
+                    if ui.button(sort_symbol).on_hover_text("Inverter Ordem").clicked() {
+                        self.sort_descending = !self.sort_descending;
+                        self.sort_items();
+                    }
+
+                    egui::ComboBox::from_id_salt("sort_mode")
+                        .selected_text(match self.sort_mode {
+                            SortMode::Name => "Nome",
+                            SortMode::Date => "Data",
+                            SortMode::Size => "Tamanho",
+                        })
+                        .show_ui(ui, |ui| {
+                            if ui.selectable_value(&mut self.sort_mode, SortMode::Name, "Nome").clicked() { self.sort_items(); }
+                            if ui.selectable_value(&mut self.sort_mode, SortMode::Date, "Data").clicked() { self.sort_items(); }
+                            if ui.selectable_value(&mut self.sort_mode, SortMode::Size, "Tamanho").clicked() { self.sort_items(); }
+                        });
+
+                    ui.separator();
+
+                    // Busca
+                    let search_width = 120.0;
+                    let search_response = ui.add_sized(
+                        egui::vec2(search_width, 22.0),
+                        egui::TextEdit::singleline(&mut self.search_query)
+                            .hint_text("Buscar...")
+                    );
+                    if search_response.changed() {
+                        self.filter_items();
+                        self.sort_items();
+                    }
+                    ui.label(egui::RichText::new(ICON_SEARCH).family(egui::FontFamily::Name("icons".into())).size(16.0));
+
+                    ui.separator();
+
+                    // 3. BARRA DE ENDEREÇO (OCUPA O MEIO)
+                    let addr_width = ui.available_width().max(100.0);
+                    let response = ui.add_sized(
+                        egui::vec2(addr_width, 22.0),
+                        egui::TextEdit::singleline(&mut self.path_input)
+                            .hint_text("Caminho...")
+                    );
+                    
+                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        let path = self.path_input.clone();
+                        if Path::new(&path).exists() {
+                            self.navigate_to(&path);
+                        } else {
+                            self.path_input = self.current_path.clone();
+                        }
+                    }
+                });
             });
-        });
-        
-        // Toolbar
-        egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Zoom:");
-                ui.add(egui::Slider::new(&mut self.thumbnail_size, 64.0..=256.0)
-                    .show_value(false));
-                
-                ui.separator();
-                ui.label(format!("Itens: {}", self.total_items));
-            });
+            ui.add_space(4.0);
         });
         
         // Windows 11 style sidebar (Restored)
@@ -2526,6 +2666,20 @@ fn main() -> eframe::Result<()> {
                     std::sync::Arc::new(egui::FontData::from_owned(font_data)),
                 );
                 loaded_fonts.push("arial_unicode".to_owned());
+            }
+
+            // 4. Remix Icon (Fonte de Ícones dedicada)
+            if let Ok(data) = std::fs::read("assets/remixicon.ttf") {
+                fonts.font_data.insert(
+                    "remix_icon".to_owned(),
+                    std::sync::Arc::new(egui::FontData::from_owned(data)),
+                );
+                
+                // Definir uma família específica para ícones
+                fonts.families.insert(
+                    egui::FontFamily::Name("icons".into()),
+                    vec!["remix_icon".to_owned()]
+                );
             }
             
             // Adiciona apenas fontes carregadas
