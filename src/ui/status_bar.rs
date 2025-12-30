@@ -3,6 +3,8 @@
 //! This module contains the rendering logic for the application status bar.
 
 use eframe::egui;
+use lru::LruCache;
+use std::path::PathBuf;
 use crate::domain::file_entry::{ViewMode, SortMode};
 
 /// Status bar action that needs to be handled by the caller
@@ -26,6 +28,7 @@ pub fn render_status_bar(
     thumbnail_size: &mut f32,
     sort_mode: &mut SortMode,
     sort_descending: &mut bool,
+    texture_cache: &LruCache<PathBuf, egui::TextureHandle>,
 ) -> StatusBarAction {
     let mut action = StatusBarAction::None;
     
@@ -61,8 +64,27 @@ pub fn render_status_bar(
             ui.add(egui::Slider::new(thumbnail_size, 64.0..=256.0).show_value(false));
         });
         
-        // Right side: sort mode
+        // Right side: sort mode and system info
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // System info (RAM/VRAM)
+            if let Some(ram_usage) = get_ram_usage() {
+                ui.label(format!("RAM: {}", format_size(ram_usage)));
+            }
+            
+            // VRAM estimation
+            let vram_usage: usize = texture_cache.iter()
+                .map(|(_, tex)| {
+                    let size = tex.size();
+                    size[0] as usize * size[1] as usize * 4 // RGBA = 4 bytes per pixel
+                })
+                .sum();
+            
+            if vram_usage > 0 {
+                ui.label(format!("VRAM: {:.1} MB", vram_usage as f64 / 1024.0 / 1024.0));
+            }
+            
+            ui.separator();
+            
             ui.label("Ordenar por:");
             
             let sort_modes = [
@@ -90,4 +112,42 @@ pub fn render_status_bar(
     });
     
     action
+}
+
+/// Gets the current process RAM usage (RSS/Working Set).
+fn get_ram_usage() -> Option<u64> {
+    use windows::{
+        Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS},
+        Win32::System::Threading::GetCurrentProcess,
+    };
+    
+    unsafe {
+        let mut counters = PROCESS_MEMORY_COUNTERS::default();
+        if K32GetProcessMemoryInfo(
+            GetCurrentProcess(),
+            &mut counters,
+            std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+        ).as_bool() {
+            Some(counters.WorkingSetSize as u64)
+        } else {
+            None
+        }
+    }
+}
+
+/// Formats size in bytes to human readable string
+fn format_size(bytes: u64) -> String {
+    const UNITS: [&str; 6] = ["B", "KB", "MB", "GB", "TB", "PB"];
+    
+    if bytes == 0 {
+        return "0 B".to_string();
+    }
+    
+    let base = 1024_f64;
+    let bytes_f64 = bytes as f64;
+    let exponent = (bytes_f64.log10() / base.log10()).floor() as i32;
+    let unit_index = exponent.min(5).max(0) as usize;
+    let divisor = base.powi(exponent);
+    
+    format!("{:.1} {}", bytes_f64 / divisor, UNITS[unit_index])
 }
