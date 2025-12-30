@@ -2005,30 +2005,93 @@ impl ImageViewerApp {
             return;
         }
         
-        use mtt_file_manager::ui::components::item_slot::{render_item_slot, ItemSlotContext, ItemSlotOperations};
+        use mtt_file_manager::ui::components::item_slot::{render_item_slot, ItemSlotContext};
         
-        let item = &self.items[idx];
+        // Clone item data to avoid borrowing self.items during the render
+        let item = self.items[idx].clone();
         let is_renaming = self.renaming_state.as_ref().map_or(false, |(i, _)| *i == idx);
-        let renaming_text = if is_renaming {
-            Some(&mut self.renaming_state.as_mut().unwrap().1)
+        
+        // Para evitar conflitos de borrow, coletamos as operações pendentes
+        // e executamos depois de renderizar
+        let mut pending_thumbnail_loads: Vec<std::path::PathBuf> = Vec::new();
+        let mut pending_folder_scans: Vec<std::path::PathBuf> = Vec::new();
+        let mut pending_rename: Option<usize> = None;
+        
+        // Texto de renomeação precisa ser tratado separadamente
+        let mut renaming_text_clone = if is_renaming {
+            self.renaming_state.as_ref().map(|(_, s)| s.clone())
         } else {
             None
         };
         
-        let mut ctx = ItemSlotContext {
-            item,
-            idx,
-            thumbnail_size: self.thumbnail_size,
-            is_renaming,
-            renaming_text,
-            focus_rename: self.focus_rename,
-            texture_cache: &mut self.texture_cache,
-            icon_loader: &mut IconLoader::new(),
-            scanned_folders: &mut self.scanned_folders,
-            loading_set: &mut self.loading_set,
-        };
+        // Create context with mutable reference to the clone
+        {
+            let renaming_text = renaming_text_clone.as_mut();
+            
+            let mut ctx = ItemSlotContext {
+                item: &item,
+                idx,
+                thumbnail_size: self.thumbnail_size,
+                is_renaming,
+                renaming_text,
+                focus_rename: self.focus_rename,
+                texture_cache: &mut self.texture_cache,
+                icon_loader: &mut IconLoader::new(),
+                scanned_folders: &mut self.scanned_folders,
+                loading_set: &mut self.loading_set,
+            };
+            
+            // Create simple ops struct that collects operations
+            struct SimpleOps<'a> {
+                thumbnail_loads: &'a mut Vec<std::path::PathBuf>,
+                folder_scans: &'a mut Vec<std::path::PathBuf>,
+                pending_rename: &'a mut Option<usize>,
+            }
+            
+            impl<'a> mtt_file_manager::ui::components::item_slot::ItemSlotOperations for SimpleOps<'a> {
+                fn request_thumbnail_load(&mut self, path: std::path::PathBuf) {
+                    self.thumbnail_loads.push(path);
+                }
+                
+                fn request_folder_scan(&mut self, path: std::path::PathBuf) {
+                    self.folder_scans.push(path);
+                }
+                
+                fn rename_item(&mut self, idx: usize) {
+                    *self.pending_rename = Some(idx);
+                }
+            }
+            
+            let mut ops = SimpleOps {
+                thumbnail_loads: &mut pending_thumbnail_loads,
+                folder_scans: &mut pending_folder_scans,
+                pending_rename: &mut pending_rename,
+            };
+            
+            render_item_slot(ui, &mut ctx, &mut ops);
+        }
         
-        render_item_slot(ui, &mut ctx, self);
+        // Apply changes after render
+        if let Some(new_text) = renaming_text_clone {
+            if is_renaming {
+                if let Some((_, ref mut text)) = self.renaming_state {
+                    *text = new_text;
+                }
+            }
+        }
+        
+        // Execute pending operations
+        for path in pending_thumbnail_loads {
+            ImageViewerApp::request_thumbnail_load(&*self, path);
+        }
+        
+        for path in pending_folder_scans {
+            ImageViewerApp::request_folder_scan(&*self, path);
+        }
+        
+        if let Some(rename_idx) = pending_rename {
+            self.rename_with_shell(rename_idx);
+        }
         
         // Reset focus flag after first use
         if self.focus_rename {
@@ -2138,16 +2201,17 @@ impl ImageViewerApp {
             }
         }
     }
-    }
 }
 
 impl mtt_file_manager::ui::components::item_slot::ItemSlotOperations for ImageViewerApp {
     fn request_thumbnail_load(&mut self, path: std::path::PathBuf) {
-        self.request_thumbnail_load(path);
+        // Call inherent method - uses &self so we need to reborrow
+        ImageViewerApp::request_thumbnail_load(&*self, path);
     }
     
     fn request_folder_scan(&mut self, path: std::path::PathBuf) {
-        self.request_folder_scan(path);
+        // Call inherent method - uses &self so we need to reborrow
+        ImageViewerApp::request_folder_scan(&*self, path);
     }
     
     fn rename_item(&mut self, idx: usize) {
