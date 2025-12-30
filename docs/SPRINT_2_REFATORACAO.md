@@ -24,6 +24,16 @@ src/
 │   │   ├── mod.rs        # Exportação de componentes
 │   │   └── item_slot.rs  (330 linhas) ⚠️ Ligeiramente acima
 │   └── mod.rs            # Exportação atualizada
+├── infrastructure/
+│   └── windows/          # Módulo Windows API ✅ NOVO
+│       ├── mod.rs        # Exportação de funções
+│       ├── icons.rs      (250 linhas) ✅ < 300
+│       ├── bitmap_conversion.rs (150 linhas) ✅ < 300
+│       ├── drives.rs     (150 linhas) ✅ < 300
+│       ├── formatting.rs (50 linhas) ✅ < 300
+│       ├── shell_operations.rs (30 linhas) ✅ < 300
+│       ├── system_info.rs (30 linhas) ✅ < 300
+│       └── file_system.rs (50 linhas) ✅ < 300
 ├── lib.rs                # Atualizado com novo módulo
 └── main.rs               (~2800 linhas) ⚠️ Ainda grande - ver Sprint 3
 ```
@@ -54,7 +64,42 @@ src/
 - **render_status_bar**: Função standalone para renderizar a barra de status
 - **StatusBarAction**: Enum para ações retornadas pela barra de status
 
-### 3. Conformidade com .cursorrules
+### 3. Módulos Windows API Extraídos ✅
+
+#### `src/infrastructure/windows/icons.rs` (250 linhas)
+- **extract_computer_icon**: Ícone "Este Computador" via PIDL
+- **extract_thumbnail**: Thumbnails via IShellItemImageFactory
+- **extract_file_icon**: Ícones por extensão
+- **extract_folder_icon**: Ícone padrão de pasta
+- **extract_file_icon_by_path**: Ícones de executáveis (.exe, .lnk)
+- **extract_drive_icon**: Ícones específicos de drives
+
+#### `src/infrastructure/windows/bitmap_conversion.rs` (150 linhas)
+- **hbitmap_to_rgba**: Conversão HBITMAP → RGBA
+- **hicon_to_rgba**: Conversão HICON → RGBA
+- **create_error_placeholder**: Placeholder para erros
+
+#### `src/infrastructure/windows/drives.rs` (150 linhas)
+- **get_volume_label**: Nome de volume via Shell Display Name
+- **get_all_drives**: Enumeração de drives com labels
+- **get_volume_info**: Informações de sistema de arquivos e espaço
+
+#### `src/infrastructure/windows/formatting.rs` (50 linhas)
+- **format_size**: Formatação bytes → KB/MB/GB
+- **format_date**: Formatação timestamp → DD/MM/YYYY HH:MM
+
+#### `src/infrastructure/windows/shell_operations.rs` (30 linhas)
+- **open_with_shell**: Abrir arquivo com aplicação padrão
+
+#### `src/infrastructure/windows/system_info.rs` (30 linhas)
+- **get_ram_usage**: Uso de RAM do processo atual
+
+#### `src/infrastructure/windows/file_system.rs` (50 linhas)
+- **get_file_attributes**: Atributos de arquivo
+- **is_directory**: Verificação de diretório
+- **is_file**: Verificação de arquivo
+
+### 4. Conformidade com .cursorrules
 
 ✅ **Maioria dos arquivos < 300 linhas**
 - `state.rs`: 295 linhas ✅
@@ -62,8 +107,9 @@ src/
 - `status_bar.rs`: 85 linhas ✅
 - `item_slot.rs`: 330 linhas ⚠️ (ligeiramente acima)
 - `main.rs`: ~2800 linhas ⚠️ (requer mais extração no Sprint 3)
+- **Todos módulos Windows API**: < 300 linhas ✅
 
-### 4. Arquivos Temporariamente Desabilitados
+### 5. Arquivos Temporariamente Desabilitados
 
 Durante a refatoração, alguns arquivos de UI foram movidos para `.bak`:
 
@@ -75,30 +121,81 @@ src/ui/icon_loader.rs.bak
 src/ui/texture_cache.rs.bak
 ```
 
-### 5. Componentes Extraídos
+### 6. Componentes Extraídos
 
 | Componente | Status | Arquivo | Integração |
 |------------|--------|---------|------------|
 | Status Bar | ✅ | `status_bar.rs` | Funcional |
 | Item Slot | ✅ | `item_slot.rs` | Corrigida (ver seção 8) |
 | Cache Manager | ⚠️ | `cache.rs` | Não utilizado no main.rs |
+| Windows APIs | ✅ | `infrastructure/windows/` | Totalmente integrado |
 
-### 6. Status de Compilação
+### 7. Status de Compilação
 
 ✅ **Compilação bem-sucedida** (após correções)
 ⚠️ **Warnings**: `icon_config` não utilizado em `cache.rs`
 
-### 7. Próximos Passos (Sprint 3)
+### 8. Extração de Windows APIs (Concluída)
+
+#### ✅ **Objetivo Alcançado**
+Todas as funções Windows API foram extraídas do `main.rs` para módulos dedicados em `src/infrastructure/windows/`.
+
+#### **Funções Extraídas:**
+1. **Ícones e Thumbnails** (`icons.rs`):
+   - `extract_computer_icon`, `extract_thumbnail`, `extract_file_icon`
+   - `extract_folder_icon`, `extract_file_icon_by_path`, `extract_drive_icon`
+
+2. **Conversão Bitmap** (`bitmap_conversion.rs`):
+   - `hbitmap_to_rgba`, `hicon_to_rgba`, `create_error_placeholder`
+
+3. **Drives e Volumes** (`drives.rs`):
+   - `get_all_drives`, `get_volume_label`, `get_volume_info`
+
+4. **Formatação** (`formatting.rs`):
+   - `format_size`, `format_date`
+
+5. **Operações Shell** (`shell_operations.rs`):
+   - `open_with_shell`
+
+6. **Informações de Sistema** (`system_info.rs`):
+   - `get_ram_usage`
+
+7. **Sistema de Arquivos** (`file_system.rs`):
+   - `get_file_attributes`, `is_directory`, `is_file`
+
+#### **Integração no main.rs:**
+```rust
+// Importação simplificada
+use mtt_file_manager::infrastructure::windows as windows_infra;
+use windows_infra::{
+    get_all_drives,
+    extract_file_icon,
+    extract_file_icon_by_path,
+    extract_drive_icon,
+    open_with_shell,
+    format_size,
+    format_date,
+};
+```
+
+#### **Benefícios:**
+- ✅ **Separação de responsabilidades**: Código Windows API isolado
+- ✅ **Reutilização**: Módulos podem ser usados por outros componentes
+- ✅ **Manutenibilidade**: Cada módulo < 300 linhas
+- ✅ **Testabilidade**: Código mais fácil de testar isoladamente
+- ✅ **Compilação**: Sem erros, apenas warnings menores
+
+### 9. Próximos Passos (Sprint 3)
 
 1. **Continuar extração do main.rs** - ainda com ~2800 linhas
 2. **Integrar CacheManager** - atualmente main.rs usa `LruCache` diretamente
-3. **Extrair Windows APIs** para módulo dedicado
-4. **Extrair views** (grid, list, computer) para módulos separados
-5. **Reimplementar arquivos .bak** com nova estrutura
+3. **Extrair views** (grid, list, computer) para módulos separados
+4. **Reimplementar arquivos .bak** com nova estrutura
+5. **Extrair lógica de workers** para módulos dedicados
 
 ---
 
-## 8. Correções Aplicadas (30/12/2024)
+## 10. Correções Aplicadas (30/12/2024)
 
 ### Problema Encontrado
 A integração do componente `Item Slot` estava incompleta, causando erro de compilação:
@@ -182,6 +279,7 @@ fn render_item_slot(&mut self, ui: &mut Ui, idx: usize) {
 | item_slot.rs | - | 330 | ✅ Novo módulo |
 | status_bar.rs | - | 85 | ✅ Novo módulo |
 | cache.rs | - | 280 | ⚠️ Não integrado |
+| **Windows API modules** | - | **~710 total** | ✅ **Totalmente extraído** |
 
 ## Lições Aprendidas
 
@@ -189,3 +287,5 @@ fn render_item_slot(&mut self, ui: &mut Ui, idx: usize) {
 2. **Verificar pattern de borrow** ao extrair código que usa `&mut self`
 3. **Traits devem usar chamadas qualificadas** quando há conflito de nomes com métodos inerentes
 4. **main.rs cresceu** durante as correções - priorizar extração no Sprint 3
+5. **Windows APIs bem isoladas** facilitam manutenção e testes
+6. **Organização por responsabilidade** melhora a navegabilidade do código
