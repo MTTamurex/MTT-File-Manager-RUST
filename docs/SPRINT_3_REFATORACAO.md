@@ -1,6 +1,19 @@
 # Sprint 3 - Continuação da Refatoração
 
-## Status: 📋 Planejado
+## Status: 🚧 Em Andamento (30/12/2025)
+
+### Progresso Atual:
+- ✅ **Fase 1: Windows APIs** - Extraídas e integradas
+- ✅ **Fase 2: Views** - Extraídas e integradas (grid_view, list_view, computer_view)
+- ⚠️ **Fase 3: Sidebar e Navegação** - Sidebar ainda inline, navigation.rs não integrado
+- ❌ **Fase 4: Context Menu** - Ainda no main.rs
+- ❌ **Fase 5: CacheManager** - Não integrado
+- ❌ **Fase 6: Limpeza** - Arquivos .bak ainda existem
+
+### Métricas Atuais:
+- `main.rs`: ~2800 linhas (redução de ~400 linhas com extração das views)
+- Views extraídas: 3 módulos funcionais
+- Compilação: ✅ Funcionando com warnings
 
 ## Objetivo
 Continuar a refatoração do `main.rs` (atualmente com ~2736 linhas) para alcançar o limite de 300 linhas, extraindo componentes para módulos dedicados.

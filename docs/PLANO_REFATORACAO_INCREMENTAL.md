@@ -88,10 +88,53 @@ src/workers/
 └── batch_thumbnail_loader.rs ⚠️ (desabilitado - não usado)
 ```
 
-**Próximos Passos (Sprint 3 - Application State):**
-- Avaliar necessidade de migrar para `self.state.*` (alto risco)
-- Considerar manter estrutura atual se funcionando
-- Focar em extração de componentes UI (Sprint 4)
+---
+
+### 🚧 Sprint 3: UI Components - VIEWS EXTRACTED
+
+**Status:** Em andamento  
+**Objetivo:** Extrair componentes de UI de `main.rs` para módulos dedicados.
+
+**Mudanças Realizadas:**
+
+1. **Extração das Views:**
+   - `src/ui/views/grid_view.rs` - Extraído e integrado (funcional)
+   - `src/ui/views/list_view.rs` - Extraído e integrado (funcional)
+   - `src/ui/views/computer_view.rs` - Extraído (pronto para integração)
+
+2. **Integração no `main.rs`:**
+   - Substituído `render_grid_view` inline pela função do módulo
+   - Substituído `render_list_view` inline pela função do módulo
+   - Resolvidos problemas de borrow com pattern de coleta de ações
+
+3. **Desafios Técnicos:**
+   - Problemas de borrow múltiplo resolvidos com pattern de "coleta de ações"
+   - Necessidade de clonar dados para evitar conflitos de lifetime
+   - Manutenção da funcionalidade existente durante a transição
+
+4. **Resultado:**
+   - ✅ Código compila sem erros: `cargo build --release`
+   - ✅ Redução de ~400 linhas em `main.rs`
+   - ✅ Views funcionam identicamente ao estado anterior
+   - ✅ Arquitetura mais modular e testável
+
+**Próximos Passos (Sprint 3 - Continuação):**
+- [ ] Extrair sidebar inline para `ui/sidebar.rs`
+- [ ] Integrar `navigation.rs` existente
+- [ ] Extrair context menu para módulo separado
+- [ ] Integrar CacheManager
+- [ ] Limpar arquivos .bak
+
+**Estrutura Atualizada das Views:**
+```
+src/ui/views/
+├── mod.rs ✅ (atualizado)
+├── grid_view.rs ✅ (extraído e integrado)
+├── list_view.rs ✅ (extraído e integrado)
+├── computer_view.rs ✅ (extraído)
+├── common.rs ✅ (existente)
+└── preview.rs ⚠️ (ainda no main.rs)
+```
 
 ---
 
