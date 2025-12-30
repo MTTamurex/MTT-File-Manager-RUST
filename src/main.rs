@@ -64,16 +64,16 @@ use windows_infra::{
 
 
 
-// Caminho padrÃ£o
+// Caminho padrão
 const PATH_PADRAO: &str = "C:\\";
 
-// LRU cache - reduzido para limitar VRAM (~25-50MB)
-const CACHE_SIZE: usize = 100;
-const MAX_CONCURRENT_LOADS: usize = 20;  // Reduzido para melhor performance
+// LRU cache - limita VRAM (~50-100MB)
+const CACHE_SIZE: usize = 200;
+const MAX_CONCURRENT_LOADS: usize = 30;  // Threads concorrentes de carregamento
 
 
-// Icon cache (menor pois Ã­cones sÃ£o compartilhados por extensÃ£o)
-const ICON_CACHE_SIZE: usize = 50;
+// Icon cache (menor pois ícones são compartilhados por extensão)
+const ICON_CACHE_SIZE: usize = 100;
 
 // Operações de Clipboard (Copiar/Recortar)
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -162,6 +162,9 @@ struct ImageViewerApp {
     context_menu_item_idx: Option<usize>,
     context_menu_target_path: Option<PathBuf>,  // Path para colar (pasta selecionada ou current_path)
     context_menu_is_empty_area: bool,           // Menu aberto em área vazia (apenas colar)
+    
+    // ICON LOADER PERSISTENTE (evita criar novo a cada frame)
+    item_icon_loader: IconLoader,
 }
 
 impl ImageViewerApp {
@@ -262,6 +265,9 @@ impl ImageViewerApp {
             context_menu_item_idx: None,
             context_menu_target_path: None,
             context_menu_is_empty_area: false,
+            
+            // ICON LOADER PERSISTENTE
+            item_icon_loader: IconLoader::new(),
         };
         
         // Inicia monitoramento inicial
@@ -1495,7 +1501,7 @@ impl ImageViewerApp {
                 renaming_text,
                 focus_rename: self.focus_rename,
                 texture_cache: &mut self.texture_cache,
-                icon_loader: &mut IconLoader::new(),
+                icon_loader: &mut self.item_icon_loader,
                 scanned_folders: &mut self.scanned_folders,
                 loading_set: &mut self.loading_set,
             };

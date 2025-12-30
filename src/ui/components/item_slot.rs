@@ -32,7 +32,7 @@ pub struct ItemSlotContext<'a> {
     pub focus_rename: bool,
     /// Cache de texturas (LRU)
     pub texture_cache: &'a mut lru::LruCache<std::path::PathBuf, egui::TextureHandle>,
-    /// Carregador de ícones
+    /// Carregador de ícones (PERSISTENTE - não crie novo a cada chamada!)
     pub icon_loader: &'a mut IconLoader,
     /// Conjunto de pastas escaneadas
     pub scanned_folders: &'a mut std::collections::HashSet<std::path::PathBuf>,

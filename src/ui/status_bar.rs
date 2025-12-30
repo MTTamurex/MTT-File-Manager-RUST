@@ -33,7 +33,7 @@ pub fn render_status_bar(
     let mut action = StatusBarAction::None;
     
     ui.horizontal(|ui| {
-        // Left side: item count and loading status
+        // === LEFT SIDE: Item count and loading status ===
         if *is_loading_folder {
             ui.spinner();
             ui.label("Carregando...");
@@ -46,27 +46,54 @@ pub fn render_status_bar(
             ui.label(item_text);
         }
         
-        // Center: view mode and thumbnail size
-        ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| {
-            ui.label("Modo:");
-            if ui.selectable_label(*view_mode == ViewMode::Grid, "Grade").clicked() {
-                *view_mode = ViewMode::Grid;
-                action = StatusBarAction::ViewModeChanged;
-            }
-            if ui.selectable_label(*view_mode == ViewMode::List, "Lista").clicked() {
-                *view_mode = ViewMode::List;
-                action = StatusBarAction::ViewModeChanged;
-            }
-            
-            ui.separator();
-            
-            ui.label("Tamanho:");
-            ui.add(egui::Slider::new(thumbnail_size, 64.0..=256.0).show_value(false));
-        });
+        ui.separator();
         
-        // Right side: sort mode and system info
+        // === CENTER: View mode and thumbnail size ===
+        ui.label("Modo:");
+        if ui.selectable_label(*view_mode == ViewMode::Grid, "Grade").clicked() {
+            *view_mode = ViewMode::Grid;
+            action = StatusBarAction::ViewModeChanged;
+        }
+        if ui.selectable_label(*view_mode == ViewMode::List, "Lista").clicked() {
+            *view_mode = ViewMode::List;
+            action = StatusBarAction::ViewModeChanged;
+        }
+        
+        ui.separator();
+        
+        ui.label("Tamanho:");
+        ui.add(egui::Slider::new(thumbnail_size, 64.0..=256.0).show_value(false));
+        
+        ui.separator();
+        
+        // === CENTER-RIGHT: Sort controls ===
+        ui.label("Ordenar:");
+        
+        let sort_modes = [
+            (SortMode::Name, "Nome"),
+            (SortMode::Date, "Data"),
+            (SortMode::Size, "Tamanho"),
+        ];
+        
+        for (mode, label) in sort_modes {
+            if ui.selectable_label(*sort_mode == mode, label).clicked() {
+                if *sort_mode == mode {
+                    *sort_descending = !*sort_descending;
+                } else {
+                    *sort_mode = mode;
+                    *sort_descending = false;
+                }
+                action = StatusBarAction::SortChanged;
+            }
+        }
+        
+        // Sort direction indicator
+        let arrow = if *sort_descending { "↓" } else { "↑" };
+        ui.label(arrow);
+        
+        // === RIGHT SIDE: System info (push to right with available space) ===
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // System info (RAM/VRAM)
+            // RAM usage (appears rightmost)
             if let Some(ram_usage) = get_ram_usage() {
                 ui.label(format!("RAM: {}", format_size(ram_usage)));
             }
@@ -79,35 +106,7 @@ pub fn render_status_bar(
                 })
                 .sum();
             
-            if vram_usage > 0 {
-                ui.label(format!("VRAM: {:.1} MB", vram_usage as f64 / 1024.0 / 1024.0));
-            }
-            
-            ui.separator();
-            
-            ui.label("Ordenar por:");
-            
-            let sort_modes = [
-                (SortMode::Name, "Nome"),
-                (SortMode::Date, "Data"),
-                (SortMode::Size, "Tamanho"),
-            ];
-            
-            for (mode, label) in sort_modes {
-                if ui.selectable_label(*sort_mode == mode, label).clicked() {
-                    if *sort_mode == mode {
-                        *sort_descending = !*sort_descending;
-                    } else {
-                        *sort_mode = mode;
-                        *sort_descending = false;
-                    }
-                    action = StatusBarAction::SortChanged;
-                }
-            }
-            
-            // Sort direction indicator
-            let arrow = if *sort_descending { "↓" } else { "↑" };
-            ui.label(arrow);
+            ui.label(format!("VRAM: {:.1} MB", vram_usage as f64 / 1024.0 / 1024.0));
         });
     });
     
