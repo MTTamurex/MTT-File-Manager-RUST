@@ -204,6 +204,13 @@ struct ImageViewerApp {
     // CLIPBOARD (Copiar/Recortar/Colar)
     clipboard_file: Option<PathBuf>,
     clipboard_op: Option<ClipboardOp>,
+    
+    // CONTEXT MENU STATE
+    context_menu_open: bool,
+    context_menu_pos: egui::Pos2,
+    context_menu_item_idx: Option<usize>,
+    context_menu_target_path: Option<PathBuf>,  // Path para colar (pasta selecionada ou current_path)
+    context_menu_is_empty_area: bool,           // Menu aberto em área vazia (apenas colar)
 }
 
 impl ImageViewerApp {
@@ -335,6 +342,13 @@ impl ImageViewerApp {
             // CLIPBOARD
             clipboard_file: None,
             clipboard_op: None,
+            
+            // CONTEXT MENU STATE
+            context_menu_open: false,
+            context_menu_pos: egui::Pos2::ZERO,
+            context_menu_item_idx: None,
+            context_menu_target_path: None,
+            context_menu_is_empty_area: false,
         };
         
         // Inicia monitoramento inicial
@@ -993,16 +1007,22 @@ impl ImageViewerApp {
             None => { return; }
         };
         
-        let dest_folder = PathBuf::from(&self.current_path);
+        // 2. Determina pasta de destino: usa target_path do menu de contexto se disponível,
+        // senão usa current_path (compatibilidade com atalhos de teclado)
+        let dest_folder = if let Some(target) = &self.context_menu_target_path {
+            target.clone()
+        } else {
+            PathBuf::from(&self.current_path)
+        };
         
-        // 2. Evita mover para a mesma pasta (redundante)
+        // 3. Evita mover para a mesma pasta (redundante)
         if let Some(ClipboardOp::Move) = self.clipboard_op {
             if src_path.parent() == Some(&dest_folder) {
                 return;
             }
         }
         
-        // 3. Prepara strings para Windows API (double-null terminated)
+        // 4. Prepara strings para Windows API (double-null terminated)
         let mut from_vec: Vec<u16> = src_path.to_string_lossy().encode_utf16().collect();
         from_vec.push(0);
         from_vec.push(0);
@@ -1011,7 +1031,7 @@ impl ImageViewerApp {
         to_vec.push(0);
         to_vec.push(0);
         
-        // 4. Define operação (FO_COPY ou FO_MOVE)
+        // 5. Define operação (FO_COPY ou FO_MOVE)
         let w_func = match self.clipboard_op {
             Some(ClipboardOp::Move) => FO_MOVE,
             _ => FO_COPY,
@@ -1026,7 +1046,7 @@ impl ImageViewerApp {
             ..Default::default()
         };
         
-        // 5. Executa operação
+        // 6. Executa operação
         unsafe {
             let result = SHFileOperationW(&mut op);
             
@@ -1694,6 +1714,16 @@ impl ImageViewerApp {
                                 open_with_shell(&item.path);
                             }
                         }
+                        
+                        // Clique direito: abre menu de contexto
+                        if response.secondary_clicked() {
+                            self.context_menu_open = true;
+                            self.context_menu_pos = response.interact_pointer_pos()
+                                .unwrap_or_else(|| ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO));
+                            self.context_menu_item_idx = Some(i);
+                            self.context_menu_target_path = Some(item.path.clone());
+                            self.context_menu_is_empty_area = false;
+                        }
 
                         // Background Selection
                         if is_selected {
@@ -1938,6 +1968,16 @@ impl ImageViewerApp {
                                 navigated = true;
                             }
                             else { open_with_shell(&item.path); }
+                        }
+                        
+                        // Clique direito: abre menu de contexto
+                        if response.secondary_clicked() {
+                            self.context_menu_open = true;
+                            self.context_menu_pos = response.interact_pointer_pos()
+                                .unwrap_or_else(|| ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO));
+                            self.context_menu_item_idx = Some(index);
+                            self.context_menu_target_path = Some(item.path.clone());
+                            self.context_menu_is_empty_area = false;
                         }
 
                         if self.selected_item == Some(index) {
@@ -2255,8 +2295,104 @@ impl ImageViewerApp {
                     });
                 }
             }
+    }
+    
+    /// Exibe o menu de contexto na posição atual
+    fn show_context_menu(&mut self, ctx: &egui::Context) {
+        if !self.context_menu_open {
+            return;
+        }
+        
+        // Exibe o menu
+        let mut menu_closed = false;
+        egui::Area::new(egui::Id::new("context_menu"))
+            .fixed_pos(self.context_menu_pos)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_min_width(180.0);
+                    
+                    // Menu em área vazia: mostra apenas "Colar" (se houver algo no clipboard)
+                    if self.context_menu_is_empty_area {
+                        let can_paste = self.clipboard_file.is_some();
+                        if ui.add_enabled(can_paste, egui::Button::new("Colar")).clicked() {
+                            self.command_paste();
+                            menu_closed = true;
+                        }
+                    } else {
+                        // Menu em item: mostra todas as opções
+                        
+                        // Copiar (só se tiver item selecionado)
+                        let can_copy = self.context_menu_item_idx.is_some();
+                        if ui.add_enabled(can_copy, egui::Button::new("Copiar")).clicked() {
+                            self.command_copy();
+                            menu_closed = true;
+                        }
+                        
+                        // Recortar (só se tiver item selecionado)
+                        let can_cut = self.context_menu_item_idx.is_some();
+                        if ui.add_enabled(can_cut, egui::Button::new("Recortar")).clicked() {
+                            self.command_cut();
+                            menu_closed = true;
+                        }
+                        
+                        // Colar (só se tiver algo no clipboard)
+                        let can_paste = self.clipboard_file.is_some();
+                        if ui.add_enabled(can_paste, egui::Button::new("Colar")).clicked() {
+                            self.command_paste();
+                            menu_closed = true;
+                        }
+                        
+                        ui.separator();
+                        
+                        // Renomear (só se tiver item selecionado)
+                        let can_rename = self.context_menu_item_idx.is_some();
+                        if ui.add_enabled(can_rename, egui::Button::new("Renomear")).clicked() {
+                            if let Some(idx) = self.context_menu_item_idx {
+                                if let Some(item) = self.items.get(idx) {
+                                    self.renaming_state = Some((idx, item.name.clone()));
+                                    self.focus_rename = true;
+                                }
+                            }
+                            menu_closed = true;
+                        }
+                        
+                        // Excluir (só se tiver item selecionado)
+                        let can_delete = self.context_menu_item_idx.is_some();
+                        if ui.add_enabled(can_delete, egui::Button::new("Excluir")).clicked() {
+                            self.delete_with_shell();
+                            menu_closed = true;
+                        }
+                    }
+                });
+            });
+        
+        // Fecha o menu se uma ação foi executada ou se clicou fora
+        if menu_closed {
+            self.context_menu_open = false;
+            return;
+        }
+        
+        // Fecha o menu se clicar fora (qualquer clique fora do menu)
+        if ctx.input(|i| i.pointer.any_click()) {
+            let pointer_pos = ctx.pointer_interact_pos();
+            if let Some(pos) = pointer_pos {
+                // Verifica se o clique foi fora do menu
+                // O menu tem aproximadamente 180x200 pixels
+                let menu_rect = egui::Rect::from_min_size(
+                    self.context_menu_pos,
+                    egui::vec2(180.0, 200.0)
+                );
+                if !menu_rect.contains(pos) {
+                    self.context_menu_open = false;
+                }
+            } else {
+                // Se não conseguiu obter a posição do ponteiro, fecha o menu por segurança
+                self.context_menu_open = false;
+            }
         }
     }
+}
 
 
 impl eframe::App for ImageViewerApp {
@@ -2740,7 +2876,21 @@ impl eframe::App for ImageViewerApp {
                     });
                 }
             }
+            
+            // Detecção de clique direito na área vazia (fora dos itens)
+            let response = ui.interact(ui.max_rect(), ui.id().with("empty_area"), egui::Sense::click());
+            if response.secondary_clicked() {
+                self.context_menu_open = true;
+                self.context_menu_pos = response.interact_pointer_pos()
+                    .unwrap_or_else(|| ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO));
+                self.context_menu_item_idx = None;
+                self.context_menu_target_path = Some(PathBuf::from(&self.current_path));
+                self.context_menu_is_empty_area = true;
+            }
         });
+        
+        // Exibe o menu de contexto (se aberto)
+        self.show_context_menu(ctx);
     }
 }
 fn main() -> eframe::Result<()> {
@@ -2820,4 +2970,3 @@ fn main() -> eframe::Result<()> {
         }),
     )
 }
-

@@ -15,6 +15,7 @@
 - **Busca em tempo real** (filtragem instantânea por nome)
 - **Navegação por teclado** (setas, Delete, F2, F5, Ctrl+Shift+N)
 - **Operações de Arquivo** (Excluir para Lixeira, Criar Nova Pasta, Renomear)
+- **Menu de contexto** (clique direito com Copiar, Recortar, Colar, Renomear, Excluir)
 - **Tooltips informativos** (nome, tamanho, data ao passar mouse)
 
 ---
@@ -303,6 +304,36 @@ render_item_slot()
    ├── Watcher (`notify`): Monitora `current_path` em tempo real
    ├── Flow: `Event` → `MPSC` → `UI Repaint` → `Debounce (500ms)` → `Reload`
    └── Benefício: UI sempre sincronizada com o disco
+ ```
+
+### 5️⃣ Menu de Contexto (Right-Click)
+ 
+ ```
+ Detecção de Clique Direito
+   ├── Grid View: `response.secondary_clicked()` em cada item
+   ├── List View: `response.secondary_clicked()` em cada linha
+   ├── Área Vazia: Clique direito fora dos itens (apenas opção "Colar")
+   ├── Estado: Armazena posição, índice do item e caminho de destino
+   └── Ação: Abre popup `egui::Area` com posicionamento fixo
+ 
+ Operações Disponíveis
+   ├── Copiar (Ctrl+C): `command_copy()` → armazena path no clipboard interno
+   ├── Recortar (Ctrl+X): `command_cut()` → armazena path com flag de movimento
+   ├── Colar (Ctrl+V): `command_paste()` → executa `SHFileOperationW` (FO_COPY/FO_MOVE)
+   ├── Renomear (F2): Ativa modo de renomeação com foco automático
+   └── Excluir (Delete): `delete_with_shell()` → move para Lixeira
+ 
+ Comportamento Inteligente
+   ├── Menu em Item: Mostra todas as opções (Copiar, Recortar, Colar, Renomear, Excluir)
+   ├── Menu em Área Vazia: Mostra apenas "Colar" (se houver algo no clipboard)
+   ├── Fechamento Automático: Fecha ao clicar fora ou selecionar opção
+   ├── Destino Inteligente: Colar usa pasta selecionada (se houver) ou pasta atual
+ 
+ Integração com Sistema
+   ├── Reutiliza funções existentes (zero duplicação)
+   ├── Suporte a atalhos de teclado (consistente)
+   ├── Clipboard Interno: Mantém estado entre operações
+   └── Compatível com Undo do Windows (Ctrl+Z)
  ```
 
 ---
@@ -900,5 +931,5 @@ Ver [ROADMAP_TECNICO.md](ROADMAP_TECNICO.md) para detalhes completos.
 
 ---
 
-*Última atualização: 2025-12-28*
+*Última atualização: 2025-12-29*
 *Responsável: Arquiteto de Software*

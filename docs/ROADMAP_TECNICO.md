@@ -9,6 +9,13 @@
 - **GetVolumeInformationW** para labels de volumes (ex: "Sistema (C:)")
 - **Cache LRU**: icon_cache, folder_icon_texture, drive_icon_cache
 
+### Menu de Contexto (Right-Click)
+- **Detecção de clique direito** em itens do grid e lista
+- **Popup nativo do egui** com posicionamento preciso
+- **Operações integradas**: Copiar (Ctrl+C), Recortar (Ctrl+X), Colar (Ctrl+V), Renomear (F2), Excluir (Delete)
+- **Estado de contexto**: Armazenamento de posição e item selecionado
+- **Integração com funções existentes**: Reutiliza `command_copy`, `command_cut`, `command_paste`, `delete_with_shell`, `rename_with_shell`
+
 ### Grid com Posicionamento Absoluto (Game Engine Style)
 - Substituído `egui::Grid` por cálculo manual de coordenadas
 - Altura de célula RÍGIDA: `thumbnail_size + 40px`
