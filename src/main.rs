@@ -1811,172 +1811,39 @@ impl eframe::App for ImageViewerApp {
         egui::SidePanel::left("sidebar")
             .min_width(200.0)
             .show(ctx, |ui| {
-                ui.add_space(10.0);
+                use mtt_file_manager::ui::sidebar::{render_sidebar, SidebarContext, SidebarOperations};
                 
-                // Header "Este Computador" com Ã­cone nativo - CLICÃVEL
-                let (header_rect, header_response) = ui.allocate_exact_size(
-                    egui::vec2(ui.available_width(), 30.0),
-                    egui::Sense::click()
-                );
+                // Clonar dados necessários para evitar problemas de borrow
+                let disks = self.disks.clone();
+                let current_path = self.current_path.clone();
+                let is_computer_view = self.is_computer_view;
+                let computer_icon = self.computer_icon.clone();
                 
-                if ui.is_rect_visible(header_rect) {
-                    // Background de hover/seleÃ§Ã£o
-                    let is_selected = self.is_computer_view;
-                    if is_selected {
-                        ui.painter().rect_filled(
-                            header_rect,
-                            0.0,
-                            egui::Color32::from_rgb(200, 220, 240)
-                        );
-                    } else if header_response.hovered() {
-                        ui.painter().rect_filled(
-                            header_rect,
-                            0.0,
-                            egui::Color32::from_rgba_unmultiplied(200, 220, 240, 50)
-                        );
-                    }
-                    
-                    // Desenha Ã­cone e texto manualmente
-                    let mut cursor_x = header_rect.min.x + 5.0;
-                    
-                    // Ãcone
-                    if let Some(icon) = &self.computer_icon {
-                        let icon_rect = egui::Rect::from_min_size(
-                            egui::pos2(cursor_x, header_rect.center().y - 8.0),
-                            egui::vec2(16.0, 16.0)
-                        );
-                        ui.painter().image(
-                            icon.id(), 
-                            icon_rect, 
-                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), 
-                            egui::Color32::WHITE
-                        );
-                        cursor_x += 20.0;
-                    }
-                    
-                    // Texto
-                    ui.painter().text(
-                        egui::pos2(cursor_x, header_rect.center().y),
-                        egui::Align2::LEFT_CENTER,
-                        "Este Computador",
-                        egui::FontId::proportional(16.0),
-                        if is_selected {
-                            egui::Color32::from_rgb(0, 50, 100)
-                        } else {
-                            ui.visuals().text_color()
-                        }
-                    );
+                // Criar contexto para sidebar
+                let mut ctx = SidebarContext {
+                    disks: &disks,
+                    current_path: &current_path,
+                    is_computer_view,
+                    computer_icon: computer_icon.as_ref(),
+                };
+                
+                // Implementar operações da sidebar
+                struct SidebarOps<'a> {
+                    app: &'a mut ImageViewerApp,
                 }
                 
-                // CLICK ACTION: Navega para "Este Computador"
-                if header_response.clicked() {
-                    self.navigate_to_computer();
-                }
-                
-                ui.separator();
-                
-                ui.add_space(5.0);
-                
-                for (disk_path, disk_label) in &self.disks.clone() {
-                    // PrÃ©-carrega Ã­cone do drive se nÃ£o estiver no cache
-                    let drive_icon = if let Some(icon) = self.drive_icon_cache.get(disk_path) {
-                        Some(icon.clone())
-                    } else {
-                        // Tenta carregar Ã­cone real do drive
-                        if let Ok((rgba_data, width, height)) = extract_drive_icon(disk_path, IconSize::Small) {
-                            let texture = ui.ctx().load_texture(
-                                format!("drive_{}", disk_path),
-                                egui::ColorImage::from_rgba_unmultiplied(
-                                    [width as usize, height as usize],
-                                    &rgba_data,
-                                ),
-                                egui::TextureOptions::LINEAR,
-                            );
-                            let cloned = texture.clone();
-                            self.drive_icon_cache.put(disk_path.clone(), texture);
-                            Some(cloned)
-                        } else {
-                            None
-                        }
-                    };
-                    
-                    
-                    // Renderiza drive com Ã­cone + label usando interact() para controle total do cursor
-                    let is_selected = self.current_path.starts_with(disk_path);
-                    
-                    // Desenha conteÃºdo no horizontal layout
-                    let (mut rect, response) = ui.allocate_exact_size(
-                        egui::vec2(ui.available_width(), 24.0),
-                        egui::Sense::click()  // Captura cliques, sem texto selecionÃ¡vel
-                    );
-                    
-                    // Expande rect para preencher toda a largura da sidebar (remove gaps)
-                    rect.min.x = ui.clip_rect().min.x;
-                    rect.max.x = ui.clip_rect().max.x;
-                    
-                    // SÃ³ desenha se visÃ­vel
-                    if ui.is_rect_visible(rect) {
-                        // Background de seleÃ§Ã£o
-                        if is_selected {
-                            ui.painter().rect_filled(
-                                rect,
-                                0.0,  // Sem cantos arredondados para ficar flush com as bordas
-                                egui::Color32::from_rgb(200, 220, 240)
-                            );
-                        }
-                        
-                        // Hover effect
-                        if response.hovered() && !is_selected {
-                            ui.painter().rect_filled(
-                                rect,
-                                2.0,
-                                egui::Color32::from_rgba_unmultiplied(200, 220, 240, 50)
-                            );
-                        }
-                        
-                        // Desenha Ã­cone e texto manualmente
-                        let mut cursor_x = rect.min.x + 5.0;
-                        
-                        // Ãcone
-                        if let Some(icon) = drive_icon {
-                            let icon_rect = egui::Rect::from_min_size(
-                                egui::pos2(cursor_x, rect.center().y - 8.0),
-                                egui::vec2(16.0, 16.0)
-                            );
-                            ui.painter().image(icon.id(), icon_rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
-                            cursor_x += 20.0;
-                        } else {
-                            ui.painter().text(
-                                egui::pos2(cursor_x, rect.center().y),
-                                egui::Align2::LEFT_CENTER,
-                                "ðŸ’¾",
-                                egui::FontId::proportional(14.0),
-                                ui.visuals().text_color()
-                            );
-                            cursor_x += 20.0;
-                        }
-                        
-                        // Texto
-                        ui.painter().text(
-                            egui::pos2(cursor_x, rect.center().y),
-                            egui::Align2::LEFT_CENTER,
-                            disk_label,
-                            egui::FontId::proportional(14.0),
-                            if is_selected { 
-                                egui::Color32::from_rgb(0, 50, 100) 
-                            } else { 
-                                ui.visuals().text_color() 
-                            }
-                        );
+                impl<'a> SidebarOperations for SidebarOps<'a> {
+                    fn navigate_to(&mut self, path: &str) {
+                        self.app.navigate_to(path);
                     }
                     
-                    if response.clicked() {
-                        self.navigate_to(disk_path);
+                    fn navigate_to_computer(&mut self) {
+                        self.app.navigate_to_computer();
                     }
-                    
-                    
-                    ui.add_space(3.0);
                 }
+                
+                let mut ops = SidebarOps { app: self };
+                render_sidebar(ui, &mut ctx, &mut ops);
             });
         
 
