@@ -1,0 +1,148 @@
+//! Icon loading functionality for the file manager.
+//!
+//! This module handles loading Windows shell icons for files and folders.
+
+use std::path::Path;
+use std::collections::HashMap;
+
+use eframe::egui;
+use lru::LruCache;
+use std::num::NonZeroUsize;
+
+use crate::domain::file_entry::IconSize;
+use crate::infrastructure::windows;
+
+/// Manages loading and caching of Windows shell icons
+pub struct IconLoader {
+    /// Cache for file icons (path -> texture)
+    icon_cache: LruCache<String, egui::TextureHandle>,
+    /// Folder icon texture (cached)
+    folder_icon_texture: Option<egui::TextureHandle>,
+    /// Computer icon texture (cached)
+    computer_icon_texture: Option<egui::TextureHandle>,
+    /// Drive icon cache (drive path -> texture)
+    drive_icon_cache: HashMap<String, egui::TextureHandle>,
+}
+
+impl IconLoader {
+    /// Creates a new icon loader
+    pub fn new() -> Self {
+        Self {
+            icon_cache: LruCache::new(NonZeroUsize::new(100).unwrap()), // ICON_CACHE_SIZE
+            folder_icon_texture: None,
+            computer_icon_texture: None,
+            drive_icon_cache: HashMap::new(),
+        }
+    }
+    
+    /// Ensures the folder icon texture is loaded
+    pub fn ensure_folder_icon(&mut self, ctx: &egui::Context) {
+        if self.folder_icon_texture.is_some() {
+            return;
+        }
+        
+        // Try to load native Windows folder icon
+        if let Ok((pixels, width, height)) = windows::extract_folder_icon(IconSize::Large) {
+            let texture = ctx.load_texture(
+                "folder_icon",
+                egui::ColorImage::from_rgba_unmultiplied(
+                    [width as usize, height as usize],
+                    &pixels,
+                ),
+                egui::TextureOptions::LINEAR,
+            );
+            self.folder_icon_texture = Some(texture);
+        }
+    }
+    
+    /// Gets or loads a Windows shell icon for a file path
+    pub fn get_or_load_icon(&mut self, ctx: &egui::Context, path: &Path) -> Option<egui::TextureHandle> {
+        let cache_key = path.to_string_lossy().to_string();
+        
+        // Check cache first
+        if let Some(texture) = self.icon_cache.get(&cache_key) {
+            return Some(texture.clone());
+        }
+        
+        // Load icon from Windows API
+        if let Ok((pixels, width, height)) = windows::extract_file_icon_by_path(path, IconSize::Large) {
+            let texture = ctx.load_texture(
+                cache_key.clone(),
+                egui::ColorImage::from_rgba_unmultiplied(
+                    [width as usize, height as usize],
+                    &pixels,
+                ),
+                egui::TextureOptions::LINEAR,
+            );
+            
+            // Cache the texture
+            let cloned = texture.clone();
+            self.icon_cache.put(cache_key, texture);
+            return Some(cloned);
+        }
+        
+        None
+    }
+    
+    /// Gets the folder icon texture (must call ensure_folder_icon first)
+    pub fn folder_icon(&self) -> Option<&egui::TextureHandle> {
+        self.folder_icon_texture.as_ref()
+    }
+    
+    /// Ensures the computer icon texture is loaded
+    pub fn ensure_computer_icon(&mut self, ctx: &egui::Context) {
+        if self.computer_icon_texture.is_some() {
+            return;
+        }
+        
+        if let Ok((data, width, height)) = windows::extract_computer_icon(IconSize::Small) {
+            let image = egui::ColorImage::from_rgba_unmultiplied(
+                [width as usize, height as usize],
+                &data,
+            );
+            
+            self.computer_icon_texture = Some(ctx.load_texture(
+                "computer_icon",
+                image,
+                egui::TextureOptions::LINEAR,
+            ));
+        }
+    }
+    
+    /// Gets the computer icon texture (must call ensure_computer_icon first)
+    pub fn computer_icon(&self) -> Option<&egui::TextureHandle> {
+        self.computer_icon_texture.as_ref()
+    }
+    
+    /// Gets or loads a drive icon
+    pub fn get_or_load_drive_icon(&mut self, ctx: &egui::Context, drive_path: &str) -> Option<egui::TextureHandle> {
+        if let Some(icon) = self.drive_icon_cache.get(drive_path) {
+            return Some(icon.clone());
+        }
+        
+        // Try to load real drive icon
+        if let Ok((rgba_data, width, height)) = windows::extract_drive_icon(drive_path, IconSize::Small) {
+            let texture = ctx.load_texture(
+                format!("drive_{}", drive_path),
+                egui::ColorImage::from_rgba_unmultiplied(
+                    [width as usize, height as usize],
+                    &rgba_data,
+                ),
+                egui::TextureOptions::LINEAR,
+            );
+            let cloned = texture.clone();
+            self.drive_icon_cache.insert(drive_path.to_string(), texture);
+            return Some(cloned);
+        }
+        
+        None
+    }
+    
+    /// Clears all icon caches
+    pub fn clear(&mut self) {
+        self.icon_cache.clear();
+        self.drive_icon_cache.clear();
+        self.folder_icon_texture = None;
+        self.computer_icon_texture = None;
+    }
+}

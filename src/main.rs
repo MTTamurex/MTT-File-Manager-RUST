@@ -35,6 +35,8 @@ use mtt_file_manager::infrastructure::windows as windows_infra;
 
 // Import UI modules
 // use mtt_file_manager::ui::status_bar; // Not used directly - imported in render_status_bar call
+use mtt_file_manager::ui::components::item_slot;
+use mtt_file_manager::ui::icon_loader::IconLoader;
 
 use windows::{
     core::*,
@@ -2003,280 +2005,35 @@ impl ImageViewerApp {
             return;
         }
         
-        let item = self.items[idx].clone();  // Clone para evitar borrow conflicts
+        use mtt_file_manager::ui::components::item_slot::{render_item_slot, ItemSlotContext, ItemSlotOperations};
         
-        // ==== DIRECTORY RENDERING ====
-        if item.is_dir {
-            // --- GATILHO LAZY LOAD ---
-            // Se nÃ£o tem capa E ainda nÃ£o foi escaneado: Dispara Scan.
-            if item.folder_cover.is_none() && !self.scanned_folders.contains(&item.path) {
-                self.scanned_folders.insert(item.path.clone());
-                self.request_folder_scan(item.path.clone());
-            }
-            
-            // GEOMETRIA
-            let available_h = ui.available_height();
-            let folder_w = self.thumbnail_size * 0.60;
-            let folder_h = folder_w * 0.85;
-            let text_height = 18.0;
-            let content_h = folder_h + text_height;
-            let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
-            
-            // Margem superior para centralizar verticalmente
-            ui.add_space(vertical_margin);
-            
-            // Centraliza a pasta horizontalmente na celula
-            let cell_width = ui.available_width();
-            let x_offset = (cell_width - folder_w) / 2.0;
-            let start_pos = ui.cursor().min + egui::vec2(x_offset.max(0.0), 0.0);
-            let folder_rect = egui::Rect::from_min_size(start_pos, egui::vec2(folder_w, folder_h));
-
-            // CORES
-            let color_back = egui::Color32::from_rgb(200, 160, 50);
-            let color_front = egui::Color32::from_rgb(255, 210, 70);
-
-            // DimensÃµes
-            let tab_h = folder_h * 0.15;
-            let tab_w = folder_w * 0.40;
-            let front_h = folder_h * 0.50;
-
-            // === DESENHO 1: BASE SÃ“LIDA (evita qualquer gap) ===
-            // Desenha TODO o corpo como uma Ãºnica forma sÃ³lida
-            ui.painter().rect_filled(
-                egui::Rect::from_min_size(folder_rect.min, egui::vec2(tab_w, tab_h)),
-                egui::CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 },
-                color_back
-            );
-            ui.painter().rect_filled(
-                egui::Rect::from_min_max(
-                    egui::pos2(folder_rect.min.x, folder_rect.min.y + tab_h),
-                    folder_rect.max
-                ),
-                egui::CornerRadius { nw: 0, ne: 3, sw: 4, se: 4 },
-                color_back
-            );
-
-            // === DESENHO 2: PREVIEW (com clipping para nÃ£o escapar) ===
-            if let Some(cover_path) = &item.folder_cover {
-                if !self.texture_cache.contains(cover_path) && !self.loading_set.contains(cover_path) {
-                    if self.loading_set.len() < MAX_CONCURRENT_LOADS {
-                        self.loading_set.insert(cover_path.clone());
-                        self.request_thumbnail_load(cover_path.clone());
-                    }
-                }
-            }
-
-            if let Some(tex) = item.folder_cover.as_ref().and_then(|p| self.texture_cache.get(p)) {
-                // Ãrea onde o preview pode aparecer (com margens)
-                let margin_x = 6.0;
-                let margin_top = 4.0;
-                let preview_area = egui::Rect::from_min_max(
-                    egui::pos2(folder_rect.min.x + margin_x, folder_rect.min.y + tab_h + margin_top),
-                    egui::pos2(folder_rect.max.x - margin_x, folder_rect.max.y - front_h)
-                );
-
-                let size = tex.size();
-                let tex_size = egui::vec2(size[0] as f32, size[1] as f32);
-                let aspect_img = tex_size.x / tex_size.y;
-                let aspect_view = preview_area.width() / preview_area.height();
-
-                let uv_rect = if aspect_img > aspect_view {
-                    let scale = aspect_view / aspect_img;
-                    let offset = (1.0 - scale) / 2.0;
-                    egui::Rect::from_min_max(egui::pos2(offset, 0.0), egui::pos2(1.0 - offset, 1.0))
-                } else {
-                    let scale = aspect_img / aspect_view;
-                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, scale))
-                };
-
-                // Usa push_clip_rect para garantir que a imagem nÃ£o escape
-                ui.painter().with_clip_rect(preview_area).image(tex.id(), preview_area, uv_rect, egui::Color32::WHITE);
-            }
-
-            // === DESENHO 3: BOLSO FRONTAL (sobrepÃµe preview) ===
-            let front_rect = egui::Rect::from_min_max(
-                egui::pos2(folder_rect.min.x, folder_rect.max.y - front_h),
-                folder_rect.max
-            );
-            ui.painter().rect_filled(front_rect, egui::CornerRadius { nw: 0, ne: 0, sw: 4, se: 4 }, color_front);
-
-            // Borda sutil
-            ui.painter().rect_stroke(
-                front_rect,
-                egui::CornerRadius { nw: 0, ne: 0, sw: 4, se: 4 },
-                egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 150, 30)),
-                egui::StrokeKind::Inside
-            );
-
-            // Aloca espaÃ§o da pasta
-            ui.allocate_rect(folder_rect, egui::Sense::hover());
-
-            // TEXTO: Usa Label com truncate (igual aos arquivos) para respeitar limites
-            ui.add_space(6.0);  // Gap entre pasta e texto
-            // LÓGICA VISUAL DE RENOMEAR (DIRETÓRIO)
-            let is_renaming_this = self.renaming_state.as_ref().map_or(false, |(i, _)| *i == idx);
-            ui.set_min_height(24.0);
-            
-            if is_renaming_this {
-                let mut text = self.renaming_state.as_mut().unwrap().1.clone();
-                let response = ui.add(egui::TextEdit::singleline(&mut text)
-                    .frame(true)
-                    .horizontal_align(egui::Align::Center)
-                    .id_source("rename_input_dir"));
-                
-                self.renaming_state.as_mut().unwrap().1 = text;
-
-                if self.focus_rename {
-                    response.request_focus();
-                    self.focus_rename = false;
-                }
-
-                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    self.rename_with_shell(idx);
-                } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                    self.renaming_state = None;
-                } else if response.clicked_elsewhere() {
-                    self.renaming_state = None;
-                }
-            } else {
-                ui.vertical_centered(|ui| {
-                    ui.add(egui::Label::new(
-                        egui::RichText::new(&item.name)
-                            .size(11.0)
-                            .color(egui::Color32::BLACK)
-                    ).truncate());
-                });
-            }
+        let item = &self.items[idx];
+        let is_renaming = self.renaming_state.as_ref().map_or(false, |(i, _)| *i == idx);
+        let renaming_text = if is_renaming {
+            Some(&mut self.renaming_state.as_mut().unwrap().1)
+        } else {
+            None
+        };
+        
+        let mut ctx = ItemSlotContext {
+            item,
+            idx,
+            thumbnail_size: self.thumbnail_size,
+            is_renaming,
+            renaming_text,
+            focus_rename: self.focus_rename,
+            texture_cache: &mut self.texture_cache,
+            icon_loader: &mut IconLoader::new(),
+            scanned_folders: &mut self.scanned_folders,
+            loading_set: &mut self.loading_set,
+        };
+        
+        render_item_slot(ui, &mut ctx, self);
+        
+        // Reset focus flag after first use
+        if self.focus_rename {
+            self.focus_rename = false;
         }
-            // ==== FILE RENDERING ====
-            else {
-                let path_clone = item.path.clone();
-                
-                // Detecta se e arquivo de midia
-                let is_media_file = if let Some(ext) = path_clone.extension() {
-                    let ext_lower = ext.to_string_lossy().to_lowercase();
-                    matches!(ext_lower.as_str(),
-                        "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" |
-                        "tiff" | "tif" | "ico" | "heic" | "heif" | "avif" |
-                        "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" |
-                        "webm" | "m4v" | "mpg" | "mpeg" | "3gp" | "ts"
-                    )
-                } else {
-                    false
-                };
-                
-                // Thumbnail loading para arquivos de midia
-                if is_media_file {
-                    let has_texture = self.texture_cache.contains(&path_clone);
-                    let is_loading = self.loading_set.contains(&path_clone);
-                    
-                    if !has_texture && !is_loading && self.loading_set.len() < MAX_CONCURRENT_LOADS {
-                        self.loading_set.insert(path_clone.clone());
-                        self.request_thumbnail_load(path_clone.clone());
-                    }
-                }
-                
-                // Carrega icone (sempre, servira como fallback)
-                let file_icon = self.get_or_load_icon(ui.ctx(), &path_clone);
-                
-                // GEOMETRIA - reduz tamanho para caber na area com margem
-                let available_h = ui.available_height();
-                let available_w = ui.available_width();
-                let thumb_size = (self.thumbnail_size - 6.0).min(available_w - 4.0); // 6px margem total
-                let text_height = 18.0;
-                let content_h = thumb_size + text_height;
-                let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
-                
-                // Margem superior para centralizar verticalmente
-                ui.add_space(vertical_margin);
-                
-                // Centraliza horizontalmente na area disponivel
-                let x_offset = (available_w - thumb_size) / 2.0;
-                let start_pos = ui.cursor().min + egui::vec2(x_offset.max(0.0), 0.0);
-                let thumb_rect = egui::Rect::from_min_size(start_pos, egui::vec2(thumb_size, thumb_size));
-                
-                // Desenha thumbnail ou icone
-                let mut drew_something = false;
-                if is_media_file {
-                    if let Some(texture) = self.texture_cache.get(&path_clone) {
-                        // Thumbnail carregado - mantem aspect ratio
-                        let tex_size = texture.size_vec2();
-                        let aspect = tex_size.x / tex_size.y;
-                        let (draw_w, draw_h) = if aspect > 1.0 {
-                            (thumb_size, thumb_size / aspect)
-                        } else {
-                            (thumb_size * aspect, thumb_size)
-                        };
-                        let offset_x = (thumb_size - draw_w) / 2.0;
-                        let offset_y = (thumb_size - draw_h) / 2.0;
-                        let draw_rect = egui::Rect::from_min_size(
-                            thumb_rect.min + egui::vec2(offset_x, offset_y),
-                            egui::vec2(draw_w, draw_h)
-                        );
-                        ui.painter().image(texture.id(), draw_rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
-                        drew_something = true;
-                    }
-                }
-
-                if !drew_something {
-                    // Fallback para icone do Windows ou placeholder
-                    ui.painter().rect_filled(thumb_rect, 4.0, egui::Color32::from_gray(248));
-                    if let Some(icon_texture) = file_icon {
-                        let icon_size = thumb_size * 0.5;
-                        let icon_rect = egui::Rect::from_center_size(thumb_rect.center(), egui::vec2(icon_size, icon_size));
-                        ui.painter().image(icon_texture.id(), icon_rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
-                    } else {
-                        // Se nem o icone carregou, mostra "..." se for midia ou icone generico
-                        let text = if is_media_file { "..." } else { ICON_FILE };
-                        let font_id = if is_media_file { 
-                            egui::FontId::proportional(thumb_size * 0.3) 
-                        } else { 
-                            egui::FontId::new(thumb_size * 0.4, egui::FontFamily::Name("icons".into()))
-                        };
-                        ui.painter().text(thumb_rect.center(), egui::Align2::CENTER_CENTER, text, font_id, egui::Color32::GRAY);
-                    }
-                }
-                
-                // Aloca espaco do thumbnail
-                ui.allocate_rect(thumb_rect, egui::Sense::hover());
-                
-                // Texto do nome - igual as pastas
-                ui.add_space(4.0);
-                // LÓGICA VISUAL DE RENOMEAR (ARQUIVO)
-                let is_renaming_this = self.renaming_state.as_ref().map_or(false, |(i, _)| *i == idx);
-                ui.set_min_height(24.0);
-                
-                if is_renaming_this {
-                    let mut text = self.renaming_state.as_mut().unwrap().1.clone();
-                    let response = ui.add(egui::TextEdit::singleline(&mut text)
-                        .frame(true)
-                        .horizontal_align(egui::Align::Center)
-                        .id_source("rename_input_file"));
-                    
-                    self.renaming_state.as_mut().unwrap().1 = text;
-
-                    if self.focus_rename {
-                        response.request_focus();
-                        self.focus_rename = false;
-                    }
-
-                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        self.rename_with_shell(idx);
-                    } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                        self.renaming_state = None;
-                    } else if response.clicked_elsewhere() {
-                        self.renaming_state = None;
-                    }
-                } else {
-                    ui.vertical_centered(|ui| {
-                        ui.add(egui::Label::new(
-                            egui::RichText::new(&item.name)
-                                .size(11.0)
-                                .color(egui::Color32::BLACK)
-                        ).truncate());
-                    });
-                }
-            }
     }
     
     /// Exibe o menu de contexto na posição atual
@@ -2381,8 +2138,22 @@ impl ImageViewerApp {
             }
         }
     }
+    }
 }
 
+impl mtt_file_manager::ui::components::item_slot::ItemSlotOperations for ImageViewerApp {
+    fn request_thumbnail_load(&mut self, path: std::path::PathBuf) {
+        self.request_thumbnail_load(path);
+    }
+    
+    fn request_folder_scan(&mut self, path: std::path::PathBuf) {
+        self.request_folder_scan(path);
+    }
+    
+    fn rename_item(&mut self, idx: usize) {
+        self.rename_with_shell(idx);
+    }
+}
 
 impl eframe::App for ImageViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
