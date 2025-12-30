@@ -179,6 +179,7 @@ struct ImageViewerApp {
     selected_item: Option<usize>,
     selected_file: Option<FileEntry>,
     show_preview_panel: bool,
+    is_computer_view: bool,     // Se estamos na view "Este Computador"
     
     total_items: usize,
     
@@ -315,6 +316,7 @@ impl ImageViewerApp {
             // Selection & Preview
             selected_file: None,
             show_preview_panel: true,  // Mostrar por padrÃ£o
+            is_computer_view: false,
             // Navigation - comeÃ§a com path inicial no histÃ³rico
             navigation_history: vec![PATH_PADRAO.to_string()],
             history_index: 0,
@@ -1314,6 +1316,28 @@ impl ImageViewerApp {
             self.watch_current_folder();  // Atualiza o watcher
             self.load_folder();
         }
+    }
+    
+    /// Navega para "Este Computador" view
+    fn navigate_to_computer(&mut self) {
+        // Update history
+        if self.history_index < self.navigation_history.len() {
+            self.navigation_history.truncate(self.history_index + 1);
+        }
+        self.navigation_history.push(self.current_path.clone());
+        self.history_index = self.navigation_history.len();
+        
+        // Set computer view
+        self.current_path = "Este Computador".to_string();
+        self.is_computer_view = true;
+        self.path_input = "Este Computador".to_string();
+        
+        // Clear items for computer view
+        self.items.clear();
+        self.all_items.clear();
+        self.selected_item = None;
+        self.selected_file = None;
+        self.total_items = self.disks.len();
     }
     
     /// Sobe um nÃ­vel (adiciona ao histÃ³rico)
@@ -2667,15 +2691,65 @@ impl eframe::App for ImageViewerApp {
             .show(ctx, |ui| {
                 ui.add_space(10.0);
                 
-                // Header "Este Computador" com Ã­cone nativo
-                ui.horizontal(|ui| {
-                    if let Some(icon) = &self.computer_icon {
-                        ui.add(egui::Image::new(icon)
-                            .max_size(egui::vec2(16.0, 16.0))
-                            .maintain_aspect_ratio(true));
+                // Header "Este Computador" com Ã­cone nativo - CLICÃVEL
+                let (header_rect, header_response) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), 30.0),
+                    egui::Sense::click()
+                );
+                
+                if ui.is_rect_visible(header_rect) {
+                    // Background de hover/seleÃ§Ã£o
+                    let is_selected = self.is_computer_view;
+                    if is_selected {
+                        ui.painter().rect_filled(
+                            header_rect,
+                            0.0,
+                            egui::Color32::from_rgb(200, 220, 240)
+                        );
+                    } else if header_response.hovered() {
+                        ui.painter().rect_filled(
+                            header_rect,
+                            0.0,
+                            egui::Color32::from_rgba_unmultiplied(200, 220, 240, 50)
+                        );
                     }
-                    ui.label(egui::RichText::new("Este Computador").strong().size(16.0));
-                });
+                    
+                    // Desenha Ã­cone e texto manualmente
+                    let mut cursor_x = header_rect.min.x + 5.0;
+                    
+                    // Ãcone
+                    if let Some(icon) = &self.computer_icon {
+                        let icon_rect = egui::Rect::from_min_size(
+                            egui::pos2(cursor_x, header_rect.center().y - 8.0),
+                            egui::vec2(16.0, 16.0)
+                        );
+                        ui.painter().image(
+                            icon.id(), 
+                            icon_rect, 
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), 
+                            egui::Color32::WHITE
+                        );
+                        cursor_x += 20.0;
+                    }
+                    
+                    // Texto
+                    ui.painter().text(
+                        egui::pos2(cursor_x, header_rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        "Este Computador",
+                        egui::FontId::proportional(16.0),
+                        if is_selected {
+                            egui::Color32::from_rgb(0, 50, 100)
+                        } else {
+                            ui.visuals().text_color()
+                        }
+                    );
+                }
+                
+                // CLICK ACTION: Navega para "Este Computador"
+                if header_response.clicked() {
+                    self.navigate_to_computer();
+                }
                 
                 ui.separator();
                 
