@@ -1007,22 +1007,43 @@ impl ImageViewerApp {
             None => { return; }
         };
         
-        // 2. Determina pasta de destino: usa target_path do menu de contexto se disponível,
+        // 2. Determina pasta de destino: usa target_path do menu de contexto se disponível e válido,
         // senão usa current_path (compatibilidade com atalhos de teclado)
         let dest_folder = if let Some(target) = &self.context_menu_target_path {
-            target.clone()
+            // Verifica se o target ainda existe (não foi deletado)
+            if target.exists() && target.is_dir() {
+                target.clone()
+            } else {
+                // Se o target não existe mais, usa current_path e limpa o target
+                self.context_menu_target_path = None;
+                PathBuf::from(&self.current_path)
+            }
         } else {
             PathBuf::from(&self.current_path)
         };
         
-        // 3. Evita mover para a mesma pasta (redundante)
+        // 3. Verifica se o arquivo de origem já existe na pasta de destino
+        if let Some(file_name) = src_path.file_name() {
+            let dest_file = dest_folder.join(file_name);
+            if dest_file.exists() && dest_file != src_path {
+                // O Windows mostrará diálogo de substituição, mas podemos prevenir operação redundante
+                // Se for mover para a mesma pasta (mesmo arquivo), não faz nada
+                if let Some(ClipboardOp::Move) = self.clipboard_op {
+                    if src_path.parent() == Some(&dest_folder) {
+                        return;
+                    }
+                }
+            }
+        }
+        
+        // 4. Evita mover para a mesma pasta (redundante)
         if let Some(ClipboardOp::Move) = self.clipboard_op {
             if src_path.parent() == Some(&dest_folder) {
                 return;
             }
         }
         
-        // 4. Prepara strings para Windows API (double-null terminated)
+        // 5. Prepara strings para Windows API (double-null terminated)
         let mut from_vec: Vec<u16> = src_path.to_string_lossy().encode_utf16().collect();
         from_vec.push(0);
         from_vec.push(0);
@@ -1031,7 +1052,7 @@ impl ImageViewerApp {
         to_vec.push(0);
         to_vec.push(0);
         
-        // 5. Define operação (FO_COPY ou FO_MOVE)
+        // 6. Define operação (FO_COPY ou FO_MOVE)
         let w_func = match self.clipboard_op {
             Some(ClipboardOp::Move) => FO_MOVE,
             _ => FO_COPY,
@@ -1046,7 +1067,7 @@ impl ImageViewerApp {
             ..Default::default()
         };
         
-        // 6. Executa operação
+        // 7. Executa operação
         unsafe {
             let result = SHFileOperationW(&mut op);
             
@@ -1060,6 +1081,9 @@ impl ImageViewerApp {
                 self.load_folder();
             }
         }
+        
+        // 8. Limpa o context_menu_target_path após a operação
+        self.context_menu_target_path = None;
     }
     
     // Helper para botÃµes "Toggle" (que ficam acesos se selecionados)
@@ -1260,6 +1284,9 @@ impl ImageViewerApp {
         
         self.current_path = path.to_string();
         self.path_input = path.to_string();
+        
+        // Limpa o context_menu_target_path para garantir sincronia com a pasta atual
+        self.context_menu_target_path = None;
         
         // ATUALIZA O VIGIA
         self.watch_current_folder();
@@ -1715,8 +1742,13 @@ impl ImageViewerApp {
                             }
                         }
                         
-                        // Clique direito: abre menu de contexto
+                        // Clique direito: abre menu de contexto e seleciona o item
                         if response.secondary_clicked() {
+                            // Seleciona o item visualmente
+                            self.selected_item = Some(i);
+                            self.selected_file = Some(item.clone());
+                            
+                            // Abre menu de contexto
                             self.context_menu_open = true;
                             self.context_menu_pos = response.interact_pointer_pos()
                                 .unwrap_or_else(|| ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO));
@@ -1970,8 +2002,13 @@ impl ImageViewerApp {
                             else { open_with_shell(&item.path); }
                         }
                         
-                        // Clique direito: abre menu de contexto
+                        // Clique direito: abre menu de contexto e seleciona o item
                         if response.secondary_clicked() {
+                            // Seleciona o item visualmente
+                            self.selected_file = Some(item.clone());
+                            self.selected_item = Some(index);
+                            
+                            // Abre menu de contexto
                             self.context_menu_open = true;
                             self.context_menu_pos = response.interact_pointer_pos()
                                 .unwrap_or_else(|| ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO));
@@ -2312,8 +2349,15 @@ impl ImageViewerApp {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.set_min_width(180.0);
                     
-                    // Menu em área vazia: mostra apenas "Colar" (se houver algo no clipboard)
+                    // Menu em área vazia: mostra "Criar pasta" e "Colar" (se houver algo no clipboard)
                     if self.context_menu_is_empty_area {
+                        // Criar pasta
+                        if ui.button("Criar pasta").clicked() {
+                            self.create_new_folder();
+                            menu_closed = true;
+                        }
+                        
+                        // Colar (só se tiver algo no clipboard)
                         let can_paste = self.clipboard_file.is_some();
                         if ui.add_enabled(can_paste, egui::Button::new("Colar")).clicked() {
                             self.command_paste();
