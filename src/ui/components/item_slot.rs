@@ -4,7 +4,6 @@
 
 use eframe::egui;
 use crate::domain::file_entry::FileEntry;
-use crate::ui::cache::CacheManager;
 use crate::ui::icon_loader::IconLoader;
 
 /// Trait para operações necessárias para renderizar um item slot
@@ -31,13 +30,13 @@ pub struct ItemSlotContext<'a> {
     pub renaming_text: Option<&'a mut String>,
     /// Se deve focar no input de rename
     pub focus_rename: bool,
-    /// Cache de texturas
-    pub texture_cache: &'a mut CacheManager,
+    /// Cache de texturas (LRU)
+    pub texture_cache: &'a mut lru::LruCache<std::path::PathBuf, egui::TextureHandle>,
     /// Carregador de ícones
     pub icon_loader: &'a mut IconLoader,
     /// Conjunto de pastas escaneadas
     pub scanned_folders: &'a mut std::collections::HashSet<std::path::PathBuf>,
-    /// Conjunto de itens carregando
+    /// Conjunto de itens carregando (usado para verificar e adicionar)
     pub loading_set: &'a mut std::collections::HashSet<std::path::PathBuf>,
 }
 
@@ -113,7 +112,7 @@ fn render_directory_slot<O: ItemSlotOperations>(
 
     // === DESENHO 2: PREVIEW (com clipping para não escapar) ===
     if let Some(cover_path) = &item.folder_cover {
-        if !ctx.texture_cache.has_thumbnail(cover_path) && !ctx.texture_cache.is_loading(cover_path) {
+        if !ctx.texture_cache.contains(cover_path) && !ctx.loading_set.contains(cover_path) {
             if ctx.loading_set.len() < 30 { // MAX_CONCURRENT_LOADS
                 ctx.loading_set.insert(cover_path.clone());
                 ops.request_thumbnail_load(cover_path.clone());
@@ -121,7 +120,7 @@ fn render_directory_slot<O: ItemSlotOperations>(
         }
     }
 
-    if let Some(tex) = item.folder_cover.as_ref().and_then(|p| -> Option<&egui::TextureHandle> { ctx.texture_cache.get_thumbnail(p) }) {
+    if let Some(tex) = item.folder_cover.as_ref().and_then(|p| -> Option<&egui::TextureHandle> { ctx.texture_cache.get(p) }) {
         // Área onde o preview pode aparecer (com margens)
         let margin_x = 6.0;
         let margin_top = 4.0;
@@ -223,8 +222,8 @@ fn render_file_slot<O: ItemSlotOperations>(
     
     // Thumbnail loading para arquivos de mídia
     if is_media_file {
-        let has_texture = ctx.texture_cache.has_thumbnail(&path_clone);
-        let is_loading = ctx.texture_cache.is_loading(&path_clone);
+        let has_texture = ctx.texture_cache.contains(&path_clone);
+        let is_loading = ctx.loading_set.contains(&path_clone);
         
         if !has_texture && !is_loading && ctx.loading_set.len() < 30 { // MAX_CONCURRENT_LOADS
             ctx.loading_set.insert(path_clone.clone());
@@ -254,7 +253,7 @@ fn render_file_slot<O: ItemSlotOperations>(
     // Desenha thumbnail ou ícone
     let mut drew_something = false;
     if is_media_file {
-        if let Some(texture) = ctx.texture_cache.get_thumbnail(&path_clone) {
+        if let Some(texture) = ctx.texture_cache.get(&path_clone) {
             // Thumbnail carregado - mantém aspect ratio
             let tex_size = texture.size_vec2();
             let aspect = tex_size.x / tex_size.y;
