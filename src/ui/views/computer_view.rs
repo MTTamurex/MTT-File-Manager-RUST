@@ -24,7 +24,7 @@ pub trait ComputerViewOperations {
 pub fn render_computer_view(
     ui: &mut Ui,
     ctx: &mut ComputerViewContext,
-    ops: &mut dyn ComputerViewOperations,
+    _ops: &mut dyn ComputerViewOperations,
 ) -> Option<String> {
     let mut clicked_disk = None;
     

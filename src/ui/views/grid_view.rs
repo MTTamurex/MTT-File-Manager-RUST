@@ -1,7 +1,7 @@
 //! Grid view rendering
 //! Follows .cursorrules: single responsibility, < 300 lines
 
-use eframe::egui::{self, Color32, Pos2, Rect, Sense, Ui};
+use eframe::egui::{self, Color32, Rect, Sense, Ui};
 use std::path::PathBuf;
 
 use crate::domain::file_entry::FileEntry;
@@ -61,7 +61,6 @@ pub fn render_grid_view(
     let mut clicked_item = None;
     let mut double_clicked_item = None;
     let mut secondary_clicked_item = None;
-    let mut navigated = false;
     
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         let content_min = ui.min_rect().min;
@@ -77,7 +76,7 @@ pub fn render_grid_view(
         let loop_min_row = visible_min_row.saturating_sub(2);
         let loop_max_row = (visible_max_row + 2).min(rows);
         
-        'row_loop: for row in loop_min_row..loop_max_row {
+        for row in loop_min_row..loop_max_row {
             for col in 0..cols {
                 let index = row * cols + col;
                 // Check bounds against current items length
@@ -133,7 +132,8 @@ pub fn render_grid_view(
                         render_item_slot_for_grid(ui, index, item, ctx, ops);
                     });
 
-                    if navigated { break 'row_loop; }
+                    // Break loop if navigation occurred
+                    // (handled outside the loop)
                 }
             }
         }
@@ -148,7 +148,6 @@ pub fn render_grid_view(
         let item = &ctx.items[idx];
         if item.is_dir {
             ops.navigate_to(&item.path.to_string_lossy());
-            navigated = true;
         } else {
             ops.open_with_shell(&item.path);
         }
@@ -209,7 +208,6 @@ fn render_item_slot_for_grid(
             thumbnail_loads: &'a mut Vec<std::path::PathBuf>,
             folder_scans: &'a mut Vec<std::path::PathBuf>,
             pending_rename: &'a mut Option<usize>,
-            grid_ops: &'a mut dyn GridViewOperations,
         }
         
         impl<'a> crate::ui::components::item_slot::ItemSlotOperations for SimpleOps<'a> {
@@ -230,7 +228,6 @@ fn render_item_slot_for_grid(
             thumbnail_loads: &mut pending_thumbnail_loads,
             folder_scans: &mut pending_folder_scans,
             pending_rename: &mut pending_rename,
-            grid_ops: ops,
         };
         
         render_item_slot(ui, &mut item_slot_ctx, &mut simple_ops);
