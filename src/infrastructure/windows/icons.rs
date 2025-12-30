@@ -2,7 +2,7 @@
 //! Follows .cursorrules: single responsibility, < 300 lines
 
 use std::path::{Path, PathBuf};
-use crate::infrastructure::windows_api::{
+use windows::{
     Win32::Foundation::*,
     Win32::Graphics::Gdi::*,
     Win32::System::Com::*,

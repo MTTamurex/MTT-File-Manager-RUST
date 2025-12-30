@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::domain::thumbnail::ThumbnailData;
 use crate::infrastructure::windows;
-use crate::infrastructure::windows_api::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
+use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 
 /// Configuration for batch thumbnail loading
 #[derive(Clone, Debug)]

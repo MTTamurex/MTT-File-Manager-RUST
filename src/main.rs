@@ -30,6 +30,9 @@ const ICON_FILE: &str = "\u{ECD3}";        // File (file-line)
 use mtt_file_manager::domain::file_entry::*;
 use mtt_file_manager::domain::thumbnail::*;
 
+// Import infrastructure modules
+use mtt_file_manager::infrastructure::windows as windows_infra;
+
 use windows::{
     core::*,
     Win32::Foundation::*,
@@ -59,52 +62,6 @@ use windows::Win32::System::Threading::GetCurrentProcess;
 // ...
 
 
-/// Extrai Ã­cone de "Este Computador" (This PC) usando PIDL (mÃ©todo robusto)
-fn extract_computer_icon(size: IconSize) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
-    unsafe {
-        // 1. ObtÃ©m o PIDL do "Meu Computador" (CSIDL_DRIVES)
-        let pidl = match SHGetSpecialFolderLocation(HWND(std::ptr::null_mut()), CSIDL_DRIVES as i32) {
-            Ok(p) => p,
-            Err(_) => {
-                println!("DEBUG: SHGetSpecialFolderLocation failed");
-                return Err("Failed to get PIDL for My Computer".into());
-            }
-        };
-        
-        let mut shfi = SHFILEINFOW::default();
-        
-        // 2. Flags com SHGFI_PIDL (CRÃTICO!)
-        let flags = SHGFI_PIDL | SHGFI_ICON | match size {
-            IconSize::Small => SHGFI_SMALLICON,
-            IconSize::Large => SHGFI_LARGEICON,
-        };
-        
-        // 3. Pede o Ã­cone usando o PIDL (cast para PCWSTR como exigido pela API)
-        let result = SHGetFileInfoW(
-            PCWSTR(pidl as *const u16),
-            FILE_ATTRIBUTE_NORMAL,
-            Some(&mut shfi),
-            std::mem::size_of::<SHFILEINFOW>() as u32,
-            flags,
-        );
-        
-        // 4. Limpa o PIDL (SEMPRE! Para evitar memory leak)
-        CoTaskMemFree(Some(pidl as *const std::ffi::c_void));
-        
-        if result == 0 || shfi.hIcon.is_invalid() {
-            println!("DEBUG: SHGetFileInfoW failed for PIDL");
-            return Err("Failed to get computer icon".into());
-        }
-        
-        // 5. Converte e limpa o Ã­cone
-        let hicon = shfi.hIcon;
-        let conversion_result = hicon_to_rgba(hicon);
-        
-        let _ = DestroyIcon(hicon);
-        
-        conversion_result
-    }
-}
 
 use windows::Win32::UI::WindowsAndMessaging::{GetIconInfo, DestroyIcon, ICONINFO, HICON};
 // FILE_ATTRIBUTE_DIRECTORY jÃ¡ importado acima, GetVolumeInformationW mantido
@@ -1538,7 +1495,7 @@ impl ImageViewerApp {
             return;
         }
         
-        if let Ok((data, width, height)) = extract_computer_icon(IconSize::Small) {
+        if let Ok((data, width, height)) = windows_infra::extract_computer_icon(IconSize::Small) {
             let image = egui::ColorImage::from_rgba_unmultiplied(
                 [width as usize, height as usize],
                 &data,

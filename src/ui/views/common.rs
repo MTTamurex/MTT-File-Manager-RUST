@@ -2,7 +2,7 @@
 //! Follows .cursorrules: single responsibility, < 300 lines
 
 use crate::domain::file_entry::FileEntry;
-use crate::infrastructure::windows_api as win_api;
+use crate::infrastructure::windows;
 
 /// Gets file type string for display
 pub fn get_file_type_string(item: &FileEntry) -> String {
@@ -22,15 +22,15 @@ pub fn get_file_type_string(item: &FileEntry) -> String {
 
 /// Formats date for display
 pub fn format_date(timestamp: u64) -> String {
-    win_api::format_date(timestamp)
+    windows::format_date(timestamp)
 }
 
 /// Formats size for display
 pub fn format_size(size: u64) -> String {
-    win_api::format_size(size)
+    windows::format_size(size)
 }
 
 /// Opens file with shell
 pub fn open_with_shell(path: &std::path::Path) {
-    win_api::open_with_shell(path);
+    windows::open_with_shell(path);
 }
