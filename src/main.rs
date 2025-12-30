@@ -202,47 +202,8 @@ impl ImageViewerApp {
         let shared_gen = Arc::new(AtomicUsize::new(0));
 
         // 4 threads: equilÃ­brio ideal entre SSD e HDD USB
-        for _ in 0..4 {
-            let rx = shared_req_rx.clone();
-            let tx = img_tx.clone();
-            let gen_tracker = shared_gen.clone();
-            let ctx_clone = ctx.clone();
-            
-            std::thread::spawn(move || {
-                unsafe { let _ = CoInitializeEx(None, COINIT_MULTITHREADED); }
-                loop {
-                    let work = {
-                        match rx.lock() {
-                            Ok(lock) => lock.recv(),
-                            Err(_) => break, // App fechou
-                        }
-                    };
-                    
-                    match work {
-                        Ok((path, req_gen)) => {
-                            // FAST CANCEL: Se a geraÃ§Ã£o global jÃ¡ mudou, ignora antes de ler o disco
-                            if req_gen == gen_tracker.load(AtomicOrdering::Relaxed) {
-                                let (data, w, h) = extract_windows_thumbnail(&path)
-                                    .unwrap_or_else(|_| create_error_placeholder());
-                                
-                                let _ = tx.send(ThumbnailData {
-                                    path,
-                                    image_data: data,
-                                    width: w,
-                                    height: h,
-                                    generation: req_gen,
-                                });
-                                
-                                // ACORDA A UI: Informa que um novo thumbnail estÃ¡ pronto
-                                ctx_clone.request_repaint();
-                            }
-                        }
-                        Err(_) => break,
-                    }
-                }
-                unsafe { CoUninitialize(); }
-            });
-        }
+        use mtt_file_manager::workers::thumbnail_worker::spawn_thumbnail_workers;
+        spawn_thumbnail_workers(shared_req_rx, img_tx, ctx.clone(), shared_gen.clone());
         
         let disks = get_all_drives();
         
