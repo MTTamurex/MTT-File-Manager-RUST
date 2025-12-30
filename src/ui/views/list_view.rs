@@ -1,7 +1,7 @@
 //! List view rendering
 //! Follows .cursorrules: single responsibility, < 300 lines
 
-use eframe::egui::{self, Color32, FontId, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Ui};
+use eframe::egui::{self, Color32, FontId, Pos2, Rect, RichText, Sense, Ui};
 use std::path::PathBuf;
 
 use crate::domain::file_entry::{FileEntry, SortMode};
@@ -58,7 +58,7 @@ pub fn render_list_view(
     ui.horizontal(|ui| {
         ui.style_mut().spacing.item_spacing.x = 0.0;
         
-        let mut draw_header = |ui: &mut Ui, text: &str, width: f32, mode: SortMode| {
+        let draw_header = |ui: &mut Ui, text: &str, width: f32, mode: SortMode| {
             let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 22.0), Sense::click());
             let is_active = ctx.sort_mode == mode;
             
