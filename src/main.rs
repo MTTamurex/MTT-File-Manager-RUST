@@ -33,12 +33,15 @@ use mtt_file_manager::domain::thumbnail::*;
 // Import infrastructure modules
 use mtt_file_manager::infrastructure::windows as windows_infra;
 
+// Import UI modules
+// use mtt_file_manager::ui::status_bar; // Not used directly - imported in render_status_bar call
+
 use windows::{
     core::*,
     Win32::Foundation::*,
     Win32::Graphics::Gdi::*,
     Win32::Storage::FileSystem::*,
-    Win32::System::Com::*,
+    // Win32::System::Com::*, // Not used
     Win32::UI::Shell::*,
     Win32::UI::WindowsAndMessaging::*,
 };
@@ -2429,43 +2432,23 @@ impl eframe::App for ImageViewerApp {
         egui::TopBottomPanel::bottom("status_bar")
             .exact_height(24.0)
             .show(ctx, |ui| {
-                ui.add_space(2.0);
-                ui.horizontal(|ui| {
-                    ui.style_mut().spacing.item_spacing.x = 12.0;
-                    
-                    ui.add_space(5.0);
-                    // Contagem de itens
-                    ui.label(format!("{} itens", self.total_items));
-                    
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.add_space(5.0);
-                        if self.is_loading_folder {
-                            ui.spinner();
-                            ui.label("Atualizando...");
-                        }
-
-                        ui.separator();
-
-                        // RAM Usage (RSS)
-                        let ram_usage = get_ram_usage();
-                        ui.label(format!("RAM: {}", format_size(ram_usage)));
-
-                        ui.separator();
-
-                        // Calculo de VRAM
-                        let vram_usage: usize = self.texture_cache.iter()
-                            .map(|(_, tex)| {
-                                let size = tex.size();
-                                size[0] * size[1] * 4
-                            })
-                            .sum();
-                        
-                        ui.label(format!(
-                            "Utilização de VRAM: {:.1} MB",
-                            vram_usage as f64 / 1024.0 / 1024.0
-                        ));
-                    });
-                });
+                use mtt_file_manager::ui::status_bar::{render_status_bar, StatusBarAction};
+                let action = render_status_bar(
+                    ui,
+                    &mut self.is_loading_folder,
+                    self.total_items,
+                    &mut self.view_mode,
+                    &mut self.thumbnail_size,
+                    &mut self.sort_mode,
+                    &mut self.sort_descending,
+                );
+                match action {
+                    StatusBarAction::SortChanged => self.sort_items(),
+                    StatusBarAction::ViewModeChanged => {
+                        // View mode changed - nothing extra to do
+                    }
+                    StatusBarAction::None => {}
+                }
             });
 
         
