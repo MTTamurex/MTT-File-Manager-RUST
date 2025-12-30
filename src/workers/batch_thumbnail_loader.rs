@@ -7,7 +7,6 @@ use std::sync::mpsc::{Sender, Receiver};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::domain::thumbnail::ThumbnailData;
-use crate::infrastructure::windows;
 use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 
 /// Configuration for batch thumbnail loading
@@ -183,90 +182,6 @@ pub fn create_batch_loader_pool(
     );
     
     loader.spawn();
-}
-
-/// Optimized version for high-performance thumbnail loading
-pub struct OptimizedThumbnailLoader {
-    work_queue: crossbeam::channel::Receiver<(PathBuf, usize)>,
-    result_sender: Sender<ThumbnailData>,
-    generation: Arc<AtomicUsize>,
-}
-
-impl OptimizedThumbnailLoader {
-    /// Creates an optimized loader using crossbeam channels for better performance
-    pub fn new(
-        work_queue: crossbeam::channel::Receiver<(PathBuf, usize)>,
-        result_sender: Sender<ThumbnailData>,
-        generation: Arc<AtomicUsize>,
-    ) -> Self {
-        Self {
-            work_queue,
-            result_sender,
-            generation,
-        }
-    }
-    
-    /// Runs the optimized loader
-    pub fn run(mut self) {
-        unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        }
-        
-        let mut batch = Vec::with_capacity(20);
-        
-        loop {
-            // Collect batch with timeout
-            self.collect_batch_optimized(&mut batch);
-            
-            if !batch.is_empty() {
-                self.process_batch_optimized(&batch);
-                batch.clear();
-            }
-            
-            // Small yield to prevent CPU spinning
-            std::thread::yield_now();
-        }
-    }
-    
-    fn collect_batch_optimized(&mut self, batch: &mut Vec<(PathBuf, usize)>) {
-        // Try to collect multiple items quickly
-        while batch.len() < 20 {
-            match self.work_queue.try_recv() {
-                Ok(item) => batch.push(item),
-                Err(_) => break,
-            }
-        }
-    }
-    
-    fn process_batch_optimized(&self, batch: &[(PathBuf, usize)]) {
-        let current_gen = self.generation.load(Ordering::Relaxed);
-        
-        batch.par_iter()
-            .filter(|(_, gen)| *gen == current_gen)
-            .for_each(|(path, gen)| {
-                match windows::extract_thumbnail(path) {
-                    Ok((data, w, h)) => {
-                        let _ = self.result_sender.send(ThumbnailData {
-                            path: path.clone(),
-                            image_data: data,
-                            width: w,
-                            height: h,
-                            generation: *gen,
-                        });
-                    }
-                    Err(_) => {
-                        let (data, w, h) = windows::create_error_placeholder();
-                        let _ = self.result_sender.send(ThumbnailData {
-                            path: path.clone(),
-                            image_data: data,
-                            width: w,
-                            height: h,
-                            generation: *gen,
-                        });
-                    }
-                }
-            });
-    }
 }
 
 #[cfg(test)]

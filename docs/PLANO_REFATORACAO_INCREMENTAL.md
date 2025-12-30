@@ -49,6 +49,52 @@ src/infrastructure/
 
 ---
 
+### ✅ Sprint 2: Workers - THUMBNAIL WORKER EXTRACTED
+
+**Status:** Concluído com sucesso  
+**Objetivo:** Extrair lógica de thumbnail workers de `main.rs` para módulo dedicado.
+
+**Mudanças Realizadas:**
+
+1. **Criação do Módulo Thumbnail Worker:**
+   - `src/workers/thumbnail_worker.rs` (novo) - Contém toda a lógica de extração de thumbnails
+   - `src/workers/mod.rs` atualizado para exportar o novo módulo
+
+2. **Substituição em `main.rs`:**
+   - Removido código inline de workers (linhas ~253-292)
+   - Adicionado import: `use mtt_file_manager::workers::thumbnail_worker::spawn_thumbnail_workers;`
+   - Substituído loop manual por chamada à função: `spawn_thumbnail_workers(shared_req_rx, img_tx, ctx.clone(), shared_gen.clone());`
+
+3. **Correções Técnicas:**
+   - Adicionado `use eframe::egui;` para acesso ao contexto da UI
+   - Adicionado `use windows::core::Interface;` para método `cast()` de `IShellItem`
+   - Removida dependência não utilizada de `crossbeam` em `batch_thumbnail_loader.rs`
+   - Desabilitado `batch_thumbnail_loader` (não usado atualmente)
+
+4. **Resultado:**
+   - ✅ Código compila sem erros: `cargo build --release`
+   - ✅ Aplicação funciona normalmente: `cargo run --release`
+   - ✅ Redução de ~40 linhas em `main.rs`
+   - ✅ Melhor organização: lógica de workers isolada em módulo dedicado
+   - ✅ Conformidade com .cursorrules: I/O em worker threads, zero alocações no hot path
+
+**Estrutura Atualizada dos Workers:**
+```
+src/workers/
+├── mod.rs ✅ (atualizado)
+├── thumbnail_worker.rs ✅ (novo - funcional)
+├── thumbnail_loader.rs ⚠️ (vazio - placeholder)
+├── folder_scanner.rs ⚠️ (vazio - placeholder)
+└── batch_thumbnail_loader.rs ⚠️ (desabilitado - não usado)
+```
+
+**Próximos Passos (Sprint 3 - Application State):**
+- Avaliar necessidade de migrar para `self.state.*` (alto risco)
+- Considerar manter estrutura atual se funcionando
+- Focar em extração de componentes UI (Sprint 4)
+
+---
+
 ## 📋 Estado Original (para referência)
 
 ### Estrutura Existente
