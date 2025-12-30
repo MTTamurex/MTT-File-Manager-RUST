@@ -5,7 +5,7 @@
 ### Progresso Atual:
 - ✅ **Fase 1: Windows APIs** - Extraídas e integradas
 - ✅ **Fase 2: Views** - Extraídas e integradas (grid_view, list_view, computer_view)
-- ⚠️ **Fase 3: Sidebar e Navegação** - Sidebar ainda inline, navigation.rs não integrado
+- ✅ **Fase 3: Sidebar e Navegação** - Sidebar extraída para ui/sidebar.rs e integrada
 - ❌ **Fase 4: Context Menu** - Ainda no main.rs
 - ❌ **Fase 5: CacheManager** - Não integrado
 - ❌ **Fase 6: Limpeza** - Arquivos .bak ainda existem
@@ -82,10 +82,10 @@ ui/views/
 ---
 
 ### Fase 3: Extrair Sidebar e Navegação (~300 linhas)
-**Prioridade: Média** | **Impacto: -300 linhas**
+**Prioridade: Média** | **Impacto: -300 linhas** ✅ **CONCLUÍDO**
 
-- [ ] Sidebar com drives → `ui/sidebar.rs` (arquivo existe, está vazio)
-- [ ] Navigation bar → `ui/navigation.rs` (arquivo existe, ~110 linhas)
+- [x] Sidebar com drives → `ui/sidebar.rs` (extraída e integrada)
+- [ ] Navigation bar → `ui/navigation.rs` (arquivo existe, ~110 linhas) - **PRÓXIMO PASSO**
 - [ ] Breadcrumb/path bar → integrar em `navigation.rs`
 
 ---
