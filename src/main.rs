@@ -1054,413 +1054,335 @@ impl ImageViewerApp {
     
     // --- DETALHES (LIST VIEW) ---
     fn render_list_view(&mut self, ui: &mut egui::Ui) {
-        let row_height = 24.0;
-        let available_w = ui.available_width();
+        use mtt_file_manager::ui::views::{list_view, ListViewContext, ListViewOperations};
         
-        // Larguras das colunas
-        let w_name = (available_w - 410.0).max(200.0);
-        let w_date = 170.0;
-        let w_type = 120.0;
-        let w_size = 100.0;
+        // Extrair dados necessários para evitar múltiplos borrows
+        let items = self.items.clone(); // Clone para evitar borrow
+        let selected_item = self.selected_item;
+        let selected_file = self.selected_file.clone();
+        let sort_mode = self.sort_mode;
+        let sort_descending = self.sort_descending;
+        let renaming_state = self.renaming_state.clone();
+        let focus_rename = self.focus_rename;
+        let folder_icon_texture = self.folder_icon_texture.clone();
+        let computer_icon = self.computer_icon.clone();
         
-        // CabeÃ§alho da Tabela
-        ui.horizontal(|ui| {
-            ui.style_mut().spacing.item_spacing.x = 0.0;
+        // Criar contexto com referências mutáveis separadas
+        let mut ctx = ListViewContext {
+            items: &items,
+            selected_item,
+            selected_file: selected_file.as_ref(),
+            sort_mode,
+            sort_descending,
+            renaming_state: renaming_state.clone(),
+            focus_rename,
+            texture_cache: &mut self.texture_cache,
+            loading_set: &mut self.loading_set,
+            scanned_folders: &mut self.scanned_folders,
+            folder_icon_texture: folder_icon_texture.as_ref(),
+            computer_icon: computer_icon.as_ref(),
+            drive_icon_cache: &mut self.drive_icon_cache,
+            item_icon_loader: &mut self.item_icon_loader,
+        };
+        
+        // Usar uma abordagem diferente: coletar ações em vetores
+        let mut actions = Vec::new();
+        
+        struct ListOps<'a> {
+            actions: &'a mut Vec<ListAction>,
+        }
+        
+        enum ListAction {
+            NavigateTo(String),
+            OpenWithShell(PathBuf),
+            RequestThumbnailLoad(PathBuf),
+            RequestFolderScan(PathBuf),
+            RenameWithShell(usize),
+        }
+        
+        impl ListViewOperations for ListOps<'_> {
+            fn navigate_to(&mut self, path: &str) {
+                self.actions.push(ListAction::NavigateTo(path.to_string()));
+            }
             
-            let mut draw_header = |ui: &mut egui::Ui, text: &str, width: f32, mode: SortMode| {
-                let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 22.0), egui::Sense::click());
-                let is_active = self.sort_mode == mode;
-                
-                if ui.is_rect_visible(rect) {
-                    if is_active {
-                        ui.painter().rect_filled(rect, 2.0, egui::Color32::from_gray(230));
-                    }
-                    let text_color = if is_active { egui::Color32::BLACK } else { egui::Color32::from_gray(100) };
-                    ui.painter().text(
-                        rect.min + egui::vec2(8.0, 4.0),
-                        egui::Align2::LEFT_TOP,
-                        text,
-                        egui::FontId::proportional(12.0),
-                        text_color,
-                    );
-                    if is_active {
-                        let arrow = if self.sort_descending { "v" } else { "^" };
-                        ui.painter().text(
-                            rect.max - egui::vec2(15.0, 8.0),
-                            egui::Align2::CENTER_CENTER,
-                            arrow,
-                            egui::FontId::proportional(10.0),
-                            text_color,
-                        );
-                    }
-                }
-                
-                if response.clicked() {
-                    if self.sort_mode == mode {
-                        self.sort_descending = !self.sort_descending;
-                    } else {
-                        self.sort_mode = mode;
-                        self.sort_descending = false;
-                    }
-                    self.sort_items();
-                }
-            };
-
-            draw_header(ui, "Nome", w_name, SortMode::Name);
-            draw_header(ui, "Última modificação", w_date, SortMode::Date);
-            draw_header(ui, "Tipo", w_type, SortMode::Name); // Tipo usa Name sort secundÃ¡rio
-            draw_header(ui, "Tamanho", w_size, SortMode::Size);
-        });
+            fn open_with_shell(&mut self, path: &PathBuf) {
+                self.actions.push(ListAction::OpenWithShell(path.clone()));
+            }
+            
+            fn request_thumbnail_load(&mut self, path: PathBuf) {
+                self.actions.push(ListAction::RequestThumbnailLoad(path));
+            }
+            
+            fn request_folder_scan(&mut self, path: PathBuf) {
+                self.actions.push(ListAction::RequestFolderScan(path));
+            }
+            
+            fn rename_with_shell(&mut self, idx: usize) {
+                self.actions.push(ListAction::RenameWithShell(idx));
+            }
+            
+            fn get_or_load_icon(
+                &mut self,
+                _ctx: &egui::Context,
+                _path: &std::path::Path,
+            ) -> Option<egui::TextureHandle> {
+                // Não podemos chamar self.app.get_or_load_icon aqui
+                // Vamos retornar None e lidar com isso de outra forma
+                None
+            }
+        }
         
-        ui.separator();
-
-        // Lista Virtualizada
-        let total_rows = self.items.len();
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(
-            ui,
-            row_height + 2.0,
-            total_rows,
-            |ui, row_range| {
-                for i in row_range {
-                    if i >= self.items.len() { break; }
-                    let item = self.items[i].clone();
-                    let is_selected = self.selected_item == Some(i);
-
-                    ui.push_id(i, |ui| {
-                        let (rect, response) = ui.allocate_exact_size(
-                            egui::vec2(ui.available_width(), row_height), 
-                            egui::Sense::click()
-                        );
-
-                        // SeleÃ§Ã£o e AÃ§Ã£o
-                        if response.clicked() {
-                            self.selected_item = Some(i);
-                            self.selected_file = Some(item.clone());
-                            
-                            // Trigger thumbnail load for sidebar preview
-                            if !item.is_dir {
-                                if !self.texture_cache.contains(&item.path) && !self.loading_set.contains(&item.path) {
-                                    self.request_thumbnail_load(item.path.clone());
-                                }
-                            }
+        let mut ops = ListOps {
+            actions: &mut actions,
+        };
+        
+        let action = list_view::render_list_view(ui, &mut ctx, &mut ops);
+        
+        // Update state from context
+        self.sort_mode = ctx.sort_mode;
+        self.sort_descending = ctx.sort_descending;
+        self.renaming_state = ctx.renaming_state;
+        self.focus_rename = ctx.focus_rename;
+        
+        // Processar ações
+        match action {
+            Some(list_view::ListViewAction::Click(idx)) => {
+                self.selected_item = Some(idx);
+                if let Some(item) = self.items.get(idx) {
+                    self.selected_file = Some(item.clone());
+                    
+                    // Trigger thumbnail load for sidebar preview
+                    if !item.is_dir {
+                        if !self.texture_cache.contains(&item.path) && !self.loading_set.contains(&item.path) {
+                            self.request_thumbnail_load(item.path.clone());
                         }
-                        if response.double_clicked() {
-                            if item.is_dir {
-                                self.navigate_to(&item.path.to_string_lossy());
-                            } else {
-                                open_with_shell(&item.path);
-                            }
-                        }
-                        
-                        // Clique direito: abre menu de contexto e seleciona o item
-                        if response.secondary_clicked() {
-                            // Seleciona o item visualmente
-                            self.selected_item = Some(i);
-                            self.selected_file = Some(item.clone());
-                            
-                            // Abre menu de contexto
-                            self.context_menu_open = true;
-                            self.context_menu_pos = response.interact_pointer_pos()
-                                .unwrap_or_else(|| ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO));
-                            self.context_menu_item_idx = Some(i);
-                            self.context_menu_target_path = Some(item.path.clone());
-                            self.context_menu_is_empty_area = false;
-                        }
-
-                        // Background Selection
-                        if is_selected {
-                            ui.painter().rect_filled(rect, 0.0, egui::Color32::from_rgb(205, 232, 255));
-                        } else if response.hovered() {
-                            ui.painter().rect_filled(rect, 0.0, egui::Color32::from_gray(245));
-                        }
-
-                        // Tooltip at cursor
-                        if response.hovered() {
-                            egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), response.id, |ui: &mut egui::Ui| {
-                                ui.set_max_width(300.0);
-                                ui.vertical(|ui| {
-                                    ui.label(egui::RichText::new(&item.name).strong());
-                                    ui.separator();
-                                    ui.label(format!("Tipo: {}", get_file_type_string(&item)));
-                                    if !item.is_dir {
-                                        ui.label(format!("Tamanho: {}", format_size(item.size)));
-                                    }
-                                    ui.label(format!("Última modificação: {}", format_date(item.modified)));
-                                });
-                            });
-                        }
-
-                        let text_color = egui::Color32::BLACK;
-                        let secondary_color = egui::Color32::from_gray(100);
-                        
-                        // 1. Icone + Nome
-                        let icon_size_px = 16.0;
-                        let icon_rect = egui::Rect::from_min_size(
-                            rect.min + egui::vec2(4.0, 4.0),
-                            egui::vec2(icon_size_px, icon_size_px)
-                        );
-                        
-                        if item.is_dir {
-                            // folder: icone nativo do Windows
-                            self.ensure_folder_icon(ui.ctx());
-                            if let Some(folder_icon) = &self.folder_icon_texture {
-                                ui.painter().image(
-                                    folder_icon.id(),
-                                    icon_rect,
-                                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                                    egui::Color32::WHITE
-                                );
-                            } else {
-                                ui.painter().text(icon_rect.min, egui::Align2::LEFT_TOP, ICON_FOLDER, egui::FontId::new(14.0, egui::FontFamily::Name("icons".into())), egui::Color32::from_rgb(255, 193, 7));
-                            }
-                        } else {
-                            // Arquivo: tenta carregar icone nativo
-                            if let Some(file_icon) = self.get_or_load_icon(ui.ctx(), &item.path) {
-                                ui.painter().image(
-                                    file_icon.id(),
-                                    icon_rect,
-                                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                                    egui::Color32::WHITE
-                                );
-                            } else {
-                                ui.painter().text(icon_rect.min, egui::Align2::LEFT_TOP, ICON_FILE, egui::FontId::new(14.0, egui::FontFamily::Name("icons".into())), egui::Color32::GRAY);
-                            }
-                        }
-
-                        // LÓGICA VISUAL DE RENOMEAR (LIST VIEW)
-                        let is_renaming_this = self.renaming_state.as_ref().map_or(false, |(idx, _)| *idx == i);
-                        if is_renaming_this {
-                            let mut text = self.renaming_state.as_mut().unwrap().1.clone();
-                            let name_rect = egui::Rect::from_min_size(
-                                rect.min + egui::vec2(24.0, 2.0),
-                                egui::vec2(w_name - 30.0, row_height - 4.0)
-                            );
-                            
-                            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(name_rect), |ui| {
-                                let response = ui.add(egui::TextEdit::singleline(&mut text)
-                                    .frame(true)
-                                    .horizontal_align(egui::Align::Min)
-                                    .id_source("rename_input_list"));
-                                
-                                self.renaming_state.as_mut().unwrap().1 = text;
-
-                                if self.focus_rename {
-                                    response.request_focus();
-                                    self.focus_rename = false;
-                                }
-
-                                if response.lost_focus() && ui.input(|i_in| i_in.key_pressed(egui::Key::Enter)) {
-                                    self.rename_with_shell(i);
-                                } else if ui.input(|i_in| i_in.key_pressed(egui::Key::Escape)) {
-                                    self.renaming_state = None;
-                                } else if response.clicked_elsewhere() {
-                                    self.renaming_state = None;
-                                }
-                            });
-                        } else {
-                            // Nome (truncado para caber na coluna - safe UTF-8)
-                            let max_name_chars = ((w_name - 30.0) / 7.0) as usize;
-                            let display_name: String = if item.name.chars().count() > max_name_chars && max_name_chars > 3 {
-                                let truncated: String = item.name.chars().take(max_name_chars.saturating_sub(3)).collect();
-                                format!("{}...", truncated)
-                            } else {
-                                item.name.clone()
-                            };
-                            ui.painter().text(
-                                rect.min + egui::vec2(24.0, 5.0),
-                                egui::Align2::LEFT_TOP,
-                                display_name,
-                                egui::FontId::proportional(12.0),
-                                text_color,
-                            );
-                        }
-
-                        // 2. Data
-                        ui.painter().text(
-                            egui::pos2(rect.min.x + w_name, rect.min.y + 5.0),
-                            egui::Align2::LEFT_TOP,
-                            format_date(item.modified),
-                            egui::FontId::proportional(12.0),
-                            secondary_color,
-                        );
-
-                        // 3. Tipo (truncado)
-                        let type_str = get_file_type_string(&item);
-                        let max_type_chars = 14; // ~100px at 7px per char
-                        let display_type: String = if type_str.chars().count() > max_type_chars {
-                            type_str.chars().take(max_type_chars - 2).collect::<String>() + ".."
-                        } else {
-                            type_str
-                        };
-                        ui.painter().text(
-                            egui::pos2(rect.min.x + w_name + w_date, rect.min.y + 5.0),
-                            egui::Align2::LEFT_TOP,
-                            display_type,
-                            egui::FontId::proportional(12.0),
-                            secondary_color,
-                        );
-
-                        // 4. Tamanho
-                        let size_str = if item.is_dir { "".to_string() } else { format_size(item.size) };
-                        ui.painter().text(
-                            egui::pos2(rect.min.x + w_name + w_date + w_type, rect.min.y + 5.0),
-                            egui::Align2::LEFT_TOP,
-                            size_str,
-                            egui::FontId::proportional(12.0),
-                            secondary_color,
-                        );
-                    });
+                    }
                 }
             }
-        );
+            Some(list_view::ListViewAction::DoubleClick(idx)) => {
+                let path_to_navigate = self.items.get(idx).map(|item| {
+                    if item.is_dir {
+                        Some(item.path.clone())
+                    } else {
+                        open_with_shell(&item.path);
+                        None
+                    }
+                });
+                
+                if let Some(Some(path)) = path_to_navigate {
+                    self.navigate_to(&path.to_string_lossy());
+                }
+            }
+            Some(list_view::ListViewAction::SecondaryClick(idx)) => {
+                self.selected_item = Some(idx);
+                if let Some(item) = self.items.get(idx) {
+                    self.selected_file = Some(item.clone());
+                    self.context_menu_open = true;
+                    self.context_menu_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
+                    self.context_menu_item_idx = Some(idx);
+                    self.context_menu_target_path = Some(item.path.clone());
+                    self.context_menu_is_empty_area = false;
+                }
+            }
+            None => {}
+        }
+        
+        // Executar ações coletadas
+        for action in actions {
+            match action {
+                ListAction::NavigateTo(path) => self.navigate_to(&path),
+                ListAction::OpenWithShell(path) => open_with_shell(&path),
+                ListAction::RequestThumbnailLoad(path) => self.request_thumbnail_load(path),
+                ListAction::RequestFolderScan(path) => self.request_folder_scan(path),
+                ListAction::RenameWithShell(idx) => self.rename_with_shell(idx),
+            }
+        }
     }
 
     // --- GRANDE (GRID VIEW) ---
     fn render_grid_view(&mut self, ui: &mut egui::Ui) {
+        use mtt_file_manager::ui::views::{grid_view, GridViewContext, GridViewOperations};
+        
+        // Calculate cols for keyboard navigation
         let padding = 8.0;
         let item_w = self.thumbnail_size;
-        let item_h = self.thumbnail_size + 20.0;  // Altura: thumb + texto
         let available_w = ui.available_width();
         let cols = ((available_w - padding) / (item_w + padding)).floor().max(1.0) as usize;
-        self.last_grid_cols = cols;
         
-        // NavegaÃ§Ã£o Teclado
-        if ui.input(|i| i.focused) {
-            let current_index = self.items.iter().position(|x| self.selected_file.as_ref().map_or(false, |f| f.path == x.path));
-            // Navegação por teclado (APENAS SE NÃO ESTIVER RENOMEANDO)
-            if self.renaming_state.is_none() {
-                let mut new_index = None;
-                if ui.input(|i| i.key_pressed(egui::Key::ArrowRight)) { 
-                    new_index = current_index.map(|idx| idx + 1); 
-                }
-                else if ui.input(|i| i.key_pressed(egui::Key::ArrowLeft)) { 
-                    new_index = current_index.map(|idx| idx.saturating_sub(1)); 
-                }
-                else if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) { 
-                    new_index = current_index.map(|idx| idx + cols).or(Some(0)); 
-                }
-                else if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) { 
-                    new_index = current_index.map(|idx| idx.saturating_sub(cols)); 
-                }
+        // Keyboard navigation (ONLY when not renaming)
+        if self.renaming_state.is_none() {
+            let current_index = self.items.iter().position(|x| 
+                self.selected_file.as_ref().map_or(false, |f| f.path == x.path)
+            );
+            
+            let mut new_index = None;
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowRight)) { 
+                new_index = current_index.map(|idx| idx + 1).or(Some(0)); 
+            }
+            else if ui.input(|i| i.key_pressed(egui::Key::ArrowLeft)) { 
+                new_index = current_index.map(|idx| idx.saturating_sub(1)); 
+            }
+            else if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) { 
+                new_index = current_index.map(|idx| idx + cols).or(Some(0)); 
+            }
+            else if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) { 
+                new_index = current_index.map(|idx| idx.saturating_sub(cols)); 
+            }
 
-                if let Some(idx) = new_index {
-                    let clamped = idx.min(self.items.len().saturating_sub(1));
-                    if let Some(item) = self.items.get(clamped) {
-                        self.selected_file = Some(item.clone());
-                        self.selected_item = Some(clamped);
-                    }
+            if let Some(idx) = new_index {
+                let clamped = idx.min(self.items.len().saturating_sub(1));
+                if let Some(item) = self.items.get(clamped) {
+                    self.selected_file = Some(item.clone());
+                    self.selected_item = Some(clamped);
                 }
             }
             
-            // Enter para abrir (apenas se não estiver renomeando)
-            if self.renaming_state.is_none() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            // Enter to open (only when not renaming)
+            if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 if let Some(selected) = &self.selected_file.clone() {
                     if selected.is_dir {
                         self.navigate_to(&selected.path.to_string_lossy());
+                        return; // Exit early after navigation
                     } else {
                         open_with_shell(&selected.path);
                     }
                 }
             }
         }
-
-        // Grid Virtualizado
-        let count = self.items.len();
-        let rows = (count as f32 / cols as f32).ceil() as usize;
-        let total_height = rows as f32 * (item_h + padding) + padding;
         
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            let content_min = ui.min_rect().min;
-            ui.allocate_rect(egui::Rect::from_min_size(content_min, egui::vec2(available_w, total_height)), egui::Sense::hover());
+        // Extrair dados necessários para evitar múltiplos borrows
+        let items = self.items.clone(); // Clone para evitar borrow
+        let selected_item = self.selected_item;
+        let selected_file = self.selected_file.clone();
+        let thumbnail_size = self.thumbnail_size;
+        let last_grid_cols = self.last_grid_cols;
+        let renaming_state = self.renaming_state.clone();
+        let focus_rename = self.focus_rename;
+        let folder_icon_texture = self.folder_icon_texture.clone();
+        let computer_icon = self.computer_icon.clone();
+        
+        // Criar contexto com referências mutáveis separadas
+        let mut ctx = GridViewContext {
+            items: &items,
+            selected_item,
+            selected_file: selected_file.as_ref(),
+            thumbnail_size,
+            last_grid_cols,
+            renaming_state: renaming_state.clone(),
+            focus_rename,
+            texture_cache: &mut self.texture_cache,
+            loading_set: &mut self.loading_set,
+            scanned_folders: &mut self.scanned_folders,
+            folder_icon_texture: folder_icon_texture.as_ref(),
+            computer_icon: computer_icon.as_ref(),
+            drive_icon_cache: &mut self.drive_icon_cache,
+            item_icon_loader: &mut self.item_icon_loader,
+        };
+        
+        // Usar uma abordagem diferente: coletar ações em vetores
+        let mut actions = Vec::new();
+        
+        struct GridOps<'a> {
+            actions: &'a mut Vec<GridAction>,
+        }
+        
+        enum GridAction {
+            NavigateTo(String),
+            OpenWithShell(PathBuf),
+            RequestThumbnailLoad(PathBuf),
+            RequestFolderScan(PathBuf),
+            RenameWithShell(usize),
+        }
+        
+        impl GridViewOperations for GridOps<'_> {
+            fn navigate_to(&mut self, path: &str) {
+                self.actions.push(GridAction::NavigateTo(path.to_string()));
+            }
             
-            let clip_rect = ui.clip_rect();
-            let start_y = (clip_rect.top() - content_min.y).max(0.0);
-            let end_y = start_y + clip_rect.height();
+            fn open_with_shell(&mut self, path: &PathBuf) {
+                self.actions.push(GridAction::OpenWithShell(path.clone()));
+            }
             
-            let visible_min_row = (start_y / (item_h + padding)).floor() as usize;
-            let visible_max_row = ((end_y / (item_h + padding)).ceil() as usize + 1).min(rows);
+            fn request_thumbnail_load(&mut self, path: PathBuf) {
+                self.actions.push(GridAction::RequestThumbnailLoad(path));
+            }
             
-            let loop_min_row = visible_min_row.saturating_sub(2);
-            let loop_max_row = (visible_max_row + 2).min(rows);
+            fn request_folder_scan(&mut self, path: PathBuf) {
+                self.actions.push(GridAction::RequestFolderScan(path));
+            }
             
-            'row_loop: for row in loop_min_row..loop_max_row {
-                for col in 0..cols {
-                    let index = row * cols + col;
-                    // Check bounds against current items length (prevents crash if navigate_to was called)
-                    if index >= self.items.len() { break; }
-                    
-                    let x_pos = col as f32 * (item_w + padding) + padding;
-                    let y_pos = row as f32 * (item_h + padding) + padding;
-                    let rect = egui::Rect::from_min_size(content_min + egui::vec2(x_pos, y_pos), egui::vec2(item_w, item_h));
-                    
-                    if ui.is_rect_visible(rect) {
-                        // Clone do item para uso seguro nesta iteração
-                        let item = self.items[index].clone();
-                        
-                        let response = ui.interact(rect, ui.id().with(index), egui::Sense::click());
-                        if response.clicked() {
-                            self.selected_file = Some(item.clone());
-                            self.selected_item = Some(index);
-                        }
-                        
-                        let mut navigated = false;
-                        if response.double_clicked() {
-                            if item.is_dir { 
-                                self.navigate_to(&item.path.to_string_lossy()); 
-                                navigated = true;
-                            }
-                            else { open_with_shell(&item.path); }
-                        }
-                        
-                        // Clique direito: abre menu de contexto e seleciona o item
-                        if response.secondary_clicked() {
-                            // Seleciona o item visualmente
-                            self.selected_file = Some(item.clone());
-                            self.selected_item = Some(index);
-                            
-                            // Abre menu de contexto
-                            self.context_menu_open = true;
-                            self.context_menu_pos = response.interact_pointer_pos()
-                                .unwrap_or_else(|| ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO));
-                            self.context_menu_item_idx = Some(index);
-                            self.context_menu_target_path = Some(item.path.clone());
-                            self.context_menu_is_empty_area = false;
-                        }
-
-                        if self.selected_item == Some(index) {
-                            ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 215)), egui::StrokeKind::Inside);
-                            ui.painter().rect_filled(rect, 4.0, egui::Color32::from_rgba_unmultiplied(0, 120, 215, 30));
-                        }
-
-                        // Tooltip at cursor
-                        let item_tooltip = item.clone();
-                        if response.hovered() {
-                            egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), response.id, |ui: &mut egui::Ui| {
-                                ui.set_max_width(300.0);
-                                ui.vertical(|ui| {
-                                    ui.label(egui::RichText::new(&item_tooltip.name).strong());
-                                    ui.separator();
-                                    ui.label(format!("Tipo: {}", get_file_type_string(&item_tooltip)));
-                                    if !item_tooltip.is_dir {
-                                        ui.label(format!("Tamanho: {}", format_size(item_tooltip.size)));
-                                    }
-                                    ui.label(format!("Última modificação: {}", format_date(item_tooltip.modified)));
-                                });
-                            });
-                        }
-                        
-                        // Content area with margin for selection border visibility
-                        let content_margin = 3.0;
-                        let inner_rect = rect.shrink(content_margin);
-                        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
-                            self.render_item_slot(ui, index);
-                        });
-
-                        if navigated { break 'row_loop; } // Escapa do loop se o contexto mudou
-                    }
+            fn rename_with_shell(&mut self, idx: usize) {
+                self.actions.push(GridAction::RenameWithShell(idx));
+            }
+            
+            fn get_or_load_icon(
+                &mut self,
+                _ctx: &egui::Context,
+                _path: &std::path::Path,
+            ) -> Option<egui::TextureHandle> {
+                // Não podemos chamar self.app.get_or_load_icon aqui
+                // Vamos retornar None e lidar com isso de outra forma
+                None
+            }
+        }
+        
+        let mut ops = GridOps {
+            actions: &mut actions,
+        };
+        
+        let action = grid_view::render_grid_view(ui, &mut ctx, &mut ops);
+        
+        // Update state from context
+        self.last_grid_cols = ctx.last_grid_cols;
+        self.renaming_state = ctx.renaming_state;
+        self.focus_rename = ctx.focus_rename;
+        
+        // Processar ações
+        match action {
+            Some(grid_view::GridViewAction::Click(idx)) => {
+                self.selected_item = Some(idx);
+                if let Some(item) = self.items.get(idx) {
+                    self.selected_file = Some(item.clone());
                 }
             }
-        });
+            Some(grid_view::GridViewAction::DoubleClick(idx)) => {
+                let path_to_navigate = self.items.get(idx).map(|item| {
+                    if item.is_dir {
+                        Some(item.path.clone())
+                    } else {
+                        open_with_shell(&item.path);
+                        None
+                    }
+                });
+                
+                if let Some(Some(path)) = path_to_navigate {
+                    self.navigate_to(&path.to_string_lossy());
+                }
+            }
+            Some(grid_view::GridViewAction::SecondaryClick(idx)) => {
+                self.selected_item = Some(idx);
+                if let Some(item) = self.items.get(idx) {
+                    self.selected_file = Some(item.clone());
+                    self.context_menu_open = true;
+                    self.context_menu_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
+                    self.context_menu_item_idx = Some(idx);
+                    self.context_menu_target_path = Some(item.path.clone());
+                    self.context_menu_is_empty_area = false;
+                }
+            }
+            None => {}
+        }
+        
+        // Executar ações coletadas
+        for action in actions {
+            match action {
+                GridAction::NavigateTo(path) => self.navigate_to(&path),
+                GridAction::OpenWithShell(path) => open_with_shell(&path),
+                GridAction::RequestThumbnailLoad(path) => self.request_thumbnail_load(path),
+                GridAction::RequestFolderScan(path) => self.request_folder_scan(path),
+                GridAction::RenameWithShell(idx) => self.rename_with_shell(idx),
+            }
+        }
     }
 
     fn render_item_slot(&mut self, ui: &mut egui::Ui, idx: usize) {

@@ -38,12 +38,19 @@ pub trait GridViewOperations {
     ) -> Option<egui::TextureHandle>;
 }
 
+/// Action returned by grid view
+pub enum GridViewAction {
+    Click(usize),
+    DoubleClick(usize),
+    SecondaryClick(usize),
+}
+
 /// Renders the grid view
 pub fn render_grid_view(
     ui: &mut Ui,
     ctx: &mut GridViewContext,
     ops: &mut dyn GridViewOperations,
-) -> Option<usize> {
+) -> Option<GridViewAction> {
     let padding = 8.0;
     let item_w = ctx.thumbnail_size;
     let item_h = ctx.thumbnail_size + 20.0;  // Height: thumb + text
@@ -139,23 +146,19 @@ pub fn render_grid_view(
         }
     });
     
-    // Handle actions after rendering
-    if let Some(idx) = clicked_item {
-        return Some(idx);
-    }
-    
+    // Handle actions after rendering - ORDER MATTERS!
+    // double_clicked and secondary_clicked must be checked BEFORE clicked
+    // because clicked() also returns true on double-click
     if let Some(idx) = double_clicked_item {
-        let item = &ctx.items[idx];
-        if item.is_dir {
-            ops.navigate_to(&item.path.to_string_lossy());
-        } else {
-            ops.open_with_shell(&item.path);
-        }
+        return Some(GridViewAction::DoubleClick(idx));
     }
     
     if let Some(idx) = secondary_clicked_item {
-        // This would trigger context menu - handled by caller
-        return Some(idx);
+        return Some(GridViewAction::SecondaryClick(idx));
+    }
+    
+    if let Some(idx) = clicked_item {
+        return Some(GridViewAction::Click(idx));
     }
     
     None

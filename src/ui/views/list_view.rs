@@ -25,6 +25,13 @@ pub struct ListViewContext<'a> {
     pub item_icon_loader: &'a mut crate::ui::icon_loader::IconLoader,
 }
 
+/// Action returned by list view
+pub enum ListViewAction {
+    Click(usize),
+    DoubleClick(usize),
+    SecondaryClick(usize),
+}
+
 /// Operations that can be performed from list view
 pub trait ListViewOperations {
     fn navigate_to(&mut self, path: &str);
@@ -44,7 +51,7 @@ pub fn render_list_view(
     ui: &mut Ui,
     ctx: &mut ListViewContext,
     ops: &mut dyn ListViewOperations,
-) -> Option<usize> {
+) -> Option<ListViewAction> {
     let row_height = 24.0;
     let available_w = ui.available_width();
     
@@ -296,23 +303,19 @@ pub fn render_list_view(
         }
     );
     
-    // Handle actions after rendering
-    if let Some(idx) = clicked_item {
-        return Some(idx);
-    }
-    
+    // Handle actions after rendering - ORDER MATTERS!
+    // double_clicked and secondary_clicked must be checked BEFORE clicked
+    // because clicked() also returns true on double-click
     if let Some(idx) = double_clicked_item {
-        let item = &ctx.items[idx];
-        if item.is_dir {
-            ops.navigate_to(&item.path.to_string_lossy());
-        } else {
-            ops.open_with_shell(&item.path);
-        }
+        return Some(ListViewAction::DoubleClick(idx));
     }
     
     if let Some(idx) = secondary_clicked_item {
-        // This would trigger context menu - handled by caller
-        return Some(idx);
+        return Some(ListViewAction::SecondaryClick(idx));
+    }
+    
+    if let Some(idx) = clicked_item {
+        return Some(ListViewAction::Click(idx));
     }
     
     None
