@@ -35,25 +35,13 @@ use mtt_file_manager::infrastructure::windows as windows_infra;
 
 // Import UI modules
 // use mtt_file_manager::ui::status_bar; // Not used directly - imported in render_status_bar call
-use mtt_file_manager::ui::components::item_slot;
 use mtt_file_manager::ui::icon_loader::IconLoader;
 
 use windows::{
     core::*,
     Win32::Foundation::*,
-    Win32::Graphics::Gdi::*,
     Win32::Storage::FileSystem::*,
-    // Win32::System::Com::*, // Not used
     Win32::UI::Shell::*,
-    Win32::UI::WindowsAndMessaging::*,
-};
-
-// Imports adicionais explÃ­citos para APIs de Ã­cones
-use windows::Win32::UI::Shell::{
-    SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_LARGEICON, 
-    SHGFI_USEFILEATTRIBUTES, SHGFI_DISPLAYNAME,
-    SHFileOperationW, SHFILEOPSTRUCTW, FO_RENAME, FO_DELETE, FO_COPY, FO_MOVE,
-    FOF_ALLOWUNDO, FOF_WANTNUKEWARNING
 };
 
 // OTIMIZAÃ‡ÃƒO: Imports para Win32 FindFirst/NextFileW (metadata em UMA syscall)
@@ -61,16 +49,17 @@ use windows::Win32::Storage::FileSystem::{
     FindFirstFileW, FindNextFileW, FindClose, WIN32_FIND_DATAW, FILE_ATTRIBUTE_DIRECTORY
 };
 use std::os::windows::ffi::OsStringExt;
-use windows::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
-use windows::Win32::System::Threading::GetCurrentProcess;
 
-// ...
-
-
-
-use windows::Win32::UI::WindowsAndMessaging::{GetIconInfo, DestroyIcon, ICONINFO, HICON};
-// FILE_ATTRIBUTE_DIRECTORY jÃ¡ importado acima, GetVolumeInformationW mantido
-use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
+// Import specific Windows API functions from modules
+use windows_infra::{
+    get_all_drives,
+    extract_file_icon,
+    extract_file_icon_by_path,
+    extract_drive_icon,
+    open_with_shell,
+    format_size,
+    format_date,
+};
 
 
 
@@ -78,14 +67,13 @@ use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
 // Caminho padrÃ£o
 const PATH_PADRAO: &str = "C:\\";
 
-// LRU cache - reduzido para limitar VRAM (~50-100MB)
-const CACHE_SIZE: usize = 200;
-const MAX_CONCURRENT_LOADS: usize = 30;  // Reduzido de 50
-  // Pre-fetch: carrega 5 linhas antes/depois da viewport
+// LRU cache - reduzido para limitar VRAM (~25-50MB)
+const CACHE_SIZE: usize = 100;
+const MAX_CONCURRENT_LOADS: usize = 20;  // Reduzido para melhor performance
 
 
 // Icon cache (menor pois Ã­cones sÃ£o compartilhados por extensÃ£o)
-const ICON_CACHE_SIZE: usize = 100;
+const ICON_CACHE_SIZE: usize = 50;
 
 // Operações de Clipboard (Copiar/Recortar)
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -284,548 +272,20 @@ impl ImageViewerApp {
     }
 }
 
-/// ObtÃ©m o label (nome) de um volume do Windows.
-/// Usa Shell Display Name (suporta drives virtuais como Cryptomator).
-/// Fallback para GetVolumeInformationW se Shell falhar.
-fn get_volume_label(drive_path: &str) -> String {
-    unsafe {
-        let path_wide: Vec<u16> = drive_path
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect();
-        
-        // Primeiro: tenta Shell Display Name (suporta Cryptomator, etc)
-        let mut shfi: SHFILEINFOW = std::mem::zeroed();
-        let result = SHGetFileInfoW(
-            PCWSTR(path_wide.as_ptr()),
-            FILE_ATTRIBUTE_DIRECTORY,
-            Some(&mut shfi),
-            std::mem::size_of::<SHFILEINFOW>() as u32,
-            SHGFI_DISPLAYNAME,
-        );
-        
-        if result != 0 {
-            let display_name = String::from_utf16_lossy(&shfi.szDisplayName)
-                .trim_end_matches('\0')
-                .to_string();
-            
-            // Shell retorna "Label (X:)" - extraimos sÃ³ o label
-            if let Some(paren_pos) = display_name.rfind(" (") {
-                let label = display_name[..paren_pos].trim();
-                if !label.is_empty() {
-                    return label.to_string();
-                }
-            } else if !display_name.is_empty() {
-                return display_name;
-            }
-        }
-        
-        // Fallback: GetVolumeInformationW (volume label real)
-        let mut volume_name_buffer = vec![0u16; 256];
-        let vol_result = GetVolumeInformationW(
-            PCWSTR(path_wide.as_ptr()),
-            Some(&mut volume_name_buffer),
-            None,
-            None,
-            None,
-            None,
-        );
-        
-        if vol_result.is_ok() {
-            let volume_name = String::from_utf16_lossy(&volume_name_buffer)
-                .trim_end_matches('\0')
-                .to_string();
-            
-            if !volume_name.is_empty() {
-                return volume_name;
-            }
-        }
-        
-        "Disco Local".to_string()
-    }
-}
-
-// Enumera drives com seus labels
-fn get_all_drives() -> Vec<(String, String)> {
-    unsafe {
-        let mut buffer = vec![0u16; 256];
-        let len = GetLogicalDriveStringsW(Some(&mut buffer));
-        
-        if len == 0 {
-            return Vec::new();
-        }
-        
-        String::from_utf16_lossy(&buffer[..len as usize])
-            .split('\0')
-            .filter(|s| !s.is_empty())
-            .map(|path| {
-                let label = get_volume_label(path);
-                let drive_letter = path.trim_end_matches('\\');
-                (path.to_string(), format!("{} ({})", label, drive_letter))
-            })
-            .collect()
-    }
-}
-
-// Extrai thumbnail
-fn extract_windows_thumbnail(path: &PathBuf) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
-    unsafe {
-        let path_str = path.to_string_lossy().to_string();
-        let path_wide: Vec<u16> = path_str.encode_utf16().chain(std::iter::once(0)).collect();
-        
-        let shell_item: IShellItem = SHCreateItemFromParsingName(
-            PCWSTR(path_wide.as_ptr()),
-            None,
-        )?;
-        
-        let image_factory: IShellItemImageFactory = shell_item.cast()?;
-        
-        let size = SIZE {
-            cx: 256,
-            cy: 256,
-        };
-        let hbitmap: HBITMAP = image_factory.GetImage(size, SIIGBF_THUMBNAILONLY)?;
-        
-        let (rgba_data, width, height) = hbitmap_to_rgba(hbitmap)?;
-        
-        let _ = DeleteObject(hbitmap);
-        
-        Ok((rgba_data, width, height))
-    }
-}
-
-fn hbitmap_to_rgba(hbitmap: HBITMAP) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
-    unsafe {
-        let mut bm = BITMAP::default();
-        GetObjectW(
-            hbitmap,
-            std::mem::size_of::<BITMAP>() as i32,
-            Some(&mut bm as *mut _ as *mut _),
-        );
-        
-        let width = bm.bmWidth as usize;
-        let height = bm.bmHeight.abs() as usize;
-        
-        let mut buffer = vec![0u8; width * height * 4];
-        
-        let mut bi = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: width as i32,
-                biHeight: -(height as i32),
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: BI_RGB.0 as u32,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        
-        let hdc = GetDC(None);
-        GetDIBits(
-            hdc,
-            hbitmap,
-            0,
-            height as u32,
-            Some(buffer.as_mut_ptr() as *mut _),
-            &mut bi,
-            DIB_RGB_COLORS,
-        );
-        ReleaseDC(None, hdc);
-        
-        for pixel in buffer.chunks_exact_mut(4) {
-            pixel.swap(0, 2);
-        }
-        
-        Ok((buffer, width as u32, height as u32))
-    }
-}
-
-fn create_error_placeholder() -> (Vec<u8>, u32, u32) {
-    let size = 256;
-    let mut buffer = vec![0u8; size * size * 4];
-    
-    for (i, pixel) in buffer.chunks_exact_mut(4).enumerate() {
-        let x = i % size;
-        let y = i / size;
-        let intensity = ((x + y) as f32 / (size * 2) as f32 * 100.0) as u8 + 100;
-        pixel[0] = intensity;
-        pixel[1] = intensity;
-        pixel[2] = intensity;
-        pixel[3] = 255;
-    }
-    
-    (buffer, 256, 256)
-}
-
-/// Converte HICON para buffer RGBA.
-/// Similar a hbitmap_to_rgba mas trabalha com Ã­cones (que tÃªm mÃ¡scara).
-/// 
-/// # Safety
-/// Usa GetIconInfo, GetDIBits. NÃ£o libera o HICON (responsabilidade do caller).
-/// IMPORTANTE: Windows GDI retorna Pre-Multiplied Alpha. Tratamento adequado do canal alpha.
-fn hicon_to_rgba(hicon: HICON) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
-    unsafe {
-        // 1. ObtÃ©m estrutura ICONINFO (color bitmap + mask bitmap)
-        let mut icon_info = ICONINFO::default();
-        if GetIconInfo(hicon, &mut icon_info).is_err() {
-            return Err("GetIconInfo failed".into());
-        }
-        
-        let hbm_color = icon_info.hbmColor;
-        
-        // 2. Valida e converte o color bitmap
-        let mut bm = BITMAP::default();
-        GetObjectW(
-            hbm_color,
-            std::mem::size_of::<BITMAP>() as i32,
-            Some(&mut bm as *mut _ as *mut _),
-        );
-        
-        let width = bm.bmWidth as usize;
-        let height = bm.bmHeight.abs() as usize;
-        
-        // 3. Valida tamanho (Ã­cones costumam ser pequenos, mas defensivo)
-        if width > 256 || height > 256 {
-            // SAFETY: Cleanup antes de retornar erro
-            let _ = DeleteObject(hbm_color);
-            let _ = DeleteObject(icon_info.hbmMask);
-            return Err("Icon too large".into());
-        }
-        
-        let mut buffer = vec![0u8; width * height * 4];
-        
-        let mut bi = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: width as i32,
-                biHeight: -(height as i32),  // Top-down
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: BI_RGB.0 as u32,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        
-        let hdc = GetDC(None);
-        let result = GetDIBits(
-            hdc,
-            hbm_color,
-            0,
-            height as u32,
-            Some(buffer.as_mut_ptr() as *mut _),
-            &mut bi,
-            DIB_RGB_COLORS,
-        );
-        
-        // SAFETY: Sempre libera DC mesmo se GetDIBits falhar
-        ReleaseDC(None, hdc);
-        
-        if result == 0 {
-            // SAFETY: Cleanup antes de retornar erro
-            let _ = DeleteObject(hbm_color);
-            let _ = DeleteObject(icon_info.hbmMask);
-            return Err("GetDIBits failed".into());
-        }
-        
-        // 4. Cleanup dos bitmaps (mas NÃƒO do HICON - caller Ã© responsÃ¡vel)
-        let _ = DeleteObject(hbm_color);
-        let _ = DeleteObject(icon_info.hbmMask);
-        
-        // 5. BGRA â†’ RGBA conversion (Windows retorna BGRA)
-        // NOTA: Alpha channel jÃ¡ estÃ¡ correto, apenas swap RGB channels
-        for pixel in buffer.chunks_exact_mut(4) {
-            pixel.swap(0, 2);  // B â†” R
-        }
-        
-        Ok((buffer, width as u32, height as u32))
-    }
-}
-
-/// Extrai Ã­cone nativo do Windows para uma extensÃ£o de arquivo.
-/// 
-/// # Safety
-/// Usa FFI para Windows APIs (SHGetFileInfoW, GetIconInfo, GetDIBits).
-/// HICON deve ser sempre liberado com DestroyIcon.
-/// 
-/// CORREÃ‡ÃƒO: Usa FILE_ATTRIBUTE_NORMAL + SHGFI_USEFILEATTRIBUTES para obter Ã­cone padrÃ£o do tipo.
-fn extract_file_icon(
-    extension: &str,  // ".pdf", ".exe", etc.
-    size: IconSize,
-) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
-    unsafe {
-        // Cria path dummy com extensÃ£o (ex: "dummy.pdf")
-        let dummy_path = format!("dummy{}", extension);
-        let path_wide: Vec<u16> = dummy_path
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect();
-        
-        let mut shfi = SHFILEINFOW::default();
-        
-        // FLAGS CORRETAS: USEFILEATTRIBUTES permite usar path dummy
-        let flags = SHGFI_ICON 
-            | SHGFI_USEFILEATTRIBUTES  // NÃ£o precisa do arquivo existir
-            | match size {
-                IconSize::Small => SHGFI_SMALLICON,
-                IconSize::Large => SHGFI_LARGEICON,
-            };
-        
-        // SAFETY: SHGetFileInfoW retorna handle que DEVE ser destruÃ­do
-        // O Pulo do Gato: FILE_ATTRIBUTE_NORMAL para arquivos genÃ©ricos
-        let result = SHGetFileInfoW(
-            PCWSTR(path_wide.as_ptr()),
-            FILE_ATTRIBUTE_NORMAL,  // Atributo para arquivo normal
-            Some(&mut shfi),
-            std::mem::size_of::<SHFILEINFOW>() as u32,
-            flags,
-        );
-        
-        if result == 0 || shfi.hIcon.is_invalid() {
-            println!("DEBUG: SHGetFileInfo falhou para: {}", dummy_path);
-            return Err("Failed to get file icon".into());
-        }
-        
-        let hicon = shfi.hIcon;
-        
-        // Converte HICON â†’ RGBA
-        let conversion_result = hicon_to_rgba(hicon);
-        
-        // SAFETY: Sempre libera HICON (RAII pattern)
-        let _ = DestroyIcon(hicon);
-        
-        conversion_result
-    }
-}
-
-/// Extrai Ã­cone de pasta usando path DUMMY (nÃ£o real).
-/// 
-/// CORREÃ‡ÃƒO: Usa FILE_ATTRIBUTE_DIRECTORY + SHGFI_USEFILEATTRIBUTES + path dummy
-/// para obter o Ã­cone padrÃ£o de pasta do Windows.
-fn extract_folder_icon_internal(
-    _folder_path: &str,  // Ignorado - usamos dummy
-    size: IconSize,
-) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
-    unsafe {
-        // O Pulo do Gato: usar path DUMMY, nÃ£o real!
-        let dummy_path = "dummy_folder";
-        let path_wide: Vec<u16> = dummy_path
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect();
-        
-        let mut shfi = SHFILEINFOW::default();
-        
-        // FLAGS CORRETAS: USEFILEATTRIBUTES permite usar path dummy
-        let flags = SHGFI_ICON 
-            | SHGFI_USEFILEATTRIBUTES  // Permite path dummy
-            | match size {
-                IconSize::Small => SHGFI_SMALLICON,
-                IconSize::Large => SHGFI_LARGEICON,
-            };
-        
-        // SAFETY: SHGetFileInfoW com path dummy
-        // O Pulo do Gato: FILE_ATTRIBUTE_DIRECTORY no parÃ¢metro dwFileAttributes!
-        let result = SHGetFileInfoW(
-            PCWSTR(path_wide.as_ptr()),
-            FILE_ATTRIBUTE_DIRECTORY,  // Indica que Ã© uma pasta
-            Some(&mut shfi),
-            std::mem::size_of::<SHFILEINFOW>() as u32,
-            flags,
-        );
-        
-        if result == 0 || shfi.hIcon.is_invalid() {
-            println!("DEBUG: SHGetFileInfo falhou para pasta dummy");
-            return Err("Failed to get folder icon".into());
-        }
-        
-        let hicon = shfi.hIcon;
-        let conversion_result = hicon_to_rgba(hicon);
-        
-        // SAFETY: Sempre libera HICON
-        let _ = DestroyIcon(hicon);
-        
-        conversion_result
-    }
-}
-
-/// Extrai icone de um arquivo REAL usando path completo.
-/// Usado para executaveis (.exe, .lnk, .ico) que tem icones unicos.
-fn extract_file_icon_by_path(
-    path: &Path,
-    size: IconSize,
-) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
-    unsafe {
-        let path_wide: Vec<u16> = path.to_string_lossy()
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect();
-        
-        let mut shfi = SHFILEINFOW::default();
-        
-        // SEM USEFILEATTRIBUTES - usa arquivo real
-        let flags = SHGFI_ICON 
-            | match size {
-                IconSize::Small => SHGFI_SMALLICON,
-                IconSize::Large => SHGFI_LARGEICON,
-            };
-        
-        // SAFETY: SHGetFileInfoW com path real
-        let result = SHGetFileInfoW(
-            PCWSTR(path_wide.as_ptr()),
-            FILE_ATTRIBUTE_NORMAL,
-            Some(&mut shfi),
-            std::mem::size_of::<SHFILEINFOW>() as u32,
-            flags,
-        );
-        
-        if result == 0 || shfi.hIcon.is_invalid() {
-            return Err("Failed to get file icon".into());
-        }
-        
-        let hicon = shfi.hIcon;
-        let conversion_result = hicon_to_rgba(hicon);
-        
-        // SAFETY: Sempre libera HICON
-        let _ = DestroyIcon(hicon);
-        
-        conversion_result
-    }
-}
-
-/// Extrai icone REAL de um drive (C:\, D:\, etc.).
-
-/// 
-/// DIFERENÃ‡A: Usa path REAL (nÃ£o dummy) e SEM SHGFI_USEFILEATTRIBUTES.
-/// Isso forÃ§a o Windows a retornar o Ã­cone especÃ­fico do drive (HD, SSD, USB, etc.).
-fn extract_drive_icon(
-    drive_path: &str,  // Deve ter barra: "C:\\"
-    size: IconSize,
-) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
-    unsafe {
-        let path_wide: Vec<u16> = drive_path
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect();
-        
-        let mut shfi = SHFILEINFOW::default();
-        
-        // FLAGS: Sem USEFILEATTRIBUTES - queremos Ã­cone REAL do volume
-        let flags = SHGFI_ICON 
-            | match size {
-                IconSize::Small => SHGFI_SMALLICON,
-                IconSize::Large => SHGFI_LARGEICON,
-            };
-        
-        // SAFETY: SHGetFileInfoW com path real de drive
-        let result = SHGetFileInfoW(
-            PCWSTR(path_wide.as_ptr()),
-            FILE_ATTRIBUTE_NORMAL,  // Use NORMAL para deixar Windows detectar tipo
-            Some(&mut shfi),
-            std::mem::size_of::<SHFILEINFOW>() as u32,
-            flags,
-        );
-        
-        if result == 0 || shfi.hIcon.is_invalid() {
-            println!("DEBUG: SHGetFileInfo falhou para drive: {}", drive_path);
-            return Err("Failed to get drive icon".into());
-        }
-        
-        let hicon = shfi.hIcon;
-        let conversion_result = hicon_to_rgba(hicon);
-        
-        // SAFETY: Sempre libera HICON
-        let _ = DestroyIcon(hicon);
-        
-        conversion_result
-    }
-}
 
 
 
 
 
-fn open_with_shell(path: &Path) {
-    unsafe {
-        let path_str = path.to_string_lossy().to_string();
-        let path_wide: Vec<u16> = path_str.encode_utf16().chain(std::iter::once(0)).collect();
-        
-        let _ = ShellExecuteW(
-            None,
-            PCWSTR(std::ptr::null()),
-            PCWSTR(path_wide.as_ptr()),
-            PCWSTR(std::ptr::null()),
-            PCWSTR(std::ptr::null()),
-            SW_SHOW,
-        );
-    }
-}
 
-// Helper functions for preview pane
-fn format_size(bytes: u64) -> String {
-    const KB: u64 = 1024;
-    const MB: u64 = KB * 1024;
-    const GB: u64 = MB * 1024;
-    
-    if bytes >= GB {
-        format!("{:.2} GB", bytes as f64 / GB as f64)
-    } else if bytes >= MB {
-        format!("{:.2} MB", bytes as f64 / MB as f64)
-    } else if bytes >= KB {
-        format!("{:.2} KB", bytes as f64 / KB as f64)
-    } else {
-        format!("{} bytes", bytes)
-    }
-}
 
-/// Obtém o uso de RAM atual do processo (RSS)
-fn get_ram_usage() -> u64 {
-    unsafe {
-        let mut counters = PROCESS_MEMORY_COUNTERS::default();
-        if K32GetProcessMemoryInfo(
-            GetCurrentProcess(),
-            &mut counters,
-            std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
-        ).as_bool() {
-            counters.WorkingSetSize as u64
-        } else {
-            0
-        }
-    }
-}
 
-fn format_date(timestamp: u64) -> String {
-    if timestamp == 0 {
-        return "Desconhecido".to_string();
-    }
-    
-    // Algoritmo simples para converter timestamp Unix em Data/Hora (UTC como base)
-    // Para simplificar e evitar dependências pesadas como chrono
-    let seconds_in_day = 86400u64;
-    let days_since_epoch = timestamp / seconds_in_day;
-    let seconds_of_day = timestamp % seconds_in_day;
 
-    let hour = (seconds_of_day / 3600) % 24;
-    let minute = (seconds_of_day / 60) % 60;
 
-    // Algoritmo de Howard Hinnant para converter dias desde a época em y/m/d
-    let z = (days_since_epoch as i64) + 719468;
-    let era = (if z >= 0 { z } else { z - 146096 }) / 146097;
-    let doe = (z - era * 146097) as u64;
-    let yoe = (doe * 2000 + 1) / 730485;
-    let y = (yoe as i64) + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let final_y = y + (if m <= 2 { 0 } else { 1 }); // Ajuste no ano bissexto/março
 
-    // Ajuste final para o ano corretp de acordo com o deslocamento de mp
-    let display_y = if m <= 2 { final_y + 1 } else { final_y };
 
-    format!("{:02}/{:02}/{:04} {:02}:{:02}", d, m, display_y, hour, minute)
-}
+
+
 
 impl ImageViewerApp {
     // Helper para botÃµes de Ã­cone da Toolbar
@@ -1428,7 +888,7 @@ impl ImageViewerApp {
             return; // JÃ¡ carregado
         }
         
-        // Windows usa Ã­cone especial para pastas
+// Windows usa Ã­cone especial para pastas
         let thumbnail_size = self.thumbnail_size;
         let icon_size = if thumbnail_size < 100.0 {
             IconSize::Small
@@ -1436,8 +896,7 @@ impl ImageViewerApp {
             IconSize::Large
         };
         
-        // Truque: usa "C:\\" que sempre existe
-        match extract_folder_icon_internal("C:\\", icon_size) {
+        match windows_infra::extract_folder_icon(icon_size) {
             Ok((rgba_data, width, height)) => {
                 let texture = ctx.load_texture(
                     "folder_icon",
@@ -2276,6 +1735,7 @@ impl eframe::App for ImageViewerApp {
                     &mut self.thumbnail_size,
                     &mut self.sort_mode,
                     &mut self.sort_descending,
+                    &self.texture_cache,
                 );
                 match action {
                     StatusBarAction::SortChanged => self.sort_items(),
