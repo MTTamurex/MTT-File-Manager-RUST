@@ -69,8 +69,6 @@ const PATH_PADRAO: &str = "C:\\";
 
 // LRU cache - limita VRAM (~50-100MB)
 const CACHE_SIZE: usize = 200;
-const MAX_CONCURRENT_LOADS: usize = 30;  // Threads concorrentes de carregamento
-
 
 // Icon cache (menor pois ícones são compartilhados por extensão)
 const ICON_CACHE_SIZE: usize = 100;
