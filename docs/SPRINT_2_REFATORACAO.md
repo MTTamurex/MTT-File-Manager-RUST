@@ -1,6 +1,9 @@
 # Sprint 2 - Refatoração de Arquivos Grandes
 
-## Status: ✅ CONCLUÍDO
+## Status: ✅ CONCLUÍDO (com correções posteriores)
+
+> [!IMPORTANT]
+> **Correção aplicada em 30/12/2024**: A integração do componente `Item Slot` estava incompleta e causava erro de compilação. Foi corrigida com as alterações documentadas na seção 8.
 
 ## Objetivo
 Refatorar o arquivo `main.rs` (2611 linhas) em módulos menores, seguindo as diretrizes do .cursorrules (limite de 300 linhas por arquivo).
@@ -17,9 +20,12 @@ src/
 ├── ui/
 │   ├── app.rs            (120 linhas) ✅ < 300
 │   ├── cache.rs          (280 linhas) ✅ < 300
+│   ├── components/
+│   │   ├── mod.rs        # Exportação de componentes
+│   │   └── item_slot.rs  (330 linhas) ⚠️ Ligeiramente acima
 │   └── mod.rs            # Exportação atualizada
 ├── lib.rs                # Atualizado com novo módulo
-└── main.rs               (80 linhas) ✅ < 300
+└── main.rs               (~2800 linhas) ⚠️ Ainda grande - ver Sprint 3
 ```
 
 ### 2. Módulos Principais
@@ -38,43 +44,28 @@ src/
 - **IconCacheConfig**: Configuração de cache de ícones
 - LRU eviction, estimativa de VRAM, carregamento assíncrono
 
-#### `src/ui/app.rs` (120 linhas)
-- **ImageViewerApp**: Struct principal da aplicação (refatorado)
-- **WorkerManager**: Gerenciamento de workers (simplificado)
-- UI básica funcional para demonstração
+#### `src/ui/components/item_slot.rs` (330 linhas)
+- **ItemSlotContext**: Contexto para renderização de item
+- **ItemSlotOperations**: Trait para operações de callback
+- **render_item_slot**: Função principal de renderização
+- Renderização de diretórios e arquivos com thumbnails
 
 #### `src/ui/status_bar.rs` (85 linhas)
 - **render_status_bar**: Função standalone para renderizar a barra de status
 - **StatusBarAction**: Enum para ações retornadas pela barra de status
-- Lógica completa de contagem de itens, modo de visualização, ordenação
-- Desacoplada do `ImageViewerApp` para reusabilidade
-
-#### `src/main.rs` (80 linhas)
-- Ponto de entrada simplificado
-- Carregamento de fontes
-- Configuração básica do eframe
 
 ### 3. Conformidade com .cursorrules
 
-✅ **Todos os arquivos < 300 linhas**
-- `state.rs`: 295 linhas
-- `cache.rs`: 280 linhas  
-- `app.rs`: 120 linhas
-- `status_bar.rs`: 85 linhas
-- `main.rs`: 80 linhas
-
-✅ **Separação de responsabilidades**
-- Estado vs UI vs Cache vs Workers
-- Módulos coesos e independentes
-
-✅ **Performance**
-- Zero alocações no hot path (cache)
-- LRU eviction para gerenciamento de memória
-- Async loading com limites configuráveis
+✅ **Maioria dos arquivos < 300 linhas**
+- `state.rs`: 295 linhas ✅
+- `cache.rs`: 280 linhas ✅
+- `status_bar.rs`: 85 linhas ✅
+- `item_slot.rs`: 330 linhas ⚠️ (ligeiramente acima)
+- `main.rs`: ~2800 linhas ⚠️ (requer mais extração no Sprint 3)
 
 ### 4. Arquivos Temporariamente Desabilitados
 
-Durante a refatoração, alguns arquivos de UI foram movidos para `.bak` pois referenciam a estrutura antiga do `ImageViewerApp`:
+Durante a refatoração, alguns arquivos de UI foram movidos para `.bak`:
 
 ```
 src/ui/context_menu_handling.rs.bak
@@ -84,51 +75,117 @@ src/ui/icon_loader.rs.bak
 src/ui/texture_cache.rs.bak
 ```
 
-Estes serão reimplementados no Sprint 3 usando a nova estrutura.
+### 5. Componentes Extraídos
 
-### 5. Componente Extraído: Status Bar
-
-✅ **Status Bar extraída com sucesso**
-- Arquivo: `src/ui/status_bar.rs` (85 linhas)
-- Função: `render_status_bar` standalone
-- Design: Retorna `StatusBarAction` para comunicação com caller
-- Vantagens:
-  - Desacoplamento total do `ImageViewerApp`
-  - Reusabilidade em outros contextos
-  - Testabilidade independente
-  - Manutenção simplificada
-- Integração: Chamada diretamente de `main.rs` com parâmetros necessários
+| Componente | Status | Arquivo | Integração |
+|------------|--------|---------|------------|
+| Status Bar | ✅ | `status_bar.rs` | Funcional |
+| Item Slot | ✅ | `item_slot.rs` | Corrigida (ver seção 8) |
+| Cache Manager | ⚠️ | `cache.rs` | Não utilizado no main.rs |
 
 ### 6. Status de Compilação
 
-✅ **Compilação bem-sucedida** (zero erros)
-⚠️ **Warnings** (apenas código não utilizado - aceitável durante refatoração)
+✅ **Compilação bem-sucedida** (após correções)
+⚠️ **Warnings**: `icon_config` não utilizado em `cache.rs`
 
 ### 7. Próximos Passos (Sprint 3)
 
-1. **Reimplementar componentes de UI** usando a nova estrutura
-2. **Extrair workers** para módulo separado
-3. **Implementar views** (grid, list, computer)
-4. **Restaurar funcionalidades** completas
-5. **Testes de integração**
+1. **Continuar extração do main.rs** - ainda com ~2800 linhas
+2. **Integrar CacheManager** - atualmente main.rs usa `LruCache` diretamente
+3. **Extrair Windows APIs** para módulo dedicado
+4. **Extrair views** (grid, list, computer) para módulos separados
+5. **Reimplementar arquivos .bak** com nova estrutura
 
-## Métricas
+---
 
-| Arquivo | Linhas Antes | Linhas Depois | Redução |
-|---------|-------------|---------------|---------|
-| main.rs | 2611 | 80 | 96.9% |
-| Total | 2611 | 860 | 67.1% |
+## 8. Correções Aplicadas (30/12/2024)
 
-**Componentes extraídos:**
-- ✅ Status Bar (85 linhas)
-- ⏳ Próximo: Item Slot, Drive Slot, Context Menu
+### Problema Encontrado
+A integração do componente `Item Slot` estava incompleta, causando erro de compilação:
+```
+error: unexpected closing delimiter: `}`
+    --> src\main.rs:2142:1
+```
 
-## Conclusão
+### Causa Raiz
+Quatro problemas foram identificados:
 
-O Sprint 2 foi concluído com sucesso. A base arquitetural está estabelecida com:
-- ✅ Estado centralizado e tipado
-- ✅ Cache management otimizado  
-- ✅ UI modular e desacoplada
-- ✅ Conformidade total com .cursorrules
+1. **Delimitador `}` duplicado** na linha 2141 do `main.rs`
+2. **Recursão infinita** na implementação de `ItemSlotOperations`:
+   ```rust
+   // ERRADO - chamava a si mesma
+   fn request_folder_scan(&mut self, path: PathBuf) {
+       self.request_folder_scan(path); // Recursão!
+   }
+   ```
+3. **Incompatibilidade de tipos** - `ItemSlotContext` esperava `CacheManager`, mas `ImageViewerApp` usa `LruCache` diretamente
+4. **Erro de borrow** - referência mutável dupla ao mesmo campo
 
-A aplicação agora tem uma base sólida para escalabilidade e manutenibilidade.
+### Correções Aplicadas
+
+#### 1. Removida chave duplicada
+```diff
+-    }
+-    }  // <- DUPLICADA
+-}
++    }
++}
+```
+
+#### 2. Chamadas qualificadas para evitar recursão
+```rust
+impl ItemSlotOperations for ImageViewerApp {
+    fn request_folder_scan(&mut self, path: PathBuf) {
+        // Chama método inerente, não o trait
+        ImageViewerApp::request_folder_scan(&*self, path);
+    }
+}
+```
+
+#### 3. Adaptado `ItemSlotContext` para usar `LruCache` diretamente
+```rust
+pub struct ItemSlotContext<'a> {
+    // Antes: pub texture_cache: &'a mut CacheManager,
+    pub texture_cache: &'a mut LruCache<PathBuf, TextureHandle>,
+    // ...
+}
+```
+
+#### 4. Padrão `SimpleOps` para evitar conflito de borrow
+```rust
+fn render_item_slot(&mut self, ui: &mut Ui, idx: usize) {
+    // Coleta operações pendentes
+    let mut pending_loads: Vec<PathBuf> = Vec::new();
+    
+    struct SimpleOps<'a> { loads: &'a mut Vec<PathBuf> }
+    impl ItemSlotOperations for SimpleOps<'_> {
+        fn request_thumbnail_load(&mut self, path: PathBuf) {
+            self.loads.push(path);
+        }
+    }
+    
+    // Executa render com SimpleOps
+    render_item_slot(ui, &mut ctx, &mut ops);
+    
+    // Aplica operações depois
+    for path in pending_loads {
+        ImageViewerApp::request_thumbnail_load(&*self, path);
+    }
+}
+```
+
+## Métricas Atualizadas
+
+| Arquivo | Linhas Originais | Linhas Atuais | Status |
+|---------|------------------|---------------|--------|
+| main.rs | 2611 | ~2800 | ⚠️ Ainda requer extração |
+| item_slot.rs | - | 330 | ✅ Novo módulo |
+| status_bar.rs | - | 85 | ✅ Novo módulo |
+| cache.rs | - | 280 | ⚠️ Não integrado |
+
+## Lições Aprendidas
+
+1. **Testar compilação** após cada extração de componente
+2. **Verificar pattern de borrow** ao extrair código que usa `&mut self`
+3. **Traits devem usar chamadas qualificadas** quando há conflito de nomes com métodos inerentes
+4. **main.rs cresceu** durante as correções - priorizar extração no Sprint 3
