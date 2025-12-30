@@ -43,6 +43,12 @@ src/
 - **WorkerManager**: Gerenciamento de workers (simplificado)
 - UI básica funcional para demonstração
 
+#### `src/ui/status_bar.rs` (85 linhas)
+- **render_status_bar**: Função standalone para renderizar a barra de status
+- **StatusBarAction**: Enum para ações retornadas pela barra de status
+- Lógica completa de contagem de itens, modo de visualização, ordenação
+- Desacoplada do `ImageViewerApp` para reusabilidade
+
 #### `src/main.rs` (80 linhas)
 - Ponto de entrada simplificado
 - Carregamento de fontes
@@ -54,6 +60,7 @@ src/
 - `state.rs`: 295 linhas
 - `cache.rs`: 280 linhas  
 - `app.rs`: 120 linhas
+- `status_bar.rs`: 85 linhas
 - `main.rs`: 80 linhas
 
 ✅ **Separação de responsabilidades**
@@ -79,12 +86,25 @@ src/ui/texture_cache.rs.bak
 
 Estes serão reimplementados no Sprint 3 usando a nova estrutura.
 
-### 5. Status de Compilação
+### 5. Componente Extraído: Status Bar
+
+✅ **Status Bar extraída com sucesso**
+- Arquivo: `src/ui/status_bar.rs` (85 linhas)
+- Função: `render_status_bar` standalone
+- Design: Retorna `StatusBarAction` para comunicação com caller
+- Vantagens:
+  - Desacoplamento total do `ImageViewerApp`
+  - Reusabilidade em outros contextos
+  - Testabilidade independente
+  - Manutenção simplificada
+- Integração: Chamada diretamente de `main.rs` com parâmetros necessários
+
+### 6. Status de Compilação
 
 ✅ **Compilação bem-sucedida** (zero erros)
 ⚠️ **Warnings** (apenas código não utilizado - aceitável durante refatoração)
 
-### 6. Próximos Passos (Sprint 3)
+### 7. Próximos Passos (Sprint 3)
 
 1. **Reimplementar componentes de UI** usando a nova estrutura
 2. **Extrair workers** para módulo separado
@@ -97,7 +117,11 @@ Estes serão reimplementados no Sprint 3 usando a nova estrutura.
 | Arquivo | Linhas Antes | Linhas Depois | Redução |
 |---------|-------------|---------------|---------|
 | main.rs | 2611 | 80 | 96.9% |
-| Total | 2611 | 775 | 70.3% |
+| Total | 2611 | 860 | 67.1% |
+
+**Componentes extraídos:**
+- ✅ Status Bar (85 linhas)
+- ⏳ Próximo: Item Slot, Drive Slot, Context Menu
 
 ## Conclusão
 
