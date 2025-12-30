@@ -2878,14 +2878,57 @@ impl eframe::App for ImageViewerApp {
             }
             
             // Detecção de clique direito na área vazia (fora dos itens)
-            let response = ui.interact(ui.max_rect(), ui.id().with("empty_area"), egui::Sense::click());
-            if response.secondary_clicked() {
-                self.context_menu_open = true;
-                self.context_menu_pos = response.interact_pointer_pos()
-                    .unwrap_or_else(|| ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO));
-                self.context_menu_item_idx = None;
-                self.context_menu_target_path = Some(PathBuf::from(&self.current_path));
-                self.context_menu_is_empty_area = true;
+            // Só abre menu de contexto se não houver item selecionado pelo clique direito
+            if !self.context_menu_open && ui.input(|i| i.pointer.secondary_clicked()) {
+                // Verifica se o clique foi em um item
+                let pointer_pos = ui.ctx().pointer_latest_pos();
+                let mut clicked_on_item = false;
+                
+                // Verifica se o clique foi em algum item (grid ou lista)
+                if let Some(pos) = pointer_pos {
+                    // Para grid view
+                    if self.view_mode == ViewMode::Grid && !self.items.is_empty() {
+                        let padding = 8.0;
+                        let item_w = self.thumbnail_size;
+                        let item_h = self.thumbnail_size + 20.0;
+                        let available_w = ui.available_width();
+                        let cols = ((available_w - padding) / (item_w + padding)).floor().max(1.0) as usize;
+                        
+                        // Calcula qual célula foi clicada
+                        let content_min = ui.min_rect().min;
+                        let relative_x = pos.x - content_min.x;
+                        let relative_y = pos.y - content_min.y;
+                        
+                        let col = (relative_x / (item_w + padding)).floor() as usize;
+                        let row = (relative_y / (item_h + padding)).floor() as usize;
+                        let index = row * cols + col;
+                        
+                        if index < self.items.len() {
+                            clicked_on_item = true;
+                        }
+                    }
+                    // Para list view (mais simples - verifica se está na área dos itens)
+                    else if self.view_mode == ViewMode::List && !self.items.is_empty() {
+                        let row_height = 24.0;
+                        let total_rows = self.items.len();
+                        let scroll_area_top = ui.min_rect().top();
+                        let relative_y = pos.y - scroll_area_top;
+                        
+                        let row = (relative_y / row_height).floor() as usize;
+                        if row < total_rows {
+                            clicked_on_item = true;
+                        }
+                    }
+                }
+                
+                // Se não clicou em item, abre menu de contexto para área vazia
+                if !clicked_on_item {
+                    self.context_menu_open = true;
+                    self.context_menu_pos = pointer_pos.unwrap_or(ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO));
+                    self.context_menu_item_idx = None;
+                    self.context_menu_target_path = Some(PathBuf::from(&self.current_path));
+                    self.context_menu_is_empty_area = true;
+                }
             }
         });
         
