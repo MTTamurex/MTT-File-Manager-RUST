@@ -1,102 +1,131 @@
-//! Computer view rendering (drives)
+//! Computer view rendering (Este Computador)
 //! Follows .cursorrules: single responsibility, < 300 lines
 
-use eframe::egui;
+use eframe::egui::{self, Color32, Pos2, Rect, Sense, Ui};
 
-use crate::ui::app::ImageViewerApp;
+use crate::domain::file_entry::IconSize;
+use crate::infrastructure::windows;
 
-impl ImageViewerApp {
-    /// Renders the "Este Computador" view with drives.
-    pub fn render_computer_view(&mut self, ui: &mut egui::Ui) {
-        let padding = 8.0;
-        let item_w = self.thumbnail_size;
-        let item_h = self.thumbnail_size + 20.0;  // Height: thumb + text
-        let available_w = ui.available_width();
-        let cols = ((available_w - padding) / (item_w + padding)).floor().max(1.0) as usize;
-        self.last_grid_cols = cols;
-        
-        // Virtualized Grid for drives
-        let count = self.disks.len();
-        let rows = (count as f32 / cols as f32).ceil() as usize;
-        let total_height = rows as f32 * (item_h + padding) + padding;
-        
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            let content_min = ui.min_rect().min;
-            ui.allocate_rect(egui::Rect::from_min_size(content_min, egui::vec2(available_w, total_height)), egui::Sense::hover());
-            
-            let clip_rect = ui.clip_rect();
-            let start_y = (clip_rect.top() - content_min.y).max(0.0);
-            let end_y = start_y + clip_rect.height();
-            
-            let visible_min_row = (start_y / (item_h + padding)).floor() as usize;
-            let visible_max_row = ((end_y / (item_h + padding)).ceil() as usize + 1).min(rows);
-            
-            let loop_min_row = visible_min_row.saturating_sub(2);
-            let loop_max_row = (visible_max_row + 2).min(rows);
-            
-            'row_loop: for row in loop_min_row..loop_max_row {
-                for col in 0..cols {
-                    let index = row * cols + col;
-                    if index >= self.disks.len() { break; }
-                    
-                    let (disk_path, disk_label) = self.disks[index].clone();
-                    let x_pos = col as f32 * (item_w + padding) + padding;
-                    let y_pos = row as f32 * (item_h + padding) + padding;
-                    let rect = egui::Rect::from_min_size(content_min + egui::vec2(x_pos, y_pos), egui::vec2(item_w, item_h));
-                    
-                    if ui.is_rect_visible(rect) {
-                        let response = ui.interact(rect, ui.id().with(index), egui::Sense::click());
-                        if response.clicked() {
-                            self.selected_item_index = Some(index);
-                            self.selected_file = None;  // Not a FileEntry
-                        }
-                        
-                        if response.double_clicked() {
-                            self.navigate_to(&disk_path);
-                            break 'row_loop;
-                        }
-                        
-                        // Right click: open context menu
-                        if response.secondary_clicked() {
-                            self.selected_item_index = Some(index);
-                            self.selected_file = None;
-                            
-                            self.context_menu.open(
-                                response.interact_pointer_pos()
-                                    .unwrap_or_else(|| ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO)),
-                                Some(index),
-                                Some(std::path::PathBuf::from(&disk_path)),
-                                false,
-                            );
-                        }
+/// Context for computer view rendering
+pub struct ComputerViewContext<'a> {
+    pub disks: &'a [(String, String)],  // (path, label)
+    pub selected_disk: Option<&'a str>,
+    pub computer_icon: Option<&'a egui::TextureHandle>,
+    pub drive_icon_cache: &'a mut lru::LruCache<String, egui::TextureHandle>,
+}
 
-                        if self.selected_item_index == Some(index) {
-                            ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 120, 215)), egui::StrokeKind::Inside);
-                            ui.painter().rect_filled(rect, 4.0, egui::Color32::from_rgba_unmultiplied(0, 120, 215, 30));
-                        }
+/// Operations that can be performed from computer view
+pub trait ComputerViewOperations {
+    fn navigate_to(&mut self, path: &str);
+    fn extract_drive_icon(&mut self, drive_path: &str, size: IconSize) -> Option<egui::TextureHandle>;
+}
 
-                        // Tooltip
-                        if response.hovered() {
-                            egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), response.id, |ui: &mut egui::Ui| {
-                                ui.set_max_width(300.0);
-                                ui.vertical(|ui| {
-                                    ui.label(egui::RichText::new(&disk_label).strong());
-                                    ui.separator();
-                                    ui.label(format!("Caminho: {}", disk_path));
-                                    ui.label("Tipo: Drive");
-                                });
-                            });
-                        }
-                        
-                        // Content area
-                        let content_margin = 3.0;
-                        let inner_rect = rect.shrink(content_margin);
-                        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
-                            self.render_drive_slot(ui, &disk_path, &disk_label);
-                        });
-                    }
-                }
+/// Renders the computer view (Este Computador)
+pub fn render_computer_view(
+    ui: &mut Ui,
+    ctx: &mut ComputerViewContext,
+    ops: &mut dyn ComputerViewOperations,
+) -> Option<String> {
+    let mut clicked_disk = None;
+    
+    for (disk_path, disk_label) in ctx.disks {
+        // Pré-carrega ícone do drive se não estiver no cache
+        let drive_icon = if let Some(icon) = ctx.drive_icon_cache.get(disk_path) {
+            Some(icon.clone())
+        } else {
+            // Tenta carregar ícone real do drive
+            if let Ok((rgba_data, width, height)) = windows::extract_drive_icon(disk_path, IconSize::Small) {
+                let texture = ui.ctx().load_texture(
+                    format!("drive_{}", disk_path),
+                    egui::ColorImage::from_rgba_unmultiplied(
+                        [width as usize, height as usize],
+                        &rgba_data,
+                    ),
+                    egui::TextureOptions::LINEAR,
+                );
+                let cloned = texture.clone();
+                ctx.drive_icon_cache.put(disk_path.clone(), texture);
+                Some(cloned)
+            } else {
+                None
             }
-        });
+        };
+        
+        // Renderiza drive com ícone + label usando interact() para controle total do cursor
+        let is_selected = ctx.selected_disk == Some(disk_path.as_str());
+        
+        // Desenha conteúdo no horizontal layout
+        let (mut rect, response) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), 24.0),
+            Sense::click()  // Captura cliques, sem texto selecionável
+        );
+        
+        // Expande rect para preencher toda a largura da sidebar (remove gaps)
+        rect.min.x = ui.clip_rect().min.x;
+        rect.max.x = ui.clip_rect().max.x;
+        
+        // Só desenha se visível
+        if ui.is_rect_visible(rect) {
+            // Background de seleção
+            if is_selected {
+                ui.painter().rect_filled(
+                    rect,
+                    0.0,  // Sem cantos arredondados para ficar flush com as bordas
+                    Color32::from_rgb(200, 220, 240)
+                );
+            }
+            
+            // Hover effect
+            if response.hovered() && !is_selected {
+                ui.painter().rect_filled(
+                    rect,
+                    2.0,
+                    Color32::from_rgba_unmultiplied(200, 220, 240, 50)
+                );
+            }
+            
+            // Desenha ícone e texto manualmente
+            let mut cursor_x = rect.min.x + 5.0;
+            
+            // Ícone
+            if let Some(icon) = drive_icon {
+                let icon_rect = Rect::from_min_size(
+                    Pos2::new(cursor_x, rect.center().y - 8.0),
+                    egui::vec2(16.0, 16.0)
+                );
+                ui.painter().image(icon.id(), icon_rect, Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)), Color32::WHITE);
+                cursor_x += 20.0;
+            } else {
+                ui.painter().text(
+                    Pos2::new(cursor_x, rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    "💽",
+                    egui::FontId::proportional(14.0),
+                    ui.visuals().text_color()
+                );
+                cursor_x += 20.0;
+            }
+            
+            // Texto
+            ui.painter().text(
+                Pos2::new(cursor_x, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                disk_label,
+                egui::FontId::proportional(14.0),
+                if is_selected { 
+                    Color32::from_rgb(0, 50, 100) 
+                } else { 
+                    ui.visuals().text_color() 
+                }
+            );
+        }
+        
+        if response.clicked() {
+            clicked_disk = Some(disk_path.clone());
+        }
+        
+        ui.add_space(3.0);
     }
+    
+    clicked_disk
 }

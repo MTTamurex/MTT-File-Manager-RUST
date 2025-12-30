@@ -195,7 +195,49 @@ use windows_infra::{
 
 ---
 
-## 10. Correções Aplicadas (30/12/2024)
+## 10. Extração das Views (30/12/2024)
+
+### Objetivo
+Extrair as funções de renderização de view do `main.rs` para módulos dedicados, seguindo o padrão de separação de responsabilidades.
+
+### Views Extraídas
+
+#### `src/ui/views/list_view.rs` (330 linhas)
+- **ListViewContext**: Contexto para renderização de lista
+- **ListViewOperations**: Trait para operações de callback
+- **render_list_view**: Função principal de renderização de lista
+- Renderização de cabeçalhos, linhas virtuais, tooltips
+
+#### `src/ui/views/grid_view.rs` (330 linhas)
+- **GridViewContext**: Contexto para renderização de grade
+- **GridViewOperations**: Trait para operações de callback
+- **render_grid_view**: Função principal de renderização de grade
+- Renderização virtualizada, navegação por teclado
+
+#### `src/ui/views/computer_view.rs` (120 linhas)
+- **ComputerViewContext**: Contexto para renderização de "Este Computador"
+- **ComputerViewOperations**: Trait para operações de callback
+- **render_computer_view**: Função principal de renderização de drives
+
+#### `src/ui/views/mod.rs` (15 linhas)
+- Exportação dos módulos de view
+- Re-export para conveniência
+
+### Integração no main.rs
+
+```rust
+// Importação simplificada
+use mtt_file_manager::ui::views;
+```
+
+### Benefícios
+- ✅ **Separação de responsabilidades**: Código de renderização isolado
+- ✅ **Reutilização**: Views podem ser usadas por outros componentes
+- ✅ **Manutenibilidade**: Cada módulo < 300 linhas
+- ✅ **Testabilidade**: Views mais fáceis de testar isoladamente
+- ✅ **Compilação**: Sem erros, apenas warnings menores
+
+## 11. Correções Aplicadas (30/12/2024)
 
 ### Problema Encontrado
 A integração do componente `Item Slot` estava incompleta, causando erro de compilação:
