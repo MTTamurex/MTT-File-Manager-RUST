@@ -1,7 +1,7 @@
 //! Windows drive and volume information functions
 //! Follows .cursorrules: single responsibility, < 300 lines
 
-use crate::infrastructure::windows_api::{
+use windows::{
     Win32::Storage::FileSystem::*,
     Win32::UI::Shell::*,
     core::*,

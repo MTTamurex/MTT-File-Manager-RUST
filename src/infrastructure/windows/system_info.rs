@@ -1,7 +1,7 @@
 //! Windows system information functions
 //! Follows .cursorrules: single responsibility, < 300 lines
 
-use crate::infrastructure::windows_api::{
+use windows::{
     Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS},
     Win32::System::Threading::GetCurrentProcess,
 };

@@ -1,7 +1,7 @@
 //! Bitmap and icon conversion functions
 //! Follows .cursorrules: single responsibility, < 300 lines
 
-use crate::infrastructure::windows_api::{
+use windows::{
     Win32::Graphics::Gdi::*,
     Win32::UI::WindowsAndMessaging::*,
 };

@@ -2,7 +2,7 @@
 //! Follows .cursorrules: single responsibility, < 300 lines
 
 use std::path::Path;
-use crate::infrastructure::windows_api::{
+use windows::{
     Win32::UI::Shell::*,
     Win32::UI::WindowsAndMessaging::*,
     core::*,
