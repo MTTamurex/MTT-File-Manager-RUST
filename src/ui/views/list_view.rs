@@ -238,7 +238,8 @@ pub fn render_list_view(
                                 response.request_focus();
                             }
 
-                            if response.lost_focus() && ui.input(|i_in| i_in.key_pressed(egui::Key::Enter)) {
+                            // Confirma renomeação com Enter (enquanto tem foco)
+                            if response.has_focus() && ui.input(|i_in| i_in.key_pressed(egui::Key::Enter)) {
                                 ops.rename_with_shell(i);
                             } else if ui.input(|i_in| i_in.key_pressed(egui::Key::Escape)) {
                                 // Cancel renaming

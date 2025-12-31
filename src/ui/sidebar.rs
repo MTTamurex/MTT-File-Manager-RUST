@@ -12,6 +12,7 @@ pub struct SidebarContext<'a> {
     pub current_path: &'a str,
     pub is_computer_view: bool,
     pub computer_icon: Option<&'a egui::TextureHandle>,
+    pub is_renaming: bool,  // Bloqueia navegação durante renomeação
 }
 
 /// Operations that can be performed from sidebar
@@ -83,8 +84,8 @@ pub fn render_sidebar(
         );
     }
     
-    // CLICK ACTION: Navega para "Este Computador"
-    if header_response.clicked() {
+    // CLICK ACTION: Navega para "Este Computador" (bloqueado durante renomeação)
+    if header_response.clicked() && !ctx.is_renaming {
         ops.navigate_to_computer();
     }
     
@@ -179,7 +180,8 @@ pub fn render_sidebar(
             );
         }
         
-        if response.clicked() {
+        // Bloqueado durante renomeação
+        if response.clicked() && !ctx.is_renaming {
             ops.navigate_to(disk_path);
         }
         
