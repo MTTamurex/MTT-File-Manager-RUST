@@ -113,7 +113,7 @@ fn render_directory_slot<O: ItemSlotOperations>(
     // === DESENHO 2: PREVIEW (com clipping para não escapar) ===
     if let Some(cover_path) = &item.folder_cover {
         if !ctx.texture_cache.contains(cover_path) && !ctx.loading_set.contains(cover_path) {
-            if ctx.loading_set.len() < 30 { // MAX_CONCURRENT_LOADS
+            if ctx.loading_set.len() < 50 { // MAX_CONCURRENT_LOADS (increased for performance)
                 ctx.loading_set.insert(cover_path.clone());
                 ops.request_thumbnail_load(cover_path.clone());
             }
@@ -226,7 +226,7 @@ fn render_file_slot<O: ItemSlotOperations>(
         let has_texture = ctx.texture_cache.contains(&path_clone);
         let is_loading = ctx.loading_set.contains(&path_clone);
         
-        if !has_texture && !is_loading && ctx.loading_set.len() < 30 { // MAX_CONCURRENT_LOADS
+        if !has_texture && !is_loading && ctx.loading_set.len() < 50 { // MAX_CONCURRENT_LOADS (increased for performance)
             ctx.loading_set.insert(path_clone.clone());
             ops.request_thumbnail_load(path_clone.clone());
         }
