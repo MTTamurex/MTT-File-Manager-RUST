@@ -17,7 +17,8 @@ pub fn spawn_thumbnail_workers(
     ctx: egui::Context,
     gen_tracker: Arc<AtomicUsize>,
 ) {
-    for _ in 0..4 {
+    // 8 threads: otimizado para SSDs e pastas grandes
+    for _ in 0..8 {
         let rx = shared_rx.clone();
         let tx = tx.clone();
         let gen_tracker = gen_tracker.clone();
@@ -53,8 +54,25 @@ fn thumbnail_worker_loop(
             Ok((path, req_gen)) => {
                 // FAST CANCEL: If global generation changed, ignore before disk read
                 if req_gen == gen_tracker.load(Ordering::Relaxed) {
-                    let (data, w, h) = extract_windows_thumbnail(&path)
-                        .unwrap_or_else(|_| create_error_placeholder());
+                    // RETRY MECHANISM: Try up to 3 times for transient failures
+                    let mut result = None;
+                    for attempt in 0..3 {
+                        match extract_windows_thumbnail(&path) {
+                            Ok((data, w, h)) => {
+                                result = Some((data, w, h));
+                                break;
+                            }
+                            Err(_) => {
+                                if attempt < 2 {
+                                    // Small delay before retry (Windows Shell cache may need time)
+                                    std::thread::sleep(std::time::Duration::from_millis(50));
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Only send if extraction succeeded or after all retries
+                    let (data, w, h) = result.unwrap_or_else(|| create_error_placeholder());
                     
                     let _ = tx.send(ThumbnailData {
                         path,
@@ -78,7 +96,7 @@ fn thumbnail_worker_loop(
 /// Extracts thumbnail using Windows Shell API
 fn extract_windows_thumbnail(path: &PathBuf) -> Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     use windows::{
-        Win32::UI::Shell::{SHCreateItemFromParsingName, IShellItem, IShellItemImageFactory, SIIGBF_THUMBNAILONLY},
+        Win32::UI::Shell::{SHCreateItemFromParsingName, IShellItem, IShellItemImageFactory, SIIGBF_RESIZETOFIT},
         Win32::Graphics::Gdi::{DeleteObject, HBITMAP},
         core::PCWSTR,
     };
@@ -98,7 +116,8 @@ fn extract_windows_thumbnail(path: &PathBuf) -> Result<(Vec<u8>, u32, u32), Box<
             cx: 256,
             cy: 256,
         };
-        let hbitmap: HBITMAP = image_factory.GetImage(size, SIIGBF_THUMBNAILONLY)?;
+        // SIIGBF_RESIZETOFIT forces thumbnail generation (even for videos without cached thumbnails)
+        let hbitmap: HBITMAP = image_factory.GetImage(size, SIIGBF_RESIZETOFIT)?;
         
         let (rgba_data, width, height) = hbitmap_to_rgba(hbitmap)?;
         
