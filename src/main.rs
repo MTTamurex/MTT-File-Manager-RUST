@@ -1138,9 +1138,10 @@ impl ImageViewerApp {
         self.renaming_state = ctx.renaming_state;
         self.focus_rename = ctx.focus_rename;
         
-        // Processar ações
+        // Processar ações (bloqueadas durante renomeação)
+        let is_renaming = self.renaming_state.is_some();
         match action {
-            Some(list_view::ListViewAction::Click(idx)) => {
+            Some(list_view::ListViewAction::Click(idx)) if !is_renaming => {
                 self.selected_item = Some(idx);
                 if let Some(item) = self.items.get(idx) {
                     self.selected_file = Some(item.clone());
@@ -1153,7 +1154,7 @@ impl ImageViewerApp {
                     }
                 }
             }
-            Some(list_view::ListViewAction::DoubleClick(idx)) => {
+            Some(list_view::ListViewAction::DoubleClick(idx)) if !is_renaming => {
                 let path_to_navigate = self.items.get(idx).map(|item| {
                     if item.is_dir {
                         Some(item.path.clone())
@@ -1167,7 +1168,7 @@ impl ImageViewerApp {
                     self.navigate_to(&path.to_string_lossy());
                 }
             }
-                Some(list_view::ListViewAction::SecondaryClick(idx)) => {
+            Some(list_view::ListViewAction::SecondaryClick(idx)) if !is_renaming => {
                 self.selected_item = Some(idx);
                 if let Some(item) = self.items.get(idx) {
                     self.selected_file = Some(item.clone());
@@ -1179,7 +1180,7 @@ impl ImageViewerApp {
                     );
                 }
             }
-            None => {}
+            _ => {}
         }
         
         // Executar ações coletadas
@@ -1332,15 +1333,16 @@ impl ImageViewerApp {
         self.renaming_state = ctx.renaming_state;
         self.focus_rename = ctx.focus_rename;
         
-        // Processar ações
+        // Processar ações (bloqueadas durante renomeação, exceto clique no próprio item)
+        let is_renaming = self.renaming_state.is_some();
         match action {
-            Some(grid_view::GridViewAction::Click(idx)) => {
+            Some(grid_view::GridViewAction::Click(idx)) if !is_renaming => {
                 self.selected_item = Some(idx);
                 if let Some(item) = self.items.get(idx) {
                     self.selected_file = Some(item.clone());
                 }
             }
-            Some(grid_view::GridViewAction::DoubleClick(idx)) => {
+            Some(grid_view::GridViewAction::DoubleClick(idx)) if !is_renaming => {
                 let path_to_navigate = self.items.get(idx).map(|item| {
                     if item.is_dir {
                         Some(item.path.clone())
@@ -1354,7 +1356,7 @@ impl ImageViewerApp {
                     self.navigate_to(&path.to_string_lossy());
                 }
             }
-            Some(grid_view::GridViewAction::SecondaryClick(idx)) => {
+            Some(grid_view::GridViewAction::SecondaryClick(idx)) if !is_renaming => {
                 self.selected_item = Some(idx);
                 if let Some(item) = self.items.get(idx) {
                     self.selected_file = Some(item.clone());
@@ -1366,7 +1368,7 @@ impl ImageViewerApp {
                     );
                 }
             }
-            None => {}
+            _ => {}
         }
         
         // Executar ações coletadas
@@ -1565,6 +1567,12 @@ impl eframe::App for ImageViewerApp {
             if ctx.input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::N)) {
                 self.create_new_folder();
             }
+        } else {
+            // Durante renomeação: ESC cancela a operação
+            if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                self.renaming_state = None;
+                self.focus_rename = false;
+            }
         }
         
         self.process_incoming_messages(ctx);
@@ -1606,22 +1614,24 @@ impl eframe::App for ImageViewerApp {
             ui.horizontal(|ui| {
                 ui.style_mut().spacing.item_spacing.x = 8.0;
 
-                // 1. NAVEGAÇÃO (ESQUERDA)
-                let can_back = self.can_go_back();
+                // 1. NAVEGAÇÃO (ESQUERDA) - Bloqueados durante renomeação
+                let is_renaming = self.renaming_state.is_some();
+                
+                let can_back = self.can_go_back() && !is_renaming;
                 if self.icon_button(ui, ICON_ARROW_LEFT, "Voltar").clicked() && can_back {
                     self.go_back();
                 }
                 
-                let can_forward = self.can_go_forward();
+                let can_forward = self.can_go_forward() && !is_renaming;
                 if self.icon_button(ui, ICON_ARROW_RIGHT, "Avançar").clicked() && can_forward {
                     self.go_forward();
                 }
                 
-                if self.icon_button(ui, ICON_ARROW_UP, "Subir um nível").clicked() {
+                if self.icon_button(ui, ICON_ARROW_UP, "Subir um nível").clicked() && !is_renaming {
                     self.go_up_one_level();
                 }
                 
-                if self.icon_button(ui, ICON_REFRESH, "Recarregar").clicked() {
+                if self.icon_button(ui, ICON_REFRESH, "Recarregar").clicked() && !is_renaming {
                     self.load_folder();
                 }
 
@@ -1633,13 +1643,13 @@ impl eframe::App for ImageViewerApp {
                     .size(22.0);
                 
                 let btn = egui::Button::new(btn_text).frame(false);
-                if ui.add(btn).on_hover_text("Criar Nova Pasta (Ctrl+Shift+N)").clicked() {
+                if ui.add(btn).on_hover_text("Criar Nova Pasta (Ctrl+Shift+N)").clicked() && !is_renaming {
                     self.create_new_folder();
                 }
 
                 ui.separator();
                 
-                if self.icon_button(ui, ICON_HOME, "Ir para C:\\").clicked() {
+                if self.icon_button(ui, ICON_HOME, "Ir para C:\\").clicked() && !is_renaming {
                     self.navigate_to("C:\\");
                 }
 
@@ -1748,6 +1758,7 @@ impl eframe::App for ImageViewerApp {
                     current_path: &current_path,
                     is_computer_view,
                     computer_icon: computer_icon.as_ref(),
+                    is_renaming: self.renaming_state.is_some(),
                 };
                 
                 // Implementar operações da sidebar
