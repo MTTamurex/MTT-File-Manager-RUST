@@ -2,6 +2,7 @@
 
 pub mod cache;
 pub mod components;
+pub mod context_menu;
 pub mod grid;
 pub mod header;
 pub mod icon_loader;

@@ -27,6 +27,7 @@ const ICON_FILE: &str = "\u{ECD3}";        // File (file-line)
 
 
 // Import domain types
+use mtt_file_manager::application::context_menu::ContextMenuState;
 use mtt_file_manager::domain::file_entry::*;
 use mtt_file_manager::domain::thumbnail::*;
 
@@ -35,6 +36,7 @@ use mtt_file_manager::infrastructure::windows as windows_infra;
 
 // Import UI modules
 // use mtt_file_manager::ui::status_bar; // Not used directly - imported in render_status_bar call
+use mtt_file_manager::ui::context_menu::{render_context_menu, ContextMenuOperations};
 use mtt_file_manager::ui::icon_loader::IconLoader;
 
 use windows::{
@@ -155,11 +157,7 @@ struct ImageViewerApp {
     clipboard_op: Option<ClipboardOp>,
     
     // CONTEXT MENU STATE
-    context_menu_open: bool,
-    context_menu_pos: egui::Pos2,
-    context_menu_item_idx: Option<usize>,
-    context_menu_target_path: Option<PathBuf>,  // Path para colar (pasta selecionada ou current_path)
-    context_menu_is_empty_area: bool,           // Menu aberto em área vazia (apenas colar)
+    context_menu: ContextMenuState,
     
     // ICON LOADER PERSISTENTE (evita criar novo a cada frame)
     item_icon_loader: IconLoader,
@@ -258,11 +256,7 @@ impl ImageViewerApp {
             clipboard_op: None,
             
             // CONTEXT MENU STATE
-            context_menu_open: false,
-            context_menu_pos: egui::Pos2::ZERO,
-            context_menu_item_idx: None,
-            context_menu_target_path: None,
-            context_menu_is_empty_area: false,
+            context_menu: ContextMenuState::new(),
             
             // ICON LOADER PERSISTENTE
             item_icon_loader: IconLoader::new(),
@@ -398,13 +392,13 @@ impl ImageViewerApp {
         
         // 2. Determina pasta de destino: usa target_path do menu de contexto se disponível e válido,
         // senão usa current_path (compatibilidade com atalhos de teclado)
-        let dest_folder = if let Some(target) = &self.context_menu_target_path {
+        let dest_folder = if let Some(target) = &self.context_menu.target_path {
             // Verifica se o target ainda existe (não foi deletado)
             if target.exists() && target.is_dir() {
                 target.clone()
             } else {
                 // Se o target não existe mais, usa current_path e limpa o target
-                self.context_menu_target_path = None;
+                self.context_menu.target_path = None;
                 PathBuf::from(&self.current_path)
             }
         } else {
@@ -471,8 +465,8 @@ impl ImageViewerApp {
             }
         }
         
-        // 8. Limpa o context_menu_target_path após a operação
-        self.context_menu_target_path = None;
+        // 8. Limpa o context_menu.target_path após a operação
+        self.context_menu.target_path = None;
     }
     
     // Helper para botÃµes "Toggle" (que ficam acesos se selecionados)
@@ -674,8 +668,8 @@ impl ImageViewerApp {
         self.current_path = path.to_string();
         self.path_input = path.to_string();
         
-        // Limpa o context_menu_target_path para garantir sincronia com a pasta atual
-        self.context_menu_target_path = None;
+        // Limpa o context_menu.target_path para garantir sincronia com a pasta atual
+        self.context_menu.target_path = None;
         
         // ATUALIZA O VIGIA
         self.watch_current_folder();
@@ -1173,15 +1167,16 @@ impl ImageViewerApp {
                     self.navigate_to(&path.to_string_lossy());
                 }
             }
-            Some(list_view::ListViewAction::SecondaryClick(idx)) => {
+                Some(list_view::ListViewAction::SecondaryClick(idx)) => {
                 self.selected_item = Some(idx);
                 if let Some(item) = self.items.get(idx) {
                     self.selected_file = Some(item.clone());
-                    self.context_menu_open = true;
-                    self.context_menu_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
-                    self.context_menu_item_idx = Some(idx);
-                    self.context_menu_target_path = Some(item.path.clone());
-                    self.context_menu_is_empty_area = false;
+                    self.context_menu.open(
+                        ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO),
+                        Some(idx),
+                        Some(item.path.clone()),
+                        false
+                    );
                 }
             }
             None => {}
@@ -1363,11 +1358,12 @@ impl ImageViewerApp {
                 self.selected_item = Some(idx);
                 if let Some(item) = self.items.get(idx) {
                     self.selected_file = Some(item.clone());
-                    self.context_menu_open = true;
-                    self.context_menu_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
-                    self.context_menu_item_idx = Some(idx);
-                    self.context_menu_target_path = Some(item.path.clone());
-                    self.context_menu_is_empty_area = false;
+                    self.context_menu.open(
+                        ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO),
+                        Some(idx),
+                        Some(item.path.clone()),
+                        false
+                    );
                 }
             }
             None => {}
@@ -1484,108 +1480,6 @@ impl ImageViewerApp {
         }
     }
     
-    /// Exibe o menu de contexto na posição atual
-    fn show_context_menu(&mut self, ctx: &egui::Context) {
-        if !self.context_menu_open {
-            return;
-        }
-        
-        // Exibe o menu
-        let mut menu_closed = false;
-        egui::Area::new(egui::Id::new("context_menu"))
-            .fixed_pos(self.context_menu_pos)
-            .order(egui::Order::Foreground)
-            .show(ctx, |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.set_min_width(180.0);
-                    
-                    // Menu em área vazia: mostra "Criar pasta" e "Colar" (se houver algo no clipboard)
-                    if self.context_menu_is_empty_area {
-                        // Criar pasta
-                        if ui.button("Criar pasta").clicked() {
-                            self.create_new_folder();
-                            menu_closed = true;
-                        }
-                        
-                        // Colar (só se tiver algo no clipboard)
-                        let can_paste = self.clipboard_file.is_some();
-                        if ui.add_enabled(can_paste, egui::Button::new("Colar")).clicked() {
-                            self.command_paste();
-                            menu_closed = true;
-                        }
-                    } else {
-                        // Menu em item: mostra todas as opções
-                        
-                        // Copiar (só se tiver item selecionado)
-                        let can_copy = self.context_menu_item_idx.is_some();
-                        if ui.add_enabled(can_copy, egui::Button::new("Copiar")).clicked() {
-                            self.command_copy();
-                            menu_closed = true;
-                        }
-                        
-                        // Recortar (só se tiver item selecionado)
-                        let can_cut = self.context_menu_item_idx.is_some();
-                        if ui.add_enabled(can_cut, egui::Button::new("Recortar")).clicked() {
-                            self.command_cut();
-                            menu_closed = true;
-                        }
-                        
-                        // Colar (só se tiver algo no clipboard)
-                        let can_paste = self.clipboard_file.is_some();
-                        if ui.add_enabled(can_paste, egui::Button::new("Colar")).clicked() {
-                            self.command_paste();
-                            menu_closed = true;
-                        }
-                        
-                        ui.separator();
-                        
-                        // Renomear (só se tiver item selecionado)
-                        let can_rename = self.context_menu_item_idx.is_some();
-                        if ui.add_enabled(can_rename, egui::Button::new("Renomear")).clicked() {
-                            if let Some(idx) = self.context_menu_item_idx {
-                                if let Some(item) = self.items.get(idx) {
-                                    self.renaming_state = Some((idx, item.name.clone()));
-                                    self.focus_rename = true;
-                                }
-                            }
-                            menu_closed = true;
-                        }
-                        
-                        // Excluir (só se tiver item selecionado)
-                        let can_delete = self.context_menu_item_idx.is_some();
-                        if ui.add_enabled(can_delete, egui::Button::new("Excluir")).clicked() {
-                            self.delete_with_shell();
-                            menu_closed = true;
-                        }
-                    }
-                });
-            });
-        
-        // Fecha o menu se uma ação foi executada ou se clicou fora
-        if menu_closed {
-            self.context_menu_open = false;
-            return;
-        }
-        
-        // Fecha o menu se clicar fora (qualquer clique fora do menu)
-        if ctx.input(|i| i.pointer.any_click()) {
-            let pointer_pos = ctx.pointer_interact_pos();
-            if let Some(pos) = pointer_pos {
-                // Verifica se o clique foi fora do menu
-                // O menu tem aproximadamente 180x200 pixels
-                let menu_rect = egui::Rect::from_min_size(
-                    self.context_menu_pos,
-                    egui::vec2(180.0, 200.0)
-                );
-                if !menu_rect.contains(pos) {
-                    self.context_menu_open = false;
-                }
-            } else {
-                // Se não conseguiu obter a posição do ponteiro, fecha o menu por segurança
-                self.context_menu_open = false;
-            }
-        }
-    }
 }
 
 impl mtt_file_manager::ui::components::item_slot::ItemSlotOperations for ImageViewerApp {
@@ -1601,6 +1495,35 @@ impl mtt_file_manager::ui::components::item_slot::ItemSlotOperations for ImageVi
     
     fn rename_item(&mut self, idx: usize) {
         self.rename_with_shell(idx);
+    }
+}
+
+impl mtt_file_manager::ui::context_menu::ContextMenuOperations for ImageViewerApp {
+    fn create_new_folder(&mut self) {
+        self.create_new_folder();
+    }
+    
+    fn command_copy(&mut self) {
+        self.command_copy();
+    }
+    
+    fn command_cut(&mut self) {
+        self.command_cut();
+    }
+    
+    fn command_paste(&mut self) {
+        self.command_paste();
+    }
+    
+    fn rename_item(&mut self, idx: usize) {
+        if let Some(item) = self.items.get(idx) {
+            self.renaming_state = Some((idx, item.name.clone()));
+            self.focus_rename = true;
+        }
+    }
+    
+    fn delete_with_shell(&mut self) {
+        self.delete_with_shell();
     }
 }
 
@@ -1986,7 +1909,7 @@ impl eframe::App for ImageViewerApp {
             
             // Detecção de clique direito na área vazia (fora dos itens)
             // Só abre menu de contexto se não houver item selecionado pelo clique direito
-            if !self.context_menu_open && ui.input(|i| i.pointer.secondary_clicked()) {
+            if !self.context_menu.is_open && ui.input(|i| i.pointer.secondary_clicked()) {
                 // Verifica se o clique foi em um item
                 let pointer_pos = ui.ctx().pointer_latest_pos();
                 let mut clicked_on_item = false;
@@ -2030,17 +1953,21 @@ impl eframe::App for ImageViewerApp {
                 
                 // Se não clicou em item, abre menu de contexto para área vazia
                 if !clicked_on_item {
-                    self.context_menu_open = true;
-                    self.context_menu_pos = pointer_pos.unwrap_or(ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO));
-                    self.context_menu_item_idx = None;
-                    self.context_menu_target_path = Some(PathBuf::from(&self.current_path));
-                    self.context_menu_is_empty_area = true;
+                    self.context_menu.open(
+                        pointer_pos.unwrap_or(ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO)),
+                        None,
+                        Some(PathBuf::from(&self.current_path)),
+                        true
+                    );
                 }
             }
         });
         
         // Exibe o menu de contexto (se aberto)
-        self.show_context_menu(ctx);
+        let mut context_menu = self.context_menu.clone();
+        let clipboard_file = self.clipboard_file.clone();
+        render_context_menu(ctx, &mut context_menu, &clipboard_file, self);
+        self.context_menu = context_menu;
     }
 }
 fn main() -> eframe::Result<()> {
