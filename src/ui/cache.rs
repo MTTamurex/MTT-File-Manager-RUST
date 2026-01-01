@@ -51,7 +51,7 @@ impl CacheManager {
     /// Creates a new cache manager with default configuration
     pub fn new() -> Self {
         Self {
-            texture_cache: LruCache::new(NonZeroUsize::new(200).unwrap()),
+            texture_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
             icon_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
             loading_set: std::collections::HashSet::new(),
             folder_icon_texture: None,
