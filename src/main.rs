@@ -75,6 +75,15 @@ const CACHE_SIZE: usize = 200;
 // Icon cache (menor pois ícones são compartilhados por extensão)
 const ICON_CACHE_SIZE: usize = 100;
 
+/// Converte string para formato Win32 (double-null terminated)
+/// Requerido por APIs como SHFileOperationW
+fn to_win32_path(path: &str) -> Vec<u16> {
+    path.encode_utf16()
+        .chain(std::iter::once(0))
+        .chain(std::iter::once(0))
+        .collect()
+}
+
 // Operações de Clipboard (Copiar/Recortar)
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum ClipboardOp {
@@ -91,7 +100,7 @@ struct ImageViewerApp {
     image_receiver: Receiver<ThumbnailData>,       // Worker Pool -> UI
     
     // File system
-    items: Vec<FileEntry>,  // Agora com metadados cacheados
+    items: Arc<Vec<FileEntry>>,  // Arc para clone barato em render loops (60 FPS)
     texture_cache: LruCache<PathBuf, egui::TextureHandle>,
     loading_set: HashSet<PathBuf>,
     
@@ -161,6 +170,11 @@ struct ImageViewerApp {
     
     // ICON LOADER PERSISTENTE (evita criar novo a cada frame)
     item_icon_loader: IconLoader,
+    
+    // ASYNC ICON WORKER (evita I/O bloqueante no render loop)
+    icon_req_sender: Sender<PathBuf>,                                    // UI → Worker
+    icon_res_receiver: Receiver<(PathBuf, Vec<u8>, u32, u32)>,           // Worker → UI
+    loading_icons: HashSet<PathBuf>,                                     // Tracking in-progress
 }
 
 impl ImageViewerApp {
@@ -193,9 +207,26 @@ impl ImageViewerApp {
         let shared_req_rx = Arc::new(std::sync::Mutex::new(req_rx));
         let shared_gen = Arc::new(AtomicUsize::new(0));
 
-        // 4 threads: equilÃ­brio ideal entre SSD e HDD USB
+        // 4 threads: equilíbrio ideal entre SSD e HDD USB
         use mtt_file_manager::workers::thumbnail_worker::spawn_thumbnail_workers;
         spawn_thumbnail_workers(shared_req_rx, img_tx, ctx.clone(), shared_gen.clone());
+        
+        // --- ASYNC ICON WORKER (single thread, evita I/O bloqueante) ---
+        let (icon_req_tx, icon_req_rx) = mpsc::channel::<PathBuf>();
+        let (icon_res_tx, icon_res_rx) = mpsc::channel();
+        let icon_ctx = ctx.clone();
+        
+        std::thread::spawn(move || {
+            use mtt_file_manager::infrastructure::windows::extract_file_icon_by_path;
+            use mtt_file_manager::domain::file_entry::IconSize;
+            
+            while let Ok(path) = icon_req_rx.recv() {
+                if let Ok((pixels, width, height)) = extract_file_icon_by_path(&path, IconSize::Large) {
+                    let _ = icon_res_tx.send((path, pixels, width, height));
+                    icon_ctx.request_repaint();
+                }
+            }
+        });
         
         let disks = get_all_drives();
         
@@ -203,7 +234,7 @@ impl ImageViewerApp {
             current_path: PATH_PADRAO.to_string(),
             thumbnail_req_sender: req_tx,
             image_receiver: img_rx,
-            items: Vec::new(),
+            items: Arc::new(Vec::new()),
             texture_cache: LruCache::new(NonZeroUsize::new(CACHE_SIZE).unwrap()),
             loading_set: HashSet::new(),
             // Async loading
@@ -260,6 +291,11 @@ impl ImageViewerApp {
             
             // ICON LOADER PERSISTENTE
             item_icon_loader: IconLoader::new(),
+            
+            // ASYNC ICON WORKER
+            icon_req_sender: icon_req_tx,
+            icon_res_receiver: icon_res_rx,
+            loading_icons: HashSet::new(),
         };
         
         // Inicia monitoramento inicial
@@ -300,11 +336,7 @@ impl ImageViewerApp {
         if let Some(idx) = self.selected_item {
             if let Some(item) = self.items.get(idx) {
                 let path = item.path.to_string_lossy().to_string();
-
-                // Double-null termination exigido pela API
-                let mut from_vec: Vec<u16> = path.encode_utf16().collect();
-                from_vec.push(0);
-                from_vec.push(0);
+                let from_vec = to_win32_path(&path);
 
                 let mut op = SHFILEOPSTRUCTW {
                     hwnd: HWND(std::ptr::null_mut()),
@@ -486,20 +518,22 @@ impl ImageViewerApp {
     /// Filtra itens baseado na query de busca
     fn filter_items(&mut self) {
         if self.search_query.is_empty() {
-            self.items = self.all_items.clone();
+            self.items = Arc::new(self.all_items.clone());
         } else {
             let query = self.search_query.to_lowercase();
-            self.items = self.all_items.iter()
+            self.items = Arc::new(self.all_items.iter()
                 .filter(|item| item.name.to_lowercase().contains(&query))
                 .cloned()
-                .collect();
+                .collect());
         }
         self.total_items = self.items.len();
     }
     
-    /// Ordena itens baseado no modo atual (mantÃ©m pastas sempre primeiro)
+    /// Ordena itens baseado no modo atual (mantém pastas sempre primeiro)
     fn sort_items(&mut self) {
-        self.items.sort_by(|a, b| {
+        // Clone interno para mutação, depois wrap em novo Arc
+        let mut items_vec = (*self.items).clone();
+        items_vec.sort_by(|a, b| {
             // 1. Pastas sempre primeiro (a menos que ambos sejam pastas ou ambos arquivos)
             if a.is_dir != b.is_dir {
                 return if a.is_dir {
@@ -509,20 +543,30 @@ impl ImageViewerApp {
                 };
             }
             
-            // 2. Ordena por modo selecionado
+            // 2. Ordena por modo selecionado (Smart Sorting com natord)
             let ordering = match self.sort_mode {
-                SortMode::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                SortMode::Name => natord::compare(&a.name.to_lowercase(), &b.name.to_lowercase()),
                 SortMode::Date => a.modified.cmp(&b.modified),
                 SortMode::Size => a.size.cmp(&b.size),
+                SortMode::Type => {
+                    // Sort by file extension, then by name
+                    let ext_a = a.path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+                    let ext_b = b.path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+                    match ext_a.cmp(&ext_b) {
+                        std::cmp::Ordering::Equal => natord::compare(&a.name.to_lowercase(), &b.name.to_lowercase()),
+                        other => other,
+                    }
+                }
             };
             
-            // 3. Inverte se descending estÃ¡ ativo
+            // 3. Inverte se descending está ativo
             if self.sort_descending {
                 ordering.reverse()
             } else {
                 ordering
             }
         });
+        self.items = Arc::new(items_vec);
     }
     
     /// Requisita scan assÃ­ncrono de uma pasta para descobrir primeira imagem.
@@ -537,7 +581,7 @@ impl ImageViewerApp {
         self.current_generation.store(self.generation, AtomicOrdering::Relaxed); // Sincroniza com workers
         
         // 1. Limpeza de Estado (UI Thread)
-        self.items.clear();
+        self.items = Arc::new(Vec::new());  // Novo Arc vazio (antigo é dropped automaticamente)
         self.all_items.clear();  // Limpa backup mestre tambÃ©m
         self.texture_cache.clear();
         self.loading_set.clear();
@@ -714,7 +758,7 @@ impl ImageViewerApp {
         self.path_input = "Este Computador".to_string();
         
         // Clear items for computer view
-        self.items.clear();
+        self.items = Arc::new(Vec::new());
         self.all_items.clear();
         self.selected_item = None;
         self.selected_file = None;
@@ -989,24 +1033,41 @@ impl ImageViewerApp {
         let mut folder_updates = false;
         while let Ok((folder_path, cover_opt)) = self.cover_worker_receiver.try_recv() {
             if let Some(cover) = cover_opt {
-                // Atualiza em items (lista filtrada/ordenada)
-                if let Some(item) = self.items.iter_mut().find(|i| i.path == folder_path) {
-                    item.folder_cover = Some(cover.clone());
-                    
-                    // JÃ¡ requisita thumbnail da imagem encontrada
-                    if !self.texture_cache.contains(&cover) && !self.loading_set.contains(&cover) {
-                        self.request_thumbnail_load(cover.clone());
-                    }
-                    folder_updates = true;
-                }
-                // TambÃ©m atualiza em all_items (persistÃªncia atravÃ©s de filtros)
+                // Atualiza em all_items (fonte mutável)
                 if let Some(item) = self.all_items.iter_mut().find(|i| i.path == folder_path) {
-                    item.folder_cover = Some(cover);
+                    item.folder_cover = Some(cover.clone());
+                    folder_updates = true;
+                    
+                    // Requisita thumbnail se necessário
+                    if !self.texture_cache.contains(&cover) && !self.loading_set.contains(&cover) {
+                        self.request_thumbnail_load(cover);
+                    }
                 }
             }
         }
+        // Reconstrói items a partir de all_items se houve updates
         if folder_updates {
+            self.filter_items();
             ctx.request_repaint();
+        }
+        
+        // 3. Icon Worker: Recebe resultados de ícones assíncronos
+        while let Ok((path, pixels, width, height)) = self.icon_res_receiver.try_recv() {
+            self.loading_icons.remove(&path);
+            
+            // Carrega textura no cache de ícones
+            let cache_key = path.to_string_lossy().to_string();
+            if !self.item_icon_loader.icon_cache.contains(&cache_key) {
+                let texture = ctx.load_texture(
+                    cache_key.clone(),
+                    egui::ColorImage::from_rgba_unmultiplied(
+                        [width as usize, height as usize],
+                        &pixels,
+                    ),
+                    egui::TextureOptions::LINEAR,
+                );
+                self.item_icon_loader.icon_cache.put(cache_key, texture);
+            }
         }
         
         // 3. Individual thumbnails
@@ -1179,6 +1240,16 @@ impl ImageViewerApp {
                         false
                     );
                 }
+            }
+            Some(list_view::ListViewAction::SortChange(mode)) => {
+                // Toggle direction if same mode, otherwise switch mode
+                if self.sort_mode == mode {
+                    self.sort_descending = !self.sort_descending;
+                } else {
+                    self.sort_mode = mode;
+                    self.sort_descending = false;
+                }
+                self.sort_items();
             }
             _ => {}
         }
@@ -1695,11 +1766,13 @@ impl eframe::App for ImageViewerApp {
                             SortMode::Name => "Nome",
                             SortMode::Date => "Data",
                             SortMode::Size => "Tamanho",
+                            SortMode::Type => "Tipo",
                         })
                         .show_ui(ui, |ui| {
                             if ui.selectable_value(&mut self.sort_mode, SortMode::Name, "Nome").clicked() { self.sort_items(); }
                             if ui.selectable_value(&mut self.sort_mode, SortMode::Date, "Data").clicked() { self.sort_items(); }
                             if ui.selectable_value(&mut self.sort_mode, SortMode::Size, "Tamanho").clicked() { self.sort_items(); }
+                            if ui.selectable_value(&mut self.sort_mode, SortMode::Type, "Tipo").clicked() { self.sort_items(); }
                         });
 
                     ui.separator();

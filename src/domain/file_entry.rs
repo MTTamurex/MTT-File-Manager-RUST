@@ -85,6 +85,7 @@ pub enum SortMode {
     Name,
     Date,
     Size,
+    Type,
 }
 
 /// Modo de visualização
