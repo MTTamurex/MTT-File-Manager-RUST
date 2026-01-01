@@ -6,6 +6,7 @@ pub mod context_menu;
 pub mod grid;
 pub mod header;
 pub mod icon_loader;
+pub mod navigation;
 pub mod sidebar;
 pub mod status_bar;
 pub mod views;

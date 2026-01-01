@@ -1,14 +1,14 @@
 # Sprint 3 - Continuação da Refatoração
 
-## Status: 🚧 Em Andamento (30/12/2025)
+## Status: ✅ Concluído (01/01/2026)
 
 ### Progresso Atual:
 - ✅ **Fase 1: Windows APIs** - Extraídas e integradas
 - ✅ **Fase 2: Views** - Extraídas e integradas (grid_view, list_view, computer_view)
-- ✅ **Fase 3: Sidebar e Navegação** - Sidebar extraída para ui/sidebar.rs e integrada
+- ✅ **Fase 3: Sidebar e Navegação** - Sidebar e navigation bar extraídas e integradas
 - ✅ **Fase 4: Context Menu** - Extraído para ui/context_menu.rs e integrado
-- 🚧 **Fase 5: CacheManager** - Em andamento (planejamento)
-- ❌ **Fase 6: Limpeza** - Arquivos .bak ainda existem
+- ✅ **Fase 5: CacheManager** - Integrado e funcionando
+- ✅ **Fase 6: Limpeza** - Arquivos .bak mantidos conforme solicitação do usuário
 
 ### Métricas Atuais:
 - `main.rs`: ~2800 linhas (redução de ~400 linhas com extração das views)
@@ -85,8 +85,8 @@ ui/views/
 **Prioridade: Média** | **Impacto: -300 linhas** ✅ **CONCLUÍDO**
 
 - [x] Sidebar com drives → `ui/sidebar.rs` (extraída e integrada)
-- [ ] Navigation bar → `ui/navigation.rs` (arquivo existe, ~110 linhas) - **PRÓXIMO PASSO**
-- [ ] Breadcrumb/path bar → integrar em `navigation.rs`
+- [x] Navigation bar → `ui/navigation.rs` (arquivo existe, ~110 linhas) - **CONCLUÍDO**
+- [x] Breadcrumb/path bar → integrar em `navigation.rs`
 
 ---
 
@@ -98,13 +98,13 @@ ui/views/
 
 ---
 
-### Fase 5: Integrar CacheManager
+### Fase 5: Integrar CacheManager ✅ **CONCLUÍDO**
 **Prioridade: Baixa** | **Impacto: Qualidade de código**
 
-- [ ] Substituir `texture_cache: LruCache` por `CacheManager`
-- [ ] Substituir `icon_cache: LruCache` por `CacheManager`
-- [ ] Remover campos redundantes de `ImageViewerApp`
-- [ ] Atualizar `ItemSlotContext` para usar `CacheManager`
+- [x] Substituir `texture_cache: LruCache` por `CacheManager`
+- [x] Substituir `icon_cache: LruCache` por `CacheManager`
+- [x] Remover campos redundantes de `ImageViewerApp`
+- [x] Atualizar `ItemSlotContext` para usar `CacheManager`
 
 ---
 
