@@ -111,4 +111,5 @@ pub enum ViewMode {
 pub enum IconSize {
     Small,  // 16x16 ou 32x32 (depende do DPI)
     Large,  // 32x32 ou 48x48
+    Jumbo,  // 256x256 (via Shell Image Factory)
 }

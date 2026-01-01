@@ -34,7 +34,7 @@ pub fn extract_computer_icon(size: IconSize) -> std::result::Result<(Vec<u8>, u3
         // 2. Flags with SHGFI_PIDL (CRITICAL!)
         let flags = SHGFI_PIDL | SHGFI_ICON | match size {
             IconSize::Small => SHGFI_SMALLICON,
-            IconSize::Large => SHGFI_LARGEICON,
+            IconSize::Large | IconSize::Jumbo => SHGFI_LARGEICON,
         };
         
         // 3. Request icon using PIDL (cast to PCWSTR as required by API)
@@ -119,7 +119,7 @@ pub fn extract_file_icon(
             | SHGFI_USEFILEATTRIBUTES
             | match size {
                 IconSize::Small => SHGFI_SMALLICON,
-                IconSize::Large => SHGFI_LARGEICON,
+                IconSize::Large | IconSize::Jumbo => SHGFI_LARGEICON,
             };
         
         let result = SHGetFileInfoW(
@@ -161,7 +161,7 @@ pub fn extract_folder_icon(size: IconSize) -> std::result::Result<(Vec<u8>, u32,
             | SHGFI_USEFILEATTRIBUTES
             | match size {
                 IconSize::Small => SHGFI_SMALLICON,
-                IconSize::Large => SHGFI_LARGEICON,
+                IconSize::Large | IconSize::Jumbo => SHGFI_LARGEICON,
             };
         
         let result = SHGetFileInfoW(
@@ -203,7 +203,7 @@ pub fn extract_file_icon_by_path(
         let flags = SHGFI_ICON 
             | match size {
                 IconSize::Small => SHGFI_SMALLICON,
-                IconSize::Large => SHGFI_LARGEICON,
+                IconSize::Large | IconSize::Jumbo => SHGFI_LARGEICON,
             };
         
         let result = SHGetFileInfoW(
@@ -240,14 +240,36 @@ pub fn extract_drive_icon(
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect();
+
+        // For Jumbo icons, use IShellItemImageFactory (higher quality)
+        if matches!(size, IconSize::Jumbo) {
+            let shell_item: IShellItem = SHCreateItemFromParsingName(
+                PCWSTR(path_wide.as_ptr()),
+                None,
+            )?;
+            
+            let image_factory: IShellItemImageFactory = shell_item.cast()?;
+            
+            let size_factory = SIZE {
+                cx: 256,
+                cy: 256,
+            };
+            
+            // SIIGBF_ICONONLY to ensure we get the icon and not a thumbnail if it were a file
+            let hbitmap: HBITMAP = image_factory.GetImage(size_factory, SIIGBF_ICONONLY)?;
+            
+            let (rgba_data, width, height) = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
+            let _ = DeleteObject(hbitmap);
+            return Ok((rgba_data, width, height));
+        }
         
+        // For Small/Large, use legacy but fast SHGetFileInfo
         let mut shfi = SHFILEINFOW::default();
         
-        // FLAGS: Without USEFILEATTRIBUTES - we want REAL volume icon
         let flags = SHGFI_ICON 
             | match size {
                 IconSize::Small => SHGFI_SMALLICON,
-                IconSize::Large => SHGFI_LARGEICON,
+                IconSize::Large | IconSize::Jumbo => SHGFI_LARGEICON, // Fallback (Jumbo handled above)
             };
         
         let result = SHGetFileInfoW(
@@ -264,7 +286,6 @@ pub fn extract_drive_icon(
         
         let hicon = shfi.hIcon;
         let conversion_result = super::bitmap_conversion::hicon_to_rgba(hicon);
-        
         let _ = DestroyIcon(hicon);
         
         conversion_result
