@@ -9,6 +9,9 @@ use crate::domain::thumbnail::ThumbnailData;
 use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED, CoUninitialize};
 use eframe::egui;
 use windows::core::Interface;
+use crate::infrastructure::disk_cache::ThumbnailDiskCache;
+use std::time::SystemTime;
+use image::ImageFormat;
 
 /// Spawns thumbnail worker threads
 pub fn spawn_thumbnail_workers(
@@ -16,6 +19,7 @@ pub fn spawn_thumbnail_workers(
     tx: Sender<ThumbnailData>,
     ctx: egui::Context,
     gen_tracker: Arc<AtomicUsize>,
+    disk_cache: Arc<ThumbnailDiskCache>,
 ) {
     // 8 threads: otimizado para SSDs e pastas grandes
     for _ in 0..8 {
@@ -23,9 +27,10 @@ pub fn spawn_thumbnail_workers(
         let tx = tx.clone();
         let gen_tracker = gen_tracker.clone();
         let ctx = ctx.clone();
+        let disk_cache = disk_cache.clone();
         
         std::thread::spawn(move || {
-            thumbnail_worker_loop(rx, tx, ctx, gen_tracker);
+            thumbnail_worker_loop(rx, tx, ctx, gen_tracker, disk_cache);
         });
     }
 }
@@ -36,6 +41,7 @@ fn thumbnail_worker_loop(
     tx: Sender<ThumbnailData>,
     ctx: egui::Context,
     gen_tracker: Arc<AtomicUsize>,
+    disk_cache: Arc<ThumbnailDiskCache>,
 ) {
     // Initialize COM for this thread (required for Windows Shell APIs)
     unsafe {
@@ -54,25 +60,50 @@ fn thumbnail_worker_loop(
             Ok((path, req_gen)) => {
                 // FAST CANCEL: If global generation changed, ignore before disk read
                 if req_gen == gen_tracker.load(Ordering::Relaxed) {
-                    // RETRY MECHANISM: Try up to 3 times for transient failures
-                    let mut result = None;
-                    for attempt in 0..3 {
-                        match extract_windows_thumbnail(&path) {
-                            Ok((data, w, h)) => {
-                                result = Some((data, w, h));
-                                break;
-                            }
-                            Err(_) => {
-                                if attempt < 2 {
-                                    // Small delay before retry (Windows Shell cache may need time)
-                                    std::thread::sleep(std::time::Duration::from_millis(50));
-                                }
-                            }
+                    
+                    // STEP 1: Try disk cache first
+                    let modified = std::fs::metadata(&path)
+                        .and_then(|m| m.modified())
+                        .unwrap_or(SystemTime::UNIX_EPOCH);
+                    
+                    let mut final_result = None;
+                    
+                    if let Some(cached_bytes) = disk_cache.get(&path, modified) {
+                        // Decode WebP from cache
+                        if let Ok(img) = image::load_from_memory_with_format(&cached_bytes, ImageFormat::WebP) {
+                            let rgba = img.to_rgba8();
+                            final_result = Some((rgba.to_vec(), rgba.width(), rgba.height()));
                         }
                     }
                     
-                    // Only send if extraction succeeded or after all retries
-                    let (data, w, h) = result.unwrap_or_else(|| create_error_placeholder());
+                    if final_result.is_none() {
+                        // STEP 2: Extract from Windows if cache miss
+                        // RETRY MECHANISM: Try up to 3 times for transient failures
+                        let mut extraction_result = None;
+                        for attempt in 0..3 {
+                            match extract_windows_thumbnail(&path) {
+                                Ok((data, w, h)) => {
+                                    extraction_result = Some((data, w, h));
+                                    break;
+                                }
+                                Err(_) => {
+                                    if attempt < 2 {
+                                        // Small delay before retry (Windows Shell cache may need time)
+                                        std::thread::sleep(std::time::Duration::from_millis(50));
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if let Some((data, w, h)) = extraction_result {
+                            // STEP 3: Save to disk cache for future use
+                            let _ = disk_cache.put(&path, modified, &data, w, h);
+                            final_result = Some((data, w, h));
+                        }
+                    }
+                    
+                    // Final fallback to placeholder if everything failed
+                    let (data, w, h) = final_result.unwrap_or_else(|| create_error_placeholder());
                     
                     let _ = tx.send(ThumbnailData {
                         path,

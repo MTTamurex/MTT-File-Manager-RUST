@@ -4,6 +4,7 @@ use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+use mtt_file_manager::infrastructure::disk_cache::ThumbnailDiskCache;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 use notify::{Watcher, RecursiveMode, RecommendedWatcher};
@@ -53,8 +54,6 @@ use std::os::windows::ffi::OsStringExt;
 // Import specific Windows API functions from modules
 use windows_infra::{
     get_all_drives,
-    get_volume_info,
-    extract_drive_icon,
     extract_file_icon,
     extract_file_icon_by_path,
     open_with_shell,
@@ -204,9 +203,16 @@ impl ImageViewerApp {
         let shared_req_rx = Arc::new(std::sync::Mutex::new(req_rx));
         let shared_gen = Arc::new(AtomicUsize::new(0));
 
-        // 4 threads: equilíbrio ideal entre SSD e HDD USB
+        // Initialize disk cache
+        let cache_dir = dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("MTT-File-Manager")
+            .join("thumbnails");
+        let disk_cache = Arc::new(ThumbnailDiskCache::new(cache_dir));
+
+        // 8 threads: equilíbrio ideal entre SSD e HDD USB
         use mtt_file_manager::workers::thumbnail_worker::spawn_thumbnail_workers;
-        spawn_thumbnail_workers(shared_req_rx, img_tx, ctx.clone(), shared_gen.clone());
+        spawn_thumbnail_workers(shared_req_rx, img_tx, ctx.clone(), shared_gen.clone(), disk_cache);
         
         // --- ASYNC ICON WORKER (single thread, evita I/O bloqueante) ---
         let (icon_req_tx, icon_req_rx) = mpsc::channel::<PathBuf>();
