@@ -10,6 +10,12 @@ rfd = "0.15"
 lru = "0.12"
 notify = "6.1.1"
 natord = "1.0"
+dirs = "5.0"
+dashmap = "5.5"
+image = { version = "0.25", features = ["webp"] }
+thiserror = "2.0"
+tempfile = "3.10"
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 [dependencies.windows]
 version = "0.58"

@@ -114,7 +114,8 @@ MTT File Manager/
 │   │   │   ├── icons.rs
 │   │   │   ├── shell_operations.rs
 │   │   │   └── system_info.rs
-│   │   ├── cache.rs       # Gerenciamento de cache
+│   │   ├── cache.rs       # Cache em memória (LRU)
+│   │   ├── disk_cache.rs  # NOVO: Cache persistente em disco (WebP)
 │   │   ├── security.rs    # Funções de segurança
 │   │   └── watcher.rs     # Integração com notify
 │   ├── ui/               # Componentes de interface
@@ -304,23 +305,22 @@ sequenceDiagram
 - Scroll: 60 FPS constante
 
 
-### 3️⃣ Carregamento de Thumbnails (Lazy)
+### 3️⃣ Carregamento de Thumbnails (Fluxo de 4 Estágios) - NOVO!
 
 ```rust
 render_item_slot()
-  ├── Verifica se texture já existe no cache
-  ├── Se não: request_thumbnail_load()
-  │   ├── Envia pedido para Worker Pool (mpsc channel)
-  │   ├── Worker Pool (4 threads fixas)
-  │   │   ├── Fast Cancel: ignora se Atomic Generation mudou
-  │   │   ├── CoInitializeEx(COINIT_MULTITHREADED)
-  │   ├── SHCreateItemFromParsingName(path)
-  │   ├── IShellItemImageFactory::GetImage(256x256)
-  │   ├── HBITMAP → RGBA conversion (BGRA swap)
-  │   ├── Envia via channel
-  │   └── CoUninitialize()
-  └── UI recebe → ctx.load_texture() → insere no LRU Cache
+  ├── 1. Memória: Verifica CacheManager (LruCache)
+  ├── 2. Solicitação: request_thumbnail_load() -> Worker Thread
+  ├── 3. Disco (Persistente): ThumbnailDiskCache::get(path, modified)
+  │   └── Se OK: decodifica WebP -> RGBA -> envia para UI
+  └── 4. Extração (Fallback): Se não no disco
+      ├── IShellItemImageFactory::GetImage(256x256)
+      ├── HBITMAP → RGBA conversion
+      ├── ThumbnailDiskCache::put(path, modified, rgba) -> Salva em WebP
+      └── Envia para UI -> ctx.load_texture() -> insere no LRU
 ```
+
+**Benefício:** Pastas grandes carregam instantaneamente após a primeira visita.
 
 ### 4️⃣ Gerenciamento de Memória e Ciclo de Vida
  

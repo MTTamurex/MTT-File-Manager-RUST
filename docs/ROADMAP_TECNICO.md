@@ -323,41 +323,17 @@ fn load_thumbnails_batch(&self, paths: Vec<PathBuf>) {
 
 ### 🟢 Desejável
 
-#### 7. Suporte a Thumbnail Caching em Disco
+#### 7. Suporte a Thumbnail Caching em Disco ✅ **CONCLUÍDO**
 
-**Problema**: Recarrega thumbnails a cada execução.
+**Problema**: Recarregava thumbnails a cada execução, causando lentidão em pastas grandes.
 
-**Solução**: Usar Windows Thumbnail Cache ou criar próprio
-```rust
-// Opção 1: Usar cache do Windows (já implementado!)
-// IShellItemImageFactory já usa o cache do Explorer
+**Solução**: Implementado `ThumbnailDiskCache` persistente em `%LOCALAPPDATA%`.
+- Armazenamento em WebP para eficiência de espaço.
+- Invalidação automática via timestamp de modificação.
+- Estrutura de subdiretórios para performance de sistema de arquivos.
 
-// Opção 2: Cache local (se precisar de mais controle)
-use std::collections::HashMap;
-use std::fs;
+**Ganho**: Carregamento instantâneo em re-visitas.
 
-struct DiskCache {
-    cache_dir: PathBuf,
-}
-
-impl DiskCache {
-    fn get(&self, path: &Path) -> Option<Vec<u8>> {
-        let hash = hash_path(path);
-        let cache_file = self.cache_dir.join(format!("{}.thumb", hash));
-        fs::read(cache_file).ok()
-    }
-    
-    fn put(&self, path: &Path, data: &[u8]) -> Result<()> {
-        let hash = hash_path(path);
-        let cache_file = self.cache_dir.join(format!("{}.thumb", hash));
-        fs::write(cache_file, data)?;
-        Ok(())
-    }
-}
-```
-
-**Tempo Estimado**: 10 horas  
-**Prioridade**: 🟢 Baixa (já usa cache do Windows)
 
 ---
 
