@@ -10,7 +10,8 @@ use std::sync::atomic::Ordering as AtomicOrdering;
 
 use eframe::egui;
 
-use crate::domain::file_entry::{FileEntry, SortMode};
+use crate::domain::file_entry::{FileEntry, SortMode, SyncStatus};
+use crate::infrastructure::onedrive;
 use crate::ui::app::ImageViewerApp;
 
 // Windows API imports for file scanning
@@ -54,6 +55,9 @@ impl ImageViewerApp {
             };
             let wide_path: Vec<u16> = search_path.encode_utf16().chain(std::iter::once(0)).collect();
             let mut find_data = WIN32_FIND_DATAW::default();
+            
+            // Check if we're in a OneDrive folder (for sync status)
+            let is_onedrive = onedrive::is_onedrive_path(&PathBuf::from(&current_path));
 
             unsafe {
                 if let Ok(handle) = FindFirstFileW(PCWSTR(wide_path.as_ptr()), &mut find_data) {
@@ -102,6 +106,8 @@ impl ImageViewerApp {
                                     size,
                                     modified,
                                     folder_cover: None,  // Lazy load
+                                    drive_info: None,
+                                    sync_status: onedrive::get_sync_status(attrs, is_onedrive),
                                 };
 
                                 // Add to batch
