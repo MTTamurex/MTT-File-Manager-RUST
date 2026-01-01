@@ -7,6 +7,7 @@ pub mod clipboard;
 pub mod context_menu;
 pub mod watcher;
 pub mod renaming;
+pub mod notification;
 
 // Re-export for convenience
 pub use state::*;
@@ -15,3 +16,4 @@ pub use clipboard::*;
 pub use context_menu::*;
 pub use watcher::*;
 pub use renaming::*;
+pub use notification::*;

@@ -931,5 +931,57 @@ Ver [ROADMAP_TECNICO.md](ROADMAP_TECNICO.md) para detalhes completos.
 
 ---
 
-*Última atualização: 2025-12-29*
+## 🚀 Melhorias de Performance (2026-01)
+
+### Fase 1: Quick Wins
+
+- **Smart Sorting**: Usa `natord` para ordenação natural ("File1, File2, File10" em vez de "File1, File10, File2")
+- **Helper `to_win32_path()`**: Cria strings double-null terminated para APIs Win32
+
+### Fase 2: Clone Optimization
+
+**Problema**: `render_grid_view()` e `render_list_view()` clonavam `Vec<FileEntry>` a cada frame (60x/segundo).
+
+**Solução**: Alterado `items: Vec<FileEntry>` para `items: Arc<Vec<FileEntry>>`.
+```rust
+// ANTES: O(n) cópia elemento por elemento
+let items = self.items.clone();  // 5000 arquivos × 60 FPS = 300k clones/s
+
+// DEPOIS: O(1) cópia de ponteiro
+let items = Arc::clone(&self.items);  // Apenas incrementa ref count
+```
+
+### Fase 3: Icon Prefetcher
+
+**Problema**: `IconLoader` carregava ícones síncronamente, bloqueando UI durante scroll.
+
+**Solução**: Worker thread assíncrono:
+```rust
+// Canais
+icon_req_sender: Sender<PathBuf>          // UI → Worker
+icon_res_receiver: Receiver<(PathBuf, Vec<u8>, u32, u32)>  // Worker → UI
+
+// Worker thread
+std::thread::spawn(move || {
+    while let Ok(path) = icon_req_rx.recv() {
+        let (pixels, w, h) = extract_file_icon_by_path(&path);
+        icon_res_tx.send((path, pixels, w, h));
+    }
+});
+```
+
+### Fase 4: Notification System
+
+**Novo módulo**: `src/application/notification.rs`
+
+**Componentes**:
+- `AppNotification`: Struct para mensagens com level, duração e timestamp
+- `NotificationLevel`: Info, Success, Warning, Error (com cores)
+- `NotificationManager`: Gerencia lista de notificações com auto-cleanup
+
+**Toast UI**: Overlay no canto inferior direito com fade animation.
+
+---
+
+*Última atualização: 2026-01-01*  
 *Responsável: Arquiteto de Software*
