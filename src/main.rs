@@ -1880,7 +1880,7 @@ impl eframe::App for ImageViewerApp {
                     ui.separator();
 
                     // Ordenação
-                    let sort_symbol = if self.sort_descending { "?" } else { "?" };
+                    let sort_symbol = if self.sort_descending { "↓" } else { "↑" };
                     if ui.button(sort_symbol).on_hover_text("Inverter Ordem").clicked() {
                         self.sort_descending = !self.sort_descending;
                         self.sort_items();
