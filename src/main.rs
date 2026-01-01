@@ -169,8 +169,8 @@ struct ImageViewerApp {
     item_icon_loader: IconLoader,
     
     // ASYNC ICON WORKER (evita I/O bloqueante no render loop)
-    icon_req_sender: Sender<PathBuf>,                                    // UI → Worker
-    icon_res_receiver: Receiver<(PathBuf, Vec<u8>, u32, u32)>,           // Worker → UI
+    icon_req_sender: Sender<PathBuf>,                                    // UI ? Worker
+    icon_res_receiver: Receiver<(PathBuf, Vec<u8>, u32, u32)>,           // Worker ? UI
     loading_icons: HashSet<PathBuf>,                                     // Tracking in-progress
     
     // NOTIFICATION SYSTEM (toast messages)
@@ -181,7 +181,7 @@ impl ImageViewerApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let ctx = cc.egui_ctx.clone();
         
-        // 1. Canais para comunicação Workers → UI
+        // 1. Canais para comunicação Workers ? UI
         let (file_entry_sender, file_entry_receiver) = mpsc::channel::<(usize, Vec<FileEntry>)>();
         
         // COVER WORKER: Worker Ãºnico para processar capas de pasta
@@ -331,7 +331,7 @@ impl ImageViewerApp {
         // Inicia monitoramento inicial
         app.watch_current_folder();
         
-        app.load_folder();
+        app.load_folder(false);
         app
     }
 }
@@ -418,7 +418,7 @@ impl ImageViewerApp {
             }
             
             // Requisita load real em background para garantir sincronia com disco
-            self.load_folder();
+            self.load_folder(false);
         }
     }
     
@@ -523,7 +523,7 @@ impl ImageViewerApp {
                     self.clipboard_op = None;
                 }
                 // Recarrega a pasta para ver o resultado
-                self.load_folder();
+                self.load_folder(false);
             }
         }
         
@@ -644,13 +644,17 @@ impl ImageViewerApp {
         let _ = self.cover_worker_sender.send(folder_path);
     }
     
-    fn load_folder(&mut self) {
+    fn load_folder(&mut self, force_refresh: bool) {
         self.generation += 1; // Incrementa a geração local
         self.current_generation.store(self.generation, AtomicOrdering::Relaxed); // Sincroniza com workers
         
         // 1. Limpeza de Estado (UI Thread)
+        if force_refresh {
+            self.cache_manager.texture_cache.clear();
+        }
+        
         self.items = Arc::new(Vec::new());  // Novo Arc vazio (antigo é dropped automaticamente)
-        self.all_items.clear();  // Limpa backup mestre tambÃ©m
+        self.all_items.clear();  // Limpa backup mestre também
         self.cache_manager.loading_set.clear(); // Limpa apenas requisições pendentes, mantém cache de texturas
         self.scanned_folders.clear();
         self.selected_item = None;
@@ -790,7 +794,7 @@ impl ImageViewerApp {
         // ATUALIZA O VIGIA
         self.watch_current_folder();
         
-        self.load_folder();
+        self.load_folder(false);
     }
     
     /// Volta no histórico (sem adicionar ao histórico)
@@ -806,7 +810,7 @@ impl ImageViewerApp {
                 self.path_input = self.current_path.clone();
                 self.is_computer_view = false;
                 self.watch_current_folder();  // Atualiza o watcher
-                self.load_folder();
+                self.load_folder(false);
             }
         }
     }
@@ -824,7 +828,7 @@ impl ImageViewerApp {
                 self.path_input = self.current_path.clone();
                 self.is_computer_view = false;
                 self.watch_current_folder();  // Atualiza o watcher
-                self.load_folder();
+                self.load_folder(false);
             }
         }
     }
@@ -961,7 +965,7 @@ impl ImageViewerApp {
                         let result = SHFileOperationW(&mut op);
                         if result == 0 {
                             // Sucesso: Recarrega a pasta para atualizar a UI
-                            self.load_folder();
+                            self.load_folder(false);
                         } else {
                             eprintln!("Erro ao renomear via Shell: {}", result);
                         }
@@ -1069,7 +1073,7 @@ impl ImageViewerApp {
     fn process_incoming_messages(&mut self, ctx: &egui::Context) {
         // 1. CHECK DE REFRESH MANUAL (F5)
         if ctx.input(|i| i.key_pressed(egui::Key::F5)) {
-            self.load_folder();
+            self.load_folder(true);
         }
 
 
@@ -1087,7 +1091,7 @@ impl ImageViewerApp {
             if elapsed > Duration::from_millis(500) {
                 // VALIDA SE O PATH ATUAL AINDA EXISTE (pode ter sido renomeado/deletado)
                 if Path::new(&self.current_path).exists() {
-                    self.load_folder();
+                    self.load_folder(false);
                 } else {
                     self.go_up_one_level();
                 }
@@ -1695,7 +1699,7 @@ impl eframe::App for ImageViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         
         // --- DETECÇÃO DE COMANDOS DE SISTEMA (Clipboard) ---
-        // O egui traduz Ctrl+C → Event::Copy, Ctrl+X → Event::Cut, Ctrl+V → Event::Paste
+        // O egui traduz Ctrl+C ? Event::Copy, Ctrl+X ? Event::Cut, Ctrl+V ? Event::Paste
         // Isso funciona porque são eventos do SO, não teclas interceptadas.
         
         if self.renaming_state.is_none() {
@@ -1798,7 +1802,7 @@ impl eframe::App for ImageViewerApp {
                 }
                 
                 if self.icon_button(ui, ICON_REFRESH, "Recarregar").clicked() && !is_renaming {
-                    self.load_folder();
+                    self.load_folder(true);
                 }
 
                 ui.separator();
@@ -1850,7 +1854,7 @@ impl eframe::App for ImageViewerApp {
                     ui.separator();
 
                     // Ordenação
-                    let sort_symbol = if self.sort_descending { "▾" } else { "▴" };
+                    let sort_symbol = if self.sort_descending { "?" } else { "?" };
                     if ui.button(sort_symbol).on_hover_text("Inverter Ordem").clicked() {
                         self.sort_descending = !self.sort_descending;
                         self.sort_items();
@@ -2009,7 +2013,7 @@ impl eframe::App for ImageViewerApp {
                                     if let Some(icon) = self.item_icon_loader.get_or_load_drive_icon(ui.ctx(), &file.path.to_string_lossy()) {
                                         ui.add(egui::Image::new(&icon).max_size(egui::vec2(icon_size, icon_size)));
                                     } else {
-                                        ui.label(egui::RichText::new("💽").size(icon_size * 0.8));
+                                        ui.label(egui::RichText::new("??").size(icon_size * 0.8));
                                     }
                                 } else if file.is_dir {
                                     // PASTA (Usa o mesmo visual da grade)
@@ -2028,7 +2032,7 @@ impl eframe::App for ImageViewerApp {
                                     if let Some(icon) = self.get_or_load_icon(ui.ctx(), &file.path) {
                                         ui.add(egui::Image::new(&icon).max_size(egui::vec2(icon_size * 0.6, icon_size * 0.6)));
                                     } else {
-                                        ui.label(egui::RichText::new("📄").size(icon_size * 0.6));
+                                        ui.label(egui::RichText::new("??").size(icon_size * 0.6));
                                     }
                                 }
                                 ui.add_space(20.0);
@@ -2344,3 +2348,4 @@ fn main() -> eframe::Result<()> {
         }),
     )
 }
+
