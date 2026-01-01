@@ -207,7 +207,25 @@ rfd::FileDialog::new()
     .pick_folder()
 ```
 
-### lru 0.12
+### rusqlite 0.32
+
+**Categoria**: SQLite bindings for Rust  
+**Modo**: Bundled (sem dependência de DLL externa)
+
+**Uso no Projeto**:
+- ✅ **Persistência de Thumbnails**: Armazenamento binário (BLOB) de thumbnails WebP.
+- ✅ **Concurrency**: PRAGMA journal_mode = WAL permite leituras e escritas seguras entre workers.
+- ✅ **Performance**: SQL query otimizada com indexação por hash.
+
+### image 0.25
+
+**Categoria**: Image processing library  
+**Codecs**: WebP (com features específicas habilitadas)
+
+**Uso no Projeto**:
+- ✅ **Decoding**: Conversão de WebP (cache) para RGBA (egui).
+- ✅ **Encoding**: Salvamento de thumbnails extraídos em formato WebP comprimido.
+- ✅ **Otimização**: Redimensionamento via `Lanczos3` para max 200px.
 
 **Categoria**: LRU Cache implementation  
 **Complexidade**: O(1) para get/put
@@ -303,10 +321,9 @@ target/
 
 | Biblioteca | Propósito | Status |
 |-----------|-----------|--------|
-| **`tracing`** | Logging estruturado | 🚧 Planejado (não implementado) |
-| **`anyhow`** | Error handling ergonômico | 🚧 Planejado (não implementado) |
-| **`serde_json`** | Config persistence | 🚧 Planejado (não implementado) |
-| **`image`** | Decode direto (fallback) | 🚧 Planejado (não implementado) |
+| **`rusqlite`** | Cache persistente em SQLite | ✅ Implementado |
+| **`image`** | Redimensionamento e WebP | ✅ Implementado |
+| **`tracing`** | Logging estruturado | 🚧 Planejado |
 
 ### ✅ Módulos Implementados (Sem Dependências Externas)
 

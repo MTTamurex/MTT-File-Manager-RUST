@@ -323,16 +323,17 @@ fn load_thumbnails_batch(&self, paths: Vec<PathBuf>) {
 
 ### 🟢 Desejável
 
-#### 7. Suporte a Thumbnail Caching em Disco ✅ **CONCLUÍDO**
+#### 7. Suporte a Thumbnail Caching em SQLite ✅ **CONCLUÍDO**
 
-**Problema**: Recarregava thumbnails a cada execução, causando lentidão em pastas grandes.
+**Problema**: Recarregava thumbnails a cada execução ou ocupava espaço excessivo com arquivos pequenos fragmentados.
 
-**Solução**: Implementado `ThumbnailDiskCache` persistente em `%LOCALAPPDATA%`.
-- Armazenamento em WebP para eficiência de espaço.
-- Invalidação automática via timestamp de modificação.
-- Estrutura de subdiretórios para performance de sistema de arquivos.
+**Solução**: Implementado `ThumbnailDiskCache` persistente via SQLite em `thumbnails.db`.
+- **Performance**: WAL mode habilitado para I/O concorrente entre workers.
+- **Espaço**: Redução de >80% via consolidação em banco de dados e WebP otimizado (200px max).
+- **Inteligência**: Invalidação automática por path hash + timestamp de modificação.
+- **Migração**: Sistema limpa automaticamente arquivos legados na inicialização.
 
-**Ganho**: Carregamento instantâneo em re-visitas.
+**Ganho**: Carregamento instantâneo e uso de disco otimizado.
 
 
 ---

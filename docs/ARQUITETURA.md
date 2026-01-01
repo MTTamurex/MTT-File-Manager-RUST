@@ -29,7 +29,8 @@
 | **Filesystem** | `walkdir 2.5` | Iteração otimizada de diretórios |
 | **Native APIs** | `windows 0.58` | Acesso direto às APIs Win32 |
 | **Dialog System** | `rfd 0.15` | Seletor nativo de pastas |
-| **Cache** | `lru 0.12` | LRU Cache para gerenciamento de memória |
+| **Cache** | `rusqlite 0.32` | Persistência ultra-eficiente em banco de dados único |
+| **Cache (RAM)** | `lru 0.12` | LRU Cache para gerenciamento de memória (VRAM) |
 
 ---
 
@@ -115,7 +116,7 @@ MTT File Manager/
 │   │   │   ├── shell_operations.rs
 │   │   │   └── system_info.rs
 │   │   ├── cache.rs       # Cache em memória (LRU)
-│   │   ├── disk_cache.rs  # NOVO: Cache persistente em disco (WebP)
+│   │   ├── disk_cache.rs  # NOVO: Cache SQLite persistente (WebP 200px)
 │   │   ├── security.rs    # Funções de segurança
 │   │   └── watcher.rs     # Integração com notify
 │   ├── ui/               # Componentes de interface
@@ -305,22 +306,24 @@ sequenceDiagram
 - Scroll: 60 FPS constante
 
 
-### 3️⃣ Carregamento de Thumbnails (Fluxo de 4 Estágios) - NOVO!
+### 3️⃣ Carregamento de Thumbnails (Fluxo de 4 Estágios)
 
 ```rust
 render_item_slot()
   ├── 1. Memória: Verifica CacheManager (LruCache)
   ├── 2. Solicitação: request_thumbnail_load() -> Worker Thread
-  ├── 3. Disco (Persistente): ThumbnailDiskCache::get(path, modified)
+  ├── 3. SQLite (Persistente): ThumbnailDiskCache::get(path, modified)
+  │   └── Query SQL: data FROM thumbnails WHERE id=? AND modified_at=?
   │   └── Se OK: decodifica WebP -> RGBA -> envia para UI
-  └── 4. Extração (Fallback): Se não no disco
+  └── 4. Extração (Fallback): Se não encontrado
       ├── IShellItemImageFactory::GetImage(256x256)
-      ├── HBITMAP → RGBA conversion
-      ├── ThumbnailDiskCache::put(path, modified, rgba) -> Salva em WebP
+      ├── Processamento: Resize(max 200px) + Strip metadata
+      ├── Compressão: WebP (Lossless/Lossy 60)
+      ├── SQLite: INSERT OR REPLACE INTO thumbnails
       └── Envia para UI -> ctx.load_texture() -> insere no LRU
 ```
 
-**Benefício:** Pastas grandes carregam instantaneamente após a primeira visita.
+**Benefício:** Consolidação em arquivo único (`thumbnails.db`), eliminando fragmentação e reduzindo espaço em disco em >80%.
 
 ### 4️⃣ Gerenciamento de Memória e Ciclo de Vida
  
