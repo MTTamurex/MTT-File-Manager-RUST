@@ -111,26 +111,29 @@ impl ThumbnailDiskCache {
             .ok_or("Failed to create image buffer")?;
         let dynamic_img = DynamicImage::ImageRgba8(img);
         
-        // Resize to max 200px (longest side) for disk efficiency
-        let resized = dynamic_img.resize(200, 200, image::imageops::FilterType::Lanczos3);
+        // Adaptive resize: only downscale if larger than 512px, never upscale
+        // This preserves video thumbnails at their native 256px size
+        let resized = if width > 512 || height > 512 {
+            dynamic_img.resize(512, 512, image::imageops::FilterType::Lanczos3)
+        } else {
+            dynamic_img // Keep original size
+        };
         
-        // STEP 2: Encode to WebP (Quality 60)
-        let mut webp_data = Vec::new();
-        {
-            let mut cursor = std::io::Cursor::new(&mut webp_data);
-            use image::codecs::webp::WebPEncoder;
-            
-            // Revertendo para lossless para garantir a compilação
-            // O redimensionamento para 200px já reduzirá drasticamente o espaço em disco
-            let encoder = WebPEncoder::new_lossless(&mut cursor);
-            resized.write_with_encoder(encoder)?;
-        }
+        // STEP 2: Encode to WebP Lossy (Quality 60 - optimized for HiDPI)
+        // Convert to RGB8 for webp crate (it doesn't support RGBA directly)
+        let rgb_img = resized.to_rgb8();
+        let (final_width, final_height) = (rgb_img.width(), rgb_img.height());
+        
+        // Use webp crate for lossy compression with quality control
+        let encoder = webp::Encoder::from_rgb(&rgb_img, final_width, final_height);
+        let webp_data = encoder.encode(60.0); // Quality 60 (0-100 scale)
+
 
         // STEP 3: Save to SQLite
         let db = self.db.lock().map_err(|_| "Database lock failed")?;
         db.execute(
             "INSERT OR REPLACE INTO thumbnails (id, data, modified_at, created_at) VALUES (?, ?, ?, ?)",
-            params![id, webp_data, mod_time, now],
+            params![id, webp_data.to_vec(), mod_time, now],
         )?;
 
         Ok(())
