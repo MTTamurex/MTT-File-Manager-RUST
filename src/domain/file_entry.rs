@@ -1,5 +1,13 @@
 use std::path::{Path, PathBuf};
 
+/// Informações de volume/drive para a view "Este Computador"
+#[derive(Clone, Debug)]
+pub struct DriveInfo {
+    pub file_system: String,
+    pub total_space: u64,
+    pub free_space: u64,
+}
+
 /// Entry de arquivo/pasta com metadados cacheados para ordenação
 #[derive(Clone, Debug)]
 pub struct FileEntry {
@@ -9,6 +17,7 @@ pub struct FileEntry {
     pub size: u64,         // Tamanho em bytes (0 para diretórios)
     pub modified: u64,     // Timestamp (segundos desde UNIX_EPOCH)
     pub folder_cover: Option<PathBuf>,  // Primeira imagem encontrada na pasta (para preview)
+    pub drive_info: Option<DriveInfo>,  // Metadados de drive (opcional)
 }
 
 impl FileEntry {
@@ -36,8 +45,9 @@ impl FileEntry {
         // OTIMIZAÇÃO: Lazy loading - sempre None inicialmente.
         // O scan será disparado por request_folder_scan() quando a pasta ficar visível.
         let folder_cover = None;
+        let drive_info = None;
         
-        Self { path, name, is_dir, size, modified, folder_cover }
+        Self { path, name, is_dir, size, modified, folder_cover, drive_info }
     }
     
     pub fn path(&self) -> &Path {

@@ -1,9 +1,6 @@
 ﻿use eframe::egui;
-use lru::LruCache;
-use std::cmp::Ordering;
 use std::collections::HashSet;
-// use std::env;
-use std::num::NonZeroUsize;
+use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
@@ -37,7 +34,7 @@ use mtt_file_manager::infrastructure::windows as windows_infra;
 
 // Import UI modules
 // use mtt_file_manager::ui::status_bar; // Not used directly - imported in render_status_bar call
-use mtt_file_manager::ui::context_menu::{render_context_menu, ContextMenuOperations};
+use mtt_file_manager::ui::context_menu::render_context_menu;
 use mtt_file_manager::ui::icon_loader::IconLoader;
 
 use windows::{
@@ -56,9 +53,10 @@ use std::os::windows::ffi::OsStringExt;
 // Import specific Windows API functions from modules
 use windows_infra::{
     get_all_drives,
+    get_volume_info,
+    extract_drive_icon,
     extract_file_icon,
     extract_file_icon_by_path,
-    extract_drive_icon,
     open_with_shell,
     format_size,
     format_date,
@@ -663,6 +661,7 @@ impl ImageViewerApp {
                                     size,
                                     modified,
                                     folder_cover: None,  // Lazy load
+                                    drive_info: None,
                                 };
 
                                 // Adiciona ao lote
@@ -717,6 +716,7 @@ impl ImageViewerApp {
         
         self.current_path = path.to_string();
         self.path_input = path.to_string();
+        self.is_computer_view = false;
         
         // Limpa o context_menu.target_path para garantir sincronia com a pasta atual
         self.context_menu.target_path = None;
@@ -731,21 +731,41 @@ impl ImageViewerApp {
     fn go_back(&mut self) {
         if self.can_go_back() {
             self.history_index -= 1;
-            self.current_path = self.navigation_history[self.history_index].clone();
-            self.path_input = self.current_path.clone();
-            self.watch_current_folder();  // Atualiza o watcher
-            self.load_folder();
+            let path = self.navigation_history[self.history_index].clone();
+            
+            if path == "Este Computador" {
+                self.navigate_to_computer();
+                // Override history addition since navigate_to_computer adds it
+                self.navigation_history.pop();
+                self.history_index = self.navigation_history.len() - 1;
+            } else {
+                self.current_path = path;
+                self.path_input = self.current_path.clone();
+                self.is_computer_view = false;
+                self.watch_current_folder();  // Atualiza o watcher
+                self.load_folder();
+            }
         }
     }
     
     /// AvanÃ§a no histÃ³rico
     fn go_forward(&mut self) {
-        if self.can_go_forward() {
+        if self.history_index + 1 < self.navigation_history.len() {
             self.history_index += 1;
-            self.current_path = self.navigation_history[self.history_index].clone();
-            self.path_input = self.current_path.clone();
-            self.watch_current_folder();  // Atualiza o watcher
-            self.load_folder();
+            let path = self.navigation_history[self.history_index].clone();
+            
+            if path == "Este Computador" {
+                self.navigate_to_computer();
+                // Override history addition
+                self.navigation_history.pop();
+                self.history_index = self.navigation_history.len() - 1;
+            } else {
+                self.current_path = path;
+                self.path_input = self.current_path.clone();
+                self.is_computer_view = false;
+                self.watch_current_folder();  // Atualiza o watcher
+                self.load_folder();
+            }
         }
     }
     
@@ -763,21 +783,44 @@ impl ImageViewerApp {
         self.is_computer_view = true;
         self.path_input = "Este Computador".to_string();
         
-        // Clear items for computer view
-        self.items = Arc::new(Vec::new());
-        self.all_items.clear();
+        // Populate items with drives
+        use mtt_file_manager::infrastructure::windows::get_volume_info;
+        use mtt_file_manager::domain::file_entry::DriveInfo;
+        
+        let mut computer_items = Vec::new();
+        for (path, label) in &self.disks {
+            let vol = get_volume_info(path);
+            let mut entry = FileEntry::from_path(PathBuf::from(path), true);
+            entry.name = label.clone();
+            entry.drive_info = Some(DriveInfo {
+                file_system: vol.file_system,
+                total_space: vol.total_space,
+                free_space: vol.free_space,
+            });
+            computer_items.push(entry);
+        }
+        
+        self.all_items = computer_items.clone();
+        self.items = Arc::new(computer_items);
         self.selected_item = None;
         self.selected_file = None;
         self.total_items = self.disks.len();
     }
     
-    /// Sobe um nÃ­vel (adiciona ao histÃ³rico)
+    /// Sobe um nível (adiciona ao histórico)
     fn go_up_one_level(&mut self) {
         if let Some(parent) = Path::new(&self.current_path).parent() {
             let parent_str = parent.to_string_lossy().to_string();
-            if !parent_str.is_empty() {
+            // No Windows, parent de "C:\" é vazio ou "." dependendo de como foi criado
+            if !parent_str.is_empty() && parent_str != "." && parent_str != self.current_path {
                 self.navigate_to(&parent_str);
+                return;
             }
+        }
+        
+        // Se já estamos no root de um drive ou local inválido, vai para Computador
+        if !self.is_computer_view {
+            self.navigate_to_computer();
         }
     }
     
@@ -1789,10 +1832,10 @@ impl eframe::App for ImageViewerApp {
         });
         
         // Windows 11 style sidebar (Restored)
-        egui::SidePanel::left("sidebar")
+        let sidebar_action = egui::SidePanel::left("sidebar")
             .min_width(200.0)
             .show(ctx, |ui| {
-                use mtt_file_manager::ui::sidebar::{render_sidebar, SidebarContext, SidebarOperations};
+                use mtt_file_manager::ui::sidebar::{render_sidebar, SidebarContext};
                 
                 // Clonar dados necessários para evitar problemas de borrow
                 let disks = self.disks.clone();
@@ -1807,26 +1850,20 @@ impl eframe::App for ImageViewerApp {
                     is_computer_view,
                     computer_icon: computer_icon.as_ref(),
                     is_renaming: self.renaming_state.is_some(),
+                    icon_loader: &mut self.item_icon_loader,
                 };
                 
-                // Implementar operações da sidebar
-                struct SidebarOps<'a> {
-                    app: &'a mut ImageViewerApp,
-                }
-                
-                impl<'a> SidebarOperations for SidebarOps<'a> {
-                    fn navigate_to(&mut self, path: &str) {
-                        self.app.navigate_to(path);
-                    }
-                    
-                    fn navigate_to_computer(&mut self) {
-                        self.app.navigate_to_computer();
-                    }
-                }
-                
-                let mut ops = SidebarOps { app: self };
-                render_sidebar(ui, &mut ctx, &mut ops);
-            });
+                render_sidebar(ui, &mut ctx)
+            }).inner;
+        
+        // Processar ação da sidebar (após ctx ser dropado e self liberado)
+        if let Some(action) = sidebar_action {
+            use mtt_file_manager::ui::sidebar::SidebarAction;
+            match action {
+                SidebarAction::NavigateTo(path) => self.navigate_to(&path),
+                SidebarAction::NavigateToComputer => self.navigate_to_computer(),
+            }
+        }
         
 
         
@@ -1892,36 +1929,68 @@ impl eframe::App for ImageViewerApp {
                             .num_columns(2)
                             .spacing([10.0, 4.0])
                             .show(ui, |ui| {
-                                ui.label("Nome:");
-                                ui.add(egui::Label::new(&file.name)
-                                    .wrap()
-                                    .truncate());
-                                ui.end_row();
-                                
-                                ui.label("Tamanho:");
-                                ui.label(format_size(file.size));
-                                ui.end_row();
-                                
-                                ui.label("Tipo:");
-                                if file.is_dir {
-                                    ui.label("Pasta");
+                                if let Some(drive) = &file.drive_info {
+                                    ui.label("Tipo:");
+                                    ui.label("Disco Local");
+                                    ui.end_row();
+
+                                    let used_space = drive.total_space - drive.free_space;
+                                    let usage_percent = if drive.total_space > 0 {
+                                        (used_space as f64 / drive.total_space as f64) * 100.0
+                                    } else { 0.0 };
+
+                                    ui.label("Espaço utilizado:");
+                                    ui.label(format!("{:.0}%", usage_percent));
+                                    ui.end_row();
+
+                                    ui.label("Espaço livre:");
+                                    ui.label(format_size(drive.free_space));
+                                    ui.end_row();
+
+                                    ui.label("Tamanho total:");
+                                    ui.label(format_size(drive.total_space));
+                                    ui.end_row();
+
+                                    ui.label("Sistema de arquivos:");
+                                    ui.label(&drive.file_system);
+                                    ui.end_row();
+                                    
+                                    // BitLocker (placeholder ou real se possível)
+                                    ui.label("Status do BitLocker:");
+                                    ui.label("Desligado");
+                                    ui.end_row();
                                 } else {
-                                    let ext = file.path.extension()
-                                        .and_then(|e| e.to_str())
-                                        .unwrap_or("Arquivo");
-                                    ui.label(ext.to_uppercase());
+                                    ui.label("Nome:");
+                                    ui.add(egui::Label::new(&file.name)
+                                        .wrap()
+                                        .truncate());
+                                    ui.end_row();
+                                    
+                                    ui.label("Tamanho:");
+                                    ui.label(format_size(file.size));
+                                    ui.end_row();
+                                    
+                                    ui.label("Tipo:");
+                                    if file.is_dir {
+                                        ui.label("Pasta");
+                                    } else {
+                                        let ext = file.path.extension()
+                                            .and_then(|e| e.to_str())
+                                            .unwrap_or("Arquivo");
+                                        ui.label(ext.to_uppercase());
+                                    }
+                                    ui.end_row();
+                                    
+                                    ui.label("Data:");
+                                    ui.label(format_date(file.modified));
+                                    ui.end_row();
                                 }
-                                ui.end_row();
-                                
-                                ui.label("Data:");
-                                ui.label(format_date(file.modified));
-                                ui.end_row();
                             });
                     } else {
                         ui.vertical_centered(|ui| {
                             ui.add_space(100.0);
                             ui.label("Selecione um arquivo");
-                            ui.label("para ver detalhes");
+                            ui.label("ou drive para ver detalhes");
                         });
                     }
                 });
