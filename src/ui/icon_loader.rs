@@ -121,7 +121,7 @@ impl IconLoader {
         }
         
         // Try to load real drive icon
-        if let Ok((rgba_data, width, height)) = windows::extract_drive_icon(drive_path, IconSize::Small) {
+        if let Ok((rgba_data, width, height)) = windows::extract_drive_icon(drive_path, IconSize::Jumbo) {
             let texture = ctx.load_texture(
                 format!("drive_{}", drive_path),
                 egui::ColorImage::from_rgba_unmultiplied(
