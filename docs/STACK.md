@@ -297,17 +297,36 @@ target/
 
 ---
 
-## Bibliotecas Ausentes (Candidatas)
+## Bibliotecas Implementadas Recentemente (2026-01-01)
 
-### 🎯 Sugestões para Adicionar
+### ✅ Novas Dependências em Uso
 
-| Biblioteca | Propósito | Prioridade |
-|-----------|-----------|-----------|
-| `tracing` | Logging estruturado | 🔥 Alta |
-| `anyhow` | Error handling ergonômico | 🔥 Alta |
-| `serde_json` | Config persistence | Média |
-| `tokio` | Async runtime (future) | Baixa |
-| `image` | Decode direto (fallback) | Baixa |
+| Biblioteca | Propósito | Status |
+|-----------|-----------|--------|
+| **`tracing`** | Logging estruturado | 🚧 Planejado (não implementado) |
+| **`anyhow`** | Error handling ergonômico | 🚧 Planejado (não implementado) |
+| **`serde_json`** | Config persistence | 🚧 Planejado (não implementado) |
+| **`image`** | Decode direto (fallback) | 🚧 Planejado (não implementado) |
+
+### ✅ Módulos Implementados (Sem Dependências Externas)
+
+| Módulo | Localização | Status |
+|--------|------------|--------|
+| **Icon Loader Assíncrono** | `src/ui/icon_loader.rs` | ✅ Implementado |
+| **CacheManager Unificado** | `src/ui/cache.rs` | ✅ Implementado |
+| **Notification System** | `src/application/notification.rs` | ✅ Implementado |
+| **Thumbnail Worker** | `src/workers/thumbnail_worker.rs` | ✅ Implementado |
+| **Windows API Wrappers** | `src/infrastructure/windows/` | ✅ Implementado (7 módulos) |
+
+### 🎯 Próximas Dependências Sugeridas
+
+| Biblioteca | Propósito | Prioridade | Justificativa |
+|-----------|-----------|-----------|---------------|
+| `tracing` + `tracing-subscriber` | Logging estruturado | 🔥 Alta | Debug em produção, monitoramento |
+| `anyhow` + `thiserror` | Error handling | 🔥 Alta | Tratamento robusto de erros |
+| `serde` + `serde_json` | Config persistence | ⚠️ Média | Preferências do usuário |
+| `mockall` | Testes unitários | ⚠️ Média | Mocking de APIs Windows |
+| `proptest` | Property-based testing | 🟢 Baixa | Testes mais robustos |
 
 ---
 

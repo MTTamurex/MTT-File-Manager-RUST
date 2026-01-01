@@ -4,11 +4,12 @@
 
 ---
 
-## 📋 Progresso Atual (30/12/2025)
+## 📋 Progresso Atual (Atualizado: 2026-01-01)
 
 ### ✅ Sprint 1: Infrastructure - CORREÇÃO DE IMPORTS
 
-**Status:** Concluído com sucesso  
+**Status:** ✅ **CONCLUÍDO COM SUCESSO**  
+**Data de Conclusão:** 30/12/2025  
 **Problema Resolvido:** Os módulos `windows/*.rs` estavam importando de `crate::infrastructure::windows_api` que não existia como módulo válido.
 
 **Mudanças Realizadas:**
@@ -46,6 +47,11 @@ src/infrastructure/
 ```
 
 **Arquivo Removido:** `windows_api.rs` (vazio, não mais necessário)
+
+**Lições Aprendidas:**
+- Import paths devem ser consistentes em toda a codebase
+- Módulos devem referenciar dependências através de `crate::` quando dentro do mesmo projeto
+- Validação de imports deve ser parte do processo de CI/CD
 
 ---
 
@@ -92,49 +98,62 @@ src/workers/
 
 ### 🚧 Sprint 3: UI Components - VIEWS EXTRACTED
 
-**Status:** Em andamento  
+**Status:** 🚧 **EM ANDAMENTO - PROGRESSO SIGNIFICATIVO**  
+**Data de Atualização:** 2026-01-01  
 **Objetivo:** Extrair componentes de UI de `main.rs` para módulos dedicados.
 
 **Mudanças Realizadas:**
 
 1. **Extração das Views:**
-   - `src/ui/views/grid_view.rs` - Extraído e integrado (funcional)
-   - `src/ui/views/list_view.rs` - Extraído e integrado (funcional)
-   - `src/ui/views/computer_view.rs` - Extraído (pronto para integração)
+   - `src/ui/views/grid_view.rs` - ✅ Extraído e integrado (funcional)
+   - `src/ui/views/list_view.rs` - ✅ Extraído e integrado (funcional)
+   - `src/ui/views/computer_view.rs` - ✅ Extraído (pronto para integração)
+   - `src/ui/sidebar.rs` - ✅ **EXTRAÍDO E INTEGRADO** (verificado)
 
 2. **Integração no `main.rs`:**
    - Substituído `render_grid_view` inline pela função do módulo
    - Substituído `render_list_view` inline pela função do módulo
+   - Substituído `render_sidebar` inline pela função do módulo
    - Resolvidos problemas de borrow com pattern de coleta de ações
 
-3. **Desafios Técnicos:**
-   - Problemas de borrow múltiplo resolvidos com pattern de "coleta de ações"
-   - Necessidade de clonar dados para evitar conflitos de lifetime
-   - Manutenção da funcionalidade existente durante a transição
+3. **Desafios Técnicos Resolvidos:**
+   - ✅ Problemas de borrow múltiplo resolvidos com pattern de "coleta de ações"
+   - ✅ Necessidade de clonar dados para evitar conflitos de lifetime
+   - ✅ Manutenção da funcionalidade existente durante a transição
+   - ✅ Pattern: Coletar ações em `Vec<Action>` e executar após renderização
 
 4. **Resultado:**
    - ✅ Código compila sem erros: `cargo build --release`
-   - ✅ Redução de ~400 linhas em `main.rs`
+   - ✅ Redução de ~440 linhas em `main.rs` (estimado)
    - ✅ Views funcionam identicamente ao estado anterior
    - ✅ Arquitetura mais modular e testável
+   - ✅ Sidebar com ícones nativos e navegação funcional
 
-**Próximos Passos (Sprint 3 - Continuação):**
-- [ ] Extrair sidebar inline para `ui/sidebar.rs`
-- [ ] Integrar `navigation.rs` existente
+**Próximos Passos (Sprint 3 - Restante):**
+- [ ] Integrar `computer_view.rs` (já extraído, precisa de integração)
 - [ ] Extrair context menu para módulo separado
-- [ ] Integrar CacheManager
-- [ ] Limpar arquivos .bak
+- [ ] Integrar CacheManager existente
+- [ ] Limpar arquivos .bak e backups antigos
+- [ ] Extrair preview panel (ainda no main.rs)
 
 **Estrutura Atualizada das Views:**
 ```
-src/ui/views/
-├── mod.rs ✅ (atualizado)
-├── grid_view.rs ✅ (extraído e integrado)
-├── list_view.rs ✅ (extraído e integrado)
-├── computer_view.rs ✅ (extraído)
-├── common.rs ✅ (existente)
-└── preview.rs ⚠️ (ainda no main.rs)
+src/ui/
+├── sidebar.rs ✅ (extraído e integrado)
+├── views/
+│   ├── mod.rs ✅ (atualizado)
+│   ├── grid_view.rs ✅ (extraído e integrado)
+│   ├── list_view.rs ✅ (extraído e integrado)
+│   ├── computer_view.rs ✅ (extraído)
+│   ├── common.rs ✅ (existente)
+│   └── preview.rs ⚠️ (ainda no main.rs)
 ```
+
+**Lições Aprendidas na Sprint 3:**
+- Pattern de "coleta de ações" resolve problemas de borrow em UI complexa
+- Clonar dados necessários antes de passar para funções de renderização
+- Manter compatibilidade com API existente durante transição
+- Testar cada componente extraído isoladamente antes de integração completa
 
 ---
 
@@ -549,6 +568,7 @@ git checkout Refatoracao-Working
 
 ---
 
-**Última atualização:** 2025-12-30  
-**Versão:** 1.0  
-**Autor:** Equipe MTT File Manager
+**Última atualização:** 2026-01-01  
+**Versão:** 2.0  
+**Autor:** Equipe MTT File Manager  
+**Status:** Sprint 3 em andamento, progresso significativo

@@ -1,6 +1,29 @@
 # 🗺️ Roadmap Técnico - MTT File Manager
 
-## ✅ Features Implementadas (2025-12-28)
+## ✅ Features Implementadas (Atualizado: 2026-01-01)
+
+### Progresso da Refatoração Modular
+- **Sprint 1: Infrastructure** ✅ **CONCLUÍDO**
+  - Módulos Windows movidos para `src/infrastructure/windows/`
+  - Imports corrigidos em todos os módulos
+  - Código compila sem erros
+
+- **Sprint 2: Workers** ✅ **CONCLUÍDO**
+  - `thumbnail_worker.rs` criado e integrado
+  - Redução de ~40 linhas em `main.rs`
+  - Workers funcionando corretamente
+
+- **Sprint 3: UI Components** 🚧 **EM ANDAMENTO**
+  - `grid_view.rs` e `list_view.rs` extraídos e integrados
+  - `sidebar.rs` extraído e integrado
+  - `computer_view.rs` extraído (pronto para integração)
+  - Redução de ~400 linhas em `main.rs`
+
+### Novas Features Implementadas
+- **Sistema de Notificações**: Toast no canto inferior direito com fade animation
+- **Icon Loader Assíncrono**: Carregamento de ícones em worker thread separada
+- **CacheManager Unificado**: Gerenciamento centralizado de caches
+- **Smart Sorting com `natord`**: Ordenação natural ("File1, File2, File10")
 
 ### Ícones Nativos do Windows
 - **SHGetFileInfoW** para ícones de arquivos por extensão (SHGFI_USEFILEATTRIBUTES)
@@ -47,43 +70,30 @@
 
 ---
 
-## Débitos Técnicos Identificados
+## Débitos Técnicos Identificados (Atualizado: 2026-01-01)
 
 ### 🔴 Crítico
 
-#### 1. Monolito de 675 Linhas
+#### 1. Monolito de 3134 Linhas (Progresso Significativo)
 
-**Problema**: Todo código em `main.rs`, dificultando manutenção e testes.
+**Status**: 🚧 **EM REFATORAÇÃO ATIVA**  
+**Progresso**: ~15 módulos extraídos, ~440 linhas movidas de `main.rs`
 
-**Impacto**:
-- Difícil de testar unitariamente
-- Conflitos em merges
-- Onboarding de novos devs lento
+**Impacto Atual**:
+- ✅ Módulos Windows extraídos para `infrastructure/windows/`
+- ✅ Workers extraídos para módulos dedicados
+- ✅ Views (grid, list, sidebar) extraídas
+- ⚠️ `main.rs` ainda grande (~3134 linhas)
+- ⚠️ Alguns componentes ainda inline
 
-**Solução Proposta**:
-```
-src/
-├── main.rs (50 linhas)
-├── lib.rs
-├── ui/
-│   ├── mod.rs
-│   ├── app.rs (ImageViewerApp)
-│   └── components/
-│       ├── sidebar.rs
-│       ├── grid.rs
-│       └── item_slot.rs
-├── domain/
-│   ├── mod.rs
-│   ├── filesystem.rs
-│   └── thumbnail.rs
-└── infrastructure/
-    ├── mod.rs
-    ├── windows_api.rs
-    └── cache.rs
-```
+**Próximos Passos**:
+- Completar Sprint 3 (extrair context menu, integrar computer_view)
+- Iniciar Sprint 4 (extrair top bar, status bar)
+- Meta: `main.rs` < 2000 linhas
 
-**Tempo Estimado**: 8 horas  
-**Prioridade**: 🔥 Alta
+**Prioridade**: 🔥 Alta (em progresso)
+
+---
 
 ---
 

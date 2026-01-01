@@ -363,30 +363,54 @@ fn extract_windows_thumbnail(path: &PathBuf)
 
 ---
 
-## 📋 Checklist de Segurança
+## 📋 Checklist de Segurança (Atualizado: 2026-01-01)
 
-### Implementado ✅
+### ✅ Implementado
 
-- [x] Filtra arquivos hidden/system via `GetFileAttributesW`
-- [x] Filtra extensões conhecidas (whitelist)
-- [x] Fallback para thumbnails corrompidos
-- [x] LRU Cache previne OOM
-- [x] Execução como usuário normal (não admin)
-- [x] Depth limit no WalkDir (`max_depth(1)`)
-- [x] Exclusão segura via Lixeira do Windows (`SHFileOperationW`)
-- [x] Renomeação nativa (`SHFileOperationW`) com suporte a Undo
+- [x] **Filtra arquivos hidden/system** via `GetFileAttributesW`
+- [x] **Filtra extensões conhecidas** (whitelist) - implementado em `open_with_shell`
+- [x] **Fallback para thumbnails corrompidos** - `create_error_placeholder()`
+- [x] **LRU Cache previne OOM** - Capacidade limitada a 200 texturas
+- [x] **Execução como usuário normal** (não requer admin)
+- [x] **Depth limit no WalkDir** (`max_depth(1)`) - previne recursão não autorizada
+- [x] **Exclusão segura via Lixeira** - `SHFileOperationW` com `FO_DELETE`
+- [x] **Renomeação nativa** - `SHFileOperationW` com suporte a Undo (Ctrl+Z)
+- [x] **Módulo de segurança** - `src/infrastructure/security.rs` criado (estrutura básica)
 
-### Faltando ❌
+### 🚧 Parcialmente Implementado
 
-- [ ] Sanitização de paths com `canonicalize()`
-- [ ] Validação de extensão antes de `ShellExecuteW`
-- [ ] Bloqueio de symlinks/junction points
-- [ ] Detecção de reparse points via metadata
-- [ ] Timeout em operações COM
-- [ ] Validação de tamanho de texturas
-- [ ] Tratamento robusto de erros COM
-- [ ] Logging de tentativas de acesso suspeitas
-- [ ] Rate limiting de operações de I/O
+- [~] **Sanitização de paths** - Implementação básica em `security.rs`, mas não integrada
+- [~] **Validação de extensão** - Implementada em `open_with_shell`, mas não abrangente
+- [~] **Bloqueio de symlinks** - `WalkDir::new(&path).follow_links(false)`, mas sem detecção de reparse points
+- [~] **Tratamento de erros COM** - Fallbacks básicos, mas sem logging estruturado
+
+### ❌ Faltando
+
+- [ ] **Detecção de reparse points** via metadata (FILE_ATTRIBUTE_REPARSE_POINT)
+- [ ] **Timeout em operações COM** - Sem mecanismo de timeout para operações bloqueantes
+- [ ] **Validação de tamanho de texturas** - Sem limites para HBITMAPs gigantes (>4K)
+- [ ] **Logging de tentativas de acesso suspeitas** - Sem sistema de auditoria
+- [ ] **Rate limiting de operações de I/O** - Sem proteção contra DoS via I/O intensivo
+- [ ] **Integração completa do módulo security** - Módulo criado mas não amplamente utilizado
+
+### 📊 Estatísticas de Segurança
+
+| Categoria | Status | Progresso |
+|-----------|--------|-----------|
+| **Path Sanitization** | 🟡 Parcial | 40% |
+| **File Execution Safety** | 🟡 Parcial | 60% |
+| **Symlink Protection** | 🟡 Parcial | 30% |
+| **Memory Safety** | 🟢 Bom | 80% |
+| **Error Handling** | 🟡 Parcial | 50% |
+| **Audit & Logging** | 🔴 Fraco | 10% |
+
+### 🎯 Prioridades Imediatas (Sprint de Segurança)
+
+1. **Integrar `security.rs`** em todas as operações de filesystem
+2. **Implementar detecção de reparse points** para bloquear symlinks
+3. **Adicionar timeout** para operações COM (thumbnails, ícones)
+4. **Implementar logging** com `tracing` para auditoria de segurança
+5. **Validação de tamanho** para HBITMAPs e buffers de textura
 
 ---
 

@@ -85,25 +85,71 @@ graph TB
 
 ---
 
-## Estrutura de Pastas
+## Estrutura de Pastas (Atualizada - 2026-01-01)
 
 ```
 MTT File Manager/
 ├── src/
-│   └── main.rs              # Aplicação principal (~2700 linhas)
-│                            # ⚠️ Candidato a refatoração em módulos
+│   ├── main.rs              # Aplicação principal (~3134 linhas)
+│   │                        # ⚠️ Em processo de refatoração modular
+│   ├── lib.rs              # Entry point da biblioteca
+│   ├── application/        # Lógica de aplicação
+│   │   ├── state.rs       # Gerenciamento de estado
+│   │   ├── clipboard.rs   # Operações de clipboard
+│   │   ├── context_menu.rs # Menu de contexto
+│   │   ├── navigation.rs  # Navegação e histórico
+│   │   ├── notification.rs # Sistema de notificações
+│   │   ├── renaming.rs    # Lógica de renomeação
+│   │   └── watcher.rs     # Monitoramento de filesystem
+│   ├── domain/            # Lógica de negócio
+│   │   ├── file_entry.rs  # Entidades de arquivo
+│   │   ├── thumbnail.rs   # Lógica de thumbnails
+│   │   └── errors.rs      # Erros do domínio
+│   ├── infrastructure/    # Dependências externas
+│   │   ├── windows/       # Wrappers Win32
+│   │   │   ├── bitmap_conversion.rs
+│   │   │   ├── drives.rs
+│   │   │   ├── file_system.rs
+│   │   │   ├── formatting.rs
+│   │   │   ├── icons.rs
+│   │   │   ├── shell_operations.rs
+│   │   │   └── system_info.rs
+│   │   ├── cache.rs       # Gerenciamento de cache
+│   │   ├── security.rs    # Funções de segurança
+│   │   └── watcher.rs     # Integração com notify
+│   ├── ui/               # Componentes de interface
+│   │   ├── app.rs        # App principal (stub)
+│   │   ├── cache.rs      # CacheManager unificado
+│   │   ├── context_menu.rs # Renderização do menu
+│   │   ├── sidebar.rs    # Sidebar com drives
+│   │   ├── status_bar.rs # Barra de status
+│   │   ├── icon_loader.rs # Carregamento assíncrono de ícones
+│   │   ├── components/   # Componentes reutilizáveis
+│   │   │   └── item_slot.rs # Renderização de item
+│   │   └── views/        # Views principais
+│   │       ├── grid_view.rs  # View em grade
+│   │       ├── list_view.rs  # View em lista
+│   │       ├── computer_view.rs # View "Este Computador"
+│   │       └── common.rs     # Utilitários comuns
+│   └── workers/          # Workers assíncronos
+│       ├── thumbnail_worker.rs # Worker de thumbnails
+│       ├── thumbnail_loader.rs # Loader de thumbnails
+│       ├── folder_scanner.rs  # Scanner de pastas
+│       └── batch_thumbnail_loader.rs # Loader em batch
 ├── target/                  # Build artifacts (ignorado no git)
 │   ├── debug/              # Debug builds
 │   └── release/            # Release optimized builds
-├── docs/                    # 📚 Documentação técnica (ESTA PASTA!)
+├── docs/                    # 📚 Documentação técnica
 │   ├── ARQUITETURA.md      # Este arquivo
 │   ├── STACK.md            # Detalhamento de tecnologias
 │   ├── SEGURANCA_WINDOWS.md
-│   └── ROADMAP_TECNICO.md
+│   ├── ROADMAP_TECNICO.md
+│   ├── PLANO_REFATORACAO_INCREMENTAL.md
+│   └── PADROES_REUTILIZAVEIS.md
 ├── Cargo.toml              # Manifesto Rust + dependências
 ├── .gitignore              # Arquivos a serem ignorados
 ├── README.md               # Documentação de usuário
-└── .cursorrules            # Governança do projeto (a ser criado)
+└── .cursorrules            # Governança do projeto
 ```
 
 ---
