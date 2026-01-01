@@ -1914,20 +1914,43 @@ impl eframe::App for ImageViewerApp {
                                     .shrink_to_fit());
                             });
                             ui.separator();
-                        } else if !file.is_dir {
-                            // Arquivo sem thumbnail -> mostra icone do Windows
-                            // Aqui o self.get_or_load_icon pode ser chamado porque 'file' eh um clone
-                            if let Some(icon) = self.get_or_load_icon(ui.ctx(), &file.path) {
-                                let icon_display_size = 64.0;
-                                ui.vertical_centered(|ui| {
-                                    ui.add_space(20.0);
-                                    ui.add(egui::Image::new(&icon)
-                                        .max_size(egui::vec2(icon_display_size, icon_display_size))
-                                        .maintain_aspect_ratio(true));
-                                    ui.add_space(20.0);
-                                });
-                                ui.separator();
-                            }
+                        } else {
+                            // Pasta ou Drive ou Arquivo sem Thumbnail
+                            let max_w: f32 = ui.available_width() - 40.0;
+                            let icon_size: f32 = (120.0f32).min(max_w);
+                            
+                            ui.vertical_centered(|ui| {
+                                ui.add_space(20.0);
+                                if let Some(_) = &file.drive_info {
+                                    // DRIVE
+                                    if let Some(icon) = self.item_icon_loader.get_or_load_drive_icon(ui.ctx(), &file.path.to_string_lossy()) {
+                                        ui.add(egui::Image::new(&icon).max_size(egui::vec2(icon_size, icon_size)));
+                                    } else {
+                                        ui.label(egui::RichText::new("💽").size(icon_size * 0.8));
+                                    }
+                                } else if file.is_dir {
+                                    // PASTA (Usa o mesmo visual da grade)
+                                    let folder_rect = ui.allocate_exact_size(egui::vec2(icon_size, icon_size * 0.85), egui::Sense::hover()).0;
+                                    
+                                    // Trigger scan se necessário
+                                    if file.folder_cover.is_none() && !self.scanned_folders.contains(&file.path) {
+                                        self.scanned_folders.insert(file.path.clone());
+                                        self.request_folder_scan(file.path.clone());
+                                    }
+
+                                    let preview_tex = file.folder_cover.as_ref().and_then(|p| self.cache_manager.texture_cache.get(p));
+                                    mtt_file_manager::draw_custom_folder(ui.painter(), folder_rect, preview_tex);
+                                } else {
+                                    // ARQUIVO SEM THUMBNAIL
+                                    if let Some(icon) = self.get_or_load_icon(ui.ctx(), &file.path) {
+                                        ui.add(egui::Image::new(&icon).max_size(egui::vec2(icon_size * 0.6, icon_size * 0.6)));
+                                    } else {
+                                        ui.label(egui::RichText::new("📄").size(icon_size * 0.6));
+                                    }
+                                }
+                                ui.add_space(20.0);
+                            });
+                            ui.separator();
                         }
                         
                         // Tabela de detalhes

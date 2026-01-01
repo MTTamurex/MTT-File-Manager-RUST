@@ -177,81 +177,11 @@ fn render_directory_slot<O: ItemSlotOperations>(
     let start_pos = ui.cursor().min + egui::vec2(x_offset.max(0.0), 0.0);
     let folder_rect = egui::Rect::from_min_size(start_pos, egui::vec2(folder_w, folder_h));
 
-    // CORES
-    let color_back = egui::Color32::from_rgb(200, 160, 50);
-    let color_front = egui::Color32::from_rgb(255, 210, 70);
-
-    // Dimensões
-    let tab_h = folder_h * 0.15;
-    let tab_w = folder_w * 0.40;
-    let front_h = folder_h * 0.50;
-
-    // === DESENHO 1: BASE SÓLIDA (evita qualquer gap) ===
-    // Desenha TODO o corpo como uma única forma sólida
-    ui.painter().rect_filled(
-        egui::Rect::from_min_size(folder_rect.min, egui::vec2(tab_w, tab_h)),
-        egui::CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 },
-        color_back
-    );
-    ui.painter().rect_filled(
-        egui::Rect::from_min_max(
-            egui::pos2(folder_rect.min.x, folder_rect.min.y + tab_h),
-            folder_rect.max
-        ),
-        egui::CornerRadius { nw: 0, ne: 3, sw: 4, se: 4 },
-        color_back
-    );
-
-    // === DESENHO 2: PREVIEW (com clipping para não escapar) ===
-    if let Some(cover_path) = &item.folder_cover {
-        if !ctx.texture_cache.contains(cover_path) && !ctx.loading_set.contains(cover_path) {
-            if ctx.loading_set.len() < 50 { // MAX_CONCURRENT_LOADS (increased for performance)
-                ctx.loading_set.insert(cover_path.clone());
-                ops.request_thumbnail_load(cover_path.clone());
-            }
-        }
-    }
-
-    if let Some(tex) = item.folder_cover.as_ref().and_then(|p| -> Option<&egui::TextureHandle> { ctx.texture_cache.get(p) }) {
-        // Área onde o preview pode aparecer (com margens)
-        let margin_x = 6.0;
-        let margin_top = 4.0;
-        let preview_area = egui::Rect::from_min_max(
-            egui::pos2(folder_rect.min.x + margin_x, folder_rect.min.y + tab_h + margin_top),
-            egui::pos2(folder_rect.max.x - margin_x, folder_rect.max.y - front_h)
-        );
-
-        let size = tex.size();
-        let tex_size = egui::vec2(size[0] as f32, size[1] as f32);
-        let aspect_img = tex_size.x / tex_size.y;
-        let aspect_view = preview_area.width() / preview_area.height();
-
-        let uv_rect = if aspect_img > aspect_view {
-            let scale = aspect_view / aspect_img;
-            let offset = (1.0 - scale) / 2.0;
-            egui::Rect::from_min_max(egui::pos2(offset, 0.0), egui::pos2(1.0 - offset, 1.0))
-        } else {
-            let scale = aspect_img / aspect_view;
-            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, scale))
-        };
-
-        // Usa push_clip_rect para garantir que a imagem não escape
-        ui.painter().with_clip_rect(preview_area).image(tex.id(), preview_area, uv_rect, egui::Color32::WHITE);
-    }
-
-    // === DESENHO 3: BOLSO FRONTAL (sobrepõe preview) ===
-    let front_rect = egui::Rect::from_min_max(
-        egui::pos2(folder_rect.min.x, folder_rect.max.y - front_h),
-        folder_rect.max
-    );
-    ui.painter().rect_filled(front_rect, egui::CornerRadius { nw: 0, ne: 0, sw: 4, se: 4 }, color_front);
-
-    // Borda sutil
-    ui.painter().rect_stroke(
-        front_rect,
-        egui::CornerRadius { nw: 0, ne: 0, sw: 4, se: 4 },
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 150, 30)),
-        egui::StrokeKind::Inside
+    // === DESENHO DA PASTA ===
+    crate::ui::components::item_slot::draw_custom_folder(
+        ui.painter(),
+        folder_rect,
+        item.folder_cover.as_ref().and_then(|p| ctx.texture_cache.get(p))
     );
 
     // Aloca espaço da pasta
@@ -420,4 +350,77 @@ fn render_file_slot<O: ItemSlotOperations>(
             ).truncate());
         });
     }
+}
+/// Função utilitária para desenhar o ícone de pasta customizado (pode ser usada fora do ItemSlot)
+pub fn draw_custom_folder(
+    painter: &egui::Painter,
+    folder_rect: egui::Rect,
+    preview_texture: Option<&egui::TextureHandle>,
+) {
+    // CORES
+    let color_back = egui::Color32::from_rgb(200, 160, 50);
+    let color_front = egui::Color32::from_rgb(255, 210, 70);
+
+    // Dimensões
+    let folder_w = folder_rect.width();
+    let folder_h = folder_rect.height();
+    let tab_h = folder_h * 0.15;
+    let tab_w = folder_w * 0.40;
+    let front_h = folder_h * 0.50;
+
+    // === DESENHO 1: BASE SÓLIDA ===
+    painter.rect_filled(
+        egui::Rect::from_min_size(folder_rect.min, egui::vec2(tab_w, tab_h)),
+        egui::CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 },
+        color_back
+    );
+    painter.rect_filled(
+        egui::Rect::from_min_max(
+            egui::pos2(folder_rect.min.x, folder_rect.min.y + tab_h),
+            folder_rect.max
+        ),
+        egui::CornerRadius { nw: 0, ne: 3, sw: 4, se: 4 },
+        color_back
+    );
+
+    // === DESENHO 2: PREVIEW ===
+    if let Some(tex) = preview_texture {
+        let margin_x = folder_w * 0.08;
+        let margin_top = folder_h * 0.05;
+        let preview_area = egui::Rect::from_min_max(
+            egui::pos2(folder_rect.min.x + margin_x, folder_rect.min.y + tab_h + margin_top),
+            egui::pos2(folder_rect.max.x - margin_x, folder_rect.max.y - front_h)
+        );
+
+        let size = tex.size();
+        let tex_size = egui::vec2(size[0] as f32, size[1] as f32);
+        let aspect_img = tex_size.x / tex_size.y;
+        let aspect_view = preview_area.width() / preview_area.height();
+
+        let uv_rect = if aspect_img > aspect_view {
+            let scale = aspect_view / aspect_img;
+            let offset = (1.0 - scale) / 2.0;
+            egui::Rect::from_min_max(egui::pos2(offset, 0.0), egui::pos2(1.0 - offset, 1.0))
+        } else {
+            let scale = aspect_img / aspect_view;
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, scale))
+        };
+
+        painter.with_clip_rect(preview_area).image(tex.id(), preview_area, uv_rect, egui::Color32::WHITE);
+    }
+
+    // === DESENHO 3: BOLSO FRONTAL ===
+    let front_rect = egui::Rect::from_min_max(
+        egui::pos2(folder_rect.min.x, folder_rect.max.y - front_h),
+        folder_rect.max
+    );
+    painter.rect_filled(front_rect, egui::CornerRadius { nw: 0, ne: 0, sw: 4, se: 4 }, color_front);
+
+    // Borda sutil
+    painter.rect_stroke(
+        front_rect,
+        egui::CornerRadius { nw: 0, ne: 0, sw: 4, se: 4 },
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 150, 30)),
+        egui::StrokeKind::Inside
+    );
 }
