@@ -651,7 +651,7 @@ impl ImageViewerApp {
         // 1. Limpeza de Estado (UI Thread)
         self.items = Arc::new(Vec::new());  // Novo Arc vazio (antigo é dropped automaticamente)
         self.all_items.clear();  // Limpa backup mestre tambÃ©m
-        self.cache_manager.clear_all();
+        self.cache_manager.loading_set.clear(); // Limpa apenas requisições pendentes, mantém cache de texturas
         self.scanned_folders.clear();
         self.selected_item = None;
         self.is_loading_folder = true;
@@ -662,6 +662,7 @@ impl ImageViewerApp {
         let current_path = self.current_path.clone();
         let file_entry_sender = self.file_entry_sender.clone();
         let ctx = self.ui_ctx.clone();
+        let disk_cache = self.disk_cache.clone();
         
         // STREAMING BATCH LOADING: Envia lotes de 250 itens progressivamente
         std::thread::spawn(move || {
@@ -717,13 +718,15 @@ impl ImageViewerApp {
                                     0
                                 };
 
+                                let folder_cover = if is_dir { disk_cache.get_folder_cover(&full_path) } else { None };
+
                                 let entry = FileEntry {
                                     path: full_path,
                                     name: filename,
                                     is_dir,
                                     size,
                                     modified,
-                                    folder_cover: None,  // Lazy load
+                                    folder_cover,
                                     drive_info: None,
                                 };
 
@@ -1121,10 +1124,11 @@ impl ImageViewerApp {
                 // Atualiza em all_items (fonte mutável)
                 if let Some(item) = self.all_items.iter_mut().find(|i| i.path == folder_path) {
                     item.folder_cover = Some(cover.clone());
+                    self.disk_cache.set_folder_cover(&folder_path, &cover);
                     folder_updates = true;
                     
-                    // Requisita thumbnail se necessário
-                    if !self.cache_manager.has_thumbnail(&cover) && !self.cache_manager.is_loading(&cover) {
+                    // Requisita thumbnail se necessário (Marcando como em carregamento para evitar loop)
+                    if !self.cache_manager.has_thumbnail(&cover) && self.cache_manager.start_loading(cover.clone()) {
                         self.request_thumbnail_load(cover);
                     }
                 }
