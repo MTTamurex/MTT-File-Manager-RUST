@@ -1,10 +1,4 @@
-//! Sidebar rendering for drives and computer view
-//! Follows .cursorrules: single responsibility, < 300 lines
-
 use eframe::egui::{self, Color32, Pos2, Rect, Sense};
-
-use crate::infrastructure::windows::extract_drive_icon;
-use crate::domain::file_entry::IconSize;
 
 /// Context for sidebar rendering
 pub struct SidebarContext<'a> {
@@ -13,179 +7,137 @@ pub struct SidebarContext<'a> {
     pub is_computer_view: bool,
     pub computer_icon: Option<&'a egui::TextureHandle>,
     pub is_renaming: bool,  // Bloqueia navegação durante renomeação
+    pub icon_loader: &'a mut crate::ui::icon_loader::IconLoader,
 }
 
-/// Operations that can be performed from sidebar
-pub trait SidebarOperations {
-    fn navigate_to(&mut self, path: &str);
-    fn navigate_to_computer(&mut self);
+/// Ações que podem ser disparadas pela sidebar
+pub enum SidebarAction {
+    NavigateTo(String),
+    NavigateToComputer,
 }
 
 /// Renders the sidebar with drives and computer view
 pub fn render_sidebar(
     ui: &mut egui::Ui,
     ctx: &mut SidebarContext,
-    ops: &mut dyn SidebarOperations,
-) {
+) -> Option<SidebarAction> {
+    let mut action = None;
     ui.add_space(10.0);
     
-    // Header "Este Computador" com ícone nativo - CLICÁVEL
+    // Header "Este Computador" com ícone nativo
     let (header_rect, header_response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), 30.0),
+        egui::vec2(ui.available_width(), 32.0),
         egui::Sense::click()
     );
     
-    if ui.is_rect_visible(header_rect) {
-        // Background de hover/seleção
+    // Alinha header_rect com as bordas da sidebar
+    let mut header_rect_full = header_rect;
+    header_rect_full.min.x = ui.clip_rect().min.x;
+    header_rect_full.max.x = ui.clip_rect().max.x;
+
+    if ui.is_rect_visible(header_rect_full) {
         let is_selected = ctx.is_computer_view;
+        
+        // Background
         if is_selected {
-            ui.painter().rect_filled(
-                header_rect,
-                0.0,
-                Color32::from_rgb(200, 220, 240)
-            );
+            ui.painter().rect_filled(header_rect_full, 0.0, Color32::from_rgb(200, 220, 240));
         } else if header_response.hovered() {
-            ui.painter().rect_filled(
-                header_rect,
-                0.0,
-                Color32::from_rgba_unmultiplied(200, 220, 240, 50)
-            );
+            ui.painter().rect_filled(header_rect_full, 0.0, Color32::from_rgba_unmultiplied(200, 220, 240, 50));
         }
         
-        // Desenha ícone e texto manualmente
-        let mut cursor_x = header_rect.min.x + 5.0;
+        let mut cursor_x = header_rect_full.min.x + 8.0;
         
         // Ícone
         if let Some(icon) = ctx.computer_icon {
-            let icon_rect = Rect::from_min_size(
-                Pos2::new(cursor_x, header_rect.center().y - 8.0),
-                egui::vec2(16.0, 16.0)
+            let icon_rect = Rect::from_center_size(
+                Pos2::new(cursor_x + 8.0, header_rect_full.center().y),
+                egui::vec2(18.0, 18.0)
             );
-            ui.painter().image(
-                icon.id(), 
-                icon_rect, 
-                Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)), 
-                Color32::WHITE
-            );
-            cursor_x += 20.0;
+            ui.painter().image(icon.id(), icon_rect, Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)), Color32::WHITE);
+            cursor_x += 24.0;
         }
         
         // Texto
         ui.painter().text(
-            Pos2::new(cursor_x, header_rect.center().y),
+            Pos2::new(cursor_x, header_rect_full.center().y),
             egui::Align2::LEFT_CENTER,
             "Este Computador",
-            egui::FontId::proportional(16.0),
-            if is_selected {
-                Color32::from_rgb(0, 50, 100)
-            } else {
-                ui.visuals().text_color()
-            }
+            egui::FontId::proportional(14.0),
+            if is_selected { Color32::from_rgb(0, 50, 100) } else { ui.visuals().text_color() }
         );
     }
     
-    // CLICK ACTION: Navega para "Este Computador" (bloqueado durante renomeação)
     if header_response.clicked() && !ctx.is_renaming {
-        ops.navigate_to_computer();
+        action = Some(SidebarAction::NavigateToComputer);
     }
     
+    ui.add_space(4.0);
     ui.separator();
+    ui.add_space(8.0);
     
-    ui.add_space(5.0);
-    
+    // Seção de Discos
+    ui.horizontal(|ui| {
+        ui.add_space(8.0);
+        ui.label(egui::RichText::new("Discos e Unidades").size(10.0).color(Color32::from_gray(120)));
+    });
+    ui.add_space(4.0);
+
     for (disk_path, disk_label) in ctx.disks {
-        // Tenta carregar ícone real do drive (sem cache por enquanto)
-        let drive_icon = match extract_drive_icon(disk_path, IconSize::Small) {
-            Ok((rgba_data, width, height)) => {
-                let texture = ui.ctx().load_texture(
-                    format!("drive_{}", disk_path),
-                    egui::ColorImage::from_rgba_unmultiplied(
-                        [width as usize, height as usize],
-                        &rgba_data,
-                    ),
-                    egui::TextureOptions::LINEAR,
-                );
-                Some(texture)
-            }
-            Err(_) => None,
-        };
+        // Tenta carregar ícone real do drive (via IconLoader agora)
+        let is_selected = !ctx.is_computer_view && ctx.current_path.starts_with(disk_path);
         
-        
-        // Renderiza drive com ícone + label usando interact() para controle total do cursor
-        let is_selected = ctx.current_path.starts_with(disk_path);
-        
-        // Desenha conteúdo no horizontal layout
         let (mut rect, response) = ui.allocate_exact_size(
-            egui::vec2(ui.available_width(), 24.0),
-            Sense::click()  // Captura cliques, sem texto selecionável
+            egui::vec2(ui.available_width(), 28.0),
+            Sense::click()
         );
         
-        // Expande rect para preencher toda a largura da sidebar (remove gaps)
         rect.min.x = ui.clip_rect().min.x;
         rect.max.x = ui.clip_rect().max.x;
         
-        // Só desenha se visível
         if ui.is_rect_visible(rect) {
-            // Background de seleção
             if is_selected {
-                ui.painter().rect_filled(
-                    rect,
-                    0.0,  // Sem cantos arredondados para ficar flush com as bordas
-                    Color32::from_rgb(200, 220, 240)
-                );
+                ui.painter().rect_filled(rect, 0.0, Color32::from_rgb(200, 220, 240));
+            } else if response.hovered() {
+                ui.painter().rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(200, 220, 240, 50));
             }
             
-            // Hover effect
-            if response.hovered() && !is_selected {
-                ui.painter().rect_filled(
-                    rect,
-                    2.0,
-                    Color32::from_rgba_unmultiplied(200, 220, 240, 50)
-                );
-            }
+            let mut cursor_x = rect.min.x + 12.0; // Identação para discos
             
-            // Desenha ícone e texto manualmente
-            let mut cursor_x = rect.min.x + 5.0;
+            // Tenta carregar ícone real do drive (via IconLoader)
+            let drive_icon = ctx.icon_loader.get_or_load_drive_icon(ui.ctx(), disk_path);
             
-            // Ícone
             if let Some(icon) = drive_icon {
-                let icon_rect = Rect::from_min_size(
-                    Pos2::new(cursor_x, rect.center().y - 8.0),
+                let icon_rect = Rect::from_center_size(
+                    Pos2::new(cursor_x + 8.0, rect.center().y),
                     egui::vec2(16.0, 16.0)
                 );
                 ui.painter().image(icon.id(), icon_rect, Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)), Color32::WHITE);
-                cursor_x += 20.0;
+                cursor_x += 24.0;
             } else {
                 ui.painter().text(
                     Pos2::new(cursor_x, rect.center().y),
                     egui::Align2::LEFT_CENTER,
-                    "💾",
+                    "💽",
                     egui::FontId::proportional(14.0),
                     ui.visuals().text_color()
                 );
                 cursor_x += 20.0;
             }
             
-            // Texto
             ui.painter().text(
                 Pos2::new(cursor_x, rect.center().y),
                 egui::Align2::LEFT_CENTER,
                 disk_label,
-                egui::FontId::proportional(14.0),
-                if is_selected { 
-                    Color32::from_rgb(0, 50, 100) 
-                } else { 
-                    ui.visuals().text_color() 
-                }
+                egui::FontId::proportional(13.0),
+                if is_selected { Color32::from_rgb(0, 50, 100) } else { ui.visuals().text_color() }
             );
         }
         
-        // Bloqueado durante renomeação
         if response.clicked() && !ctx.is_renaming {
-            ops.navigate_to(disk_path);
+            action = Some(SidebarAction::NavigateTo(disk_path.to_string()));
         }
-        
-        
-        ui.add_space(3.0);
+        ui.add_space(2.0);
     }
+    
+    action
 }

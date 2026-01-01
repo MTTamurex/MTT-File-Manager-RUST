@@ -46,11 +46,103 @@ pub fn render_item_slot<O: ItemSlotOperations>(
     ctx: &mut ItemSlotContext,
     ops: &mut O,
 ) {
-    if ctx.item.is_dir {
+    if let Some(drive_info) = &ctx.item.drive_info {
+        render_drive_slot(ui, ctx, drive_info);
+    } else if ctx.item.is_dir {
         render_directory_slot(ui, ctx, ops);
     } else {
         render_file_slot(ui, ctx, ops);
     }
+}
+
+/// Renderiza um slot de drive (Este Computador)
+fn render_drive_slot(
+    ui: &mut egui::Ui,
+    ctx: &mut ItemSlotContext,
+    drive_info: &crate::domain::file_entry::DriveInfo,
+) {
+    let item = ctx.item;
+    let path_clone = item.path.clone();
+    
+    // Carrega ícone real do drive
+    let drive_icon = ctx.icon_loader.get_or_load_drive_icon(ui.ctx(), &path_clone.to_string_lossy());
+    
+    // GEOMETRIA
+    let available_h = ui.available_height();
+    let available_w = ui.available_width();
+    let icon_size = (ctx.thumbnail_size * 0.4).min(available_w * 0.5);
+    let progress_w = (available_w * 0.8).min(150.0);
+    let text_height = 36.0; // Nome + Espaço Livre
+    let content_h = icon_size + 12.0 + 8.0 + text_height; // Ícone + Barra + Padding + Texto
+    
+    let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
+    ui.add_space(vertical_margin);
+    
+    ui.vertical_centered(|ui| {
+        // 1. ÍCONE
+        if let Some(tex) = drive_icon {
+            ui.add(egui::Image::new(&tex)
+                .max_size(egui::vec2(icon_size, icon_size))
+                .maintain_aspect_ratio(true));
+        } else {
+            ui.label(egui::RichText::new("💽").size(icon_size * 0.8));
+        }
+        ui.add_space(8.0);
+        
+        // 2. BARRA DE PROGRESSO (Espaço Usado)
+        if drive_info.total_space > 0 {
+            let used_space = drive_info.total_space - drive_info.free_space;
+            let usage_ratio = used_space as f32 / drive_info.total_space as f32;
+            
+            // Cor da barra: azul ou vermelho se estiver cheio (> 90%)
+            let bar_color = if usage_ratio > 0.9 {
+                egui::Color32::from_rgb(230, 50, 50) // Vermelho
+            } else {
+                egui::Color32::from_rgb(30, 130, 230) // Azul Windows
+            };
+            
+            let bg_color = egui::Color32::from_gray(230);
+            
+            let (bar_rect, _) = ui.allocate_exact_size(egui::vec2(progress_w, 12.0), egui::Sense::hover());
+            ui.painter().rect_filled(bar_rect, 2.0, bg_color);
+            
+            let filled_w = progress_w * usage_ratio;
+            let filled_rect = egui::Rect::from_min_size(bar_rect.min, egui::vec2(filled_w, 12.0));
+            ui.painter().rect_filled(filled_rect, 2.0, bar_color);
+        }
+        
+        ui.add_space(6.0);
+        
+        // 3. TEXTO (Nome e Espaço Livre)
+        ui.add(egui::Label::new(
+            egui::RichText::new(&item.name)
+                .size(11.0)
+                .strong()
+        ).truncate());
+        
+        if drive_info.total_space > 0 {
+            let free_gb = drive_info.free_space as f64 / (1024.0 * 1024.0 * 1024.0);
+            let total_gb = drive_info.total_space as f64 / (1024.0 * 1024.0 * 1024.0);
+            
+            let (free_val, unit) = if total_gb >= 1000.0 {
+                (free_gb / 1024.0, "TB")
+            } else {
+                (free_gb, "GB")
+            };
+            
+            let (total_val, total_unit) = if total_gb >= 1000.0 {
+                (total_gb / 1024.0, "TB")
+            } else {
+                (total_gb, "GB")
+            };
+
+            ui.add(egui::Label::new(
+                egui::RichText::new(format!("{:.1} {} livres de {:.1} {}", free_val, unit, total_val, total_unit))
+                    .size(9.0)
+                    .color(egui::Color32::from_gray(100))
+            ).truncate());
+        }
+    });
 }
 
 /// Renderiza um slot de diretório

@@ -1027,6 +1027,16 @@ std::thread::spawn(move || {
 - Adicionado suporte a: `mp4`, `mkv`, `avi`, `mov`, `webm`.
 - Integração nativa com a API de thumbnails do Windows (que já extrai frames de vídeo).
 
+### Fase 6: Visão "Este Computador" e Detalhes de Drive
+
+**Problema**: "Este Computador" não exibia itens na área central e os drives não mostravam estatísticas de uso.
+
+**Solução**: Unificação da navegação e implementação de UI rica para drives.
+- **FileEntry**: Estendida com `DriveInfo` (espaço total/livre, sistema de arquivos).
+- **Sidebar**: Cabeçalho "Este Computador" agora é parte do sistema de seleção unificado. Refatorada para usar padrão de *Action Collection* (evitando conflitos de borrow em Rust).
+- **Central View**: Implementada renderização especial para drives com ícones reais e barras de progresso de uso.
+- **Preview Panel**: Painel lateral direito agora exibe estatísticas detalhadas ao selecionar um drive.
+
 ---
 
 *Última atualização: 2026-01-01*  
