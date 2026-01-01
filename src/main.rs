@@ -102,8 +102,6 @@ struct ImageViewerApp {
     
     // File system
     items: Arc<Vec<FileEntry>>,  // Arc para clone barato em render loops (60 FPS)
-    texture_cache: LruCache<PathBuf, egui::TextureHandle>,
-    loading_set: HashSet<PathBuf>,
     
     // Async loading (evita freeze da UI ao ler metadata)
     file_entry_receiver: Receiver<(usize, Vec<FileEntry>)>,
@@ -115,11 +113,8 @@ struct ImageViewerApp {
     cover_worker_receiver: Receiver<(PathBuf, Option<PathBuf>)>,  // Worker â†’ UI: Resultado
     scanned_folders: HashSet<PathBuf>,  // Cache: evita re-scan
     
-    // Icon cache (novo: extensÃ£o â†’ texture)
-    icon_cache: LruCache<String, egui::TextureHandle>,
-    folder_icon_texture: Option<egui::TextureHandle>,
-    computer_icon: Option<egui::TextureHandle>,  // Ãcone "Este Computador"
-    drive_icon_cache: LruCache<String, egui::TextureHandle>,  // path â†’ icon
+    // Cache Manager (unifica texture_cache, icon_cache, loading_set, etc.)
+    cache_manager: mtt_file_manager::ui::cache::CacheManager,
     
     // Sorting state
     sort_mode: SortMode,
@@ -239,8 +234,6 @@ impl ImageViewerApp {
             thumbnail_req_sender: req_tx,
             image_receiver: img_rx,
             items: Arc::new(Vec::new()),
-            texture_cache: LruCache::new(NonZeroUsize::new(CACHE_SIZE).unwrap()),
-            loading_set: HashSet::new(),
             // Async loading
             file_entry_receiver,
             file_entry_sender,
@@ -249,10 +242,8 @@ impl ImageViewerApp {
             cover_worker_sender: cover_req_tx,
             cover_worker_receiver: cover_res_rx,
             scanned_folders: HashSet::new(),
-            icon_cache: LruCache::new(NonZeroUsize::new(ICON_CACHE_SIZE).unwrap()),
-            folder_icon_texture: None,
-            computer_icon: None,
-            drive_icon_cache: LruCache::new(NonZeroUsize::new(10).unwrap()),  // Poucos drives
+            // Cache Manager (unifica texture_cache, icon_cache, loading_set, etc.)
+            cache_manager: mtt_file_manager::ui::cache::CacheManager::new(),
             // Sorting - padrÃ£o: Nome, Ascendente
             sort_mode: SortMode::Name,
             sort_descending: false,
@@ -599,8 +590,7 @@ impl ImageViewerApp {
         // 1. Limpeza de Estado (UI Thread)
         self.items = Arc::new(Vec::new());  // Novo Arc vazio (antigo é dropped automaticamente)
         self.all_items.clear();  // Limpa backup mestre tambÃ©m
-        self.texture_cache.clear();
-        self.loading_set.clear();
+        self.cache_manager.clear_all();
         self.scanned_folders.clear();
         self.selected_item = None;
         self.is_loading_folder = true;
@@ -902,7 +892,7 @@ impl ImageViewerApp {
         };
         
         // Cache hit? Clone do handle (barato)
-        if let Some(texture) = self.icon_cache.get(&cache_key) {
+        if let Some(texture) = self.cache_manager.icon_cache.get(&cache_key) {
             return Some(texture.clone());
         }
         
@@ -933,7 +923,7 @@ impl ImageViewerApp {
                 );
                 
                 let cloned = texture.clone();
-                self.icon_cache.put(cache_key, texture);
+                self.cache_manager.icon_cache.put(cache_key, texture);
                 Some(cloned)
             }
             Err(_) => None,  // Fallback: sem icone
@@ -942,11 +932,6 @@ impl ImageViewerApp {
     
     /// Garante que Ã­cone de pasta estÃ¡ carregado.
     fn ensure_folder_icon(&mut self, ctx: &egui::Context) {
-        if self.folder_icon_texture.is_some() {
-            return; // JÃ¡ carregado
-        }
-        
-// Windows usa Ã­cone especial para pastas
         let thumbnail_size = self.thumbnail_size;
         let icon_size = if thumbnail_size < 100.0 {
             IconSize::Small
@@ -954,42 +939,16 @@ impl ImageViewerApp {
             IconSize::Large
         };
         
-        match windows_infra::extract_folder_icon(icon_size) {
-            Ok((rgba_data, width, height)) => {
-                let texture = ctx.load_texture(
-                    "folder_icon",
-                    egui::ColorImage::from_rgba_unmultiplied(
-                        [width as usize, height as usize],
-                        &rgba_data,
-                    ),
-                    egui::TextureOptions::LINEAR,
-                );
-                self.folder_icon_texture = Some(texture);
-            }
-            Err(_) => {
-                // Fallback: mantÃ©m emoji
-            }
-        }
+        self.cache_manager.ensure_folder_icon(ctx, || {
+            windows_infra::extract_folder_icon(icon_size)
+        });
     }
     
     /// Garante que Ã­cone de "Este Computador" estÃ¡ carregado.
     fn ensure_computer_icon(&mut self, ctx: &egui::Context) {
-        if self.computer_icon.is_some() {
-            return;
-        }
-        
-        if let Ok((data, width, height)) = windows_infra::extract_computer_icon(IconSize::Small) {
-            let image = egui::ColorImage::from_rgba_unmultiplied(
-                [width as usize, height as usize],
-                &data,
-            );
-            
-            self.computer_icon = Some(ctx.load_texture(
-                "computer_icon",
-                image,
-                egui::TextureOptions::LINEAR,
-            ));
-        }
+        self.cache_manager.ensure_computer_icon(ctx, || {
+            windows_infra::extract_computer_icon(IconSize::Small)
+        });
     }
     
     /// Processa mensagens que chegam dos canais de workers
@@ -1055,7 +1014,7 @@ impl ImageViewerApp {
                     folder_updates = true;
                     
                     // Requisita thumbnail se necessário
-                    if !self.texture_cache.contains(&cover) && !self.loading_set.contains(&cover) {
+                    if !self.cache_manager.has_thumbnail(&cover) && !self.cache_manager.is_loading(&cover) {
                         self.request_thumbnail_load(cover);
                     }
                 }
@@ -1102,7 +1061,7 @@ impl ImageViewerApp {
             
             // SÃ³ processa thumbnails (image_data nÃ£o vazio)
             if !thumbnail_data.image_data.is_empty() {
-                self.loading_set.remove(&thumbnail_data.path);
+                self.cache_manager.finish_loading(&thumbnail_data.path);
                 
                 let texture = ctx.load_texture(
                     thumbnail_data.path.to_string_lossy().to_string(),
@@ -1113,7 +1072,7 @@ impl ImageViewerApp {
                     egui::TextureOptions::LINEAR,
                 );
                 
-                self.texture_cache.put(thumbnail_data.path, texture);
+                self.cache_manager.put_thumbnail(thumbnail_data.path, texture);
             }
         }
 
@@ -1135,8 +1094,8 @@ impl ImageViewerApp {
         let sort_descending = self.sort_descending;
         let renaming_state = self.renaming_state.clone();
         let focus_rename = self.focus_rename;
-        let folder_icon_texture = self.folder_icon_texture.clone();
-        let computer_icon = self.computer_icon.clone();
+        let folder_icon_texture = self.cache_manager.folder_icon_texture.clone();
+        let computer_icon = self.cache_manager.computer_icon.clone();
         
         // Criar contexto com referências mutáveis separadas
         let mut ctx = ListViewContext {
@@ -1147,12 +1106,12 @@ impl ImageViewerApp {
             sort_descending,
             renaming_state: renaming_state.clone(),
             focus_rename,
-            texture_cache: &mut self.texture_cache,
-            loading_set: &mut self.loading_set,
+            texture_cache: &mut self.cache_manager.texture_cache,
+            loading_set: &mut self.cache_manager.loading_set,
             scanned_folders: &mut self.scanned_folders,
             folder_icon_texture: folder_icon_texture.as_ref(),
             computer_icon: computer_icon.as_ref(),
-            drive_icon_cache: &mut self.drive_icon_cache,
+            drive_icon_cache: &mut self.cache_manager.drive_icon_cache,
             item_icon_loader: &mut self.item_icon_loader,
         };
         
@@ -1225,7 +1184,7 @@ impl ImageViewerApp {
                     
                     // Trigger thumbnail load for sidebar preview
                     if !item.is_dir {
-                        if !self.texture_cache.contains(&item.path) && !self.loading_set.contains(&item.path) {
+                        if !self.cache_manager.has_thumbnail(&item.path) && !self.cache_manager.is_loading(&item.path) {
                             self.request_thumbnail_load(item.path.clone());
                         }
                     }
@@ -1341,8 +1300,8 @@ impl ImageViewerApp {
         let last_grid_cols = self.last_grid_cols;
         let renaming_state = self.renaming_state.clone();
         let focus_rename = self.focus_rename;
-        let folder_icon_texture = self.folder_icon_texture.clone();
-        let computer_icon = self.computer_icon.clone();
+        let folder_icon_texture = self.cache_manager.folder_icon_texture.clone();
+        let computer_icon = self.cache_manager.computer_icon.clone();
         
         // Criar contexto com referências mutáveis separadas
         let mut ctx = GridViewContext {
@@ -1353,12 +1312,12 @@ impl ImageViewerApp {
             last_grid_cols,
             renaming_state: renaming_state.clone(),
             focus_rename,
-            texture_cache: &mut self.texture_cache,
-            loading_set: &mut self.loading_set,
+            texture_cache: &mut self.cache_manager.texture_cache,
+            loading_set: &mut self.cache_manager.loading_set,
             scanned_folders: &mut self.scanned_folders,
             folder_icon_texture: folder_icon_texture.as_ref(),
             computer_icon: computer_icon.as_ref(),
-            drive_icon_cache: &mut self.drive_icon_cache,
+            drive_icon_cache: &mut self.cache_manager.drive_icon_cache,
             item_icon_loader: &mut self.item_icon_loader,
         };
         
@@ -1505,10 +1464,10 @@ impl ImageViewerApp {
                 is_renaming,
                 renaming_text,
                 focus_rename: self.focus_rename,
-                texture_cache: &mut self.texture_cache,
+                texture_cache: &mut self.cache_manager.texture_cache,
                 icon_loader: &mut self.item_icon_loader,
                 scanned_folders: &mut self.scanned_folders,
-                loading_set: &mut self.loading_set,
+                loading_set: &mut self.cache_manager.loading_set,
             };
             
             // Create simple ops struct that collects operations
@@ -1679,7 +1638,7 @@ impl eframe::App for ImageViewerApp {
                     &mut self.thumbnail_size,
                     &mut self.sort_mode,
                     &mut self.sort_descending,
-                    &self.texture_cache,
+                    &self.cache_manager.texture_cache,
                 );
                 match action {
                     StatusBarAction::SortChanged => self.sort_items(),
@@ -1839,7 +1798,7 @@ impl eframe::App for ImageViewerApp {
                 let disks = self.disks.clone();
                 let current_path = self.current_path.clone();
                 let is_computer_view = self.is_computer_view;
-                let computer_icon = self.computer_icon.clone();
+                let computer_icon = self.cache_manager.computer_icon.clone();
                 
                 // Criar contexto para sidebar
                 let mut ctx = SidebarContext {
@@ -1884,7 +1843,7 @@ impl eframe::App for ImageViewerApp {
                         ui.separator();
                         
                         // Preview de imagem/video (se houver thumbnail)
-                        let _has_thumbnail = self.texture_cache.peek(&file.path).is_some();
+                        let _has_thumbnail = self.cache_manager.texture_cache.peek(&file.path).is_some();
                         let is_media = file.path.extension()
                             .and_then(|e| e.to_str())
                             .map(|ext| {
@@ -1898,7 +1857,7 @@ impl eframe::App for ImageViewerApp {
                             })
                             .unwrap_or(false);
                         
-                        let texture = self.texture_cache.peek(&file.path).cloned();
+                        let texture = self.cache_manager.texture_cache.peek(&file.path).cloned();
 
                         if let (Some(tex), true) = (texture, is_media) {
                             // Mostra thumbnail de imagem/video

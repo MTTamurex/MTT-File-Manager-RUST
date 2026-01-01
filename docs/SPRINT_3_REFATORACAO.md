@@ -6,8 +6,8 @@
 - ✅ **Fase 1: Windows APIs** - Extraídas e integradas
 - ✅ **Fase 2: Views** - Extraídas e integradas (grid_view, list_view, computer_view)
 - ✅ **Fase 3: Sidebar e Navegação** - Sidebar extraída para ui/sidebar.rs e integrada
-- ❌ **Fase 4: Context Menu** - Ainda no main.rs
-- ❌ **Fase 5: CacheManager** - Não integrado
+- ✅ **Fase 4: Context Menu** - Extraído para ui/context_menu.rs e integrado
+- 🚧 **Fase 5: CacheManager** - Em andamento (planejamento)
 - ❌ **Fase 6: Limpeza** - Arquivos .bak ainda existem
 
 ### Métricas Atuais:
