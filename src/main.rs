@@ -727,17 +727,14 @@ impl ImageViewerApp {
         self.load_folder();
     }
     
-    /// Volta no histÃ³rico (sem adicionar ao histÃ³rico)
+    /// Volta no histórico (sem adicionar ao histórico)
     fn go_back(&mut self) {
         if self.can_go_back() {
             self.history_index -= 1;
             let path = self.navigation_history[self.history_index].clone();
             
             if path == "Este Computador" {
-                self.navigate_to_computer();
-                // Override history addition since navigate_to_computer adds it
-                self.navigation_history.pop();
-                self.history_index = self.navigation_history.len() - 1;
+                self.setup_computer_view();
             } else {
                 self.current_path = path;
                 self.path_input = self.current_path.clone();
@@ -748,17 +745,14 @@ impl ImageViewerApp {
         }
     }
     
-    /// AvanÃ§a no histÃ³rico
+    /// Avança no histórico
     fn go_forward(&mut self) {
         if self.history_index + 1 < self.navigation_history.len() {
             self.history_index += 1;
             let path = self.navigation_history[self.history_index].clone();
             
             if path == "Este Computador" {
-                self.navigate_to_computer();
-                // Override history addition
-                self.navigation_history.pop();
-                self.history_index = self.navigation_history.len() - 1;
+                self.setup_computer_view();
             } else {
                 self.current_path = path;
                 self.path_input = self.current_path.clone();
@@ -769,15 +763,26 @@ impl ImageViewerApp {
         }
     }
     
-    /// Navega para "Este Computador" view
+    /// Navega para "Este Computador" view (adicionando ao histórico)
     fn navigate_to_computer(&mut self) {
-        // Update history
-        if self.history_index < self.navigation_history.len() {
+        if self.is_computer_view {
+            return;
+        }
+
+        // Corta histórico "futuro"
+        if self.history_index < self.navigation_history.len().saturating_sub(1) {
             self.navigation_history.truncate(self.history_index + 1);
         }
-        self.navigation_history.push(self.current_path.clone());
-        self.history_index = self.navigation_history.len();
         
+        // Adiciona ao histórico
+        self.navigation_history.push("Este Computador".to_string());
+        self.history_index = self.navigation_history.len() - 1;
+        
+        self.setup_computer_view();
+    }
+
+    /// Configura a visão de "Este Computador" sem afetar o histórico
+    fn setup_computer_view(&mut self) {
         // Set computer view
         self.current_path = "Este Computador".to_string();
         self.is_computer_view = true;
@@ -1739,8 +1744,8 @@ impl eframe::App for ImageViewerApp {
 
                 ui.separator();
                 
-                if self.icon_button(ui, ICON_HOME, "Ir para C:\\").clicked() && !is_renaming {
-                    self.navigate_to("C:\\");
+                if self.icon_button(ui, ICON_HOME, "Home").clicked() && !is_renaming {
+                    self.navigate_to_computer();
                 }
 
                 // 2. ELEMENTOS DA DIREITA (DIREITA -> ESQUERDA)
