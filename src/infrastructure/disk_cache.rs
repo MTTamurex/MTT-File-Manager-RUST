@@ -213,53 +213,28 @@ impl ThumbnailDiskCache {
     /// Remove cache entries for a specific path (file or folder)
     /// If the path is a folder, removes all entries that start with that path
     pub fn remove_cache_for_path(&self, path: &Path) {
+        // Normaliza o path removendo o prefixo \\?\ do Windows
         let path_str = path.to_string_lossy().to_string();
+        let path_str = path_str.strip_prefix(r"\\?\").unwrap_or(&path_str).to_string();
         
         if let Ok(db) = self.db.lock() {
-            // Count BEFORE delete
-            let count_before: i64 = db.query_row(
-                "SELECT COUNT(*) FROM thumbnails",
-                [],
-                |row| row.get(0)
-            ).unwrap_or(0);
-            
-            eprintln!("[GC] Entries BEFORE delete: {}", count_before);
-            
-            // Pattern: C:\folder\* (need to add backslash before %)
+            // Pattern: C:\folder\* (precisa adicionar barra antes de %)
             let pattern = format!("{}\\%", path_str.trim_end_matches('\\'));
-            eprintln!("[GC] Using LIKE pattern: {}", pattern);
             
-            // Execute DELETE with explicit result check
-            let result1 = db.execute("DELETE FROM thumbnails WHERE path = ?", [&path_str]);
-            let result2 = db.execute("DELETE FROM thumbnails WHERE path LIKE ?", [&pattern]);
-            
-            eprintln!("[GC] DELETE exact result: {:?}", result1);
-            eprintln!("[GC] DELETE LIKE result: {:?}", result2);
-            
-            // Count AFTER delete
-            let count_after: i64 = db.query_row(
-                "SELECT COUNT(*) FROM thumbnails",
-                [],
-                |row| row.get(0)
-            ).unwrap_or(0);
-            
-            eprintln!("[GC] Entries AFTER delete: {}", count_after);
-            eprintln!("[GC] Actually deleted: {}", count_before - count_after);
+            // Remove entradas de thumbnails
+            let _ = db.execute("DELETE FROM thumbnails WHERE path = ?", [&path_str]);
+            let deleted = db.execute("DELETE FROM thumbnails WHERE path LIKE ?", [&pattern])
+                .unwrap_or(0);
             
             // Remove folder cover entries
             let _ = db.execute("DELETE FROM folder_covers WHERE folder_path = ?", [&path_str]);
             let _ = db.execute("DELETE FROM folder_covers WHERE folder_path LIKE ?", [&pattern]);
             let _ = db.execute("DELETE FROM folder_covers WHERE cover_path LIKE ?", [&pattern]);
             
-            // If we deleted something, run VACUUM to actually shrink the file
-            let deleted = count_before - count_after;
+            // Se deletou algo, roda VACUUM para reduzir tamanho do arquivo
             if deleted > 0 {
-                eprintln!("[GC] Running VACUUM to shrink file...");
-                if let Err(e) = db.execute("VACUUM", []) {
-                    eprintln!("[GC] VACUUM error: {:?}", e);
-                } else {
-                    eprintln!("[GC] VACUUM completed - file should be smaller now");
-                }
+                let _ = db.execute("VACUUM", []);
+                eprintln!("[Cache] Cleaned {} entries for: {}", deleted, path_str);
             }
         }
     }

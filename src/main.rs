@@ -332,8 +332,12 @@ impl ImageViewerApp {
         app.watch_current_folder();
         
         // Garbage Collector em background (não bloqueia a UI)
+        // Delay de 3s para permitir que a UI carregue primeiro
         let gc_cache = app.disk_cache.clone();
         std::thread::spawn(move || {
+            // Aguarda a UI carregar antes de iniciar o GC
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            
             let removed = gc_cache.garbage_collect();
             if removed > 0 {
                 eprintln!("[GC] Removed {} orphaned cache entries", removed);
@@ -1093,7 +1097,16 @@ impl ImageViewerApp {
         // 2. CHECK DE AUTO-REFRESH (WATCHER)
         while let Ok(event) = self.fs_event_receiver.try_recv() {
             match event {
-                Ok(_) => self.pending_auto_reload = true,
+                Ok(evt) => {
+                    // Detecta eventos de Remove para limpar cache automaticamente
+                    if matches!(evt.kind, notify::EventKind::Remove(_)) {
+                        for path in &evt.paths {
+                            eprintln!("[FS] Detected removal of: {:?}", path);
+                            self.disk_cache.remove_cache_for_path(path);
+                        }
+                    }
+                    self.pending_auto_reload = true;
+                },
                 Err(e) => eprintln!("Erro de watch: {:?}", e),
             }
         }
