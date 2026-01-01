@@ -53,9 +53,11 @@
 - Botões: Voltar (⬅), Avançar (➡), Subir (⬆)
 - Botões desabilitados quando não aplicável
 
-### Otimização de VRAM
-- CACHE_SIZE reduzido de 500 → 200
-- MAX_CONCURRENT_LOADS reduzido de 50 → 30
+### Otimização de VRAM ✅
+- CACHE_SIZE reduzido de 500 → 100 (Otimizado para manter ~100MB VRAM)
+- MAX_CONCURRENT_DECODES limitado a 4 (Proteção contra picos de RAM)
+- Worker threads reduzidas para 4 (Performance balanceada)
+- Resize antecipado (Transient Flow) para liberar RAM de alta resolução
 ### Estabilidade e Gerenciamento de Ciclo de Vida (Anti-Leak)
 - **Persistent Worker Pool**: Fila de 4 threads para evitar disk thrashing em HDDs externos.
 - **Atomic Generational Validation**: Sistema de gerações que invalida tasks de thumbnails via `Arc<AtomicUsize>`.
@@ -67,6 +69,8 @@
 - **Create New Folder**: Fluxo instantâneo com auto-rename e resolução de conflitos de nome.
 - **Clipboard Operations (Ctrl+C/X/V)**: Copy, Cut e Paste via `Event::Copy/Cut/Paste` do egui e `SHFileOperationW` (`FO_COPY`/`FO_MOVE`).
 - **UI Refinements**: Ícones Remix Icon corrigidos, layout responsivo e botões frameless.
+- **Persistent Sort & Folder Position ✅**: Preferências de ordenação e posição de pastas salvas em SQLite.
+- **Proactive Folder Previews ✅**: Escaneamento de capas de pastas no modo lista e persistência em SQLite.
 
 ---
 

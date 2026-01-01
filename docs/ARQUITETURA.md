@@ -330,10 +330,17 @@ render_item_slot()
  
  ```
  LruCache<PathBuf, TextureHandle>
-   ├── Capacidade: 200 itens (Otimizado)
+-  ├── Capacidade: 200 itens (Otimizado)
++  ├── Capacidade: 100 itens (Otimizado para VRAM)
    ├── Max Concurrent Loads: 30
-   ├── Objetivo: Manter VRAM < 100MB
+-  ├── Objetivo: Manter VRAM < 100MB
++  ├── Objetivo: Manter VRAM < 100MB constante
    └── Eviction automática agressiva
++
++ Concurrency Limiting (RAM Protection)
++   ├── AtomicUsize Counter: Limita decodificações simultâneas a 4
++   ├── Worker Threads: Reduzido de 8 para 4 (foco em slots de RAM, não CPU count)
++   └── Transient Flow: Resize imediato para 512px após decode, descartando buffer full-res
  
  Generational Validation (Anti-Leak)
    ├── `generation: usize` incrementado a cada `load_folder`
