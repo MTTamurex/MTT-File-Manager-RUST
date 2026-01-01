@@ -27,10 +27,11 @@
 | **UI Framework** | `eframe 0.31` (egui) | Interface gráfica imediata com GPU acceleration |
 | **Paralelismo** | `rayon 1.10` | Thread pool para processamento paralelo |
 | **Filesystem** | `walkdir 2.5` | Iteração otimizada de diretórios |
-| **Native APIs** | `windows 0.58` | Acesso direto às APIs Win32 |
+| **Native APIs** | `windows 0.58` | Acesso direto às APIs Win32 (Shell, WIC, GDI) |
 | **Dialog System** | `rfd 0.15` | Seletor nativo de pastas |
 | **Cache** | `rusqlite 0.32` | Persistência ultra-eficiente em banco de dados único |
 | **Cache (RAM)** | `lru 0.12` | LRU Cache para gerenciamento de memória (VRAM) |
+| **Compressão** | `webp 0.3` | Encode WebP lossy com controle de qualidade |
 
 ---
 

@@ -213,19 +213,30 @@ rfd::FileDialog::new()
 **Modo**: Bundled (sem dependência de DLL externa)
 
 **Uso no Projeto**:
-- ✅ **Persistência de Thumbnails**: Armazenamento binário (BLOB) de thumbnails WebP.
+- ✅ **Persistência de Thumbnails**: Armazenamento binário (BLOB) de WebP lossy Q60.
+- ✅ **Tamanhos Adaptativos**: Imagens >512px downscaled, vídeos preservados em 256px.
 - ✅ **Concurrency**: PRAGMA journal_mode = WAL permite leituras e escritas seguras entre workers.
-- ✅ **Performance**: SQL query otimizada com indexação por hash.
+- ✅ **Performance**: SQL query otimizada com indexação por hash do path.
 
 ### image 0.25
 
 **Categoria**: Image processing library  
-**Codecs**: WebP (com features específicas habilitadas)
+**Codecs**: WebP, JPEG, PNG, BMP, GIF, TIFF
 
 **Uso no Projeto**:
-- ✅ **Decoding**: Conversão de WebP (cache) para RGBA (egui).
-- ✅ **Encoding**: Salvamento de thumbnails extraídos em formato WebP comprimido.
-- ✅ **Otimização**: Redimensionamento via `Lanczos3` para max 200px.
+- ✅ **Stage 1 Extraction**: Decodificação rápida de imagens padrão RGB.
+- ✅ **Cache Decoding**: Conversão de WebP (cache SQLite) para RGBA (egui).
+- ✅ **Resize Adaptativo**: Downscale inteligente via `Lanczos3` (preserva ≤512px, reduz >512px).
+
+### webp 0.3
+
+**Categoria**: WebP encoding/decoding  
+**Backend**: libwebp (Google)
+
+**Uso no Projeto**:
+- ✅ **Lossy Compression**: Encode WebP com quality 60 para thumbnails.
+- ✅ **Tamanho Otimizado**: ~30KB por thumbnail em 512px (balanço qualidade/espaço).
+- ✅ **HiDPI Support**: Mantém qualidade visual em displays 2x (200% DPI).
 
 **Categoria**: LRU Cache implementation  
 **Complexidade**: O(1) para get/put
