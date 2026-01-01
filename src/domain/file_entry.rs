@@ -18,6 +18,7 @@ pub struct FileEntry {
     pub modified: u64,     // Timestamp (segundos desde UNIX_EPOCH)
     pub folder_cover: Option<PathBuf>,  // Primeira imagem encontrada na pasta (para preview)
     pub drive_info: Option<DriveInfo>,  // Metadados de drive (opcional)
+    pub sync_status: SyncStatus,        // Status de sincronização OneDrive
 }
 
 impl FileEntry {
@@ -47,7 +48,7 @@ impl FileEntry {
         let folder_cover = None;
         let drive_info = None;
         
-        Self { path, name, is_dir, size, modified, folder_cover, drive_info }
+        Self { path, name, is_dir, size, modified, folder_cover, drive_info, sync_status: SyncStatus::None }
     }
     
     pub fn path(&self) -> &Path {
@@ -120,4 +121,14 @@ pub enum FoldersPosition {
     First,   // Pastas antes de arquivos (padrão)
     Last,    // Arquivos antes de pastas
     Mixed,   // Misturados por critério de ordenação
+}
+
+/// Status de sincronização OneDrive
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum SyncStatus {
+    #[default]
+    None,             // Not a cloud file / Normal
+    CloudOnly,        // "Available online" (needs download)
+    Pinned,           // "Always keep on this device" (Green check)
+    LocallyAvailable, // Downloaded on demand (Green outline)
 }

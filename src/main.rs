@@ -32,6 +32,7 @@ use mtt_file_manager::domain::thumbnail::*;
 
 // Import infrastructure modules
 use mtt_file_manager::infrastructure::windows as windows_infra;
+use mtt_file_manager::infrastructure::onedrive;
 
 // Import UI modules
 // use mtt_file_manager::ui::status_bar; // Not used directly - imported in render_status_bar call
@@ -207,6 +208,9 @@ impl ImageViewerApp {
         let shared_req_rx = Arc::new(std::sync::Mutex::new(req_rx));
         let shared_gen = Arc::new(AtomicUsize::new(0));
 
+        // Initialize OneDrive path detection
+        onedrive::init_onedrive_paths();
+        
         // Initialize disk cache
         let cache_dir = dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("."))
@@ -698,6 +702,9 @@ impl ImageViewerApp {
             };
             let wide_path: Vec<u16> = search_path.encode_utf16().chain(std::iter::once(0)).collect();
             let mut find_data = WIN32_FIND_DATAW::default();
+            
+            // Check if we're in a OneDrive folder (for sync status)
+            let is_onedrive = onedrive::is_onedrive_path(&PathBuf::from(&current_path));
 
             unsafe {
                 if let Ok(handle) = FindFirstFileW(PCWSTR(wide_path.as_ptr()), &mut find_data) {
@@ -749,6 +756,7 @@ impl ImageViewerApp {
                                     modified,
                                     folder_cover,
                                     drive_info: None,
+                                    sync_status: onedrive::get_sync_status(attrs, is_onedrive),
                                 };
 
                                 // Adiciona ao lote
