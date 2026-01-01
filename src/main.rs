@@ -331,6 +331,15 @@ impl ImageViewerApp {
         // Inicia monitoramento inicial
         app.watch_current_folder();
         
+        // Garbage Collector em background (não bloqueia a UI)
+        let gc_cache = app.disk_cache.clone();
+        std::thread::spawn(move || {
+            let removed = gc_cache.garbage_collect();
+            if removed > 0 {
+                eprintln!("[GC] Removed {} orphaned cache entries", removed);
+            }
+        });
+        
         app.load_folder(false);
         app
     }
@@ -365,8 +374,9 @@ impl ImageViewerApp {
     fn delete_with_shell(&mut self) {
         if let Some(idx) = self.selected_item {
             if let Some(item) = self.items.get(idx) {
-                let path = item.path.to_string_lossy().to_string();
-                let from_vec = to_win32_path(&path);
+                let path = item.path.clone();
+                let path_str = path.to_string_lossy().to_string();
+                let from_vec = to_win32_path(&path_str);
 
                 let mut op = SHFILEOPSTRUCTW {
                     hwnd: HWND(std::ptr::null_mut()),
@@ -380,6 +390,9 @@ impl ImageViewerApp {
                 unsafe {
                     let result = SHFileOperationW(&mut op);
                     if result == 0 {
+                        // Limpa cache do item deletado
+                        self.disk_cache.remove_cache_for_path(&path);
+                        
                         // O watcher vai cuidar do refresh, mas podemos limpar a seleção
                         self.selected_item = None;
                         self.selected_file = None;

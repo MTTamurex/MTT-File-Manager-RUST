@@ -31,20 +31,24 @@ impl ThumbnailDiskCache {
         let db_path = cache_dir.join("thumbnails.db");
         let conn = Connection::open(db_path).expect("Failed to open thumbnail database");
 
-        // Performance Tuning: WAL mode and Normal sync
-        let _ = conn.execute("PRAGMA journal_mode = WAL", []).ok();
-        let _ = conn.execute("PRAGMA synchronous = NORMAL", []).ok();
+        // Performance Tuning: Use DELETE mode for immediate sync (WAL was causing issues)
+        let _ = conn.execute("PRAGMA journal_mode = DELETE", []).ok();
+        let _ = conn.execute("PRAGMA synchronous = FULL", []).ok();
 
-        // Create table
+        // Create table (with path for GC)
         conn.execute(
             "CREATE TABLE IF NOT EXISTS thumbnails (
                 id TEXT PRIMARY KEY,
+                path TEXT,
                 data BLOB,
                 modified_at INTEGER,
                 created_at INTEGER
             )",
             [],
         ).expect("Failed to create thumbnails table");
+
+        // Migration: Add path column if missing (for existing DBs)
+        let _ = conn.execute("ALTER TABLE thumbnails ADD COLUMN path TEXT", []);
 
         // Create preferences table
         conn.execute(
@@ -147,11 +151,20 @@ impl ThumbnailDiskCache {
         let webp_data = encoder.encode(60.0); // Quality 60 (0-100 scale)
 
 
-        // STEP 3: Save to SQLite
+        // STEP 3: Save to SQLite (with path for GC)
         let db = self.db.lock().map_err(|_| "Database lock failed")?;
+        let path_str = path.to_string_lossy().to_string();
+        
+        // DEBUG: Log first few saves
+        static SAVE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let count = SAVE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if count < 3 {
+            eprintln!("[PUT] Saving thumbnail for: {}", path_str);
+        }
+        
         db.execute(
-            "INSERT OR REPLACE INTO thumbnails (id, data, modified_at, created_at) VALUES (?, ?, ?, ?)",
-            params![id, webp_data.to_vec(), mod_time, now],
+            "INSERT OR REPLACE INTO thumbnails (id, path, data, modified_at, created_at) VALUES (?, ?, ?, ?, ?)",
+            params![id, path_str, webp_data.to_vec(), mod_time, now],
         )?;
 
         Ok(())
@@ -195,5 +208,140 @@ impl ThumbnailDiskCache {
                 [folder_path.to_string_lossy(), cover_path.to_string_lossy()],
             );
         }
+    }
+
+    /// Remove cache entries for a specific path (file or folder)
+    /// If the path is a folder, removes all entries that start with that path
+    pub fn remove_cache_for_path(&self, path: &Path) {
+        let path_str = path.to_string_lossy().to_string();
+        
+        if let Ok(db) = self.db.lock() {
+            // Count BEFORE delete
+            let count_before: i64 = db.query_row(
+                "SELECT COUNT(*) FROM thumbnails",
+                [],
+                |row| row.get(0)
+            ).unwrap_or(0);
+            
+            eprintln!("[GC] Entries BEFORE delete: {}", count_before);
+            
+            // Pattern: C:\folder\* (need to add backslash before %)
+            let pattern = format!("{}\\%", path_str.trim_end_matches('\\'));
+            eprintln!("[GC] Using LIKE pattern: {}", pattern);
+            
+            // Execute DELETE with explicit result check
+            let result1 = db.execute("DELETE FROM thumbnails WHERE path = ?", [&path_str]);
+            let result2 = db.execute("DELETE FROM thumbnails WHERE path LIKE ?", [&pattern]);
+            
+            eprintln!("[GC] DELETE exact result: {:?}", result1);
+            eprintln!("[GC] DELETE LIKE result: {:?}", result2);
+            
+            // Count AFTER delete
+            let count_after: i64 = db.query_row(
+                "SELECT COUNT(*) FROM thumbnails",
+                [],
+                |row| row.get(0)
+            ).unwrap_or(0);
+            
+            eprintln!("[GC] Entries AFTER delete: {}", count_after);
+            eprintln!("[GC] Actually deleted: {}", count_before - count_after);
+            
+            // Remove folder cover entries
+            let _ = db.execute("DELETE FROM folder_covers WHERE folder_path = ?", [&path_str]);
+            let _ = db.execute("DELETE FROM folder_covers WHERE folder_path LIKE ?", [&pattern]);
+            let _ = db.execute("DELETE FROM folder_covers WHERE cover_path LIKE ?", [&pattern]);
+            
+            // If we deleted something, run VACUUM to actually shrink the file
+            let deleted = count_before - count_after;
+            if deleted > 0 {
+                eprintln!("[GC] Running VACUUM to shrink file...");
+                if let Err(e) = db.execute("VACUUM", []) {
+                    eprintln!("[GC] VACUUM error: {:?}", e);
+                } else {
+                    eprintln!("[GC] VACUUM completed - file should be smaller now");
+                }
+            }
+        }
+    }
+
+    /// Garbage Collector: Remove entradas de arquivos que não existem mais
+    /// Roda em background na inicialização para não bloquear a UI
+    pub fn garbage_collect(&self) -> usize {
+        eprintln!("[GC] Starting garbage collection...");
+        
+        let mut removed = 0;
+        let mut total_checked = 0;
+        
+        if let Ok(db) = self.db.lock() {
+            // 1. Coleta todos os paths do cache
+            let mut paths_to_remove = Vec::new();
+            
+            if let Ok(mut stmt) = db.prepare("SELECT id, path FROM thumbnails WHERE path IS NOT NULL") {
+                if let Ok(rows) = stmt.query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                }) {
+                    for row in rows.flatten() {
+                        total_checked += 1;
+                        let (id, path_str) = row;
+                        if !Path::new(&path_str).exists() {
+                            paths_to_remove.push(id);
+                        }
+                    }
+                }
+            }
+            
+            eprintln!("[GC] Checked {} entries, found {} orphans", total_checked, paths_to_remove.len());
+            
+            // 2. Remove entradas órfãs
+            for id in &paths_to_remove {
+                if db.execute("DELETE FROM thumbnails WHERE id = ?", [id]).is_ok() {
+                    removed += 1;
+                }
+            }
+            
+            // 3. Limpa folder_covers órfãs também
+            let mut folders_to_remove = Vec::new();
+            if let Ok(mut stmt) = db.prepare("SELECT folder_path FROM folder_covers") {
+                if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+                    for row in rows.flatten() {
+                        if !Path::new(&row).exists() {
+                            folders_to_remove.push(row);
+                        }
+                    }
+                }
+            }
+            
+            for folder in &folders_to_remove {
+                let _ = db.execute("DELETE FROM folder_covers WHERE folder_path = ?", [folder]);
+                removed += 1;
+            }
+            
+            // 4. SEMPRE compacta o banco se removeu algo (WAL mode precisa de VACUUM)
+            if removed > 0 {
+                eprintln!("[GC] Removed {} entries, running VACUUM...", removed);
+                if let Err(e) = db.execute("VACUUM", []) {
+                    eprintln!("[GC] VACUUM error: {:?}", e);
+                } else {
+                    eprintln!("[GC] VACUUM completed successfully");
+                }
+                
+                // Força checkpoint WAL para sincronizar imediatamente com o arquivo principal
+                let checkpoint_result: Result<i32, _> = db.query_row(
+                    "PRAGMA wal_checkpoint(TRUNCATE)", 
+                    [], 
+                    |row| row.get(0)
+                );
+                match checkpoint_result {
+                    Ok(_) => eprintln!("[GC] WAL checkpoint completed"),
+                    Err(e) => eprintln!("[GC] Checkpoint error: {:?}", e),
+                }
+            } else {
+                eprintln!("[GC] No orphans found, skipping VACUUM");
+            }
+        } else {
+            eprintln!("[GC] Failed to acquire database lock!");
+        }
+        
+        removed
     }
 }
