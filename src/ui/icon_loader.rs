@@ -15,7 +15,7 @@ use crate::infrastructure::windows;
 /// Manages loading and caching of Windows shell icons
 pub struct IconLoader {
     /// Cache for file icons (path -> texture)
-    icon_cache: LruCache<String, egui::TextureHandle>,
+    pub icon_cache: LruCache<String, egui::TextureHandle>,
     /// Folder icon texture (cached)
     folder_icon_texture: Option<egui::TextureHandle>,
     /// Computer icon texture (cached)

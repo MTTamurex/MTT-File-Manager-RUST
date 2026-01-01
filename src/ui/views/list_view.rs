@@ -30,6 +30,7 @@ pub enum ListViewAction {
     Click(usize),
     DoubleClick(usize),
     SecondaryClick(usize),
+    SortChange(SortMode),
 }
 
 /// Operations that can be performed from list view
@@ -61,7 +62,9 @@ pub fn render_list_view(
     let w_type = 120.0;
     let w_size = 100.0;
     
-    // Table header
+    // Table header - capture sort mode change
+    let mut sort_action: Option<SortMode> = None;
+    
     ui.horizontal(|ui| {
         ui.style_mut().spacing.item_spacing.x = 0.0;
         
@@ -93,23 +96,23 @@ pub fn render_list_view(
                 }
             }
             
-            response.clicked()
+            (response.clicked(), mode)
         };
 
-        if draw_header(ui, "Nome", w_name, SortMode::Name) {
-            return Some(SortMode::Name);
-        }
-        if draw_header(ui, "Última modificação", w_date, SortMode::Date) {
-            return Some(SortMode::Date);
-        }
-        if draw_header(ui, "Tipo", w_type, SortMode::Name) {
-            return Some(SortMode::Name);
-        }
-        if draw_header(ui, "Tamanho", w_size, SortMode::Size) {
-            return Some(SortMode::Size);
-        }
+        let (clicked_name, _) = draw_header(ui, "Nome", w_name, SortMode::Name);
+        if clicked_name { return Some(SortMode::Name); }
+        
+        let (clicked_date, _) = draw_header(ui, "Última modificação", w_date, SortMode::Date);
+        if clicked_date { return Some(SortMode::Date); }
+        
+        let (clicked_type, _) = draw_header(ui, "Tipo", w_type, SortMode::Type);
+        if clicked_type { return Some(SortMode::Type); }
+        
+        let (clicked_size, _) = draw_header(ui, "Tamanho", w_size, SortMode::Size);
+        if clicked_size { return Some(SortMode::Size); }
+        
         None
-    });
+    }).inner.map(|mode| sort_action = Some(mode));
     
     ui.separator();
 
@@ -305,6 +308,11 @@ pub fn render_list_view(
     );
     
     // Handle actions after rendering - ORDER MATTERS!
+    // Sort header clicks take priority
+    if let Some(mode) = sort_action {
+        return Some(ListViewAction::SortChange(mode));
+    }
+    
     // double_clicked and secondary_clicked must be checked BEFORE clicked
     // because clicked() also returns true on double-click
     if let Some(idx) = double_clicked_item {

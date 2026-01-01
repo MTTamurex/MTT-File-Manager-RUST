@@ -225,6 +225,22 @@ LruCache<PathBuf, egui::TextureHandle>
 - ✅ Determinístico: Sempre remove least-recently-used
 - ⚠️ Não persiste entre sessões
 
+### natord 1.0
+
+**Categoria**: Natural/Smart Sorting  
+**Complexidade**: O(n) comparação com parsing de números
+
+**Uso no Projeto**:
+```rust
+// Ordena "File1, File2, File10" em vez de "File1, File10, File2"
+natord::compare(&a.name.to_lowercase(), &b.name.to_lowercase())
+```
+
+**Características**:
+- ✅ Leve (~50 linhas de código, MIT)
+- ✅ Zero allocations durante comparação
+- ✅ Trata números embarcados em strings corretamente
+
 ---
 
 ## Dependências Transitivas Importantes

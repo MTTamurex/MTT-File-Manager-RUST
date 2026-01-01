@@ -192,6 +192,15 @@ impl AppState {
                 SortMode::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
                 SortMode::Date => a.modified.cmp(&b.modified),
                 SortMode::Size => a.size.cmp(&b.size),
+                SortMode::Type => {
+                    // Sort by file extension, then by name
+                    let ext_a = a.path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+                    let ext_b = b.path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+                    match ext_a.cmp(&ext_b) {
+                        std::cmp::Ordering::Equal => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                        other => other,
+                    }
+                }
             };
             
             if self.sort_descending {
