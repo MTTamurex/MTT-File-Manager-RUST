@@ -1091,7 +1091,7 @@ impl ImageViewerApp {
             if elapsed > Duration::from_millis(500) {
                 // VALIDA SE O PATH ATUAL AINDA EXISTE (pode ter sido renomeado/deletado)
                 if Path::new(&self.current_path).exists() {
-                    self.load_folder(false);
+                    self.load_folder(true); // force_refresh para atualizar thumbnails modificados
                 } else {
                     self.go_up_one_level();
                 }
