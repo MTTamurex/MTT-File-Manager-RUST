@@ -196,7 +196,7 @@ pub fn render_list_view(
                         egui::vec2(icon_size_px, icon_size_px)
                     );
                     
-                    if let Some(drive_info) = &item.drive_info {
+                    if let Some(_) = &item.drive_info {
                         // Drive: use specialized drive icon loader
                         if let Some(drive_icon) = ctx.item_icon_loader.get_or_load_drive_icon(ui.ctx(), &item.path.to_string_lossy()) {
                             ui.painter().image(
