@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 use notify::{Watcher, RecursiveMode, RecommendedWatcher};
+use rayon::prelude::*;
 
 // Mapeamento Remix Icon
 const ICON_ARROW_LEFT: &str = "\u{EA64}";  // Seta Esq
@@ -536,26 +537,27 @@ impl ImageViewerApp {
     }
     
     /// Ordena itens baseado no modo atual (mantém pastas sempre primeiro)
+    /// OTIMIZADO: Usa par_sort_by para listas >5000 itens (rayon)
     fn sort_items(&mut self) {
         // Clone interno para mutação, depois wrap em novo Arc
         let mut items_vec = (*self.items).clone();
-        items_vec.sort_by(|a, b| {
-            // 1. Pastas sempre primeiro (a menos que ambos sejam pastas ou ambos arquivos)
+        
+        // Closure de comparação
+        let sort_mode = self.sort_mode;
+        let sort_descending = self.sort_descending;
+        
+        let compare = |a: &FileEntry, b: &FileEntry| -> Ordering {
+            // 1. Pastas sempre primeiro
             if a.is_dir != b.is_dir {
-                return if a.is_dir {
-                    Ordering::Less
-                } else {
-                    Ordering::Greater
-                };
+                return if a.is_dir { Ordering::Less } else { Ordering::Greater };
             }
             
             // 2. Ordena por modo selecionado (Smart Sorting com natord)
-            let ordering = match self.sort_mode {
+            let ordering = match sort_mode {
                 SortMode::Name => natord::compare(&a.name.to_lowercase(), &b.name.to_lowercase()),
                 SortMode::Date => a.modified.cmp(&b.modified),
                 SortMode::Size => a.size.cmp(&b.size),
                 SortMode::Type => {
-                    // Sort by file extension, then by name
                     let ext_a = a.path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
                     let ext_b = b.path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
                     match ext_a.cmp(&ext_b) {
@@ -566,12 +568,20 @@ impl ImageViewerApp {
             };
             
             // 3. Inverte se descending está ativo
-            if self.sort_descending {
-                ordering.reverse()
-            } else {
-                ordering
-            }
-        });
+            if sort_descending { ordering.reverse() } else { ordering }
+        };
+        
+        // Threshold adaptativo: paralelo para listas grandes, sequencial para pequenas
+        const PARALLEL_THRESHOLD: usize = 5000;
+        
+        if items_vec.len() > PARALLEL_THRESHOLD {
+            // Paralelo: usa todos os núcleos da CPU
+            items_vec.par_sort_by(compare);
+        } else {
+            // Sequencial: evita overhead de threads para listas pequenas
+            items_vec.sort_by(compare);
+        }
+        
         self.items = Arc::new(items_vec);
     }
     
