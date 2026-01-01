@@ -16,6 +16,7 @@ pub struct ListViewContext<'a> {
     pub sort_descending: bool,
     pub renaming_state: Option<(usize, String)>,
     pub focus_rename: bool,
+    pub is_computer_view: bool,
     pub texture_cache: &'a mut lru::LruCache<PathBuf, egui::TextureHandle>,
     pub loading_set: &'a mut std::collections::HashSet<PathBuf>,
     pub scanned_folders: &'a mut std::collections::HashSet<PathBuf>,
@@ -102,14 +103,25 @@ pub fn render_list_view(
         let (clicked_name, _) = draw_header(ui, "Nome", w_name, SortMode::Name);
         if clicked_name { return Some(SortMode::Name); }
         
-        let (clicked_date, _) = draw_header(ui, "Última modificação", w_date, SortMode::Date);
-        if clicked_date { return Some(SortMode::Date); }
-        
-        let (clicked_type, _) = draw_header(ui, "Tipo", w_type, SortMode::Type);
-        if clicked_type { return Some(SortMode::Type); }
-        
-        let (clicked_size, _) = draw_header(ui, "Tamanho", w_size, SortMode::Size);
-        if clicked_size { return Some(SortMode::Size); }
+        if ctx.is_computer_view {
+            let (clicked_type, _) = draw_header(ui, "Tipo", w_type, SortMode::Type);
+            if clicked_type { return Some(SortMode::Type); }
+            
+            let (clicked_total, _) = draw_header(ui, "Espaço Total", w_date, SortMode::Size);
+            if clicked_total { return Some(SortMode::Size); }
+            
+            let (clicked_free, _) = draw_header(ui, "Espaço Livre", w_size, SortMode::Size);
+            if clicked_free { return Some(SortMode::Size); }
+        } else {
+            let (clicked_date, _) = draw_header(ui, "Última modificação", w_date, SortMode::Date);
+            if clicked_date { return Some(SortMode::Date); }
+            
+            let (clicked_type, _) = draw_header(ui, "Tipo", w_type, SortMode::Type);
+            if clicked_type { return Some(SortMode::Type); }
+            
+            let (clicked_size, _) = draw_header(ui, "Tamanho", w_size, SortMode::Size);
+            if clicked_size { return Some(SortMode::Size); }
+        }
         
         None
     }).inner.map(|mode| sort_action = Some(mode));
@@ -184,7 +196,25 @@ pub fn render_list_view(
                         egui::vec2(icon_size_px, icon_size_px)
                     );
                     
-                    if item.is_dir {
+                    if let Some(drive_info) = &item.drive_info {
+                        // Drive: use specialized drive icon loader
+                        if let Some(drive_icon) = ctx.item_icon_loader.get_or_load_drive_icon(ui.ctx(), &item.path.to_string_lossy()) {
+                            ui.painter().image(
+                                drive_icon.id(),
+                                icon_rect,
+                                Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
+                                Color32::WHITE
+                            );
+                        } else {
+                            ui.painter().text(
+                                icon_rect.min,
+                                egui::Align2::LEFT_TOP,
+                                "💽",
+                                FontId::proportional(14.0),
+                                Color32::GRAY
+                            );
+                        }
+                    } else if item.is_dir {
                         // folder: Windows native icon
                         if let Some(folder_icon) = ctx.folder_icon_texture {
                             ui.painter().image(
@@ -268,40 +298,89 @@ pub fn render_list_view(
                         );
                     }
 
-                    // 2. Date
-                    ui.painter().text(
-                        Pos2::new(rect.min.x + w_name, rect.min.y + 5.0),
-                        egui::Align2::LEFT_TOP,
-                        format_date(item.modified),
-                        FontId::proportional(12.0),
-                        secondary_color,
-                    );
+                    if ctx.is_computer_view {
+                        // 2. Type
+                        let drive_type = if let Some(di) = &item.drive_info {
+                            if !di.file_system.is_empty() {
+                                format!("Disco Local ({})", di.file_system)
+                            } else {
+                                "Disco Local".to_string()
+                            }
+                        } else {
+                            "Unidade".to_string()
+                        };
+                        
+                        ui.painter().text(
+                            Pos2::new(rect.min.x + w_name, rect.min.y + 5.0),
+                            egui::Align2::LEFT_TOP,
+                            drive_type,
+                            FontId::proportional(12.0),
+                            secondary_color,
+                        );
 
-                    // 3. Type (truncated)
-                    let type_str = get_file_type_string(item);
-                    let max_type_chars = 14; // ~100px at 7px per char
-                    let display_type: String = if type_str.chars().count() > max_type_chars {
-                        type_str.chars().take(max_type_chars - 2).collect::<String>() + ".."
+                        // 3. Total Size
+                        let total_str = if let Some(di) = &item.drive_info {
+                            format_size(di.total_space)
+                        } else {
+                            "-".to_string()
+                        };
+                        ui.painter().text(
+                            Pos2::new(rect.min.x + w_name + w_type, rect.min.y + 5.0),
+                            egui::Align2::LEFT_TOP,
+                            total_str,
+                            FontId::proportional(12.0),
+                            secondary_color,
+                        );
+
+                        // 4. Free Space
+                        let free_str = if let Some(di) = &item.drive_info {
+                            format_size(di.free_space)
+                        } else {
+                            "-".to_string()
+                        };
+                        ui.painter().text(
+                            Pos2::new(rect.min.x + w_name + w_type + w_date, rect.min.y + 5.0),
+                            egui::Align2::LEFT_TOP,
+                            free_str,
+                            FontId::proportional(12.0),
+                            secondary_color,
+                        );
                     } else {
-                        type_str
-                    };
-                    ui.painter().text(
-                        Pos2::new(rect.min.x + w_name + w_date, rect.min.y + 5.0),
-                        egui::Align2::LEFT_TOP,
-                        display_type,
-                        FontId::proportional(12.0),
-                        secondary_color,
-                    );
+                        // 2. Date
+                        ui.painter().text(
+                            Pos2::new(rect.min.x + w_name, rect.min.y + 5.0),
+                            egui::Align2::LEFT_TOP,
+                            format_date(item.modified),
+                            FontId::proportional(12.0),
+                            secondary_color,
+                        );
 
-                    // 4. Size
-                    let size_str = if item.is_dir { "".to_string() } else { format_size(item.size) };
-                    ui.painter().text(
-                        Pos2::new(rect.min.x + w_name + w_date + w_type, rect.min.y + 5.0),
-                        egui::Align2::LEFT_TOP,
-                        size_str,
-                        FontId::proportional(12.0),
-                        secondary_color,
-                    );
+                        // 3. Type (truncated)
+                        let type_str = get_file_type_string(item);
+                        let max_type_chars = 14; // ~100px at 7px per char
+                        let display_type: String = if type_str.chars().count() > max_type_chars {
+                            type_str.chars().take(max_type_chars - 2).collect::<String>() + ".."
+                        } else {
+                            type_str
+                        };
+                        ui.painter().text(
+                            Pos2::new(rect.min.x + w_name + w_date, rect.min.y + 5.0),
+                            egui::Align2::LEFT_TOP,
+                            display_type,
+                            FontId::proportional(12.0),
+                            secondary_color,
+                        );
+
+                        // 4. Size
+                        let size_str = if item.is_dir { "".to_string() } else { format_size(item.size) };
+                        ui.painter().text(
+                            Pos2::new(rect.min.x + w_name + w_date + w_type, rect.min.y + 5.0),
+                            egui::Align2::LEFT_TOP,
+                            size_str,
+                            FontId::proportional(12.0),
+                            secondary_color,
+                        );
+                    }
                 });
             }
         }
