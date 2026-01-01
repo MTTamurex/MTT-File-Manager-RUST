@@ -11,9 +11,12 @@ use eframe::egui;
 use windows::core::Interface;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use std::time::SystemTime;
-use image::ImageFormat;
+use image::{ImageFormat, DynamicImage};
 
-/// Spawns thumbnail worker threads
+/// Maximum concurrent decode operations (RAM limiter)
+const MAX_CONCURRENT_DECODES: usize = 4;
+
+/// Spawns thumbnail worker threads with concurrency limiting
 pub fn spawn_thumbnail_workers(
     shared_rx: Arc<Mutex<Receiver<(PathBuf, usize)>>>,
     tx: Sender<ThumbnailData>,
@@ -21,15 +24,20 @@ pub fn spawn_thumbnail_workers(
     gen_tracker: Arc<AtomicUsize>,
     disk_cache: Arc<ThumbnailDiskCache>,
 ) {
-    for _ in 0..8 {
+    // AtomicUsize counter to limit concurrent decode operations (RAM limiter)
+    let active_decodes = Arc::new(AtomicUsize::new(0));
+    
+    // 4 worker threads (reduced from 8 - counter limits actual concurrent work)
+    for _ in 0..4 {
         let rx = shared_rx.clone();
         let tx = tx.clone();
         let gen_tracker = gen_tracker.clone();
         let ctx = ctx.clone();
         let disk_cache = disk_cache.clone();
+        let active_counter = active_decodes.clone();
         
         std::thread::spawn(move || {
-            thumbnail_worker_loop(rx, tx, ctx, gen_tracker, disk_cache);
+            thumbnail_worker_loop(rx, tx, ctx, gen_tracker, disk_cache, active_counter);
         });
     }
 }
@@ -40,6 +48,7 @@ fn thumbnail_worker_loop(
     ctx: egui::Context,
     gen_tracker: Arc<AtomicUsize>,
     disk_cache: Arc<ThumbnailDiskCache>,
+    active_decodes: Arc<AtomicUsize>,
 ) {
     unsafe { let _ = CoInitializeEx(None, COINIT_MULTITHREADED); }
     
@@ -58,7 +67,7 @@ fn thumbnail_worker_loop(
                     
                     let mut final_result = None;
                     
-                    // STEP 0: Check Disk Cache
+                    // STEP 0: Check Disk Cache (já otimizado, vai direto para UI)
                     if let Some(cached_bytes) = disk_cache.get(&path, modified) {
                         if let Ok(img) = image::load_from_memory_with_format(&cached_bytes, ImageFormat::WebP) {
                             let rgba = img.to_rgba8();
@@ -66,13 +75,29 @@ fn thumbnail_worker_loop(
                         }
                     }
                     
+                    // STEP 1: Se não está em cache, decodifica com limite de concorrência
                     if final_result.is_none() {
-                        // HYBRID PIPELINE
-                        final_result = generate_thumbnail_hybrid(&path);
-                        
-                        if let Some((ref data, w, h)) = final_result {
-                            let _ = disk_cache.put(&path, modified, data, w, h);
+                        // Aguarda até ter um slot disponível (max 4 decodes simultâneos)
+                        while active_decodes.load(Ordering::Relaxed) >= MAX_CONCURRENT_DECODES {
+                            std::thread::sleep(std::time::Duration::from_millis(10));
                         }
+                        active_decodes.fetch_add(1, Ordering::Relaxed);
+                        
+                        // HYBRID PIPELINE com resize imediato
+                        if let Some((raw_data, w, h)) = generate_thumbnail_hybrid(&path) {
+                            // STEP 2: Resize imediato para 512px (libera RAM do full-res)
+                            let resized = resize_to_max_512(&raw_data, w, h);
+                            
+                            // STEP 3: Salva versão otimizada em SQLite
+                            let _ = disk_cache.put(&path, modified, &resized.0, resized.1, resized.2);
+                            
+                            // STEP 4: Usa a versão resizada (já otimizada)
+                            final_result = Some(resized);
+                        }
+                        // raw_data é dropado aqui automaticamente (libera RAM)
+                        
+                        // Libera slot
+                        active_decodes.fetch_sub(1, Ordering::Relaxed);
                     }
                     
                     let (data, w, h) = final_result.unwrap_or_else(|| create_error_placeholder());
@@ -91,6 +116,30 @@ fn thumbnail_worker_loop(
         }
     }
     unsafe { CoUninitialize(); }
+}
+
+/// Resize RGBA buffer to max 512x512 while preserving aspect ratio
+fn resize_to_max_512(rgba_data: &[u8], width: u32, height: u32) -> (Vec<u8>, u32, u32) {
+    // Se já é pequeno o suficiente, retorna como está
+    if width <= 512 && height <= 512 {
+        return (rgba_data.to_vec(), width, height);
+    }
+    
+    // Calcula novo tamanho mantendo aspect ratio
+    let scale = 512.0 / (width.max(height) as f32);
+    let new_w = ((width as f32) * scale).round() as u32;
+    let new_h = ((height as f32) * scale).round() as u32;
+    
+    // Usa image crate para resize
+    if let Some(img) = image::ImageBuffer::from_raw(width, height, rgba_data.to_vec()) {
+        let dynamic = DynamicImage::ImageRgba8(img);
+        let resized = dynamic.resize(new_w, new_h, image::imageops::FilterType::Lanczos3);
+        let rgba = resized.to_rgba8();
+        return (rgba.to_vec(), rgba.width(), rgba.height());
+    }
+    
+    // Fallback: retorna original se resize falhar
+    (rgba_data.to_vec(), width, height)
 }
 
 /// The 3-Step Hybrid Pipeline
