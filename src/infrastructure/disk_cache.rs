@@ -46,6 +46,15 @@ impl ThumbnailDiskCache {
             [],
         ).expect("Failed to create thumbnails table");
 
+        // Create preferences table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS user_preferences (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )",
+            [],
+        ).expect("Failed to create preferences table");
+
         Self { 
             db: Arc::new(Mutex::new(conn)),
             cache_dir 
@@ -137,5 +146,25 @@ impl ThumbnailDiskCache {
         )?;
 
         Ok(())
+    }
+
+    /// Sets a user preference
+    pub fn set_preference(&self, key: &str, value: &str) {
+        if let Ok(db) = self.db.lock() {
+            let _ = db.execute(
+                "INSERT OR REPLACE INTO user_preferences (key, value) VALUES (?, ?)",
+                params![key, value],
+            );
+        }
+    }
+
+    /// Gets a user preference
+    pub fn get_preference(&self, key: &str) -> Option<String> {
+        if let Ok(db) = self.db.lock() {
+            let mut stmt = db.prepare("SELECT value FROM user_preferences WHERE key = ?").ok()?;
+            stmt.query_row(params![key], |row| row.get(0)).ok()
+        } else {
+            None
+        }
     }
 }

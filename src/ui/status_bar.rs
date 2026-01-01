@@ -5,7 +5,7 @@
 use eframe::egui;
 use lru::LruCache;
 use std::path::PathBuf;
-use crate::domain::file_entry::{ViewMode, SortMode};
+use crate::domain::file_entry::{ViewMode, SortMode, FoldersPosition};
 
 /// Status bar action that needs to be handled by the caller
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -28,6 +28,7 @@ pub fn render_status_bar(
     thumbnail_size: &mut f32,
     sort_mode: &mut SortMode,
     sort_descending: &mut bool,
+    folders_position: &mut FoldersPosition,
     texture_cache: &LruCache<PathBuf, egui::TextureHandle>,
 ) -> StatusBarAction {
     let mut action = StatusBarAction::None;
@@ -90,6 +91,22 @@ pub fn render_status_bar(
         // Sort direction indicator
         let arrow = if *sort_descending { "↓" } else { "↑" };
         ui.label(arrow);
+        
+        ui.separator();
+        
+        ui.label("Pastas:");
+        if ui.selectable_label(*folders_position == FoldersPosition::First, "Início").on_hover_text("Pastas sempre no topo").clicked() {
+            *folders_position = FoldersPosition::First;
+            action = StatusBarAction::SortChanged;
+        }
+        if ui.selectable_label(*folders_position == FoldersPosition::Last, "Fim").on_hover_text("Pastas no final da lista").clicked() {
+            *folders_position = FoldersPosition::Last;
+            action = StatusBarAction::SortChanged;
+        }
+        if ui.selectable_label(*folders_position == FoldersPosition::Mixed, "Misto").on_hover_text("Pastas misturadas com arquivos").clicked() {
+            *folders_position = FoldersPosition::Mixed;
+            action = StatusBarAction::SortChanged;
+        }
         
         // === RIGHT SIDE: System info (push to right with available space) ===
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

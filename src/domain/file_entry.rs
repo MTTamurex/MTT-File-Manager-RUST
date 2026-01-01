@@ -113,3 +113,11 @@ pub enum IconSize {
     Large,  // 32x32 ou 48x48
     Jumbo,  // 256x256 (via Shell Image Factory)
 }
+
+/// Posição das pastas na listagem
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub enum FoldersPosition {
+    First,   // Pastas antes de arquivos (padrão)
+    Last,    // Arquivos antes de pastas
+    Mixed,   // Misturados por critério de ordenação
+}

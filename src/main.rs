@@ -115,7 +115,11 @@ struct ImageViewerApp {
     
     // Sorting state
     sort_mode: SortMode,
-    sort_descending: bool,  // true = Z-A, Mais Novo, Maior
+    sort_descending: bool,      // true = Z-A, Mais Novo, Maior
+    folders_position: FoldersPosition, // First, Last, Mixed
+    
+    // Persistence Layer
+    disk_cache: Arc<ThumbnailDiskCache>,
     
     // View Mode
     view_mode: ViewMode,
@@ -210,9 +214,31 @@ impl ImageViewerApp {
             .join("thumbnails");
         let disk_cache = Arc::new(ThumbnailDiskCache::new(cache_dir));
 
+        // Load Preferences from SQLite
+        let sort_mode = disk_cache.get_preference("sort_mode")
+            .map(|s| match s.as_str() {
+                "date" => SortMode::Date,
+                "size" => SortMode::Size,
+                "type" => SortMode::Type,
+                _ => SortMode::Name,
+            })
+            .unwrap_or(SortMode::Name);
+
+        let sort_descending = disk_cache.get_preference("sort_descending")
+            .map(|s| s == "true")
+            .unwrap_or(false);
+
+        let folders_position = disk_cache.get_preference("folders_position")
+            .map(|s| match s.as_str() {
+                "last" => FoldersPosition::Last,
+                "mixed" => FoldersPosition::Mixed,
+                _ => FoldersPosition::First,
+            })
+            .unwrap_or(FoldersPosition::First);
+
         // 8 threads: equilíbrio ideal entre SSD e HDD USB
         use mtt_file_manager::workers::thumbnail_worker::spawn_thumbnail_workers;
-        spawn_thumbnail_workers(shared_req_rx, img_tx, ctx.clone(), shared_gen.clone(), disk_cache);
+        spawn_thumbnail_workers(shared_req_rx, img_tx, ctx.clone(), shared_gen.clone(), disk_cache.clone());
         
         // --- ASYNC ICON WORKER (single thread, evita I/O bloqueante) ---
         let (icon_req_tx, icon_req_rx) = mpsc::channel::<PathBuf>();
@@ -248,9 +274,11 @@ impl ImageViewerApp {
             scanned_folders: HashSet::new(),
             // Cache Manager (unifica texture_cache, icon_cache, loading_set, etc.)
             cache_manager: mtt_file_manager::ui::cache::CacheManager::new(),
-            // Sorting - padrÃ£o: Nome, Ascendente
-            sort_mode: SortMode::Name,
-            sort_descending: false,
+            // Sorting - carregado do SQLite ou defaults
+            sort_mode,
+            sort_descending,
+            folders_position,
+            disk_cache: disk_cache.clone(),
             // View mode: Grid por padrÃ£o
             view_mode: ViewMode::Grid,
             // Selection & Preview
@@ -517,7 +545,7 @@ impl ImageViewerApp {
         ui.add(btn).on_hover_text(tooltip)
     }
 
-    /// Filtra itens baseado na query de busca
+    /// Filtra itens baseado na query de busca e reaplica ordenação
     fn filter_items(&mut self) {
         if self.search_query.is_empty() {
             self.items = Arc::new(self.all_items.clone());
@@ -529,9 +557,12 @@ impl ImageViewerApp {
                 .collect());
         }
         self.total_items = self.items.len();
+        
+        // SEMPRE ordena após filtrar para manter consistência
+        self.sort_items();
     }
     
-    /// Ordena itens baseado no modo atual (mantém pastas sempre primeiro)
+    /// Ordena itens baseado no modo atual e preferência de posição de pastas
     /// OTIMIZADO: Usa par_sort_by para listas >5000 itens (rayon)
     fn sort_items(&mut self) {
         // Clone interno para mutação, depois wrap em novo Arc
@@ -540,11 +571,17 @@ impl ImageViewerApp {
         // Closure de comparação
         let sort_mode = self.sort_mode;
         let sort_descending = self.sort_descending;
+        let folders_position = self.folders_position;
         
         let compare = |a: &FileEntry, b: &FileEntry| -> Ordering {
-            // 1. Pastas sempre primeiro
-            if a.is_dir != b.is_dir {
-                return if a.is_dir { Ordering::Less } else { Ordering::Greater };
+            // 1. Posição das pastas (se não for Mixed)
+            if folders_position != FoldersPosition::Mixed && a.is_dir != b.is_dir {
+                let folders_come_first = folders_position == FoldersPosition::First;
+                return if a.is_dir {
+                    if folders_come_first { Ordering::Less } else { Ordering::Greater }
+                } else {
+                    if folders_come_first { Ordering::Greater } else { Ordering::Less }
+                };
             }
             
             // 2. Ordena por modo selecionado (Smart Sorting com natord)
@@ -578,6 +615,26 @@ impl ImageViewerApp {
         }
         
         self.items = Arc::new(items_vec);
+    }
+
+    /// Salva as preferências atuais no SQLite
+    fn save_preferences(&self) {
+        let sort_mode_str = match self.sort_mode {
+            SortMode::Name => "name",
+            SortMode::Date => "date",
+            SortMode::Size => "size",
+            SortMode::Type => "type",
+        };
+        self.disk_cache.set_preference("sort_mode", sort_mode_str);
+        
+        self.disk_cache.set_preference("sort_descending", if self.sort_descending { "true" } else { "false" });
+        
+        let folders_pos_str = match self.folders_position {
+            FoldersPosition::First => "first",
+            FoldersPosition::Last => "last",
+            FoldersPosition::Mixed => "mixed",
+        };
+        self.disk_cache.set_preference("folders_position", folders_pos_str);
     }
     
     /// Requisita scan assÃ­ncrono de uma pasta para descobrir primeira imagem.
@@ -1051,9 +1108,8 @@ impl ImageViewerApp {
                 // Chegou dados! Adiciona Ã  lista mestre
                 self.all_items.extend(new_batch);
                 
-                // Reaplica filtro e ordenaÃ§Ã£o incrementalmente
+                // Reaplica filtro (que já chama sort_items internamente)
                 self.filter_items(); 
-                self.sort_items();
             }
             ctx.request_repaint();
         }
@@ -1280,6 +1336,7 @@ impl ImageViewerApp {
                     self.sort_descending = false;
                 }
                 self.sort_items();
+                self.save_preferences();
             }
             _ => {}
         }
@@ -1693,10 +1750,14 @@ impl eframe::App for ImageViewerApp {
                     &mut self.thumbnail_size,
                     &mut self.sort_mode,
                     &mut self.sort_descending,
+                    &mut self.folders_position,
                     &self.cache_manager.texture_cache,
                 );
                 match action {
-                    StatusBarAction::SortChanged => self.sort_items(),
+                    StatusBarAction::SortChanged => {
+                        self.sort_items();
+                        self.save_preferences();
+                    },
                     StatusBarAction::ViewModeChanged => {
                         // View mode changed - nothing extra to do
                     }
@@ -1789,6 +1850,7 @@ impl eframe::App for ImageViewerApp {
                     if ui.button(sort_symbol).on_hover_text("Inverter Ordem").clicked() {
                         self.sort_descending = !self.sort_descending;
                         self.sort_items();
+                        self.save_preferences();
                     }
 
                     egui::ComboBox::from_id_salt("sort_mode")
@@ -1799,10 +1861,22 @@ impl eframe::App for ImageViewerApp {
                             SortMode::Type => "Tipo",
                         })
                         .show_ui(ui, |ui| {
-                            if ui.selectable_value(&mut self.sort_mode, SortMode::Name, "Nome").clicked() { self.sort_items(); }
-                            if ui.selectable_value(&mut self.sort_mode, SortMode::Date, "Data").clicked() { self.sort_items(); }
-                            if ui.selectable_value(&mut self.sort_mode, SortMode::Size, "Tamanho").clicked() { self.sort_items(); }
-                            if ui.selectable_value(&mut self.sort_mode, SortMode::Type, "Tipo").clicked() { self.sort_items(); }
+                            if ui.selectable_value(&mut self.sort_mode, SortMode::Name, "Nome").clicked() { 
+                                self.sort_items(); 
+                                self.save_preferences();
+                            }
+                            if ui.selectable_value(&mut self.sort_mode, SortMode::Date, "Data").clicked() { 
+                                self.sort_items(); 
+                                self.save_preferences();
+                            }
+                            if ui.selectable_value(&mut self.sort_mode, SortMode::Size, "Tamanho").clicked() { 
+                                self.sort_items(); 
+                                self.save_preferences();
+                            }
+                            if ui.selectable_value(&mut self.sort_mode, SortMode::Type, "Tipo").clicked() { 
+                                self.sort_items(); 
+                                self.save_preferences();
+                            }
                         });
 
                     ui.separator();
@@ -1816,7 +1890,6 @@ impl eframe::App for ImageViewerApp {
                     );
                     if search_response.changed() {
                         self.filter_items();
-                        self.sort_items();
                     }
                     ui.label(egui::RichText::new(ICON_SEARCH).family(egui::FontFamily::Name("icons".into())).size(16.0));
 
