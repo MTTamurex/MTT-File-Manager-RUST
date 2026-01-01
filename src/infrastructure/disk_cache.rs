@@ -55,6 +55,15 @@ impl ThumbnailDiskCache {
             [],
         ).expect("Failed to create preferences table");
 
+        // Create folder covers table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS folder_covers (
+                folder_path TEXT PRIMARY KEY,
+                cover_path TEXT
+            )",
+            [],
+        ).expect("Failed to create folder covers table");
+
         Self { 
             db: Arc::new(Mutex::new(conn)),
             cache_dir 
@@ -165,6 +174,26 @@ impl ThumbnailDiskCache {
             stmt.query_row(params![key], |row| row.get(0)).ok()
         } else {
             None
+        }
+    }
+
+    /// Obtém a capa (thumbnail) de uma pasta se já foi descoberta
+    pub fn get_folder_cover(&self, folder_path: &Path) -> Option<PathBuf> {
+        let db = self.db.lock().ok()?;
+        let mut stmt = db.prepare_cached("SELECT cover_path FROM folder_covers WHERE folder_path = ?").ok()?;
+        stmt.query_row([folder_path.to_string_lossy()], |row| {
+            let path_str: String = row.get(0)?;
+            Ok(PathBuf::from(path_str))
+        }).ok()
+    }
+
+    /// Salva a capa (thumbnail) descoberta para uma pasta
+    pub fn set_folder_cover(&self, folder_path: &Path, cover_path: &Path) {
+        if let Ok(db) = self.db.lock() {
+            let _ = db.execute(
+                "INSERT OR REPLACE INTO folder_covers (folder_path, cover_path) VALUES (?, ?)",
+                [folder_path.to_string_lossy(), cover_path.to_string_lossy()],
+            );
         }
     }
 }

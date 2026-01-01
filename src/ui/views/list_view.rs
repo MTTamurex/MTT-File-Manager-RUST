@@ -142,6 +142,12 @@ pub fn render_list_view(
             for i in row_range {
                 if i >= ctx.items.len() { break; }
                 let item = &ctx.items[i];
+
+                // GATILHO LAZY LOAD PARA PASTAS: Descobre capa se ainda não tem
+                if item.is_dir && !ctx.is_computer_view && item.folder_cover.is_none() && !ctx.scanned_folders.contains(&item.path) {
+                    ctx.scanned_folders.insert(item.path.clone());
+                    ops.request_folder_scan(item.path.clone());
+                }
                 let is_selected = ctx.selected_item == Some(i);
 
                 ui.push_id(i, |ui| {

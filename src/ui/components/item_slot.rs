@@ -160,6 +160,14 @@ fn render_directory_slot<O: ItemSlotOperations>(
         ops.request_folder_scan(item.path.clone());
     }
     
+    // Se TEM capa (de SQLite ou descoberta recente) MAS a textura não está carregada: Carrega!
+    if let Some(ref cover_path) = item.folder_cover {
+        if !ctx.texture_cache.contains(cover_path) && !ctx.loading_set.contains(cover_path) && ctx.loading_set.len() < 50 {
+            ctx.loading_set.insert(cover_path.clone());
+            ops.request_thumbnail_load(cover_path.clone());
+        }
+    }
+    
     // GEOMETRIA
     let available_h = ui.available_height();
     let folder_w = ctx.thumbnail_size * 0.60;
