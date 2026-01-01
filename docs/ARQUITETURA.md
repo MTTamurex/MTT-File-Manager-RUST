@@ -1016,16 +1016,16 @@ std::thread::spawn(move || {
 });
 ```
 
-### Fase 4: Notification System
-
-**Novo módulo**: `src/application/notification.rs`
-
-**Componentes**:
-- `AppNotification`: Struct para mensagens com level, duração e timestamp
-- `NotificationLevel`: Info, Success, Warning, Error (com cores)
-- `NotificationManager`: Gerencia lista de notificações com auto-cleanup
-
 **Toast UI**: Overlay no canto inferior direito com fade animation.
+
+### Fase 5: Previews de Vídeo em Pastas
+
+**Problema**: Apenas imagens eram usadas como "capa" de pastas. Pastas contendo apenas vídeos não exibiam preview no ícone.
+
+**Solução**: Expansão do scanner de preview para incluir extensões de vídeo.
+- Renomeado `find_first_image_in_folder` para `find_folder_preview_item`.
+- Adicionado suporte a: `mp4`, `mkv`, `avi`, `mov`, `webm`.
+- Integração nativa com a API de thumbnails do Windows (que já extrai frames de vídeo).
 
 ---
 

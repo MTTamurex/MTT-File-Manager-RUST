@@ -190,10 +190,10 @@ impl ImageViewerApp {
         
         // Spawna WORKER THREAD: fica em loop processando fila
         std::thread::spawn(move || {
-            // Loop infinito: consome requisiÃ§Ãµes da fila
+            // Loop infinito: consome requisições da fila
             while let Ok(folder_path) = cover_req_rx.recv() {
-                // Executa busca (funÃ§Ã£o jÃ¡ existente)
-                let cover = find_first_image_in_folder(&folder_path);
+                // Executa busca (imagem ou vídeo)
+                let cover = find_folder_preview_item(&folder_path);
                 
                 // Devolve resultado para UI thread
                 let _ = cover_res_tx.send((folder_path, cover));
