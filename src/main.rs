@@ -803,13 +803,13 @@ impl ImageViewerApp {
                 }
             }
 
-            // Envia o restante (Ãºltimo lote) se sobrou algo e a geraÃ§Ã£o ainda Ã© vÃ¡lida
+            // Envia o restante (último lote) se sobrou algo e a geração ainda é válida
             if !batch.is_empty() && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                 let _ = file_entry_sender.send((my_gen, batch));
                 ctx.request_repaint();
             }
             
-            // Envia vetor VAZIO para sinalizar FIM do carregamento (apenas se a geraÃ§Ã£o for a mesma)
+            // Envia vetor VAZIO para sinalizar FIM do carregamento (apenas se a geração for a mesma)
             if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                 let _ = file_entry_sender.send((my_gen, Vec::new()));
                 ctx.request_repaint();
@@ -946,6 +946,7 @@ impl ImageViewerApp {
         self.selected_item = None;
         self.selected_file = None;
         self.total_items = self.disks.len();
+        self.is_loading_folder = false; // CRITICAL: Clear loading state for computer view
     }
     
     /// Sobe um nível (adiciona ao histórico)

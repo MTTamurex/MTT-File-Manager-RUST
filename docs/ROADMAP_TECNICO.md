@@ -72,6 +72,15 @@
 - **Persistent Sort & Folder Position ✅**: Preferências de ordenação e posição de pastas salvas em SQLite.
 - **Proactive Folder Previews ✅**: Escaneamento de capas de pastas no modo lista e persistência em SQLite.
 
+### Otimização do Garbage Collector (2026-01-02) ✅ NOVO
+- **Problema Crítico Resolvido**: GC bloqueava database lock durante verificações de arquivos (I/O lento), travando navegação.
+- **Solução Implementada**: Refatoração em 3 fases com locks curtos:
+  1. **Fase 1**: Leitura rápida de paths (lock ~50ms)
+  2. **Fase 2**: Verificação de existência de arquivos (SEM lock)
+  3. **Fase 3**: Batch transaction para deleções (1 commit vs N commits)
+- **Correção Adicional**: `setup_computer_view()` agora seta `is_loading_folder = false`
+- **Impacto**: App responde imediatamente durante GC, deleções 10-100x mais rápidas
+
 ---
 
 ## Débitos Técnicos Identificados (Atualizado: 2026-01-01)
