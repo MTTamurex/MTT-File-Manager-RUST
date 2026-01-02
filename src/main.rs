@@ -180,6 +180,9 @@ struct ImageViewerApp {
     // ONEDRIVE SIDEBAR SHORTCUT
     onedrive_path: Option<String>,           // Caminho do OneDrive (se instalado)
     onedrive_icon: Option<egui::TextureHandle>,  // Ícone nativo do OneDrive
+    
+    // NAVEGAÇÃO / ADDRESS BAR (Breadcrumbs vs Edit)
+    is_address_editing: bool,
 }
 
 impl ImageViewerApp {
@@ -340,6 +343,9 @@ impl ImageViewerApp {
                 .or_else(|| std::env::var("OneDriveConsumer").ok())
                 .or_else(|| std::env::var("OneDriveCommercial").ok()),
             onedrive_icon: None,  // Will be loaded lazily on first sidebar render
+            
+            // NAVEGAÇÃO / ADDRESS BAR
+            is_address_editing: false,
         };
         
         // Inicia monitoramento inicial
@@ -1947,21 +1953,109 @@ impl eframe::App for ImageViewerApp {
 
                     ui.separator();
 
-                    // 3. BARRA DE ENDEREÇO (OCUPA O MEIO)
-                    let addr_width = ui.available_width().max(100.0);
-                    let response = ui.add_sized(
-                        egui::vec2(addr_width, 22.0),
-                        egui::TextEdit::singleline(&mut self.path_input)
-                            .hint_text("Caminho...")
+                    // 3. BARRA DE ENDEREÇO (Breadcrumbs ou Edição)
+                    // No layout reverse (right_to_left), o available_width() retorna o que sobrou à esquerda.
+                    let addr_width = (ui.available_width() - 4.0).max(100.0);
+                    let (addr_rect, _addr_response) = ui.allocate_exact_size(
+                        egui::vec2(addr_width, 24.0),
+                        egui::Sense::hover()
                     );
                     
-                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        let path = self.path_input.clone();
-                        if Path::new(&path).exists() {
-                            self.navigate_to(&path);
-                        } else {
-                            self.path_input = self.current_path.clone();
+                    let mut navigate_target = None;
+                    let mut start_editing = false;
+
+                    // IMPORTANTE: Usar allocate_new_ui com closure para ter o novo Ui com layout correto
+                    ui.allocate_new_ui(egui::UiBuilder::new()
+                        .max_rect(addr_rect)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)), 
+                        |ui| {
+                            if self.is_address_editing {
+                                let edit_response = ui.add_sized(
+                                    ui.available_size(),
+                                    egui::TextEdit::singleline(&mut self.path_input)
+                                        .hint_text("Caminho...")
+                                        .id_source("address_edit")
+                                );
+                                
+                                if edit_response.clicked_elsewhere() || (edit_response.lost_focus() && !ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+                                    self.is_address_editing = false;
+                                }
+                                
+                                if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                    let path = self.path_input.clone();
+                                    if Path::new(&path).exists() {
+                                        navigate_target = Some(path);
+                                        self.is_address_editing = false;
+                                    } else {
+                                        self.path_input = self.current_path.clone();
+                                        self.is_address_editing = false;
+                                    }
+                                }
+                                
+                                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                                    self.is_address_editing = false;
+                                    self.path_input = self.current_path.clone();
+                                }
+                            } else {
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 2.0;
+                                    
+                                    if self.current_path == "Este Computador" {
+                                        ui.label(egui::RichText::new("Este Computador").size(13.0));
+                                    } else {
+                                        let path = Path::new(&self.current_path);
+                                        let mut full_accumulated = PathBuf::new();
+                                        let components: Vec<_> = path.components().collect();
+                                        
+                                        for (i, comp) in components.iter().enumerate() {
+                                            let comp_str = comp.as_os_str().to_string_lossy();
+                                            let display_name = comp_str.trim_end_matches('\\');
+                                            
+                                            if display_name.is_empty() && i > 0 { continue; }
+                                            
+                                            full_accumulated.push(comp);
+                                            let target_path = full_accumulated.to_string_lossy().to_string();
+                                            
+                                            // Nome do drive ou pasta
+                                            let display = if display_name.is_empty() { 
+                                                comp_str.into_owned() // Root / ou C:\
+                                            } else { 
+                                                display_name.to_string()
+                                            };
+
+                                            if ui.button(display).clicked() {
+                                                navigate_target = Some(target_path);
+                                            }
+                                            
+                                            if i < components.len() - 1 {
+                                                ui.label(egui::RichText::new("›").size(14.0).color(egui::Color32::from_gray(120)));
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Espaço clicável à direita para entrar no modo edição
+                                    let remaining = ui.available_width();
+                                    if remaining > 0.0 {
+                                        let (_rect, resp) = ui.allocate_exact_size(
+                                            egui::vec2(remaining, ui.available_height()),
+                                            egui::Sense::click()
+                                        );
+                                        if resp.clicked() {
+                                            start_editing = true;
+                                        }
+                                    }
+                                });
+                            }
                         }
+                    );
+
+                    if let Some(target) = navigate_target {
+                        self.navigate_to(&target);
+                    }
+                    if start_editing {
+                        self.path_input = self.current_path.clone();
+                        self.is_address_editing = true;
+                        ui.ctx().memory_mut(|m| m.request_focus(egui::Id::from("address_edit").with("text_edit")));
                     }
                 });
             });
