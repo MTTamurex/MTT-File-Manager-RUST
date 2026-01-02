@@ -191,6 +191,9 @@ fn render_directory_slot<O: ItemSlotOperations>(
         folder_rect,
         item.folder_cover.as_ref().and_then(|p| ctx.texture_cache.get(p))
     );
+    
+    // Render sync status badge (OneDrive) for folders
+    render_sync_badge(ui, folder_rect, item.sync_status);
 
     // Aloca espaço da pasta
     ui.allocate_rect(folder_rect, egui::Sense::hover());
