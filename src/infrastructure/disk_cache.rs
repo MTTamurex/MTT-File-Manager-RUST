@@ -29,7 +29,20 @@ impl ThumbnailDiskCache {
         Self::cleanup_legacy(&cache_dir);
 
         let db_path = cache_dir.join("thumbnails.db");
-        let conn = Connection::open(db_path).expect("Failed to open thumbnail database");
+        let conn = match Connection::open(&db_path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[Cache] Failed to open database: {:?}. Using in-memory fallback.", e);
+                // Fallback to in-memory if disk database fails
+                match Connection::open_in_memory() {
+                    Ok(c) => c,
+                    Err(fatal_e) => {
+                        // This really shouldn't happen, but if it does, we must panic as we need a DB connection
+                        panic!("[FATAL] Cannot create even an in-memory database: {:?}", fatal_e);
+                    }
+                }
+            }
+        };
 
         // Performance Tuning: Use DELETE mode for immediate sync (WAL was causing issues)
         let _ = conn.execute("PRAGMA journal_mode = DELETE", []).ok();
@@ -45,7 +58,10 @@ impl ThumbnailDiskCache {
                 created_at INTEGER
             )",
             [],
-        ).expect("Failed to create thumbnails table");
+        ).unwrap_or_else(|e| {
+            eprintln!("[Cache] Warning: Failed to create thumbnails table: {:?}", e);
+            0 // continue
+        });
 
         // Migration: Add path column if missing (for existing DBs)
         let _ = conn.execute("ALTER TABLE thumbnails ADD COLUMN path TEXT", []);
@@ -57,7 +73,10 @@ impl ThumbnailDiskCache {
                 value TEXT
             )",
             [],
-        ).expect("Failed to create preferences table");
+        ).unwrap_or_else(|e| {
+            eprintln!("[Cache] Warning: Failed to create preferences table: {:?}", e);
+            0 // continue
+        });
 
         // Create folder covers table
         conn.execute(
@@ -66,7 +85,10 @@ impl ThumbnailDiskCache {
                 cover_path TEXT
             )",
             [],
-        ).expect("Failed to create folder covers table");
+        ).unwrap_or_else(|e| {
+            eprintln!("[Cache] Warning: Failed to create folder covers table: {:?}", e);
+            0 // continue
+        });
 
         Self { 
             db: Arc::new(Mutex::new(conn)),
