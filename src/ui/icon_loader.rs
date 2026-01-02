@@ -145,4 +145,30 @@ impl IconLoader {
         self.folder_icon_texture = None;
         self.computer_icon_texture = None;
     }
+    
+    /// Gets or loads a native icon for a specific folder path (like OneDrive)
+    pub fn get_or_load_folder_path_icon(&mut self, ctx: &egui::Context, folder_path: &str) -> Option<egui::TextureHandle> {
+        let cache_key = folder_path.to_string();
+        
+        if let Some(icon) = self.drive_icon_cache.get(&cache_key) {
+            return Some(icon.clone());
+        }
+        
+        // Try to load native folder icon for this specific path
+        if let Ok((rgba_data, width, height)) = windows::extract_drive_icon(folder_path, IconSize::Jumbo) {
+            let texture = ctx.load_texture(
+                format!("folder_{}", folder_path),
+                egui::ColorImage::from_rgba_unmultiplied(
+                    [width as usize, height as usize],
+                    &rgba_data,
+                ),
+                egui::TextureOptions::LINEAR,
+            );
+            let cloned = texture.clone();
+            self.drive_icon_cache.insert(cache_key, texture);
+            return Some(cloned);
+        }
+        
+        None
+    }
 }
