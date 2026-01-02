@@ -240,81 +240,94 @@ impl ThumbnailDiskCache {
     }
 
     /// Garbage Collector: Remove entradas de arquivos que não existem mais
+    /// OTIMIZADO: Libera o lock durante verificações de arquivo (I/O lento)
     /// Roda em background na inicialização para não bloquear a UI
     pub fn garbage_collect(&self) -> usize {
         eprintln!("[GC] Starting garbage collection...");
         
         let mut removed = 0;
-        let mut total_checked = 0;
         
-        if let Ok(db) = self.db.lock() {
-            // 1. Coleta todos os paths do cache
-            let mut paths_to_remove = Vec::new();
+        // FASE 1: Lê todos os paths (lock curto - apenas leitura do banco)
+        let all_entries: Vec<(String, String)>;
+        let all_folders: Vec<String>;
+        
+        {
+            let db = match self.db.lock() {
+                Ok(db) => db,
+                Err(_) => {
+                    eprintln!("[GC] Failed to acquire database lock!");
+                    return 0;
+                }
+            };
             
-            if let Ok(mut stmt) = db.prepare("SELECT id, path FROM thumbnails WHERE path IS NOT NULL") {
-                if let Ok(rows) = stmt.query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                }) {
-                    for row in rows.flatten() {
-                        total_checked += 1;
-                        let (id, path_str) = row;
-                        if !Path::new(&path_str).exists() {
-                            paths_to_remove.push(id);
-                        }
+            // Coleta thumbnails
+            all_entries = db.prepare("SELECT id, path FROM thumbnails WHERE path IS NOT NULL")
+                .and_then(|mut stmt| {
+                    stmt.query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })
+                    .map(|rows| rows.flatten().collect())
+                })
+                .unwrap_or_default();
+            
+            // Coleta folder_covers
+            all_folders = db.prepare("SELECT folder_path FROM folder_covers")
+                .and_then(|mut stmt| {
+                    stmt.query_map([], |row| row.get::<_, String>(0))
+                    .map(|rows| rows.flatten().collect())
+                })
+                .unwrap_or_default();
+        }
+        // ^^^ Lock liberado aqui!
+        
+        eprintln!("[GC] Loaded {} thumbnails, {} folder covers to check", all_entries.len(), all_folders.len());
+        
+        // FASE 2: Verifica existência de arquivos (SEM lock - I/O puro)
+        // Esta é a parte lenta, mas não bloqueia o banco
+        let orphan_thumbs: Vec<String> = all_entries
+            .into_iter()
+            .filter(|(_, path)| !Path::new(path).exists())
+            .map(|(id, _)| id)
+            .collect();
+        
+        let orphan_folders: Vec<String> = all_folders
+            .into_iter()
+            .filter(|path| !Path::new(path).exists())
+            .collect();
+        
+        eprintln!("[GC] Found {} orphan thumbnails, {} orphan folders", orphan_thumbs.len(), orphan_folders.len());
+        
+        // FASE 3: Remove órfãos usando BATCH TRANSACTION (1 commit ao invés de N)
+        if !orphan_thumbs.is_empty() || !orphan_folders.is_empty() {
+            if let Ok(db) = self.db.lock() {
+                // Inicia transação única - todas as deleções acontecem na memória
+                let _ = db.execute("BEGIN TRANSACTION", []);
+                
+                // Remove thumbnails órfãos
+                for id in &orphan_thumbs {
+                    if db.execute("DELETE FROM thumbnails WHERE id = ?", [id]).is_ok() {
+                        removed += 1;
                     }
-                }
-            }
-            
-            eprintln!("[GC] Checked {} entries, found {} orphans", total_checked, paths_to_remove.len());
-            
-            // 2. Remove entradas órfãs
-            for id in &paths_to_remove {
-                if db.execute("DELETE FROM thumbnails WHERE id = ?", [id]).is_ok() {
-                    removed += 1;
-                }
-            }
-            
-            // 3. Limpa folder_covers órfãs também
-            let mut folders_to_remove = Vec::new();
-            if let Ok(mut stmt) = db.prepare("SELECT folder_path FROM folder_covers") {
-                if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
-                    for row in rows.flatten() {
-                        if !Path::new(&row).exists() {
-                            folders_to_remove.push(row);
-                        }
-                    }
-                }
-            }
-            
-            for folder in &folders_to_remove {
-                let _ = db.execute("DELETE FROM folder_covers WHERE folder_path = ?", [folder]);
-                removed += 1;
-            }
-            
-            // 4. SEMPRE compacta o banco se removeu algo (WAL mode precisa de VACUUM)
-            if removed > 0 {
-                eprintln!("[GC] Removed {} entries, running VACUUM...", removed);
-                if let Err(e) = db.execute("VACUUM", []) {
-                    eprintln!("[GC] VACUUM error: {:?}", e);
-                } else {
-                    eprintln!("[GC] VACUUM completed successfully");
                 }
                 
-                // Força checkpoint WAL para sincronizar imediatamente com o arquivo principal
-                let checkpoint_result: Result<i32, _> = db.query_row(
-                    "PRAGMA wal_checkpoint(TRUNCATE)", 
-                    [], 
-                    |row| row.get(0)
-                );
-                match checkpoint_result {
-                    Ok(_) => eprintln!("[GC] WAL checkpoint completed"),
-                    Err(e) => eprintln!("[GC] Checkpoint error: {:?}", e),
+                // Remove folder_covers órfãos
+                for folder in &orphan_folders {
+                    if db.execute("DELETE FROM folder_covers WHERE folder_path = ?", [folder]).is_ok() {
+                        removed += 1;
+                    }
                 }
-            } else {
-                eprintln!("[GC] No orphans found, skipping VACUUM");
+                
+                // Commit único - grava tudo no disco de uma vez
+                let _ = db.execute("COMMIT", []);
+                
+                // VACUUM apenas se removeu algo
+                if removed > 0 {
+                    eprintln!("[GC] Removed {} entries, running VACUUM...", removed);
+                    let _ = db.execute("VACUUM", []);
+                }
             }
         } else {
-            eprintln!("[GC] Failed to acquire database lock!");
+            eprintln!("[GC] No orphans found, skipping cleanup");
         }
         
         removed
