@@ -710,11 +710,19 @@ impl ImageViewerApp {
             // Buffer para envio em lotes
             let mut batch = Vec::with_capacity(250);
             
-            // Prepara busca Win32
-            let search_path = if current_path.ends_with('\\') {
-                format!("{}*", current_path)
+            // Normaliza o path base: drive roots precisam de trailing backslash
+            // Ex: "Z:" -> "Z:\\" para que PathBuf::join funcione corretamente
+            let base_path = if current_path.len() == 2 && current_path.ends_with(':') {
+                format!("{}\\", current_path)
             } else {
-                format!("{}\\*", current_path)
+                current_path.clone()
+            };
+            
+            // Prepara busca Win32
+            let search_path = if base_path.ends_with('\\') {
+                format!("{}*", base_path)
+            } else {
+                format!("{}\\*", base_path)
             };
             let wide_path: Vec<u16> = search_path.encode_utf16().chain(std::iter::once(0)).collect();
             let mut find_data = WIN32_FIND_DATAW::default();
@@ -746,7 +754,7 @@ impl ImageViewerApp {
                             
                             if !is_hidden && !is_system && !is_special && !filename.starts_with('.') {
                                 let is_dir = (attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
-                                let full_path = PathBuf::from(&current_path).join(&filename);
+                                let full_path = PathBuf::from(&base_path).join(&filename);
 
                                 let size = if is_dir { 
                                     0 
@@ -811,8 +819,25 @@ impl ImageViewerApp {
     
     /// Navega para um caminho, adicionando ao histÃ³rico (corta histÃ³rico futuro)
     fn navigate_to(&mut self, path: &str) {
+        // Normaliza paths de drive roots: garante que "Z:" sempre vire "Z:\"
+        // Isso corrige o bug do PathBuf::join não adicionar backslash
+        let normalized_path = if path.len() >= 2 && path.chars().nth(1) == Some(':') {
+            // É um path Windows com letra de drive
+            if path.len() == 2 {
+                // Apenas "Z:" -> "Z:\"
+                format!("{}\\", path)
+            } else if path.chars().nth(2) != Some('\\') {
+                // "Z:folder" -> "Z:\folder" (corrige path malformado)
+                format!("{}\\{}", &path[0..2], &path[2..])
+            } else {
+                path.to_string()
+            }
+        } else {
+            path.to_string()
+        };
+        
         // Se jÃ¡ estamos nesse caminho, nÃ£o faz nada
-        if self.current_path == path {
+        if self.current_path == normalized_path {
             return;
         }
         
@@ -822,11 +847,11 @@ impl ImageViewerApp {
         }
         
         // Adiciona novo caminho ao histÃ³rico
-        self.navigation_history.push(path.to_string());
+        self.navigation_history.push(normalized_path.clone());
         self.history_index = self.navigation_history.len() - 1;
         
-        self.current_path = path.to_string();
-        self.path_input = path.to_string();
+        self.current_path = normalized_path.clone();
+        self.path_input = normalized_path;
         self.is_computer_view = false;
         
         // Limpa o context_menu.target_path para garantir sincronia com a pasta atual
@@ -2014,7 +2039,15 @@ impl eframe::App for ImageViewerApp {
                                             if display_name.is_empty() && i > 0 { continue; }
                                             
                                             full_accumulated.push(comp);
-                                            let target_path = full_accumulated.to_string_lossy().to_string();
+                                            // Normaliza drive roots: "Z:" -> "Z:\" para navegação correta
+                                            let target_path = {
+                                                let p = full_accumulated.to_string_lossy().to_string();
+                                                if p.len() == 2 && p.ends_with(':') {
+                                                    format!("{}\\", p)
+                                                } else {
+                                                    p
+                                                }
+                                            };
                                             
                                             // Nome do drive ou pasta
                                             let display = if display_name.is_empty() { 

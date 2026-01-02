@@ -1,0 +1,71 @@
+﻿cargo : warning: field `icon_config` is never 
+read
+At line:1 char:1
++ cargo check 2>&1 | Out-File -FilePath 
+cargo_errors.txt -Encoding utf8 ...
++ ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (w 
+   arning: field ...` is never read:String) [  
+  ], RemoteException
+    + FullyQualifiedErrorId : NativeCommandErr 
+   or
+ 
+  --> src\ui\cache.rs:47:5
+   |
+38 | pub struct CacheManager {
+   |            ------------ field in this 
+struct
+...
+47 |     icon_config: IconCacheConfig,
+   |     ^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of 
+`#[warn(unused)]`) on by default
+
+warning: field `max_permits` is never read
+  --> src\workers\thumbnail_worker.rs:22:5
+   |
+21 | struct Semaphore {
+   |        --------- field in this struct
+22 |     max_permits: usize,
+   |     ^^^^^^^^^^^
+
+warning: function `create_error_placeholder` 
+is never used
+   --> src\workers\thumbnail_worker.rs:451:4
+    |
+451 | fn create_error_placeholder() -> (Vec<...
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `mtt-file-manager` (lib) generated 3 
+warnings
+    Checking mtt-file-manager v0.1.0 (C:\MTT 
+File Manager)
+error[E0382]: borrow of moved value: `img_tx`
+   --> src\main.rs:269:27
+    |
+216 |         let (img_tx, img_rx) = 
+mpsc::channel();
+    |              ------ move occurs because 
+`img_tx` has type `std::sync::mpsc::Sender<mtt_
+file_manager::domain::thumbnail::ThumbnailData>
+`, which does not implement the `Copy` trait
+...
+261 |             img_tx, 
+    |             ------ value moved here
+...
+269 |         let img_tx_slow = img_tx.clone();
+    |                           ^^^^^^ value 
+borrowed here after move
+    |
+help: consider cloning the value if the 
+performance cost is acceptable
+    |
+261 |             img_tx.clone(), 
+    |                   ++++++++
+
+For more information about this error, try 
+`rustc --explain E0382`.
+error: could not compile `mtt-file-manager` 
+(bin "mtt-file-manager") due to 1 previous 
+error
