@@ -176,6 +176,10 @@ struct ImageViewerApp {
     
     // NOTIFICATION SYSTEM (toast messages)
     notifications: mtt_file_manager::application::NotificationManager,
+    
+    // ONEDRIVE SIDEBAR SHORTCUT
+    onedrive_path: Option<String>,           // Caminho do OneDrive (se instalado)
+    onedrive_icon: Option<egui::TextureHandle>,  // Ícone nativo do OneDrive
 }
 
 impl ImageViewerApp {
@@ -330,6 +334,12 @@ impl ImageViewerApp {
             
             // NOTIFICATION SYSTEM
             notifications: mtt_file_manager::application::NotificationManager::new(),
+            
+            // ONEDRIVE SIDEBAR SHORTCUT
+            onedrive_path: std::env::var("OneDrive").ok()
+                .or_else(|| std::env::var("OneDriveConsumer").ok())
+                .or_else(|| std::env::var("OneDriveCommercial").ok()),
+            onedrive_icon: None,  // Will be loaded lazily on first sidebar render
         };
         
         // Inicia monitoramento inicial
@@ -1978,6 +1988,8 @@ impl eframe::App for ImageViewerApp {
                     computer_icon: computer_icon.as_ref(),
                     is_renaming: self.renaming_state.is_some(),
                     icon_loader: &mut self.item_icon_loader,
+                    onedrive_path: self.onedrive_path.as_deref(),
+                    onedrive_icon: self.onedrive_icon.as_ref(),
                 };
                 
                 render_sidebar(ui, &mut ctx)
