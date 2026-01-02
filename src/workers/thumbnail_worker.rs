@@ -50,7 +50,11 @@ fn thumbnail_worker_loop(
     disk_cache: Arc<ThumbnailDiskCache>,
     active_decodes: Arc<AtomicUsize>,
 ) {
-    unsafe { let _ = CoInitializeEx(None, COINIT_MULTITHREADED); }
+    unsafe { 
+        // SAFETY: Initializing COM with Multithreaded support for this worker thread.
+        // It is paired with `CoUninitialize` at the end of the thread loop.
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED); 
+    }
     
     loop {
         let work = match rx.lock() {
@@ -115,7 +119,10 @@ fn thumbnail_worker_loop(
             Err(_) => break,
         }
     }
-    unsafe { CoUninitialize(); }
+    unsafe { 
+        // SAFETY: Cleaning up COM for this thread before exit.
+        CoUninitialize(); 
+    }
 }
 
 /// Resize RGBA buffer to max 512x512 while preserving aspect ratio
@@ -188,6 +195,9 @@ fn try_wic_extraction(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
     };
 
     unsafe {
+        // SAFETY: All WIC components are used within this block and the COM library 
+        // has been initialized for this thread. Raw pointers from `path_wide` are 
+        // valid for the duration of the call.
         let factory: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER).ok()?;
         
         let path_str = path.to_string_lossy().to_string();
@@ -251,6 +261,8 @@ fn extract_windows_thumbnail_shell(path: &Path) -> Result<(Vec<u8>, u32, u32), B
     let size_px = if is_video { 256 } else { 512 };
     
     unsafe {
+        // SAFETY: Raw pointers from `path_wide` are valid for the call.
+        // HBITMAP is a resource that is manually deleted with `DeleteObject` below.
         let path_str = path.to_string_lossy().to_string();
         let path_wide: Vec<u16> = path_str.encode_utf16().chain(std::iter::once(0)).collect();
         
@@ -270,6 +282,8 @@ fn extract_windows_thumbnail_shell(path: &Path) -> Result<(Vec<u8>, u32, u32), B
 fn hbitmap_to_rgba(hbitmap: windows::Win32::Graphics::Gdi::HBITMAP) -> Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     use windows::Win32::Graphics::Gdi::*;
     unsafe {
+        // SAFETY: `bm` is properly initialized before being passed to `GetObjectW`.
+        // `buffer` is pre-allocated with correct size. `hbitmap` is a valid handle.
         let mut bm = BITMAP::default();
         GetObjectW(hbitmap, std::mem::size_of::<BITMAP>() as i32, Some(&mut bm as *mut _ as *mut _));
         

@@ -412,6 +412,8 @@ impl ImageViewerApp {
                 };
 
                 unsafe {
+                    // SAFETY: `op` is properly initialized with a double-null terminated wide string
+                    // from `to_win32_path`, which is required by `SHFileOperationW`.
                     let result = SHFileOperationW(&mut op);
                     if result == 0 {
                         // Limpa cache do item deletado
@@ -551,6 +553,9 @@ impl ImageViewerApp {
         
         // 7. Executa operação
         unsafe {
+            // SAFETY: `from_vec` and `to_vec` are properly double-null terminated wide strings
+            // as required by `SHFileOperationW`. Ownership of the buffers is maintained
+            // until the function returns.
             let result = SHFileOperationW(&mut op);
             
             if result == 0 {
@@ -731,6 +736,10 @@ impl ImageViewerApp {
             let is_onedrive = onedrive::is_onedrive_path(&PathBuf::from(&current_path));
 
             unsafe {
+                // SAFETY: `wide_path` is a null-terminated UTF-16 string buffer.
+                // `find_data` is a valid pointer to a `WIN32_FIND_DATAW` struct.
+                // The handle returned is checked for validity and closed via `FindClose`
+                // before the scope ends.
                 if let Ok(handle) = FindFirstFileW(PCWSTR(wide_path.as_ptr()), &mut find_data) {
                     loop {
                         // Verifica se a geração mudou -> Aborta scan antigo
@@ -1029,6 +1038,8 @@ impl ImageViewerApp {
                     };
 
                     unsafe {
+                        // SAFETY: `from_vec` and `to_vec` are properly double-null terminated wide strings
+                        // as required by `SHFileOperationW`.
                         let result = SHFileOperationW(&mut op);
                         if result == 0 {
                             // Sucesso: Recarrega a pasta para atualizar a UI

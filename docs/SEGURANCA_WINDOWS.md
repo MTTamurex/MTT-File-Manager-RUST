@@ -437,6 +437,7 @@ fn extract_windows_thumbnail(path: &PathBuf)
 | `CoInitializeEx/CoUninitialize` | COM initialization | Baixo - padrão documentado |
 
 **Mitigações**:
+- **SAFETY comments**: Todos os blocos `unsafe` possuem comentários obrigatórios documentando invariantes. ✅
 - Todos os `unsafe` estão em funções pequenas e auditáveis
 - Sem pointer arithmetic manual (usa `Vec<u8>`)
 - Sem `transmute` ou type punning
