@@ -416,7 +416,7 @@ fn extract_windows_thumbnail(path: &PathBuf)
 
 ## 🔍 Auditoria de Código Unsafe
 
-**Total de blocos `unsafe` no projeto**: 12
+**Total de blocos `unsafe` no projeto**: 13
 
 ### Justificativa de Cada Uso:
 
@@ -431,6 +431,7 @@ fn extract_windows_thumbnail(path: &PathBuf)
 | `extract_drive_icon()` | FFI para SHGetFileInfoW | Baixo - usa path real do drive |
 | `get_volume_label()` | FFI para GetVolumeInformationW | Baixo - read-only |
 | `open_with_shell()` | FFI para `ShellExecuteW` | Alto - execução de código |
+| `show_shell_context_menu()` | `SHParseDisplayName` + `IContextMenu::InvokeCommand` para menu nativo | Médio - requer HWND válido e liberação de PIDL |
 | `load_folder()` (GetFileAttributesW) | FFI para filesystem APIs | Baixo - read-only |
 | `rename_with_shell()` | FFI para `SHFileOperationW` | Médio - move/rename |
 | `delete_with_shell()` | FFI para `SHFileOperationW` | Médio - move para lixeira |
