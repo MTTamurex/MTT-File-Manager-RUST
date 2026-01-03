@@ -20,6 +20,9 @@ pub struct ContextMenuState {
     /// Flag to indicate that a right-click selection was made and the menu should open
     /// after the selection has been drawn. This ensures visual feedback before the menu appears.
     pub needs_draw_before_menu: bool,
+    /// Pending click to replay after menu was dismissed by clicking outside
+    /// Format: (screen_x, screen_y, is_right_click) - stored when menu is cancelled by outside click
+    pub pending_click_replay: Option<(i32, i32, bool)>,
 }
 
 impl Default for ContextMenuState {
@@ -32,6 +35,7 @@ impl Default for ContextMenuState {
             is_empty_area: false,
             pending_native_menu: None,
             needs_draw_before_menu: false,
+            pending_click_replay: None,
         }
     }
 }
