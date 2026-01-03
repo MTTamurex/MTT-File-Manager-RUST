@@ -44,6 +44,7 @@ use windows::{
     Win32::Foundation::*,
     Win32::Storage::FileSystem::*,
     Win32::UI::Shell::*,
+    Win32::UI::WindowsAndMessaging::{FindWindowW, GetCursorPos},
 };
 
 // OTIMIZAÃ‡ÃƒO: Imports para Win32 FindFirst/NextFileW (metadata em UMA syscall)
@@ -183,6 +184,9 @@ struct ImageViewerApp {
     
     // NAVEGAÇÃO / ADDRESS BAR (Breadcrumbs vs Edit)
     is_address_editing: bool,
+
+    // Window handle for native shell interactions
+    native_hwnd: Option<HWND>,
 }
 
 impl ImageViewerApp {
@@ -346,6 +350,9 @@ impl ImageViewerApp {
             
             // NAVEGAÇÃO / ADDRESS BAR
             is_address_editing: false,
+
+            // HWND nativo (capturado na primeira atualização)
+            native_hwnd: None,
         };
         
         // Inicia monitoramento inicial
@@ -1067,6 +1074,37 @@ impl ImageViewerApp {
         // Envia pedido para o Worker Pool com a geraÃ§Ã£o atual
         let _ = self.thumbnail_req_sender.send((path, self.generation));
     }
+
+    /// Captura e armazena o HWND nativo a partir do título da janela principal.
+    fn ensure_window_handle(&mut self, _frame: &eframe::Frame) {
+        if self.native_hwnd.is_some() {
+            return;
+        }
+
+        let title: Vec<u16> = "MTT File Manager".encode_utf16().chain(std::iter::once(0)).collect();
+        let hwnd_result = unsafe { FindWindowW(None, PCWSTR(title.as_ptr())) };
+        if let Ok(hwnd) = hwnd_result {
+            if !hwnd.0.is_null() {
+                self.native_hwnd = Some(hwnd);
+            }
+        }
+    }
+
+    /// Tenta abrir o menu de contexto nativo para o caminho informado. Retorna true em caso de tentativa.
+    fn try_show_shell_context_menu(&mut self, _ui: &egui::Ui, path: &Path) -> bool {
+        if let Some(hwnd) = self.native_hwnd {
+            let mut cursor = POINT::default();
+            unsafe {
+                let _ = GetCursorPos(&mut cursor);
+            }
+            if let Err(err) = windows_infra::show_shell_context_menu(hwnd, path, cursor.x, cursor.y) {
+                eprintln!("Falha ao abrir menu de contexto do Windows: {:?}", err);
+            }
+            true
+        } else {
+            false
+        }
+    }
     
     /// Retorna icone para um arquivo, carregando sob demanda.
     /// Executaveis (.exe, .lnk, .ico) sao cacheados por path completo.
@@ -1413,13 +1451,17 @@ impl ImageViewerApp {
             Some(list_view::ListViewAction::SecondaryClick(idx)) if !is_renaming => {
                 self.selected_item = Some(idx);
                 if let Some(item) = self.items.get(idx) {
+                    let item_path = item.path.clone();
                     self.selected_file = Some(item.clone());
-                    self.context_menu.open(
-                        ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO),
-                        Some(idx),
-                        Some(item.path.clone()),
-                        false
-                    );
+                    self.context_menu.target_path = Some(item_path.clone());
+                    if !self.try_show_shell_context_menu(ui, &item_path) {
+                        self.context_menu.open(
+                            ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO),
+                            Some(idx),
+                            Some(item_path),
+                            false
+                        );
+                    }
                 }
             }
             Some(list_view::ListViewAction::SortChange(mode)) => {
@@ -1612,13 +1654,17 @@ impl ImageViewerApp {
             Some(grid_view::GridViewAction::SecondaryClick(idx)) if !is_renaming => {
                 self.selected_item = Some(idx);
                 if let Some(item) = self.items.get(idx) {
+                    let item_path = item.path.clone();
                     self.selected_file = Some(item.clone());
-                    self.context_menu.open(
-                        ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO),
-                        Some(idx),
-                        Some(item.path.clone()),
-                        false
-                    );
+                    self.context_menu.target_path = Some(item_path.clone());
+                    if !self.try_show_shell_context_menu(ui, &item_path) {
+                        self.context_menu.open(
+                            ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO),
+                            Some(idx),
+                            Some(item_path),
+                            false
+                        );
+                    }
                 }
             }
             _ => {}
@@ -1783,7 +1829,8 @@ impl mtt_file_manager::ui::context_menu::ContextMenuOperations for ImageViewerAp
 }
 
 impl eframe::App for ImageViewerApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        self.ensure_window_handle(frame);
         
         // --- DETECÇÃO DE COMANDOS DE SISTEMA (Clipboard) ---
         // O egui traduz Ctrl+C ? Event::Copy, Ctrl+X ? Event::Cut, Ctrl+V ? Event::Paste
