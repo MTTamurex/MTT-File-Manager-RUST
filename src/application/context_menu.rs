@@ -13,6 +13,13 @@ pub struct ContextMenuState {
     pub item_index: Option<usize>,
     pub target_path: Option<PathBuf>,
     pub is_empty_area: bool,
+    /// Pending native shell context menu - path, screen coordinates, and start timestamp
+    /// The menu will only be shown after enough time has passed for the UI to be rendered.
+    /// Format: (path, screen_x, screen_y, start_time_ms) where start_time_ms is 0 initially
+    pub pending_native_menu: Option<(PathBuf, i32, i32, u64)>,
+    /// Flag to indicate that a right-click selection was made and the menu should open
+    /// after the selection has been drawn. This ensures visual feedback before the menu appears.
+    pub needs_draw_before_menu: bool,
 }
 
 impl Default for ContextMenuState {
@@ -23,6 +30,8 @@ impl Default for ContextMenuState {
             item_index: None,
             target_path: None,
             is_empty_area: false,
+            pending_native_menu: None,
+            needs_draw_before_menu: false,
         }
     }
 }
