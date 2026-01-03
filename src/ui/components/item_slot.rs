@@ -467,6 +467,17 @@ fn render_sync_badge(ui: &mut egui::Ui, thumb_rect: egui::Rect, status: SyncStat
                 egui::Color32::WHITE
             );
         }
+        SyncStatus::Syncing => {
+            // Blue circular arrows - file is being synced
+            painter.circle_filled(badge_center, badge_radius, egui::Color32::from_rgb(0, 120, 215));
+            painter.text(
+                badge_center, 
+                egui::Align2::CENTER_CENTER, 
+                "⟳", 
+                egui::FontId::proportional(13.0), 
+                egui::Color32::WHITE
+            );
+        }
         SyncStatus::Pinned => {
             // Green solid circle with check - always keep on device
             painter.circle_filled(badge_center, badge_radius, egui::Color32::from_rgb(0, 150, 0));

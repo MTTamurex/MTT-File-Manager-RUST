@@ -4,7 +4,7 @@
 use eframe::egui::{self, Color32, FontId, Pos2, Rect, RichText, Sense, Ui};
 use std::path::PathBuf;
 
-use crate::domain::file_entry::{FileEntry, SortMode};
+use crate::domain::file_entry::{FileEntry, SortMode, SyncStatus};
 use crate::infrastructure::windows::{format_date, format_size};
 
 /// Context for list view rendering
@@ -17,6 +17,7 @@ pub struct ListViewContext<'a> {
     pub renaming_state: Option<(usize, String)>,
     pub focus_rename: bool,
     pub is_computer_view: bool,
+    pub is_onedrive_folder: bool,
     pub texture_cache: &'a mut lru::LruCache<PathBuf, egui::TextureHandle>,
     pub loading_set: &'a mut std::collections::HashSet<PathBuf>,
     pub scanned_folders: &'a mut std::collections::HashSet<PathBuf>,
@@ -52,8 +53,10 @@ pub fn render_list_view(
     let row_height = 24.0;
     let available_w = ui.available_width();
     
-    // Column widths
-    let w_name = (available_w - 410.0).max(200.0);
+    // Column widths - add status column when in OneDrive folder
+    let w_status = if ctx.is_onedrive_folder && !ctx.is_computer_view { 120.0 } else { 0.0 };
+    let base_cols = 410.0 + w_status;
+    let w_name = (available_w - base_cols).max(200.0);
     let w_date = 170.0;
     let w_type = 120.0;
     let w_size = 100.0;
@@ -116,6 +119,20 @@ pub fn render_list_view(
             
             let (clicked_size, _) = draw_header(ui, "Tamanho", w_size, SortMode::Size);
             if clicked_size { return Some(SortMode::Size); }
+            
+            // Status column (OneDrive only)
+            if ctx.is_onedrive_folder {
+                let (rect, _response) = ui.allocate_exact_size(egui::vec2(w_status, 22.0), Sense::hover());
+                if ui.is_rect_visible(rect) {
+                    ui.painter().text(
+                        rect.min + egui::vec2(8.0, 4.0),
+                        egui::Align2::LEFT_TOP,
+                        "Status",
+                        FontId::proportional(12.0),
+                        Color32::from_gray(100),
+                    );
+                }
+            }
         }
         
         None
@@ -381,6 +398,15 @@ pub fn render_list_view(
                             FontId::proportional(12.0),
                             secondary_color,
                         );
+                        
+                        // 5. OneDrive Status (if in OneDrive folder)
+                        if ctx.is_onedrive_folder {
+                            render_status_badge(
+                                ui,
+                                Pos2::new(rect.min.x + w_name + w_date + w_type + w_size + 8.0, rect.min.y + 4.0),
+                                item.sync_status
+                            );
+                        }
                     }
                 });
             }
@@ -419,4 +445,70 @@ fn get_file_type_string(item: &FileEntry) -> String {
         return format!("Arquivo {}", ext.to_string_lossy().to_uppercase());
     }
     "Arquivo".to_string()
+}
+
+/// Renders a sync status badge (OneDrive) in the status column
+fn render_status_badge(ui: &mut egui::Ui, pos: Pos2, status: SyncStatus) {
+    if status == SyncStatus::None {
+        return; // No badge for normal files
+    }
+    
+    let badge_size = 16.0;
+    let badge_center = pos + egui::vec2(badge_size / 2.0, badge_size / 2.0);
+    let badge_radius = badge_size / 2.0;
+    
+    let painter = ui.painter();
+    
+    match status {
+        SyncStatus::CloudOnly => {
+            // Blue cloud icon - file needs download
+            painter.circle_filled(badge_center, badge_radius, Color32::from_rgb(0, 120, 215));
+            painter.text(
+                badge_center, 
+                egui::Align2::CENTER_CENTER, 
+                "☁", 
+                FontId::proportional(11.0), 
+                Color32::WHITE
+            );
+        }
+        SyncStatus::Syncing => {
+            // Blue circular arrows - file is being synced
+            painter.circle_filled(badge_center, badge_radius, Color32::from_rgb(0, 120, 215));
+            painter.text(
+                badge_center, 
+                egui::Align2::CENTER_CENTER, 
+                "⟳", 
+                FontId::proportional(12.0), 
+                Color32::WHITE
+            );
+        }
+        SyncStatus::Pinned => {
+            // Green solid circle with check - always keep on device
+            painter.circle_filled(badge_center, badge_radius, Color32::from_rgb(0, 150, 0));
+            painter.text(
+                badge_center, 
+                egui::Align2::CENTER_CENTER, 
+                "✓",
+                FontId::proportional(10.0), 
+                Color32::WHITE
+            );
+        }
+        SyncStatus::LocallyAvailable => {
+            // White circle with green outline/check - downloaded on demand
+            painter.circle_filled(badge_center, badge_radius, Color32::WHITE);
+            painter.circle_stroke(
+                badge_center, 
+                badge_radius - 1.0, 
+                egui::Stroke::new(2.0, Color32::from_rgb(0, 150, 0))
+            );
+            painter.text(
+                badge_center, 
+                egui::Align2::CENTER_CENTER, 
+                "✓",
+                FontId::proportional(10.0), 
+                Color32::from_rgb(0, 150, 0)
+            );
+        }
+        SyncStatus::None => {} // Already handled above
+    }
 }

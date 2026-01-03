@@ -759,18 +759,36 @@ impl ImageViewerApp {
 
                         if filename != "." && filename != ".." {
                             let attrs = find_data.dwFileAttributes;
+                            let full_path = PathBuf::from(&base_path).join(&filename);
+                            
+                            // Get extended attributes using GetFileAttributesEx for OneDrive cloud file attributes
+                            let extended_attrs = if is_onedrive {
+                                let path_wide: Vec<u16> = full_path.to_string_lossy()
+                                    .encode_utf16()
+                                    .chain(std::iter::once(0))
+                                    .collect();
+                                
+                                use windows::Win32::Storage::FileSystem::{GetFileAttributesW, INVALID_FILE_ATTRIBUTES};
+                                match unsafe { GetFileAttributesW(windows::core::PCWSTR(path_wide.as_ptr())) } {
+                                    result if result != INVALID_FILE_ATTRIBUTES => result,
+                                    _ => attrs,  // Fallback to basic attributes
+                                }
+                            } else {
+                                attrs
+                            };
+                            
+
                             
                             // Filtros: hidden/system files
-                            let is_hidden = (attrs & FILE_ATTRIBUTE_HIDDEN.0) != 0;
-                            let is_system = (attrs & FILE_ATTRIBUTE_SYSTEM.0) != 0;
+                            let is_hidden = (extended_attrs & FILE_ATTRIBUTE_HIDDEN.0) != 0;
+                            let is_system = (extended_attrs & FILE_ATTRIBUTE_SYSTEM.0) != 0;
                             let is_special = matches!(filename.to_lowercase().as_str(),
                                 "desktop.ini" | "thumbs.db" | "$recycle.bin" | "system volume information"
                                 // Re-adicionado "System Volume Information" para garantir compatibilidade
                             );
                             
                             if !is_hidden && !is_system && !is_special && !filename.starts_with('.') {
-                                let is_dir = (attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
-                                let full_path = PathBuf::from(&base_path).join(&filename);
+                                let is_dir = (extended_attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
 
                                 let size = if is_dir { 
                                     0 
@@ -788,6 +806,17 @@ impl ImageViewerApp {
 
                                 let folder_cover = if is_dir { disk_cache.get_folder_cover(&full_path) } else { None };
 
+                                // Check if file is currently open (being used)
+                                let mut sync_status = onedrive::get_sync_status(extended_attrs, is_onedrive);
+                                
+                                // If file is open in an application, mark as syncing
+                                // (this mimics Windows Explorer behavior showing syncing icon for open files)
+                                if is_onedrive && !is_dir && sync_status != SyncStatus::None {
+                                    if onedrive::is_file_open(&full_path) {
+                                        sync_status = SyncStatus::Syncing;
+                                    }
+                                }
+
                                 let entry = FileEntry {
                                     path: full_path,
                                     name: filename,
@@ -796,7 +825,7 @@ impl ImageViewerApp {
                                     modified,
                                     folder_cover,
                                     drive_info: None,
-                                    sync_status: onedrive::get_sync_status(attrs, is_onedrive),
+                                    sync_status,
                                 };
 
                                 // Adiciona ao lote
@@ -1228,6 +1257,8 @@ impl ImageViewerApp {
                 self.pending_auto_reload = false;
             }
         }
+        
+
 
         // 1. STREAMING: Recebe lotes incrementais de FileEntry (Filtrado por geraÃ§Ã£o)
         while let Ok((gen_id, new_batch)) = self.file_entry_receiver.try_recv() {
@@ -1344,6 +1375,9 @@ impl ImageViewerApp {
         let folder_icon_texture = self.cache_manager.folder_icon_texture.clone();
         let computer_icon = self.cache_manager.computer_icon.clone();
         
+        // Check if current path is in OneDrive
+        let is_onedrive_folder = mtt_file_manager::infrastructure::onedrive::is_onedrive_path(&PathBuf::from(&self.current_path));
+        
         // Criar contexto com referências mutáveis separadas
         let mut ctx = ListViewContext {
             items: &items,
@@ -1354,6 +1388,7 @@ impl ImageViewerApp {
             renaming_state: renaming_state.clone(),
             focus_rename,
             is_computer_view: self.is_computer_view,
+            is_onedrive_folder,
             texture_cache: &mut self.cache_manager.texture_cache,
             loading_set: &mut self.cache_manager.loading_set,
             scanned_folders: &mut self.scanned_folders,
