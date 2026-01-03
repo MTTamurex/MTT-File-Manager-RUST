@@ -41,11 +41,6 @@ pub trait ListViewOperations {
     fn request_thumbnail_load(&mut self, path: PathBuf);
     fn request_folder_scan(&mut self, path: PathBuf);
     fn rename_with_shell(&mut self, idx: usize);
-    fn get_or_load_icon(
-        &mut self,
-        ctx: &egui::Context,
-        path: &std::path::Path,
-    ) -> Option<egui::TextureHandle>;
 }
 
 /// Renders the list view
@@ -239,8 +234,8 @@ pub fn render_list_view(
                             );
                         }
                     } else {
-                        // File: try to load native icon
-                        if let Some(file_icon) = ops.get_or_load_icon(ui.ctx(), &item.path) {
+                        // File: load native Windows icon using IconLoader (same as grid view)
+                        if let Some(file_icon) = ctx.item_icon_loader.get_or_load_icon(ui.ctx(), &item.path) {
                             ui.painter().image(
                                 file_icon.id(),
                                 icon_rect,

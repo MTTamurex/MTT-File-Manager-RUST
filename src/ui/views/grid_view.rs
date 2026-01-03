@@ -31,11 +31,6 @@ pub trait GridViewOperations {
     fn request_thumbnail_load(&mut self, path: PathBuf);
     fn request_folder_scan(&mut self, path: PathBuf);
     fn rename_with_shell(&mut self, idx: usize);
-    fn get_or_load_icon(
-        &mut self,
-        ctx: &egui::Context,
-        path: &std::path::Path,
-    ) -> Option<egui::TextureHandle>;
 }
 
 /// Action returned by grid view

@@ -1398,16 +1398,6 @@ impl ImageViewerApp {
             fn rename_with_shell(&mut self, idx: usize) {
                 self.actions.push(ListAction::RenameWithShell(idx));
             }
-            
-            fn get_or_load_icon(
-                &mut self,
-                _ctx: &egui::Context,
-                _path: &std::path::Path,
-            ) -> Option<egui::TextureHandle> {
-                // Não podemos chamar self.app.get_or_load_icon aqui
-                // Vamos retornar None e lidar com isso de outra forma
-                None
-            }
         }
         
         let mut ops = ListOps {
@@ -1622,16 +1612,6 @@ impl ImageViewerApp {
             
             fn rename_with_shell(&mut self, idx: usize) {
                 self.actions.push(GridAction::RenameWithShell(idx));
-            }
-            
-            fn get_or_load_icon(
-                &mut self,
-                _ctx: &egui::Context,
-                _path: &std::path::Path,
-            ) -> Option<egui::TextureHandle> {
-                // Não podemos chamar self.app.get_or_load_icon aqui
-                // Vamos retornar None e lidar com isso de outra forma
-                None
             }
         }
         
