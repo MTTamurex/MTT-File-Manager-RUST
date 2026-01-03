@@ -129,6 +129,7 @@ pub enum SyncStatus {
     #[default]
     None,             // Not a cloud file / Normal
     CloudOnly,        // "Available online" (needs download)
+    Syncing,          // Currently syncing (blue arrows)
     Pinned,           // "Always keep on this device" (Green check)
     LocallyAvailable, // Downloaded on demand (Green outline)
 }
