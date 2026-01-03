@@ -1090,16 +1090,20 @@ impl ImageViewerApp {
         }
     }
 
-    /// Tenta abrir o menu de contexto nativo para o caminho informado. Retorna true em caso de tentativa.
-    fn try_show_shell_context_menu(&mut self, _ui: &egui::Ui, path: &Path) -> bool {
-        if let Some(hwnd) = self.native_hwnd {
+    /// Agenda abertura do menu de contexto nativo para após a UI ser renderizada.
+    /// Isso permite que a UI repinte a seleção visual antes do menu aparecer.
+    /// Retorna true em caso de tentativa.
+    fn try_show_shell_context_menu(&mut self, ui: &egui::Ui, path: &Path) -> bool {
+        if self.native_hwnd.is_some() {
             let mut cursor = POINT::default();
             unsafe {
                 let _ = GetCursorPos(&mut cursor);
             }
-            if let Err(err) = windows_infra::show_shell_context_menu(hwnd, path, cursor.x, cursor.y) {
-                eprintln!("Falha ao abrir menu de contexto do Windows: {:?}", err);
-            }
+            // Store pending menu request with 1 frame delay
+            // This ensures the UI is fully rendered before the menu appears
+            self.context_menu.pending_native_menu = Some((path.to_path_buf(), cursor.x, cursor.y, 1));
+            // Request immediate repaint so the selection is visible
+            ui.ctx().request_repaint();
             true
         } else {
             false
@@ -1449,12 +1453,26 @@ impl ImageViewerApp {
                 }
             }
             Some(list_view::ListViewAction::SecondaryClick(idx)) if !is_renaming => {
+                // Step 1: Update selection immediately (this will cause a repaint)
                 self.selected_item = Some(idx);
                 if let Some(item) = self.items.get(idx) {
                     let item_path = item.path.clone();
                     self.selected_file = Some(item.clone());
                     self.context_menu.target_path = Some(item_path.clone());
-                    if !self.try_show_shell_context_menu(ui, &item_path) {
+                    
+                    // Step 2: Store pending menu data and mark that we need to draw first
+                    if self.native_hwnd.is_some() {
+                        let mut cursor = POINT::default();
+                        unsafe {
+                            let _ = GetCursorPos(&mut cursor);
+                        }
+                        // Menu will open after the selection is drawn (needs_draw_before_menu flag)
+                        self.context_menu.pending_native_menu = Some((item_path.clone(), cursor.x, cursor.y, 0));
+                        self.context_menu.needs_draw_before_menu = true;
+                        // Request repaint to ensure selection is drawn before menu
+                        ui.ctx().request_repaint();
+                    } else {
+                        // Fallback: use egui context menu
                         self.context_menu.open(
                             ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO),
                             Some(idx),
@@ -1652,12 +1670,26 @@ impl ImageViewerApp {
                 }
             }
             Some(grid_view::GridViewAction::SecondaryClick(idx)) if !is_renaming => {
+                // Step 1: Update selection immediately (this will cause a repaint)
                 self.selected_item = Some(idx);
                 if let Some(item) = self.items.get(idx) {
                     let item_path = item.path.clone();
                     self.selected_file = Some(item.clone());
                     self.context_menu.target_path = Some(item_path.clone());
-                    if !self.try_show_shell_context_menu(ui, &item_path) {
+                    
+                    // Step 2: Store pending menu data and mark that we need to draw first
+                    if self.native_hwnd.is_some() {
+                        let mut cursor = POINT::default();
+                        unsafe {
+                            let _ = GetCursorPos(&mut cursor);
+                        }
+                        // Menu will open after the selection is drawn (needs_draw_before_menu flag)
+                        self.context_menu.pending_native_menu = Some((item_path.clone(), cursor.x, cursor.y, 0));
+                        self.context_menu.needs_draw_before_menu = true;
+                        // Request repaint to ensure selection is drawn before menu
+                        ui.ctx().request_repaint();
+                    } else {
+                        // Fallback: use egui context menu
                         self.context_menu.open(
                             ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO),
                             Some(idx),
@@ -2501,6 +2533,35 @@ impl eframe::App for ImageViewerApp {
             }
             ctx.request_repaint();  // Keep animating
         }
+        
+        // --- PENDING NATIVE CONTEXT MENU ---
+        // Open the context menu after a delay that allows the GPU to render the selection
+        // We use request_repaint_after to schedule a repaint, then check if enough time has passed
+        if let Some((path, screen_x, screen_y, start_time_ms)) = self.context_menu.pending_native_menu.take() {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            
+            if start_time_ms == 0 {
+                // First frame after right-click - record the start time and request repaint after delay
+                let start = now;
+                self.context_menu.pending_native_menu = Some((path, screen_x, screen_y, start));
+                ctx.request_repaint_after(std::time::Duration::from_millis(60));
+            } else if now - start_time_ms >= 50 {
+                // Enough time has passed - GPU should have rendered by now, open the menu
+                if let Some(hwnd) = self.native_hwnd {
+                    if let Err(err) = windows_infra::show_shell_context_menu(hwnd, &path, screen_x, screen_y) {
+                        eprintln!("Falha ao abrir menu de contexto do Windows: {:?}", err);
+                    }
+                }
+            } else {
+                // Not enough time yet - keep waiting
+                self.context_menu.pending_native_menu = Some((path, screen_x, screen_y, start_time_ms));
+                ctx.request_repaint_after(std::time::Duration::from_millis(10));
+            }
+        }
+        self.context_menu.needs_draw_before_menu = false;
     }
 }
 fn main() -> eframe::Result<()> {
