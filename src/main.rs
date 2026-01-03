@@ -2551,8 +2551,26 @@ impl eframe::App for ImageViewerApp {
             } else if now - start_time_ms >= 50 {
                 // Enough time has passed - GPU should have rendered by now, open the menu
                 if let Some(hwnd) = self.native_hwnd {
-                    if let Err(err) = windows_infra::show_shell_context_menu(hwnd, &path, screen_x, screen_y) {
-                        eprintln!("Falha ao abrir menu de contexto do Windows: {:?}", err);
+                    match windows_infra::show_shell_context_menu(hwnd, &path, screen_x, screen_y) {
+                        Ok(result) => {
+                            if result.was_cancelled {
+                                // Menu was cancelled by clicking outside - store the click for replay
+                                // Check if the click position is different from the menu position (user clicked somewhere else)
+                                let click_moved = (result.cursor_x - screen_x).abs() > 5 || 
+                                                  (result.cursor_y - screen_y).abs() > 5;
+                                if click_moved {
+                                    self.context_menu.pending_click_replay = Some((
+                                        result.cursor_x, 
+                                        result.cursor_y, 
+                                        result.right_button_down
+                                    ));
+                                    ctx.request_repaint();
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            eprintln!("Falha ao abrir menu de contexto do Windows: {:?}", err);
+                        }
                     }
                 }
             } else {
@@ -2562,6 +2580,57 @@ impl eframe::App for ImageViewerApp {
             }
         }
         self.context_menu.needs_draw_before_menu = false;
+        
+        // --- REPLAY PENDING CLICK ---
+        // If a click was consumed by context menu dismissal, replay it using SendInput
+        if let Some((click_x, click_y, is_right_click)) = self.context_menu.pending_click_replay.take() {
+            use windows::Win32::UI::Input::KeyboardAndMouse::*;
+            use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+            
+            unsafe {
+                // Move mouse to the click position and simulate click
+                let screen_width = GetSystemMetrics(SM_CXSCREEN);
+                let screen_height = GetSystemMetrics(SM_CYSCREEN);
+                
+                // Normalize coordinates for absolute mouse position (0-65535)
+                let norm_x = (click_x * 65535) / screen_width;
+                let norm_y = (click_y * 65535) / screen_height;
+                
+                let button_down = if is_right_click { MOUSEEVENTF_RIGHTDOWN } else { MOUSEEVENTF_LEFTDOWN };
+                let button_up = if is_right_click { MOUSEEVENTF_RIGHTUP } else { MOUSEEVENTF_LEFTUP };
+                
+                let inputs = [
+                    INPUT {
+                        r#type: INPUT_MOUSE,
+                        Anonymous: INPUT_0 {
+                            mi: MOUSEINPUT {
+                                dx: norm_x,
+                                dy: norm_y,
+                                mouseData: 0,
+                                dwFlags: MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | button_down,
+                                time: 0,
+                                dwExtraInfo: 0,
+                            },
+                        },
+                    },
+                    INPUT {
+                        r#type: INPUT_MOUSE,
+                        Anonymous: INPUT_0 {
+                            mi: MOUSEINPUT {
+                                dx: norm_x,
+                                dy: norm_y,
+                                mouseData: 0,
+                                dwFlags: MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | button_up,
+                                time: 0,
+                                dwExtraInfo: 0,
+                            },
+                        },
+                    },
+                ];
+                
+                SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+            }
+        }
     }
 }
 fn main() -> eframe::Result<()> {

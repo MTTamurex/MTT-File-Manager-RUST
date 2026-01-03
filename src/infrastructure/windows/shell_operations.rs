@@ -7,6 +7,7 @@ use windows::{
     core::*,
     Win32::Foundation::*,
     Win32::System::Com::*,
+    Win32::UI::Input::KeyboardAndMouse::*,
     Win32::UI::Shell::Common::*,
     Win32::UI::Shell::*,
     Win32::UI::WindowsAndMessaging::*,
@@ -51,9 +52,21 @@ impl Drop for ComGuard {
     }
 }
 
+/// Result of showing a shell context menu
+#[derive(Debug)]
+pub struct ContextMenuResult {
+    /// True if the menu was cancelled (dismissed without selection)
+    pub was_cancelled: bool,
+    /// Cursor position when the menu was dismissed (screen coordinates)
+    pub cursor_x: i32,
+    pub cursor_y: i32,
+    /// True if right button is currently pressed (for right-click detection)
+    pub right_button_down: bool,
+}
+
 /// Shows the native Windows shell context menu for a single filesystem path at the given screen coordinates.
-/// Returns Ok even if the menu is dismissed without executing a command.
-pub fn show_shell_context_menu(hwnd: HWND, path: &Path, screen_x: i32, screen_y: i32) -> windows::core::Result<()> {
+/// Returns Ok with info about how the menu was dismissed.
+pub fn show_shell_context_menu(hwnd: HWND, path: &Path, screen_x: i32, screen_y: i32) -> windows::core::Result<ContextMenuResult> {
     let _com_guard = ComGuard::new()?;
 
     // Convert path to wide string for SHParseDisplayName
@@ -69,7 +82,12 @@ pub fn show_shell_context_menu(hwnd: HWND, path: &Path, screen_x: i32, screen_y:
         SHParseDisplayName(PCWSTR(wide_path.as_ptr()), None, &mut pidl, 0, None)?;
 
         if pidl.is_null() {
-            return Ok(());
+            return Ok(ContextMenuResult {
+                was_cancelled: true,
+                cursor_x: screen_x,
+                cursor_y: screen_y,
+                right_button_down: false,
+            });
         }
 
         let mut child: *mut ITEMIDLIST = std::ptr::null_mut();
@@ -84,7 +102,12 @@ pub fn show_shell_context_menu(hwnd: HWND, path: &Path, screen_x: i32, screen_y:
         let hmenu = CreatePopupMenu()?;
         if hmenu.0.is_null() {
             CoTaskMemFree(Some(pidl as _));
-            return Ok(());
+            return Ok(ContextMenuResult {
+                was_cancelled: true,
+                cursor_x: screen_x,
+                cursor_y: screen_y,
+                right_button_down: false,
+            });
         }
 
         // SAFETY: hmenu is a valid menu handle; command ids start at 1.
@@ -98,6 +121,15 @@ pub fn show_shell_context_menu(hwnd: HWND, path: &Path, screen_x: i32, screen_y:
             hwnd,
             None,
         ).0 as u32;
+
+        // Get cursor position after menu closes
+        let mut cursor = POINT::default();
+        let _ = GetCursorPos(&mut cursor);
+        
+        // Check if any mouse button is pressed
+        let right_down = GetAsyncKeyState(0x02) < 0; // VK_RBUTTON = 0x02
+
+        let was_cancelled = command_id == 0;
 
         if command_id != 0 {
             let invoke = CMINVOKECOMMANDINFOEX {
@@ -116,7 +148,12 @@ pub fn show_shell_context_menu(hwnd: HWND, path: &Path, screen_x: i32, screen_y:
 
         DestroyMenu(hmenu)?;
         CoTaskMemFree(Some(pidl as _));
-    }
 
-    Ok(())
+        Ok(ContextMenuResult {
+            was_cancelled,
+            cursor_x: cursor.x,
+            cursor_y: cursor.y,
+            right_button_down: right_down,
+        })
+    }
 }
