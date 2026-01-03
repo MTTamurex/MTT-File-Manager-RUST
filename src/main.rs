@@ -2417,7 +2417,10 @@ impl eframe::App for ImageViewerApp {
             
             // Detecção de clique direito na área vazia (fora dos itens)
             // Só abre menu de contexto se não houver item selecionado pelo clique direito
-            if !self.context_menu.is_open && ui.input(|i| i.pointer.secondary_clicked()) {
+            // e não houver menu pendente (já definido pelo grid_view ou list_view)
+            if !self.context_menu.is_open 
+               && self.context_menu.pending_native_menu.is_none() 
+               && ui.input(|i| i.pointer.secondary_clicked()) {
                 // Verifica se o clique foi em um item
                 let pointer_pos = ui.ctx().pointer_latest_pos();
                 let mut clicked_on_item = false;
@@ -2459,14 +2462,31 @@ impl eframe::App for ImageViewerApp {
                     }
                 }
                 
-                // Se não clicou em item, abre menu de contexto para área vazia
+                // Se não clicou em item, abre menu de contexto nativo para a pasta atual (área vazia)
                 if !clicked_on_item {
-                    self.context_menu.open(
-                        pointer_pos.unwrap_or(ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO)),
-                        None,
-                        Some(PathBuf::from(&self.current_path)),
-                        true
-                    );
+                    // Use native Windows context menu for the current folder
+                    if self.native_hwnd.is_some() && !self.is_computer_view {
+                        let mut cursor = POINT::default();
+                        unsafe {
+                            let _ = GetCursorPos(&mut cursor);
+                        }
+                        // Store pending menu for the current folder (not a specific item)
+                        self.context_menu.pending_native_menu = Some((
+                            PathBuf::from(&self.current_path), 
+                            cursor.x, 
+                            cursor.y, 
+                            0
+                        ));
+                        ui.ctx().request_repaint();
+                    } else {
+                        // Fallback to egui context menu
+                        self.context_menu.open(
+                            pointer_pos.unwrap_or(ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO)),
+                            None,
+                            Some(PathBuf::from(&self.current_path)),
+                            true
+                        );
+                    }
                 }
             }
         });
