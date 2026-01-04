@@ -184,6 +184,9 @@ struct ImageViewerApp {
     // NAVEGAÇÃO / ADDRESS BAR (Breadcrumbs vs Edit)
     is_address_editing: bool,
 
+    // SCROLL TO SELECTED (para navegação por teclado)
+    scroll_to_selected: bool,
+
     // Window handle for native shell interactions
     native_hwnd: Option<HWND>,
 }
@@ -375,6 +378,9 @@ impl ImageViewerApp {
 
             // NAVEGAÇÃO / ADDRESS BAR
             is_address_editing: false,
+
+            // SCROLL TO SELECTED (para navegação por teclado)
+            scroll_to_selected: false,
 
             // HWND nativo (capturado na primeira atualização)
             native_hwnd: None,
@@ -1550,6 +1556,43 @@ impl ImageViewerApp {
     fn render_list_view(&mut self, ui: &mut egui::Ui) {
         use mtt_file_manager::ui::views::{list_view, ListViewContext, ListViewOperations};
 
+        // Keyboard navigation for list view (ONLY when not renaming)
+        if self.renaming_state.is_none() {
+            let current_index = self.items.iter().position(|x| {
+                self.selected_file
+                    .as_ref()
+                    .map_or(false, |f| f.path == x.path)
+            });
+
+            let mut new_index = None;
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                new_index = current_index.map(|idx| idx + 1).or(Some(0));
+            } else if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                new_index = current_index.map(|idx| idx.saturating_sub(1));
+            }
+
+            if let Some(idx) = new_index {
+                let clamped = idx.min(self.items.len().saturating_sub(1));
+                if let Some(item) = self.items.get(clamped) {
+                    self.selected_file = Some(item.clone());
+                    self.selected_item = Some(clamped);
+                    self.scroll_to_selected = true; // Trigger scroll to selected item
+                }
+            }
+
+            // Enter to open (only when not renaming)
+            if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                if let Some(selected) = &self.selected_file.clone() {
+                    if selected.is_dir {
+                        self.navigate_to(&selected.path.to_string_lossy());
+                        return; // Exit early after navigation
+                    } else {
+                        open_with_shell(&selected.path);
+                    }
+                }
+            }
+        }
+
         // Extrair dados necessários para evitar múltiplos borrows
         let items = self.items.clone(); // Clone para evitar borrow
         let selected_item = self.selected_item;
@@ -1567,6 +1610,7 @@ impl ImageViewerApp {
         );
 
         // Criar contexto com referências mutáveis separadas
+        let scroll_to_selected = self.scroll_to_selected;
         let mut ctx = ListViewContext {
             items: &items,
             selected_item,
@@ -1575,6 +1619,7 @@ impl ImageViewerApp {
             sort_descending,
             renaming_state: renaming_state.clone(),
             focus_rename,
+            scroll_to_selected,
             is_computer_view: self.is_computer_view,
             is_onedrive_folder,
             texture_cache: &mut self.cache_manager.texture_cache,
@@ -1634,6 +1679,7 @@ impl ImageViewerApp {
         self.sort_descending = ctx.sort_descending;
         self.renaming_state = ctx.renaming_state;
         self.focus_rename = ctx.focus_rename;
+        self.scroll_to_selected = false; // Reset after scrolling
 
         // Processar ações (bloqueadas durante renomeação)
         let is_renaming = self.renaming_state.is_some();
@@ -1760,6 +1806,7 @@ impl ImageViewerApp {
                 if let Some(item) = self.items.get(clamped) {
                     self.selected_file = Some(item.clone());
                     self.selected_item = Some(clamped);
+                    self.scroll_to_selected = true; // Trigger scroll to selected item
                 }
             }
 
@@ -1788,6 +1835,7 @@ impl ImageViewerApp {
         let computer_icon = self.cache_manager.computer_icon.clone();
 
         // Criar contexto com referências mutáveis separadas
+        let scroll_to_selected = self.scroll_to_selected;
         let mut ctx = GridViewContext {
             items: &items,
             selected_item,
@@ -1796,6 +1844,7 @@ impl ImageViewerApp {
             last_grid_cols,
             renaming_state: renaming_state.clone(),
             focus_rename,
+            scroll_to_selected,
             texture_cache: &mut self.cache_manager.texture_cache,
             loading_set: &mut self.cache_manager.loading_set,
             scanned_folders: &mut self.scanned_folders,
@@ -1852,6 +1901,7 @@ impl ImageViewerApp {
         self.last_grid_cols = ctx.last_grid_cols;
         self.renaming_state = ctx.renaming_state;
         self.focus_rename = ctx.focus_rename;
+        self.scroll_to_selected = false; // Reset after scrolling
 
         // Processar ações (bloqueadas durante renomeação, exceto clique no próprio item)
         let is_renaming = self.renaming_state.is_some();

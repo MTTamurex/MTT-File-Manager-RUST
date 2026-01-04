@@ -15,6 +15,7 @@ pub struct GridViewContext<'a> {
     pub last_grid_cols: usize,
     pub renaming_state: Option<(usize, String)>,
     pub focus_rename: bool,
+    pub scroll_to_selected: bool, // Scroll to selected item on keyboard navigation
     pub texture_cache: &'a mut lru::LruCache<PathBuf, egui::TextureHandle>,
     pub loading_set: &'a mut std::collections::HashSet<PathBuf>,
     pub scanned_folders: &'a mut std::collections::HashSet<PathBuf>,
@@ -118,6 +119,10 @@ pub fn render_grid_view(
                         }
 
                         if ctx.selected_item == Some(index) {
+                            // Scroll to selected item if requested (keyboard navigation)
+                            if ctx.scroll_to_selected {
+                                ui.scroll_to_rect(rect, Some(egui::Align::Center));
+                            }
                             ui.painter().rect_stroke(
                                 rect,
                                 2.0,

@@ -16,6 +16,7 @@ pub struct ListViewContext<'a> {
     pub sort_descending: bool,
     pub renaming_state: Option<(usize, String)>,
     pub focus_rename: bool,
+    pub scroll_to_selected: bool, // Scroll to selected item on keyboard navigation
     pub is_computer_view: bool,
     pub is_onedrive_folder: bool,
     pub texture_cache: &'a mut lru::LruCache<PathBuf, egui::TextureHandle>,
@@ -212,6 +213,10 @@ pub fn render_list_view(
 
                     // Background Selection
                     if is_selected {
+                        // Scroll to selected item if requested (keyboard navigation)
+                        if ctx.scroll_to_selected {
+                            ui.scroll_to_rect(rect, Some(egui::Align::Center));
+                        }
                         ui.painter()
                             .rect_filled(rect, 0.0, Color32::from_rgb(205, 232, 255));
                     } else if response.hovered() {
