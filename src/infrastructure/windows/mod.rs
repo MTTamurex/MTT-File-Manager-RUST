@@ -6,6 +6,7 @@ pub mod drives;
 pub mod file_system;
 pub mod formatting;
 pub mod icons;
+pub mod media_foundation;
 pub mod metadata;
 pub mod shell_operations;
 pub mod system_info;
@@ -16,6 +17,8 @@ pub use drives::*;
 pub use file_system::*;
 pub use formatting::*;
 pub use icons::*;
+pub use media_foundation::*;
 pub use metadata::*;
 pub use shell_operations::*;
 pub use system_info::*;
+
