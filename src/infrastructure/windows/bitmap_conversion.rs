@@ -1,16 +1,15 @@
 //! Bitmap and icon conversion functions
 //! Follows .cursorrules: single responsibility, < 300 lines
 
-use windows::{
-    Win32::Graphics::Gdi::*,
-    Win32::UI::WindowsAndMessaging::*,
-};
+use windows::{Win32::Graphics::Gdi::*, Win32::UI::WindowsAndMessaging::*};
 
 /// Converts HBITMAP to RGBA buffer.
 ///
 /// # Safety
 /// Uses GetObjectW, GetDIBits. Does NOT delete the HBITMAP (caller's responsibility).
-pub fn hbitmap_to_rgba(hbitmap: HBITMAP) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
+pub fn hbitmap_to_rgba(
+    hbitmap: HBITMAP,
+) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     unsafe {
         let mut bm = BITMAP::default();
         GetObjectW(
@@ -18,12 +17,12 @@ pub fn hbitmap_to_rgba(hbitmap: HBITMAP) -> std::result::Result<(Vec<u8>, u32, u
             std::mem::size_of::<BITMAP>() as i32,
             Some(&mut bm as *mut _ as *mut _),
         );
-        
+
         let width = bm.bmWidth as usize;
         let height = bm.bmHeight.abs() as usize;
-        
+
         let mut buffer = vec![0u8; width * height * 4];
-        
+
         let mut bi = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
                 biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
@@ -36,7 +35,7 @@ pub fn hbitmap_to_rgba(hbitmap: HBITMAP) -> std::result::Result<(Vec<u8>, u32, u
             },
             ..Default::default()
         };
-        
+
         let hdc = GetDC(None);
         GetDIBits(
             hdc,
@@ -48,12 +47,12 @@ pub fn hbitmap_to_rgba(hbitmap: HBITMAP) -> std::result::Result<(Vec<u8>, u32, u
             DIB_RGB_COLORS,
         );
         ReleaseDC(None, hdc);
-        
+
         // BGRA → RGBA conversion
         for pixel in buffer.chunks_exact_mut(4) {
             pixel.swap(0, 2);
         }
-        
+
         Ok((buffer, width as u32, height as u32))
     }
 }
@@ -65,39 +64,41 @@ pub fn hbitmap_to_rgba(hbitmap: HBITMAP) -> std::result::Result<(Vec<u8>, u32, u
 /// # Safety
 /// Uses GetIconInfo, GetDIBits. Does NOT free the HICON (caller's responsibility).
 /// Windows GDI returns Pre-Multiplied Alpha.
-pub fn hicon_to_rgba(hicon: HICON) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
+pub fn hicon_to_rgba(
+    hicon: HICON,
+) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     unsafe {
         let mut icon_info = ICONINFO::default();
         if GetIconInfo(hicon, &mut icon_info).is_err() {
             return Err("GetIconInfo failed".into());
         }
-        
+
         let hbm_color = icon_info.hbmColor;
-        
+
         let mut bm = BITMAP::default();
         GetObjectW(
             hbm_color,
             std::mem::size_of::<BITMAP>() as i32,
             Some(&mut bm as *mut _ as *mut _),
         );
-        
+
         let width = bm.bmWidth as usize;
         let height = bm.bmHeight.abs() as usize;
-        
+
         // Validate size (icons are usually small, but be defensive)
         if width > 256 || height > 256 {
             let _ = DeleteObject(hbm_color);
             let _ = DeleteObject(icon_info.hbmMask);
             return Err("Icon too large".into());
         }
-        
+
         let mut buffer = vec![0u8; width * height * 4];
-        
+
         let mut bi = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
                 biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
                 biWidth: width as i32,
-                biHeight: -(height as i32),  // Top-down
+                biHeight: -(height as i32), // Top-down
                 biPlanes: 1,
                 biBitCount: 32,
                 biCompression: BI_RGB.0 as u32,
@@ -105,7 +106,7 @@ pub fn hicon_to_rgba(hicon: HICON) -> std::result::Result<(Vec<u8>, u32, u32), B
             },
             ..Default::default()
         };
-        
+
         let hdc = GetDC(None);
         let result = GetDIBits(
             hdc,
@@ -116,24 +117,24 @@ pub fn hicon_to_rgba(hicon: HICON) -> std::result::Result<(Vec<u8>, u32, u32), B
             &mut bi,
             DIB_RGB_COLORS,
         );
-        
+
         ReleaseDC(None, hdc);
-        
+
         if result == 0 {
             let _ = DeleteObject(hbm_color);
             let _ = DeleteObject(icon_info.hbmMask);
             return Err("GetDIBits failed".into());
         }
-        
+
         // Cleanup bitmaps (but NOT the HICON - caller is responsible)
         let _ = DeleteObject(hbm_color);
         let _ = DeleteObject(icon_info.hbmMask);
-        
+
         // BGRA → RGBA conversion
         for pixel in buffer.chunks_exact_mut(4) {
             pixel.swap(0, 2);
         }
-        
+
         Ok((buffer, width as u32, height as u32))
     }
 }
@@ -142,7 +143,7 @@ pub fn hicon_to_rgba(hicon: HICON) -> std::result::Result<(Vec<u8>, u32, u32), B
 pub fn create_error_placeholder() -> (Vec<u8>, u32, u32) {
     let size = 256;
     let mut buffer = vec![0u8; size * size * 4];
-    
+
     for (i, pixel) in buffer.chunks_exact_mut(4).enumerate() {
         let x = i % size;
         let y = i / size;
@@ -152,6 +153,6 @@ pub fn create_error_placeholder() -> (Vec<u8>, u32, u32) {
         pixel[2] = intensity;
         pixel[3] = 255;
     }
-    
+
     (buffer, 256, 256)
 }

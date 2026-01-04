@@ -2,9 +2,9 @@
 //!
 //! This module contains the rendering logic for individual items in grid view.
 
-use eframe::egui;
 use crate::domain::file_entry::{FileEntry, SyncStatus};
 use crate::ui::icon_loader::IconLoader;
+use eframe::egui;
 
 /// Trait para operações necessárias para renderizar um item slot
 pub trait ItemSlotOperations {
@@ -63,10 +63,12 @@ fn render_drive_slot(
 ) {
     let item = ctx.item;
     let path_clone = item.path.clone();
-    
+
     // Carrega ícone real do drive
-    let drive_icon = ctx.icon_loader.get_or_load_drive_icon(ui.ctx(), &path_clone.to_string_lossy());
-    
+    let drive_icon = ctx
+        .icon_loader
+        .get_or_load_drive_icon(ui.ctx(), &path_clone.to_string_lossy());
+
     // GEOMETRIA
     let available_h = ui.available_height();
     let available_w = ui.available_width();
@@ -74,73 +76,78 @@ fn render_drive_slot(
     let progress_w = (available_w * 0.8).min(150.0);
     let text_height = 36.0; // Nome + Espaço Livre
     let content_h = icon_size + 12.0 + 8.0 + text_height; // Ícone + Barra + Padding + Texto
-    
+
     let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
     ui.add_space(vertical_margin);
-    
+
     ui.vertical_centered(|ui| {
         // 1. ÍCONE
         if let Some(tex) = drive_icon {
-            ui.add(egui::Image::new(&tex)
-                .max_size(egui::vec2(icon_size, icon_size))
-                .maintain_aspect_ratio(true));
+            ui.add(
+                egui::Image::new(&tex)
+                    .max_size(egui::vec2(icon_size, icon_size))
+                    .maintain_aspect_ratio(true),
+            );
         } else {
             ui.label(egui::RichText::new("💽").size(icon_size * 0.8));
         }
         ui.add_space(8.0);
-        
+
         // 2. BARRA DE PROGRESSO (Espaço Usado)
         if drive_info.total_space > 0 {
             let used_space = drive_info.total_space - drive_info.free_space;
             let usage_ratio = used_space as f32 / drive_info.total_space as f32;
-            
+
             // Cor da barra: azul ou vermelho se estiver cheio (> 90%)
             let bar_color = if usage_ratio > 0.9 {
                 egui::Color32::from_rgb(230, 50, 50) // Vermelho
             } else {
                 egui::Color32::from_rgb(30, 130, 230) // Azul Windows
             };
-            
+
             let bg_color = egui::Color32::from_gray(230);
-            
-            let (bar_rect, _) = ui.allocate_exact_size(egui::vec2(progress_w, 12.0), egui::Sense::hover());
+
+            let (bar_rect, _) =
+                ui.allocate_exact_size(egui::vec2(progress_w, 12.0), egui::Sense::hover());
             ui.painter().rect_filled(bar_rect, 2.0, bg_color);
-            
+
             let filled_w = progress_w * usage_ratio;
             let filled_rect = egui::Rect::from_min_size(bar_rect.min, egui::vec2(filled_w, 12.0));
             ui.painter().rect_filled(filled_rect, 2.0, bar_color);
         }
-        
+
         ui.add_space(6.0);
-        
+
         // 3. TEXTO (Nome e Espaço Livre)
-        ui.add(egui::Label::new(
-            egui::RichText::new(&item.name)
-                .size(11.0)
-                .strong()
-        ).truncate());
-        
+        ui.add(egui::Label::new(egui::RichText::new(&item.name).size(11.0).strong()).truncate());
+
         if drive_info.total_space > 0 {
             let free_gb = drive_info.free_space as f64 / (1024.0 * 1024.0 * 1024.0);
             let total_gb = drive_info.total_space as f64 / (1024.0 * 1024.0 * 1024.0);
-            
+
             let (free_val, unit) = if total_gb >= 1000.0 {
                 (free_gb / 1024.0, "TB")
             } else {
                 (free_gb, "GB")
             };
-            
+
             let (total_val, total_unit) = if total_gb >= 1000.0 {
                 (total_gb / 1024.0, "TB")
             } else {
                 (total_gb, "GB")
             };
 
-            ui.add(egui::Label::new(
-                egui::RichText::new(format!("{:.1} {} livres de {:.1} {}", free_val, unit, total_val, total_unit))
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(format!(
+                        "{:.1} {} livres de {:.1} {}",
+                        free_val, unit, total_val, total_unit
+                    ))
                     .size(9.0)
-                    .color(egui::Color32::from_gray(100))
-            ).truncate());
+                    .color(egui::Color32::from_gray(100)),
+                )
+                .truncate(),
+            );
         }
     });
 }
@@ -152,22 +159,25 @@ fn render_directory_slot<O: ItemSlotOperations>(
     ops: &mut O,
 ) {
     let item = ctx.item;
-    
+
     // --- GATILHO LAZY LOAD ---
     // Se não tem capa E ainda não foi escaneado: Dispara Scan.
     if item.folder_cover.is_none() && !ctx.scanned_folders.contains(&item.path) {
         ctx.scanned_folders.insert(item.path.clone());
         ops.request_folder_scan(item.path.clone());
     }
-    
+
     // Se TEM capa (de SQLite ou descoberta recente) MAS a textura não está carregada: Carrega!
     if let Some(ref cover_path) = item.folder_cover {
-        if !ctx.texture_cache.contains(cover_path) && !ctx.loading_set.contains(cover_path) && ctx.loading_set.len() < 50 {
+        if !ctx.texture_cache.contains(cover_path)
+            && !ctx.loading_set.contains(cover_path)
+            && ctx.loading_set.len() < 50
+        {
             ctx.loading_set.insert(cover_path.clone());
             ops.request_thumbnail_load(cover_path.clone());
         }
     }
-    
+
     // GEOMETRIA
     let available_h = ui.available_height();
     let folder_w = ctx.thumbnail_size * 0.60;
@@ -175,10 +185,10 @@ fn render_directory_slot<O: ItemSlotOperations>(
     let text_height = 18.0;
     let content_h = folder_h + text_height;
     let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
-    
+
     // Margem superior para centralizar verticalmente
     ui.add_space(vertical_margin);
-    
+
     // Centraliza a pasta horizontalmente na celula
     let cell_width = ui.available_width();
     let x_offset = (cell_width - folder_w) / 2.0;
@@ -189,9 +199,11 @@ fn render_directory_slot<O: ItemSlotOperations>(
     crate::ui::components::item_slot::draw_custom_folder(
         ui.painter(),
         folder_rect,
-        item.folder_cover.as_ref().and_then(|p| ctx.texture_cache.get(p))
+        item.folder_cover
+            .as_ref()
+            .and_then(|p| ctx.texture_cache.get(p)),
     );
-    
+
     // Render sync status badge (OneDrive) for folders
     render_sync_badge(ui, folder_rect, item.sync_status);
 
@@ -199,15 +211,17 @@ fn render_directory_slot<O: ItemSlotOperations>(
     ui.allocate_rect(folder_rect, egui::Sense::hover());
 
     // TEXTO: Usa Label com truncate (igual aos arquivos) para respeitar limites
-    ui.add_space(6.0);  // Gap entre pasta e texto
-    
+    ui.add_space(6.0); // Gap entre pasta e texto
+
     if ctx.is_renaming {
         if let Some(text) = &mut ctx.renaming_text {
-            let response = ui.add(egui::TextEdit::singleline(&mut **text)
-                .frame(true)
-                .horizontal_align(egui::Align::Center)
-                .id_source("rename_input_dir"));
-            
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut **text)
+                    .frame(true)
+                    .horizontal_align(egui::Align::Center)
+                    .id_source("rename_input_dir"),
+            );
+
             if ctx.focus_rename {
                 response.request_focus();
             }
@@ -223,11 +237,14 @@ fn render_directory_slot<O: ItemSlotOperations>(
         }
     } else {
         ui.vertical_centered(|ui| {
-            ui.add(egui::Label::new(
-                egui::RichText::new(&item.name)
-                    .size(11.0)
-                    .color(egui::Color32::BLACK)
-            ).truncate());
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(&item.name)
+                        .size(11.0)
+                        .color(egui::Color32::BLACK),
+                )
+                .truncate(),
+            );
         });
     }
 }
@@ -240,34 +257,56 @@ fn render_file_slot<O: ItemSlotOperations>(
 ) {
     let item = ctx.item;
     let path_clone = item.path.clone();
-    
+
     // Detecta se é arquivo de mídia
     let is_media_file = if let Some(ext) = path_clone.extension() {
         let ext_lower = ext.to_string_lossy().to_lowercase();
-        matches!(ext_lower.as_str(),
-            "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" |
-            "tiff" | "tif" | "ico" | "heic" | "heif" | "avif" |
-            "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" |
-            "webm" | "m4v" | "mpg" | "mpeg" | "3gp" | "ts"
+        matches!(
+            ext_lower.as_str(),
+            "jpg"
+                | "jpeg"
+                | "png"
+                | "gif"
+                | "bmp"
+                | "webp"
+                | "tiff"
+                | "tif"
+                | "ico"
+                | "heic"
+                | "heif"
+                | "avif"
+                | "mp4"
+                | "mkv"
+                | "avi"
+                | "mov"
+                | "wmv"
+                | "flv"
+                | "webm"
+                | "m4v"
+                | "mpg"
+                | "mpeg"
+                | "3gp"
+                | "ts"
         )
     } else {
         false
     };
-    
+
     // Thumbnail loading para arquivos de mídia
     if is_media_file {
         let has_texture = ctx.texture_cache.contains(&path_clone);
         let is_loading = ctx.loading_set.contains(&path_clone);
-        
-        if !has_texture && !is_loading && ctx.loading_set.len() < 50 { // MAX_CONCURRENT_LOADS (increased for performance)
+
+        if !has_texture && !is_loading && ctx.loading_set.len() < 50 {
+            // MAX_CONCURRENT_LOADS (increased for performance)
             ctx.loading_set.insert(path_clone.clone());
             ops.request_thumbnail_load(path_clone.clone());
         }
     }
-    
+
     // Carrega ícone (sempre, servirá como fallback)
     let file_icon = ctx.icon_loader.get_or_load_icon(ui.ctx(), &path_clone);
-    
+
     // GEOMETRIA - reduz tamanho para caber na area com margem
     let available_h = ui.available_height();
     let available_w = ui.available_width();
@@ -275,15 +314,15 @@ fn render_file_slot<O: ItemSlotOperations>(
     let text_height = 18.0;
     let content_h = thumb_size + text_height;
     let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
-    
+
     // Margem superior para centralizar verticalmente
     ui.add_space(vertical_margin);
-    
+
     // Centraliza horizontalmente na area disponivel
     let x_offset = (available_w - thumb_size) / 2.0;
     let start_pos = ui.cursor().min + egui::vec2(x_offset.max(0.0), 0.0);
     let thumb_rect = egui::Rect::from_min_size(start_pos, egui::vec2(thumb_size, thumb_size));
-    
+
     // Desenha thumbnail ou ícone
     let mut drew_something = false;
     if is_media_file {
@@ -300,48 +339,68 @@ fn render_file_slot<O: ItemSlotOperations>(
             let offset_y = (thumb_size - draw_h) / 2.0;
             let draw_rect = egui::Rect::from_min_size(
                 thumb_rect.min + egui::vec2(offset_x, offset_y),
-                egui::vec2(draw_w, draw_h)
+                egui::vec2(draw_w, draw_h),
             );
-            ui.painter().image(texture.id(), draw_rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+            ui.painter().image(
+                texture.id(),
+                draw_rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
             drew_something = true;
         }
     }
 
     if !drew_something {
         // Fallback para ícone do Windows ou placeholder
-        ui.painter().rect_filled(thumb_rect, 4.0, egui::Color32::from_gray(248));
+        ui.painter()
+            .rect_filled(thumb_rect, 4.0, egui::Color32::from_gray(248));
         if let Some(icon_texture) = file_icon {
             let icon_size = thumb_size * 0.5;
-            let icon_rect = egui::Rect::from_center_size(thumb_rect.center(), egui::vec2(icon_size, icon_size));
-            ui.painter().image(icon_texture.id(), icon_rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+            let icon_rect =
+                egui::Rect::from_center_size(thumb_rect.center(), egui::vec2(icon_size, icon_size));
+            ui.painter().image(
+                icon_texture.id(),
+                icon_rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
         } else {
             // Se nem o ícone carregou, mostra "..." se for mídia ou ícone genérico
             let text = if is_media_file { "..." } else { "📄" };
-            let font_id = if is_media_file { 
-                egui::FontId::proportional(thumb_size * 0.3) 
-            } else { 
+            let font_id = if is_media_file {
+                egui::FontId::proportional(thumb_size * 0.3)
+            } else {
                 egui::FontId::proportional(thumb_size * 0.4)
             };
-            ui.painter().text(thumb_rect.center(), egui::Align2::CENTER_CENTER, text, font_id, egui::Color32::GRAY);
+            ui.painter().text(
+                thumb_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                text,
+                font_id,
+                egui::Color32::GRAY,
+            );
         }
     }
-    
+
     // Render sync status badge (OneDrive)
     render_sync_badge(ui, thumb_rect, item.sync_status);
-    
+
     // Aloca espaço do thumbnail
     ui.allocate_rect(thumb_rect, egui::Sense::hover());
-    
+
     // Texto do nome - igual as pastas
     ui.add_space(4.0);
-    
+
     if ctx.is_renaming {
         if let Some(text) = &mut ctx.renaming_text {
-            let response = ui.add(egui::TextEdit::singleline(&mut **text)
-                .frame(true)
-                .horizontal_align(egui::Align::Center)
-                .id_source("rename_input_file"));
-            
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut **text)
+                    .frame(true)
+                    .horizontal_align(egui::Align::Center)
+                    .id_source("rename_input_file"),
+            );
+
             if ctx.focus_rename {
                 response.request_focus();
             }
@@ -357,11 +416,14 @@ fn render_file_slot<O: ItemSlotOperations>(
         }
     } else {
         ui.vertical_centered(|ui| {
-            ui.add(egui::Label::new(
-                egui::RichText::new(&item.name)
-                    .size(11.0)
-                    .color(egui::Color32::BLACK)
-            ).truncate());
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(&item.name)
+                        .size(11.0)
+                        .color(egui::Color32::BLACK),
+                )
+                .truncate(),
+            );
         });
     }
 }
@@ -385,16 +447,26 @@ pub fn draw_custom_folder(
     // === DESENHO 1: BASE SÓLIDA ===
     painter.rect_filled(
         egui::Rect::from_min_size(folder_rect.min, egui::vec2(tab_w, tab_h)),
-        egui::CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 },
-        color_back
+        egui::CornerRadius {
+            nw: 3,
+            ne: 3,
+            sw: 0,
+            se: 0,
+        },
+        color_back,
     );
     painter.rect_filled(
         egui::Rect::from_min_max(
             egui::pos2(folder_rect.min.x, folder_rect.min.y + tab_h),
-            folder_rect.max
+            folder_rect.max,
         ),
-        egui::CornerRadius { nw: 0, ne: 3, sw: 4, se: 4 },
-        color_back
+        egui::CornerRadius {
+            nw: 0,
+            ne: 3,
+            sw: 4,
+            se: 4,
+        },
+        color_back,
     );
 
     // === DESENHO 2: PREVIEW ===
@@ -402,8 +474,11 @@ pub fn draw_custom_folder(
         let margin_x = folder_w * 0.08;
         let margin_top = folder_h * 0.05;
         let preview_area = egui::Rect::from_min_max(
-            egui::pos2(folder_rect.min.x + margin_x, folder_rect.min.y + tab_h + margin_top),
-            egui::pos2(folder_rect.max.x - margin_x, folder_rect.max.y - front_h)
+            egui::pos2(
+                folder_rect.min.x + margin_x,
+                folder_rect.min.y + tab_h + margin_top,
+            ),
+            egui::pos2(folder_rect.max.x - margin_x, folder_rect.max.y - front_h),
         );
 
         let size = tex.size();
@@ -420,22 +495,41 @@ pub fn draw_custom_folder(
             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, scale))
         };
 
-        painter.with_clip_rect(preview_area).image(tex.id(), preview_area, uv_rect, egui::Color32::WHITE);
+        painter.with_clip_rect(preview_area).image(
+            tex.id(),
+            preview_area,
+            uv_rect,
+            egui::Color32::WHITE,
+        );
     }
 
     // === DESENHO 3: BOLSO FRONTAL ===
     let front_rect = egui::Rect::from_min_max(
         egui::pos2(folder_rect.min.x, folder_rect.max.y - front_h),
-        folder_rect.max
+        folder_rect.max,
     );
-    painter.rect_filled(front_rect, egui::CornerRadius { nw: 0, ne: 0, sw: 4, se: 4 }, color_front);
+    painter.rect_filled(
+        front_rect,
+        egui::CornerRadius {
+            nw: 0,
+            ne: 0,
+            sw: 4,
+            se: 4,
+        },
+        color_front,
+    );
 
     // Borda sutil
     painter.rect_stroke(
         front_rect,
-        egui::CornerRadius { nw: 0, ne: 0, sw: 4, se: 4 },
+        egui::CornerRadius {
+            nw: 0,
+            ne: 0,
+            sw: 4,
+            se: 4,
+        },
         egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 150, 30)),
-        egui::StrokeKind::Inside
+        egui::StrokeKind::Inside,
     );
 }
 
@@ -444,7 +538,7 @@ fn render_sync_badge(ui: &mut egui::Ui, thumb_rect: egui::Rect, status: SyncStat
     if status == SyncStatus::None {
         return; // No badge for normal files
     }
-    
+
     let badge_size = 18.0;
     let badge_pos = egui::pos2(
         thumb_rect.right() - badge_size - 2.0,
@@ -452,57 +546,69 @@ fn render_sync_badge(ui: &mut egui::Ui, thumb_rect: egui::Rect, status: SyncStat
     );
     let badge_center = badge_pos + egui::vec2(badge_size / 2.0, badge_size / 2.0);
     let badge_radius = badge_size / 2.0;
-    
+
     let painter = ui.painter();
-    
+
     match status {
         SyncStatus::CloudOnly => {
             // Blue cloud icon - file needs download
-            painter.circle_filled(badge_center, badge_radius, egui::Color32::from_rgb(0, 120, 215));
+            painter.circle_filled(
+                badge_center,
+                badge_radius,
+                egui::Color32::from_rgb(0, 120, 215),
+            );
             painter.text(
-                badge_center, 
-                egui::Align2::CENTER_CENTER, 
-                "☁", 
-                egui::FontId::proportional(12.0), 
-                egui::Color32::WHITE
+                badge_center,
+                egui::Align2::CENTER_CENTER,
+                "☁",
+                egui::FontId::proportional(12.0),
+                egui::Color32::WHITE,
             );
         }
         SyncStatus::Syncing => {
             // Blue circular arrows - file is being synced
-            painter.circle_filled(badge_center, badge_radius, egui::Color32::from_rgb(0, 120, 215));
+            painter.circle_filled(
+                badge_center,
+                badge_radius,
+                egui::Color32::from_rgb(0, 120, 215),
+            );
             painter.text(
-                badge_center, 
-                egui::Align2::CENTER_CENTER, 
-                "⟳", 
-                egui::FontId::proportional(13.0), 
-                egui::Color32::WHITE
+                badge_center,
+                egui::Align2::CENTER_CENTER,
+                "⟳",
+                egui::FontId::proportional(13.0),
+                egui::Color32::WHITE,
             );
         }
         SyncStatus::Pinned => {
             // Green solid circle with check - always keep on device
-            painter.circle_filled(badge_center, badge_radius, egui::Color32::from_rgb(0, 150, 0));
+            painter.circle_filled(
+                badge_center,
+                badge_radius,
+                egui::Color32::from_rgb(0, 150, 0),
+            );
             painter.text(
-                badge_center, 
-                egui::Align2::CENTER_CENTER, 
+                badge_center,
+                egui::Align2::CENTER_CENTER,
                 "✓",
-                egui::FontId::proportional(11.0), 
-                egui::Color32::WHITE
+                egui::FontId::proportional(11.0),
+                egui::Color32::WHITE,
             );
         }
         SyncStatus::LocallyAvailable => {
             // White circle with green outline/check - downloaded on demand
             painter.circle_filled(badge_center, badge_radius, egui::Color32::WHITE);
             painter.circle_stroke(
-                badge_center, 
-                badge_radius - 1.0, 
-                egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 150, 0))
+                badge_center,
+                badge_radius - 1.0,
+                egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 150, 0)),
             );
             painter.text(
-                badge_center, 
-                egui::Align2::CENTER_CENTER, 
+                badge_center,
+                egui::Align2::CENTER_CENTER,
                 "✓",
-                egui::FontId::proportional(11.0), 
-                egui::Color32::from_rgb(0, 150, 0)
+                egui::FontId::proportional(11.0),
+                egui::Color32::from_rgb(0, 150, 0),
             );
         }
         SyncStatus::None => {} // Already handled above

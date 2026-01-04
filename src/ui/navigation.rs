@@ -24,7 +24,7 @@ pub trait NavigationOperations {
 /// Helper functions for navigation logic
 pub mod helpers {
     use super::*;
-    
+
     /// Navigates to a specific path (implementation logic)
     pub fn navigate_to_impl(
         current_path: &mut String,
@@ -40,28 +40,28 @@ pub mod helpers {
         if *current_path == path {
             return;
         }
-        
+
         // Cut "future" history (if we went back and navigated elsewhere)
         if *history_index < navigation_history.len().saturating_sub(1) {
             navigation_history.truncate(*history_index + 1);
         }
-        
+
         // Add new path to history
         navigation_history.push(path.to_string());
         *history_index = navigation_history.len() - 1;
-        
+
         *current_path = path.to_string();
         *path_input = path.to_string();
-        
+
         // Clear context_menu.target_path to ensure sync with current folder
         *context_menu_target_path = None;
-        
+
         // UPDATE WATCHER
         watch_current_folder();
-        
+
         load_folder();
     }
-    
+
     /// Goes back in navigation history (without adding to history)
     pub fn go_back_impl(
         current_path: &mut String,
@@ -82,7 +82,7 @@ pub mod helpers {
             false
         }
     }
-    
+
     /// Goes forward in navigation history
     pub fn go_forward_impl(
         current_path: &mut String,
@@ -103,7 +103,7 @@ pub mod helpers {
             false
         }
     }
-    
+
     /// Navigates to "Este Computador" view
     pub fn navigate_to_computer_impl(
         current_path: &mut String,
@@ -124,12 +124,12 @@ pub mod helpers {
         }
         navigation_history.push(current_path.clone());
         *history_index = navigation_history.len();
-        
+
         // Set computer view
         *current_path = "Este Computador".to_string();
         *is_computer_view = true;
         *path_input = "Este Computador".to_string();
-        
+
         // Clear items for computer view
         *items = Arc::new(Vec::new());
         all_items.clear();
@@ -137,12 +137,9 @@ pub mod helpers {
         *selected_file = None;
         *total_items = disks_len;
     }
-    
+
     /// Goes up one level (adds to history)
-    pub fn go_up_one_level_impl(
-        current_path: &str,
-        navigate_to: &mut dyn FnMut(&str),
-    ) -> bool {
+    pub fn go_up_one_level_impl(current_path: &str, navigate_to: &mut dyn FnMut(&str)) -> bool {
         if let Some(parent) = Path::new(current_path).parent() {
             let parent_str = parent.to_string_lossy().to_string();
             if !parent_str.is_empty() {
@@ -152,17 +149,17 @@ pub mod helpers {
         }
         false
     }
-    
+
     /// Can go back in history?
     pub fn can_go_back_impl(history_index: usize) -> bool {
         history_index > 0
     }
-    
+
     /// Can go forward in history?
     pub fn can_go_forward_impl(history_index: usize, navigation_history_len: usize) -> bool {
         history_index < navigation_history_len.saturating_sub(1)
     }
-    
+
     /// Can go up one level?
     pub fn can_go_up_impl(is_computer_view: bool, current_path: &str) -> bool {
         !is_computer_view && Path::new(current_path).parent().is_some()

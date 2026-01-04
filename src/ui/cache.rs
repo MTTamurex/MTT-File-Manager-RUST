@@ -15,7 +15,7 @@ pub struct TextureCacheConfig {
 impl Default for TextureCacheConfig {
     fn default() -> Self {
         Self {
-            max_size: 200,  // ~50-100MB VRAM
+            max_size: 200, // ~50-100MB VRAM
             max_concurrent_loads: 30,
         }
     }
@@ -29,7 +29,7 @@ pub struct IconCacheConfig {
 impl Default for IconCacheConfig {
     fn default() -> Self {
         Self {
-            max_size: 100,  // Icons are shared by extension
+            max_size: 100, // Icons are shared by extension
         }
     }
 }
@@ -42,7 +42,7 @@ pub struct CacheManager {
     pub folder_icon_texture: Option<egui::TextureHandle>,
     pub computer_icon: Option<egui::TextureHandle>,
     pub drive_icon_cache: LruCache<String, egui::TextureHandle>,
-    
+
     config: TextureCacheConfig,
     icon_config: IconCacheConfig,
 }
@@ -57,12 +57,12 @@ impl CacheManager {
             folder_icon_texture: None,
             computer_icon: None,
             drive_icon_cache: LruCache::new(NonZeroUsize::new(10).unwrap()),
-            
+
             config: TextureCacheConfig::default(),
             icon_config: IconCacheConfig::default(),
         }
     }
-    
+
     /// Creates a cache manager with custom configuration
     pub fn with_config(config: TextureCacheConfig, icon_config: IconCacheConfig) -> Self {
         Self {
@@ -72,32 +72,32 @@ impl CacheManager {
             folder_icon_texture: None,
             computer_icon: None,
             drive_icon_cache: LruCache::new(NonZeroUsize::new(10).unwrap()),
-            
+
             config,
             icon_config,
         }
     }
-    
+
     /// Checks if a thumbnail is in the cache
     pub fn has_thumbnail(&self, path: &PathBuf) -> bool {
         self.texture_cache.contains(path)
     }
-    
+
     /// Gets a thumbnail from the cache
     pub fn get_thumbnail(&mut self, path: &PathBuf) -> Option<&egui::TextureHandle> {
         self.texture_cache.get(path)
     }
-    
+
     /// Puts a thumbnail in the cache
     pub fn put_thumbnail(&mut self, path: PathBuf, texture: egui::TextureHandle) {
         self.texture_cache.put(path, texture);
     }
-    
+
     /// Checks if a thumbnail is being loaded
     pub fn is_loading(&self, path: &PathBuf) -> bool {
         self.loading_set.contains(path)
     }
-    
+
     /// Starts loading a thumbnail
     pub fn start_loading(&mut self, path: PathBuf) -> bool {
         if self.loading_set.len() < self.config.max_concurrent_loads {
@@ -107,12 +107,12 @@ impl CacheManager {
             false
         }
     }
-    
+
     /// Finishes loading a thumbnail
     pub fn finish_loading(&mut self, path: &PathBuf) {
         self.loading_set.remove(path);
     }
-    
+
     /// Clears all caches
     pub fn clear_all(&mut self) {
         self.texture_cache.clear();
@@ -121,33 +121,39 @@ impl CacheManager {
         self.drive_icon_cache.clear();
         // Note: folder_icon_texture and computer_icon are kept as they're singletons
     }
-    
+
     /// Estimates VRAM usage in bytes
     pub fn estimate_vram_usage(&self) -> usize {
-        let texture_usage: usize = self.texture_cache.iter()
+        let texture_usage: usize = self
+            .texture_cache
+            .iter()
             .map(|(_, tex)| {
                 let size = tex.size();
-                size[0] * size[1] * 4  // RGBA = 4 bytes per pixel
+                size[0] * size[1] * 4 // RGBA = 4 bytes per pixel
             })
             .sum();
-        
-        let icon_usage: usize = self.icon_cache.iter()
-            .map(|(_, tex)| {
-                let size = tex.size();
-                size[0] * size[1] * 4
-            })
-            .sum();
-        
-        let drive_icon_usage: usize = self.drive_icon_cache.iter()
+
+        let icon_usage: usize = self
+            .icon_cache
+            .iter()
             .map(|(_, tex)| {
                 let size = tex.size();
                 size[0] * size[1] * 4
             })
             .sum();
-        
+
+        let drive_icon_usage: usize = self
+            .drive_icon_cache
+            .iter()
+            .map(|(_, tex)| {
+                let size = tex.size();
+                size[0] * size[1] * 4
+            })
+            .sum();
+
         texture_usage + icon_usage + drive_icon_usage
     }
-    
+
     /// Gets or creates a drive icon
     pub fn get_drive_icon(
         &mut self,
@@ -158,7 +164,7 @@ impl CacheManager {
         if let Some(texture) = self.drive_icon_cache.get(disk_path) {
             return Some(texture.clone());
         }
-        
+
         match extract_fn(disk_path) {
             Ok((rgba_data, width, height)) => {
                 let texture = ctx.load_texture(
@@ -169,7 +175,7 @@ impl CacheManager {
                     ),
                     egui::TextureOptions::LINEAR,
                 );
-                
+
                 let cloned = texture.clone();
                 self.drive_icon_cache.put(disk_path.to_string(), texture);
                 Some(cloned)
@@ -177,7 +183,7 @@ impl CacheManager {
             Err(_) => None,
         }
     }
-    
+
     /// Gets or creates a file icon
     pub fn get_file_icon(
         &mut self,
@@ -194,12 +200,12 @@ impl CacheManager {
             // Cache por extensão - todos .txt compartilham ícone
             format!(".{}", extension)
         };
-        
+
         // Cache hit? Clone do handle (barato)
         if let Some(texture) = self.icon_cache.get(&cache_key) {
             return Some(texture.clone());
         }
-        
+
         // Cache miss -> carrega ícone
         match extract_fn(path) {
             Ok((rgba_data, width, height)) => {
@@ -211,7 +217,7 @@ impl CacheManager {
                     ),
                     egui::TextureOptions::LINEAR,
                 );
-                
+
                 let cloned = texture.clone();
                 self.icon_cache.put(cache_key, texture);
                 Some(cloned)
@@ -219,7 +225,7 @@ impl CacheManager {
             Err(_) => None,
         }
     }
-    
+
     /// Ensures folder icon is loaded
     pub fn ensure_folder_icon(
         &mut self,
@@ -229,7 +235,7 @@ impl CacheManager {
         if self.folder_icon_texture.is_some() {
             return;
         }
-        
+
         match extract_fn() {
             Ok((rgba_data, width, height)) => {
                 let texture = ctx.load_texture(
@@ -247,7 +253,7 @@ impl CacheManager {
             }
         }
     }
-    
+
     /// Ensures computer icon is loaded
     pub fn ensure_computer_icon(
         &mut self,
@@ -257,19 +263,16 @@ impl CacheManager {
         if self.computer_icon.is_some() {
             return;
         }
-        
+
         match extract_fn() {
             Ok((data, width, height)) => {
                 let image = egui::ColorImage::from_rgba_unmultiplied(
                     [width as usize, height as usize],
                     &data,
                 );
-                
-                self.computer_icon = Some(ctx.load_texture(
-                    "computer_icon",
-                    image,
-                    egui::TextureOptions::LINEAR,
-                ));
+
+                self.computer_icon =
+                    Some(ctx.load_texture("computer_icon", image, egui::TextureOptions::LINEAR));
             }
             Err(_) => {
                 // Fallback
@@ -287,7 +290,7 @@ impl Default for CacheManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_cache_manager_creation() {
         let cache = CacheManager::new();
@@ -295,27 +298,27 @@ mod tests {
         assert_eq!(cache.icon_cache.len(), 0);
         assert!(cache.loading_set.is_empty());
     }
-    
+
     #[test]
     fn test_loading_management() {
         let mut cache = CacheManager::new();
         let path = PathBuf::from("test.txt");
-        
+
         assert!(!cache.is_loading(&path));
         assert!(cache.start_loading(path.clone()));
         assert!(cache.is_loading(&path));
-        
+
         cache.finish_loading(&path);
         assert!(!cache.is_loading(&path));
     }
-    
+
     #[test]
     fn test_vram_estimation() {
         let cache = CacheManager::new();
         let usage = cache.estimate_vram_usage();
         assert_eq!(usage, 0); // Empty cache
     }
-    
+
     #[test]
     fn test_cache_clear() {
         let mut cache = CacheManager::new();

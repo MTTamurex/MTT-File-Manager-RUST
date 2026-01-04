@@ -2,19 +2,17 @@
 //! Follows .cursorrules: single responsibility, < 300 lines
 
 use std::path::Path;
-use windows::{
-    Win32::Storage::FileSystem::*,
-    core::*,
-};
+use windows::{core::*, Win32::Storage::FileSystem::*};
 
 /// Gets file attributes for a path.
 pub fn get_file_attributes(path: &Path) -> u32 {
     unsafe {
-        let path_wide: Vec<u16> = path.to_string_lossy()
+        let path_wide: Vec<u16> = path
+            .to_string_lossy()
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect();
-        
+
         GetFileAttributesW(PCWSTR(path_wide.as_ptr()))
     }
 }

@@ -6,7 +6,7 @@ pub fn format_size(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = KB * 1024;
     const GB: u64 = MB * 1024;
-    
+
     if bytes >= GB {
         format!("{:.2} GB", bytes as f64 / GB as f64)
     } else if bytes >= MB {
@@ -23,7 +23,7 @@ pub fn format_date(timestamp: u64) -> String {
     if timestamp == 0 {
         return "Desconhecido".to_string();
     }
-    
+
     let seconds_in_day = 86400u64;
     let days_since_epoch = timestamp / seconds_in_day;
     let seconds_of_day = timestamp % seconds_in_day;
@@ -45,5 +45,8 @@ pub fn format_date(timestamp: u64) -> String {
 
     let display_y = if m <= 2 { final_y + 1 } else { final_y };
 
-    format!("{:02}/{:02}/{:04} {:02}:{:02}", d, m, display_y, hour, minute)
+    format!(
+        "{:02}/{:02}/{:04} {:02}:{:02}",
+        d, m, display_y, hour, minute
+    )
 }

@@ -18,22 +18,22 @@ impl RenamingState {
             focus_requested: true,
         }
     }
-    
+
     /// Updates the new name
     pub fn update_name(&mut self, new_name: String) {
         self.new_name = new_name;
     }
-    
+
     /// Marks focus as handled
     pub fn mark_focus_handled(&mut self) {
         self.focus_requested = false;
     }
-    
+
     /// Checks if focus is requested
     pub fn focus_requested(&self) -> bool {
         self.focus_requested
     }
-    
+
     /// Completes renaming and returns the state
     pub fn complete(self) -> (usize, String) {
         (self.item_index, self.new_name)
