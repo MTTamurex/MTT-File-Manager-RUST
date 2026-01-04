@@ -2671,6 +2671,105 @@ impl eframe::App for ImageViewerApp {
                                             ui.end_row();
                                         }
 
+                                        // EXIF Data for Images
+                                        if let Some(maker) = &meta.camera_maker {
+                                            ui.label("Fabricante da câmera:");
+                                            ui.label(maker);
+                                            ui.end_row();
+                                        }
+
+                                        if let Some(model) = &meta.camera_model {
+                                            ui.label("Modelo da câmera:");
+                                            ui.label(model);
+                                            ui.end_row();
+                                        }
+
+                                        if let Some(date) = &meta.date_taken {
+                                            ui.label("Data de captura:");
+                                            ui.label(date);
+                                            ui.end_row();
+                                        }
+
+                                        if let Some(f_stop) = &meta.f_stop {
+                                            ui.label("F-stop:");
+                                            ui.label(f_stop);
+                                            ui.end_row();
+                                        }
+
+                                        if let Some(exposure) = &meta.exposure_time {
+                                            ui.label("Tempo de exposição:");
+                                            ui.label(exposure);
+                                            ui.end_row();
+                                        }
+
+                                        if let Some(iso) = meta.iso_speed {
+                                            ui.label("ISO:");
+                                            ui.label(format!("ISO-{}", iso));
+                                            ui.end_row();
+                                        }
+
+                                        if let Some(focal) = &meta.focal_length {
+                                            ui.label("Distância focal:");
+                                            ui.label(focal);
+                                            ui.end_row();
+                                        }
+
+                                        if let Some(aperture) = &meta.max_aperture {
+                                            ui.label("Abertura máxima:");
+                                            ui.label(aperture);
+                                            ui.end_row();
+                                        }
+
+                                        if let Some(metering) = &meta.metering_mode {
+                                            ui.label("Modo de medição:");
+                                            ui.label(metering);
+                                            ui.end_row();
+                                        }
+
+                                        if let Some(flash) = &meta.flash_mode {
+                                            ui.label("Flash:");
+                                            ui.label(flash);
+                                            ui.end_row();
+                                        }
+
+                                        if let Some(subject) = &meta.subject {
+                                            ui.label("Assunto:");
+                                            ui.label(subject);
+                                            ui.end_row();
+                                        }
+
+                                        // Video Codec Info
+                                        if let Some(codec) = &meta.video_codec {
+                                            ui.label("Codec de vídeo:");
+                                            ui.label(codec);
+                                            ui.end_row();
+                                        }
+
+                                        if let Some(codec) = &meta.audio_codec {
+                                            ui.label("Codec de áudio:");
+                                            ui.label(codec);
+                                            ui.end_row();
+                                        }
+
+                                        if let Some(bitrate) = meta.audio_bitrate {
+                                            ui.label("Bitrate de áudio:");
+                                            ui.label(Self::format_bitrate(bitrate));
+                                            ui.end_row();
+                                        }
+
+                                        if let Some(channels) = meta.audio_channels {
+                                            ui.label("Canais de áudio:");
+                                            let channel_name = match channels {
+                                                1 => "Mono",
+                                                2 => "Estéreo",
+                                                6 => "5.1",
+                                                8 => "7.1",
+                                                _ => "Outro",
+                                            };
+                                            ui.label(format!("{} ({})", channels, channel_name));
+                                            ui.end_row();
+                                        }
+
                                         if let Some(duration) = meta.duration_100ns {
                                             ui.label("Duração:");
                                             ui.label(Self::format_media_duration(duration));
