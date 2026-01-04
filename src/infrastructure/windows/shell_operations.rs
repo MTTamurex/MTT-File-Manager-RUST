@@ -4,13 +4,8 @@
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use windows::{
-    core::*,
-    Win32::Foundation::*,
-    Win32::System::Com::*,
-    Win32::UI::Input::KeyboardAndMouse::*,
-    Win32::UI::Shell::Common::*,
-    Win32::UI::Shell::*,
-    Win32::UI::WindowsAndMessaging::*,
+    core::*, Win32::Foundation::*, Win32::System::Com::*, Win32::UI::Input::KeyboardAndMouse::*,
+    Win32::UI::Shell::Common::*, Win32::UI::Shell::*, Win32::UI::WindowsAndMessaging::*,
 };
 
 /// Opens a file with its default application using ShellExecuteW.
@@ -18,7 +13,7 @@ pub fn open_with_shell(path: &Path) {
     unsafe {
         let path_str = path.to_string_lossy().to_string();
         let path_wide: Vec<u16> = path_str.encode_utf16().chain(std::iter::once(0)).collect();
-        
+
         let _ = ShellExecuteW(
             None,
             PCWSTR(std::ptr::null()),
@@ -48,7 +43,9 @@ impl ComGuard {
 
 impl Drop for ComGuard {
     fn drop(&mut self) {
-        unsafe { CoUninitialize(); }
+        unsafe {
+            CoUninitialize();
+        }
     }
 }
 
@@ -66,7 +63,12 @@ pub struct ContextMenuResult {
 
 /// Shows the native Windows shell context menu for a single filesystem path at the given screen coordinates.
 /// Returns Ok with info about how the menu was dismissed.
-pub fn show_shell_context_menu(hwnd: HWND, path: &Path, screen_x: i32, screen_y: i32) -> windows::core::Result<ContextMenuResult> {
+pub fn show_shell_context_menu(
+    hwnd: HWND,
+    path: &Path,
+    screen_x: i32,
+    screen_y: i32,
+) -> windows::core::Result<ContextMenuResult> {
     let _com_guard = ComGuard::new()?;
 
     // Convert path to wide string for SHParseDisplayName
@@ -120,12 +122,13 @@ pub fn show_shell_context_menu(hwnd: HWND, path: &Path, screen_x: i32, screen_y:
             screen_y,
             hwnd,
             None,
-        ).0 as u32;
+        )
+        .0 as u32;
 
         // Get cursor position after menu closes
         let mut cursor = POINT::default();
         let _ = GetCursorPos(&mut cursor);
-        
+
         // Check if any mouse button is pressed
         let right_down = GetAsyncKeyState(0x02) < 0; // VK_RBUTTON = 0x02
 
@@ -138,7 +141,10 @@ pub fn show_shell_context_menu(hwnd: HWND, path: &Path, screen_x: i32, screen_y:
                 hwnd,
                 lpVerb: PCSTR((command_id - 1) as usize as *const u8),
                 nShow: SW_SHOWNORMAL.0 as i32,
-                ptInvoke: POINT { x: screen_x, y: screen_y },
+                ptInvoke: POINT {
+                    x: screen_x,
+                    y: screen_y,
+                },
                 ..Default::default()
             };
 

@@ -2,8 +2,8 @@
 //!
 //! This module handles loading Windows shell icons for files and folders.
 
-use std::path::Path;
 use std::collections::HashMap;
+use std::path::Path;
 
 use eframe::egui;
 use lru::LruCache;
@@ -34,13 +34,13 @@ impl IconLoader {
             drive_icon_cache: HashMap::new(),
         }
     }
-    
+
     /// Ensures the folder icon texture is loaded
     pub fn ensure_folder_icon(&mut self, ctx: &egui::Context) {
         if self.folder_icon_texture.is_some() {
             return;
         }
-        
+
         // Try to load native Windows folder icon
         if let Ok((pixels, width, height)) = windows::extract_folder_icon(IconSize::Large) {
             let texture = ctx.load_texture(
@@ -54,18 +54,24 @@ impl IconLoader {
             self.folder_icon_texture = Some(texture);
         }
     }
-    
+
     /// Gets or loads a Windows shell icon for a file path
-    pub fn get_or_load_icon(&mut self, ctx: &egui::Context, path: &Path) -> Option<egui::TextureHandle> {
+    pub fn get_or_load_icon(
+        &mut self,
+        ctx: &egui::Context,
+        path: &Path,
+    ) -> Option<egui::TextureHandle> {
         let cache_key = path.to_string_lossy().to_string();
-        
+
         // Check cache first
         if let Some(texture) = self.icon_cache.get(&cache_key) {
             return Some(texture.clone());
         }
-        
+
         // Load icon from Windows API
-        if let Ok((pixels, width, height)) = windows::extract_file_icon_by_path(path, IconSize::Large) {
+        if let Ok((pixels, width, height)) =
+            windows::extract_file_icon_by_path(path, IconSize::Large)
+        {
             let texture = ctx.load_texture(
                 cache_key.clone(),
                 egui::ColorImage::from_rgba_unmultiplied(
@@ -74,54 +80,55 @@ impl IconLoader {
                 ),
                 egui::TextureOptions::LINEAR,
             );
-            
+
             // Cache the texture
             let cloned = texture.clone();
             self.icon_cache.put(cache_key, texture);
             return Some(cloned);
         }
-        
+
         None
     }
-    
+
     /// Gets the folder icon texture (must call ensure_folder_icon first)
     pub fn folder_icon(&self) -> Option<&egui::TextureHandle> {
         self.folder_icon_texture.as_ref()
     }
-    
+
     /// Ensures the computer icon texture is loaded
     pub fn ensure_computer_icon(&mut self, ctx: &egui::Context) {
         if self.computer_icon_texture.is_some() {
             return;
         }
-        
+
         if let Ok((data, width, height)) = windows::extract_computer_icon(IconSize::Small) {
-            let image = egui::ColorImage::from_rgba_unmultiplied(
-                [width as usize, height as usize],
-                &data,
-            );
-            
-            self.computer_icon_texture = Some(ctx.load_texture(
-                "computer_icon",
-                image,
-                egui::TextureOptions::LINEAR,
-            ));
+            let image =
+                egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &data);
+
+            self.computer_icon_texture =
+                Some(ctx.load_texture("computer_icon", image, egui::TextureOptions::LINEAR));
         }
     }
-    
+
     /// Gets the computer icon texture (must call ensure_computer_icon first)
     pub fn computer_icon(&self) -> Option<&egui::TextureHandle> {
         self.computer_icon_texture.as_ref()
     }
-    
+
     /// Gets or loads a drive icon
-    pub fn get_or_load_drive_icon(&mut self, ctx: &egui::Context, drive_path: &str) -> Option<egui::TextureHandle> {
+    pub fn get_or_load_drive_icon(
+        &mut self,
+        ctx: &egui::Context,
+        drive_path: &str,
+    ) -> Option<egui::TextureHandle> {
         if let Some(icon) = self.drive_icon_cache.get(drive_path) {
             return Some(icon.clone());
         }
-        
+
         // Try to load real drive icon
-        if let Ok((rgba_data, width, height)) = windows::extract_drive_icon(drive_path, IconSize::Jumbo) {
+        if let Ok((rgba_data, width, height)) =
+            windows::extract_drive_icon(drive_path, IconSize::Jumbo)
+        {
             let texture = ctx.load_texture(
                 format!("drive_{}", drive_path),
                 egui::ColorImage::from_rgba_unmultiplied(
@@ -131,13 +138,14 @@ impl IconLoader {
                 egui::TextureOptions::LINEAR,
             );
             let cloned = texture.clone();
-            self.drive_icon_cache.insert(drive_path.to_string(), texture);
+            self.drive_icon_cache
+                .insert(drive_path.to_string(), texture);
             return Some(cloned);
         }
-        
+
         None
     }
-    
+
     /// Clears all icon caches
     pub fn clear(&mut self) {
         self.icon_cache.clear();
@@ -145,17 +153,23 @@ impl IconLoader {
         self.folder_icon_texture = None;
         self.computer_icon_texture = None;
     }
-    
+
     /// Gets or loads a native icon for a specific folder path (like OneDrive)
-    pub fn get_or_load_folder_path_icon(&mut self, ctx: &egui::Context, folder_path: &str) -> Option<egui::TextureHandle> {
+    pub fn get_or_load_folder_path_icon(
+        &mut self,
+        ctx: &egui::Context,
+        folder_path: &str,
+    ) -> Option<egui::TextureHandle> {
         let cache_key = folder_path.to_string();
-        
+
         if let Some(icon) = self.drive_icon_cache.get(&cache_key) {
             return Some(icon.clone());
         }
-        
+
         // Try to load native folder icon for this specific path
-        if let Ok((rgba_data, width, height)) = windows::extract_drive_icon(folder_path, IconSize::Jumbo) {
+        if let Ok((rgba_data, width, height)) =
+            windows::extract_drive_icon(folder_path, IconSize::Jumbo)
+        {
             let texture = ctx.load_texture(
                 format!("folder_{}", folder_path),
                 egui::ColorImage::from_rgba_unmultiplied(
@@ -168,7 +182,7 @@ impl IconLoader {
             self.drive_icon_cache.insert(cache_key, texture);
             return Some(cloned);
         }
-        
+
         None
     }
 }

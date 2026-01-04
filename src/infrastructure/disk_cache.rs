@@ -1,14 +1,14 @@
 //! Persistent SQLite cache for thumbnails
 //! Follows .cursorrules: I/O in worker threads, RAII for resources
 
-use std::path::{Path, PathBuf};
-use std::fs;
-use std::time::{SystemTime, UNIX_EPOCH};
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Mutex};
 use image::{DynamicImage, ImageBuffer, Rgba};
 use rusqlite::{params, Connection};
+use std::collections::hash_map::DefaultHasher;
+use std::fs;
+use std::hash::{Hash, Hasher};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Manages persistent thumbnail storage in SQLite
 pub struct ThumbnailDiskCache {
@@ -24,7 +24,7 @@ impl ThumbnailDiskCache {
         if !cache_dir.exists() {
             let _ = fs::create_dir_all(&cache_dir);
         }
-        
+
         // Clean up legacy files if they exist (Migration)
         Self::cleanup_legacy(&cache_dir);
 
@@ -32,13 +32,19 @@ impl ThumbnailDiskCache {
         let conn = match Connection::open(&db_path) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("[Cache] Failed to open database: {:?}. Using in-memory fallback.", e);
+                eprintln!(
+                    "[Cache] Failed to open database: {:?}. Using in-memory fallback.",
+                    e
+                );
                 // Fallback to in-memory if disk database fails
                 match Connection::open_in_memory() {
                     Ok(c) => c,
                     Err(fatal_e) => {
                         // This really shouldn't happen, but if it does, we must panic as we need a DB connection
-                        panic!("[FATAL] Cannot create even an in-memory database: {:?}", fatal_e);
+                        panic!(
+                            "[FATAL] Cannot create even an in-memory database: {:?}",
+                            fatal_e
+                        );
                     }
                 }
             }
@@ -58,8 +64,12 @@ impl ThumbnailDiskCache {
                 created_at INTEGER
             )",
             [],
-        ).unwrap_or_else(|e| {
-            eprintln!("[Cache] Warning: Failed to create thumbnails table: {:?}", e);
+        )
+        .unwrap_or_else(|e| {
+            eprintln!(
+                "[Cache] Warning: Failed to create thumbnails table: {:?}",
+                e
+            );
             0 // continue
         });
 
@@ -73,8 +83,12 @@ impl ThumbnailDiskCache {
                 value TEXT
             )",
             [],
-        ).unwrap_or_else(|e| {
-            eprintln!("[Cache] Warning: Failed to create preferences table: {:?}", e);
+        )
+        .unwrap_or_else(|e| {
+            eprintln!(
+                "[Cache] Warning: Failed to create preferences table: {:?}",
+                e
+            );
             0 // continue
         });
 
@@ -85,14 +99,18 @@ impl ThumbnailDiskCache {
                 cover_path TEXT
             )",
             [],
-        ).unwrap_or_else(|e| {
-            eprintln!("[Cache] Warning: Failed to create folder covers table: {:?}", e);
+        )
+        .unwrap_or_else(|e| {
+            eprintln!(
+                "[Cache] Warning: Failed to create folder covers table: {:?}",
+                e
+            );
             0 // continue
         });
 
-        Self { 
+        Self {
             db: Arc::new(Mutex::new(conn)),
-            cache_dir 
+            cache_dir,
         }
     }
 
@@ -126,15 +144,24 @@ impl ThumbnailDiskCache {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;
-        
+
         let db = self.db.lock().ok()?;
-        let mut stmt = db.prepare_cached("SELECT data FROM thumbnails WHERE id = ? AND modified_at = ?").ok()?;
-        
+        let mut stmt = db
+            .prepare_cached("SELECT data FROM thumbnails WHERE id = ? AND modified_at = ?")
+            .ok()?;
+
         stmt.query_row(params![id, mod_time], |row| row.get(0)).ok()
     }
 
     /// Saves a thumbnail to SQLite with optimized compression
-    pub fn put(&self, path: &Path, modified: SystemTime, rgba_data: &[u8], width: u32, height: u32) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn put(
+        &self,
+        path: &Path,
+        modified: SystemTime,
+        rgba_data: &[u8],
+        width: u32,
+        height: u32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let id = Self::hash_path(path);
         let mod_time = modified
             .duration_since(UNIX_EPOCH)
@@ -150,11 +177,12 @@ impl ThumbnailDiskCache {
         if rgba_data.len() != (width * height * 4) as usize {
             return Err("Invalid RGBA data length".into());
         }
-        
-        let img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_raw(width, height, rgba_data.to_vec())
-            .ok_or("Failed to create image buffer")?;
+
+        let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
+            ImageBuffer::from_raw(width, height, rgba_data.to_vec())
+                .ok_or("Failed to create image buffer")?;
         let dynamic_img = DynamicImage::ImageRgba8(img);
-        
+
         // Adaptive resize: only downscale if larger than 512px, never upscale
         // This preserves video thumbnails at their native 256px size
         let resized = if width > 512 || height > 512 {
@@ -162,28 +190,27 @@ impl ThumbnailDiskCache {
         } else {
             dynamic_img // Keep original size
         };
-        
+
         // STEP 2: Encode to WebP Lossy (Quality 60 - optimized for HiDPI)
         // Convert to RGB8 for webp crate (it doesn't support RGBA directly)
         let rgb_img = resized.to_rgb8();
         let (final_width, final_height) = (rgb_img.width(), rgb_img.height());
-        
+
         // Use webp crate for lossy compression with quality control
         let encoder = webp::Encoder::from_rgb(&rgb_img, final_width, final_height);
         let webp_data = encoder.encode(60.0); // Quality 60 (0-100 scale)
 
-
         // STEP 3: Save to SQLite (with path for GC)
         let db = self.db.lock().map_err(|_| "Database lock failed")?;
         let path_str = path.to_string_lossy().to_string();
-        
+
         // DEBUG: Log first few saves
         static SAVE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let count = SAVE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if count < 3 {
             eprintln!("[PUT] Saving thumbnail for: {}", path_str);
         }
-        
+
         db.execute(
             "INSERT OR REPLACE INTO thumbnails (id, path, data, modified_at, created_at) VALUES (?, ?, ?, ?, ?)",
             params![id, path_str, webp_data.to_vec(), mod_time, now],
@@ -205,7 +232,9 @@ impl ThumbnailDiskCache {
     /// Gets a user preference
     pub fn get_preference(&self, key: &str) -> Option<String> {
         if let Ok(db) = self.db.lock() {
-            let mut stmt = db.prepare("SELECT value FROM user_preferences WHERE key = ?").ok()?;
+            let mut stmt = db
+                .prepare("SELECT value FROM user_preferences WHERE key = ?")
+                .ok()?;
             stmt.query_row(params![key], |row| row.get(0)).ok()
         } else {
             None
@@ -215,11 +244,14 @@ impl ThumbnailDiskCache {
     /// Obtém a capa (thumbnail) de uma pasta se já foi descoberta
     pub fn get_folder_cover(&self, folder_path: &Path) -> Option<PathBuf> {
         let db = self.db.lock().ok()?;
-        let mut stmt = db.prepare_cached("SELECT cover_path FROM folder_covers WHERE folder_path = ?").ok()?;
+        let mut stmt = db
+            .prepare_cached("SELECT cover_path FROM folder_covers WHERE folder_path = ?")
+            .ok()?;
         stmt.query_row([folder_path.to_string_lossy()], |row| {
             let path_str: String = row.get(0)?;
             Ok(PathBuf::from(path_str))
-        }).ok()
+        })
+        .ok()
     }
 
     /// Salva a capa (thumbnail) descoberta para uma pasta
@@ -237,22 +269,35 @@ impl ThumbnailDiskCache {
     pub fn remove_cache_for_path(&self, path: &Path) {
         // Normaliza o path removendo o prefixo \\?\ do Windows
         let path_str = path.to_string_lossy().to_string();
-        let path_str = path_str.strip_prefix(r"\\?\").unwrap_or(&path_str).to_string();
-        
+        let path_str = path_str
+            .strip_prefix(r"\\?\")
+            .unwrap_or(&path_str)
+            .to_string();
+
         if let Ok(db) = self.db.lock() {
             // Pattern: C:\folder\* (precisa adicionar barra antes de %)
             let pattern = format!("{}\\%", path_str.trim_end_matches('\\'));
-            
+
             // Remove entradas de thumbnails
             let _ = db.execute("DELETE FROM thumbnails WHERE path = ?", [&path_str]);
-            let deleted = db.execute("DELETE FROM thumbnails WHERE path LIKE ?", [&pattern])
+            let deleted = db
+                .execute("DELETE FROM thumbnails WHERE path LIKE ?", [&pattern])
                 .unwrap_or(0);
-            
+
             // Remove folder cover entries
-            let _ = db.execute("DELETE FROM folder_covers WHERE folder_path = ?", [&path_str]);
-            let _ = db.execute("DELETE FROM folder_covers WHERE folder_path LIKE ?", [&pattern]);
-            let _ = db.execute("DELETE FROM folder_covers WHERE cover_path LIKE ?", [&pattern]);
-            
+            let _ = db.execute(
+                "DELETE FROM folder_covers WHERE folder_path = ?",
+                [&path_str],
+            );
+            let _ = db.execute(
+                "DELETE FROM folder_covers WHERE folder_path LIKE ?",
+                [&pattern],
+            );
+            let _ = db.execute(
+                "DELETE FROM folder_covers WHERE cover_path LIKE ?",
+                [&pattern],
+            );
+
             // Se deletou algo, roda VACUUM para reduzir tamanho do arquivo
             if deleted > 0 {
                 let _ = db.execute("VACUUM", []);
@@ -266,13 +311,13 @@ impl ThumbnailDiskCache {
     /// Roda em background na inicialização para não bloquear a UI
     pub fn garbage_collect(&self) -> usize {
         eprintln!("[GC] Starting garbage collection...");
-        
+
         let mut removed = 0;
-        
+
         // FASE 1: Lê todos os paths (lock curto - apenas leitura do banco)
         let all_entries: Vec<(String, String)>;
         let all_folders: Vec<String>;
-        
+
         {
             let db = match self.db.lock() {
                 Ok(db) => db,
@@ -281,9 +326,10 @@ impl ThumbnailDiskCache {
                     return 0;
                 }
             };
-            
+
             // Coleta thumbnails
-            all_entries = db.prepare("SELECT id, path FROM thumbnails WHERE path IS NOT NULL")
+            all_entries = db
+                .prepare("SELECT id, path FROM thumbnails WHERE path IS NOT NULL")
                 .and_then(|mut stmt| {
                     stmt.query_map([], |row| {
                         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -291,19 +337,24 @@ impl ThumbnailDiskCache {
                     .map(|rows| rows.flatten().collect())
                 })
                 .unwrap_or_default();
-            
+
             // Coleta folder_covers
-            all_folders = db.prepare("SELECT folder_path FROM folder_covers")
+            all_folders = db
+                .prepare("SELECT folder_path FROM folder_covers")
                 .and_then(|mut stmt| {
                     stmt.query_map([], |row| row.get::<_, String>(0))
-                    .map(|rows| rows.flatten().collect())
+                        .map(|rows| rows.flatten().collect())
                 })
                 .unwrap_or_default();
         }
         // ^^^ Lock liberado aqui!
-        
-        eprintln!("[GC] Loaded {} thumbnails, {} folder covers to check", all_entries.len(), all_folders.len());
-        
+
+        eprintln!(
+            "[GC] Loaded {} thumbnails, {} folder covers to check",
+            all_entries.len(),
+            all_folders.len()
+        );
+
         // FASE 2: Verifica existência de arquivos (SEM lock - I/O puro)
         // Esta é a parte lenta, mas não bloqueia o banco
         let orphan_thumbs: Vec<String> = all_entries
@@ -311,37 +362,47 @@ impl ThumbnailDiskCache {
             .filter(|(_, path)| !Path::new(path).exists())
             .map(|(id, _)| id)
             .collect();
-        
+
         let orphan_folders: Vec<String> = all_folders
             .into_iter()
             .filter(|path| !Path::new(path).exists())
             .collect();
-        
-        eprintln!("[GC] Found {} orphan thumbnails, {} orphan folders", orphan_thumbs.len(), orphan_folders.len());
-        
+
+        eprintln!(
+            "[GC] Found {} orphan thumbnails, {} orphan folders",
+            orphan_thumbs.len(),
+            orphan_folders.len()
+        );
+
         // FASE 3: Remove órfãos usando BATCH TRANSACTION (1 commit ao invés de N)
         if !orphan_thumbs.is_empty() || !orphan_folders.is_empty() {
             if let Ok(db) = self.db.lock() {
                 // Inicia transação única - todas as deleções acontecem na memória
                 let _ = db.execute("BEGIN TRANSACTION", []);
-                
+
                 // Remove thumbnails órfãos
                 for id in &orphan_thumbs {
-                    if db.execute("DELETE FROM thumbnails WHERE id = ?", [id]).is_ok() {
+                    if db
+                        .execute("DELETE FROM thumbnails WHERE id = ?", [id])
+                        .is_ok()
+                    {
                         removed += 1;
                     }
                 }
-                
+
                 // Remove folder_covers órfãos
                 for folder in &orphan_folders {
-                    if db.execute("DELETE FROM folder_covers WHERE folder_path = ?", [folder]).is_ok() {
+                    if db
+                        .execute("DELETE FROM folder_covers WHERE folder_path = ?", [folder])
+                        .is_ok()
+                    {
                         removed += 1;
                     }
                 }
-                
+
                 // Commit único - grava tudo no disco de uma vez
                 let _ = db.execute("COMMIT", []);
-                
+
                 // VACUUM apenas se removeu algo
                 if removed > 0 {
                     eprintln!("[GC] Removed {} entries, running VACUUM...", removed);
@@ -351,7 +412,7 @@ impl ThumbnailDiskCache {
         } else {
             eprintln!("[GC] No orphans found, skipping cleanup");
         }
-        
+
         removed
     }
 }
