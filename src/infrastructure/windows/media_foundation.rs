@@ -262,9 +262,15 @@ fn guid_to_codec_name(guid: &windows::core::GUID) -> String {
         0x31435657 => return "VC-1".to_string(),
         0x41564D57 => return "WMV Advanced".to_string(),
 
-        // DivX/XviD
-        0x58564944 | 0x78766964 => return "DivX".to_string(),
-        0x44495658 | 0x64697678 => return "XviD".to_string(),
+        // DivX/XviD - including all common FourCC variants
+        // DX50 = DivX 5.0 (0x30355844 = "DX50" as little-endian)
+        0x30355844 | 0x30357844 => return "DivX 5".to_string(), // 'DX50', 'dX50'
+        0x44585850 => return "DivX".to_string(),                // 'DXPP'
+        0x58564944 | 0x78766964 => return "DivX".to_string(),   // 'DIVX', 'divx'
+        0x34564944 | 0x34766964 => return "DivX 4".to_string(), // 'DIV4', 'div4'
+        0x33564944 | 0x33766964 => return "DivX 3".to_string(), // 'DIV3', 'div3
+        0x44495658 | 0x64697678 => return "XviD".to_string(),   // 'XVID', 'xvid'
+        0x44495856 => return "XviD".to_string(),                // 'VXID' (alternative)
 
         // MJPEG
         0x47504A4D | 0x67706a6d => return "MJPEG".to_string(),

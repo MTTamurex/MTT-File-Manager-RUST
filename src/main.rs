@@ -2517,38 +2517,13 @@ impl eframe::App for ImageViewerApp {
                         // Preview de imagem/video (se houver thumbnail)
                         let _has_thumbnail =
                             self.cache_manager.texture_cache.peek(&file.path).is_some();
+                        // Detecta se é mídia usando Windows Perceived Type API
                         let is_media = file
                             .path
                             .extension()
-                            .and_then(|e| e.to_str())
                             .map(|ext| {
-                                let ext_lower = ext.to_lowercase();
-                                matches!(
-                                    ext_lower.as_str(),
-                                    "jpg"
-                                        | "jpeg"
-                                        | "png"
-                                        | "gif"
-                                        | "bmp"
-                                        | "webp"
-                                        | "tiff"
-                                        | "tif"
-                                        | "ico"
-                                        | "heic"
-                                        | "heif"
-                                        | "avif"
-                                        | "mp4"
-                                        | "mkv"
-                                        | "avi"
-                                        | "mov"
-                                        | "wmv"
-                                        | "flv"
-                                        | "webm"
-                                        | "m4v"
-                                        | "mpg"
-                                        | "mpeg"
-                                        | "3gp"
-                                        | "ts"
+                                mtt_file_manager::infrastructure::windows::is_media_extension(
+                                    &ext.to_string_lossy(),
                                 )
                             })
                             .unwrap_or(false);

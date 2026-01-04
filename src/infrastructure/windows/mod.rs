@@ -4,6 +4,7 @@
 pub mod bitmap_conversion;
 pub mod drives;
 pub mod file_system;
+pub mod file_type;
 pub mod formatting;
 pub mod icons;
 pub mod media_foundation;
@@ -15,6 +16,7 @@ pub mod system_info;
 pub use bitmap_conversion::*;
 pub use drives::*;
 pub use file_system::*;
+pub use file_type::*;
 pub use formatting::*;
 pub use icons::*;
 pub use media_foundation::*;

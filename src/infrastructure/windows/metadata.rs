@@ -256,39 +256,14 @@ pub fn extract_media_metadata(path: &Path) -> MediaMetadata {
 }
 
 fn is_image_extension(ext: &str) -> bool {
-    matches!(
-        ext,
-        "jpg"
-            | "jpeg"
-            | "png"
-            | "gif"
-            | "bmp"
-            | "webp"
-            | "tiff"
-            | "tif"
-            | "ico"
-            | "heic"
-            | "heif"
-            | "avif"
-    )
+    // Use Windows Perceived Type API for dynamic detection
+    super::file_type::is_image_extension(ext)
 }
 
 fn is_video_extension(ext: &str) -> bool {
-    matches!(
-        ext,
-        "mp4"
-            | "mkv"
-            | "avi"
-            | "mov"
-            | "wmv"
-            | "flv"
-            | "webm"
-            | "m4v"
-            | "mpg"
-            | "mpeg"
-            | "3gp"
-            | "ts"
-    )
+    // Use Windows Perceived Type API for dynamic detection
+    // This includes OGM, MKV, WebM, and any format K-Lite/Icaros registers
+    super::file_type::is_video_extension(ext)
 }
 
 fn read_image_exif_metadata(path: &Path) -> Result<MediaMetadata, windows::core::Error> {
@@ -474,20 +449,33 @@ fn read_video_metadata(path: &Path) -> Result<MediaMetadata, windows::core::Erro
     // Decide if we need MediaFoundation: missing core fields OR missing codecs/frame rate
     let need_mf = match &ps_meta_opt {
         Some(meta) => {
-            meta.width.is_none()
+            let missing_video = meta.video_codec.is_none();
+            let missing_audio = meta.audio_codec.is_none();
+            let missing_width = meta.width.is_none();
+            
+            eprintln!("[DEBUG MF] File: {:?}, Missing Video: {}, Missing Audio: {}, Missing Width: {}", 
+                path.file_name(), missing_video, missing_audio, missing_width);
+            
+            missing_width
                 || meta.height.is_none()
                 || meta.duration_100ns.is_none()
-                || meta.video_codec.is_none()
-                || meta.audio_codec.is_none()
+                || missing_video
+                || missing_audio
                 || meta.frame_rate.is_none()
         }
         None => true,
     };
 
     if need_mf {
+        eprintln!("[DEBUG MF] Calling MediaFoundation for: {:?}", path.file_name());
         if let Some(mf_meta) = extract_video_metadata_mf(path) {
+            eprintln!("[DEBUG MF] Got MF metadata:");
+            eprintln!("  video_codec_guid: {:?}", mf_meta.video_codec_guid);
+            eprintln!("  audio_codec_guid: {:?}", mf_meta.audio_codec_guid);
             let base = ps_meta_opt.take().unwrap_or_default();
             return Ok(merge_video_metadata(base, mf_meta, path));
+        } else {
+            eprintln!("[DEBUG MF] MediaFoundation returned None");
         }
     }
 
@@ -585,33 +573,75 @@ fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windows::
 
     // PRIORITY FALLBACK SYSTEM for Video Codec (K-Lite/Icaros friendly)
     // Priority 1: FourCC (raw technical identifier - most accurate)
-    let video_codec = unsafe { read_fourcc(&store, &PKEY_VIDEO_FOURCC) }
-        // Priority 2: StreamName (K-Lite/Icaros populates this)
-        .or_else(|| unsafe { read_string(&store, &PKEY_VIDEO_STREAMNAME) })
-        // Priority 3: Other sources (less reliable)
-        .or_else(|| unsafe { read_string(&store, &PKEY_MEDIA_SUBTITLE) })
-        .or_else(|| unsafe { read_string(&store, &PKEY_MEDIA_ENCODINGSETTINGS) })
-        .or_else(|| unsafe { read_string(&store, &PKEY_MEDIA_CONTENTTYPE) })
-        // Priority 4: Compression (LAST - often just container name)
+    let fourcc = unsafe { read_fourcc(&store, &PKEY_VIDEO_FOURCC) };
+    let stream_name = unsafe { read_string(&store, &PKEY_VIDEO_STREAMNAME) };
+    let subtitle = unsafe { read_string(&store, &PKEY_MEDIA_SUBTITLE) };
+    let encoding_settings = unsafe { read_string(&store, &PKEY_MEDIA_ENCODINGSETTINGS) };
+    let content_type = unsafe { read_string(&store, &PKEY_MEDIA_CONTENTTYPE) };
+    let compression = unsafe { read_string(&store, &PKEY_VIDEO_COMPRESSION) };
+    
+    // DEBUG: Log all video codec sources
+    eprintln!("[DEBUG CODEC] File: {:?}", path.file_name());
+    
+    // Proactive Property Dump: Check all properties in the store to find where hidden info is
+    unsafe {
+        if let Ok(count) = store.GetCount() {
+            for i in 0..count {
+                let mut pk = windows::Win32::UI::Shell::PropertiesSystem::PROPERTYKEY::default();
+                if store.GetAt(i, &mut pk).is_ok() {
+                    if let Ok(pv) = store.GetValue(&pk) {
+                         let vt = pv.as_raw().Anonymous.Anonymous.vt;
+                         if vt == 31 || vt == 8 || vt == 4127 { // String, BSTR, or Vector
+                             let custom_pk = PROPERTYKEY { fmtid: pk.fmtid, pid: pk.pid };
+                             if let Some(val) = read_string(&store, &custom_pk) {
+                                 if !val.trim().is_empty() && val.len() < 150 {
+                                     eprintln!("  [PROP DUMP] PKEY {{ pid: {} }} -> Value: {:?}", pk.pid, val);
+                                 }
+                             }
+                         }
+                    }
+                }
+            }
+        }
+    }
+
+    eprintln!("  [VIDEO] FourCC: {:?}", fourcc);
+    eprintln!("  [VIDEO] StreamName: {:?}", stream_name);
+    eprintln!("  [VIDEO] Subtitle: {:?}", subtitle);
+    eprintln!("  [VIDEO] EncodingSettings: {:?}", encoding_settings);
+    eprintln!("  [VIDEO] ContentType: {:?}", content_type);
+    eprintln!("  [VIDEO] Compression: {:?}", compression);
+    
+    let video_codec = fourcc
+        .or_else(|| stream_name.clone())
+        .or_else(|| subtitle.clone())
+        .or_else(|| encoding_settings.clone())
+        .or_else(|| content_type.clone())
         .or_else(|| {
-            let compression = unsafe { read_string(&store, &PKEY_VIDEO_COMPRESSION) }?;
+            let comp = compression.clone()?;
             // Filter out container names and generic labels
             let file_ext = path.extension()?.to_str()?.to_uppercase();
-            let compression_upper = compression.to_uppercase();
+            let compression_upper = comp.to_uppercase();
             if compression_upper == file_ext || compression_upper == "VIDEO" {
                 None // Skip container names
             } else {
-                Some(compression)
+                Some(comp)
             }
         });
 
     // PRIORITY FALLBACK SYSTEM for Audio Codec
-    // Priority 1: Audio.Compression - K-Lite/Icaros populates this with readable names!
-    let audio_codec = unsafe { read_string(&store, &PKEY_AUDIO_COMPRESSION) }
-        // Priority 2: Audio.StreamName (also used by some handlers)
-        .or_else(|| unsafe { read_string(&store, &PKEY_AUDIO_STREAMNAME) })
-        // Priority 3: Audio.Format (may be GUID, we'll sanitize it)
-        .or_else(|| unsafe { read_string(&store, &PKEY_AUDIO_FORMAT) })
+    let audio_compression = unsafe { read_string(&store, &PKEY_AUDIO_COMPRESSION) };
+    let audio_stream_name = unsafe { read_string(&store, &PKEY_AUDIO_STREAMNAME) };
+    let audio_format = unsafe { read_string(&store, &PKEY_AUDIO_FORMAT) };
+    
+    // DEBUG: Log all audio codec sources
+    eprintln!("  [AUDIO] Compression: {:?}", audio_compression);
+    eprintln!("  [AUDIO] StreamName: {:?}", audio_stream_name);
+    eprintln!("  [AUDIO] Format: {:?}", audio_format);
+    
+    let audio_codec = audio_compression
+        .or_else(|| audio_stream_name.clone())
+        .or_else(|| audio_format.clone())
         .map(|s| sanitize_codec_string(&s));
 
     // Audio metadata
@@ -652,6 +682,12 @@ fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windows::
         }
         if filename_lower.contains("vp8") {
             return Some("VP8".to_string());
+        }
+        if filename_lower.contains("divx") || filename_lower.contains("dx50") {
+            return Some("DivX".to_string());
+        }
+        if filename_lower.contains("xvid") {
+            return Some("XviD".to_string());
         }
 
         // Don't return container name as codec - better to show nothing
@@ -721,6 +757,10 @@ fn sanitize_codec_string(s: &str) -> String {
     if upper.contains("8D2FD10B") {
         // {8D2FD10B-5841-4A6B-8905-588FEC1ADED9} → Vorbis (MEDIASUBTYPE_Vorbis2)
         return "Vorbis".to_string();
+    }
+    if upper.contains("E06D802C") {
+        // {E06D802C-DB46-11CF-B4D1-00805F6CBBEA} → Dolby AC-3 (MEDIASUBTYPE_DOLBY_AC3)
+        return "Dolby AC-3".to_string();
     }
 
     // Check if it's a GUID string like "{00001610-0000-0010-8000-00AA00389B71}"
@@ -1007,28 +1047,75 @@ unsafe fn read_f64(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<f64> {
 #[allow(dead_code)]
 unsafe fn read_string(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<String> {
     const VT_LPWSTR: u16 = 31;
+    const VT_BSTR: u16 = 8;
+    const VT_EMPTY: u16 = 0;
 
-    let pv = store
+    let pv = match store
         .GetValue(&windows::Win32::UI::Shell::PropertiesSystem::PROPERTYKEY {
             fmtid: key.fmtid,
             pid: key.pid,
-        })
-        .ok()?;
+        }) {
+        Ok(v) => v,
+        Err(_) => return None,
+    };
 
     let raw = pv.as_raw();
     let vt = raw.Anonymous.Anonymous.vt;
 
-    if vt == VT_LPWSTR {
-        let ptr = raw.Anonymous.Anonymous.Anonymous.pwszVal;
-        if !ptr.is_null() {
-            let len = (0..).take_while(|&i| *ptr.add(i) != 0).count();
-            let slice = std::slice::from_raw_parts(ptr, len);
-            Some(String::from_utf16_lossy(slice))
-        } else {
+    match vt {
+        VT_EMPTY => None, // Property not available - don't log
+        VT_LPWSTR => {
+            let ptr = raw.Anonymous.Anonymous.Anonymous.pwszVal;
+            if !ptr.is_null() {
+                let len = (0..).take_while(|&i| *ptr.add(i) != 0).count();
+                let slice = std::slice::from_raw_parts(ptr, len);
+                Some(String::from_utf16_lossy(slice))
+            } else {
+                None
+            }
+        }
+        VT_BSTR => {
+            // BSTR is also a wide string, try to read it
+            let ptr = raw.Anonymous.Anonymous.Anonymous.bstrVal;
+            if !ptr.is_null() {
+                let len = (0..).take_while(|&i| *ptr.add(i) != 0).count();
+                let slice = std::slice::from_raw_parts(ptr, len);
+                Some(String::from_utf16_lossy(slice))
+            } else {
+                None
+            }
+        }
+        4127 => {
+            // VT_VECTOR | VT_LPWSTR (0x1000 | 31)
+            // Multi-stream files often store names in vectors
+            let c_elems = unsafe { raw.Anonymous.Anonymous.Anonymous.calpwstr.cElems };
+            let p_elems = unsafe { raw.Anonymous.Anonymous.Anonymous.calpwstr.pElems };
+            if c_elems > 0 && !p_elems.is_null() {
+                let mut result = String::new();
+                for i in 0..c_elems {
+                    let ptr = *p_elems.add(i as usize);
+                    if !ptr.is_null() {
+                        let len = (0..).take_while(|&j| *ptr.add(j) != 0).count();
+                        let slice = std::slice::from_raw_parts(ptr, len);
+                        let s = String::from_utf16_lossy(slice);
+                        if !result.is_empty() {
+                            result.push_str(", ");
+                        }
+                        result.push_str(&s);
+                    }
+                }
+                if result.is_empty() { None } else { Some(result) }
+            } else {
+                None
+            }
+        }
+        other => {
+            if other != 0 {
+                // Log unexpected VT types for debugging
+                eprintln!("[DEBUG] read_string: unexpected VT type {} for PKEY {{pid={}}}", other, key.pid);
+            }
             None
         }
-    } else {
-        None
     }
 }
 

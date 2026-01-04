@@ -258,39 +258,12 @@ fn render_file_slot<O: ItemSlotOperations>(
     let item = ctx.item;
     let path_clone = item.path.clone();
 
-    // Detecta se é arquivo de mídia
-    let is_media_file = if let Some(ext) = path_clone.extension() {
-        let ext_lower = ext.to_string_lossy().to_lowercase();
-        matches!(
-            ext_lower.as_str(),
-            "jpg"
-                | "jpeg"
-                | "png"
-                | "gif"
-                | "bmp"
-                | "webp"
-                | "tiff"
-                | "tif"
-                | "ico"
-                | "heic"
-                | "heif"
-                | "avif"
-                | "mp4"
-                | "mkv"
-                | "avi"
-                | "mov"
-                | "wmv"
-                | "flv"
-                | "webm"
-                | "m4v"
-                | "mpg"
-                | "mpeg"
-                | "3gp"
-                | "ts"
-        )
-    } else {
-        false
-    };
+    // Detecta se é arquivo de mídia usando Windows Perceived Type API
+    // Respeita handlers instalados (K-Lite/Icaros) - suporta OGM, MKV, etc.
+    let is_media_file = path_clone
+        .extension()
+        .map(|ext| crate::infrastructure::windows::is_media_extension(&ext.to_string_lossy()))
+        .unwrap_or(false);
 
     // Thumbnail loading para arquivos de mídia
     if is_media_file {
