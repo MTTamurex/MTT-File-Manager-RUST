@@ -1577,6 +1577,15 @@ impl ImageViewerApp {
                     self.selected_file = Some(item.clone());
                     self.selected_item = Some(clamped);
                     self.scroll_to_selected = true; // Trigger scroll to selected item
+                    
+                    // Trigger thumbnail load for sidebar preview
+                    if !item.is_dir {
+                        if !self.cache_manager.has_thumbnail(&item.path)
+                            && !self.cache_manager.is_loading(&item.path)
+                        {
+                            self.request_thumbnail_load(item.path.clone());
+                        }
+                    }
                 }
             }
 

@@ -190,6 +190,25 @@ pub fn render_list_view(
                     ctx.scanned_folders.insert(item.path.clone());
                     ops.request_folder_scan(item.path.clone());
                 }
+                
+                // GATILHO LAZY LOAD PARA ARQUIVOS DE MÍDIA: Carrega thumbnail proativamente
+                // (mesmo comportamento do grid view - thumbnails ficam disponíveis para o painel de preview)
+                if !item.is_dir {
+                    let is_media_file = item.path
+                        .extension()
+                        .map(|ext| crate::infrastructure::windows::is_media_extension(&ext.to_string_lossy()))
+                        .unwrap_or(false);
+                    
+                    if is_media_file
+                        && !ctx.texture_cache.contains(&item.path)
+                        && !ctx.loading_set.contains(&item.path)
+                        && ctx.loading_set.len() < 50
+                    {
+                        ctx.loading_set.insert(item.path.clone());
+                        ops.request_thumbnail_load(item.path.clone());
+                    }
+                }
+                
                 let is_selected = ctx.selected_item == Some(i);
 
                 ui.push_id(i, |ui| {
