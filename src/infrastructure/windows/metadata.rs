@@ -13,7 +13,8 @@ use windows::{
     Win32::Foundation::RPC_E_CHANGED_MODE,
     Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED},
     Win32::UI::Shell::PropertiesSystem::{
-        IPropertyStore, SHGetPropertyStoreFromParsingName, GPS_READWRITE, GETPROPERTYSTOREFLAGS,
+        IPropertyStore, SHGetPropertyStoreFromParsingName, GETPROPERTYSTOREFLAGS, GPS_OPENSLOWITEM,
+        GPS_READWRITE,
     },
 };
 use exif::{In, Reader as ExifReader, Tag};
@@ -181,6 +182,12 @@ const PKEY_AUDIO_FORMAT: PROPERTYKEY = PROPERTYKEY {
 const PKEY_AUDIO_STREAMNAME: PROPERTYKEY = PROPERTYKEY {
     fmtid: GUID::from_u128(0x64440490_4C8B_11D1_8B70_080036B11A03),
     pid: 9,
+};
+
+// System.Audio.Compression (64440490-4C8B-11D1-8B70-080036B11A03, 10) - K-Lite/Icaros populates this!
+const PKEY_AUDIO_COMPRESSION: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x64440490_4C8B_11D1_8B70_080036B11A03),
+    pid: 10,
 };
 
 // PROPVARIANT type tags (from WTypes.h)
@@ -457,23 +464,36 @@ fn read_image_metadata(path: &Path) -> Result<MediaMetadata, image::ImageError> 
 fn read_video_metadata(path: &Path) -> Result<MediaMetadata, windows::core::Error> {
     // Try Property Store first (fast, uses Windows cache)
     let ps_result = read_video_via_property_store(path);
-    
-    // If Property Store succeeded AND has critical fields, return it
-    if let Ok(ref meta) = ps_result {
-        if meta.width.is_some() && meta.height.is_some() && meta.duration_100ns.is_some() {
-            return ps_result;
+
+    // Split result to allow merging with MediaFoundation when codecs/frame rate are missing
+    let (mut ps_meta_opt, ps_err_opt) = match ps_result {
+        Ok(meta) => (Some(meta), None),
+        Err(e) => (None, Some(e)),
+    };
+
+    // Decide if we need MediaFoundation: missing core fields OR missing codecs/frame rate
+    let need_mf = match &ps_meta_opt {
+        Some(meta) => meta.width.is_none()
+            || meta.height.is_none()
+            || meta.duration_100ns.is_none()
+            || meta.video_codec.is_none()
+            || meta.audio_codec.is_none()
+            || meta.frame_rate.is_none(),
+        None => true,
+    };
+
+    if need_mf {
+        if let Some(mf_meta) = extract_video_metadata_mf(path) {
+            let base = ps_meta_opt.take().unwrap_or_default();
+            return Ok(merge_video_metadata(base, mf_meta, path));
         }
     }
-    
-    // Fallback to MediaFoundation (slower but more reliable)
-    if let Some(mf_meta) = extract_video_metadata_mf(path) {
-        // Merge PS data with MF data, preferring MF for missing fields
-        let ps_meta = ps_result.unwrap_or_default();
-        return Ok(merge_video_metadata(ps_meta, mf_meta, path));
+
+    if let Some(meta) = ps_meta_opt {
+        Ok(meta)
+    } else {
+        Err(ps_err_opt.unwrap())
     }
-    
-    // Return Property Store result even if incomplete
-    ps_result
 }
 
 /// Merge Property Store metadata with MediaFoundation metadata
@@ -489,8 +509,15 @@ fn merge_video_metadata(
         }
     });
     
-    let video_codec = ps.video_codec.or_else(|| mf.video_codec_guid.clone());
-    let audio_codec = ps.audio_codec.or_else(|| mf.audio_codec_guid.clone());
+    let video_codec = ps
+        .video_codec
+        .or_else(|| mf.video_codec_guid.clone())
+        .map(|s| sanitize_codec_string(&s));
+
+    let audio_codec = ps
+        .audio_codec
+        .or_else(|| mf.audio_codec_guid.clone())
+        .map(|s| sanitize_codec_string(&s));
     
     let format = path
         .extension()
@@ -546,8 +573,8 @@ fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windows::
     let width = unsafe { read_u32(&store, &PKEY_VIDEO_FRAMEWIDTH) };
     let height = unsafe { read_u32(&store, &PKEY_VIDEO_FRAMEHEIGHT) };
     let duration_100ns = unsafe { read_u64(&store, &PKEY_MEDIA_DURATION) };
-    let frame_rate =
-        unsafe { read_u32(&store, &PKEY_VIDEO_FRAMERATE) }.map(|raw| raw as f32 / 1_000.0);
+    let frame_rate = unsafe { read_u32(&store, &PKEY_VIDEO_FRAMERATE) }
+        .and_then(|raw| if raw == 0 { None } else { Some(raw as f32 / 1_000.0) });
 
     // PRIORITY FALLBACK SYSTEM for Video Codec (K-Lite/Icaros friendly)
     // Priority 1: FourCC (raw technical identifier - most accurate)
@@ -572,8 +599,12 @@ fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windows::
         });
 
     // PRIORITY FALLBACK SYSTEM for Audio Codec
-    let audio_codec = unsafe { read_string(&store, &PKEY_AUDIO_FORMAT) }
+    // Priority 1: Audio.Compression - K-Lite/Icaros populates this with readable names!
+    let audio_codec = unsafe { read_string(&store, &PKEY_AUDIO_COMPRESSION) }
+        // Priority 2: Audio.StreamName (also used by some handlers)
         .or_else(|| unsafe { read_string(&store, &PKEY_AUDIO_STREAMNAME) })
+        // Priority 3: Audio.Format (may be GUID, we'll sanitize it)
+        .or_else(|| unsafe { read_string(&store, &PKEY_AUDIO_FORMAT) })
         .map(|s| sanitize_codec_string(&s));
 
     // Audio metadata
@@ -662,6 +693,18 @@ fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windows::
 /// Convert GUID strings and technical codec identifiers to friendly names
 fn sanitize_codec_string(s: &str) -> String {
     let s = s.trim();
+
+    // Quick GUID substring checks for common audio codecs that sometimes leak as GUID strings
+    let upper = s.to_ascii_uppercase();
+    if upper.contains("0000704F") { // {0000704F-0000-0010-8000-00AA00389B71} → Opus
+        return "Opus".to_string();
+    }
+    if upper.contains("00001FCA") { // {00001FCA-0000-0010-8000-00AA00389B71} → AV1 (rare audio GUID form)
+        return "AV1".to_string();
+    }
+    if upper.contains("8D2FD10B") { // {8D2FD10B-5841-4A6B-8905-588FEC1ADED9} → Vorbis (MEDIASUBTYPE_Vorbis2)
+        return "Vorbis".to_string();
+    }
     
     // Check if it's a GUID string like "{00001610-0000-0010-8000-00AA00389B71}"
     if s.starts_with('{') && s.contains('-') {
@@ -674,6 +717,8 @@ fn sanitize_codec_string(s: &str) -> String {
                     0x0003 => "IEEE Float".to_string(),
                     0x0055 => "MP3".to_string(),
                     0x00FF => "AAC".to_string(),
+                    0x004F70 => "Opus".to_string(), // GUIDs that encode Opus as 0x0000704F
+                    0x0000704F => "Opus".to_string(), // Another Opus variant seen in Property Store
                     0x0160 => "WMA v1".to_string(),
                     0x0161 => "WMA v2".to_string(),
                     0x0162 => "WMA Pro".to_string(),
@@ -776,7 +821,7 @@ unsafe fn open_property_store(path: &Path) -> Result<IPropertyStore, windows::co
     SHGetPropertyStoreFromParsingName(
         PCWSTR(wide_path.as_ptr()),
         None,
-        GETPROPERTYSTOREFLAGS(GPS_READWRITE.0 | 0x1) // GPS_READWRITE | GPS_OPENSLOWITEM
+        GETPROPERTYSTOREFLAGS(GPS_READWRITE.0 | GPS_OPENSLOWITEM.0),
     )
 }
 
