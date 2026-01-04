@@ -204,8 +204,8 @@ impl ImageViewerApp {
         std::thread::spawn(move || {
             // Loop infinito: consome requisições da fila
             while let Ok(folder_path) = cover_req_rx.recv() {
-                // Executa busca (imagem ou vídeo)
-                let cover = find_folder_preview_item(&folder_path);
+                // Executa busca (imagem ou vídeo) usando detecção dinâmica baseado no Registro do Windows
+                let cover = windows_infra::find_folder_preview_item(&folder_path);
 
                 // Devolve resultado para UI thread
                 let _ = cover_res_tx.send((folder_path, cover));
