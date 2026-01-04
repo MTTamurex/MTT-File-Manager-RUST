@@ -449,33 +449,20 @@ fn read_video_metadata(path: &Path) -> Result<MediaMetadata, windows::core::Erro
     // Decide if we need MediaFoundation: missing core fields OR missing codecs/frame rate
     let need_mf = match &ps_meta_opt {
         Some(meta) => {
-            let missing_video = meta.video_codec.is_none();
-            let missing_audio = meta.audio_codec.is_none();
-            let missing_width = meta.width.is_none();
-            
-            eprintln!("[DEBUG MF] File: {:?}, Missing Video: {}, Missing Audio: {}, Missing Width: {}", 
-                path.file_name(), missing_video, missing_audio, missing_width);
-            
-            missing_width
+            meta.width.is_none()
                 || meta.height.is_none()
                 || meta.duration_100ns.is_none()
-                || missing_video
-                || missing_audio
+                || meta.video_codec.is_none()
+                || meta.audio_codec.is_none()
                 || meta.frame_rate.is_none()
         }
         None => true,
     };
 
     if need_mf {
-        eprintln!("[DEBUG MF] Calling MediaFoundation for: {:?}", path.file_name());
         if let Some(mf_meta) = extract_video_metadata_mf(path) {
-            eprintln!("[DEBUG MF] Got MF metadata:");
-            eprintln!("  video_codec_guid: {:?}", mf_meta.video_codec_guid);
-            eprintln!("  audio_codec_guid: {:?}", mf_meta.audio_codec_guid);
             let base = ps_meta_opt.take().unwrap_or_default();
             return Ok(merge_video_metadata(base, mf_meta, path));
-        } else {
-            eprintln!("[DEBUG MF] MediaFoundation returned None");
         }
     }
 
@@ -555,6 +542,16 @@ fn merge_video_metadata(
     }
 }
 
+const PKEY_VIDEO_TRACKS: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0xEC59938F_E25E_4592_82E3_8013018EDB74), // OGM Video Tracks
+    pid: 3,
+};
+
+const PKEY_AUDIO_TRACKS: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x6F6B78A7_F4A2_4F9F_86B1_C6AAA6DEC9A5), // OGM Audio Tracks
+    pid: 4,
+};
+
 /// Read video metadata using Windows Property Store (fast path)
 fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windows::core::Error> {
     let _com_guard = ComGuard::new();
@@ -580,40 +577,12 @@ fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windows::
     let content_type = unsafe { read_string(&store, &PKEY_MEDIA_CONTENTTYPE) };
     let compression = unsafe { read_string(&store, &PKEY_VIDEO_COMPRESSION) };
     
-    // DEBUG: Log all video codec sources
-    eprintln!("[DEBUG CODEC] File: {:?}", path.file_name());
-    
-    // Proactive Property Dump: Check all properties in the store to find where hidden info is
-    unsafe {
-        if let Ok(count) = store.GetCount() {
-            for i in 0..count {
-                let mut pk = windows::Win32::UI::Shell::PropertiesSystem::PROPERTYKEY::default();
-                if store.GetAt(i, &mut pk).is_ok() {
-                    if let Ok(pv) = store.GetValue(&pk) {
-                         let vt = pv.as_raw().Anonymous.Anonymous.vt;
-                         if vt == 31 || vt == 8 || vt == 4127 { // String, BSTR, or Vector
-                             let custom_pk = PROPERTYKEY { fmtid: pk.fmtid, pid: pk.pid };
-                             if let Some(val) = read_string(&store, &custom_pk) {
-                                 if !val.trim().is_empty() && val.len() < 150 {
-                                     eprintln!("  [PROP DUMP] PKEY {{ pid: {} }} -> Value: {:?}", pk.pid, val);
-                                 }
-                             }
-                         }
-                    }
-                }
-            }
-        }
-    }
+    let ogm_video = unsafe { read_string(&store, &PKEY_VIDEO_TRACKS) };
+    let ogm_audio = unsafe { read_string(&store, &PKEY_AUDIO_TRACKS) };
 
-    eprintln!("  [VIDEO] FourCC: {:?}", fourcc);
-    eprintln!("  [VIDEO] StreamName: {:?}", stream_name);
-    eprintln!("  [VIDEO] Subtitle: {:?}", subtitle);
-    eprintln!("  [VIDEO] EncodingSettings: {:?}", encoding_settings);
-    eprintln!("  [VIDEO] ContentType: {:?}", content_type);
-    eprintln!("  [VIDEO] Compression: {:?}", compression);
-    
     let video_codec = fourcc
         .or_else(|| stream_name.clone())
+        .or_else(|| ogm_video.clone())
         .or_else(|| subtitle.clone())
         .or_else(|| encoding_settings.clone())
         .or_else(|| content_type.clone())
@@ -634,13 +603,9 @@ fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windows::
     let audio_stream_name = unsafe { read_string(&store, &PKEY_AUDIO_STREAMNAME) };
     let audio_format = unsafe { read_string(&store, &PKEY_AUDIO_FORMAT) };
     
-    // DEBUG: Log all audio codec sources
-    eprintln!("  [AUDIO] Compression: {:?}", audio_compression);
-    eprintln!("  [AUDIO] StreamName: {:?}", audio_stream_name);
-    eprintln!("  [AUDIO] Format: {:?}", audio_format);
-    
     let audio_codec = audio_compression
         .or_else(|| audio_stream_name.clone())
+        .or_else(|| ogm_audio.clone())
         .or_else(|| audio_format.clone())
         .map(|s| sanitize_codec_string(&s));
 
@@ -815,6 +780,20 @@ fn sanitize_codec_string(s: &str) -> String {
     }
 
     // If it's already a readable name, return as-is
+    let upper = s.to_ascii_uppercase();
+    if upper.contains("VORBIS") {
+        return "Vorbis".to_string();
+    }
+    if upper == "DX50" {
+        return "DX50".to_string();
+    }
+    if upper.contains("DX50") || upper.contains("DIVX") {
+        return "DivX".to_string();
+    }
+    if upper.contains("XVID") {
+        return "XviD".to_string();
+    }
+
     s.to_string()
 }
 
@@ -987,8 +966,9 @@ unsafe fn read_u32(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<u32> {
         VT_I4 => Some(raw.Anonymous.Anonymous.Anonymous.lVal as u32),
         VT_UI2 => Some(raw.Anonymous.Anonymous.Anonymous.uiVal as u32),
         VT_I2 => Some(raw.Anonymous.Anonymous.Anonymous.iVal as u32),
-        _ => {
-            eprintln!("    [DEBUG] Unexpected VT type for u32: {}", vt);
+        0 => None, // VT_EMPTY
+        other => {
+            eprintln!("    [DEBUG] Unexpected VT type for u32: {}", other);
             None
         }
     };
