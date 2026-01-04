@@ -183,6 +183,20 @@ Win32::Foundation::{
 }
 ```
 
+#### 6. Media Foundation (Video Metadata)
+```rust
+Win32::Media::MediaFoundation::{
+    MFStartup, MFShutdown,           // Lifecycle management
+    MFCreateSourceReaderFromURL,      // Open video files
+    IMFSourceReader,                  // Read video streams
+    IMFMediaType,                     // Stream format info
+    MF_MT_FRAME_SIZE,                 // Video resolution
+    MF_MT_FRAME_RATE,                 // Video framerate
+    MF_MT_SUBTYPE,                    // Codec GUID
+    MF_PD_DURATION,                   // Video duration
+}
+```
+
 **Por que Windows Crate?**
 - ✅ **Bindings oficiais da Microsoft**
 - ✅ **Type-safe**: Erros em compile-time

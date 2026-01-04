@@ -1,16 +1,19 @@
-//! Media metadata extraction via Windows Property Store and image headers
-//! Follows .cursorrules: single responsibility, < 300 lines
+//! Media metadata extraction via Windows Property Store, MediaFoundation, and image headers
+//! Follows .cursorrules: single responsibility
+//!
+//! Strategy: Property Store (fast) -> MediaFoundation fallback (reliable)
 
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 
+use super::media_foundation::extract_video_metadata_mf;
 use image::ImageReader;
 use windows::{
     core::{GUID, PCWSTR},
     Win32::Foundation::RPC_E_CHANGED_MODE,
     Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED},
     Win32::UI::Shell::PropertiesSystem::{
-        IPropertyStore, SHGetPropertyStoreFromParsingName, GPS_DEFAULT,
+        IPropertyStore, SHGetPropertyStoreFromParsingName, GPS_READWRITE, GETPROPERTYSTOREFLAGS,
     },
 };
 use exif::{In, Reader as ExifReader, Tag};
@@ -160,6 +163,24 @@ const PKEY_MEDIA_CONTENTTYPE: PROPERTYKEY = PROPERTYKEY {
 const PKEY_VIDEO_COMPRESSION: PROPERTYKEY = PROPERTYKEY {
     fmtid: GUID::from_u128(0x64440491_4C8B_11D1_8B70_080036B11A03),
     pid: 10,
+};
+
+// System.Video.StreamName (64440491-4C8B-11D1-8B70-080036B11A03, 2) - Used by K-Lite/Icaros
+const PKEY_VIDEO_STREAMNAME: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x64440491_4C8B_11D1_8B70_080036B11A03),
+    pid: 2,
+};
+
+// System.Audio.Format (64440490-4C8B-11D1-8B70-080036B11A03, 2)
+const PKEY_AUDIO_FORMAT: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x64440490_4C8B_11D1_8B70_080036B11A03),
+    pid: 2,
+};
+
+// System.Audio.StreamName (64440490-4C8B-11D1-8B70-080036B11A03, 9)
+const PKEY_AUDIO_STREAMNAME: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x64440490_4C8B_11D1_8B70_080036B11A03),
+    pid: 9,
 };
 
 // PROPVARIANT type tags (from WTypes.h)
@@ -434,6 +455,91 @@ fn read_image_metadata(path: &Path) -> Result<MediaMetadata, image::ImageError> 
 }
 
 fn read_video_metadata(path: &Path) -> Result<MediaMetadata, windows::core::Error> {
+    // Try Property Store first (fast, uses Windows cache)
+    let ps_result = read_video_via_property_store(path);
+    
+    // If Property Store succeeded AND has critical fields, return it
+    if let Ok(ref meta) = ps_result {
+        if meta.width.is_some() && meta.height.is_some() && meta.duration_100ns.is_some() {
+            return ps_result;
+        }
+    }
+    
+    // Fallback to MediaFoundation (slower but more reliable)
+    if let Some(mf_meta) = extract_video_metadata_mf(path) {
+        // Merge PS data with MF data, preferring MF for missing fields
+        let ps_meta = ps_result.unwrap_or_default();
+        return Ok(merge_video_metadata(ps_meta, mf_meta, path));
+    }
+    
+    // Return Property Store result even if incomplete
+    ps_result
+}
+
+/// Merge Property Store metadata with MediaFoundation metadata
+fn merge_video_metadata(
+    ps: MediaMetadata,
+    mf: super::media_foundation::VideoMetadataMF,
+    path: &Path,
+) -> MediaMetadata {
+    let frame_rate = ps.frame_rate.or_else(|| {
+        match (mf.frame_rate_num, mf.frame_rate_den) {
+            (Some(num), Some(den)) if den > 0 => Some(num as f32 / den as f32),
+            _ => None,
+        }
+    });
+    
+    let video_codec = ps.video_codec.or_else(|| mf.video_codec_guid.clone());
+    let audio_codec = ps.audio_codec.or_else(|| mf.audio_codec_guid.clone());
+    
+    let format = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|ext| ext.to_uppercase());
+    
+    // Calculate bitrate from file size if not available
+    let duration_100ns = ps.duration_100ns.or(mf.duration_100ns);
+    let bitrate = ps.bitrate.or(mf.video_bitrate).or_else(|| {
+        if let Some(duration) = duration_100ns {
+            if duration > 0 {
+                if let Ok(file_meta) = std::fs::metadata(path) {
+                    let size_bytes = file_meta.len();
+                    let duration_seconds = duration as f64 / 10_000_000.0;
+                    return Some((size_bytes as f64 * 8.0 / duration_seconds) as u32);
+                }
+            }
+        }
+        None
+    });
+    
+    MediaMetadata {
+        width: ps.width.or(mf.width),
+        height: ps.height.or(mf.height),
+        duration_100ns,
+        frame_rate,
+        bitrate,
+        format,
+        color_depth: None,
+        camera_maker: None,
+        camera_model: None,
+        f_stop: None,
+        exposure_time: None,
+        iso_speed: None,
+        focal_length: None,
+        max_aperture: None,
+        metering_mode: None,
+        flash_mode: None,
+        date_taken: None,
+        subject: None,
+        video_codec,
+        audio_codec,
+        audio_bitrate: ps.audio_bitrate.or(mf.audio_bitrate),
+        audio_channels: ps.audio_channels.or(mf.audio_channels),
+    }
+}
+
+/// Read video metadata using Windows Property Store (fast path)
+fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windows::core::Error> {
     let _com_guard = ComGuard::new();
     let store = unsafe { open_property_store(path)? };
 
@@ -443,14 +549,32 @@ fn read_video_metadata(path: &Path) -> Result<MediaMetadata, windows::core::Erro
     let frame_rate =
         unsafe { read_u32(&store, &PKEY_VIDEO_FRAMERATE) }.map(|raw| raw as f32 / 1_000.0);
 
-    // Try multiple sources for video codec (Property Store often empty for MKV/WebM)
-    let video_codec = unsafe { 
-        read_string(&store, &PKEY_MEDIA_SUBTITLE)
-            .or_else(|| read_string(&store, &PKEY_VIDEO_FOURCC))
-            .or_else(|| read_string(&store, &PKEY_MEDIA_ENCODINGSETTINGS))
-            .or_else(|| read_string(&store, &PKEY_MEDIA_CONTENTTYPE))
-            .or_else(|| read_string(&store, &PKEY_VIDEO_COMPRESSION))
-    };
+    // PRIORITY FALLBACK SYSTEM for Video Codec (K-Lite/Icaros friendly)
+    // Priority 1: FourCC (raw technical identifier - most accurate)
+    let video_codec = unsafe { read_fourcc(&store, &PKEY_VIDEO_FOURCC) }
+        // Priority 2: StreamName (K-Lite/Icaros populates this)
+        .or_else(|| unsafe { read_string(&store, &PKEY_VIDEO_STREAMNAME) })
+        // Priority 3: Other sources (less reliable)
+        .or_else(|| unsafe { read_string(&store, &PKEY_MEDIA_SUBTITLE) })
+        .or_else(|| unsafe { read_string(&store, &PKEY_MEDIA_ENCODINGSETTINGS) })
+        .or_else(|| unsafe { read_string(&store, &PKEY_MEDIA_CONTENTTYPE) })
+        // Priority 4: Compression (LAST - often just container name)
+        .or_else(|| {
+            let compression = unsafe { read_string(&store, &PKEY_VIDEO_COMPRESSION) }?;
+            // Filter out container names and generic labels
+            let file_ext = path.extension()?.to_str()?.to_uppercase();
+            let compression_upper = compression.to_uppercase();
+            if compression_upper == file_ext || compression_upper == "VIDEO" {
+                None // Skip container names
+            } else {
+                Some(compression)
+            }
+        });
+
+    // PRIORITY FALLBACK SYSTEM for Audio Codec
+    let audio_codec = unsafe { read_string(&store, &PKEY_AUDIO_FORMAT) }
+        .or_else(|| unsafe { read_string(&store, &PKEY_AUDIO_STREAMNAME) })
+        .map(|s| sanitize_codec_string(&s));
 
     // Audio metadata
     let audio_bitrate = unsafe { read_u32(&store, &PKEY_AUDIO_ENCODINGBITRATE) };
@@ -486,18 +610,13 @@ fn read_video_metadata(path: &Path) -> Result<MediaMetadata, windows::core::Erro
             return Some("VP8".to_string());
         }
         
-        // Last resort: show container format
-        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-            match ext.to_lowercase().as_str() {
-                "webm" => Some("WebM".to_string()),
-                "mkv" => Some("MKV".to_string()),
-                "mp4" => Some("MP4".to_string()),
-                _ => None,
-            }
-        } else {
-            None
-        }
+        // Don't return container name as codec - better to show nothing
+        None
     });
+    
+    // Sanitize video codec string (convert GUIDs to names, filter container names)
+    let video_codec_sanitized = video_codec_final.map(|s| sanitize_codec_string(&s))
+        .filter(|s| !s.is_empty() && !is_container_name(s, path));
 
     // Calculate total bitrate from file size if Property Store doesn't have it
     let bitrate = video_bitrate.or_else(|| {
@@ -533,11 +652,85 @@ fn read_video_metadata(path: &Path) -> Result<MediaMetadata, windows::core::Erro
         flash_mode: None,
         date_taken: None,
         subject: None,
-        video_codec: video_codec_final,
-        audio_codec: None,
+        video_codec: video_codec_sanitized,
+        audio_codec,
         audio_bitrate,
         audio_channels,
     })
+}
+
+/// Convert GUID strings and technical codec identifiers to friendly names
+fn sanitize_codec_string(s: &str) -> String {
+    let s = s.trim();
+    
+    // Check if it's a GUID string like "{00001610-0000-0010-8000-00AA00389B71}"
+    if s.starts_with('{') && s.contains('-') {
+        // Extract the first segment (data1)
+        if let Some(data1_str) = s.strip_prefix('{').and_then(|s| s.split('-').next()) {
+            if let Ok(data1) = u32::from_str_radix(data1_str, 16) {
+                // Common audio format tags
+                return match data1 {
+                    0x0001 => "PCM".to_string(),
+                    0x0003 => "IEEE Float".to_string(),
+                    0x0055 => "MP3".to_string(),
+                    0x00FF => "AAC".to_string(),
+                    0x0160 => "WMA v1".to_string(),
+                    0x0161 => "WMA v2".to_string(),
+                    0x0162 => "WMA Pro".to_string(),
+                    0x0163 => "WMA Lossless".to_string(),
+                    0x1610 => "AAC-LC".to_string(),
+                    0x1612 => "AAC-HE".to_string(),
+                    0xA106 => "AAC (ADTS)".to_string(),
+                    0x2000 => "AC-3".to_string(),
+                    0x2001 => "DTS".to_string(),
+                    
+                    // FourCC-based codecs (higher numbers)
+                    0x6134706D => "AAC".to_string(),      // 'mp4a'
+                    0x7375704F => "Opus".to_string(),     // 'Opus'
+                    0x43414C46 => "FLAC".to_string(),     // 'FLAC'
+                    0x30395056 => "VP9".to_string(),      // 'VP90'
+                    0x30385056 => "VP8".to_string(),      // 'VP80'
+                    0x31305641 => "AV1".to_string(),      // 'AV01'
+                    0x31435641 => "H.264/AVC".to_string(), // 'AVC1'
+                    0x43564548 => "H.265/HEVC".to_string(), // 'HEVC'
+                    
+                    _ => {
+                        // Try to decode as FourCC
+                        let bytes = data1.to_le_bytes();
+                        if bytes.iter().all(|&b| b.is_ascii_alphanumeric() || b == b' ' || b == b'-') {
+                            let fourcc: String = bytes.iter().map(|&b| b as char).collect();
+                            fourcc.trim().to_string()
+                        } else {
+                            s.to_string() // Return original if can't decode
+                        }
+                    }
+                };
+            }
+        }
+    }
+    
+    // If it's already a readable name, return as-is
+    s.to_string()
+}
+
+/// Check if a codec string is actually a container name (not a real codec)
+fn is_container_name(codec: &str, path: &Path) -> bool {
+    let codec_lower = codec.to_lowercase();
+    let ext = path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+    
+    // Check if codec matches container extension
+    if codec_lower == ext {
+        return true;
+    }
+    
+    // Known container names that aren't real codecs
+    matches!(codec_lower.as_str(), 
+        "mkv" | "webm" | "mp4" | "avi" | "mov" | "wmv" | "flv" | 
+        "video" | "audio" | "matroska" | "container"
+    )
 }
 
 struct ComGuard {
@@ -578,7 +771,13 @@ unsafe fn open_property_store(path: &Path) -> Result<IPropertyStore, windows::co
         .collect();
 
     // SAFETY: wide_path is a null-terminated UTF-16 buffer that stays alive for the call.
-    SHGetPropertyStoreFromParsingName(PCWSTR(wide_path.as_ptr()), None, GPS_DEFAULT)
+    // GPS_READWRITE: Forces Windows to query installed codecs (K-Lite, etc.) even if not indexed
+    // This is the SAME method Windows Explorer uses - slower but gets real codec info
+    SHGetPropertyStoreFromParsingName(
+        PCWSTR(wide_path.as_ptr()),
+        None,
+        GETPROPERTYSTOREFLAGS(GPS_READWRITE.0 | 0x1) // GPS_READWRITE | GPS_OPENSLOWITEM
+    )
 }
 
 // EXIF helper: Convert raw F-number value to f-stop string
@@ -754,5 +953,53 @@ unsafe fn read_string(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<Strin
         }
     } else {
         None
+    }
+}
+
+// Helper to read FourCC (can be u32 or string)
+// FourCC is a 4-character code stored as u32 (e.g., 0x31637661 = "avc1")
+unsafe fn read_fourcc(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<String> {
+    const VT_LPWSTR: u16 = 31;
+
+    let pv = store
+        .GetValue(&windows::Win32::UI::Shell::PropertiesSystem::PROPERTYKEY {
+            fmtid: key.fmtid,
+            pid: key.pid,
+        })
+        .ok()?;
+
+    let raw = pv.as_raw();
+    let vt = raw.Anonymous.Anonymous.vt;
+
+    match vt {
+        VT_UI4 => {
+            // FourCC as u32 - convert bytes to ASCII string
+            let fourcc = raw.Anonymous.Anonymous.Anonymous.ulVal;
+            let bytes = [
+                (fourcc & 0xFF) as u8,
+                ((fourcc >> 8) & 0xFF) as u8,
+                ((fourcc >> 16) & 0xFF) as u8,
+                ((fourcc >> 24) & 0xFF) as u8,
+            ];
+            // Reverse byte order for little-endian and convert to string
+            let codec_str = String::from_utf8(bytes.to_vec()).ok()?;
+            if codec_str.trim().is_empty() {
+                None
+            } else {
+                Some(codec_str)
+            }
+        }
+        VT_LPWSTR => {
+            // FourCC as string (some property handlers use this)
+            let ptr = raw.Anonymous.Anonymous.Anonymous.pwszVal;
+            if !ptr.is_null() {
+                let len = (0..).take_while(|&i| *ptr.add(i) != 0).count();
+                let slice = std::slice::from_raw_parts(ptr, len);
+                Some(String::from_utf16_lossy(slice))
+            } else {
+                None
+            }
+        }
+        _ => None,
     }
 }
