@@ -83,26 +83,6 @@ pub fn get_file_type_string(entry: &FileEntry) -> String {
     "Arquivo".to_string()
 }
 
-/// Busca primeiro item de mídia (imagem ou vídeo) em uma pasta para usar como preview
-/// Verifica apenas os primeiros 15 arquivos para performance
-pub fn find_folder_preview_item(folder_path: &Path) -> Option<PathBuf> {
-    if let Ok(entries) = std::fs::read_dir(folder_path) {
-        for entry in entries.flatten().take(15) {
-            let path = entry.path();
-            if path.is_file() {
-                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                    match ext.to_lowercase().as_str() {
-                        "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "mp4" | "mkv" | "avi"
-                        | "mov" | "webm" => return Some(path),
-                        _ => {}
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
 /// Modo de ordenação
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum SortMode {

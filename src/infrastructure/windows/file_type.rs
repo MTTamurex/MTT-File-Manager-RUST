@@ -5,7 +5,9 @@
 
 use std::collections::HashMap;
 use std::ffi::OsStr;
+use std::fs;
 use std::os::windows::ffi::OsStrExt;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::OnceLock;
 
@@ -128,6 +130,26 @@ pub fn is_audio_extension(extension: &str) -> bool {
 /// Check if an extension is an image file
 pub fn is_image_extension(extension: &str) -> bool {
     get_perceived_type(extension) == PerceivedType::Image
+}
+
+/// Busca primeiro item de mídia (imagem ou vídeo) em uma pasta para usar como preview
+/// Verifica apenas os primeiros 15 arquivos para performance
+pub fn find_folder_preview_item(folder_path: &Path) -> Option<PathBuf> {
+    if let Ok(entries) = fs::read_dir(folder_path) {
+        for entry in entries.flatten().take(15) {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    // Para preview de pasta, queremos apenas imagens ou vídeos
+                    let ptype = get_perceived_type(ext);
+                    if ptype == PerceivedType::Image || ptype == PerceivedType::Video {
+                        return Some(path);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
