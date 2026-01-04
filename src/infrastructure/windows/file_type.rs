@@ -1,0 +1,149 @@
+//! File type detection using Windows Perceived Type API.
+//!
+//! Uses `AssocGetPerceivedType` to dynamically detect file types based on
+//! Windows registry (respects K-Lite/Icaros handlers).
+
+use std::collections::HashMap;
+use std::ffi::OsStr;
+use std::os::windows::ffi::OsStrExt;
+use std::sync::Mutex;
+use std::sync::OnceLock;
+
+use windows::{
+    core::PCWSTR,
+    Win32::UI::Shell::AssocGetPerceivedType,
+};
+
+// PERCEIVED type values from shlwapi.h
+const PERCEIVED_TYPE_IMAGE: i32 = 2;
+const PERCEIVED_TYPE_AUDIO: i32 = 3;
+const PERCEIVED_TYPE_VIDEO: i32 = 4;
+
+// PERCEIVED is a simple i32 wrapper - define it ourselves
+#[repr(transparent)]
+#[derive(Clone, Copy, Default)]
+struct PERCEIVED(i32);
+
+/// Perceived file type category
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PerceivedType {
+    Video,
+    Audio,
+    Image,
+    Other,
+}
+
+/// Cache for perceived types (extension -> type)
+static PERCEIVED_TYPE_CACHE: OnceLock<Mutex<HashMap<String, PerceivedType>>> = OnceLock::new();
+
+/// Get the perceived type of a file based on its extension.
+///
+/// Uses Windows `AssocGetPerceivedType` API to query the registry for the file type.
+/// This respects any handlers installed by codec packs like K-Lite/Icaros.
+///
+/// Results are cached for performance.
+pub fn get_perceived_type(extension: &str) -> PerceivedType {
+    // Normalize extension (lowercase, ensure starts with dot)
+    let ext_lower = extension.to_lowercase();
+    let ext_with_dot = if ext_lower.starts_with('.') {
+        ext_lower
+    } else {
+        format!(".{}", ext_lower)
+    };
+
+    // Check cache first
+    let cache = PERCEIVED_TYPE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+
+    {
+        let cache_guard = cache.lock().unwrap();
+        if let Some(&cached_type) = cache_guard.get(&ext_with_dot) {
+            return cached_type;
+        }
+    }
+
+    // Query Windows API
+    let perceived = query_perceived_type(&ext_with_dot);
+
+    // Only cache successful results (not Other)
+    if perceived != PerceivedType::Other {
+        let mut cache_guard = cache.lock().unwrap();
+        cache_guard.insert(ext_with_dot, perceived);
+    }
+
+    perceived
+}
+
+/// Query Windows for the perceived type of an extension using AssocGetPerceivedType
+fn query_perceived_type(extension: &str) -> PerceivedType {
+    // Convert to wide string
+    let ext_wide: Vec<u16> = OsStr::new(extension)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let mut perceived_type = PERCEIVED::default();
+    let mut perceived_flag: u32 = 0;
+
+    let result = unsafe {
+        AssocGetPerceivedType(
+            PCWSTR(ext_wide.as_ptr()),
+            // Cast our PERCEIVED to the type windows-rs expects
+            std::mem::transmute::<*mut PERCEIVED, _>(&mut perceived_type),
+            &mut perceived_flag,
+            None,
+        )
+    };
+
+    if result.is_err() {
+        return PerceivedType::Other;
+    }
+
+    // Map PERCEIVED values to our PerceivedType
+    match perceived_type.0 {
+        PERCEIVED_TYPE_IMAGE => PerceivedType::Image,
+        PERCEIVED_TYPE_AUDIO => PerceivedType::Audio,
+        PERCEIVED_TYPE_VIDEO => PerceivedType::Video,
+        _ => PerceivedType::Other,
+    }
+}
+
+/// Check if an extension is a media file (video, audio, or image)
+pub fn is_media_extension(extension: &str) -> bool {
+    matches!(
+        get_perceived_type(extension),
+        PerceivedType::Video | PerceivedType::Audio | PerceivedType::Image
+    )
+}
+
+/// Check if an extension is a video file
+pub fn is_video_extension(extension: &str) -> bool {
+    get_perceived_type(extension) == PerceivedType::Video
+}
+
+/// Check if an extension is an audio file
+pub fn is_audio_extension(extension: &str) -> bool {
+    get_perceived_type(extension) == PerceivedType::Audio
+}
+
+/// Check if an extension is an image file
+pub fn is_image_extension(extension: &str) -> bool {
+    get_perceived_type(extension) == PerceivedType::Image
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_common_video_extensions() {
+        assert_eq!(get_perceived_type("mp4"), PerceivedType::Video);
+        assert_eq!(get_perceived_type("mkv"), PerceivedType::Video);
+        assert_eq!(get_perceived_type("avi"), PerceivedType::Video);
+    }
+
+    #[test]
+    fn test_common_image_extensions() {
+        assert_eq!(get_perceived_type("jpg"), PerceivedType::Image);
+        assert_eq!(get_perceived_type("png"), PerceivedType::Image);
+    }
+}
