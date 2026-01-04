@@ -183,10 +183,10 @@ impl ThumbnailDiskCache {
                 .ok_or("Failed to create image buffer")?;
         let dynamic_img = DynamicImage::ImageRgba8(img);
 
-        // Adaptive resize: only downscale if larger than 512px, never upscale
-        // This preserves video thumbnails at their native 256px size
-        let resized = if width > 512 || height > 512 {
-            dynamic_img.resize(512, 512, image::imageops::FilterType::Lanczos3)
+        // Adaptive resize: only downscale if larger than 1024px, never upscale
+        // This preserves high-quality thumbnails for the preview panel
+        let resized = if width > 1024 || height > 1024 {
+            dynamic_img.resize(1024, 1024, image::imageops::FilterType::Lanczos3)
         } else {
             dynamic_img // Keep original size
         };

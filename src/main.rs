@@ -1278,7 +1278,7 @@ impl ImageViewerApp {
                         [width as usize, height as usize],
                         &rgba_data,
                     ),
-                    egui::TextureOptions::LINEAR,
+                    egui::TextureOptions::NEAREST,
                 );
 
                 let cloned = texture.clone();
@@ -1483,7 +1483,7 @@ impl ImageViewerApp {
                         [width as usize, height as usize],
                         &pixels,
                     ),
-                    egui::TextureOptions::LINEAR,
+                    egui::TextureOptions::NEAREST,
                 );
                 self.item_icon_loader.icon_cache.put(cache_key, texture);
             }
@@ -1533,7 +1533,7 @@ impl ImageViewerApp {
                         ],
                         &thumbnail_data.image_data,
                     ),
-                    egui::TextureOptions::LINEAR,
+                    egui::TextureOptions::NEAREST,
                 );
 
                 self.cache_manager

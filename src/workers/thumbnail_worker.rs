@@ -91,8 +91,8 @@ fn thumbnail_worker_loop(
 
                         // HYBRID PIPELINE com resize imediato
                         if let Some((raw_data, w, h)) = generate_thumbnail_hybrid(&path) {
-                            // STEP 2: Resize imediato para 512px (libera RAM do full-res)
-                            let resized = resize_to_max_512(&raw_data, w, h);
+                            // STEP 2: Resize imediato para 1024px (libera RAM do full-res)
+                            let resized = resize_to_max_1024(&raw_data, w, h);
 
                             // STEP 3: Salva versão otimizada em SQLite
                             let _ =
@@ -128,15 +128,15 @@ fn thumbnail_worker_loop(
     }
 }
 
-/// Resize RGBA buffer to max 512x512 while preserving aspect ratio
-fn resize_to_max_512(rgba_data: &[u8], width: u32, height: u32) -> (Vec<u8>, u32, u32) {
+/// Resize RGBA buffer to max 1024x1024 while preserving aspect ratio
+fn resize_to_max_1024(rgba_data: &[u8], width: u32, height: u32) -> (Vec<u8>, u32, u32) {
     // Se já é pequeno o suficiente, retorna como está
-    if width <= 512 && height <= 512 {
+    if width <= 1024 && height <= 1024 {
         return (rgba_data.to_vec(), width, height);
     }
 
     // Calcula novo tamanho mantendo aspect ratio
-    let scale = 512.0 / (width.max(height) as f32);
+    let scale = 1024.0 / (width.max(height) as f32);
     let new_w = ((width as f32) * scale).round() as u32;
     let new_h = ((height as f32) * scale).round() as u32;
 
@@ -259,8 +259,8 @@ fn extract_windows_thumbnail_shell(
     };
 
     // Determine size based on file type
-    // Videos: 256px (better compatibility, faster extraction, less memory)
-    // Others: 512px (system icons, executables, etc.)
+    // Videos: 512px (high quality for preview panel)
+    // Others: 1024px (high-res system icons, executables, etc.)
     let is_video = path
         .extension()
         .and_then(|e| e.to_str())
@@ -294,7 +294,7 @@ fn extract_windows_thumbnail_shell(
         })
         .unwrap_or(false);
 
-    let size_px = if is_video { 256 } else { 512 };
+    let size_px = if is_video { 512 } else { 1024 };
 
     unsafe {
         // SAFETY: Raw pointers from `path_wide` are valid for the call.

@@ -47,7 +47,7 @@ pub fn render_computer_view(
                         [width as usize, height as usize],
                         &rgba_data,
                     ),
-                    egui::TextureOptions::LINEAR,
+                    egui::TextureOptions::NEAREST,
                 );
                 let cloned = texture.clone();
                 ctx.drive_icon_cache.put(disk_path.clone(), texture);
