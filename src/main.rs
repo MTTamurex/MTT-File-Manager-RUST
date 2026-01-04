@@ -1,14 +1,16 @@
 use eframe::egui;
+use lru::LruCache;
 use mtt_file_manager::infrastructure::disk_cache::ThumbnailDiskCache;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use rayon::prelude::*;
 use std::cmp::Ordering;
 use std::collections::HashSet;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 // Mapeamento Remix Icon
 const ICON_ARROW_LEFT: &str = "\u{EA64}"; // Seta Esq
@@ -129,6 +131,10 @@ struct ImageViewerApp {
     selected_item: Option<usize>,
     selected_file: Option<FileEntry>,
     selected_metadata: Option<(PathBuf, windows_infra::MediaMetadata)>,
+    metadata_req_sender: Sender<(PathBuf, u64)>,
+    metadata_res_receiver: Receiver<(PathBuf, u64, windows_infra::MediaMetadata)>,
+    metadata_cache: LruCache<PathBuf, (u64, windows_infra::MediaMetadata)>,
+    metadata_loading: HashSet<PathBuf>,
     show_preview_panel: bool,
     is_computer_view: bool, // Se estamos na view "Este Computador"
 
@@ -276,6 +282,19 @@ impl ImageViewerApp {
             }
         });
 
+        // --- METADATA WORKER (assíncrono para HDD lentos) ---
+        let (meta_req_tx, meta_req_rx) = mpsc::channel::<(PathBuf, u64)>();
+        let (meta_res_tx, meta_res_rx) = mpsc::channel();
+        let meta_ctx = ctx.clone();
+
+        std::thread::spawn(move || {
+            while let Ok((path, mtime)) = meta_req_rx.recv() {
+                let meta = windows_infra::extract_media_metadata(&path);
+                let _ = meta_res_tx.send((path, mtime, meta));
+                meta_ctx.request_repaint();
+            }
+        });
+
         let disks = get_all_drives();
 
         let mut app = Self {
@@ -359,6 +378,12 @@ impl ImageViewerApp {
 
             // HWND nativo (capturado na primeira atualização)
             native_hwnd: None,
+
+            // METADATA ASYNC
+            metadata_req_sender: meta_req_tx,
+            metadata_res_receiver: meta_res_rx,
+            metadata_cache: LruCache::new(NonZeroUsize::new(512).unwrap()),
+            metadata_loading: HashSet::new(),
         };
 
         // Inicia monitoramento inicial
@@ -1294,14 +1319,27 @@ impl ImageViewerApp {
 
         match current_file {
             Some(path) => {
-                let needs_update = match &self.selected_metadata {
-                    Some((cached_path, _)) => cached_path != &path,
-                    None => true,
-                };
+                let mtime = std::fs::metadata(&path)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
 
-                if needs_update {
-                    let metadata = windows_infra::extract_media_metadata(&path);
-                    self.selected_metadata = Some((path, metadata));
+                if let Some((cached_mtime, meta)) = self.metadata_cache.get(&path) {
+                    if *cached_mtime == mtime {
+                        self.selected_metadata = Some((path, meta.clone()));
+                        return;
+                    }
+                }
+
+                if !self.metadata_loading.contains(&path) {
+                    let _ = self.metadata_req_sender.send((path.clone(), mtime));
+                    self.metadata_loading.insert(path.clone());
+                }
+
+                if !matches!(self.selected_metadata.as_ref(), Some((p, _)) if p == &path) {
+                    self.selected_metadata = None;
                 }
             }
             None => {
@@ -1451,7 +1489,24 @@ impl ImageViewerApp {
             }
         }
 
-        // 3. Individual thumbnails
+        // 4. Metadata Worker: drena respostas mesmo sem thumbnails
+        let mut metadata_updated = false;
+        while let Ok((path, mtime, meta)) = self.metadata_res_receiver.try_recv() {
+            self.metadata_loading.remove(&path);
+            self.metadata_cache.put(path.clone(), (mtime, meta.clone()));
+
+            if let Some(selected) = &self.selected_file {
+                if selected.path == path {
+                    self.selected_metadata = Some((path.clone(), meta));
+                    metadata_updated = true;
+                }
+            }
+        }
+        if metadata_updated {
+            ctx.request_repaint();
+        }
+
+        // 5. Individual thumbnails
         let mut received_any = false;
         let mut _new_items_added = false;
 
@@ -2584,6 +2639,7 @@ impl eframe::App for ImageViewerApp {
                             .selected_metadata
                             .as_ref()
                             .and_then(|(p, meta)| if p == &file.path { Some(meta) } else { None });
+                        let is_loading_meta = self.metadata_loading.contains(&file.path);
 
                         egui::Grid::new("details_grid")
                             .num_columns(2)
@@ -2795,6 +2851,10 @@ impl eframe::App for ImageViewerApp {
                                             ui.label(Self::format_bitrate(bps));
                                             ui.end_row();
                                         }
+                                    } else if is_loading_meta {
+                                        ui.label("Metadados:");
+                                        ui.label("Carregando...");
+                                        ui.end_row();
                                     }
                                 }
                             });
