@@ -298,7 +298,7 @@ impl ImageViewerApp {
                         [thumbnail_data.width as usize, thumbnail_data.height as usize],
                         &thumbnail_data.image_data,
                     ),
-                    egui::TextureOptions::LINEAR,
+                    egui::TextureOptions::NEAREST,
                 );
                 
                 self.texture_cache.put(thumbnail_data.path, texture);

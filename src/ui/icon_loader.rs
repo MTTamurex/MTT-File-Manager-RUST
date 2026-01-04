@@ -49,7 +49,7 @@ impl IconLoader {
                     [width as usize, height as usize],
                     &pixels,
                 ),
-                egui::TextureOptions::LINEAR,
+                egui::TextureOptions::NEAREST,
             );
             self.folder_icon_texture = Some(texture);
         }
@@ -78,7 +78,7 @@ impl IconLoader {
                     [width as usize, height as usize],
                     &pixels,
                 ),
-                egui::TextureOptions::LINEAR,
+                egui::TextureOptions::NEAREST,
             );
 
             // Cache the texture
@@ -106,7 +106,7 @@ impl IconLoader {
                 egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &data);
 
             self.computer_icon_texture =
-                Some(ctx.load_texture("computer_icon", image, egui::TextureOptions::LINEAR));
+                Some(ctx.load_texture("computer_icon", image, egui::TextureOptions::NEAREST));
         }
     }
 
@@ -135,7 +135,7 @@ impl IconLoader {
                     [width as usize, height as usize],
                     &rgba_data,
                 ),
-                egui::TextureOptions::LINEAR,
+                egui::TextureOptions::NEAREST,
             );
             let cloned = texture.clone();
             self.drive_icon_cache
@@ -176,7 +176,7 @@ impl IconLoader {
                     [width as usize, height as usize],
                     &rgba_data,
                 ),
-                egui::TextureOptions::LINEAR,
+                egui::TextureOptions::NEAREST,
             );
             let cloned = texture.clone();
             self.drive_icon_cache.insert(cache_key, texture);
