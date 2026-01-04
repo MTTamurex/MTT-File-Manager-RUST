@@ -2510,7 +2510,11 @@ impl eframe::App for ImageViewerApp {
                 .min_width(250.0)
                 .max_width(500.0)
                 .show(ctx, |ui| {
-                    if let Some(file) = self.selected_file.clone() {
+                    egui::ScrollArea::vertical()
+                        .id_source("preview_scroll")
+                        .show(ui, |ui| {
+                            ui.set_max_width(ui.available_width());
+                            if let Some(file) = self.selected_file.clone() {
                         ui.heading("Detalhes");
                         ui.separator();
 
@@ -2532,14 +2536,13 @@ impl eframe::App for ImageViewerApp {
 
                         if let (Some(tex), true) = (texture, is_media) {
                             // Mostra thumbnail de imagem/video
-                            let max_preview_width = ui.available_width() - 20.0;
+                            let max_preview_width = ui.available_width() - 8.0;
                             let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
 
                             ui.vertical_centered(|ui| {
                                 ui.add(
                                     egui::Image::new(&tex)
                                         .max_size(max_preview_size)
-                                        .fit_to_original_size(1.0)
                                         .shrink_to_fit(),
                                 );
                             });
@@ -2609,230 +2612,182 @@ impl eframe::App for ImageViewerApp {
                             ui.separator();
                         }
 
-                        // Tabela de detalhes
-                        let selected_metadata = self
-                            .selected_metadata
-                            .as_ref()
-                            .and_then(|(p, meta)| if p == &file.path { Some(meta) } else { None });
+                        // Tabela de detalhes (Manual Responsive Grid)
+                        let selected_metadata = self.selected_metadata.as_ref().and_then(|(p, meta)| {
+                            if p == &file.path {
+                                Some(meta)
+                            } else {
+                                None
+                            }
+                        });
                         let is_loading_meta = self.metadata_loading.contains(&file.path);
 
-                        egui::Grid::new("details_grid")
-                            .num_columns(2)
-                            .spacing([10.0, 4.0])
-                            .show(ui, |ui| {
-                                if let Some(drive) = &file.drive_info {
-                                    ui.label("Tipo:");
-                                    ui.label(drive.drive_type.label());
-                                    ui.end_row();
-
-                                    let used_space = drive.total_space - drive.free_space;
-                                    let usage_percent = if drive.total_space > 0 {
-                                        (used_space as f64 / drive.total_space as f64) * 100.0
-                                    } else {
-                                        0.0
-                                    };
-
-                                    ui.label("Espaço utilizado:");
-                                    ui.label(format!("{:.0}%", usage_percent));
-                                    ui.end_row();
-
-                                    ui.label("Espaço livre:");
-                                    ui.label(format_size(drive.free_space));
-                                    ui.end_row();
-
-                                    ui.label("Tamanho total:");
-                                    ui.label(format_size(drive.total_space));
-                                    ui.end_row();
-
-                                    ui.label("Sistema de arquivos:");
-                                    let fs_label = if drive.file_system.is_empty() {
-                                        "NTFS"
-                                    } else {
-                                        &drive.file_system
-                                    };
-                                    ui.label(fs_label);
-                                    ui.end_row();
-
-                                    // BitLocker (placeholder ou real se possível)
-                                    ui.label("Status do BitLocker:");
-                                    ui.label("Desligado");
-                                    ui.end_row();
-                                } else {
-                                    ui.label("Nome:");
-                                    ui.add(egui::Label::new(&file.name).wrap().truncate());
-                                    ui.end_row();
-
-                                    ui.label("Tamanho:");
-                                    ui.label(format_size(file.size));
-                                    ui.end_row();
-
-                                    ui.label("Tipo:");
-                                    if file.is_dir {
-                                        ui.label("Pasta");
-                                    } else {
-                                        let ext = file
-                                            .path
-                                            .extension()
-                                            .and_then(|e| e.to_str())
-                                            .unwrap_or("Arquivo");
-                                        ui.label(ext.to_uppercase());
-                                    }
-                                    ui.end_row();
-
-                                    ui.label("Data:");
-                                    ui.label(format_date(file.modified));
-                                    ui.end_row();
-
-                                    if let Some(meta) = selected_metadata {
-                                        if let (Some(w), Some(h)) = (meta.width, meta.height) {
-                                            ui.label("Resolução:");
-                                            ui.label(format!("{} x {} px", w, h));
-                                            ui.end_row();
-                                        }
-
-                                        if let Some(format) = &meta.format {
-                                            ui.label("Formato:");
-                                            ui.label(format);
-                                            ui.end_row();
-                                        }
-
-                                        if let Some(bits) = meta.color_depth {
-                                            ui.label("Profundidade:");
-                                            ui.label(format!("{} bits", bits));
-                                            ui.end_row();
-                                        }
-
-                                        // EXIF Data for Images
-                                        if let Some(maker) = &meta.camera_maker {
-                                            ui.label("Fabricante da câmera:");
-                                            ui.label(maker);
-                                            ui.end_row();
-                                        }
-
-                                        if let Some(model) = &meta.camera_model {
-                                            ui.label("Modelo da câmera:");
-                                            ui.label(model);
-                                            ui.end_row();
-                                        }
-
-                                        if let Some(date) = &meta.date_taken {
-                                            ui.label("Data de captura:");
-                                            ui.label(date);
-                                            ui.end_row();
-                                        }
-
-                                        if let Some(f_stop) = &meta.f_stop {
-                                            ui.label("F-stop:");
-                                            ui.label(f_stop);
-                                            ui.end_row();
-                                        }
-
-                                        if let Some(exposure) = &meta.exposure_time {
-                                            ui.label("Tempo de exposição:");
-                                            ui.label(exposure);
-                                            ui.end_row();
-                                        }
-
-                                        if let Some(iso) = meta.iso_speed {
-                                            ui.label("ISO:");
-                                            ui.label(format!("ISO-{}", iso));
-                                            ui.end_row();
-                                        }
-
-                                        if let Some(focal) = &meta.focal_length {
-                                            ui.label("Distância focal:");
-                                            ui.label(focal);
-                                            ui.end_row();
-                                        }
-
-                                        if let Some(aperture) = &meta.max_aperture {
-                                            ui.label("Abertura máxima:");
-                                            ui.label(aperture);
-                                            ui.end_row();
-                                        }
-
-                                        if let Some(metering) = &meta.metering_mode {
-                                            ui.label("Modo de medição:");
-                                            ui.label(metering);
-                                            ui.end_row();
-                                        }
-
-                                        if let Some(flash) = &meta.flash_mode {
-                                            ui.label("Flash:");
-                                            ui.label(flash);
-                                            ui.end_row();
-                                        }
-
-                                        if let Some(subject) = &meta.subject {
-                                            ui.label("Assunto:");
-                                            ui.label(subject);
-                                            ui.end_row();
-                                        }
-
-                                        // Video Codec Info
-                                        if let Some(codec) = &meta.video_codec {
-                                            ui.label("Codec de vídeo:");
-                                            ui.label(codec);
-                                            ui.end_row();
-                                        }
-
-                                        if let Some(codec) = &meta.audio_codec {
-                                            ui.label("Codec de áudio:");
-                                            ui.label(codec);
-                                            ui.end_row();
-                                        }
-
-                                        if let Some(bitrate) = meta.audio_bitrate {
-                                            ui.label("Bitrate de áudio:");
-                                            ui.label(Self::format_bitrate(bitrate));
-                                            ui.end_row();
-                                        }
-
-                                        if let Some(channels) = meta.audio_channels {
-                                            ui.label("Canais de áudio:");
-                                            let channel_name = match channels {
-                                                1 => "Mono",
-                                                2 => "Estéreo",
-                                                6 => "5.1",
-                                                8 => "7.1",
-                                                _ => "Outro",
-                                            };
-                                            ui.label(format!("{} ({})", channels, channel_name));
-                                            ui.end_row();
-                                        }
-
-                                        if let Some(duration) = meta.duration_100ns {
-                                            ui.label("Duração:");
-                                            ui.label(Self::format_media_duration(duration));
-                                            ui.end_row();
-                                        }
-
-                                        if let Some(fps) = meta.frame_rate {
-                                            ui.label("Frame rate:");
-                                            ui.label(format!("{:.2} fps", fps));
-                                            ui.end_row();
-                                        }
-
-                                        let mut bitrate_to_show = meta.bitrate;
-                                        if bitrate_to_show.is_none() {
-                                            if let Some(duration) = meta.duration_100ns {
-                                                bitrate_to_show =
-                                                    Self::approximate_bitrate(file.size, duration);
-                                            }
-                                        }
-
-                                        if let Some(bps) = bitrate_to_show {
-                                            ui.label("Bitrate:");
-                                            ui.label(Self::format_bitrate(bps));
-                                            ui.end_row();
-                                        }
-                                    } else if is_loading_meta {
-                                        ui.label("Metadados:");
-                                        ui.label("Carregando...");
-                                        ui.end_row();
-                                    }
-                                }
+                        let key_w = 110.0;
+                        let mut add_detail = |ui: &mut egui::Ui, label: &str, value: String| {
+                            ui.horizontal_top(|ui| {
+                                ui.add_sized(
+                                    egui::vec2(key_w, 0.0),
+                                    egui::Label::new(egui::RichText::new(label).strong()),
+                                );
+                                ui.add(egui::Label::new(value).wrap());
                             });
+                            ui.add_space(2.0);
+                        };
+
+                        ui.scope(|ui| {
+                            ui.set_max_width(ui.available_width());
+
+                            if let Some(drive) = &file.drive_info {
+                                add_detail(ui, "Tipo:", drive.drive_type.label().to_string());
+
+                                let used_space = drive.total_space - drive.free_space;
+                                let usage_percent = if drive.total_space > 0 {
+                                    (used_space as f64 / drive.total_space as f64) * 100.0
+                                } else {
+                                    0.0
+                                };
+
+                                add_detail(ui, "Uso:", format!("{:.0}%", usage_percent));
+                                add_detail(ui, "Livre:", format_size(drive.free_space));
+                                add_detail(ui, "Total:", format_size(drive.total_space));
+                                add_detail(
+                                    ui,
+                                    "Sist. Arq:",
+                                    if drive.file_system.is_empty() {
+                                        "NTFS".to_string()
+                                    } else {
+                                        drive.file_system.clone()
+                                    },
+                                );
+                                add_detail(ui, "BitLocker:", "Desligado".to_string());
+                            } else {
+                                add_detail(ui, "Nome:", file.name.clone());
+                                add_detail(ui, "Tamanho:", format_size(file.size));
+
+                                let type_label = if file.is_dir {
+                                    "Pasta".to_string()
+                                } else {
+                                    file.path
+                                        .extension()
+                                        .and_then(|e| e.to_str())
+                                        .unwrap_or("Arquivo")
+                                        .to_uppercase()
+                                };
+                                add_detail(ui, "Tipo:", type_label);
+                                add_detail(ui, "Data:", format_date(file.modified));
+
+                                if let Some(meta) = selected_metadata {
+                                    if let (Some(w), Some(h)) = (meta.width, meta.height) {
+                                        add_detail(ui, "Resolução:", format!("{} x {} px", w, h));
+                                    }
+
+                                    if let Some(format) = &meta.format {
+                                        add_detail(ui, "Formato:", format.clone());
+                                    }
+
+                                    if let Some(bits) = meta.color_depth {
+                                        add_detail(ui, "Profundidade:", format!("{} bits", bits));
+                                    }
+
+                                    if let Some(maker) = &meta.camera_maker {
+                                        add_detail(ui, "Fabricante:", maker.clone());
+                                    }
+
+                                    if let Some(model) = &meta.camera_model {
+                                        add_detail(ui, "Modelo:", model.clone());
+                                    }
+
+                                    if let Some(date) = &meta.date_taken {
+                                        add_detail(ui, "Captura:", date.clone());
+                                    }
+
+                                    if let Some(f_stop) = &meta.f_stop {
+                                        add_detail(ui, "F-stop:", f_stop.clone());
+                                    }
+
+                                    if let Some(exposure) = &meta.exposure_time {
+                                        add_detail(ui, "Exposição:", exposure.clone());
+                                    }
+
+                                    if let Some(iso) = meta.iso_speed {
+                                        add_detail(ui, "ISO:", format!("ISO-{}", iso));
+                                    }
+
+                                    if let Some(focal) = &meta.focal_length {
+                                        add_detail(ui, "Dist. Focal:", focal.clone());
+                                    }
+
+                                    if let Some(aperture) = &meta.max_aperture {
+                                        add_detail(ui, "Abertura:", aperture.clone());
+                                    }
+
+                                    if let Some(metering) = &meta.metering_mode {
+                                        add_detail(ui, "Medição:", metering.clone());
+                                    }
+
+                                    if let Some(flash) = &meta.flash_mode {
+                                        add_detail(ui, "Flash:", flash.clone());
+                                    }
+
+                                    if let Some(subject) = &meta.subject {
+                                        add_detail(ui, "Assunto:", subject.clone());
+                                    }
+
+                                    if let Some(codec) = &meta.video_codec {
+                                        add_detail(ui, "Video Codec:", codec.clone());
+                                    }
+
+                                    if let Some(codec) = &meta.audio_codec {
+                                        add_detail(ui, "Audio Codec:", codec.clone());
+                                    }
+
+                                    if let Some(bitrate) = meta.audio_bitrate {
+                                        add_detail(ui, "Audio BR:", Self::format_bitrate(bitrate));
+                                    }
+
+                                    if let Some(channels) = meta.audio_channels {
+                                        let channel_name = match channels {
+                                            1 => "Mono",
+                                            2 => "Estéreo",
+                                            6 => "5.1",
+                                            8 => "7.1",
+                                            _ => "Outro",
+                                        };
+                                        add_detail(
+                                            ui,
+                                            "Canais:",
+                                            format!("{} ({})", channels, channel_name),
+                                        );
+                                    }
+
+                                    if let Some(duration) = meta.duration_100ns {
+                                        add_detail(
+                                            ui,
+                                            "Duração:",
+                                            Self::format_media_duration(duration),
+                                        );
+                                    }
+
+                                    if let Some(fps) = meta.frame_rate {
+                                        add_detail(ui, "Frame rate:", format!("{:.2} fps", fps));
+                                    }
+
+                                    let mut bitrate_to_show = meta.bitrate;
+                                    if bitrate_to_show.is_none() {
+                                        if let Some(duration) = meta.duration_100ns {
+                                            bitrate_to_show =
+                                                Self::approximate_bitrate(file.size, duration);
+                                        }
+                                    }
+
+                                    if let Some(bps) = bitrate_to_show {
+                                        add_detail(ui, "Bitrate:", Self::format_bitrate(bps));
+                                    }
+                                } else if is_loading_meta {
+                                    add_detail(ui, "Metadados:", "Carregando...".to_string());
+                                }
+                            }
+                        });
                     } else {
                         ui.vertical_centered(|ui| {
                             ui.add_space(100.0);
@@ -2840,6 +2795,7 @@ impl eframe::App for ImageViewerApp {
                             ui.label("ou drive para ver detalhes");
                         });
                     }
+                        });
                 });
         }
 
