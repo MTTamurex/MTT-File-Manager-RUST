@@ -10,6 +10,7 @@
 - **Thumbnails assíncronos** com cache LRU inteligente
 - **Ícones nativos do Windows** (SHGetFileInfoW)
 - **Metadados de mídia com paridade do Explorer** (Property Store usando GPS_OPENSLOWITEM + fallback MediaFoundation)
+- **Metadados assíncronos com cache LRU** (worker dedicado + cache 512 itens por mtime para HDD lentos)
 - **Navegação completa** (histórico, Enter para abrir, botões)
 - **Ordenação performática** (Nome/Data/Tamanho com cache)
 - **Seleção shrink-wrap** (estilo Windows Explorer)

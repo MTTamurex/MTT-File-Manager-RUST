@@ -7,6 +7,7 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 
 use super::media_foundation::extract_video_metadata_mf;
+use exif::{In, Reader as ExifReader, Tag};
 use image::ImageReader;
 use windows::{
     core::{GUID, PCWSTR},
@@ -17,7 +18,6 @@ use windows::{
         GPS_READWRITE,
     },
 };
-use exif::{In, Reader as ExifReader, Tag};
 
 // Manual property key definitions (from Propkey.h)
 // These are not exposed by windows-rs, so we define them manually
@@ -195,9 +195,9 @@ const VT_UI4: u16 = 19;
 const VT_UI8: u16 = 21;
 const VT_I4: u16 = 3;
 const VT_I8: u16 = 20;
-const VT_R8: u16 = 5;  // Double (64-bit float)
+const VT_R8: u16 = 5; // Double (64-bit float)
 const VT_UI2: u16 = 18; // Unsigned 16-bit int
-const VT_I2: u16 = 2;   // Signed 16-bit int
+const VT_I2: u16 = 2; // Signed 16-bit int
 
 /// Generic media metadata used by the preview panel.
 #[derive(Clone, Debug, Default)]
@@ -293,7 +293,7 @@ fn is_video_extension(ext: &str) -> bool {
 
 fn read_image_exif_metadata(path: &Path) -> Result<MediaMetadata, windows::core::Error> {
     eprintln!("[EXIF DEBUG] Reading EXIF for: {:?}", path.file_name());
-    
+
     // Try direct EXIF reading first (more reliable than Property Store for JPEG)
     let mut camera_maker = None;
     let mut camera_model = None;
@@ -311,27 +311,27 @@ fn read_image_exif_metadata(path: &Path) -> Result<MediaMetadata, windows::core:
         let mut bufreader = std::io::BufReader::new(&file);
         if let Ok(exifreader) = ExifReader::new().read_from_container(&mut bufreader) {
             eprintln!("  [EXIF] Successfully parsed EXIF data");
-            
+
             // Camera Make
             if let Some(field) = exifreader.get_field(Tag::Make, In::PRIMARY) {
                 camera_maker = Some(field.display_value().to_string());
             }
-            
+
             // Camera Model
             if let Some(field) = exifreader.get_field(Tag::Model, In::PRIMARY) {
                 camera_model = Some(field.display_value().to_string());
             }
-            
+
             // F-Number
             if let Some(field) = exifreader.get_field(Tag::FNumber, In::PRIMARY) {
                 f_stop = Some(format!("f/{}", field.display_value()));
             }
-            
+
             // Exposure Time
             if let Some(field) = exifreader.get_field(Tag::ExposureTime, In::PRIMARY) {
                 exposure_time = Some(format!("{} sec.", field.display_value()));
             }
-            
+
             // ISO Speed
             if let Some(field) = exifreader.get_field(Tag::PhotographicSensitivity, In::PRIMARY) {
                 if let exif::Value::Short(ref v) = field.value {
@@ -340,39 +340,39 @@ fn read_image_exif_metadata(path: &Path) -> Result<MediaMetadata, windows::core:
                     }
                 }
             }
-            
+
             // Focal Length
             if let Some(field) = exifreader.get_field(Tag::FocalLength, In::PRIMARY) {
                 focal_length = Some(format!("{} mm", field.display_value()));
             }
-            
+
             // Max Aperture
             if let Some(field) = exifreader.get_field(Tag::MaxApertureValue, In::PRIMARY) {
                 max_aperture = Some(field.display_value().to_string());
             }
-            
+
             // Metering Mode
             if let Some(field) = exifreader.get_field(Tag::MeteringMode, In::PRIMARY) {
                 metering_mode = Some(field.display_value().to_string());
             }
-            
+
             // Flash
             if let Some(field) = exifreader.get_field(Tag::Flash, In::PRIMARY) {
                 flash_mode = Some(field.display_value().to_string());
             }
-            
+
             // Date Taken
             if let Some(field) = exifreader.get_field(Tag::DateTime, In::PRIMARY) {
                 date_taken = Some(field.display_value().to_string());
             }
-            
+
             // Subject/Description
             if let Some(field) = exifreader.get_field(Tag::ImageDescription, In::PRIMARY) {
                 subject = Some(field.display_value().to_string());
             }
         } else {
             eprintln!("  [EXIF] Failed to parse EXIF data, trying Property Store fallback");
-            
+
             // Fallback to Property Store if direct EXIF reading fails
             let _com_guard = ComGuard::new();
             if let Ok(store) = unsafe { open_property_store(path) } {
@@ -473,12 +473,14 @@ fn read_video_metadata(path: &Path) -> Result<MediaMetadata, windows::core::Erro
 
     // Decide if we need MediaFoundation: missing core fields OR missing codecs/frame rate
     let need_mf = match &ps_meta_opt {
-        Some(meta) => meta.width.is_none()
-            || meta.height.is_none()
-            || meta.duration_100ns.is_none()
-            || meta.video_codec.is_none()
-            || meta.audio_codec.is_none()
-            || meta.frame_rate.is_none(),
+        Some(meta) => {
+            meta.width.is_none()
+                || meta.height.is_none()
+                || meta.duration_100ns.is_none()
+                || meta.video_codec.is_none()
+                || meta.audio_codec.is_none()
+                || meta.frame_rate.is_none()
+        }
         None => true,
     };
 
@@ -502,13 +504,13 @@ fn merge_video_metadata(
     mf: super::media_foundation::VideoMetadataMF,
     path: &Path,
 ) -> MediaMetadata {
-    let frame_rate = ps.frame_rate.or_else(|| {
-        match (mf.frame_rate_num, mf.frame_rate_den) {
+    let frame_rate = ps
+        .frame_rate
+        .or_else(|| match (mf.frame_rate_num, mf.frame_rate_den) {
             (Some(num), Some(den)) if den > 0 => Some(num as f32 / den as f32),
             _ => None,
-        }
-    });
-    
+        });
+
     let video_codec = ps
         .video_codec
         .or_else(|| mf.video_codec_guid.clone())
@@ -518,12 +520,12 @@ fn merge_video_metadata(
         .audio_codec
         .or_else(|| mf.audio_codec_guid.clone())
         .map(|s| sanitize_codec_string(&s));
-    
+
     let format = path
         .extension()
         .and_then(|e| e.to_str())
         .map(|ext| ext.to_uppercase());
-    
+
     // Calculate bitrate from file size if not available
     let duration_100ns = ps.duration_100ns.or(mf.duration_100ns);
     let bitrate = ps.bitrate.or(mf.video_bitrate).or_else(|| {
@@ -538,7 +540,7 @@ fn merge_video_metadata(
         }
         None
     });
-    
+
     MediaMetadata {
         width: ps.width.or(mf.width),
         height: ps.height.or(mf.height),
@@ -573,8 +575,13 @@ fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windows::
     let width = unsafe { read_u32(&store, &PKEY_VIDEO_FRAMEWIDTH) };
     let height = unsafe { read_u32(&store, &PKEY_VIDEO_FRAMEHEIGHT) };
     let duration_100ns = unsafe { read_u64(&store, &PKEY_MEDIA_DURATION) };
-    let frame_rate = unsafe { read_u32(&store, &PKEY_VIDEO_FRAMERATE) }
-        .and_then(|raw| if raw == 0 { None } else { Some(raw as f32 / 1_000.0) });
+    let frame_rate = unsafe { read_u32(&store, &PKEY_VIDEO_FRAMERATE) }.and_then(|raw| {
+        if raw == 0 {
+            None
+        } else {
+            Some(raw as f32 / 1_000.0)
+        }
+    });
 
     // PRIORITY FALLBACK SYSTEM for Video Codec (K-Lite/Icaros friendly)
     // Priority 1: FourCC (raw technical identifier - most accurate)
@@ -623,12 +630,18 @@ fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windows::
     let video_codec_final = video_codec.or_else(|| {
         let filename = path.file_name()?.to_str()?;
         let filename_lower = filename.to_lowercase();
-        
+
         // Check for common codec indicators in filename
-        if filename_lower.contains("x264") || filename_lower.contains("h264") || filename_lower.contains("avc") {
+        if filename_lower.contains("x264")
+            || filename_lower.contains("h264")
+            || filename_lower.contains("avc")
+        {
             return Some("H.264/AVC".to_string());
         }
-        if filename_lower.contains("x265") || filename_lower.contains("h265") || filename_lower.contains("hevc") {
+        if filename_lower.contains("x265")
+            || filename_lower.contains("h265")
+            || filename_lower.contains("hevc")
+        {
             return Some("H.265/HEVC".to_string());
         }
         if filename_lower.contains("av1") {
@@ -640,13 +653,14 @@ fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windows::
         if filename_lower.contains("vp8") {
             return Some("VP8".to_string());
         }
-        
+
         // Don't return container name as codec - better to show nothing
         None
     });
-    
+
     // Sanitize video codec string (convert GUIDs to names, filter container names)
-    let video_codec_sanitized = video_codec_final.map(|s| sanitize_codec_string(&s))
+    let video_codec_sanitized = video_codec_final
+        .map(|s| sanitize_codec_string(&s))
         .filter(|s| !s.is_empty() && !is_container_name(s, path));
 
     // Calculate total bitrate from file size if Property Store doesn't have it
@@ -696,16 +710,19 @@ fn sanitize_codec_string(s: &str) -> String {
 
     // Quick GUID substring checks for common audio codecs that sometimes leak as GUID strings
     let upper = s.to_ascii_uppercase();
-    if upper.contains("0000704F") { // {0000704F-0000-0010-8000-00AA00389B71} → Opus
+    if upper.contains("0000704F") {
+        // {0000704F-0000-0010-8000-00AA00389B71} → Opus
         return "Opus".to_string();
     }
-    if upper.contains("00001FCA") { // {00001FCA-0000-0010-8000-00AA00389B71} → AV1 (rare audio GUID form)
+    if upper.contains("00001FCA") {
+        // {00001FCA-0000-0010-8000-00AA00389B71} → AV1 (rare audio GUID form)
         return "AV1".to_string();
     }
-    if upper.contains("8D2FD10B") { // {8D2FD10B-5841-4A6B-8905-588FEC1ADED9} → Vorbis (MEDIASUBTYPE_Vorbis2)
+    if upper.contains("8D2FD10B") {
+        // {8D2FD10B-5841-4A6B-8905-588FEC1ADED9} → Vorbis (MEDIASUBTYPE_Vorbis2)
         return "Vorbis".to_string();
     }
-    
+
     // Check if it's a GUID string like "{00001610-0000-0010-8000-00AA00389B71}"
     if s.starts_with('{') && s.contains('-') {
         // Extract the first segment (data1)
@@ -728,21 +745,24 @@ fn sanitize_codec_string(s: &str) -> String {
                     0xA106 => "AAC (ADTS)".to_string(),
                     0x2000 => "AC-3".to_string(),
                     0x2001 => "DTS".to_string(),
-                    
+
                     // FourCC-based codecs (higher numbers)
-                    0x6134706D => "AAC".to_string(),      // 'mp4a'
-                    0x7375704F => "Opus".to_string(),     // 'Opus'
-                    0x43414C46 => "FLAC".to_string(),     // 'FLAC'
-                    0x30395056 => "VP9".to_string(),      // 'VP90'
-                    0x30385056 => "VP8".to_string(),      // 'VP80'
-                    0x31305641 => "AV1".to_string(),      // 'AV01'
-                    0x31435641 => "H.264/AVC".to_string(), // 'AVC1'
+                    0x6134706D => "AAC".to_string(),        // 'mp4a'
+                    0x7375704F => "Opus".to_string(),       // 'Opus'
+                    0x43414C46 => "FLAC".to_string(),       // 'FLAC'
+                    0x30395056 => "VP9".to_string(),        // 'VP90'
+                    0x30385056 => "VP8".to_string(),        // 'VP80'
+                    0x31305641 => "AV1".to_string(),        // 'AV01'
+                    0x31435641 => "H.264/AVC".to_string(),  // 'AVC1'
                     0x43564548 => "H.265/HEVC".to_string(), // 'HEVC'
-                    
+
                     _ => {
                         // Try to decode as FourCC
                         let bytes = data1.to_le_bytes();
-                        if bytes.iter().all(|&b| b.is_ascii_alphanumeric() || b == b' ' || b == b'-') {
+                        if bytes
+                            .iter()
+                            .all(|&b| b.is_ascii_alphanumeric() || b == b' ' || b == b'-')
+                        {
                             let fourcc: String = bytes.iter().map(|&b| b as char).collect();
                             fourcc.trim().to_string()
                         } else {
@@ -753,7 +773,7 @@ fn sanitize_codec_string(s: &str) -> String {
             }
         }
     }
-    
+
     // If it's already a readable name, return as-is
     s.to_string()
 }
@@ -761,20 +781,31 @@ fn sanitize_codec_string(s: &str) -> String {
 /// Check if a codec string is actually a container name (not a real codec)
 fn is_container_name(codec: &str, path: &Path) -> bool {
     let codec_lower = codec.to_lowercase();
-    let ext = path.extension()
+    let ext = path
+        .extension()
         .and_then(|e| e.to_str())
         .map(|e| e.to_lowercase())
         .unwrap_or_default();
-    
+
     // Check if codec matches container extension
     if codec_lower == ext {
         return true;
     }
-    
+
     // Known container names that aren't real codecs
-    matches!(codec_lower.as_str(), 
-        "mkv" | "webm" | "mp4" | "avi" | "mov" | "wmv" | "flv" | 
-        "video" | "audio" | "matroska" | "container"
+    matches!(
+        codec_lower.as_str(),
+        "mkv"
+            | "webm"
+            | "mp4"
+            | "avi"
+            | "mov"
+            | "wmv"
+            | "flv"
+            | "video"
+            | "audio"
+            | "matroska"
+            | "container"
     )
 }
 
@@ -919,7 +950,7 @@ unsafe fn read_u32(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<u32> {
         _ => {
             eprintln!("    [DEBUG] Unexpected VT type for u32: {}", vt);
             None
-        },
+        }
     };
 
     value
@@ -967,7 +998,7 @@ unsafe fn read_f64(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<f64> {
         _ => {
             eprintln!("    [DEBUG] Unexpected VT type for f64: {}", vt);
             None
-        },
+        }
     };
 
     value

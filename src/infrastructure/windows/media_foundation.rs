@@ -1,5 +1,5 @@
 //! MediaFoundation-based video metadata extraction
-//! 
+//!
 //! Fallback for Property Store when it fails to retrieve video metadata.
 //! Uses IMFSourceReader to read video stream information directly.
 
@@ -12,8 +12,7 @@ use windows::{
     Win32::Media::MediaFoundation::{
         IMFMediaType, IMFSourceReader, MFCreateSourceReaderFromURL, MFShutdown, MFStartup,
         MFSTARTUP_NOSOCKET, MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND,
-        MF_MT_AVG_BITRATE, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE, MF_MT_SUBTYPE,
-        MF_PD_DURATION,
+        MF_MT_AVG_BITRATE, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE, MF_MT_SUBTYPE, MF_PD_DURATION,
     },
     Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED},
 };
@@ -21,7 +20,7 @@ use windows::{
 // Stream index constants - these are defined as i32/u32 in the actual API
 const MF_SOURCE_READER_FIRST_VIDEO_STREAM: u32 = 0xFFFFFFFC; // -4 as u32
 const MF_SOURCE_READER_FIRST_AUDIO_STREAM: u32 = 0xFFFFFFFD; // -3 as u32
-const MF_SOURCE_READER_MEDIASOURCE: u32 = 0xFFFFFFFF;        // -1 as u32
+const MF_SOURCE_READER_MEDIASOURCE: u32 = 0xFFFFFFFF; // -1 as u32
 
 /// Video metadata extracted via MediaFoundation
 #[derive(Debug, Default, Clone)]
@@ -99,7 +98,7 @@ impl Drop for MFGuard {
 }
 
 /// Extract video metadata using MediaFoundation IMFSourceReader.
-/// 
+///
 /// This is more reliable than Property Store for modern codecs and containers,
 /// but is slower because it opens and parses the file.
 pub fn extract_video_metadata_mf(path: &Path) -> Option<VideoMetadataMF> {
@@ -114,9 +113,8 @@ pub fn extract_video_metadata_mf(path: &Path) -> Option<VideoMetadataMF> {
         .collect();
 
     // Create source reader from URL (file path)
-    let reader: IMFSourceReader = unsafe {
-        MFCreateSourceReaderFromURL(PCWSTR(wide_path.as_ptr()), None).ok()?
-    };
+    let reader: IMFSourceReader =
+        unsafe { MFCreateSourceReaderFromURL(PCWSTR(wide_path.as_ptr()), None).ok()? };
 
     let mut meta = VideoMetadataMF::default();
 
@@ -148,18 +146,22 @@ fn read_duration(reader: &IMFSourceReader) -> Option<u64> {
         let propvar = reader
             .GetPresentationAttribute(MF_SOURCE_READER_MEDIASOURCE, &MF_PD_DURATION)
             .ok()?;
-        
+
         // PROPVARIANT for duration contains VT_UI8 (u64)
         // Access the raw value directly from the anonymous union
         let raw = propvar.as_raw();
         let vt = raw.Anonymous.Anonymous.vt;
-        
+
         // VT_UI8 = 21, VT_I8 = 20
         match vt {
             21 => Some(raw.Anonymous.Anonymous.Anonymous.uhVal as u64), // VT_UI8
             20 => {
                 let val = raw.Anonymous.Anonymous.Anonymous.hVal;
-                if val >= 0 { Some(val as u64) } else { None }
+                if val >= 0 {
+                    Some(val as u64)
+                } else {
+                    None
+                }
             }
             _ => None,
         }
@@ -223,54 +225,54 @@ fn guid_to_codec_name(guid: &windows::core::GUID) -> String {
     // First, check for well-known full GUIDs (audio codecs often need this)
     // Format: {XXXXXXXX-0000-0010-8000-00AA00389B71} is the standard MediaFoundation format
     // where XXXXXXXX is the FourCC or format tag
-    
+
     let fourcc = guid.data1;
-    
+
     // Check if it's a standard MediaFoundation GUID format (data2=0x0000, data3=0x0010)
     // or FourCC-based GUID format
     let is_standard_mf_format = guid.data2 == 0x0000 && guid.data3 == 0x0010;
-    
+
     // Video codecs - FourCC based
     match fourcc {
         // H.264/AVC variants
-        0x31435641 | 0x31637661 => return "H.264/AVC".to_string(),     // 'AVC1', 'avc1'
-        0x34363248 | 0x34363268 => return "H.264/AVC".to_string(),     // 'H264', 'h264'
-        0x3436324E => return "H.264/AVC".to_string(),                   // Various encoders
-        
-        // H.265/HEVC variants  
-        0x35365648 | 0x31435648 => return "H.265/HEVC".to_string(),    // 'HV51', 'HVC1'
-        0x31637668 | 0x35637668 => return "H.265/HEVC".to_string(),    // 'hvc1', 'hvc5'
-        0x43564548 | 0x63766568 => return "H.265/HEVC".to_string(),    // 'HEVC', 'hevc'
-        
+        0x31435641 | 0x31637661 => return "H.264/AVC".to_string(), // 'AVC1', 'avc1'
+        0x34363248 | 0x34363268 => return "H.264/AVC".to_string(), // 'H264', 'h264'
+        0x3436324E => return "H.264/AVC".to_string(),              // Various encoders
+
+        // H.265/HEVC variants
+        0x35365648 | 0x31435648 => return "H.265/HEVC".to_string(), // 'HV51', 'HVC1'
+        0x31637668 | 0x35637668 => return "H.265/HEVC".to_string(), // 'hvc1', 'hvc5'
+        0x43564548 | 0x63766568 => return "H.265/HEVC".to_string(), // 'HEVC', 'hevc'
+
         // VP8/VP9/AV1 - WebM codecs
-        0x30385056 => return "VP8".to_string(),                         // 'VP80'
-        0x30395056 => return "VP9".to_string(),                         // 'VP90'
-        0x39507600 => return "VP9".to_string(),                         // Alternative VP9
-        0x31305641 => return "AV1".to_string(),                         // 'AV01'
-        
+        0x30385056 => return "VP8".to_string(), // 'VP80'
+        0x30395056 => return "VP9".to_string(), // 'VP90'
+        0x39507600 => return "VP9".to_string(), // Alternative VP9
+        0x31305641 => return "AV1".to_string(), // 'AV01'
+
         // MPEG-4
-        0x5634504D | 0x7634706D => return "MPEG-4".to_string(),        // 'MP4V', 'mp4v'
-        0x3253504D => return "MPEG-2".to_string(),                      // 'MP2S'
-        0x3156504D => return "MPEG-1".to_string(),                      // 'MP1V'
-        
+        0x5634504D | 0x7634706D => return "MPEG-4".to_string(), // 'MP4V', 'mp4v'
+        0x3253504D => return "MPEG-2".to_string(),              // 'MP2S'
+        0x3156504D => return "MPEG-1".to_string(),              // 'MP1V'
+
         // WMV
         0x31564D57 => return "WMV1".to_string(),
         0x32564D57 => return "WMV2".to_string(),
         0x33564D57 => return "WMV3".to_string(),
         0x31435657 => return "VC-1".to_string(),
         0x41564D57 => return "WMV Advanced".to_string(),
-        
+
         // DivX/XviD
         0x58564944 | 0x78766964 => return "DivX".to_string(),
         0x44495658 | 0x64697678 => return "XviD".to_string(),
-        
+
         // MJPEG
         0x47504A4D | 0x67706a6d => return "MJPEG".to_string(),
-        
+
         // Catch remaining video codecs before audio
         _ => {}
     }
-    
+
     // Audio codecs - need to check format tags AND FourCC patterns
     // Common audio format tags (as data1 when lower values)
     if is_standard_mf_format || fourcc <= 0xFFFF {
@@ -295,58 +297,67 @@ fn guid_to_codec_name(guid: &windows::core::GUID) -> String {
             _ => {}
         }
     }
-    
+
     // FourCC-based audio codecs
     match fourcc {
         // AAC variants (FourCC encoding)
-        0x6134706D => return "AAC".to_string(),           // 'mp4a'
-        0x61346D70 => return "AAC".to_string(),           // 'pm4a' (reversed)
-        0x4D344120 => return "AAC".to_string(),           // 'M4A '
-        0x63614120 => return "AAC".to_string(),           // 'cAA ' (rare)
-        
+        0x6134706D => return "AAC".to_string(), // 'mp4a'
+        0x61346D70 => return "AAC".to_string(), // 'pm4a' (reversed)
+        0x4D344120 => return "AAC".to_string(), // 'M4A '
+        0x63614120 => return "AAC".to_string(), // 'cAA ' (rare)
+
         // Opus (WebM/Matroska audio)
-        0x7375704F => return "Opus".to_string(),          // 'Opus'
-        0x5355504F => return "Opus".to_string(),          // 'OPUS'
-        0x73757075 => return "Opus".to_string(),          // 'upus' (reversed)
-        
+        0x7375704F => return "Opus".to_string(), // 'Opus'
+        0x5355504F => return "Opus".to_string(), // 'OPUS'
+        0x73757075 => return "Opus".to_string(), // 'upus' (reversed)
+
         // Vorbis (WebM/OGG audio)
-        0x73696272 => return "Vorbis".to_string(),        // 'vorbis' partial
-        0x62726F56 => return "Vorbis".to_string(),        // 'Vorb'
-        0x5642524F => return "Vorbis".to_string(),        // 'OVRB' (reversed)
-        0x7669726F => return "Vorbis".to_string(),        // 'oriv'
-        
+        0x73696272 => return "Vorbis".to_string(), // 'vorbis' partial
+        0x62726F56 => return "Vorbis".to_string(), // 'Vorb'
+        0x5642524F => return "Vorbis".to_string(), // 'OVRB' (reversed)
+        0x7669726F => return "Vorbis".to_string(), // 'oriv'
+
         // FLAC
-        0x43414C46 => return "FLAC".to_string(),          // 'FLAC'
-        0x63616C66 => return "FLAC".to_string(),          // 'flac'
-        
+        0x43414C46 => return "FLAC".to_string(), // 'FLAC'
+        0x63616C66 => return "FLAC".to_string(), // 'flac'
+
         // AC-3 / E-AC-3
-        0x43412D33 => return "AC-3".to_string(),          // 'ac-3'
-        0x33432D41 => return "AC-3".to_string(),          // 'A-C3'
-        0x43454133 => return "E-AC-3".to_string(),        // '3AEC'
-        0x332D4345 => return "E-AC-3".to_string(),        // 'EC-3'
-        
+        0x43412D33 => return "AC-3".to_string(),   // 'ac-3'
+        0x33432D41 => return "AC-3".to_string(),   // 'A-C3'
+        0x43454133 => return "E-AC-3".to_string(), // '3AEC'
+        0x332D4345 => return "E-AC-3".to_string(), // 'EC-3'
+
         // DTS variants
-        0x5344544D => return "DTS".to_string(),           // 'DTS '
-        0x20535444 => return "DTS".to_string(),           // ' STD'
-        0x53544448 => return "DTS-HD".to_string(),        // 'HDTS'
-        
+        0x5344544D => return "DTS".to_string(),    // 'DTS '
+        0x20535444 => return "DTS".to_string(),    // ' STD'
+        0x53544448 => return "DTS-HD".to_string(), // 'HDTS'
+
         // TrueHD
-        0x44484C4D => return "TrueHD".to_string(),        // 'MLHD'
-        
+        0x44484C4D => return "TrueHD".to_string(), // 'MLHD'
+
         _ => {}
     }
-    
+
     // Special handling for GUIDs that don't fit the FourCC pattern
     // Check full GUID for some special cases
-    let guid_upper = format!("{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
-        guid.data1, guid.data2, guid.data3,
-        guid.data4[0], guid.data4[1], guid.data4[2], guid.data4[3],
-        guid.data4[4], guid.data4[5], guid.data4[6], guid.data4[7]
+    let guid_upper = format!(
+        "{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
+        guid.data1,
+        guid.data2,
+        guid.data3,
+        guid.data4[0],
+        guid.data4[1],
+        guid.data4[2],
+        guid.data4[3],
+        guid.data4[4],
+        guid.data4[5],
+        guid.data4[6],
+        guid.data4[7]
     );
-    
+
     // Check against known problematic GUIDs
     if guid_upper.starts_with("{6D703461") {
-        return "AAC".to_string();  // mp4a in any form
+        return "AAC".to_string(); // mp4a in any form
     }
     if guid_upper.starts_with("{7375704F") {
         return "Opus".to_string(); // Opus in any form
@@ -354,7 +365,7 @@ fn guid_to_codec_name(guid: &windows::core::GUID) -> String {
     if guid_upper.starts_with("{30395056") || guid_upper.starts_with("{39507600") {
         return "VP9".to_string();
     }
-    
+
     // If not a known FourCC, try to decode it as ASCII characters
     let bytes = fourcc.to_le_bytes();
     if bytes.iter().all(|&b| b.is_ascii_graphic() || b == b' ') {
@@ -379,7 +390,7 @@ fn guid_to_codec_name(guid: &windows::core::GUID) -> String {
             }
         }
     }
-    
+
     // Fallback: return full GUID as string (for debugging/unrecognized codecs)
     guid_upper
 }
