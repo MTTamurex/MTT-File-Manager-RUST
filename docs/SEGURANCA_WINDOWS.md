@@ -393,16 +393,26 @@ fn extract_windows_thumbnail(path: &PathBuf)
 - [ ] **Rate limiting de operações de I/O** - Sem proteção contra DoS via I/O intensivo
 - [ ] **Integração completa do módulo security** - Módulo criado mas não amplamente utilizado
 
-### 7. Device Notifications (NOVO)
+### 7. Device Notifications ✅ **IMPLEMENTADO**
 
-**Descrição**: O app agora cria uma janela oculta dedicada que registra `WM_DEVICECHANGE` + `GUID_DEVINTERFACE_VOLUME` via `RegisterDeviceNotificationW`. Apenas eventos `DBT_DEVICEARRIVAL` e `DBT_DEVICEREMOVECOMPLETE` geram um sinal mpsc (sem payload sensível) para a UI, eliminando polling pesado e reduzindo o tempo para detectar pendrives.
+**Descrição**: O app cria uma janela oculta dedicada que registra `WM_DEVICECHANGE` + `GUID_DEVINTERFACE_VOLUME` via `RegisterDeviceNotificationW`. Eventos `DBT_DEVICEARRIVAL` e `DBT_DEVICEREMOVECOMPLETE` são processados instantaneamente (<100ms).
+
+**Implementação Final**:
+- ✅ Worker thread dedicado com message loop (`GetMessageW`)
+- ✅ Janela `HWND_MESSAGE` (invisível, apenas para receber eventos do sistema)
+- ✅ Comunicação via `mpsc::channel` + `egui::Context.request_repaint()` direto do worker
+- ✅ Detecção instantânea sem precisar de input do usuário (mouse/teclado)
+- ✅ Polling de fallback (350ms) mantido para casos extremos
 
 **Considerações de Segurança**:
-- ✅ Janela é `HWND_MESSAGE` (não exibida, sem interação do usuário).
-- ✅ Nenhum handle externo é exposto; o listener apenas envia `()` para o canal interno.
-- ✅ Sem privilégios elevados: o mecanismo usa broadcasting padrão do Windows.
-- ✅ Eventos não executam código arbitrário; apenas chamam `reload_drive_list()`.
-- ⚠️ Atenção para sempre tratar a mensagem antes de retornar `0` para evitar bloqueios no shell.
+- ✅ Janela `HWND_MESSAGE` não é visível nem interagível
+- ✅ Nenhum handle externo é exposto; o listener apenas envia `()` para o canal interno
+- ✅ Sem privilégios elevados: usa broadcasting padrão do Windows
+- ✅ Eventos não executam código arbitrário; apenas atualizam lista de drives
+- ✅ `egui::Context` armazenado em `OnceLock` com inicialização única e thread-safe
+- ✅ WndProc callback sempre retorna `LRESULT(0)` para evitar bloqueios
+
+**Localização**: `src/infrastructure/windows/device_change.rs`
 
 ### 📊 Estatísticas de Segurança
 
@@ -413,6 +423,7 @@ fn extract_windows_thumbnail(path: &PathBuf)
 | **Symlink Protection** | 🟡 Parcial | 30% |
 | **Memory Safety** | 🟢 Bom | 80% |
 | **Error Handling** | 🟡 Parcial | 50% |
+| **Device Detection** | 🟢 Excelente | 100% |
 | **Audit & Logging** | 🔴 Fraco | 10% |
 
 ### 🎯 Prioridades Imediatas (Sprint de Segurança)

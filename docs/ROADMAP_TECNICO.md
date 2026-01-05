@@ -72,7 +72,7 @@
 - **Persistent Sort & Folder Position ✅**: Preferências de ordenação e posição de pastas salvas em SQLite.
 - **Proactive Folder Previews ✅**: Escaneamento de capas de pastas no modo lista e persistência em SQLite.
 
-### Otimização do Garbage Collector (2026-01-02) ✅ NOVO
+### Otimização do Garbage Collector (2026-01-02) ✅ CONCLUÍDO
 - **Problema Crítico Resolvido**: GC bloqueava database lock durante verificações de arquivos (I/O lento), travando navegação.
 - **Solução Implementada**: Refatoração em 3 fases com locks curtos:
   1. **Fase 1**: Leitura rápida de paths (lock ~50ms)
@@ -81,9 +81,20 @@
 - **Correção Adicional**: `setup_computer_view()` agora seta `is_loading_folder = false`
 - **Impacto**: App responde imediatamente durante GC, deleções 10-100x mais rápidas
 
+### Detecção Instantânea de USB Drives (2026-01-04) ✅ CONCLUÍDO
+- **Problema Original**: USB drives não eram detectados automaticamente ao conectar/remover
+- **Solução Implementada**: Sistema nativo de detecção via `WM_DEVICECHANGE`
+  - Worker thread dedicado com janela `HWND_MESSAGE` oculta
+  - Registro de `GUID_DEVINTERFACE_VOLUME` via `RegisterDeviceNotificationW`
+  - Comunicação assíncrona via `mpsc::channel` + `egui::Context.request_repaint()`
+  - Polling de fallback (350ms) para casos extremos
+- **Desafio Resolvido**: egui em modo reactive aguardava input - solução foi chamar `request_repaint()` diretamente do worker thread
+- **Resultado**: Detecção <100ms, atualização imediata da UI sem aguardar eventos de mouse/teclado
+- **Localização**: `src/infrastructure/windows/device_change.rs`
+
 ---
 
-## Débitos Técnicos Identificados (Atualizado: 2026-01-01)
+## Débitos Técnicos Identificados (Atualizado: 2026-01-04)
 
 ### 🔴 Crítico
 

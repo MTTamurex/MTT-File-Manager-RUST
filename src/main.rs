@@ -1448,19 +1448,13 @@ impl ImageViewerApp {
         }
 
         while self.device_event_receiver.try_recv().is_ok() {
-            eprintln!("[main] Device event received from listener");
             if self.reload_drive_list() {
-                eprintln!("[main] Drive list changed, updating UI");
-                eprintln!("[main] Old disks count: {}, New count: {}", self.disks.len(), self.disks.len());
                 self.last_drive_refresh = Instant::now();
                 if self.is_computer_view {
-                    eprintln!("[main] Updating computer view");
                     self.setup_computer_view();
                 }
                 // Force immediate repaint without waiting for input events
                 ctx.request_repaint_after(std::time::Duration::from_millis(0));
-            } else {
-                eprintln!("[main] Drive list unchanged");
             }
         }
 

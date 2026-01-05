@@ -27,9 +27,7 @@ static EGUI_CONTEXT: OnceLock<egui::Context> = OnceLock::new();
 /// Starts a background thread that listens for WM_DEVICECHANGE events and notifies the UI
 /// whenever a volume (drive) is mounted or unmounted.
 pub fn start_device_change_listener(sender: Sender<()>, ctx: egui::Context) {
-    eprintln!("[device_change] Starting device change listener thread...");
     std::thread::spawn(move || {
-        eprintln!("[device_change] Device listener thread started");
         if let Err(err) = run_device_listener(sender, ctx) {
             eprintln!("[device_change] listener failed: {:?}", err);
         }
@@ -76,7 +74,6 @@ fn run_device_listener(sender: Sender<()>, ctx: egui::Context) -> Result<()> {
         )?;
 
         register_volume_notifications(hwnd)?;
-        eprintln!("[device_change] Window created and notifications registered, starting message loop...");
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, HWND::default(), 0, 0).into() {
@@ -101,7 +98,6 @@ unsafe fn register_volume_notifications(hwnd: HWND) -> Result<()> {
         &mut filter as *mut _ as *mut c_void,
         DEVICE_NOTIFY_WINDOW_HANDLE,
     )?;
-    eprintln!("[device_change] Volume notifications registered successfully");
     Ok(())
 }
 
@@ -114,36 +110,13 @@ unsafe extern "system" fn device_wnd_proc(
     match msg {
         WM_DEVICECHANGE => {
             let event = wparam.0 as u32;
-            eprintln!("[device_change] WM_DEVICECHANGE received, event code: 0x{:X}", event);
             
-            if event == DBT_DEVICEARRIVAL {
-                eprintln!("[device_change] DBT_DEVICEARRIVAL (device connected)");
+            if event == DBT_DEVICEARRIVAL || event == DBT_DEVICEREMOVECOMPLETE {
                 if let Some(sender) = DEVICE_EVENT_SENDER.get() {
-                    match sender.send(()) {
-                        Ok(_) => {
-                            eprintln!("[device_change] Event sent to UI thread successfully");
-                            // Force immediate repaint from worker thread
-                            if let Some(ctx) = EGUI_CONTEXT.get() {
-                                ctx.request_repaint();
-                                eprintln!("[device_change] request_repaint() called");
-                            }
-                        }
-                        Err(e) => eprintln!("[device_change] Failed to send event: {:?}", e),
-                    }
-                }
-            } else if event == DBT_DEVICEREMOVECOMPLETE {
-                eprintln!("[device_change] DBT_DEVICEREMOVECOMPLETE (device removed)");
-                if let Some(sender) = DEVICE_EVENT_SENDER.get() {
-                    match sender.send(()) {
-                        Ok(_) => {
-                            eprintln!("[device_change] Event sent to UI thread successfully");
-                            // Force immediate repaint from worker thread
-                            if let Some(ctx) = EGUI_CONTEXT.get() {
-                                ctx.request_repaint();
-                                eprintln!("[device_change] request_repaint() called");
-                            }
-                        }
-                        Err(e) => eprintln!("[device_change] Failed to send event: {:?}", e),
+                    let _ = sender.send(());
+                    // Force immediate UI repaint from worker thread
+                    if let Some(ctx) = EGUI_CONTEXT.get() {
+                        ctx.request_repaint();
                     }
                 }
             }
