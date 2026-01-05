@@ -70,7 +70,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
             Pos2::new(cursor_x, header_rect_full.center().y),
             egui::Align2::LEFT_CENTER,
             "Este Computador",
-            egui::FontId::proportional(14.0),
+            egui::FontId::proportional(12.0),
             if is_selected {
                 Color32::from_rgb(0, 50, 100)
             } else {
@@ -143,7 +143,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
                     Pos2::new(cursor_x + 8.0, rect.center().y),
                     egui::Align2::CENTER_CENTER,
                     "☁",
-                    egui::FontId::proportional(14.0),
+                    egui::FontId::proportional(12.0),
                     Color32::from_rgb(0, 120, 215),
                 );
                 cursor_x += 24.0;
@@ -153,7 +153,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
                 Pos2::new(cursor_x, rect.center().y),
                 egui::Align2::LEFT_CENTER,
                 "OneDrive",
-                egui::FontId::proportional(13.0),
+                egui::FontId::proportional(11.5),
                 if is_selected {
                     Color32::from_rgb(0, 50, 100)
                 } else {
@@ -241,7 +241,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
                         Pos2::new(cursor_x, rect.center().y),
                         egui::Align2::LEFT_CENTER,
                         "💽",
-                        egui::FontId::proportional(14.0),
+                        egui::FontId::proportional(12.0),
                         ui.visuals().text_color(),
                     );
                     cursor_x += 20.0;
@@ -251,7 +251,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
                     Pos2::new(cursor_x, rect.center().y),
                     egui::Align2::LEFT_CENTER,
                     disk_label,
-                    egui::FontId::proportional(13.0),
+                    egui::FontId::proportional(11.5),
                     if is_selected {
                         Color32::from_rgb(0, 50, 100)
                     } else {
