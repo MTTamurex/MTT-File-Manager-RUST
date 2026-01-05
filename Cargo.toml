@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-eframe = "0.31"
+eframe = { version = "0.31", features = ["persistence"] }
 rayon = "1.10"
 rfd = "0.15"
 lru = "0.12"
