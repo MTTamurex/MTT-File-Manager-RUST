@@ -15,7 +15,7 @@ use windows::{
     Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED},
     Win32::UI::Shell::PropertiesSystem::{
         IPropertyStore, SHGetPropertyStoreFromParsingName, GETPROPERTYSTOREFLAGS, GPS_OPENSLOWITEM,
-        GPS_READWRITE,
+        GPS_READWRITE, GPS_BESTEFFORT,
     },
 };
 
@@ -188,6 +188,13 @@ const PKEY_AUDIO_STREAMNAME: PROPERTYKEY = PROPERTYKEY {
 const PKEY_AUDIO_COMPRESSION: PROPERTYKEY = PROPERTYKEY {
     fmtid: GUID::from_u128(0x64440490_4C8B_11D1_8B70_080036B11A03),
     pid: 10,
+};
+
+// System.Video.StreamDescription - K-Lite/Icaros provides "Video: H.264 (AVC), 1920x1080" here
+// This is the PRIMARY source for readable codec names from property handlers
+const PKEY_VIDEO_STREAMDESCRIPTION: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x64440491_4C8B_11D1_8B70_080036B11A03),
+    pid: 11, // System.Video.StreamDescription
 };
 
 // PROPVARIANT type tags (from WTypes.h)
@@ -542,6 +549,55 @@ fn merge_video_metadata(
     }
 }
 
+/// Smart codec detection: parse K-Lite/Icaros description strings for real codec names
+/// The description often contains "Video: H.264 (AVC), 1920x1080" which we parse for the codec
+fn detect_codec_from_description(description: &str) -> Option<String> {
+    let desc = description.to_uppercase();
+    
+    // Priority 1: Look for specific codec keywords (K-Lite signature patterns)
+    if desc.contains("H.264") || desc.contains("AVC") || desc.contains("X264") {
+        return Some("H.264/AVC".to_string());
+    }
+    if desc.contains("H.265") || desc.contains("HEVC") || desc.contains("X265") {
+        return Some("H.265/HEVC".to_string());
+    }
+    if desc.contains("VP9") {
+        return Some("VP9".to_string());
+    }
+    if desc.contains("VP8") {
+        return Some("VP8".to_string());
+    }
+    if desc.contains("AV1") || desc.contains("AV01") {
+        return Some("AV1".to_string());
+    }
+    if desc.contains("MPEG-4") {
+        return Some("MPEG-4".to_string());
+    }
+    if desc.contains("XVID") {
+        return Some("XviD".to_string());
+    }
+    if desc.contains("DIVX") || desc.contains("DX50") {
+        return Some("DivX".to_string());
+    }
+    if desc.contains("PRORES") {
+        return Some("ProRes".to_string());
+    }
+    if desc.contains("MJPEG") || desc.contains("MOTION JPEG") {
+        return Some("MJPEG".to_string());
+    }
+    if desc.contains("WMV3") || desc.contains("WMV9") {
+        return Some("WMV".to_string());
+    }
+    if desc.contains("THEORA") {
+        return Some("Theora".to_string());
+    }
+    if desc.contains("MPEG-2") || desc.contains("MPEG2") {
+        return Some("MPEG-2".to_string());
+    }
+    
+    None
+}
+
 const PKEY_VIDEO_TRACKS: PROPERTYKEY = PROPERTYKEY {
     fmtid: GUID::from_u128(0xEC59938F_E25E_4592_82E3_8013018EDB74), // OGM Video Tracks
     pid: 3,
@@ -569,9 +625,10 @@ fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windows::
     });
 
     // PRIORITY FALLBACK SYSTEM for Video Codec (K-Lite/Icaros friendly)
-    // Priority 1: FourCC (raw technical identifier - most accurate)
+    // Read all possible sources for codec info
     let fourcc = unsafe { read_fourcc(&store, &PKEY_VIDEO_FOURCC) };
     let stream_name = unsafe { read_string(&store, &PKEY_VIDEO_STREAMNAME) };
+    let stream_description = unsafe { read_string(&store, &PKEY_VIDEO_STREAMDESCRIPTION) };
     let subtitle = unsafe { read_string(&store, &PKEY_MEDIA_SUBTITLE) };
     let encoding_settings = unsafe { read_string(&store, &PKEY_MEDIA_ENCODINGSETTINGS) };
     let content_type = unsafe { read_string(&store, &PKEY_MEDIA_CONTENTTYPE) };
@@ -580,19 +637,29 @@ fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windows::
     let ogm_video = unsafe { read_string(&store, &PKEY_VIDEO_TRACKS) };
     let ogm_audio = unsafe { read_string(&store, &PKEY_AUDIO_TRACKS) };
 
-    let video_codec = fourcc
-        .or_else(|| stream_name.clone())
+    // Priority 1: Parse Stream Description for codec keywords (K-Lite primary source)
+    // K-Lite often provides "Video: H.264 (AVC), 1920x1080" in this field
+    let video_codec = stream_description.as_ref()
+        .and_then(|d| detect_codec_from_description(d))
+        // Priority 2: Parse Stream Name for codec keywords
+        .or_else(|| stream_name.as_ref().and_then(|s| detect_codec_from_description(s)))
+        // Priority 3: Parse subtitle field (used by some handlers)
+        .or_else(|| subtitle.as_ref().and_then(|s| detect_codec_from_description(s)))
+        // Priority 4: FourCC (raw technical identifier)
+        .or_else(|| fourcc.clone())
+        // Priority 5: OGM video tracks
         .or_else(|| ogm_video.clone())
-        .or_else(|| subtitle.clone())
+        // Priority 6: Encoding settings
         .or_else(|| encoding_settings.clone())
-        .or_else(|| content_type.clone())
+        // Priority 7: Content type (less reliable)
+        .or_else(|| content_type.clone().filter(|s| !s.is_empty()))
+        // Priority 8: Compression with container filtering
         .or_else(|| {
             let comp = compression.clone()?;
-            // Filter out container names and generic labels
             let file_ext = path.extension()?.to_str()?.to_uppercase();
             let compression_upper = comp.to_uppercase();
             if compression_upper == file_ext || compression_upper == "VIDEO" {
-                None // Skip container names
+                None
             } else {
                 Some(comp)
             }
@@ -867,11 +934,13 @@ unsafe fn open_property_store(path: &Path) -> Result<IPropertyStore, windows::co
 
     // SAFETY: wide_path is a null-terminated UTF-16 buffer that stays alive for the call.
     // GPS_READWRITE: Forces Windows to query installed codecs (K-Lite, etc.) even if not indexed
-    // This is the SAME method Windows Explorer uses - slower but gets real codec info
+    // GPS_OPENSLOWITEM: Handles offline/slow items gracefully (cloud files, network drives)
+    // GPS_BESTEFFORT: Don't fail if some properties are missing - return what we can
+    // This is the SAME method Windows Explorer uses - delegates to Icaros handler for optimized reads
     SHGetPropertyStoreFromParsingName(
         PCWSTR(wide_path.as_ptr()),
         None,
-        GETPROPERTYSTOREFLAGS(GPS_READWRITE.0 | GPS_OPENSLOWITEM.0),
+        GETPROPERTYSTOREFLAGS(GPS_READWRITE.0 | GPS_OPENSLOWITEM.0 | GPS_BESTEFFORT.0),
     )
 }
 
