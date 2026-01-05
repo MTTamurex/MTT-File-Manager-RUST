@@ -1854,6 +1854,7 @@ impl ImageViewerApp {
             renaming_state: renaming_state.clone(),
             focus_rename,
             scroll_to_selected,
+            is_computer_view: self.is_computer_view,
             texture_cache: &mut self.cache_manager.texture_cache,
             loading_set: &mut self.cache_manager.loading_set,
             scanned_folders: &mut self.scanned_folders,
