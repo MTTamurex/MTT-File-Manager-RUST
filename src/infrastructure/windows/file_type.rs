@@ -11,10 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::OnceLock;
 
-use windows::{
-    core::PCWSTR,
-    Win32::UI::Shell::AssocGetPerceivedType,
-};
+use windows::{core::PCWSTR, Win32::UI::Shell::AssocGetPerceivedType};
 
 // PERCEIVED type values from shlwapi.h
 const PERCEIVED_TYPE_IMAGE: i32 = 2;

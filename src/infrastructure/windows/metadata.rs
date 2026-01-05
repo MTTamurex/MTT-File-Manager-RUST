@@ -576,7 +576,7 @@ fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windows::
     let encoding_settings = unsafe { read_string(&store, &PKEY_MEDIA_ENCODINGSETTINGS) };
     let content_type = unsafe { read_string(&store, &PKEY_MEDIA_CONTENTTYPE) };
     let compression = unsafe { read_string(&store, &PKEY_VIDEO_COMPRESSION) };
-    
+
     let ogm_video = unsafe { read_string(&store, &PKEY_VIDEO_TRACKS) };
     let ogm_audio = unsafe { read_string(&store, &PKEY_AUDIO_TRACKS) };
 
@@ -602,7 +602,7 @@ fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windows::
     let audio_compression = unsafe { read_string(&store, &PKEY_AUDIO_COMPRESSION) };
     let audio_stream_name = unsafe { read_string(&store, &PKEY_AUDIO_STREAMNAME) };
     let audio_format = unsafe { read_string(&store, &PKEY_AUDIO_FORMAT) };
-    
+
     let audio_codec = audio_compression
         .or_else(|| audio_stream_name.clone())
         .or_else(|| ogm_audio.clone())
@@ -1030,11 +1030,10 @@ unsafe fn read_string(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<Strin
     const VT_BSTR: u16 = 8;
     const VT_EMPTY: u16 = 0;
 
-    let pv = match store
-        .GetValue(&windows::Win32::UI::Shell::PropertiesSystem::PROPERTYKEY {
-            fmtid: key.fmtid,
-            pid: key.pid,
-        }) {
+    let pv = match store.GetValue(&windows::Win32::UI::Shell::PropertiesSystem::PROPERTYKEY {
+        fmtid: key.fmtid,
+        pid: key.pid,
+    }) {
         Ok(v) => v,
         Err(_) => return None,
     };
@@ -1084,7 +1083,11 @@ unsafe fn read_string(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<Strin
                         result.push_str(&s);
                     }
                 }
-                if result.is_empty() { None } else { Some(result) }
+                if result.is_empty() {
+                    None
+                } else {
+                    Some(result)
+                }
             } else {
                 None
             }
@@ -1092,7 +1095,10 @@ unsafe fn read_string(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<Strin
         other => {
             if other != 0 {
                 // Log unexpected VT types for debugging
-                eprintln!("[DEBUG] read_string: unexpected VT type {} for PKEY {{pid={}}}", other, key.pid);
+                eprintln!(
+                    "[DEBUG] read_string: unexpected VT type {} for PKEY {{pid={}}}",
+                    other, key.pid
+                );
             }
             None
         }

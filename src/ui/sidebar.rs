@@ -22,6 +22,7 @@ pub enum SidebarAction {
 /// Renders the sidebar with drives and computer view
 pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<SidebarAction> {
     let mut action = None;
+    eprintln!("[sidebar] Rendering sidebar with {} disks", ctx.disks.len());
     ui.add_space(10.0);
 
     // Header "Este Computador" com ícone nativo

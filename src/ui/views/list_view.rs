@@ -181,10 +181,9 @@ pub fn render_list_view(
             let mut network = Vec::new();
 
             for (i, item) in ctx.items.iter().enumerate() {
-                let is_remote = item
-                    .drive_info
-                    .as_ref()
-                    .map_or(false, |di| di.drive_type == crate::infrastructure::windows::DriveType::Remote);
+                let is_remote = item.drive_info.as_ref().map_or(false, |di| {
+                    di.drive_type == crate::infrastructure::windows::DriveType::Remote
+                });
                 if is_remote {
                     network.push((i, item));
                 } else {
@@ -209,7 +208,9 @@ pub fn render_list_view(
                         .path
                         .extension()
                         .map(|ext| {
-                            crate::infrastructure::windows::is_media_extension(&ext.to_string_lossy())
+                            crate::infrastructure::windows::is_media_extension(
+                                &ext.to_string_lossy(),
+                            )
                         })
                         .unwrap_or(false);
 
@@ -258,21 +259,26 @@ pub fn render_list_view(
 
                     // Tooltip at cursor
                     if response.hovered() {
-                        egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), response.id, |ui: &mut Ui| {
-                            ui.set_max_width(300.0);
-                            ui.vertical(|ui| {
-                                ui.label(RichText::new(&item.name).strong());
-                                ui.separator();
-                                ui.label(format!("Tipo: {}", get_file_type_string(item)));
-                                if !item.is_dir {
-                                    ui.label(format!("Tamanho: {}", format_size(item.size)));
-                                }
-                                ui.label(format!(
-                                    "Última modificação: {}",
-                                    format_date(item.modified)
-                                ));
-                            });
-                        });
+                        egui::show_tooltip_at_pointer(
+                            ui.ctx(),
+                            ui.layer_id(),
+                            response.id,
+                            |ui: &mut Ui| {
+                                ui.set_max_width(300.0);
+                                ui.vertical(|ui| {
+                                    ui.label(RichText::new(&item.name).strong());
+                                    ui.separator();
+                                    ui.label(format!("Tipo: {}", get_file_type_string(item)));
+                                    if !item.is_dir {
+                                        ui.label(format!("Tamanho: {}", format_size(item.size)));
+                                    }
+                                    ui.label(format!(
+                                        "Última modificação: {}",
+                                        format_date(item.modified)
+                                    ));
+                                });
+                            },
+                        );
                     }
 
                     let text_color = Color32::BLACK;
@@ -326,7 +332,8 @@ pub fn render_list_view(
                         }
                     } else {
                         // File: load native Windows icon using IconLoader (same as grid view)
-                        if let Some(file_icon) = ctx.item_icon_loader.get_or_load_icon(ui.ctx(), &item.path)
+                        if let Some(file_icon) =
+                            ctx.item_icon_loader.get_or_load_icon(ui.ctx(), &item.path)
                         {
                             ui.painter().image(
                                 file_icon.id(),
@@ -370,7 +377,9 @@ pub fn render_list_view(
                             }
 
                             // Confirma renomeação com Enter (enquanto tem foco)
-                            if response.has_focus() && ui.input(|i_in| i_in.key_pressed(egui::Key::Enter)) {
+                            if response.has_focus()
+                                && ui.input(|i_in| i_in.key_pressed(egui::Key::Enter))
+                            {
                                 ops.rename_with_shell(i);
                             } else if ui.input(|i_in| i_in.key_pressed(egui::Key::Escape)) {
                                 // Cancel renaming
@@ -539,7 +548,9 @@ pub fn render_list_view(
                         .path
                         .extension()
                         .map(|ext| {
-                            crate::infrastructure::windows::is_media_extension(&ext.to_string_lossy())
+                            crate::infrastructure::windows::is_media_extension(
+                                &ext.to_string_lossy(),
+                            )
                         })
                         .unwrap_or(false);
 
@@ -588,21 +599,26 @@ pub fn render_list_view(
 
                     // Tooltip at cursor
                     if response.hovered() {
-                        egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), response.id, |ui: &mut Ui| {
-                            ui.set_max_width(300.0);
-                            ui.vertical(|ui| {
-                                ui.label(RichText::new(&item.name).strong());
-                                ui.separator();
-                                ui.label(format!("Tipo: {}", get_file_type_string(item)));
-                                if !item.is_dir {
-                                    ui.label(format!("Tamanho: {}", format_size(item.size)));
-                                }
-                                ui.label(format!(
-                                    "Última modificação: {}",
-                                    format_date(item.modified)
-                                ));
-                            });
-                        });
+                        egui::show_tooltip_at_pointer(
+                            ui.ctx(),
+                            ui.layer_id(),
+                            response.id,
+                            |ui: &mut Ui| {
+                                ui.set_max_width(300.0);
+                                ui.vertical(|ui| {
+                                    ui.label(RichText::new(&item.name).strong());
+                                    ui.separator();
+                                    ui.label(format!("Tipo: {}", get_file_type_string(item)));
+                                    if !item.is_dir {
+                                        ui.label(format!("Tamanho: {}", format_size(item.size)));
+                                    }
+                                    ui.label(format!(
+                                        "Última modificação: {}",
+                                        format_date(item.modified)
+                                    ));
+                                });
+                            },
+                        );
                     }
 
                     let text_color = Color32::BLACK;
@@ -656,7 +672,8 @@ pub fn render_list_view(
                         }
                     } else {
                         // File: load native Windows icon using IconLoader (same as grid view)
-                        if let Some(file_icon) = ctx.item_icon_loader.get_or_load_icon(ui.ctx(), &item.path)
+                        if let Some(file_icon) =
+                            ctx.item_icon_loader.get_or_load_icon(ui.ctx(), &item.path)
                         {
                             ui.painter().image(
                                 file_icon.id(),
@@ -700,7 +717,9 @@ pub fn render_list_view(
                             }
 
                             // Confirma renomeação com Enter (enquanto tem foco)
-                            if response.has_focus() && ui.input(|i_in| i_in.key_pressed(egui::Key::Enter)) {
+                            if response.has_focus()
+                                && ui.input(|i_in| i_in.key_pressed(egui::Key::Enter))
+                            {
                                 ops.rename_with_shell(i);
                             } else if ui.input(|i_in| i_in.key_pressed(egui::Key::Escape)) {
                                 // Cancel renaming

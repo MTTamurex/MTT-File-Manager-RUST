@@ -44,9 +44,9 @@ use windows::{
     core::*,
     Win32::Foundation::*,
     Win32::Storage::FileSystem::*,
+    Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState,
     Win32::UI::Shell::*,
     Win32::UI::WindowsAndMessaging::{FindWindowW, GetCursorPos},
-    Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState,
 };
 
 // OTIMIZAÃ‡ÃƒO: Imports para Win32 FindFirst/NextFileW (metadata em UMA syscall)
@@ -69,6 +69,8 @@ const CACHE_SIZE: usize = 200;
 
 // Icon cache (menor pois ícones são compartilhados por extensão)
 const ICON_CACHE_SIZE: usize = 100;
+
+const DRIVE_REFRESH_INTERVAL_MS: u64 = 350;
 
 /// Converte string para formato Win32 (double-null terminated)
 /// Requerido por APIs como SHFileOperationW
@@ -128,7 +130,8 @@ struct ImageViewerApp {
 
     // UI state
     disks: Vec<(String, String)>, // (path, label)
-    thumbnail_size: f32,          // Zoom: 64-512
+    last_drive_refresh: Instant,
+    thumbnail_size: f32, // Zoom: 64-512
     selected_item: Option<usize>,
     selected_file: Option<FileEntry>,
     selected_metadata: Option<(PathBuf, windows_infra::MediaMetadata)>,
@@ -157,6 +160,7 @@ struct ImageViewerApp {
     watcher: Option<RecommendedWatcher>,
     fs_event_receiver: Receiver<notify::Result<notify::Event>>,
     fs_event_sender: Sender<notify::Result<notify::Event>>,
+    device_event_receiver: Receiver<()>,
     last_auto_reload: Instant,
     pending_auto_reload: bool,
 
@@ -206,6 +210,9 @@ impl ImageViewerApp {
         let (cover_req_tx, cover_req_rx) = mpsc::channel::<PathBuf>(); // UI â†’ Worker
         let (cover_res_tx, cover_res_rx) = mpsc::channel(); // Worker â†’ UI
         let (fs_tx, fs_rx) = mpsc::channel();
+        let (device_event_sender, device_event_receiver) = mpsc::channel();
+
+        windows_infra::start_device_change_listener(device_event_sender, ctx.clone());
 
         // Spawna WORKER THREAD: fica em loop processando fila
         std::thread::spawn(move || {
@@ -336,6 +343,7 @@ impl ImageViewerApp {
             history_index: 0,
             path_input: PATH_PADRAO.to_string(),
             disks,
+            last_drive_refresh: Instant::now(),
             thumbnail_size: 128.0, // Default zoom
             selected_item: None,
             total_items: 0,
@@ -352,6 +360,7 @@ impl ImageViewerApp {
             watcher: None,
             fs_event_receiver: fs_rx,
             fs_event_sender: fs_tx,
+            device_event_receiver: device_event_receiver,
             last_auto_reload: Instant::now(),
             pending_auto_reload: false,
 
@@ -504,7 +513,11 @@ impl ImageViewerApp {
         if let Some(idx) = self.selected_item {
             if let Some(item) = self.items.get(idx) {
                 // Put file in Windows clipboard using CF_HDROP format
-                if let Err(e) = mtt_file_manager::infrastructure::windows_clipboard::copy_files_to_clipboard(&[item.path.clone()]) {
+                if let Err(e) =
+                    mtt_file_manager::infrastructure::windows_clipboard::copy_files_to_clipboard(&[
+                        item.path.clone(),
+                    ])
+                {
                     eprintln!("[CLIPBOARD ERROR] Failed to copy: {}", e);
                 }
                 // Also keep internal state as backup
@@ -519,7 +532,11 @@ impl ImageViewerApp {
         if let Some(idx) = self.selected_item {
             if let Some(item) = self.items.get(idx) {
                 // Put file in Windows clipboard using CF_HDROP format with MOVE effect
-                if let Err(e) = mtt_file_manager::infrastructure::windows_clipboard::cut_files_to_clipboard(&[item.path.clone()]) {
+                if let Err(e) =
+                    mtt_file_manager::infrastructure::windows_clipboard::cut_files_to_clipboard(&[
+                        item.path.clone(),
+                    ])
+                {
                     eprintln!("[CLIPBOARD ERROR] Failed to cut: {}", e);
                 }
                 // Also keep internal state as backup
@@ -532,20 +549,21 @@ impl ImageViewerApp {
     /// Colar: Lê do clipboard do Windows e executa SHFileOperationW
     fn command_paste(&mut self) {
         use mtt_file_manager::infrastructure::windows_clipboard;
-        
+
         // 1. First try to read from Windows clipboard
-        let (src_paths, is_move) = if let Some(files) = windows_clipboard::get_files_from_clipboard() {
-            let op = windows_clipboard::get_clipboard_operation();
-            let is_move = matches!(op, Some(windows_clipboard::ClipboardFileOp::Move));
-            (files, is_move)
-        } else if let Some(path) = &self.clipboard_file {
-            // Fallback to internal clipboard
-            let is_move = matches!(self.clipboard_op, Some(ClipboardOp::Move));
-            (vec![path.clone()], is_move)
-        } else {
-            // Nothing to paste
-            return;
-        };
+        let (src_paths, is_move) =
+            if let Some(files) = windows_clipboard::get_files_from_clipboard() {
+                let op = windows_clipboard::get_clipboard_operation();
+                let is_move = matches!(op, Some(windows_clipboard::ClipboardFileOp::Move));
+                (files, is_move)
+            } else if let Some(path) = &self.clipboard_file {
+                // Fallback to internal clipboard
+                let is_move = matches!(self.clipboard_op, Some(ClipboardOp::Move));
+                (vec![path.clone()], is_move)
+            } else {
+                // Nothing to paste
+                return;
+            };
 
         if src_paths.is_empty() {
             return;
@@ -599,7 +617,7 @@ impl ImageViewerApp {
 
         // 5. Reload folder to show result
         self.load_folder(false);
-        
+
         // 6. Clear context menu target
         self.context_menu.target_path = None;
     }
@@ -1050,6 +1068,8 @@ impl ImageViewerApp {
         self.navigation_history.push("Este Computador".to_string());
         self.history_index = self.navigation_history.len() - 1;
 
+        let _ = self.reload_drive_list();
+        self.last_drive_refresh = Instant::now();
         self.setup_computer_view();
     }
 
@@ -1085,6 +1105,35 @@ impl ImageViewerApp {
         self.selected_file = None;
         self.total_items = self.disks.len();
         self.is_loading_folder = false; // CRITICAL: Clear loading state for computer view
+    }
+
+    fn reload_drive_list(&mut self) -> bool {
+        let new_disks = get_all_drives();
+        if new_disks != self.disks {
+            self.disks = new_disks;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn refresh_drives_if_needed(&mut self) {
+        if self.last_drive_refresh.elapsed() >= Duration::from_millis(DRIVE_REFRESH_INTERVAL_MS) {
+            self.last_drive_refresh = Instant::now();
+            if self.reload_drive_list() && self.is_computer_view {
+                self.setup_computer_view();
+            }
+        }
+    }
+
+    fn trigger_manual_refresh(&mut self) {
+        if self.is_computer_view {
+            let _ = self.reload_drive_list();
+            self.setup_computer_view();
+            self.last_drive_refresh = Instant::now();
+        } else {
+            self.load_folder(true);
+        }
     }
 
     /// Sobe um nível (adiciona ao histórico)
@@ -1395,7 +1444,24 @@ impl ImageViewerApp {
     fn process_incoming_messages(&mut self, ctx: &egui::Context) {
         // 1. CHECK DE REFRESH MANUAL (F5)
         if ctx.input(|i| i.key_pressed(egui::Key::F5)) {
-            self.load_folder(true);
+            self.trigger_manual_refresh();
+        }
+
+        while self.device_event_receiver.try_recv().is_ok() {
+            eprintln!("[main] Device event received from listener");
+            if self.reload_drive_list() {
+                eprintln!("[main] Drive list changed, updating UI");
+                eprintln!("[main] Old disks count: {}, New count: {}", self.disks.len(), self.disks.len());
+                self.last_drive_refresh = Instant::now();
+                if self.is_computer_view {
+                    eprintln!("[main] Updating computer view");
+                    self.setup_computer_view();
+                }
+                // Force immediate repaint without waiting for input events
+                ctx.request_repaint_after(std::time::Duration::from_millis(0));
+            } else {
+                eprintln!("[main] Drive list unchanged");
+            }
         }
 
         // 2. CHECK DE AUTO-REFRESH (WATCHER)
@@ -1577,7 +1643,7 @@ impl ImageViewerApp {
                     self.selected_file = Some(item.clone());
                     self.selected_item = Some(clamped);
                     self.scroll_to_selected = true; // Trigger scroll to selected item
-                    
+
                     // Trigger thumbnail load for sidebar preview
                     if !item.is_dir {
                         if !self.cache_manager.has_thumbnail(&item.path)
@@ -2140,18 +2206,23 @@ impl eframe::App for ImageViewerApp {
 
         // DEBUG: Log todos os frames para verificar se o código está rodando
         // eprintln!("[DEBUG] Frame update - renaming={:?} address_editing={}", self.renaming_state.is_some(), self.is_address_editing);
-        
+
         if self.renaming_state.is_none() && !self.is_address_editing {
             // Detectar teclas através dos eventos (Key events)
             let mut do_copy = false;
             let mut do_cut = false;
             let mut do_paste = false;
-            
+
             ctx.input(|i| {
                 // Log all key events to see what's arriving
                 for event in &i.events {
                     match event {
-                        egui::Event::Key { key, pressed, modifiers, .. } => {
+                        egui::Event::Key {
+                            key,
+                            pressed,
+                            modifiers,
+                            ..
+                        } => {
                             if *pressed && modifiers.ctrl {
                                 eprintln!("[DEBUG] Key event: {:?} Ctrl+pressed", key);
                                 match key {
@@ -2181,7 +2252,7 @@ impl eframe::App for ImageViewerApp {
             // VK_CONTROL = 0x11, VK_V = 0x56
             let ctrl_down = unsafe { GetAsyncKeyState(0x11) < 0 };
             let v_down = unsafe { GetAsyncKeyState(0x56) < 0 };
-            
+
             // Debounced paste detection (only fire once per key press)
             if ctrl_down && v_down && !self.paste_key_debounce {
                 do_paste = true;
@@ -2219,6 +2290,7 @@ impl eframe::App for ImageViewerApp {
         }
 
         self.process_incoming_messages(ctx);
+        self.refresh_drives_if_needed();
         self.ensure_folder_icon(ctx);
         self.ensure_computer_icon(ctx);
 
@@ -2281,7 +2353,7 @@ impl eframe::App for ImageViewerApp {
                 }
 
                 if self.icon_button(ui, ICON_REFRESH, "Recarregar").clicked() && !is_renaming {
-                    self.load_folder(true);
+                    self.trigger_manual_refresh();
                 }
 
                 ui.separator();
@@ -2604,14 +2676,14 @@ impl eframe::App for ImageViewerApp {
                         .show(ui, |ui| {
                             ui.set_max_width(ui.available_width());
                             if let Some(file) = self.selected_file.clone() {
-                        ui.heading("Detalhes");
-                        ui.separator();
+                                ui.heading("Detalhes");
+                                ui.separator();
 
-                        // Preview de imagem/video (se houver thumbnail)
-                        let _has_thumbnail =
-                            self.cache_manager.texture_cache.peek(&file.path).is_some();
-                        // Detecta se é mídia usando Windows Perceived Type API
-                        let is_media = file
+                                // Preview de imagem/video (se houver thumbnail)
+                                let _has_thumbnail =
+                                    self.cache_manager.texture_cache.peek(&file.path).is_some();
+                                // Detecta se é mídia usando Windows Perceived Type API
+                                let is_media = file
                             .path
                             .extension()
                             .map(|ext| {
@@ -2621,269 +2693,308 @@ impl eframe::App for ImageViewerApp {
                             })
                             .unwrap_or(false);
 
-                        let texture = self.cache_manager.texture_cache.peek(&file.path).cloned();
+                                let texture =
+                                    self.cache_manager.texture_cache.peek(&file.path).cloned();
 
-                        if let (Some(tex), true) = (texture, is_media) {
-                            // Mostra thumbnail de imagem/video
-                            let max_preview_width = ui.available_width() - 8.0;
-                            let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
+                                if let (Some(tex), true) = (texture, is_media) {
+                                    // Mostra thumbnail de imagem/video
+                                    let max_preview_width = ui.available_width() - 8.0;
+                                    let max_preview_size =
+                                        egui::vec2(max_preview_width, max_preview_width);
 
-                            ui.vertical_centered(|ui| {
-                                ui.add(
-                                    egui::Image::new(&tex)
-                                        .max_size(max_preview_size)
-                                        .shrink_to_fit(),
-                                );
-                            });
-                            ui.separator();
-                        } else {
-                            // Pasta ou Drive ou Arquivo sem Thumbnail
-                            let max_w: f32 = ui.available_width() - 40.0;
-                            let icon_size: f32 = (120.0f32).min(max_w);
-
-                            ui.vertical_centered(|ui| {
-                                ui.add_space(20.0);
-                                if let Some(_) = &file.drive_info {
-                                    // DRIVE
-                                    if let Some(icon) =
-                                        self.item_icon_loader.get_or_load_drive_icon(
-                                            ui.ctx(),
-                                            &file.path.to_string_lossy(),
-                                        )
-                                    {
+                                    ui.vertical_centered(|ui| {
                                         ui.add(
-                                            egui::Image::new(&icon)
-                                                .max_size(egui::vec2(icon_size, icon_size)),
+                                            egui::Image::new(&tex)
+                                                .max_size(max_preview_size)
+                                                .shrink_to_fit(),
                                         );
-                                    } else {
-                                        ui.label(egui::RichText::new("??").size(icon_size * 0.8));
-                                    }
-                                } else if file.is_dir {
-                                    // PASTA (Usa o mesmo visual da grade)
-                                    let folder_rect = ui
-                                        .allocate_exact_size(
-                                            egui::vec2(icon_size, icon_size * 0.85),
-                                            egui::Sense::hover(),
-                                        )
-                                        .0;
-
-                                    // Trigger scan se necessário
-                                    if file.folder_cover.is_none()
-                                        && !self.scanned_folders.contains(&file.path)
-                                    {
-                                        self.scanned_folders.insert(file.path.clone());
-                                        self.request_folder_scan(file.path.clone());
-                                    }
-
-                                    let preview_tex = file
-                                        .folder_cover
-                                        .as_ref()
-                                        .and_then(|p| self.cache_manager.texture_cache.get(p));
-                                    mtt_file_manager::draw_custom_folder(
-                                        ui.painter(),
-                                        folder_rect,
-                                        preview_tex,
-                                    );
+                                    });
+                                    ui.separator();
                                 } else {
-                                    // ARQUIVO SEM THUMBNAIL
-                                    if let Some(icon) = self.get_or_load_icon(ui.ctx(), &file.path)
-                                    {
-                                        ui.add(egui::Image::new(&icon).max_size(egui::vec2(
-                                            icon_size * 0.6,
-                                            icon_size * 0.6,
-                                        )));
-                                    } else {
-                                        ui.label(egui::RichText::new("??").size(icon_size * 0.6));
-                                    }
+                                    // Pasta ou Drive ou Arquivo sem Thumbnail
+                                    let max_w: f32 = ui.available_width() - 40.0;
+                                    let icon_size: f32 = (120.0f32).min(max_w);
+
+                                    ui.vertical_centered(|ui| {
+                                        ui.add_space(20.0);
+                                        if let Some(_) = &file.drive_info {
+                                            // DRIVE
+                                            if let Some(icon) =
+                                                self.item_icon_loader.get_or_load_drive_icon(
+                                                    ui.ctx(),
+                                                    &file.path.to_string_lossy(),
+                                                )
+                                            {
+                                                ui.add(
+                                                    egui::Image::new(&icon)
+                                                        .max_size(egui::vec2(icon_size, icon_size)),
+                                                );
+                                            } else {
+                                                ui.label(
+                                                    egui::RichText::new("??").size(icon_size * 0.8),
+                                                );
+                                            }
+                                        } else if file.is_dir {
+                                            // PASTA (Usa o mesmo visual da grade)
+                                            let folder_rect = ui
+                                                .allocate_exact_size(
+                                                    egui::vec2(icon_size, icon_size * 0.85),
+                                                    egui::Sense::hover(),
+                                                )
+                                                .0;
+
+                                            // Trigger scan se necessário
+                                            if file.folder_cover.is_none()
+                                                && !self.scanned_folders.contains(&file.path)
+                                            {
+                                                self.scanned_folders.insert(file.path.clone());
+                                                self.request_folder_scan(file.path.clone());
+                                            }
+
+                                            let preview_tex =
+                                                file.folder_cover.as_ref().and_then(|p| {
+                                                    self.cache_manager.texture_cache.get(p)
+                                                });
+                                            mtt_file_manager::draw_custom_folder(
+                                                ui.painter(),
+                                                folder_rect,
+                                                preview_tex,
+                                            );
+                                        } else {
+                                            // ARQUIVO SEM THUMBNAIL
+                                            if let Some(icon) =
+                                                self.get_or_load_icon(ui.ctx(), &file.path)
+                                            {
+                                                ui.add(egui::Image::new(&icon).max_size(
+                                                    egui::vec2(icon_size * 0.6, icon_size * 0.6),
+                                                ));
+                                            } else {
+                                                ui.label(
+                                                    egui::RichText::new("??").size(icon_size * 0.6),
+                                                );
+                                            }
+                                        }
+                                        ui.add_space(20.0);
+                                    });
+                                    ui.separator();
                                 }
-                                ui.add_space(20.0);
-                            });
-                            ui.separator();
-                        }
 
-                        // Tabela de detalhes (Manual Responsive Grid)
-                        let selected_metadata = self.selected_metadata.as_ref().and_then(|(p, meta)| {
-                            if p == &file.path {
-                                Some(meta)
-                            } else {
-                                None
-                            }
-                        });
-                        let is_loading_meta = self.metadata_loading.contains(&file.path);
+                                // Tabela de detalhes (Manual Responsive Grid)
+                                let selected_metadata =
+                                    self.selected_metadata.as_ref().and_then(|(p, meta)| {
+                                        if p == &file.path {
+                                            Some(meta)
+                                        } else {
+                                            None
+                                        }
+                                    });
+                                let is_loading_meta = self.metadata_loading.contains(&file.path);
 
-                        let key_w = 110.0;
-                        let mut add_detail = |ui: &mut egui::Ui, label: &str, value: String| {
-                            ui.horizontal_top(|ui| {
-                                ui.add_sized(
-                                    egui::vec2(key_w, 0.0),
-                                    egui::Label::new(egui::RichText::new(label).strong()),
-                                );
-                                ui.add(egui::Label::new(value).wrap());
-                            });
-                            ui.add_space(2.0);
-                        };
+                                let key_w = 110.0;
+                                let mut add_detail =
+                                    |ui: &mut egui::Ui, label: &str, value: String| {
+                                        ui.horizontal_top(|ui| {
+                                            ui.add_sized(
+                                                egui::vec2(key_w, 0.0),
+                                                egui::Label::new(
+                                                    egui::RichText::new(label).strong(),
+                                                ),
+                                            );
+                                            ui.add(egui::Label::new(value).wrap());
+                                        });
+                                        ui.add_space(2.0);
+                                    };
 
-                        ui.scope(|ui| {
-                            ui.set_max_width(ui.available_width());
+                                ui.scope(|ui| {
+                                    ui.set_max_width(ui.available_width());
 
-                            if let Some(drive) = &file.drive_info {
-                                add_detail(ui, "Tipo:", drive.drive_type.label().to_string());
+                                    if let Some(drive) = &file.drive_info {
+                                        add_detail(
+                                            ui,
+                                            "Tipo:",
+                                            drive.drive_type.label().to_string(),
+                                        );
 
-                                let used_space = drive.total_space - drive.free_space;
-                                let usage_percent = if drive.total_space > 0 {
-                                    (used_space as f64 / drive.total_space as f64) * 100.0
-                                } else {
-                                    0.0
-                                };
-
-                                add_detail(ui, "Uso:", format!("{:.0}%", usage_percent));
-                                add_detail(ui, "Livre:", format_size(drive.free_space));
-                                add_detail(ui, "Total:", format_size(drive.total_space));
-                                add_detail(
-                                    ui,
-                                    "Sist. Arq:",
-                                    if drive.file_system.is_empty() {
-                                        "NTFS".to_string()
-                                    } else {
-                                        drive.file_system.clone()
-                                    },
-                                );
-                                add_detail(ui, "BitLocker:", "Desligado".to_string());
-                            } else {
-                                add_detail(ui, "Nome:", file.name.clone());
-                                add_detail(ui, "Tamanho:", format_size(file.size));
-
-                                let type_label = if file.is_dir {
-                                    "Pasta".to_string()
-                                } else {
-                                    file.path
-                                        .extension()
-                                        .and_then(|e| e.to_str())
-                                        .unwrap_or("Arquivo")
-                                        .to_uppercase()
-                                };
-                                add_detail(ui, "Tipo:", type_label);
-                                add_detail(ui, "Data:", format_date(file.modified));
-
-                                if let Some(meta) = selected_metadata {
-                                    if let (Some(w), Some(h)) = (meta.width, meta.height) {
-                                        add_detail(ui, "Resolução:", format!("{} x {} px", w, h));
-                                    }
-
-                                    if let Some(format) = &meta.format {
-                                        add_detail(ui, "Formato:", format.clone());
-                                    }
-
-                                    if let Some(bits) = meta.color_depth {
-                                        add_detail(ui, "Profundidade:", format!("{} bits", bits));
-                                    }
-
-                                    if let Some(maker) = &meta.camera_maker {
-                                        add_detail(ui, "Fabricante:", maker.clone());
-                                    }
-
-                                    if let Some(model) = &meta.camera_model {
-                                        add_detail(ui, "Modelo:", model.clone());
-                                    }
-
-                                    if let Some(date) = &meta.date_taken {
-                                        add_detail(ui, "Captura:", date.clone());
-                                    }
-
-                                    if let Some(f_stop) = &meta.f_stop {
-                                        add_detail(ui, "F-stop:", f_stop.clone());
-                                    }
-
-                                    if let Some(exposure) = &meta.exposure_time {
-                                        add_detail(ui, "Exposição:", exposure.clone());
-                                    }
-
-                                    if let Some(iso) = meta.iso_speed {
-                                        add_detail(ui, "ISO:", format!("ISO-{}", iso));
-                                    }
-
-                                    if let Some(focal) = &meta.focal_length {
-                                        add_detail(ui, "Dist. Focal:", focal.clone());
-                                    }
-
-                                    if let Some(aperture) = &meta.max_aperture {
-                                        add_detail(ui, "Abertura:", aperture.clone());
-                                    }
-
-                                    if let Some(metering) = &meta.metering_mode {
-                                        add_detail(ui, "Medição:", metering.clone());
-                                    }
-
-                                    if let Some(flash) = &meta.flash_mode {
-                                        add_detail(ui, "Flash:", flash.clone());
-                                    }
-
-                                    if let Some(subject) = &meta.subject {
-                                        add_detail(ui, "Assunto:", subject.clone());
-                                    }
-
-                                    if let Some(codec) = &meta.video_codec {
-                                        add_detail(ui, "Video Codec:", codec.clone());
-                                    }
-
-                                    if let Some(codec) = &meta.audio_codec {
-                                        add_detail(ui, "Audio Codec:", codec.clone());
-                                    }
-
-                                    if let Some(bitrate) = meta.audio_bitrate {
-                                        add_detail(ui, "Audio BR:", Self::format_bitrate(bitrate));
-                                    }
-
-                                    if let Some(channels) = meta.audio_channels {
-                                        let channel_name = match channels {
-                                            1 => "Mono",
-                                            2 => "Estéreo",
-                                            6 => "5.1",
-                                            8 => "7.1",
-                                            _ => "Outro",
+                                        let used_space = drive.total_space - drive.free_space;
+                                        let usage_percent = if drive.total_space > 0 {
+                                            (used_space as f64 / drive.total_space as f64) * 100.0
+                                        } else {
+                                            0.0
                                         };
+
+                                        add_detail(ui, "Uso:", format!("{:.0}%", usage_percent));
+                                        add_detail(ui, "Livre:", format_size(drive.free_space));
+                                        add_detail(ui, "Total:", format_size(drive.total_space));
                                         add_detail(
                                             ui,
-                                            "Canais:",
-                                            format!("{} ({})", channels, channel_name),
+                                            "Sist. Arq:",
+                                            if drive.file_system.is_empty() {
+                                                "NTFS".to_string()
+                                            } else {
+                                                drive.file_system.clone()
+                                            },
                                         );
-                                    }
+                                        add_detail(ui, "BitLocker:", "Desligado".to_string());
+                                    } else {
+                                        add_detail(ui, "Nome:", file.name.clone());
+                                        add_detail(ui, "Tamanho:", format_size(file.size));
 
-                                    if let Some(duration) = meta.duration_100ns {
-                                        add_detail(
-                                            ui,
-                                            "Duração:",
-                                            Self::format_media_duration(duration),
-                                        );
-                                    }
+                                        let type_label = if file.is_dir {
+                                            "Pasta".to_string()
+                                        } else {
+                                            file.path
+                                                .extension()
+                                                .and_then(|e| e.to_str())
+                                                .unwrap_or("Arquivo")
+                                                .to_uppercase()
+                                        };
+                                        add_detail(ui, "Tipo:", type_label);
+                                        add_detail(ui, "Data:", format_date(file.modified));
 
-                                    if let Some(fps) = meta.frame_rate {
-                                        add_detail(ui, "Frame rate:", format!("{:.2} fps", fps));
-                                    }
+                                        if let Some(meta) = selected_metadata {
+                                            if let (Some(w), Some(h)) = (meta.width, meta.height) {
+                                                add_detail(
+                                                    ui,
+                                                    "Resolução:",
+                                                    format!("{} x {} px", w, h),
+                                                );
+                                            }
 
-                                    let mut bitrate_to_show = meta.bitrate;
-                                    if bitrate_to_show.is_none() {
-                                        if let Some(duration) = meta.duration_100ns {
-                                            bitrate_to_show =
-                                                Self::approximate_bitrate(file.size, duration);
+                                            if let Some(format) = &meta.format {
+                                                add_detail(ui, "Formato:", format.clone());
+                                            }
+
+                                            if let Some(bits) = meta.color_depth {
+                                                add_detail(
+                                                    ui,
+                                                    "Profundidade:",
+                                                    format!("{} bits", bits),
+                                                );
+                                            }
+
+                                            if let Some(maker) = &meta.camera_maker {
+                                                add_detail(ui, "Fabricante:", maker.clone());
+                                            }
+
+                                            if let Some(model) = &meta.camera_model {
+                                                add_detail(ui, "Modelo:", model.clone());
+                                            }
+
+                                            if let Some(date) = &meta.date_taken {
+                                                add_detail(ui, "Captura:", date.clone());
+                                            }
+
+                                            if let Some(f_stop) = &meta.f_stop {
+                                                add_detail(ui, "F-stop:", f_stop.clone());
+                                            }
+
+                                            if let Some(exposure) = &meta.exposure_time {
+                                                add_detail(ui, "Exposição:", exposure.clone());
+                                            }
+
+                                            if let Some(iso) = meta.iso_speed {
+                                                add_detail(ui, "ISO:", format!("ISO-{}", iso));
+                                            }
+
+                                            if let Some(focal) = &meta.focal_length {
+                                                add_detail(ui, "Dist. Focal:", focal.clone());
+                                            }
+
+                                            if let Some(aperture) = &meta.max_aperture {
+                                                add_detail(ui, "Abertura:", aperture.clone());
+                                            }
+
+                                            if let Some(metering) = &meta.metering_mode {
+                                                add_detail(ui, "Medição:", metering.clone());
+                                            }
+
+                                            if let Some(flash) = &meta.flash_mode {
+                                                add_detail(ui, "Flash:", flash.clone());
+                                            }
+
+                                            if let Some(subject) = &meta.subject {
+                                                add_detail(ui, "Assunto:", subject.clone());
+                                            }
+
+                                            if let Some(codec) = &meta.video_codec {
+                                                add_detail(ui, "Video Codec:", codec.clone());
+                                            }
+
+                                            if let Some(codec) = &meta.audio_codec {
+                                                add_detail(ui, "Audio Codec:", codec.clone());
+                                            }
+
+                                            if let Some(bitrate) = meta.audio_bitrate {
+                                                add_detail(
+                                                    ui,
+                                                    "Audio BR:",
+                                                    Self::format_bitrate(bitrate),
+                                                );
+                                            }
+
+                                            if let Some(channels) = meta.audio_channels {
+                                                let channel_name = match channels {
+                                                    1 => "Mono",
+                                                    2 => "Estéreo",
+                                                    6 => "5.1",
+                                                    8 => "7.1",
+                                                    _ => "Outro",
+                                                };
+                                                add_detail(
+                                                    ui,
+                                                    "Canais:",
+                                                    format!("{} ({})", channels, channel_name),
+                                                );
+                                            }
+
+                                            if let Some(duration) = meta.duration_100ns {
+                                                add_detail(
+                                                    ui,
+                                                    "Duração:",
+                                                    Self::format_media_duration(duration),
+                                                );
+                                            }
+
+                                            if let Some(fps) = meta.frame_rate {
+                                                add_detail(
+                                                    ui,
+                                                    "Frame rate:",
+                                                    format!("{:.2} fps", fps),
+                                                );
+                                            }
+
+                                            let mut bitrate_to_show = meta.bitrate;
+                                            if bitrate_to_show.is_none() {
+                                                if let Some(duration) = meta.duration_100ns {
+                                                    bitrate_to_show = Self::approximate_bitrate(
+                                                        file.size, duration,
+                                                    );
+                                                }
+                                            }
+
+                                            if let Some(bps) = bitrate_to_show {
+                                                add_detail(
+                                                    ui,
+                                                    "Bitrate:",
+                                                    Self::format_bitrate(bps),
+                                                );
+                                            }
+                                        } else if is_loading_meta {
+                                            add_detail(
+                                                ui,
+                                                "Metadados:",
+                                                "Carregando...".to_string(),
+                                            );
                                         }
                                     }
-
-                                    if let Some(bps) = bitrate_to_show {
-                                        add_detail(ui, "Bitrate:", Self::format_bitrate(bps));
-                                    }
-                                } else if is_loading_meta {
-                                    add_detail(ui, "Metadados:", "Carregando...".to_string());
-                                }
+                                });
+                            } else {
+                                ui.vertical_centered(|ui| {
+                                    ui.add_space(100.0);
+                                    ui.label("Selecione um arquivo");
+                                    ui.label("ou drive para ver detalhes");
+                                });
                             }
-                        });
-                    } else {
-                        ui.vertical_centered(|ui| {
-                            ui.add_space(100.0);
-                            ui.label("Selecione um arquivo");
-                            ui.label("ou drive para ver detalhes");
-                        });
-                    }
                         });
                 });
         }

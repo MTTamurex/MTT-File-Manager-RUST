@@ -359,10 +359,12 @@ render_item_slot()
    └── Error Handling: Diálogos nativos do Windows (ex: arquivo em uso)
  
  Sistema de Refresh (Manual & Auto)
-   ├── F5: Gatilho direto para `load_folder()`
-   ├── Watcher (`notify`): Monitora `current_path` em tempo real
-   ├── Flow: `Event` → `MPSC` → `UI Repaint` → `Debounce (500ms)` → `Reload`
-   └── Benefício: UI sempre sincronizada com o disco
+    ├── Device Change Listener: janela oculta registra `WM_DEVICECHANGE`/`GUID_DEVINTERFACE_VOLUME` e dispara refresh imediato ao conectar ou remover um drive
+    ├── Polling de Drives: ~4×/s reexecuta `get_all_drives()` e atualiza sidebar/"Este Computador" automaticamente (fallback caso o evento do Windows seja perdido)
+     ├── F5/Botão Recarregar: chama `trigger_manual_refresh()` que decide entre `setup_computer_view()` (para "Este Computador") e `load_folder()` (pastas reais)
+     ├── Watcher (`notify`): Monitora `current_path` em tempo real
+     ├── Flow: `Event` → `MPSC` → `UI Repaint` → `Debounce (500ms)` → `Reload`
+     └── Benefício: UI sempre sincronizada com o disco
  ```
 
 ### 5️⃣ Menu de Contexto (Right-Click)

@@ -393,6 +393,17 @@ fn extract_windows_thumbnail(path: &PathBuf)
 - [ ] **Rate limiting de operações de I/O** - Sem proteção contra DoS via I/O intensivo
 - [ ] **Integração completa do módulo security** - Módulo criado mas não amplamente utilizado
 
+### 7. Device Notifications (NOVO)
+
+**Descrição**: O app agora cria uma janela oculta dedicada que registra `WM_DEVICECHANGE` + `GUID_DEVINTERFACE_VOLUME` via `RegisterDeviceNotificationW`. Apenas eventos `DBT_DEVICEARRIVAL` e `DBT_DEVICEREMOVECOMPLETE` geram um sinal mpsc (sem payload sensível) para a UI, eliminando polling pesado e reduzindo o tempo para detectar pendrives.
+
+**Considerações de Segurança**:
+- ✅ Janela é `HWND_MESSAGE` (não exibida, sem interação do usuário).
+- ✅ Nenhum handle externo é exposto; o listener apenas envia `()` para o canal interno.
+- ✅ Sem privilégios elevados: o mecanismo usa broadcasting padrão do Windows.
+- ✅ Eventos não executam código arbitrário; apenas chamam `reload_drive_list()`.
+- ⚠️ Atenção para sempre tratar a mensagem antes de retornar `0` para evitar bloqueios no shell.
+
 ### 📊 Estatísticas de Segurança
 
 | Categoria | Status | Progresso |
