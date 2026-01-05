@@ -416,7 +416,7 @@ fn extract_windows_thumbnail(path: &PathBuf)
 
 ## 🔍 Auditoria de Código Unsafe
 
-**Total de blocos `unsafe` no projeto**: 14
+**Total de blocos `unsafe` no projeto**: 16
 
 ### Justificativa de Cada Uso:
 
@@ -437,6 +437,7 @@ fn extract_windows_thumbnail(path: &PathBuf)
 | `delete_with_shell()` | FFI para `SHFileOperationW` | Médio - move para lixeira |
 | `CoInitializeEx/CoUninitialize` | COM initialization | Baixo - padrão documentado |
 | `metadata.rs::read_video_metadata()` | `SHGetPropertyStoreFromParsingName` + `PROPVARIANT` leitura | Médio - requer `PropVariantClear` e COM guard |
+| `GetAsyncKeyState` (Ctrl+V detection) | FFI para detectar teclas no nível de hardware | Baixo - read-only, bypass de consumo de eventos do Windows |
 
 **Mitigações**:
 - **SAFETY comments**: Todos os blocos `unsafe` possuem comentários obrigatórios documentando invariantes. ✅

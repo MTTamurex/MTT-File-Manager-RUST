@@ -359,6 +359,32 @@ target/
 | **Notification System** | `src/application/notification.rs` | ✅ Implementado |
 | **Thumbnail Worker** | `src/workers/thumbnail_worker.rs` | ✅ Implementado |
 | **Windows API Wrappers** | `src/infrastructure/windows/` | ✅ Implementado (7 módulos) |
+| **Windows Clipboard (CF_HDROP)** | `src/infrastructure/windows_clipboard.rs` | ✅ Implementado (2026-01-04) |
+
+### clipboard-win 5.4
+
+**Categoria**: Windows Clipboard API bindings  
+**Formato**: CF_HDROP (file list)
+
+**Uso no Projeto**:
+- ✅ **Ctrl+C**: Copia arquivo para clipboard Windows (CF_HDROP)
+- ✅ **Ctrl+X**: Recorta arquivo (CF_HDROP + Preferred DropEffect = MOVE)
+- ✅ **Ctrl+V**: Lê arquivos do clipboard Windows
+- ✅ **Menu de Contexto Nativo**: "Colar" aparece automaticamente no menu nativo
+- ✅ **Cross-App**: Copiar no Explorer → Colar no MTT (e vice-versa)
+
+**Exemplo**:
+```rust
+use clipboard_win::{formats, Clipboard, Setter, Getter};
+
+// Copiar arquivo para clipboard
+let _clip = Clipboard::new_attempts(10)?;
+formats::FileList.write_clipboard(&["C:\\path\\to\\file.txt"])?;
+
+// Ler arquivos do clipboard
+let mut files: Vec<String> = Vec::new();
+formats::FileList.read_clipboard(&mut files)?;
+```
 
 ### 🎯 Próximas Dependências Sugeridas
 
