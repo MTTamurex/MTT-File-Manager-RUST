@@ -1,0 +1,154 @@
+use eframe::egui;
+use std::{
+    ffi::c_void,
+    sync::{mpsc::Sender, OnceLock},
+};
+use windows::{
+    core::{Result, PCWSTR},
+    Win32::Foundation::{HANDLE, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM},
+    Win32::System::Ioctl::GUID_DEVINTERFACE_VOLUME,
+    Win32::System::LibraryLoader::GetModuleHandleW,
+    Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, RegisterClassW,
+        RegisterDeviceNotificationW, TranslateMessage, DBT_DEVICEARRIVAL, DBT_DEVICEREMOVECOMPLETE,
+        DBT_DEVTYP_DEVICEINTERFACE, DEVICE_NOTIFY_WINDOW_HANDLE, DEV_BROADCAST_DEVICEINTERFACE_W,
+        HDEVNOTIFY, HWND_MESSAGE, MSG, WINDOW_EX_STYLE, WINDOW_STYLE, WM_DEVICECHANGE, WNDCLASSW,
+    },
+};
+
+const CLASS_NAME_WIDE: [u16; 22] = [
+    77, 84, 84, 68, 101, 118, 105, 99, 101, 67, 104, 97, 110, 103, 101, 87, 105, 110, 100, 111,
+    119, 0,
+];
+
+static DEVICE_EVENT_SENDER: OnceLock<Sender<()>> = OnceLock::new();
+static EGUI_CONTEXT: OnceLock<egui::Context> = OnceLock::new();
+
+/// Starts a background thread that listens for WM_DEVICECHANGE events and notifies the UI
+/// whenever a volume (drive) is mounted or unmounted.
+pub fn start_device_change_listener(sender: Sender<()>, ctx: egui::Context) {
+    eprintln!("[device_change] Starting device change listener thread...");
+    std::thread::spawn(move || {
+        eprintln!("[device_change] Device listener thread started");
+        if let Err(err) = run_device_listener(sender, ctx) {
+            eprintln!("[device_change] listener failed: {:?}", err);
+        }
+    });
+}
+
+fn run_device_listener(sender: Sender<()>, ctx: egui::Context) -> Result<()> {
+    unsafe {
+        if DEVICE_EVENT_SENDER.set(sender).is_err() {
+            return Ok(()); // listener already initialized
+        }
+        
+        if EGUI_CONTEXT.set(ctx).is_err() {
+            return Ok(()); // context already set
+        }
+
+        let hmodule = GetModuleHandleW(None)?;
+        let hinstance = HINSTANCE(hmodule.0);
+        let class_name = PCWSTR(CLASS_NAME_WIDE.as_ptr());
+
+        let wnd_class = WNDCLASSW {
+            lpfnWndProc: Some(device_wnd_proc),
+            hInstance: hinstance,
+            lpszClassName: class_name,
+            ..Default::default()
+        };
+
+        // RegisterClassW returns 0 on failure or if the class already exists; ignore the error
+        RegisterClassW(&wnd_class);
+
+        let hwnd = CreateWindowExW(
+            WINDOW_EX_STYLE(0),
+            class_name,
+            class_name,
+            WINDOW_STYLE(0),
+            0,
+            0,
+            0,
+            0,
+            HWND_MESSAGE,
+            None,
+            hinstance,
+            None,
+        )?;
+
+        register_volume_notifications(hwnd)?;
+        eprintln!("[device_change] Window created and notifications registered, starting message loop...");
+
+        let mut msg = MSG::default();
+        while GetMessageW(&mut msg, HWND::default(), 0, 0).into() {
+            let _ = TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+
+    Ok(())
+}
+
+unsafe fn register_volume_notifications(hwnd: HWND) -> Result<()> {
+    let mut filter = DEV_BROADCAST_DEVICEINTERFACE_W {
+        dbcc_size: std::mem::size_of::<DEV_BROADCAST_DEVICEINTERFACE_W>() as u32,
+        dbcc_devicetype: DBT_DEVTYP_DEVICEINTERFACE.0,
+        dbcc_classguid: GUID_DEVINTERFACE_VOLUME,
+        ..Default::default()
+    };
+
+    let _notification_handle: HDEVNOTIFY = RegisterDeviceNotificationW(
+        HANDLE(hwnd.0),
+        &mut filter as *mut _ as *mut c_void,
+        DEVICE_NOTIFY_WINDOW_HANDLE,
+    )?;
+    eprintln!("[device_change] Volume notifications registered successfully");
+    Ok(())
+}
+
+unsafe extern "system" fn device_wnd_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    match msg {
+        WM_DEVICECHANGE => {
+            let event = wparam.0 as u32;
+            eprintln!("[device_change] WM_DEVICECHANGE received, event code: 0x{:X}", event);
+            
+            if event == DBT_DEVICEARRIVAL {
+                eprintln!("[device_change] DBT_DEVICEARRIVAL (device connected)");
+                if let Some(sender) = DEVICE_EVENT_SENDER.get() {
+                    match sender.send(()) {
+                        Ok(_) => {
+                            eprintln!("[device_change] Event sent to UI thread successfully");
+                            // Force immediate repaint from worker thread
+                            if let Some(ctx) = EGUI_CONTEXT.get() {
+                                ctx.request_repaint();
+                                eprintln!("[device_change] request_repaint() called");
+                            }
+                        }
+                        Err(e) => eprintln!("[device_change] Failed to send event: {:?}", e),
+                    }
+                }
+            } else if event == DBT_DEVICEREMOVECOMPLETE {
+                eprintln!("[device_change] DBT_DEVICEREMOVECOMPLETE (device removed)");
+                if let Some(sender) = DEVICE_EVENT_SENDER.get() {
+                    match sender.send(()) {
+                        Ok(_) => {
+                            eprintln!("[device_change] Event sent to UI thread successfully");
+                            // Force immediate repaint from worker thread
+                            if let Some(ctx) = EGUI_CONTEXT.get() {
+                                ctx.request_repaint();
+                                eprintln!("[device_change] request_repaint() called");
+                            }
+                        }
+                        Err(e) => eprintln!("[device_change] Failed to send event: {:?}", e),
+                    }
+                }
+            }
+            LRESULT(0)
+        }
+        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
+}
