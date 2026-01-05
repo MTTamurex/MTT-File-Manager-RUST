@@ -197,6 +197,14 @@ struct ImageViewerApp {
 
     // Window handle for native shell interactions
     native_hwnd: Option<HWND>,
+
+    // 3-stage startup: hidden -> maximize/resize -> reveal
+    startup_tick: usize,
+
+    // Window state persistence
+    saved_window_width: f32,
+    saved_window_height: f32,
+    saved_is_maximized: bool,
 }
 
 impl ImageViewerApp {
@@ -286,6 +294,20 @@ impl ImageViewerApp {
             .get_preference("show_preview_panel")
             .map(|s| s != "false")
             .unwrap_or(true);
+
+        // Load window state from SQLite
+        let saved_window_width = disk_cache
+            .get_preference("window_width")
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(1280.0);
+        let saved_window_height = disk_cache
+            .get_preference("window_height")
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(720.0);
+        let saved_is_maximized = disk_cache
+            .get_preference("window_is_maximized")
+            .map(|s| s == "true")
+            .unwrap_or(true); // Default to maximized
 
         // 8 threads: equilíbrio ideal entre SSD e HDD USB
         use mtt_file_manager::workers::thumbnail_worker::spawn_thumbnail_workers;
@@ -420,6 +442,14 @@ impl ImageViewerApp {
 
             // HWND nativo (capturado na primeira atualização)
             native_hwnd: None,
+
+            // 3-stage startup counter
+            startup_tick: 0,
+
+            // Window state persistence
+            saved_window_width,
+            saved_window_height,
+            saved_is_maximized,
 
             // METADATA ASYNC
             metadata_req_sender: meta_req_tx,
@@ -803,6 +833,16 @@ impl ImageViewerApp {
         self.disk_cache.set_preference(
             "show_preview_panel",
             if self.show_preview_panel { "true" } else { "false" },
+        );
+
+        // Window state persistence
+        self.disk_cache
+            .set_preference("window_width", &self.saved_window_width.to_string());
+        self.disk_cache
+            .set_preference("window_height", &self.saved_window_height.to_string());
+        self.disk_cache.set_preference(
+            "window_is_maximized",
+            if self.saved_is_maximized { "true" } else { "false" },
         );
     }
 
@@ -2227,6 +2267,48 @@ impl mtt_file_manager::ui::context_menu::ContextMenuOperations for ImageViewerAp
 
 impl eframe::App for ImageViewerApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // --- 3-STAGE STARTUP SEQUENCE ---
+        // Stage 1 (frame 1): Apply saved geometry (maximize OR size) while hidden
+        // Stage 2 (frames 2-5): Wait for layouts to stabilize  
+        // Stage 3 (frame 5): Reveal window
+        if self.startup_tick < 5 {
+            self.startup_tick += 1;
+            
+            if self.startup_tick == 1 {
+                // Frame 1: Apply saved geometry while window is hidden
+                if self.saved_is_maximized {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                } else {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(
+                        egui::Vec2::new(self.saved_window_width, self.saved_window_height)
+                    ));
+                }
+            }
+            
+            if self.startup_tick == 5 {
+                // Frame 5: Reveal the window
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
+            
+            // Keep the loop running fast during startup
+            ctx.request_repaint();
+        }
+        // --- END STARTUP SEQUENCE ---
+
+        // Track current window state for saving on exit
+        ctx.input(|i| {
+            if let Some(rect) = i.viewport().inner_rect {
+                // Only save size when NOT maximized
+                if !i.viewport().maximized.unwrap_or(false) {
+                    self.saved_window_width = rect.width();
+                    self.saved_window_height = rect.height();
+                }
+            }
+            self.saved_is_maximized = i.viewport().maximized.unwrap_or(false);
+        });
+        // --- END STARTUP SEQUENCE ---
+
         self.ensure_window_handle(frame);
 
         // --- DETECÇÃO DE COMANDOS DE SISTEMA (Clipboard) ---
@@ -3328,12 +3410,15 @@ impl eframe::App for ImageViewerApp {
     }
 }
 fn main() -> eframe::Result<()> {
+    // 3-STAGE STARTUP: Start hidden and small (NOT maximized here)
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 720.0])
+            .with_visible(false) // Start hidden
+            .with_maximized(false) // NOT maximized at creation
+            .with_inner_size([800.0, 600.0]) // Small initial size (will be maximized in update)
             .with_title("MTT File Manager")
-            .with_app_id("mtt-file-manager"), // Enables window position/size persistence
-        persist_window: true, // Save window position and size between sessions
+            .with_app_id("mtt-file-manager"),
+        persist_window: false, // Disable eframe persistence - we control manually
         ..Default::default()
     };
 

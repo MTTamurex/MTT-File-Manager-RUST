@@ -199,7 +199,13 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
         ui.add_space(4.0);
 
         for (disk_path, disk_label) in drives {
-            let is_selected = !ctx.is_computer_view && ctx.current_path.starts_with(disk_path);
+            // Don't select drive if we're in OneDrive (OneDrive has priority)
+            let in_onedrive = ctx.onedrive_path
+                .map(|od| ctx.current_path.starts_with(od))
+                .unwrap_or(false);
+            let is_selected = !ctx.is_computer_view 
+                && !in_onedrive 
+                && ctx.current_path.starts_with(disk_path);
 
             let (mut rect, response) =
                 ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), Sense::click());
