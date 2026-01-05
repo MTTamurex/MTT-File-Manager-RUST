@@ -2162,15 +2162,12 @@ impl eframe::App for ImageViewerApp {
                             }
                         }
                         egui::Event::Copy => {
-                            eprintln!("[DEBUG] Event::Copy received!");
                             do_copy = true;
                         }
                         egui::Event::Cut => {
-                            eprintln!("[DEBUG] Event::Cut received!");
                             do_cut = true;
                         }
                         egui::Event::Paste(_) => {
-                            eprintln!("[DEBUG] Event::Paste received!");
                             do_paste = true;
                         }
                         _ => {}
@@ -2186,26 +2183,20 @@ impl eframe::App for ImageViewerApp {
             
             // Debounced paste detection (only fire once per key press)
             if ctrl_down && v_down && !self.paste_key_debounce {
-                eprintln!("[DEBUG] Ctrl+V detected via GetAsyncKeyState - triggering paste");
                 do_paste = true;
-                self.paste_key_debounce = true; // Prevent repeat firing
+                self.paste_key_debounce = true;
             } else if !v_down {
-                self.paste_key_debounce = false; // Reset when V is released
+                self.paste_key_debounce = false;
             }
 
             // Executar ações de clipboard
             if do_copy {
-                eprintln!("[DEBUG] Executing command_copy, selected_item={:?}", self.selected_item);
                 self.command_copy();
-                eprintln!("[DEBUG] After command_copy: clipboard_file={:?}", self.clipboard_file);
             }
             if do_cut {
-                eprintln!("[DEBUG] Executing command_cut, selected_item={:?}", self.selected_item);
                 self.command_cut();
-                eprintln!("[DEBUG] After command_cut: clipboard_file={:?}", self.clipboard_file);
             }
             if do_paste {
-                eprintln!("[DEBUG] Executing command_paste");
                 self.command_paste();
             }
 

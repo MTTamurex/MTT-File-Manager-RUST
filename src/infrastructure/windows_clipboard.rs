@@ -50,7 +50,6 @@ pub fn copy_files_to_clipboard(paths: &[PathBuf]) -> Result<(), String> {
     // Set preferred drop effect to COPY
     set_preferred_drop_effect(DROPEFFECT_COPY)?;
 
-    eprintln!("[CLIPBOARD] Copied {} file(s) to Windows clipboard", paths.len());
     Ok(())
 }
 
@@ -82,7 +81,6 @@ pub fn cut_files_to_clipboard(paths: &[PathBuf]) -> Result<(), String> {
     // Set preferred drop effect to MOVE
     set_preferred_drop_effect(DROPEFFECT_MOVE)?;
 
-    eprintln!("[CLIPBOARD] Cut {} file(s) to Windows clipboard", paths.len());
     Ok(())
 }
 
@@ -96,7 +94,6 @@ pub fn get_files_from_clipboard() -> Option<Vec<PathBuf>> {
 
     let mut file_list: Vec<String> = Vec::new();
     if formats::FileList.read_clipboard(&mut file_list).is_ok() && !file_list.is_empty() {
-        eprintln!("[CLIPBOARD] Read {} file(s) from Windows clipboard", file_list.len());
         Some(file_list.into_iter().map(PathBuf::from).collect())
     } else {
         None
