@@ -109,7 +109,12 @@ struct ImageViewerApp {
     cover_worker_receiver: Receiver<(PathBuf, Option<PathBuf>)>, // Worker â†’ UI: Resultado
     scanned_folders: HashSet<PathBuf>,    // Cache: evita re-scan
 
+    // FOLDER PREVIEW WORKER: Native Windows Shell folder previews (sandwich effect)
+    folder_preview_sender: Sender<PathBuf>,
+    folder_preview_receiver: Receiver<mtt_file_manager::workers::folder_preview_worker::FolderPreviewData>,
+
     // Cache Manager (unifica texture_cache, icon_cache, loading_set, etc.)
+
     cache_manager: mtt_file_manager::ui::cache::CacheManager,
 
     // Sorting state
@@ -351,6 +356,15 @@ impl ImageViewerApp {
             }
         });
 
+        // --- FOLDER PREVIEW WORKER (Native Windows Shell sandwich effect) ---
+        let (folder_preview_tx, folder_preview_rx_thread) = mpsc::channel::<PathBuf>();
+        let (folder_preview_res_tx, folder_preview_res_rx) = mpsc::channel();
+        let folder_preview_rx = Arc::new(std::sync::Mutex::new(folder_preview_rx_thread));
+        {
+            use mtt_file_manager::workers::folder_preview_worker::spawn_folder_preview_worker;
+            spawn_folder_preview_worker(folder_preview_rx, folder_preview_res_tx, ctx.clone());
+        }
+
         let disks = get_all_drives();
 
         let mut app = Self {
@@ -366,6 +380,9 @@ impl ImageViewerApp {
             cover_worker_sender: cover_req_tx,
             cover_worker_receiver: cover_res_rx,
             scanned_folders: HashSet::new(),
+            // Folder Preview Worker (Native Windows Shell)
+            folder_preview_sender: folder_preview_tx,
+            folder_preview_receiver: folder_preview_res_rx,
             // Cache Manager (unifica texture_cache, icon_cache, loading_set, etc.)
             cache_manager: mtt_file_manager::ui::cache::CacheManager::new(),
             // Sorting - carregado do SQLite ou defaults
@@ -1322,6 +1339,12 @@ impl ImageViewerApp {
         let _ = self.thumbnail_req_sender.send((path, self.generation));
     }
 
+    fn request_folder_preview_load(&mut self, path: PathBuf) {
+        if self.cache_manager.start_folder_preview_loading(path.clone()) {
+            let _ = self.folder_preview_sender.send(path);
+        }
+    }
+
     /// Captura e armazena o HWND nativo a partir do título da janela principal.
     fn ensure_window_handle(&mut self, _frame: &eframe::Frame) {
         if self.native_hwnd.is_some() {
@@ -1682,6 +1705,23 @@ impl ImageViewerApp {
             }
         }
 
+        // 6. Folder Previews (Native Sandwich effect)
+        while let Ok(data) = self.folder_preview_receiver.try_recv() {
+            self.cache_manager.finish_folder_preview_loading(&data.path);
+
+            let texture = ctx.load_texture(
+                format!("folder_preview_{}", data.path.to_string_lossy()),
+                egui::ColorImage::from_rgba_unmultiplied(
+                    [data.width as usize, data.height as usize],
+                    &data.rgba_data,
+                ),
+                egui::TextureOptions::NEAREST,
+            );
+
+            self.cache_manager.put_folder_preview(data.path, texture);
+        }
+
+
         if received_any {
             ctx.request_repaint();
         }
@@ -1787,6 +1827,7 @@ impl ImageViewerApp {
             OpenWithShell(PathBuf),
             RequestThumbnailLoad(PathBuf),
             RequestFolderScan(PathBuf),
+            RequestFolderPreviewLoad(PathBuf),
             RenameWithShell(usize),
         }
 
@@ -1805,6 +1846,10 @@ impl ImageViewerApp {
 
             fn request_folder_scan(&mut self, path: PathBuf) {
                 self.actions.push(ListAction::RequestFolderScan(path));
+            }
+
+            fn request_folder_preview_load(&mut self, path: PathBuf) {
+                self.actions.push(ListAction::RequestFolderPreviewLoad(path));
             }
 
             fn rename_with_shell(&mut self, idx: usize) {
@@ -1909,6 +1954,7 @@ impl ImageViewerApp {
                 ListAction::OpenWithShell(path) => open_with_shell(&path),
                 ListAction::RequestThumbnailLoad(path) => self.request_thumbnail_load(path),
                 ListAction::RequestFolderScan(path) => self.request_folder_scan(path),
+                ListAction::RequestFolderPreviewLoad(path) => self.request_folder_preview_load(path),
                 ListAction::RenameWithShell(idx) => self.rename_with_shell(idx),
             }
         }
@@ -1997,6 +2043,8 @@ impl ImageViewerApp {
             computer_icon: computer_icon.as_ref(),
             drive_icon_cache: &mut self.cache_manager.drive_icon_cache,
             item_icon_loader: &mut self.item_icon_loader,
+            folder_preview_cache: &mut self.cache_manager.folder_preview_cache,
+            folder_preview_loading: &mut self.cache_manager.folder_preview_loading,
         };
 
         // Usar uma abordagem diferente: coletar ações em vetores
@@ -2011,6 +2059,7 @@ impl ImageViewerApp {
             OpenWithShell(PathBuf),
             RequestThumbnailLoad(PathBuf),
             RequestFolderScan(PathBuf),
+            RequestFolderPreviewLoad(PathBuf),
             RenameWithShell(usize),
         }
 
@@ -2029,6 +2078,9 @@ impl ImageViewerApp {
 
             fn request_folder_scan(&mut self, path: PathBuf) {
                 self.actions.push(GridAction::RequestFolderScan(path));
+            }
+            fn request_folder_preview_load(&mut self, path: PathBuf) {
+                self.actions.push(GridAction::RequestFolderPreviewLoad(path));
             }
 
             fn rename_with_shell(&mut self, idx: usize) {
@@ -2112,6 +2164,7 @@ impl ImageViewerApp {
                 GridAction::OpenWithShell(path) => open_with_shell(&path),
                 GridAction::RequestThumbnailLoad(path) => self.request_thumbnail_load(path),
                 GridAction::RequestFolderScan(path) => self.request_folder_scan(path),
+                GridAction::RequestFolderPreviewLoad(path) => self.request_folder_preview_load(path),
                 GridAction::RenameWithShell(idx) => self.rename_with_shell(idx),
             }
         }
@@ -2135,6 +2188,7 @@ impl ImageViewerApp {
         // e executamos depois de renderizar
         let mut pending_thumbnail_loads: Vec<std::path::PathBuf> = Vec::new();
         let mut pending_folder_scans: Vec<std::path::PathBuf> = Vec::new();
+        let mut pending_folder_preview_loads: Vec<std::path::PathBuf> = Vec::new();
         let mut pending_rename: Option<usize> = None;
 
         // Texto de renomeação precisa ser tratado separadamente
@@ -2159,12 +2213,15 @@ impl ImageViewerApp {
                 icon_loader: &mut self.item_icon_loader,
                 scanned_folders: &mut self.scanned_folders,
                 loading_set: &mut self.cache_manager.loading_set,
+                folder_preview_cache: &mut self.cache_manager.folder_preview_cache,
+                folder_preview_loading: &mut self.cache_manager.folder_preview_loading,
             };
 
             // Create simple ops struct that collects operations
             struct SimpleOps<'a> {
                 thumbnail_loads: &'a mut Vec<std::path::PathBuf>,
                 folder_scans: &'a mut Vec<std::path::PathBuf>,
+                folder_preview_loads: &'a mut Vec<std::path::PathBuf>,
                 pending_rename: &'a mut Option<usize>,
             }
 
@@ -2177,6 +2234,10 @@ impl ImageViewerApp {
                     self.folder_scans.push(path);
                 }
 
+                fn request_folder_preview_load(&mut self, path: std::path::PathBuf) {
+                    self.folder_preview_loads.push(path);
+                }
+
                 fn rename_item(&mut self, idx: usize) {
                     *self.pending_rename = Some(idx);
                 }
@@ -2185,6 +2246,7 @@ impl ImageViewerApp {
             let mut ops = SimpleOps {
                 thumbnail_loads: &mut pending_thumbnail_loads,
                 folder_scans: &mut pending_folder_scans,
+                folder_preview_loads: &mut pending_folder_preview_loads,
                 pending_rename: &mut pending_rename,
             };
 
@@ -2209,6 +2271,10 @@ impl ImageViewerApp {
             ImageViewerApp::request_folder_scan(&*self, path);
         }
 
+        for path in pending_folder_preview_loads {
+            self.request_folder_preview_load(path);
+        }
+
         if let Some(rename_idx) = pending_rename {
             self.rename_with_shell(rename_idx);
         }
@@ -2229,6 +2295,10 @@ impl mtt_file_manager::ui::components::item_slot::ItemSlotOperations for ImageVi
     fn request_folder_scan(&mut self, path: std::path::PathBuf) {
         // Call inherent method - uses &self so we need to reborrow
         ImageViewerApp::request_folder_scan(&*self, path);
+    }
+
+    fn request_folder_preview_load(&mut self, path: std::path::PathBuf) {
+        self.request_folder_preview_load(path);
     }
 
     fn rename_item(&mut self, idx: usize) {

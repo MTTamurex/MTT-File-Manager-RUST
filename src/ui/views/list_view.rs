@@ -42,6 +42,7 @@ pub trait ListViewOperations {
     fn open_with_shell(&mut self, path: &PathBuf);
     fn request_thumbnail_load(&mut self, path: PathBuf);
     fn request_folder_scan(&mut self, path: PathBuf);
+    fn request_folder_preview_load(&mut self, path: PathBuf);
     fn rename_with_shell(&mut self, idx: usize);
 }
 

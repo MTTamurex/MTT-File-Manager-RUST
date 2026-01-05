@@ -12,6 +12,8 @@ pub trait ItemSlotOperations {
     fn request_thumbnail_load(&mut self, path: std::path::PathBuf);
     /// Requisita scan de pasta
     fn request_folder_scan(&mut self, path: std::path::PathBuf);
+    /// Requisita carregamento de preview nativo da pasta (sandwich effect)
+    fn request_folder_preview_load(&mut self, path: std::path::PathBuf);
     /// Executa rename
     fn rename_item(&mut self, idx: usize);
 }
@@ -36,8 +38,12 @@ pub struct ItemSlotContext<'a> {
     pub icon_loader: &'a mut IconLoader,
     /// Conjunto de pastas escaneadas
     pub scanned_folders: &'a mut std::collections::HashSet<std::path::PathBuf>,
-    /// Conjunto de itens carregando (usado para verificar e adicionar)
+    /// Conjunto de itens carregando (thumbnails de arquivos)
     pub loading_set: &'a mut std::collections::HashSet<std::path::PathBuf>,
+    /// Cache de previews de pastas (Native Sandwich)
+    pub folder_preview_cache: &'a mut lru::LruCache<std::path::PathBuf, egui::TextureHandle>,
+    /// Conjunto de pastas carregando preview nativo
+    pub folder_preview_loading: &'a mut std::collections::HashSet<std::path::PathBuf>,
 }
 
 /// Renderiza um item slot para grid view
@@ -196,13 +202,32 @@ fn render_directory_slot<O: ItemSlotOperations>(
     let folder_rect = egui::Rect::from_min_size(start_pos, egui::vec2(folder_w, folder_h));
 
     // === DESENHO DA PASTA ===
-    crate::ui::components::item_slot::draw_custom_folder(
-        ui.painter(),
-        folder_rect,
-        item.folder_cover
-            .as_ref()
-            .and_then(|p| ctx.texture_cache.get(p)),
-    );
+    // 1. Tenta usar o preview nativo (Shell Sandwich)
+    let native_preview = ctx.folder_preview_cache.get(&item.path);
+
+    if let Some(tex) = native_preview {
+        // Se temos o preview nativo, desenhamos ele ocupando todo o rect
+        ui.painter().image(
+            tex.id(),
+            folder_rect,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+    } else {
+        // Se não tem preview nativo, verifica se precisa carregar
+        if !ctx.folder_preview_loading.contains(&item.path) {
+            ops.request_folder_preview_load(item.path.clone());
+        }
+
+        // Fallback: Desenha a pasta customizada (pode ter uma capa manual ou ser vazia)
+        crate::ui::components::item_slot::draw_custom_folder(
+            ui.painter(),
+            folder_rect,
+            item.folder_cover
+                .as_ref()
+                .and_then(|p| ctx.texture_cache.get(p)),
+        );
+    }
 
     // Render sync status badge (OneDrive) for folders
     render_sync_badge(ui, folder_rect, item.sync_status);

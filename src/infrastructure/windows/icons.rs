@@ -90,6 +90,51 @@ pub fn extract_thumbnail(
     }
 }
 
+/// Extracts Windows folder preview (sandwich effect) using IShellItemImageFactory.
+///
+/// Returns the folder icon with internal content preview composed by Windows Shell.
+/// Falls back to standard folder icon if no preview content available.
+///
+/// # Safety
+/// Uses COM interfaces (IShellItem, IShellItemImageFactory).
+/// DeleteObject is called on the returned HBITMAP.
+pub fn get_folder_preview(
+    folder_path: &Path,
+) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
+    unsafe {
+        // SAFETY: path_wide is valid for the duration of this call
+        let path_wide: Vec<u16> = folder_path
+            .to_string_lossy()
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+
+        let shell_item: IShellItem =
+            SHCreateItemFromParsingName(PCWSTR(path_wide.as_ptr()), None)?;
+        let image_factory: IShellItemImageFactory = shell_item.cast()?;
+
+        // Request 256px with SIIGBF_THUMBNAILONLY to get the sandwich preview
+        let size = SIZE { cx: 256, cy: 256 };
+
+        match image_factory.GetImage(size, SIIGBF_THUMBNAILONLY) {
+            Ok(hbitmap) => {
+                // SAFETY: hbitmap is valid, DeleteObject called after conversion
+                let result = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
+                let _ = DeleteObject(hbitmap);
+                Ok(result)
+            }
+            Err(_) => {
+                // Fallback: Get standard folder icon without preview content
+                let hbitmap = image_factory.GetImage(size, SIIGBF_ICONONLY)?;
+                let result = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
+                let _ = DeleteObject(hbitmap);
+                Ok(result)
+            }
+        }
+    }
+}
+
+
 /// Extracts the native Windows icon for a file extension.
 ///
 /// Uses FILE_ATTRIBUTE_NORMAL + SHGFI_USEFILEATTRIBUTES to get the default icon for the type.
