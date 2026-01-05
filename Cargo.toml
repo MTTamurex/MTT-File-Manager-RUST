@@ -18,6 +18,7 @@ tempfile = "3.10"
 rusqlite = { version = "0.32", features = ["bundled"] }
 webp = "0.3"  # For lossy WebP compression with quality control
 kamadak-exif = "0.5"  # For direct EXIF reading from JPEG files
+clipboard-win = "5.4"  # For Windows clipboard integration (CF_HDROP format)
 
 
 [dependencies.windows]
@@ -28,6 +29,8 @@ features = [
     "Win32_UI_Shell_PropertiesSystem",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
     "Win32_Graphics_Gdi",
     "Win32_Foundation",
     "Win32_Storage_FileSystem",

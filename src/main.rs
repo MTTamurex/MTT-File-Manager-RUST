@@ -46,6 +46,7 @@ use windows::{
     Win32::Storage::FileSystem::*,
     Win32::UI::Shell::*,
     Win32::UI::WindowsAndMessaging::{FindWindowW, GetCursorPos},
+    Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState,
 };
 
 // OTIMIZAÃ‡ÃƒO: Imports para Win32 FindFirst/NextFileW (metadata em UMA syscall)
@@ -186,6 +187,9 @@ struct ImageViewerApp {
 
     // SCROLL TO SELECTED (para navegação por teclado)
     scroll_to_selected: bool,
+
+    // Debounce for paste key (keys_down can fire multiple times)
+    paste_key_debounce: bool,
 
     // Window handle for native shell interactions
     native_hwnd: Option<HWND>,
@@ -382,6 +386,9 @@ impl ImageViewerApp {
             // SCROLL TO SELECTED (para navegação por teclado)
             scroll_to_selected: false,
 
+            // Debounce for paste key (keys_down can fire multiple times)
+            paste_key_debounce: false,
+
             // HWND nativo (capturado na primeira atualização)
             native_hwnd: None,
 
@@ -492,115 +499,108 @@ impl ImageViewerApp {
 
     // ===== CLIPBOARD OPERATIONS (Ctrl+C, Ctrl+X, Ctrl+V) =====
 
-    /// Copiar: Guarda o path do arquivo selecionado na memória
+    /// Copiar: Coloca o arquivo no clipboard do Windows (CF_HDROP format)
     fn command_copy(&mut self) {
         if let Some(idx) = self.selected_item {
             if let Some(item) = self.items.get(idx) {
+                // Put file in Windows clipboard using CF_HDROP format
+                if let Err(e) = mtt_file_manager::infrastructure::windows_clipboard::copy_files_to_clipboard(&[item.path.clone()]) {
+                    eprintln!("[CLIPBOARD ERROR] Failed to copy: {}", e);
+                }
+                // Also keep internal state as backup
                 self.clipboard_file = Some(item.path.clone());
                 self.clipboard_op = Some(ClipboardOp::Copy);
             }
         }
     }
 
-    /// Recortar: Guarda o path do arquivo selecionado com flag de movimento
+    /// Recortar: Coloca o arquivo no clipboard do Windows com flag de MOVE
     fn command_cut(&mut self) {
         if let Some(idx) = self.selected_item {
             if let Some(item) = self.items.get(idx) {
+                // Put file in Windows clipboard using CF_HDROP format with MOVE effect
+                if let Err(e) = mtt_file_manager::infrastructure::windows_clipboard::cut_files_to_clipboard(&[item.path.clone()]) {
+                    eprintln!("[CLIPBOARD ERROR] Failed to cut: {}", e);
+                }
+                // Also keep internal state as backup
                 self.clipboard_file = Some(item.path.clone());
                 self.clipboard_op = Some(ClipboardOp::Move);
             }
         }
     }
 
-    /// Colar: Executa SHFileOperationW para copiar ou mover o arquivo
+    /// Colar: Lê do clipboard do Windows e executa SHFileOperationW
     fn command_paste(&mut self) {
-        // 1. Validação: tem algo para colar?
-        let src_path = match &self.clipboard_file {
-            Some(p) => p.clone(),
-            None => {
-                return;
-            }
-        };
-
-        // 2. Determina pasta de destino: usa target_path do menu de contexto se disponível e válido,
-        // senão usa current_path (compatibilidade com atalhos de teclado)
-        let dest_folder = if let Some(target) = &self.context_menu.target_path {
-            // Verifica se o target ainda existe (não foi deletado)
-            if target.exists() && target.is_dir() {
-                target.clone()
-            } else {
-                // Se o target não existe mais, usa current_path e limpa o target
-                self.context_menu.target_path = None;
-                PathBuf::from(&self.current_path)
-            }
+        use mtt_file_manager::infrastructure::windows_clipboard;
+        
+        // 1. First try to read from Windows clipboard
+        let (src_paths, is_move) = if let Some(files) = windows_clipboard::get_files_from_clipboard() {
+            let op = windows_clipboard::get_clipboard_operation();
+            let is_move = matches!(op, Some(windows_clipboard::ClipboardFileOp::Move));
+            (files, is_move)
+        } else if let Some(path) = &self.clipboard_file {
+            // Fallback to internal clipboard
+            let is_move = matches!(self.clipboard_op, Some(ClipboardOp::Move));
+            (vec![path.clone()], is_move)
         } else {
-            PathBuf::from(&self.current_path)
+            // Nothing to paste
+            return;
         };
 
-        // 3. Verifica se o arquivo de origem já existe na pasta de destino
-        if let Some(file_name) = src_path.file_name() {
-            let dest_file = dest_folder.join(file_name);
-            if dest_file.exists() && dest_file != src_path {
-                // O Windows mostrará diálogo de substituição, mas podemos prevenir operação redundante
-                // Se for mover para a mesma pasta (mesmo arquivo), não faz nada
-                if let Some(ClipboardOp::Move) = self.clipboard_op {
-                    if src_path.parent() == Some(&dest_folder) {
-                        return;
-                    }
+        if src_paths.is_empty() {
+            return;
+        }
+
+        // 2. Destination folder (current directory)
+        let dest_folder = PathBuf::from(&self.current_path);
+
+        // 3. Perform operation for each file
+        for src_path in &src_paths {
+            // Skip if trying to move to same folder
+            if is_move && src_path.parent() == Some(&dest_folder) {
+                continue;
+            }
+
+            // Prepare strings for Windows API (double-null terminated)
+            let mut from_vec: Vec<u16> = src_path.to_string_lossy().encode_utf16().collect();
+            from_vec.push(0);
+            from_vec.push(0);
+
+            let mut to_vec: Vec<u16> = dest_folder.to_string_lossy().encode_utf16().collect();
+            to_vec.push(0);
+            to_vec.push(0);
+
+            let w_func = if is_move { FO_MOVE } else { FO_COPY };
+
+            let mut op = SHFILEOPSTRUCTW {
+                hwnd: HWND(std::ptr::null_mut()),
+                wFunc: w_func,
+                pFrom: PCWSTR(from_vec.as_ptr()),
+                pTo: PCWSTR(to_vec.as_ptr()),
+                fFlags: (FOF_ALLOWUNDO).0 as u16,
+                ..Default::default()
+            };
+
+            unsafe {
+                // SAFETY: from_vec and to_vec are properly double-null terminated
+                let result = SHFileOperationW(&mut op);
+                if result != 0 {
+                    eprintln!("[PASTE ERROR] SHFileOperationW returned: {}", result);
                 }
             }
         }
 
-        // 4. Evita mover para a mesma pasta (redundante)
-        if let Some(ClipboardOp::Move) = self.clipboard_op {
-            if src_path.parent() == Some(&dest_folder) {
-                return;
-            }
+        // 4. If it was a Move operation, clear clipboards
+        if is_move {
+            self.clipboard_file = None;
+            self.clipboard_op = None;
+            // Note: Windows clipboard is managed by the shell, we don't clear it
         }
 
-        // 5. Prepara strings para Windows API (double-null terminated)
-        let mut from_vec: Vec<u16> = src_path.to_string_lossy().encode_utf16().collect();
-        from_vec.push(0);
-        from_vec.push(0);
-
-        let mut to_vec: Vec<u16> = dest_folder.to_string_lossy().encode_utf16().collect();
-        to_vec.push(0);
-        to_vec.push(0);
-
-        // 6. Define operação (FO_COPY ou FO_MOVE)
-        let w_func = match self.clipboard_op {
-            Some(ClipboardOp::Move) => FO_MOVE,
-            _ => FO_COPY,
-        };
-
-        let mut op = SHFILEOPSTRUCTW {
-            hwnd: HWND(std::ptr::null_mut()),
-            wFunc: w_func,
-            pFrom: PCWSTR(from_vec.as_ptr()),
-            pTo: PCWSTR(to_vec.as_ptr()),
-            fFlags: (FOF_ALLOWUNDO).0 as u16,
-            ..Default::default()
-        };
-
-        // 7. Executa operação
-        unsafe {
-            // SAFETY: `from_vec` and `to_vec` are properly double-null terminated wide strings
-            // as required by `SHFileOperationW`. Ownership of the buffers is maintained
-            // until the function returns.
-            let result = SHFileOperationW(&mut op);
-
-            if result == 0 {
-                // Se foi Recortar, limpa o clipboard
-                if let Some(ClipboardOp::Move) = self.clipboard_op {
-                    self.clipboard_file = None;
-                    self.clipboard_op = None;
-                }
-                // Recarrega a pasta para ver o resultado
-                self.load_folder(false);
-            }
-        }
-
-        // 8. Limpa o context_menu.target_path após a operação
+        // 5. Reload folder to show result
+        self.load_folder(false);
+        
+        // 6. Clear context menu target
         self.context_menu.target_path = None;
     }
 
@@ -2134,25 +2134,43 @@ impl eframe::App for ImageViewerApp {
         self.ensure_window_handle(frame);
 
         // --- DETECÇÃO DE COMANDOS DE SISTEMA (Clipboard) ---
-        // O egui traduz Ctrl+C ? Event::Copy, Ctrl+X ? Event::Cut, Ctrl+V ? Event::Paste
-        // Isso funciona porque são eventos do SO, não teclas interceptadas.
+        // Usa detecção via eventos RAW de teclas.
+        // Só bloqueia durante renomeação ou edição de endereço.
 
-        if self.renaming_state.is_none() {
-            // Capturar eventos de clipboard do sistema
+        // DEBUG: Log todos os frames para verificar se o código está rodando
+        // eprintln!("[DEBUG] Frame update - renaming={:?} address_editing={}", self.renaming_state.is_some(), self.is_address_editing);
+        
+        if self.renaming_state.is_none() && !self.is_address_editing {
+            // Detectar teclas através dos eventos (Key events)
             let mut do_copy = false;
             let mut do_cut = false;
             let mut do_paste = false;
-
+            
             ctx.input(|i| {
+                // Log all key events to see what's arriving
                 for event in &i.events {
                     match event {
+                        egui::Event::Key { key, pressed, modifiers, .. } => {
+                            if *pressed && modifiers.ctrl {
+                                eprintln!("[DEBUG] Key event: {:?} Ctrl+pressed", key);
+                                match key {
+                                    egui::Key::C => do_copy = true,
+                                    egui::Key::X => do_cut = true,
+                                    egui::Key::V => do_paste = true,
+                                    _ => {}
+                                }
+                            }
+                        }
                         egui::Event::Copy => {
+                            eprintln!("[DEBUG] Event::Copy received!");
                             do_copy = true;
                         }
                         egui::Event::Cut => {
+                            eprintln!("[DEBUG] Event::Cut received!");
                             do_cut = true;
                         }
                         egui::Event::Paste(_) => {
+                            eprintln!("[DEBUG] Event::Paste received!");
                             do_paste = true;
                         }
                         _ => {}
@@ -2160,14 +2178,34 @@ impl eframe::App for ImageViewerApp {
                 }
             });
 
+            // Fallback: use Windows GetAsyncKeyState for hardware-level detection
+            // (Windows consumes Ctrl+V key events when clipboard has files)
+            // VK_CONTROL = 0x11, VK_V = 0x56
+            let ctrl_down = unsafe { GetAsyncKeyState(0x11) < 0 };
+            let v_down = unsafe { GetAsyncKeyState(0x56) < 0 };
+            
+            // Debounced paste detection (only fire once per key press)
+            if ctrl_down && v_down && !self.paste_key_debounce {
+                eprintln!("[DEBUG] Ctrl+V detected via GetAsyncKeyState - triggering paste");
+                do_paste = true;
+                self.paste_key_debounce = true; // Prevent repeat firing
+            } else if !v_down {
+                self.paste_key_debounce = false; // Reset when V is released
+            }
+
             // Executar ações de clipboard
             if do_copy {
+                eprintln!("[DEBUG] Executing command_copy, selected_item={:?}", self.selected_item);
                 self.command_copy();
+                eprintln!("[DEBUG] After command_copy: clipboard_file={:?}", self.clipboard_file);
             }
             if do_cut {
+                eprintln!("[DEBUG] Executing command_cut, selected_item={:?}", self.selected_item);
                 self.command_cut();
+                eprintln!("[DEBUG] After command_cut: clipboard_file={:?}", self.clipboard_file);
             }
             if do_paste {
+                eprintln!("[DEBUG] Executing command_paste");
                 self.command_paste();
             }
 
