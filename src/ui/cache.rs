@@ -42,6 +42,10 @@ pub struct CacheManager {
     pub folder_icon_texture: Option<egui::TextureHandle>,
     pub computer_icon: Option<egui::TextureHandle>,
     pub drive_icon_cache: LruCache<String, egui::TextureHandle>,
+    /// Cache for folder preview thumbnails (sandwich effect)
+    pub folder_preview_cache: LruCache<PathBuf, egui::TextureHandle>,
+    /// Set of folder paths currently being loaded
+    pub folder_preview_loading: std::collections::HashSet<PathBuf>,
 
     config: TextureCacheConfig,
     icon_config: IconCacheConfig,
@@ -57,6 +61,8 @@ impl CacheManager {
             folder_icon_texture: None,
             computer_icon: None,
             drive_icon_cache: LruCache::new(NonZeroUsize::new(10).unwrap()),
+            folder_preview_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
+            folder_preview_loading: std::collections::HashSet::new(),
 
             config: TextureCacheConfig::default(),
             icon_config: IconCacheConfig::default(),
@@ -72,6 +78,8 @@ impl CacheManager {
             folder_icon_texture: None,
             computer_icon: None,
             drive_icon_cache: LruCache::new(NonZeroUsize::new(10).unwrap()),
+            folder_preview_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
+            folder_preview_loading: std::collections::HashSet::new(),
 
             config,
             icon_config,
@@ -119,8 +127,48 @@ impl CacheManager {
         self.icon_cache.clear();
         self.loading_set.clear();
         self.drive_icon_cache.clear();
+        self.folder_preview_cache.clear();
+        self.folder_preview_loading.clear();
         // Note: folder_icon_texture and computer_icon are kept as they're singletons
     }
+
+    // ========== Folder Preview Methods (Native Windows Shell) ==========
+
+    /// Gets folder preview from cache
+    pub fn get_folder_preview(&mut self, path: &PathBuf) -> Option<&egui::TextureHandle> {
+        self.folder_preview_cache.get(path)
+    }
+
+    /// Checks if folder preview is in cache
+    pub fn has_folder_preview(&self, path: &PathBuf) -> bool {
+        self.folder_preview_cache.contains(path)
+    }
+
+    /// Stores folder preview in cache
+    pub fn put_folder_preview(&mut self, path: PathBuf, texture: egui::TextureHandle) {
+        self.folder_preview_cache.put(path, texture);
+    }
+
+    /// Checks if folder preview is currently being loaded
+    pub fn is_folder_preview_loading(&self, path: &PathBuf) -> bool {
+        self.folder_preview_loading.contains(path)
+    }
+
+    /// Starts loading a folder preview (returns false if too many loads in progress)
+    pub fn start_folder_preview_loading(&mut self, path: PathBuf) -> bool {
+        if self.folder_preview_loading.len() < 30 {
+            self.folder_preview_loading.insert(path);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Finishes loading a folder preview
+    pub fn finish_folder_preview_loading(&mut self, path: &PathBuf) {
+        self.folder_preview_loading.remove(path);
+    }
+
 
     /// Estimates VRAM usage in bytes
     pub fn estimate_vram_usage(&self) -> usize {

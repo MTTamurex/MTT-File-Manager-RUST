@@ -24,6 +24,8 @@ pub struct GridViewContext<'a> {
     pub computer_icon: Option<&'a egui::TextureHandle>,
     pub drive_icon_cache: &'a mut lru::LruCache<String, egui::TextureHandle>,
     pub item_icon_loader: &'a mut crate::ui::icon_loader::IconLoader,
+    pub folder_preview_cache: &'a mut lru::LruCache<PathBuf, egui::TextureHandle>,
+    pub folder_preview_loading: &'a mut std::collections::HashSet<PathBuf>,
 }
 
 /// Operations that can be performed from grid view
@@ -32,6 +34,7 @@ pub trait GridViewOperations {
     fn open_with_shell(&mut self, path: &PathBuf);
     fn request_thumbnail_load(&mut self, path: PathBuf);
     fn request_folder_scan(&mut self, path: PathBuf);
+    fn request_folder_preview_load(&mut self, path: PathBuf);
     fn rename_with_shell(&mut self, idx: usize);
 }
 
@@ -360,6 +363,7 @@ fn render_item_slot_for_grid(
     // e executamos depois de renderizar
     let mut pending_thumbnail_loads: Vec<std::path::PathBuf> = Vec::new();
     let mut pending_folder_scans: Vec<std::path::PathBuf> = Vec::new();
+    let mut pending_folder_preview_loads: Vec<std::path::PathBuf> = Vec::new();
     let mut pending_rename: Option<usize> = None;
 
     // Texto de renomeação precisa ser tratado separadamente
@@ -384,12 +388,15 @@ fn render_item_slot_for_grid(
             icon_loader: ctx.item_icon_loader,
             scanned_folders: ctx.scanned_folders,
             loading_set: ctx.loading_set,
+            folder_preview_cache: ctx.folder_preview_cache,
+            folder_preview_loading: ctx.folder_preview_loading,
         };
 
         // Create simple ops struct that collects operations
         struct SimpleOps<'a> {
             thumbnail_loads: &'a mut Vec<std::path::PathBuf>,
             folder_scans: &'a mut Vec<std::path::PathBuf>,
+            folder_preview_loads: &'a mut Vec<std::path::PathBuf>,
             pending_rename: &'a mut Option<usize>,
         }
 
@@ -401,6 +408,9 @@ fn render_item_slot_for_grid(
             fn request_folder_scan(&mut self, path: std::path::PathBuf) {
                 self.folder_scans.push(path);
             }
+            fn request_folder_preview_load(&mut self, path: std::path::PathBuf) {
+                self.folder_preview_loads.push(path);
+            }
 
             fn rename_item(&mut self, idx: usize) {
                 *self.pending_rename = Some(idx);
@@ -410,6 +420,7 @@ fn render_item_slot_for_grid(
         let mut simple_ops = SimpleOps {
             thumbnail_loads: &mut pending_thumbnail_loads,
             folder_scans: &mut pending_folder_scans,
+            folder_preview_loads: &mut pending_folder_preview_loads,
             pending_rename: &mut pending_rename,
         };
 
@@ -432,6 +443,9 @@ fn render_item_slot_for_grid(
 
     for path in pending_folder_scans {
         ops.request_folder_scan(path);
+    }
+    for path in pending_folder_preview_loads {
+        ops.request_folder_preview_load(path);
     }
 
     if let Some(rename_idx) = pending_rename {

@@ -459,6 +459,7 @@ fn extract_windows_thumbnail(path: &PathBuf)
 | `delete_with_shell()` | FFI para `SHFileOperationW` | Médio - move para lixeira |
 | `CoInitializeEx/CoUninitialize` | COM initialization | Baixo - padrão documentado |
 | `metadata.rs::read_video_metadata()` | `SHGetPropertyStoreFromParsingName` + `PROPVARIANT` leitura | Médio - requer `PropVariantClear` e COM guard |
+| `get_folder_preview()` | FFI para `IShellItemImageFactory` | Médio - I/O do Shell |
 | `GetAsyncKeyState` (Ctrl+V detection) | FFI para detectar teclas no nível de hardware | Baixo - read-only, bypass de consumo de eventos do Windows |
 
 **Mitigações**:

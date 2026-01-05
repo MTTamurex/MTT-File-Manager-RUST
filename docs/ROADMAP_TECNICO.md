@@ -71,6 +71,7 @@
 - **UI Refinements**: Ícones Remix Icon corrigidos, layout responsivo e botões frameless.
 - **Persistent Sort & Folder Position ✅**: Preferências de ordenação e posição de pastas salvas em SQLite.
 - **Proactive Folder Previews ✅**: Escaneamento de capas de pastas no modo lista e persistência em SQLite.
+- **Native Folder Previews (“Sandwich Effect”) ✅**: Implementado via `IShellItemImageFactory` com sistema de carregamento assíncrono e cache dedicado.
 
 ### Otimização do Garbage Collector (2026-01-02) ✅ CONCLUÍDO
 - **Problema Crítico Resolvido**: GC bloqueava database lock durante verificações de arquivos (I/O lento), travando navegação.
