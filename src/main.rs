@@ -267,6 +267,26 @@ impl ImageViewerApp {
             })
             .unwrap_or(FoldersPosition::First);
 
+        // Load UI preferences from SQLite
+        let thumbnail_size = disk_cache
+            .get_preference("thumbnail_size")
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(128.0)
+            .clamp(64.0, 512.0); // Ensure valid range
+
+        let view_mode = disk_cache
+            .get_preference("view_mode")
+            .map(|s| match s.as_str() {
+                "list" => ViewMode::List,
+                _ => ViewMode::Grid,
+            })
+            .unwrap_or(ViewMode::Grid);
+
+        let show_preview_panel = disk_cache
+            .get_preference("show_preview_panel")
+            .map(|s| s != "false")
+            .unwrap_or(true);
+
         // 8 threads: equilíbrio ideal entre SSD e HDD USB
         use mtt_file_manager::workers::thumbnail_worker::spawn_thumbnail_workers;
         spawn_thumbnail_workers(
@@ -331,12 +351,12 @@ impl ImageViewerApp {
             sort_descending,
             folders_position,
             disk_cache: disk_cache.clone(),
-            // View mode: Grid por padrÃ£o
-            view_mode: ViewMode::Grid,
+            // View mode: loaded from SQLite
+            view_mode,
             // Selection & Preview
             selected_file: None,
             selected_metadata: None,
-            show_preview_panel: true, // Mostrar por padrÃ£o
+            show_preview_panel, // Loaded from SQLite
             is_computer_view: false,
             // Navigation - comeÃ§a com path inicial no histÃ³rico
             navigation_history: vec![PATH_PADRAO.to_string()],
@@ -344,7 +364,7 @@ impl ImageViewerApp {
             path_input: PATH_PADRAO.to_string(),
             disks,
             last_drive_refresh: Instant::now(),
-            thumbnail_size: 128.0, // Default zoom
+            thumbnail_size, // Loaded from SQLite
             selected_item: None,
             total_items: 0,
             // Search & Navigation (NEW)
@@ -769,6 +789,21 @@ impl ImageViewerApp {
         };
         self.disk_cache
             .set_preference("folders_position", folders_pos_str);
+
+        // UI preferences
+        self.disk_cache
+            .set_preference("thumbnail_size", &self.thumbnail_size.to_string());
+
+        let view_mode_str = match self.view_mode {
+            ViewMode::Grid => "grid",
+            ViewMode::List => "list",
+        };
+        self.disk_cache.set_preference("view_mode", view_mode_str);
+
+        self.disk_cache.set_preference(
+            "show_preview_panel",
+            if self.show_preview_panel { "true" } else { "false" },
+        );
     }
 
     /// Requisita scan assÃ­ncrono de uma pasta para descobrir primeira imagem.
@@ -3286,12 +3321,19 @@ impl eframe::App for ImageViewerApp {
             }
         }
     }
+
+    /// Called when the app is exiting - save all preferences
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.save_preferences();
+    }
 }
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1280.0, 720.0])
-            .with_title("MTT File Manager"),
+            .with_title("MTT File Manager")
+            .with_app_id("mtt-file-manager"), // Enables window position/size persistence
+        persist_window: true, // Save window position and size between sessions
         ..Default::default()
     };
 
