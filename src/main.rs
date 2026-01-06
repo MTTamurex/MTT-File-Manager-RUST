@@ -504,7 +504,7 @@ impl ImageViewerApp {
             }
         });
 
-        app.load_folder(false);
+
         app
     }
 }
@@ -2546,8 +2546,10 @@ impl eframe::App for ImageViewerApp {
                 // FINAL INITIALIZATION: Agora que a UI estÃ¡ pronta, garante que a aba inicial estÃ¡ populada
                 if self.is_computer_view {
                     self.setup_computer_view();
-                    self.sync_to_tab();
+                } else {
+                    self.load_folder(false);
                 }
+                self.sync_to_tab();
             }
             
             // Keep the loop running fast during startup
