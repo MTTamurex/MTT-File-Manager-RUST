@@ -2890,6 +2890,33 @@ impl eframe::App for ImageViewerApp {
                                                 .shrink_to_fit(),
                                         );
                                     });
+                                    
+                                    // Botão de recarregar thumbnail
+                                    ui.horizontal(|ui| {
+                                        ui.add_space(ui.available_width() / 2.0 - 50.0);
+                                        if ui.button("🔄 Recarregar").on_hover_text("Força re-extração do thumbnail (bypassa cache do Windows)").clicked() {
+                                            // 1. Remove do cache SQLite
+                                            self.disk_cache.remove_cache_for_path(&file.path);
+                                            
+                                            // 2. Remove do cache RAM (texture_cache)
+                                            self.cache_manager.texture_cache.pop(&file.path);
+                                            
+                                            // 3. Remove do loading_set para permitir re-carregamento
+                                            self.cache_manager.loading_set.remove(&file.path);
+                                            
+                                            // 4. Dispara re-extração normal via worker pool
+                                            // O worker já tenta múltiplas abordagens, incluindo Shell API
+                                            let _ = self.thumbnail_req_sender.send((file.path.clone(), self.generation));
+                                            
+                                            // Notifica o usuário
+                                            self.notifications.push(
+                                                mtt_file_manager::application::AppNotification::info(
+                                                    "Recarregando thumbnail...".to_string(),
+                                                ),
+                                            );
+                                        }
+                                    });
+                                    
                                     ui.separator();
                                 } else {
                                     // Pasta ou Drive ou Arquivo sem Thumbnail

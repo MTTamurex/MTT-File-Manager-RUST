@@ -135,6 +135,72 @@ pub fn get_folder_preview(
 }
 
 
+/// Forces extraction of a new thumbnail, bypassing the Windows thumbnail cache.
+///
+/// Uses IThumbnailCache::GetThumbnail with WTS_FORCEEXTRACTION flag.
+/// This is useful when the cached thumbnail is corrupted or shows an icon instead of content.
+///
+/// # Safety
+/// Uses COM interfaces (IShellItem, IThumbnailCache, ISharedBitmap).
+/// All COM objects are properly released.
+pub fn force_extract_thumbnail(
+    path: &Path,
+) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
+    use windows::Win32::UI::Shell::{
+        IThumbnailCache, ISharedBitmap, LocalThumbnailCache,
+        WTS_FORCEEXTRACTION, WTS_SCALETOREQUESTEDSIZE, WTS_CACHEFLAGS,
+    };
+    
+    unsafe {
+        // SAFETY: path_wide is valid for the duration of this call
+        let path_wide: Vec<u16> = path
+            .to_string_lossy()
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+
+        // Create IShellItem for the file
+        let shell_item: IShellItem =
+            SHCreateItemFromParsingName(PCWSTR(path_wide.as_ptr()), None)?;
+
+        // Create IThumbnailCache instance
+        let thumbnail_cache: IThumbnailCache = 
+            CoCreateInstance(&LocalThumbnailCache, None, CLSCTX_INPROC_SERVER)?;
+
+        // Request thumbnail with FORCE EXTRACTION (ignores cache)
+        // WTS_FORCEEXTRACTION = 0x8 - Forces extraction even if cached
+        // WTS_SCALETOREQUESTEDSIZE = 0x100 - Scales to requested size
+        let flags = WTS_FORCEEXTRACTION | WTS_SCALETOREQUESTEDSIZE;
+        let requested_size: u32 = 512; // Good balance for preview panel
+        
+        let mut shared_bitmap: Option<ISharedBitmap> = None;
+        let mut _cache_flags: WTS_CACHEFLAGS = WTS_CACHEFLAGS::default();
+        let mut _thumbnail_id = windows::Win32::UI::Shell::WTS_THUMBNAILID::default();
+        
+        thumbnail_cache.GetThumbnail(
+            &shell_item,
+            requested_size,
+            flags,
+            Some(&mut shared_bitmap),
+            Some(&mut _cache_flags),
+            Some(&mut _thumbnail_id),
+        )?;
+
+        let shared_bitmap = shared_bitmap.ok_or("Failed to get shared bitmap")?;
+        
+        // Get HBITMAP from ISharedBitmap
+        let hbitmap = shared_bitmap.GetSharedBitmap()?;
+        
+        // Convert to RGBA
+        let result = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
+        
+        // Note: We don't DeleteObject(hbitmap) here because ISharedBitmap owns it
+        // and will release it when dropped
+        
+        Ok(result)
+    }
+}
+
 /// Extracts the native Windows icon for a file extension.
 ///
 /// Uses FILE_ATTRIBUTE_NORMAL + SHGFI_USEFILEATTRIBUTES to get the default icon for the type.
