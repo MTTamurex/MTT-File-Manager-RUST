@@ -152,7 +152,7 @@ fn resize_to_max_1024(rgba_data: &[u8], width: u32, height: u32) -> (Vec<u8>, u3
     (rgba_data.to_vec(), width, height)
 }
 
-/// The 3-Step Hybrid Pipeline
+/// The 4-Step Hybrid Pipeline
 fn generate_thumbnail_hybrid(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
     // Stage 1: image crate (Fast Path)
     if let Some(result) = try_image_crate_extraction(path) {
@@ -164,8 +164,14 @@ fn generate_thumbnail_hybrid(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
         return Some(result);
     }
 
-    // Stage 3: Shell API (Universal/Video Fallback)
-    extract_windows_thumbnail_shell(path).ok()
+    // Stage 3: Shell API (Universal/Video)
+    if let Ok(result) = extract_windows_thumbnail_shell(path) {
+        return Some(result);
+    }
+
+    // Stage 4: IThumbnailCache with WTS_FORCEEXTRACTION (bypassa cache do Windows)
+    // Útil quando o cache do Windows retornou um ícone em vez do thumbnail real
+    crate::infrastructure::windows::icons::force_extract_thumbnail(path).ok()
 }
 
 fn try_image_crate_extraction(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
@@ -254,7 +260,8 @@ fn extract_windows_thumbnail_shell(
         core::PCWSTR,
         Win32::Graphics::Gdi::{DeleteObject, HBITMAP},
         Win32::UI::Shell::{
-            IShellItem, IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_RESIZETOFIT,
+            IShellItem, IShellItemImageFactory, SHCreateItemFromParsingName, 
+            SIIGBF_RESIZETOFIT, SIIGBF_THUMBNAILONLY,
         },
     };
 
@@ -309,7 +316,12 @@ fn extract_windows_thumbnail_shell(
             cx: size_px,
             cy: size_px,
         };
-        let hbitmap: HBITMAP = image_factory.GetImage(size, SIIGBF_RESIZETOFIT)?;
+        
+        // Para vídeos: usa THUMBNAILONLY para FALHAR se só tiver ícone
+        // Isso permite que Stage 4 (force extraction) seja acionado
+        // Para outros arquivos: usa RESIZETOFIT que aceita ícones
+        let flags = if is_video { SIIGBF_THUMBNAILONLY } else { SIIGBF_RESIZETOFIT };
+        let hbitmap: HBITMAP = image_factory.GetImage(size, flags)?;
 
         let (rgba_data, width, height) = hbitmap_to_rgba(hbitmap)?;
         let _ = DeleteObject(hbitmap);
