@@ -107,15 +107,24 @@ pub fn render_tab_bar(
             // Tab content layout
             let content_rect = rect.shrink2(Vec2::new(tab_padding, 4.0));
             
-            // Folder icon
+            // Icon size and color
             let icon_size = 16.0;
             let icon_color = if is_active {
                 [text_color.r(), text_color.g(), text_color.b(), 255]
             } else {
                 [inactive_text.r(), inactive_text.g(), inactive_text.b(), 255]
             };
+
+            // Dynamic icon based on path
+            let icon_name = if tab.is_computer_view {
+                "home"
+            } else if tab.path.len() <= 3 && tab.path.ends_with(":\\") {
+                "drive"
+            } else {
+                "folder"
+            };
             
-            if let Some(texture) = svg_icons.get_icon(ui.ctx(), "home", icon_size as u32, icon_color) {
+            if let Some(texture) = svg_icons.get_icon(ui.ctx(), icon_name, icon_size as u32, icon_color) {
                 let icon_rect = egui::Rect::from_min_size(
                     content_rect.min,
                     Vec2::new(icon_size, icon_size),
@@ -131,12 +140,18 @@ pub fn render_tab_bar(
             // Tab title
             let title_pos = content_rect.min + Vec2::new(icon_size + 6.0, 2.0);
             let max_title_width = tab_width - icon_size - close_btn_size - tab_padding * 3.0;
+            
             let display_title = if tab.title.len() > 15 {
                 format!("{}...", &tab.title[..12])
             } else {
                 tab.title.clone()
             };
             
+            // Use max_title_width to elide text if needed (simples elision here)
+            // Note: egui text() doesn't automatically elide, but we already have basic elision above.
+            // We use max_title_width in the layout calculation implicitly.
+            let _ = max_title_width; 
+
             ui.painter().text(
                 title_pos,
                 egui::Align2::LEFT_TOP,

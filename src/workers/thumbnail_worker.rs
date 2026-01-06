@@ -167,14 +167,26 @@ fn generate_thumbnail_hybrid(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
     // Stage 3: Shell API (Universal/Video)
     match extract_windows_thumbnail_shell(path) {
         Ok(result) => return Some(result),
-        Err(e) => eprintln!("[Thumbnail] Stage 3 failed for {:?}: {}", path.file_name(), e),
+        Err(e) => {
+            let err_str = e.to_string();
+            // Don't log "File Not Found" errors as they are expected for recently deleted files
+            if !err_str.contains("0x80070002") {
+                eprintln!("[Thumbnail] Stage 3 failed for {:?}: {}", path.file_name(), e);
+            }
+        }
     }
 
     // Stage 4: IThumbnailCache with WTS_FORCEEXTRACTION (bypassa cache do Windows)
     // Útil quando o cache do Windows retornou um ícone em vez do thumbnail real
     match crate::infrastructure::windows::icons::force_extract_thumbnail(path) {
         Ok(result) => return Some(result),
-        Err(e) => eprintln!("[Thumbnail] Stage 4 (force) failed for {:?}: {}", path.file_name(), e),
+        Err(e) => {
+            let err_str = e.to_string();
+            // Don't log "File Not Found" errors as they are expected for recently deleted files
+            if !err_str.contains("0x80070002") {
+                eprintln!("[Thumbnail] Stage 4 (force) failed for {:?}: {}", path.file_name(), e);
+            }
+        }
     }
     
     None
