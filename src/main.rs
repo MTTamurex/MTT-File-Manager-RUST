@@ -1172,6 +1172,10 @@ impl ImageViewerApp {
             if path == "Este Computador" {
                 // Invalida preview da pasta que estávamos
                 self.cache_manager.invalidate_folder_preview(&previous_path);
+                
+                // SYNC TAB STATE
+                self.tab_manager.active_mut().navigate_to("Este Computador");
+                
                 self.setup_computer_view();
             } else {
                 let new_path = std::path::PathBuf::from(&path);
@@ -1181,7 +1185,8 @@ impl ImageViewerApp {
                     self.cache_manager.invalidate_folder_preview(&previous_path);
                 }
                 
-                self.current_path = path;
+                self.current_path = path.clone();
+                self.tab_manager.active_mut().navigate_to(&path);
                 self.path_input = self.current_path.clone();
                 self.is_computer_view = false;
                 self.watch_current_folder(); // Atualiza o watcher
@@ -1201,6 +1206,10 @@ impl ImageViewerApp {
 
             if path == "Este Computador" {
                 self.cache_manager.invalidate_folder_preview(&previous_path);
+                
+                // SYNC TAB STATE
+                self.tab_manager.active_mut().navigate_to("Este Computador");
+                
                 self.setup_computer_view();
             } else {
                 let new_path = std::path::PathBuf::from(&path);
@@ -1210,7 +1219,8 @@ impl ImageViewerApp {
                     self.cache_manager.invalidate_folder_preview(&previous_path);
                 }
                 
-                self.current_path = path;
+                self.current_path = path.clone();
+                self.tab_manager.active_mut().navigate_to(&path);
                 self.path_input = self.current_path.clone();
                 self.is_computer_view = false;
                 self.watch_current_folder(); // Atualiza o watcher
@@ -1248,6 +1258,9 @@ impl ImageViewerApp {
         self.current_path = "Este Computador".to_string();
         self.is_computer_view = true;
         self.path_input = "Este Computador".to_string();
+
+        // ALWAYS reload drives to ensure fresh data
+        let _ = self.reload_drive_list();
 
         // Populate items with drives
         use mtt_file_manager::domain::file_entry::DriveInfo;
