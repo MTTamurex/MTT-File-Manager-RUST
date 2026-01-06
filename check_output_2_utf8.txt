@@ -1,0 +1,131 @@
+﻿cargo :     Checking mtt-file-manager v0.1.0 
+(C:\MTT File Manager)
+At line:1 char:1
++ cargo check --release > check_output_2.txt 
+2>&1
++ 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (  
+      Checking mt...T File Manager):String) [  
+  ], RemoteException
+    + FullyQualifiedErrorId : NativeCommandErr 
+   or
+ 
+warning: unused import: 
+`Win32::Graphics::Gdi::*`
+ --> 
+src\infrastructure\windows\native_menu.rs:8:40
+  |
+8 |     Win32::UI::WindowsAndMessaging::*, 
+Win32::Graphics::Gdi::*,
+  |                                        
+^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of 
+`#[warn(unused)]`) on by default
+
+warning: unused import: `std::path::PathBuf`
+ --> src\ui\context_menu.rs:5:5
+  |
+5 | use std::path::PathBuf;
+  |     ^^^^^^^^^^^^^^^^^^
+
+error[E0277]: `ContextMenuItem` doesn't 
+implement `std::fmt::Debug`
+  --> src\application\context_menu.rs:29:5
+   |
+20 | #[derive(Clone, Debug)]
+   |                 ----- in this derive 
+macro expansion
+...
+29 |     pub items: Vec<ContextMenuItem>,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ 
+unsatisfied trait bound
+   |
+help: the trait `std::fmt::Debug` is not 
+implemented for `ContextMenuItem`
+  --> src\application\context_menu.rs:10:1
+   |
+10 | pub struct ContextMenuItem {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: add `#[derive(Debug)]` to 
+`ContextMenuItem` or manually `impl 
+std::fmt::Debug for ContextMenuItem`
+   = help: the trait `std::fmt::Debug` is 
+implemented for `std::vec::Vec<T, A>`
+
+error[E0308]: mismatched types
+  --> 
+src\infrastructure\windows\native_menu.rs:97:73
+   |
+97 |     let icon_rgba = if 
+!info.hbmpItem.0.is_null() && info.hbmpItem.0 
+!= HBMMENU_CALLBACK.0 as isize {
+   |                                           
+           ---------------    
+^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `*mut 
+c_void`, found `isize`
+   |                                           
+           |
+   |                                           
+           expected because this is `*mut 
+c_void`
+   |
+   = note: expected raw pointer `*mut c_void`
+                     found type `isize`
+
+error[E0277]: the trait bound `TextureHandle: 
+Into<SizedTexture>` is not satisfied
+  --> src\ui\context_menu.rs:93:17
+   |
+92 |             egui::Button::image_and_text(
+   |             ---------------------------- 
+required by a bound introduced by this call
+93 |                 tex.clone(),
+   |                 ^^^^^^^^^^^ the trait 
+`Into<SizedTexture>` is not implemented for 
+`TextureHandle`
+   |
+   = note: required for `TextureHandle` to 
+implement `Into<SizedTexture>`
+   = note: required for `ImageSource<'_>` to 
+implement `From<TextureHandle>`
+   = note: 3 redundant requirements hidden
+   = note: required for `TextureHandle` to 
+implement `Into<eframe::egui::Image<'_>>`
+note: required by a bound in 
+`eframe::egui::Button::<'a>::image_and_text`
+  --> C:\Users\mtamu\.cargo\registry\src\index.
+crates.io-1949cf8c6b5b557f\egui-0.31.1\src\widg
+ets\button.rs:56:39
+   |
+56 |     pub fn image_and_text(image: impl 
+Into<Image<'a>>, text: impl Into<WidgetText>) 
+-> Self {
+   |                                       
+^^^^^^^^^^^^^^^ required by this bound in 
+`Button::<'a>::image_and_text`
+help: consider borrowing here
+   |
+93 |                 &tex.clone(),
+   |                 +
+
+warning: unused variable: `ops`
+  --> src\ui\context_menu.rs:23:5
+   |
+23 |     ops: &mut dyn ContextMenuOperations,
+   |     ^^^ help: if this is intentional, 
+prefix it with an underscore: `_ops`
+   |
+   = note: `#[warn(unused_variables)]` (part 
+of `#[warn(unused)]`) on by default
+
+Some errors have detailed explanations: E0277, 
+E0308.
+For more information about an error, try 
+`rustc --explain E0277`.
+warning: `mtt-file-manager` (lib) generated 3 
+warnings
+error: could not compile `mtt-file-manager` 
+(lib) due to 3 previous errors; 3 warnings 
+emitted

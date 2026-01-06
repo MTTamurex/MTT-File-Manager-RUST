@@ -10,6 +10,7 @@ pub mod formatting;
 pub mod icons;
 pub mod media_foundation;
 pub mod metadata;
+pub mod native_menu;
 pub mod shell_operations;
 pub mod system_info;
 
@@ -23,5 +24,6 @@ pub use formatting::*;
 pub use icons::*;
 pub use media_foundation::*;
 pub use metadata::*;
+pub use native_menu::*;
 pub use shell_operations::*;
 pub use system_info::*;
