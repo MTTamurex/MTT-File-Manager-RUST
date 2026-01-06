@@ -1,0 +1,110 @@
+﻿cargo :    Compiling mtt-file-manager v0.1.0 
+(C:\MTT File Manager)
+At line:1 char:1
++ cargo build --release 2>&1 | Out-File 
+-FilePath build_tab_errors.txt  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (  
+     Compiling mt...T File Manager):String) [  
+  ], RemoteException
+    + FullyQualifiedErrorId : NativeCommandErr 
+   or
+ 
+warning: use of deprecated type alias 
+`eframe::egui::Rounding`: Renamed to 
+CornerRadius
+ --> src\ui\tab_bar.rs:9:35
+  |
+9 | use eframe::egui::{self, Color32, 
+Rounding, Stroke, Vec2};
+  |                                   ^^^^^^^^
+  |
+  = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated type alias 
+`eframe::egui::Rounding`: Renamed to 
+CornerRadius
+  --> src\ui\tab_bar.rs:98:28
+   |
+98 |             let rounding = Rounding {
+   |                            ^^^^^^^^
+
+warning: use of deprecated type alias 
+`eframe::egui::Rounding`: Renamed to 
+CornerRadius
+   --> src\ui\tab_bar.rs:115:21
+    |
+115 |                     Rounding::ZERO,
+    |                     ^^^^^^^^
+
+warning: use of deprecated type alias 
+`eframe::egui::Rounding`: Renamed to 
+CornerRadius
+   --> src\ui\tab_bar.rs:207:13
+    |
+207 |             Rounding {
+    |             ^^^^^^^^
+
+error[E0308]: mismatched types
+  --> src\ui\tab_bar.rs:99:21
+   |
+99 |                 nw: 8.0,
+   |                     ^^^ expected `u8`, 
+found floating-point number
+
+error[E0308]: mismatched types
+   --> src\ui\tab_bar.rs:100:21
+    |
+100 |                 ne: 8.0,
+    |                     ^^^ expected `u8`, 
+found floating-point number
+
+error[E0308]: mismatched types
+   --> src\ui\tab_bar.rs:101:21
+    |
+101 |                 sw: 0.0,
+    |                     ^^^ expected `u8`, 
+found floating-point number
+
+error[E0308]: mismatched types
+   --> src\ui\tab_bar.rs:102:21
+    |
+102 |                 se: 0.0,
+    |                     ^^^ expected `u8`, 
+found floating-point number
+
+error[E0308]: mismatched types
+   --> src\ui\tab_bar.rs:208:21
+    |
+208 |                 nw: 8.0,
+    |                     ^^^ expected `u8`, 
+found floating-point number
+
+error[E0308]: mismatched types
+   --> src\ui\tab_bar.rs:209:21
+    |
+209 |                 ne: 8.0,
+    |                     ^^^ expected `u8`, 
+found floating-point number
+
+error[E0308]: mismatched types
+   --> src\ui\tab_bar.rs:210:21
+    |
+210 |                 sw: 0.0,
+    |                     ^^^ expected `u8`, 
+found floating-point number
+
+error[E0308]: mismatched types
+   --> src\ui\tab_bar.rs:211:21
+    |
+211 |                 se: 0.0,
+    |                     ^^^ expected `u8`, 
+found floating-point number
+
+For more information about this error, try 
+`rustc --explain E0308`.
+warning: `mtt-file-manager` (lib) generated 4 
+warnings
+error: could not compile `mtt-file-manager` 
+(lib) due to 8 previous errors; 4 warnings 
+emitted
