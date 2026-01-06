@@ -169,7 +169,12 @@ impl CacheManager {
         self.folder_preview_loading.remove(path);
     }
 
-
+    /// Invalidates a folder preview (removes from cache and loading set)
+    /// Called when folder contents change to trigger reload
+    pub fn invalidate_folder_preview(&mut self, path: &PathBuf) {
+        self.folder_preview_cache.pop(path);
+        self.folder_preview_loading.remove(path);
+    }
     /// Estimates VRAM usage in bytes
     pub fn estimate_vram_usage(&self) -> usize {
         let texture_usage: usize = self

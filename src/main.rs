@@ -1557,6 +1557,7 @@ impl ImageViewerApp {
         }
 
         // 2. CHECK DE AUTO-REFRESH (WATCHER)
+        let current_path_buf = PathBuf::from(&self.current_path);
         while let Ok(event) = self.fs_event_receiver.try_recv() {
             match event {
                 Ok(evt) => {
@@ -1567,6 +1568,22 @@ impl ImageViewerApp {
                             self.disk_cache.remove_cache_for_path(path);
                         }
                     }
+                    
+                    // Detecta Modify em subpastas para invalidar folder previews
+                    if matches!(evt.kind, notify::EventKind::Modify(_)) {
+                        for path in &evt.paths {
+                            // Verifica se é uma subpasta direta da pasta atual
+                            if let Some(parent) = path.parent() {
+                                if parent == current_path_buf {
+                                    // É uma subpasta direta - invalida o preview
+                                    eprintln!("[FS] Subfolder modified, invalidating preview: {:?}", path.file_name());
+                                    let path_buf = path.to_path_buf();
+                                    self.cache_manager.invalidate_folder_preview(&path_buf);
+                                }
+                            }
+                        }
+                    }
+                    
                     self.pending_auto_reload = true;
                 }
                 Err(e) => eprintln!("Erro de watch: {:?}", e),
