@@ -878,6 +878,7 @@ impl ImageViewerApp {
         // 1. Limpeza de Estado (UI Thread)
         if force_refresh {
             self.cache_manager.texture_cache.clear();
+            self.cache_manager.folder_preview_cache.clear();
         }
 
         self.items = Arc::new(Vec::new()); // Novo Arc vazio (antigo é dropped automaticamente)
@@ -1112,12 +1113,24 @@ impl ImageViewerApp {
     /// Volta no histórico (sem adicionar ao histórico)
     fn go_back(&mut self) {
         if self.can_go_back() {
+            // Guarda o path atual antes de voltar (para invalidar o preview)
+            let previous_path = std::path::PathBuf::from(&self.current_path);
+            
             self.history_index -= 1;
             let path = self.navigation_history[self.history_index].clone();
 
             if path == "Este Computador" {
+                // Invalida preview da pasta que estávamos
+                self.cache_manager.invalidate_folder_preview(&previous_path);
                 self.setup_computer_view();
             } else {
+                let new_path = std::path::PathBuf::from(&path);
+                
+                // Se estávamos em uma subpasta do destino, invalida o preview dessa subpasta
+                if previous_path.starts_with(&new_path) && previous_path != new_path {
+                    self.cache_manager.invalidate_folder_preview(&previous_path);
+                }
+                
                 self.current_path = path;
                 self.path_input = self.current_path.clone();
                 self.is_computer_view = false;
@@ -1130,12 +1143,23 @@ impl ImageViewerApp {
     /// Avança no histórico
     fn go_forward(&mut self) {
         if self.history_index + 1 < self.navigation_history.len() {
+            // Guarda o path atual antes de avançar (para invalidar o preview)
+            let previous_path = std::path::PathBuf::from(&self.current_path);
+            
             self.history_index += 1;
             let path = self.navigation_history[self.history_index].clone();
 
             if path == "Este Computador" {
+                self.cache_manager.invalidate_folder_preview(&previous_path);
                 self.setup_computer_view();
             } else {
+                let new_path = std::path::PathBuf::from(&path);
+                
+                // Se o destino é pai do path atual, invalida o preview do path atual
+                if previous_path.starts_with(&new_path) && previous_path != new_path {
+                    self.cache_manager.invalidate_folder_preview(&previous_path);
+                }
+                
                 self.current_path = path;
                 self.path_input = self.current_path.clone();
                 self.is_computer_view = false;
@@ -1557,28 +1581,59 @@ impl ImageViewerApp {
         }
 
         // 2. CHECK DE AUTO-REFRESH (WATCHER)
-        let current_path_buf = PathBuf::from(&self.current_path);
+        // 2. CHECK DE AUTO-REFRESH (WATCHER)
+        fn normalize_for_match(p: &Path) -> String {
+            let s = p.to_string_lossy().to_string().to_lowercase();
+            if s.starts_with(r"\\?\") {
+                s[4..].to_string()
+            } else {
+                s
+            }
+        }
+
+        fn clean_path(p: &Path) -> PathBuf {
+            let s = p.to_string_lossy().to_string();
+            if s.starts_with(r"\\?\") {
+                PathBuf::from(&s[4..])
+            } else {
+                p.to_path_buf()
+            }
+        }
+
+        let current_path_norm = normalize_for_match(Path::new(&self.current_path));
+        
         while let Ok(event) = self.fs_event_receiver.try_recv() {
             match event {
                 Ok(evt) => {
                     // Detecta eventos de Remove para limpar cache automaticamente
                     if matches!(evt.kind, notify::EventKind::Remove(_)) {
                         for path in &evt.paths {
-                            eprintln!("[FS] Detected removal of: {:?}", path);
-                            self.disk_cache.remove_cache_for_path(path);
+                            let cleaned = clean_path(path);
+                            eprintln!("[FS] Detected removal, clearing disk cache for: {:?}", cleaned);
+                            self.disk_cache.remove_cache_for_path(&cleaned);
                         }
                     }
                     
-                    // Detecta Modify em subpastas para invalidar folder previews
-                    if matches!(evt.kind, notify::EventKind::Modify(_)) {
-                        for path in &evt.paths {
-                            // Verifica se é uma subpasta direta da pasta atual
-                            if let Some(parent) = path.parent() {
-                                if parent == current_path_buf {
-                                    // É uma subpasta direta - invalida o preview
-                                    eprintln!("[FS] Subfolder modified, invalidating preview: {:?}", path.file_name());
-                                    let path_buf = path.to_path_buf();
-                                    self.cache_manager.invalidate_folder_preview(&path_buf);
+                    // Detecta Modify para invalidar folder previews
+                    for path in &evt.paths {
+                        // 1. Se o path alterado é uma subpasta direta da pasta atual
+                        if let Some(parent) = path.parent() {
+                            let parent_norm = normalize_for_match(parent);
+                            if parent_norm == current_path_norm {
+                                let cleaned = clean_path(path);
+                                eprintln!("[FS] Direct subfolder modified: {:?}", cleaned.file_name());
+                                self.cache_manager.invalidate_folder_preview(&cleaned);
+                            }
+                        }
+                        
+                        // 2. Se o path alterado é UM ARQUIVO dentro de uma subpasta da pasta atual
+                        if let Some(parent) = path.parent() {
+                            if let Some(grandparent) = parent.parent() {
+                                let grandparent_norm = normalize_for_match(grandparent);
+                                if grandparent_norm == current_path_norm {
+                                    let cleaned_parent = clean_path(parent);
+                                    eprintln!("[FS] File in subfolder modified, invalidating: {:?}", cleaned_parent.file_name());
+                                    self.cache_manager.invalidate_folder_preview(&cleaned_parent);
                                 }
                             }
                         }
