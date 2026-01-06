@@ -2916,31 +2916,88 @@ impl eframe::App for ImageViewerApp {
                                                 );
                                             }
                                         } else if file.is_dir {
-                                            // PASTA (Usa o mesmo visual da grade)
+                                            // PASTA (Usa preview nativo do Windows - sandwich effect)
                                             let folder_rect = ui
                                                 .allocate_exact_size(
-                                                    egui::vec2(icon_size, icon_size * 0.85),
+                                                    egui::vec2(icon_size, icon_size),
                                                     egui::Sense::hover(),
                                                 )
                                                 .0;
 
-                                            // Trigger scan se necessário
-                                            if file.folder_cover.is_none()
-                                                && !self.scanned_folders.contains(&file.path)
-                                            {
-                                                self.scanned_folders.insert(file.path.clone());
-                                                self.request_folder_scan(file.path.clone());
-                                            }
+                                            // Tenta usar o preview nativo (Shell Sandwich)
+                                            let native_preview = self.cache_manager.folder_preview_cache.get(&file.path).cloned();
+                                            let is_loading = self.cache_manager.folder_preview_loading.contains(&file.path);
 
-                                            let preview_tex =
-                                                file.folder_cover.as_ref().and_then(|p| {
-                                                    self.cache_manager.texture_cache.get(p)
-                                                });
-                                            mtt_file_manager::draw_custom_folder(
-                                                ui.painter(),
-                                                folder_rect,
-                                                preview_tex,
-                                            );
+                                            if let Some(tex) = native_preview {
+                                                // Preview nativo carregado - desenha mantendo aspect ratio
+                                                let tex_size = tex.size_vec2();
+                                                let aspect = tex_size.x / tex_size.y;
+                                                
+                                                let (draw_w, draw_h) = if aspect > 1.0 {
+                                                    (folder_rect.width(), folder_rect.width() / aspect)
+                                                } else {
+                                                    (folder_rect.height() * aspect, folder_rect.height())
+                                                };
+                                                
+                                                let offset_x = (folder_rect.width() - draw_w) / 2.0;
+                                                let offset_y = (folder_rect.height() - draw_h) / 2.0;
+                                                let draw_rect = egui::Rect::from_min_size(
+                                                    folder_rect.min + egui::vec2(offset_x, offset_y),
+                                                    egui::vec2(draw_w, draw_h),
+                                                );
+                                                
+                                                ui.painter().image(
+                                                    tex.id(),
+                                                    draw_rect,
+                                                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                                    egui::Color32::WHITE,
+                                                );
+                                            } else if is_loading {
+                                                // Spinner enquanto carrega
+                                                ui.painter().rect_filled(
+                                                    folder_rect,
+                                                    4.0,
+                                                    egui::Color32::from_gray(245),
+                                                );
+                                                
+                                                let spinner_size = folder_rect.width().min(folder_rect.height()) * 0.3;
+                                                let center = folder_rect.center();
+                                                let radius = spinner_size / 2.0 - 2.0;
+                                                let time = ui.input(|i| i.time);
+                                                let angle = (time * 3.0) as f32;
+                                                let stroke = egui::Stroke::new(3.0, egui::Color32::from_rgb(100, 150, 220));
+                                                
+                                                let points: Vec<egui::Pos2> = (0..20)
+                                                    .map(|i| {
+                                                        let t = i as f32 / 19.0 * std::f32::consts::PI * 1.5;
+                                                        let a = angle + t;
+                                                        egui::pos2(center.x + radius * a.cos(), center.y + radius * a.sin())
+                                                    })
+                                                    .collect();
+                                                
+                                                ui.painter().add(egui::Shape::line(points, stroke));
+                                                ui.ctx().request_repaint();
+                                            } else {
+                                                // Não tem preview e não está carregando - dispara carregamento
+                                                if self.cache_manager.folder_preview_loading.len() < 30 {
+                                                    self.cache_manager.folder_preview_loading.insert(file.path.clone());
+                                                    let _ = self.folder_preview_sender.send(file.path.clone());
+                                                }
+                                                
+                                                // Mostra placeholder enquanto inicia
+                                                ui.painter().rect_filled(
+                                                    folder_rect,
+                                                    4.0,
+                                                    egui::Color32::from_gray(240),
+                                                );
+                                                ui.painter().text(
+                                                    folder_rect.center(),
+                                                    egui::Align2::CENTER_CENTER,
+                                                    "📁",
+                                                    egui::FontId::proportional(icon_size * 0.4),
+                                                    egui::Color32::from_gray(180),
+                                                );
+                                            }
                                         } else {
                                             // ARQUIVO SEM THUMBNAIL
                                             if let Some(icon) =
