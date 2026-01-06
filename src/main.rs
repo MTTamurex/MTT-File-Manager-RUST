@@ -1145,8 +1145,11 @@ impl ImageViewerApp {
         self.history_index = self.navigation_history.len() - 1;
 
         self.current_path = normalized_path.clone();
-        self.path_input = normalized_path;
+        self.path_input = normalized_path.clone();
         self.is_computer_view = false;
+
+        // SYNC TAB STATE
+        self.tab_manager.active_mut().navigate_to(&normalized_path);
 
         // Limpa o context_menu.target_path para garantir sincronia com a pasta atual
         self.context_menu.target_path = None;
@@ -1230,6 +1233,9 @@ impl ImageViewerApp {
         // Adiciona ao histórico
         self.navigation_history.push("Este Computador".to_string());
         self.history_index = self.navigation_history.len() - 1;
+
+        // SYNC TAB STATE
+        self.tab_manager.active_mut().navigate_to("Este Computador");
 
         let _ = self.reload_drive_list();
         self.last_drive_refresh = Instant::now();
