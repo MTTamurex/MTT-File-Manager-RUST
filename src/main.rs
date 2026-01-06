@@ -491,6 +491,10 @@ impl ImageViewerApp {
         // Inicia monitoramento inicial
         app.watch_current_folder();
 
+        // Inicializa a visÃ£o inicial (Este Computador) e salva na aba
+        app.setup_computer_view();
+        app.sync_to_tab();
+
         // Garbage Collector em background (não bloqueia a UI)
         // Delay de 3s para permitir que a UI carregue primeiro
         let gc_cache = app.disk_cache.clone();
@@ -1149,7 +1153,7 @@ impl ImageViewerApp {
         self.is_computer_view = false;
 
         // SYNC TAB STATE
-        self.tab_manager.active_mut().navigate_to(&normalized_path);
+        self.sync_to_tab();
 
         // Limpa o context_menu.target_path para garantir sincronia com a pasta atual
         self.context_menu.target_path = None;
@@ -1174,7 +1178,7 @@ impl ImageViewerApp {
                 self.cache_manager.invalidate_folder_preview(&previous_path);
                 
                 // SYNC TAB STATE
-                self.tab_manager.active_mut().navigate_to("Este Computador");
+                self.sync_to_tab();
                 
                 self.setup_computer_view();
             } else {
@@ -1186,7 +1190,7 @@ impl ImageViewerApp {
                 }
                 
                 self.current_path = path.clone();
-                self.tab_manager.active_mut().navigate_to(&path);
+                self.sync_to_tab();
                 self.path_input = self.current_path.clone();
                 self.is_computer_view = false;
                 self.watch_current_folder(); // Atualiza o watcher
@@ -1208,7 +1212,7 @@ impl ImageViewerApp {
                 self.cache_manager.invalidate_folder_preview(&previous_path);
                 
                 // SYNC TAB STATE
-                self.tab_manager.active_mut().navigate_to("Este Computador");
+                self.sync_to_tab();
                 
                 self.setup_computer_view();
             } else {
@@ -1220,7 +1224,7 @@ impl ImageViewerApp {
                 }
                 
                 self.current_path = path.clone();
-                self.tab_manager.active_mut().navigate_to(&path);
+                self.sync_to_tab();
                 self.path_input = self.current_path.clone();
                 self.is_computer_view = false;
                 self.watch_current_folder(); // Atualiza o watcher
@@ -1316,6 +1320,51 @@ impl ImageViewerApp {
         } else {
             self.load_folder(true);
         }
+    }
+
+    /// Sincroniza o estado atual do app para a aba ativa
+    fn sync_to_tab(&mut self) {
+        let active = self.tab_manager.active_mut();
+        active.path = self.current_path.clone();
+        active.path_input = self.path_input.clone();
+        active.is_computer_view = self.is_computer_view;
+        active.navigation_history = self.navigation_history.clone();
+        active.history_index = self.history_index;
+        active.items = self.items.clone();
+        active.all_items = self.all_items.clone();
+        active.selected_item = self.selected_item;
+        active.selected_file = self.selected_file.clone();
+        active.search_query = self.search_query.clone();
+        active.scroll_to_selected = self.scroll_to_selected;
+
+        // No Windows, Path::new("Este Computador").file_name() Ã© None
+        if active.is_computer_view {
+            active.title = "Este Computador".to_string();
+        } else {
+            active.title = Path::new(&active.path)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| active.path.clone());
+        }
+    }
+
+    /// Sincroniza o estado da aba ativa para o app
+    fn sync_from_tab(&mut self) {
+        // Clonamos o estado da aba para evitar problemas de borrow checker ao atualizar self
+        let active = self.tab_manager.active().clone();
+        self.current_path = active.path;
+        self.path_input = active.path_input;
+        self.is_computer_view = active.is_computer_view;
+        self.navigation_history = active.navigation_history;
+        self.history_index = active.history_index;
+        self.items = active.items;
+        self.all_items = active.all_items;
+        self.selected_item = active.selected_item;
+        self.selected_file = active.selected_file;
+        self.search_query = active.search_query;
+        self.scroll_to_selected = active.scroll_to_selected;
+
+        self.watch_current_folder();
     }
 
     /// Sobe um nível (adiciona ao histórico)
@@ -2551,11 +2600,11 @@ impl eframe::App for ImageViewerApp {
                                     // TAB MANAGEMENT SHORTCUTS
                                     egui::Key::T => {
                                         // Ctrl+T = New tab
+                                        self.sync_to_tab();
                                         self.tab_manager.new_tab();
-                                        let tab = self.tab_manager.active();
-                                        self.current_path = tab.path.clone();
-                                        self.is_computer_view = tab.is_computer_view;
-                                        self.load_folder(false);
+                                        self.sync_from_tab();
+                                        self.setup_computer_view();
+                                        self.sync_to_tab();
                                     }
                                     egui::Key::W => {
                                         // Ctrl+W = Close current tab
@@ -2563,23 +2612,18 @@ impl eframe::App for ImageViewerApp {
                                             // Last tab - quit app
                                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                                         } else {
-                                            let tab = self.tab_manager.active();
-                                            self.current_path = tab.path.clone();
-                                            self.is_computer_view = tab.is_computer_view;
-                                            self.load_folder(false);
+                                            self.sync_from_tab();
                                         }
                                     }
                                     egui::Key::Tab => {
                                         // Ctrl+Tab = Next tab, Ctrl+Shift+Tab = Previous tab
+                                        self.sync_to_tab();
                                         if modifiers.shift {
                                             self.tab_manager.prev_tab();
                                         } else {
                                             self.tab_manager.next_tab();
                                         }
-                                        let tab = self.tab_manager.active();
-                                        self.current_path = tab.path.clone();
-                                        self.is_computer_view = tab.is_computer_view;
-                                        self.load_folder(false);
+                                        self.sync_from_tab();
                                     }
                                     _ => {}
                                 }
@@ -2686,30 +2730,22 @@ impl eframe::App for ImageViewerApp {
                 
                 match action {
                     TabBarAction::SwitchTab(idx) => {
+                        self.sync_to_tab();
                         self.tab_manager.switch_to(idx);
-                        // Sync app state with new active tab
-                        let tab = self.tab_manager.active();
-                        self.current_path = tab.path.clone();
-                        self.is_computer_view = tab.is_computer_view;
-                        self.load_folder(false);
+                        self.sync_from_tab();
                     }
                     TabBarAction::NewTab => {
+                        self.sync_to_tab();
                         self.tab_manager.new_tab();
-                        let tab = self.tab_manager.active();
-                        self.current_path = tab.path.clone();
-                        self.is_computer_view = tab.is_computer_view;
-                        self.load_folder(false);
+                        self.sync_from_tab();
+                        self.setup_computer_view(); // Popula os drives na nova aba
+                        self.sync_to_tab(); // Salva estado populado
                     }
                     TabBarAction::CloseTab(idx) => {
                         if self.tab_manager.close_tab(idx) {
-                            // Last tab closed - quit app
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                         } else {
-                            // Sync with new active tab
-                            let tab = self.tab_manager.active();
-                            self.current_path = tab.path.clone();
-                            self.is_computer_view = tab.is_computer_view;
-                            self.load_folder(false);
+                            self.sync_from_tab();
                         }
                     }
                     TabBarAction::CloseApp => {
