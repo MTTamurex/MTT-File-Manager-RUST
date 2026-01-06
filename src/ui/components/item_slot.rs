@@ -184,9 +184,9 @@ fn render_directory_slot<O: ItemSlotOperations>(
         }
     }
 
-    // GEOMETRIA
+    // GEOMETRIA - Aumentado para 0.85 para folder preview maior
     let available_h = ui.available_height();
-    let folder_w = ctx.thumbnail_size * 0.60;
+    let folder_w = ctx.thumbnail_size * 0.85;
     let folder_h = folder_w * 0.85;
     let text_height = 18.0;
     let content_h = folder_h + text_height;
@@ -204,22 +204,79 @@ fn render_directory_slot<O: ItemSlotOperations>(
     // === DESENHO DA PASTA ===
     // 1. Tenta usar o preview nativo (Shell Sandwich)
     let native_preview = ctx.folder_preview_cache.get(&item.path);
+    let is_loading = ctx.folder_preview_loading.contains(&item.path);
 
     if let Some(tex) = native_preview {
-        // Se temos o preview nativo, desenhamos ele ocupando todo o rect
+        // Se temos o preview nativo, desenha mantendo aspect ratio e centralizando
+        let tex_size = tex.size_vec2();
+        let aspect = tex_size.x / tex_size.y;
+        
+        // Calcula tamanho mantendo aspect ratio
+        let (draw_w, draw_h) = if aspect > 1.0 {
+            (folder_rect.width(), folder_rect.width() / aspect)
+        } else {
+            (folder_rect.height() * aspect, folder_rect.height())
+        };
+        
+        // Centraliza no folder_rect
+        let offset_x = (folder_rect.width() - draw_w) / 2.0;
+        let offset_y = (folder_rect.height() - draw_h) / 2.0;
+        let draw_rect = egui::Rect::from_min_size(
+            folder_rect.min + egui::vec2(offset_x, offset_y),
+            egui::vec2(draw_w, draw_h),
+        );
+        
         ui.painter().image(
             tex.id(),
-            folder_rect,
+            draw_rect,
             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
             egui::Color32::WHITE,
         );
+    } else if is_loading {
+        // LOADING SPINNER: Mostra spinner animado enquanto carrega
+        let spinner_size = folder_rect.width().min(folder_rect.height()) * 0.3;
+        let spinner_rect = egui::Rect::from_center_size(
+            folder_rect.center(),
+            egui::vec2(spinner_size, spinner_size),
+        );
+        
+        // Desenha fundo leve
+        ui.painter().rect_filled(
+            folder_rect,
+            4.0,
+            egui::Color32::from_gray(245),
+        );
+        
+        // Spinner animado usando tempo do UI
+        let time = ui.input(|i| i.time);
+        let angle = (time * 3.0) as f32; // 3 rotações por segundo
+        
+        // Desenha arco do spinner
+        let center = spinner_rect.center();
+        let radius = spinner_size / 2.0 - 2.0;
+        let stroke = egui::Stroke::new(3.0, egui::Color32::from_rgb(100, 150, 220));
+        
+        // Desenha um arco (semi-círculo rotativo)
+        let points: Vec<egui::Pos2> = (0..20)
+            .map(|i| {
+                let t = i as f32 / 19.0 * std::f32::consts::PI * 1.5; // 270 graus
+                let a = angle + t;
+                egui::pos2(
+                    center.x + radius * a.cos(),
+                    center.y + radius * a.sin(),
+                )
+            })
+            .collect();
+        
+        ui.painter().add(egui::Shape::line(points, stroke));
+        
+        // Força repaint para animação contínua
+        ui.ctx().request_repaint();
     } else {
-        // Se não tem preview nativo, verifica se precisa carregar
-        if !ctx.folder_preview_loading.contains(&item.path) {
-            ops.request_folder_preview_load(item.path.clone());
-        }
-
-        // Fallback: Desenha a pasta customizada (pode ter uma capa manual ou ser vazia)
+        // Se não tem preview e não está carregando, dispara o carregamento
+        ops.request_folder_preview_load(item.path.clone());
+        
+        // Fallback temporário: mostra pasta customizada enquanto não iniciou loading
         crate::ui::components::item_slot::draw_custom_folder(
             ui.painter(),
             folder_rect,
