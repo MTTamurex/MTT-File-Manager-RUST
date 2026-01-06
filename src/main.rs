@@ -491,10 +491,6 @@ impl ImageViewerApp {
         // Inicia monitoramento inicial
         app.watch_current_folder();
 
-        // Inicializa a visÃ£o inicial (Este Computador) e salva na aba
-        app.setup_computer_view();
-        app.sync_to_tab();
-
         // Garbage Collector em background (não bloqueia a UI)
         // Delay de 3s para permitir que a UI carregue primeiro
         let gc_cache = app.disk_cache.clone();
@@ -2546,6 +2542,12 @@ impl eframe::App for ImageViewerApp {
                 // Frame 5: Reveal the window
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+
+                // FINAL INITIALIZATION: Agora que a UI estÃ¡ pronta, garante que a aba inicial estÃ¡ populada
+                if self.is_computer_view {
+                    self.setup_computer_view();
+                    self.sync_to_tab();
+                }
             }
             
             // Keep the loop running fast during startup

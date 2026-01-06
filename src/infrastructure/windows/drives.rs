@@ -75,14 +75,20 @@ pub fn get_volume_label(drive_path: &str) -> String {
 /// Enumerates all drives with their labels.
 pub fn get_all_drives() -> Vec<(String, String)> {
     unsafe {
-        let mut buffer = vec![0u16; 256];
-        let len = GetLogicalDriveStringsW(Some(&mut buffer));
-
+        // First, get the required length
+        let len = GetLogicalDriveStringsW(None);
         if len == 0 {
             return Vec::new();
         }
 
-        String::from_utf16_lossy(&buffer[..len as usize])
+        let mut buffer = vec![0u16; len as usize];
+        let actual_len = GetLogicalDriveStringsW(Some(&mut buffer));
+
+        if actual_len == 0 {
+            return Vec::new();
+        }
+
+        String::from_utf16_lossy(&buffer[..actual_len as usize])
             .split('\0')
             .filter(|s| !s.is_empty())
             .map(|path| {
