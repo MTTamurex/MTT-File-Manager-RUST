@@ -165,13 +165,19 @@ fn generate_thumbnail_hybrid(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
     }
 
     // Stage 3: Shell API (Universal/Video)
-    if let Ok(result) = extract_windows_thumbnail_shell(path) {
-        return Some(result);
+    match extract_windows_thumbnail_shell(path) {
+        Ok(result) => return Some(result),
+        Err(e) => eprintln!("[Thumbnail] Stage 3 failed for {:?}: {}", path.file_name(), e),
     }
 
     // Stage 4: IThumbnailCache with WTS_FORCEEXTRACTION (bypassa cache do Windows)
     // Útil quando o cache do Windows retornou um ícone em vez do thumbnail real
-    crate::infrastructure::windows::icons::force_extract_thumbnail(path).ok()
+    match crate::infrastructure::windows::icons::force_extract_thumbnail(path) {
+        Ok(result) => return Some(result),
+        Err(e) => eprintln!("[Thumbnail] Stage 4 (force) failed for {:?}: {}", path.file_name(), e),
+    }
+    
+    None
 }
 
 fn try_image_crate_extraction(path: &Path) -> Option<(Vec<u8>, u32, u32)> {

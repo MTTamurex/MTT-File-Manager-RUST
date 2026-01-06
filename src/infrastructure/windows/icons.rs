@@ -151,6 +151,11 @@ pub fn force_extract_thumbnail(
         WTS_FORCEEXTRACTION, WTS_SCALETOREQUESTEDSIZE, WTS_CACHEFLAGS,
     };
     
+    // WTS_E_EXTRACTIONPENDING = 0x8004B205 - extraction is in progress (common for OneDrive)
+    const WTS_E_EXTRACTIONPENDING: i32 = 0x8004B205_u32 as i32;
+    const MAX_RETRIES: usize = 5;
+    const RETRY_DELAY_MS: u64 = 500;
+    
     unsafe {
         // SAFETY: path_wide is valid for the duration of this call
         let path_wide: Vec<u16> = path
@@ -173,33 +178,49 @@ pub fn force_extract_thumbnail(
         let flags = WTS_FORCEEXTRACTION | WTS_SCALETOREQUESTEDSIZE;
         let requested_size: u32 = 512; // Good balance for preview panel
         
-        let mut shared_bitmap: Option<ISharedBitmap> = None;
-        let mut _cache_flags: WTS_CACHEFLAGS = WTS_CACHEFLAGS::default();
-        let mut _thumbnail_id = windows::Win32::UI::Shell::WTS_THUMBNAILID::default();
+        // Retry loop for OneDrive/cloud files where extraction is async
+        for attempt in 0..MAX_RETRIES {
+            let mut shared_bitmap: Option<ISharedBitmap> = None;
+            let mut _cache_flags: WTS_CACHEFLAGS = WTS_CACHEFLAGS::default();
+            let mut _thumbnail_id = windows::Win32::UI::Shell::WTS_THUMBNAILID::default();
+            
+            let result = thumbnail_cache.GetThumbnail(
+                &shell_item,
+                requested_size,
+                flags,
+                Some(&mut shared_bitmap),
+                Some(&mut _cache_flags),
+                Some(&mut _thumbnail_id),
+            );
+            
+            match result {
+                Ok(()) => {
+                    if let Some(bitmap) = shared_bitmap {
+                        // Get HBITMAP from ISharedBitmap
+                        let hbitmap = bitmap.GetSharedBitmap()?;
+                        
+                        // Convert to RGBA
+                        let rgba_result = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
+                        return Ok(rgba_result);
+                    }
+                }
+                Err(e) => {
+                    let code = e.code().0;
+                    if code == WTS_E_EXTRACTIONPENDING && attempt < MAX_RETRIES - 1 {
+                        // Extraction in progress - wait and retry
+                        eprintln!("[Thumbnail] Extraction pending, retry {}/{}", attempt + 1, MAX_RETRIES);
+                        std::thread::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS));
+                        continue;
+                    }
+                    return Err(e.into());
+                }
+            }
+        }
         
-        thumbnail_cache.GetThumbnail(
-            &shell_item,
-            requested_size,
-            flags,
-            Some(&mut shared_bitmap),
-            Some(&mut _cache_flags),
-            Some(&mut _thumbnail_id),
-        )?;
-
-        let shared_bitmap = shared_bitmap.ok_or("Failed to get shared bitmap")?;
-        
-        // Get HBITMAP from ISharedBitmap
-        let hbitmap = shared_bitmap.GetSharedBitmap()?;
-        
-        // Convert to RGBA
-        let result = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
-        
-        // Note: We don't DeleteObject(hbitmap) here because ISharedBitmap owns it
-        // and will release it when dropped
-        
-        Ok(result)
+        Err("Max retries exceeded for thumbnail extraction".into())
     }
 }
+
 
 /// Extracts the native Windows icon for a file extension.
 ///
