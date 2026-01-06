@@ -309,7 +309,8 @@ sequenceDiagram
 - Scroll: 60 FPS constante
 
 
-### 3️⃣ Carregamento de Thumbnails (Fluxo de 4 Estágios)
+
+### 3️⃣ Carregamento de Thumbnails (Pipeline Híbrido de 4 Estágios)
 
 ```rust
 render_item_slot()
@@ -318,15 +319,56 @@ render_item_slot()
   ├── 3. SQLite (Persistente): ThumbnailDiskCache::get(path, modified)
   │   └── Query SQL: data FROM thumbnails WHERE id=? AND modified_at=?
   │   └── Se OK: decodifica WebP -> RGBA -> envia para UI
-  └── 4. Extração (Fallback): Se não encontrado
-      ├── IShellItemImageFactory::GetImage(256x256)
-      ├── Processamento: Resize(max 200px) + Strip metadata
-      ├── Compressão: WebP (Lossless/Lossy 60)
-      ├── SQLite: INSERT OR REPLACE INTO thumbnails
-      └── Envia para UI -> ctx.load_texture() -> insere no LRU
+  └── 4. Extração (Pipeline Híbrido): Se não encontrado no cache
+      ├── Stage 1: image crate (Fast Path para imagens comuns)
+      ├── Stage 2: WIC (Fallback para JPEGs CMYK/HDR)
+      ├── Stage 3: IShellItemImageFactory (Videos/Universal)
+      │   └── SIIGBF_THUMBNAILONLY para vídeos (falha se só ícone)
+      │   └── SIIGBF_RESIZETOFIT para outros arquivos
+      ├── Stage 4: IThumbnailCache + WTS_FORCEEXTRACTION
+      │   └── Bypassa cache do Windows (útil para OneDrive)
+      │   └── Retry com 5 tentativas + 500ms delay para WTS_E_EXTRACTIONPENDING
+      └── Fallback: Placeholder cinza se todas as etapas falharem
 ```
 
+#### Botão de Recarregar Thumbnail (Painel de Detalhes)
+
+Para arquivos com thumbnails "quebrados" (mostrando ícone em vez de preview):
+
+```rust
+// Fluxo do botão "🔄 Recarregar" no painel de detalhes:
+1. disk_cache.remove_cache_for_path(&file.path)  // Remove do SQLite
+2. cache_manager.texture_cache.pop(&file.path)   // Remove do LRU RAM
+3. cache_manager.loading_set.remove(&file.path)  // Permite re-carregamento
+4. thumbnail_req_sender.send((path, generation)) // Dispara re-extração
+```
+
+#### Tratamento de OneDrive (WTS_E_EXTRACTIONPENDING)
+
+Arquivos em pastas sincronizadas do OneDrive frequentemente retornam erro `0x8004B205` (extração pendente):
+
+```rust
+// O Stage 4 implementa retry automático:
+const MAX_RETRIES: usize = 5;
+const RETRY_DELAY_MS: u64 = 500;  // Total: ~2.5s de espera
+
+for attempt in 0..MAX_RETRIES {
+    match thumbnail_cache.GetThumbnail(...) {
+        Ok(bitmap) => return Ok(convert_to_rgba(bitmap)),
+        Err(e) if e.code() == 0x8004B205 => {
+            eprintln!("[Thumbnail] Extraction pending, retry {}/{}", attempt+1, MAX_RETRIES);
+            thread::sleep(Duration::from_millis(RETRY_DELAY_MS));
+            continue;  // Tenta novamente
+        }
+        Err(e) => return Err(e),
+    }
+}
+```
+
+> **Nota:** Se a extração ainda retornar "pending" após 5 tentativas, o Windows está gerando o thumbnail em background. Sair e voltar à pasta geralmente resolve, pois o thumbnail já estará pronto.
+
 **Benefício:** Consolidação em arquivo único (`thumbnails.db`), eliminando fragmentação e reduzindo espaço em disco em >80%.
+
 
 ### 4️⃣ Gerenciamento de Memória e Ciclo de Vida
  

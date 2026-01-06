@@ -438,7 +438,7 @@ fn extract_windows_thumbnail(path: &PathBuf)
 
 ## 🔍 Auditoria de Código Unsafe
 
-**Total de blocos `unsafe` no projeto**: 16
+**Total de blocos `unsafe` no projeto**: 17
 
 ### Justificativa de Cada Uso:
 
@@ -460,6 +460,7 @@ fn extract_windows_thumbnail(path: &PathBuf)
 | `CoInitializeEx/CoUninitialize` | COM initialization | Baixo - padrão documentado |
 | `metadata.rs::read_video_metadata()` | `SHGetPropertyStoreFromParsingName` + `PROPVARIANT` leitura | Médio - requer `PropVariantClear` e COM guard |
 | `get_folder_preview()` | FFI para `IShellItemImageFactory` | Médio - I/O do Shell |
+| `force_extract_thumbnail()` | FFI para `IThumbnailCache` + `WTS_FORCEEXTRACTION` | Médio - retry loop com delay para OneDrive |
 | `GetAsyncKeyState` (Ctrl+V detection) | FFI para detectar teclas no nível de hardware | Baixo - read-only, bypass de consumo de eventos do Windows |
 
 **Mitigações**:
