@@ -64,7 +64,7 @@
 - **Reactive Repaints**: Workers agora disparam `ctx.request_repaint()` imediatamente ao completar tarefas, garantindo fluidez sem depender de inputs do usuário.
 - **CreationContext Initialization**: Refatorada inicialização para captar o contexto egui nativamente.
 - **Native Rename (F2)**: Implementado renomeação via `SHFileOperationW` com suporte a Undo (Ctrl+Z).
-- **Manual & Auto Refresh**: Sistema de recarga via F5 e monitoramento automático via `notify` crate com debounce de 500ms.
+- **Manual & Auto Refresh ✅**: Sistema de recarga via F5 e monitoramento automático via `notify` crate com detecção inteligente de mudanças em subpastas e invalidação de cache em tempo real.
 - **Delete to Recycle Bin**: Implementado via `SHFileOperationW` (`FO_DELETE`) com suporte nativo do SO.
 - **Create New Folder**: Fluxo instantâneo com auto-rename e resolução de conflitos de nome.
 - **Clipboard Operations (Ctrl+C/X/V)**: Copy, Cut e Paste via `Event::Copy/Cut/Paste` do egui e `SHFileOperationW` (`FO_COPY`/`FO_MOVE`).
@@ -72,6 +72,7 @@
 - **Persistent Sort & Folder Position ✅**: Preferências de ordenação e posição de pastas salvas em SQLite.
 - **Proactive Folder Previews ✅**: Escaneamento de capas de pastas no modo lista e persistência em SQLite.
 - **Native Folder Previews (“Sandwich Effect”) ✅**: Implementado via `IShellItemImageFactory` com sistema de carregamento assíncrono e cache dedicado.
+- **Folder Preview Auto-Refresh ✅**: Invalidação de cache em tempo real baseada em eventos de filesystem (subpastas) com normalização de paths para evitar bugs de prefixo UNC.
 
 ### Otimização do Garbage Collector (2026-01-02) ✅ CONCLUÍDO
 - **Problema Crítico Resolvido**: GC bloqueava database lock durante verificações de arquivos (I/O lento), travando navegação.
