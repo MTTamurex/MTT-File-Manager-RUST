@@ -151,8 +151,6 @@ pub fn force_extract_thumbnail(
         WTS_FORCEEXTRACTION, WTS_SCALETOREQUESTEDSIZE, WTS_CACHEFLAGS,
     };
     
-    // WTS_E_EXTRACTIONPENDING = 0x8004B205 - extraction is in progress (common for OneDrive)
-    const WTS_E_EXTRACTIONPENDING: i32 = 0x8004B205_u32 as i32;
     const MAX_RETRIES: usize = 5;
     const RETRY_DELAY_MS: u64 = 500;
     
@@ -205,10 +203,11 @@ pub fn force_extract_thumbnail(
                     }
                 }
                 Err(e) => {
-                    let code = e.code().0;
-                    if code == WTS_E_EXTRACTIONPENDING && attempt < MAX_RETRIES - 1 {
-                        // Extraction in progress - wait and retry
-                        eprintln!("[Thumbnail] Extraction pending, retry {}/{}", attempt + 1, MAX_RETRIES);
+                    // Compare as u32 to handle error codes correctly
+                    let code = e.code().0 as u32;
+                    if code == 0x8004B205 && attempt < MAX_RETRIES - 1 {
+                        // WTS_E_EXTRACTIONPENDING - extraction in progress (OneDrive)
+                        eprintln!("[Thumbnail] Extraction pending (0x{:08X}), retry {}/{}", code, attempt + 1, MAX_RETRIES);
                         std::thread::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS));
                         continue;
                     }
