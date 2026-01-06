@@ -214,6 +214,9 @@ struct ImageViewerApp {
     saved_window_width: f32,
     saved_window_height: f32,
     saved_is_maximized: bool,
+    
+    // TAB SYSTEM
+    tab_manager: mtt_file_manager::tabs::TabManager,
 }
 
 impl ImageViewerApp {
@@ -480,6 +483,9 @@ impl ImageViewerApp {
 
             // SVG ICON MANAGER
             svg_icon_manager: SvgIconManager::new(PathBuf::from("assets/icons")),
+            
+            // TAB SYSTEM
+            tab_manager: mtt_file_manager::tabs::TabManager::new(),
         };
 
         // Inicia monitoramento inicial
@@ -2523,6 +2529,39 @@ impl eframe::App for ImageViewerApp {
                                     egui::Key::C => do_copy = true,
                                     egui::Key::X => do_cut = true,
                                     egui::Key::V => do_paste = true,
+                                    // TAB MANAGEMENT SHORTCUTS
+                                    egui::Key::T => {
+                                        // Ctrl+T = New tab
+                                        self.tab_manager.new_tab();
+                                        let tab = self.tab_manager.active();
+                                        self.current_path = tab.path.clone();
+                                        self.is_computer_view = tab.is_computer_view;
+                                        self.load_folder(false);
+                                    }
+                                    egui::Key::W => {
+                                        // Ctrl+W = Close current tab
+                                        if self.tab_manager.close_active_tab() {
+                                            // Last tab - quit app
+                                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                                        } else {
+                                            let tab = self.tab_manager.active();
+                                            self.current_path = tab.path.clone();
+                                            self.is_computer_view = tab.is_computer_view;
+                                            self.load_folder(false);
+                                        }
+                                    }
+                                    egui::Key::Tab => {
+                                        // Ctrl+Tab = Next tab, Ctrl+Shift+Tab = Previous tab
+                                        if modifiers.shift {
+                                            self.tab_manager.prev_tab();
+                                        } else {
+                                            self.tab_manager.next_tab();
+                                        }
+                                        let tab = self.tab_manager.active();
+                                        self.current_path = tab.path.clone();
+                                        self.is_computer_view = tab.is_computer_view;
+                                        self.load_folder(false);
+                                    }
                                     _ => {}
                                 }
                             }
@@ -2618,6 +2657,48 @@ impl eframe::App for ImageViewerApp {
 
         // Windows 11 style sidebar
         // Left Sidebar moved to after TopPanels for correct layout
+
+        // TAB BAR (above navigation bar)
+        egui::TopBottomPanel::top("tab_bar_panel")
+            .exact_height(36.0)
+            .show(ctx, |ui| {
+                use mtt_file_manager::ui::tab_bar::{render_tab_bar, TabBarAction};
+                let action = render_tab_bar(ui, &self.tab_manager, &mut self.svg_icon_manager);
+                
+                match action {
+                    TabBarAction::SwitchTab(idx) => {
+                        self.tab_manager.switch_to(idx);
+                        // Sync app state with new active tab
+                        let tab = self.tab_manager.active();
+                        self.current_path = tab.path.clone();
+                        self.is_computer_view = tab.is_computer_view;
+                        self.load_folder(false);
+                    }
+                    TabBarAction::NewTab => {
+                        self.tab_manager.new_tab();
+                        let tab = self.tab_manager.active();
+                        self.current_path = tab.path.clone();
+                        self.is_computer_view = tab.is_computer_view;
+                        self.load_folder(false);
+                    }
+                    TabBarAction::CloseTab(idx) => {
+                        if self.tab_manager.close_tab(idx) {
+                            // Last tab closed - quit app
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        } else {
+                            // Sync with new active tab
+                            let tab = self.tab_manager.active();
+                            self.current_path = tab.path.clone();
+                            self.is_computer_view = tab.is_computer_view;
+                            self.load_folder(false);
+                        }
+                    }
+                    TabBarAction::CloseApp => {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    TabBarAction::None => {}
+                }
+            });
 
         // Top navigation bar
         egui::TopBottomPanel::top("nav_bar").show(ctx, |ui| {
