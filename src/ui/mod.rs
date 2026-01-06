@@ -9,4 +9,5 @@ pub mod icon_loader;
 pub mod navigation;
 pub mod sidebar;
 pub mod status_bar;
+pub mod svg_icons;
 pub mod views;

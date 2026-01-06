@@ -39,6 +39,7 @@ use mtt_file_manager::infrastructure::windows as windows_infra;
 // use mtt_file_manager::ui::status_bar; // Not used directly - imported in render_status_bar call
 use mtt_file_manager::ui::context_menu::render_context_menu;
 use mtt_file_manager::ui::icon_loader::IconLoader;
+use mtt_file_manager::ui::svg_icons::SvgIconManager;
 
 use windows::{
     core::*,
@@ -196,6 +197,9 @@ struct ImageViewerApp {
 
     // SCROLL TO SELECTED (para navegação por teclado)
     scroll_to_selected: bool,
+
+    // SVG ICON MANAGER
+    svg_icon_manager: SvgIconManager,
 
     // Debounce for paste key (keys_down can fire multiple times)
     paste_key_debounce: bool,
@@ -473,6 +477,9 @@ impl ImageViewerApp {
             metadata_res_receiver: meta_res_rx,
             metadata_cache: LruCache::new(NonZeroUsize::new(512).unwrap()),
             metadata_loading: HashSet::new(),
+
+            // SVG ICON MANAGER
+            svg_icon_manager: SvgIconManager::new(PathBuf::from("assets/icons")),
         };
 
         // Inicia monitoramento inicial
@@ -498,13 +505,19 @@ impl ImageViewerApp {
 
 impl ImageViewerApp {
     // Helper para botÃµes de Ã­cone da Toolbar
-    fn icon_button(&self, ui: &mut egui::Ui, icon: &str, tooltip: &str) -> egui::Response {
-        let rich_text = egui::RichText::new(icon)
-            .family(egui::FontFamily::Name("icons".into()))
-            .size(22.0);
+    fn icon_button(&mut self, ui: &mut egui::Ui, icon: &str, tooltip: &str) -> egui::Response {
+        let icon_name = match icon {
+            ICON_ARROW_LEFT => "nav_back",
+            ICON_ARROW_RIGHT => "nav_forward",
+            ICON_ARROW_UP => "nav_up",
+            ICON_REFRESH => "refresh",
+            ICON_HOME => "home",
+            ICON_SEARCH => "search",
+            ICON_FOLDER_ADD => "folder_new",
+            _ => return ui.button(icon).on_hover_text(tooltip),
+        };
 
-        let btn = egui::Button::new(rich_text).frame(false);
-        ui.add(btn).on_hover_text(tooltip)
+        mtt_file_manager::ui::svg_icons::icon_button(ui, &mut self.svg_icon_manager, icon_name, 20.0, tooltip)
     }
 
     fn delete_with_shell(&mut self) {
@@ -691,26 +704,54 @@ impl ImageViewerApp {
 
     // Helper para botÃµes "Toggle" (que ficam acesos se selecionados)
     fn toggle_icon_button(
-        &self,
+        &mut self,
         ui: &mut egui::Ui,
         icon: &str,
         active: bool,
         tooltip: &str,
     ) -> egui::Response {
-        let color = if active {
-            egui::Color32::from_rgb(0, 120, 215)
-        } else {
-            ui.visuals().text_color()
+        let icon_name = match icon {
+            ICON_GRID => "view_grid",
+            ICON_LIST => "view_list",
+            ICON_DETAILS => "info",
+            _ => {
+                let color = if active {
+                    egui::Color32::from_rgb(0, 120, 215)
+                } else {
+                    ui.visuals().text_color()
+                };
+                let rich_text = egui::RichText::new(icon)
+                    .family(egui::FontFamily::Name("icons".into()))
+                    .size(22.0)
+                    .color(color);
+                return ui.add(egui::Button::new(rich_text).frame(false)).on_hover_text(tooltip);
+            }
         };
 
-        let rich_text = egui::RichText::new(icon)
-            .family(egui::FontFamily::Name("icons".into()))
-            .size(22.0)
-            .color(color);
+        let size = 20.0;
+        let color = if active {
+            [0, 120, 215, 255] // Blue for active
+        } else if ui.visuals().dark_mode {
+            [220, 220, 220, 255]
+        } else {
+            [60, 60, 60, 255]
+        };
 
-        // Removemos o .fill(bg) para retirar o "glow" azul
-        let btn = egui::Button::new(rich_text).frame(false);
-        ui.add(btn).on_hover_text(tooltip)
+        if let Some(texture) = self.svg_icon_manager.get_icon(ui.ctx(), icon_name, size as u32, color) {
+            let resp = ui.add(
+                egui::ImageButton::new(egui::load::SizedTexture::new(
+                    texture.id(),
+                    egui::vec2(size, size),
+                ))
+                .frame(false)
+            );
+            if !tooltip.is_empty() {
+                resp.clone().on_hover_text(tooltip);
+            }
+            resp
+        } else {
+            ui.add(egui::Button::new("?").min_size(egui::vec2(size, size)))
+        }
     }
 
     /// Filtra itens baseado na query de busca e reaplica ordenação
@@ -2611,18 +2652,8 @@ impl eframe::App for ImageViewerApp {
 
                 ui.separator();
 
-                // Botão de Nova Pasta mais visível (agora sem fundo para combinar)
-                let btn_text = egui::RichText::new(format!("+ {}", ICON_FOLDER_ADD))
-                    .family(egui::FontFamily::Name("icons".into()))
-                    .size(22.0);
-
-                let btn = egui::Button::new(btn_text).frame(false);
-                if ui
-                    .add(btn)
-                    .on_hover_text("Criar Nova Pasta (Ctrl+Shift+N)")
-                    .clicked()
-                    && !is_renaming
-                {
+                // Botão de Nova Pasta
+                if self.icon_button(ui, ICON_FOLDER_ADD, "Criar Nova Pasta (Ctrl+Shift+N)").clicked() && !is_renaming {
                     self.create_new_folder();
                 }
 
@@ -2742,10 +2773,11 @@ impl eframe::App for ImageViewerApp {
                     if search_response.changed() {
                         self.filter_items();
                     }
-                    ui.label(
-                        egui::RichText::new(ICON_SEARCH)
-                            .family(egui::FontFamily::Name("icons".into()))
-                            .size(16.0),
+                    mtt_file_manager::ui::svg_icons::icon_image(
+                        ui,
+                        &mut self.svg_icon_manager,
+                        "search",
+                        16.0,
                     );
 
                     ui.separator();
@@ -2800,6 +2832,7 @@ impl eframe::App for ImageViewerApp {
                                     ui.spacing_mut().item_spacing.x = 2.0;
 
                                     if self.current_path == "Este Computador" {
+                                        mtt_file_manager::ui::svg_icons::icon_image(ui, &mut self.svg_icon_manager, "home", 16.0);
                                         ui.label(egui::RichText::new("Este Computador").size(13.0));
                                     } else {
                                         let path = Path::new(&self.current_path);
@@ -2963,10 +2996,9 @@ impl eframe::App for ImageViewerApp {
                                         );
                                     });
                                     
-                                    // Botão de recarregar thumbnail
-                                    ui.horizontal(|ui| {
-                                        ui.add_space(ui.available_width() / 2.0 - 50.0);
-                                        if ui.button("🔄 Recarregar").on_hover_text("Força re-extração do thumbnail (bypassa cache do Windows)").clicked() {
+                                    // Botão de recarregar thumbnail (centralizado)
+                                    ui.vertical_centered(|ui| {
+                                        if self.icon_button(ui, ICON_REFRESH, "Recarregar Thumbnail").clicked() {
                                             // 1. Remove do cache SQLite
                                             self.disk_cache.remove_cache_for_path(&file.path);
                                             

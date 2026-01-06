@@ -1,0 +1,126 @@
+﻿cargo :     Checking usvg v0.44.0
+At line:1 char:1
++ cargo check 2>&1 | Out-File -FilePath 
+build_errors_2.txt -Encoding ut ...
++ ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (  
+      Checking usvg v0.44.0:String) [], Remot  
+  eException
+    + FullyQualifiedErrorId : NativeCommandErr 
+   or
+ 
+    Checking resvg v0.44.0
+    Checking mtt-file-manager v0.1.0 (C:\MTT 
+File Manager)
+warning: constant `DROPEFFECT_NONE` is never 
+used
+  --> 
+src\infrastructure\windows_clipboard.rs:11:7
+   |
+11 | const DROPEFFECT_NONE: u32 = 0;
+   |       ^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of 
+`#[warn(unused)]`) on by default
+
+warning: constant `CF_PREFERREDDROPEFFECT` is 
+never used
+  --> 
+src\infrastructure\windows_clipboard.rs:16:7
+   |
+16 | const CF_PREFERREDDROPEFFECT: u32 = 0; // 
+Will be registered dynamically
+   |       ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `icon_config` is never read
+  --> src\ui\cache.rs:51:5
+   |
+38 | pub struct CacheManager {
+   |            ------------ field in this 
+struct
+...
+51 |     icon_config: IconCacheConfig,
+   |     ^^^^^^^^^^^
+
+warning: `mtt-file-manager` (lib) generated 3 
+warnings
+error[E0433]: failed to resolve: unresolved 
+import
+   --> src\main.rs:520:16
+    |
+520 |         
+crate::ui::svg_icons::icon_button(ui, &mut 
+self.svg_icon_manager, icon_name, 20.0, 
+tooltip)
+    |                ^^ unresolved import
+    |
+help: a similar path exists
+    |
+520 |         crate::mtt_file_manager::ui::svg_
+icons::icon_button(ui, &mut 
+self.svg_icon_manager, icon_name, 20.0, 
+tooltip)
+    |                ++++++++++++++++++
+help: consider importing this module
+    |
+  1 + use mtt_file_manager::ui::svg_icons;
+    |
+help: if you import `svg_icons`, refer to it 
+directly
+    |
+520 -         
+crate::ui::svg_icons::icon_button(ui, &mut 
+self.svg_icon_manager, icon_name, 20.0, 
+tooltip)
+520 +         svg_icons::icon_button(ui, &mut 
+self.svg_icon_manager, icon_name, 20.0, 
+tooltip)
+    |
+
+warning: use of deprecated method 
+`eframe::egui::ScrollArea::id_source`: Renamed 
+id_salt
+    --> src\main.rs:2968:26
+     |
+2968 |                         
+.id_source("preview_scroll")
+     |                          ^^^^^^^^^
+     |
+     = note: `#[warn(deprecated)]` on by 
+default
+
+warning: unnecessary `unsafe` block
+    --> src\main.rs:1003:39
+     |
+ 967 |             unsafe {
+     |             ------ because it's nested 
+under this `unsafe` block
+...
+1003 |                                 match 
+unsafe {
+     |                                       
+^^^^^^ unnecessary `unsafe` block
+     |
+     = note: `#[warn(unused_unsafe)]` (part of 
+`#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src\main.rs:3171:37
+     |
+3171 | ...                   let mut 
+add_detail =
+     |                           ----^^^^^^^^^^
+     |                           |
+     |                           help: remove 
+this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of 
+`#[warn(unused)]`) on by default
+
+For more information about this error, try 
+`rustc --explain E0433`.
+warning: `mtt-file-manager` (bin 
+"mtt-file-manager") generated 3 warnings
+error: could not compile `mtt-file-manager` 
+(bin "mtt-file-manager") due to 1 previous 
+error; 3 warnings emitted
