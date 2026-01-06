@@ -1498,26 +1498,6 @@ impl ImageViewerApp {
         }
     }
 
-    /// Agenda abertura do menu de contexto nativo para após a UI ser renderizada.
-    /// Isso permite que a UI repinte a seleção visual antes do menu aparecer.
-    /// Retorna true em caso de tentativa.
-    fn try_show_shell_context_menu(&mut self, ui: &egui::Ui, path: &Path) -> bool {
-        if self.native_hwnd.is_some() {
-            let mut cursor = POINT::default();
-            unsafe {
-                let _ = GetCursorPos(&mut cursor);
-            }
-            // Store pending menu request with 1 frame delay
-            // This ensures the UI is fully rendered before the menu appears
-            self.context_menu.pending_native_menu =
-                Some((path.to_path_buf(), cursor.x, cursor.y, 1));
-            // Request immediate repaint so the selection is visible
-            ui.ctx().request_repaint();
-            true
-        } else {
-            false
-        }
-    }
 
     /// Retorna icone para um arquivo, carregando sob demanda.
     /// Executaveis (.exe, .lnk, .ico) sao cacheados por path completo.
@@ -2093,27 +2073,15 @@ impl ImageViewerApp {
                     self.selected_file = Some(item.clone());
                     self.context_menu.target_path = Some(item_path.clone());
 
-                    // Step 2: Store pending menu data and mark that we need to draw first
-                    if self.native_hwnd.is_some() {
-                        let mut cursor = POINT::default();
-                        unsafe {
-                            let _ = GetCursorPos(&mut cursor);
-                        }
-                        // Menu will open after the selection is drawn (needs_draw_before_menu flag)
-                        self.context_menu.pending_native_menu =
-                            Some((item_path.clone(), cursor.x, cursor.y, 0));
-                        self.context_menu.needs_draw_before_menu = true;
-                        // Request repaint to ensure selection is drawn before menu
-                        ui.ctx().request_repaint();
-                    } else {
-                        // Fallback: use egui context menu
-                        self.context_menu.open(
-                            ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO),
-                            Some(idx),
-                            Some(item_path),
-                            false,
-                        );
-                    }
+                    // Usar o novo sistema de menu estilizado
+                    let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
+                    self.populate_context_menu(ui.ctx(), &item_path, false, Some(idx));
+                    self.context_menu.open(
+                        pointer_pos,
+                        Some(idx),
+                        Some(item_path),
+                        false,
+                    );
                 }
             }
             Some(list_view::ListViewAction::SortChange(mode)) => {
@@ -2314,27 +2282,15 @@ impl ImageViewerApp {
                     self.selected_file = Some(item.clone());
                     self.context_menu.target_path = Some(item_path.clone());
 
-                    // Step 2: Store pending menu data and mark that we need to draw first
-                    if self.native_hwnd.is_some() {
-                        let mut cursor = POINT::default();
-                        unsafe {
-                            let _ = GetCursorPos(&mut cursor);
-                        }
-                        // Menu will open after the selection is drawn (needs_draw_before_menu flag)
-                        self.context_menu.pending_native_menu =
-                            Some((item_path.clone(), cursor.x, cursor.y, 0));
-                        self.context_menu.needs_draw_before_menu = true;
-                        // Request repaint to ensure selection is drawn before menu
-                        ui.ctx().request_repaint();
-                    } else {
-                        // Fallback: use egui context menu
-                        self.context_menu.open(
-                            ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO),
-                            Some(idx),
-                            Some(item_path),
-                            false,
-                        );
-                    }
+                    // Usar o novo sistema de menu estilizado
+                    let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
+                    self.populate_context_menu(ui.ctx(), &item_path, false, Some(idx));
+                    self.context_menu.open(
+                        pointer_pos,
+                        Some(idx),
+                        Some(item_path),
+                        false,
+                    );
                 }
             }
             _ => {}
@@ -2515,6 +2471,133 @@ impl mtt_file_manager::ui::context_menu::ContextMenuOperations for ImageViewerAp
 
     fn delete_with_shell(&mut self) {
         self.delete_with_shell();
+    }
+}
+
+impl ImageViewerApp {
+    fn populate_context_menu(&mut self, ctx: &egui::Context, path: &std::path::Path, is_empty_area: bool, _item_index: Option<usize>) {
+        use mtt_file_manager::application::context_menu::ContextMenuItem;
+        use mtt_file_manager::infrastructure::windows::native_menu::{extract_shell_menu, ShellMenuItem, is_known_verb};
+        
+        let mut items = Vec::new();
+        
+        // ========== PRIMARY ITEMS (Header bar) - matching Files ==========
+        // These appear as icon buttons in the header
+        items.push(ContextMenuItem::primary(-10, "Recortar").with_command("cut").with_shortcut("Ctrl+X"));
+        items.push(ContextMenuItem::primary(-11, "Copiar").with_command("copy").with_shortcut("Ctrl+C"));
+        
+        let can_paste = self.clipboard_file.is_some();
+        items.push(ContextMenuItem::primary(-12, "Colar").with_command("paste").with_shortcut("Ctrl+V").enabled(can_paste));
+        
+        if !is_empty_area {
+            items.push(ContextMenuItem::primary(-13, "Renomear").with_command("rename").with_shortcut("F2"));
+            items.push(ContextMenuItem::primary(-14, "Excluir").with_command("delete").with_shortcut("Del"));
+            items.push(ContextMenuItem::primary(-15, "Propriedades").with_command("properties").with_shortcut("Alt+Enter"));
+        }
+        
+        // ========== SECONDARY ITEMS (App-specific) ==========
+        if is_empty_area {
+            items.push(ContextMenuItem::separator());
+            items.push(ContextMenuItem::new(-1, "Criar pasta").with_shortcut("Ctrl+Shift+N"));
+            items.push(ContextMenuItem::separator());
+        } else {
+            items.push(ContextMenuItem::separator());
+            items.push(ContextMenuItem::new(-20, "Abrir"));
+            items.push(ContextMenuItem::new(-21, "Abrir em nova guia"));
+            items.push(ContextMenuItem::new(-22, "Abrir em nova janela").with_shortcut("Alt+Ctrl+Enter"));
+            items.push(ContextMenuItem::new(-23, "Abrir em novo painel"));
+            items.push(ContextMenuItem::separator());
+            items.push(ContextMenuItem::new(-24, "Copiar caminho do item").with_shortcut("Ctrl+Shift+C"));
+            items.push(ContextMenuItem::new(-25, "Criar pasta com seleção"));
+            items.push(ContextMenuItem::new(-26, "Criar atalho"));
+            items.push(ContextMenuItem::new(-27, "Fixar na Barra Lateral"));
+            items.push(ContextMenuItem::separator());
+        }
+        
+        // ========== SHELL ITEMS (Third-party extensions) ==========
+        if let Some(hwnd) = self.native_hwnd {
+            if let Ok(shell_ctx) = extract_shell_menu(hwnd, path) {
+                // Convert Shell items to UI items, filtering known verbs
+                fn convert(ui_ctx: &egui::Context, shell_item: &ShellMenuItem) -> Option<ContextMenuItem> {
+                    // Filter items we handle internally
+                    if let Some(ref verb) = shell_item.command_string {
+                        if is_known_verb(verb) {
+                            return None;
+                        }
+                    }
+                    
+                    // Resize icon to 16x16 if needed
+                    let icon = shell_item.icon_rgba.as_ref().map(|(rgba, w, h)| {
+                        let (final_rgba, fw, fh) = if *w != 16 || *h != 16 {
+                            // Simple resize - in production would use proper resampling
+                            (rgba.clone(), *w, *h)
+                        } else {
+                            (rgba.clone(), *w, *h)
+                        };
+                        let color_image = egui::ColorImage::from_rgba_unmultiplied([fw as usize, fh as usize], &final_rgba);
+                        ui_ctx.load_texture(
+                            format!("menu_icon_{}", shell_item.id),
+                            color_image,
+                            Default::default()
+                        )
+                    });
+                    
+                    let sub_items: Vec<ContextMenuItem> = shell_item.sub_items.iter()
+                        .filter_map(|s| convert(ui_ctx, s))
+                        .collect();
+                    
+                    Some(ContextMenuItem {
+                        id: shell_item.id as i32,
+                        text: shell_item.text.clone(),
+                        icon,
+                        sub_items,
+                        is_separator: shell_item.is_separator,
+                        is_enabled: shell_item.is_enabled,
+                        is_primary: false,
+                        keyboard_shortcut: None,
+                        command_string: shell_item.command_string.clone(),
+                        show_in_overflow: false,
+                    })
+                }
+                
+                let shell_items: Vec<ContextMenuItem> = shell_ctx.items.iter()
+                    .filter_map(|s| convert(ctx, s))
+                    .collect();
+                
+                // Separate shell items: common ones visible, rest go to overflow
+                let mut visible_shell_items = Vec::new();
+                let mut overflow_shell_items = Vec::new();
+                
+                for s_item in shell_items {
+                    // Keep only items with submenus (like 7-Zip, WinRAR) visible, rest to overflow
+                    if !s_item.sub_items.is_empty() {
+                        visible_shell_items.push(s_item);
+                    } else if !s_item.is_separator {
+                        overflow_shell_items.push(s_item);
+                    }
+                }
+                
+                // Add visible shell items (with submenus like 7-Zip)
+                if !visible_shell_items.is_empty() {
+                    items.push(ContextMenuItem::separator());
+                    for s_item in visible_shell_items {
+                        items.push(s_item);
+                    }
+                }
+                
+                // Add overflow submenu with remaining shell items
+                if !overflow_shell_items.is_empty() {
+                    items.push(ContextMenuItem::separator());
+                    items.push(ContextMenuItem::new(-99, "Mostrar mais opções")
+                        .with_subitems(overflow_shell_items));
+                }
+                
+                // Keep the native context alive for command invocation
+                self.context_menu.native_context = Some(std::rc::Rc::new(shell_ctx));
+            }
+        }
+        
+        self.context_menu.items = items;
     }
 }
 
@@ -3550,9 +3633,7 @@ impl eframe::App for ImageViewerApp {
 
             // Detecção de clique direito na área vazia (fora dos itens)
             // Só abre menu de contexto se não houver item selecionado pelo clique direito
-            // e não houver menu pendente (já definido pelo grid_view ou list_view)
             if !self.context_menu.is_open
-                && self.context_menu.pending_native_menu.is_none()
                 && ui.input(|i| i.pointer.secondary_clicked())
             {
                 // Verifica se o clique foi em um item
@@ -3598,37 +3679,63 @@ impl eframe::App for ImageViewerApp {
                     }
                 }
 
-                // Se não clicou em item, abre menu de contexto nativo para a pasta atual (área vazia)
+                // Se não clicou em item, abre menu de contexto estilizado para a pasta atual (área vazia)
                 if !clicked_on_item {
-                    // Use native Windows context menu for the current folder
-                    if self.native_hwnd.is_some() && !self.is_computer_view {
-                        let mut cursor = POINT::default();
-                        unsafe {
-                            let _ = GetCursorPos(&mut cursor);
-                        }
-                        // Store pending menu for the current folder (not a specific item)
-                        self.context_menu.pending_native_menu =
-                            Some((PathBuf::from(&self.current_path), cursor.x, cursor.y, 0));
-                        ui.ctx().request_repaint();
-                    } else {
-                        // Fallback to egui context menu
-                        self.context_menu.open(
-                            pointer_pos.unwrap_or(
-                                ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO),
-                            ),
-                            None,
-                            Some(PathBuf::from(&self.current_path)),
-                            true,
-                        );
-                    }
+                    let path = PathBuf::from(&self.current_path);
+                    let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
+                    self.populate_context_menu(ui.ctx(), &path, true, None);
+                    self.context_menu.open(
+                        pointer_pos,
+                        None,
+                        Some(path),
+                        true,
+                    );
                 }
             }
         });
 
         // Exibe o menu de contexto (se aberto)
-        let mut context_menu = self.context_menu.clone();
-        let clipboard_file = self.clipboard_file.clone();
-        render_context_menu(ctx, &mut context_menu, &clipboard_file, self);
+        let mut context_menu = std::mem::replace(&mut self.context_menu, mtt_file_manager::application::context_menu::ContextMenuState::default());
+        let _ = mtt_file_manager::ui::context_menu::render_context_menu(ctx, &mut context_menu, self);
+        
+        // Handle selected command before putting state back
+        if let Some(id) = context_menu.selected_command_id.take() {
+            if id > 0 {
+                // Shell command
+                if let Some(native_ctx) = &context_menu.native_context {
+                    if let Some(shell_ctx) = native_ctx.downcast_ref::<mtt_file_manager::infrastructure::windows::native_menu::ShellMenuContext>() {
+                        let _ = mtt_file_manager::infrastructure::windows::native_menu::invoke_menu_command(
+                            self.native_hwnd.unwrap_or_default(),
+                            &shell_ctx.context_menu,
+                            id as u32,
+                            context_menu.position.x as i32,
+                            context_menu.position.y as i32,
+                        );
+                    }
+                }
+            } else {
+                // Internal command handled via trait
+                use mtt_file_manager::ui::context_menu::ContextMenuOperations;
+                match id {
+                    -1 => self.create_new_folder(),
+                    -2 => self.command_copy(),
+                    -3 => self.command_cut(),
+                    -4 => self.command_paste(),
+                    -5 => {
+                        if let Some(idx) = context_menu.item_index {
+                            if let Some(item) = self.items.get(idx) {
+                                self.renaming_state = Some((idx, item.name.clone()));
+                                self.focus_rename = true;
+                            }
+                        }
+                    }
+                    -6 => self.delete_with_shell(),
+                    _ => {}
+                }
+            }
+            context_menu.close();
+        }
+        
         self.context_menu = context_menu;
 
         // === TOAST NOTIFICATIONS ===
@@ -3688,118 +3795,6 @@ impl eframe::App for ImageViewerApp {
             ctx.request_repaint(); // Keep animating
         }
 
-        // --- PENDING NATIVE CONTEXT MENU ---
-        // Open the context menu after a delay that allows the GPU to render the selection
-        // We use request_repaint_after to schedule a repaint, then check if enough time has passed
-        if let Some((path, screen_x, screen_y, start_time_ms)) =
-            self.context_menu.pending_native_menu.take()
-        {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64;
-
-            if start_time_ms == 0 {
-                // First frame after right-click - record the start time and request repaint after delay
-                let start = now;
-                self.context_menu.pending_native_menu = Some((path, screen_x, screen_y, start));
-                ctx.request_repaint_after(std::time::Duration::from_millis(60));
-            } else if now - start_time_ms >= 50 {
-                // Enough time has passed - GPU should have rendered by now, open the menu
-                if let Some(hwnd) = self.native_hwnd {
-                    match windows_infra::show_shell_context_menu(hwnd, &path, screen_x, screen_y) {
-                        Ok(result) => {
-                            if result.was_cancelled {
-                                // Menu was cancelled by clicking outside - store the click for replay
-                                // Check if the click position is different from the menu position (user clicked somewhere else)
-                                let click_moved = (result.cursor_x - screen_x).abs() > 5
-                                    || (result.cursor_y - screen_y).abs() > 5;
-                                if click_moved {
-                                    self.context_menu.pending_click_replay = Some((
-                                        result.cursor_x,
-                                        result.cursor_y,
-                                        result.right_button_down,
-                                    ));
-                                    ctx.request_repaint();
-                                }
-                            }
-                        }
-                        Err(err) => {
-                            eprintln!("Falha ao abrir menu de contexto do Windows: {:?}", err);
-                        }
-                    }
-                }
-            } else {
-                // Not enough time yet - keep waiting
-                self.context_menu.pending_native_menu =
-                    Some((path, screen_x, screen_y, start_time_ms));
-                ctx.request_repaint_after(std::time::Duration::from_millis(10));
-            }
-        }
-        self.context_menu.needs_draw_before_menu = false;
-
-        // --- REPLAY PENDING CLICK ---
-        // If a click was consumed by context menu dismissal, replay it using SendInput
-        if let Some((click_x, click_y, is_right_click)) =
-            self.context_menu.pending_click_replay.take()
-        {
-            use windows::Win32::UI::Input::KeyboardAndMouse::*;
-            use windows::Win32::UI::WindowsAndMessaging::{
-                GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN,
-            };
-
-            unsafe {
-                // Move mouse to the click position and simulate click
-                let screen_width = GetSystemMetrics(SM_CXSCREEN);
-                let screen_height = GetSystemMetrics(SM_CYSCREEN);
-
-                // Normalize coordinates for absolute mouse position (0-65535)
-                let norm_x = (click_x * 65535) / screen_width;
-                let norm_y = (click_y * 65535) / screen_height;
-
-                let button_down = if is_right_click {
-                    MOUSEEVENTF_RIGHTDOWN
-                } else {
-                    MOUSEEVENTF_LEFTDOWN
-                };
-                let button_up = if is_right_click {
-                    MOUSEEVENTF_RIGHTUP
-                } else {
-                    MOUSEEVENTF_LEFTUP
-                };
-
-                let inputs = [
-                    INPUT {
-                        r#type: INPUT_MOUSE,
-                        Anonymous: INPUT_0 {
-                            mi: MOUSEINPUT {
-                                dx: norm_x,
-                                dy: norm_y,
-                                mouseData: 0,
-                                dwFlags: MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | button_down,
-                                time: 0,
-                                dwExtraInfo: 0,
-                            },
-                        },
-                    },
-                    INPUT {
-                        r#type: INPUT_MOUSE,
-                        Anonymous: INPUT_0 {
-                            mi: MOUSEINPUT {
-                                dx: norm_x,
-                                dy: norm_y,
-                                mouseData: 0,
-                                dwFlags: MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | button_up,
-                                time: 0,
-                                dwExtraInfo: 0,
-                            },
-                        },
-                    },
-                ];
-
-                SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
-            }
-        }
     }
 
     /// Called when the app is exiting - save all preferences

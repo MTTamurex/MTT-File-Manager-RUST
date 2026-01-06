@@ -1,0 +1,106 @@
+﻿cargo :     Checking mtt-file-manager v0.1.0 
+(C:\MTT File Manager)
+At line:1 char:1
++ cargo check --release > check_output_3.txt 
+2>&1
++ 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (  
+      Checking mt...T File Manager):String) [  
+  ], RemoteException
+    + FullyQualifiedErrorId : NativeCommandErr 
+   or
+ 
+warning: unused import: 
+`Win32::Graphics::Gdi::*`
+ --> 
+src\infrastructure\windows\native_menu.rs:8:40
+  |
+8 |     Win32::UI::WindowsAndMessaging::*, 
+Win32::Graphics::Gdi::*,
+  |                                        
+^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of 
+`#[warn(unused)]`) on by default
+
+warning: unused import: `std::path::PathBuf`
+ --> src\ui\context_menu.rs:5:5
+  |
+5 | use std::path::PathBuf;
+  |     ^^^^^^^^^^^^^^^^^^
+
+error[E0119]: conflicting implementations of 
+trait `std::fmt::Debug` for type 
+`application::context_menu::ContextMenuState`
+  --> src\application\context_menu.rs:20:17
+   |
+20 | #[derive(Clone, Debug)]
+   |                 ^^^^^ conflicting 
+implementation for 
+`application::context_menu::ContextMenuState`
+...
+97 | impl std::fmt::Debug for ContextMenuState 
+{
+   | ----------------------------------------- 
+first implementation here
+
+error[E0277]: `TextureHandle` doesn't 
+implement `std::fmt::Debug`
+  --> src\application\context_menu.rs:13:5
+   |
+ 9 | #[derive(Clone, Debug)]
+   |                 ----- in this derive 
+macro expansion
+...
+13 |     pub icon: Option<egui::TextureHandle>,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ 
+the trait `std::fmt::Debug` is not implemented 
+for `TextureHandle`
+   |
+   = help: the trait `std::fmt::Debug` is 
+implemented for `Option<T>`
+
+error[E0277]: the trait bound `TextureHandle: 
+Into<SizedTexture>` is not satisfied
+   --> src\ui\context_menu.rs:93:43
+    |
+ 93 |                 
+egui::Image::from_texture(tex.clone()),
+    |                 
+------------------------- ^^^^^^^^^^^ the 
+trait `Into<SizedTexture>` is not implemented 
+for `TextureHandle`
+    |                 |
+    |                 required by a bound 
+introduced by this call
+    |
+    = note: required for `TextureHandle` to 
+implement `Into<SizedTexture>`
+note: required by a bound in 
+`eframe::egui::Image::<'a>::from_texture`
+   --> C:\Users\mtamu\.cargo\registry\src\index
+.crates.io-1949cf8c6b5b557f\egui-0.31.1\src\wid
+gets\image.rs:100:39
+    |
+100 |     pub fn from_texture(texture: impl 
+Into<SizedTexture>) -> Self {
+    |                                       
+^^^^^^^^^^^^^^^^^^ required by this bound in 
+`Image::<'a>::from_texture`
+help: consider borrowing here
+    |
+ 93 |                 
+egui::Image::from_texture(&tex.clone()),
+    |                                          
+ +
+
+Some errors have detailed explanations: E0119, 
+E0277.
+For more information about an error, try 
+`rustc --explain E0119`.
+warning: `mtt-file-manager` (lib) generated 2 
+warnings
+error: could not compile `mtt-file-manager` 
+(lib) due to 3 previous errors; 2 warnings 
+emitted
