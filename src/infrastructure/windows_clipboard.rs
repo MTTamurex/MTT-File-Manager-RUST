@@ -167,28 +167,46 @@ fn set_preferred_drop_effect(effect: u32) -> Result<(), String> {
 /// Gets the preferred drop effect from the clipboard
 fn get_preferred_drop_effect() -> Option<u32> {
     use windows::core::w;
-    use windows::Win32::System::DataExchange::{GetClipboardData, RegisterClipboardFormatW};
+    use windows::Win32::System::DataExchange::{
+        CloseClipboard, GetClipboardData, OpenClipboard, RegisterClipboardFormatW,
+    };
     use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
 
     unsafe {
-        let format = RegisterClipboardFormatW(w!("Preferred DropEffect"));
-        if format == 0 {
+        // MUST open clipboard before GetClipboardData
+        if OpenClipboard(None).is_err() {
             return None;
         }
 
-        let handle = GetClipboardData(format).ok()?;
+        let format = RegisterClipboardFormatW(w!("Preferred DropEffect"));
+        if format == 0 {
+            let _ = CloseClipboard();
+            return None;
+        }
+
+        let handle = match GetClipboardData(format) {
+            Ok(h) => h,
+            Err(_) => {
+                let _ = CloseClipboard();
+                return None;
+            }
+        };
+        
         if handle.is_invalid() {
+            let _ = CloseClipboard();
             return None;
         }
 
         let hmem = windows::Win32::Foundation::HGLOBAL(handle.0);
         let ptr = GlobalLock(hmem);
         if ptr.is_null() {
+            let _ = CloseClipboard();
             return None;
         }
 
         let effect = *(ptr as *const u32);
         let _ = GlobalUnlock(hmem);
+        let _ = CloseClipboard();
 
         Some(effect)
     }

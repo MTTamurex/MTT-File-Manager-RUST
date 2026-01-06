@@ -104,19 +104,6 @@ pub fn render_tab_bar(
             
             ui.painter().rect_filled(rect, rounding, bg_color);
             
-            // Active tab indicator (bottom border)
-            if is_active {
-                let indicator_rect = egui::Rect::from_min_size(
-                    rect.min + Vec2::new(0.0, tab_height - 2.0),
-                    Vec2::new(tab_width, 2.0),
-                );
-                ui.painter().rect_filled(
-                    indicator_rect,
-                    CornerRadius::ZERO,
-                    Color32::from_rgb(0, 120, 215), // Accent blue
-                );
-            }
-            
             // Tab content layout
             let content_rect = rect.shrink2(Vec2::new(tab_padding, 4.0));
             
