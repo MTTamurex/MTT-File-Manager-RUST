@@ -197,6 +197,9 @@ struct ImageViewerApp {
     // SCROLL TO SELECTED (para navegação por teclado)
     scroll_to_selected: bool,
 
+    // Throttle for keyboard navigation (prevents scroll desync when holding arrow keys)
+    last_keyboard_nav: Instant,
+
     // SVG ICON MANAGER
     svg_icon_manager: SvgIconManager,
 
@@ -488,6 +491,9 @@ impl ImageViewerApp {
 
             // SCROLL TO SELECTED (para navegação por teclado)
             scroll_to_selected: false,
+
+            // Throttle for keyboard navigation (prevents scroll desync when holding arrow keys)
+            last_keyboard_nav: Instant::now(),
 
             // Debounce for paste key (keys_down can fire multiple times)
             paste_key_debounce: false,
@@ -1976,7 +1982,8 @@ impl ImageViewerApp {
         use mtt_file_manager::ui::views::{list_view, ListViewContext, ListViewOperations};
 
         // Keyboard navigation for list view (ONLY when not renaming)
-        if self.renaming_state.is_none() {
+        // Throttle: 50ms between navigations to prevent scroll desync when holding keys
+        if self.renaming_state.is_none() && self.last_keyboard_nav.elapsed() >= Duration::from_millis(50) {
             let current_index = self.items.iter().position(|x| {
                 self.selected_file
                     .as_ref()
@@ -1996,6 +2003,7 @@ impl ImageViewerApp {
                     self.selected_file = Some(item.clone());
                     self.selected_item = Some(clamped);
                     self.scroll_to_selected = true; // Trigger scroll to selected item
+                    self.last_keyboard_nav = Instant::now(); // Reset throttle timer
 
                     // Trigger thumbnail load for sidebar preview
                     if !item.is_dir {
@@ -2205,7 +2213,8 @@ impl ImageViewerApp {
             .max(1.0) as usize;
 
         // Keyboard navigation (ONLY when not renaming)
-        if self.renaming_state.is_none() {
+        // Throttle: 50ms between navigations to prevent scroll desync when holding keys
+        if self.renaming_state.is_none() && self.last_keyboard_nav.elapsed() >= Duration::from_millis(50) {
             let current_index = self.items.iter().position(|x| {
                 self.selected_file
                     .as_ref()
@@ -2229,6 +2238,7 @@ impl ImageViewerApp {
                     self.selected_file = Some(item.clone());
                     self.selected_item = Some(clamped);
                     self.scroll_to_selected = true; // Trigger scroll to selected item
+                    self.last_keyboard_nav = Instant::now(); // Reset throttle timer
                 }
             }
 
