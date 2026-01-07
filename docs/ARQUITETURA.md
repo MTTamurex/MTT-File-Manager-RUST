@@ -72,6 +72,7 @@ graph TB
     
     subgraph "State Management"
         R[LruCache - Thumbnails] --> S[TextureHandle egui]
+        PT[selected_thumbnail] --> S
         T[HashSet - Loading State] --> U[Concurrency Control]
         V[Vec - FileSystemItems] --> W[Ordered List]
     end

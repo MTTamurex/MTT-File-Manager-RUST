@@ -72,7 +72,8 @@
 - **Persistent Sort & Folder Position ✅**: Preferências de ordenação e posição de pastas salvas em SQLite.
 - **Proactive Folder Previews ✅**: Escaneamento de capas de pastas no modo lista e persistência em SQLite.
 - **Native Folder Previews (“Sandwich Effect”) ✅**: Implementado via `IShellItemImageFactory` com sistema de carregamento assíncrono e cache dedicado.
-- **Folder Preview Auto-Refresh ✅**: Invalidação de cache em tempo real baseada em eventos de filesystem (subpastas) com normalização de paths para evitar bugs de prefixo UNC.
+- [x] **Folder Preview Auto-Refresh ✅**: Invalidação de cache em tempo real baseada em eventos de filesystem (subpastas) com normalização de paths para evitar bugs de prefixo UNC.
+- [x] **Persistent Selected Thumbnail ✅**: Implementado campo `selected_thumbnail` em `ImageViewerApp` que mantém o preview do arquivo selecionado visível mesmo que ele saia do viewport (evitando despejo do cache LRU).
 
 ### Otimização do Garbage Collector (2026-01-02) ✅ CONCLUÍDO
 - **Problema Crítico Resolvido**: GC bloqueava database lock durante verificações de arquivos (I/O lento), travando navegação.

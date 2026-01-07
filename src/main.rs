@@ -139,6 +139,7 @@ struct ImageViewerApp {
     thumbnail_size: f32, // Zoom: 64-512
     selected_item: Option<usize>,
     selected_file: Option<FileEntry>,
+    selected_thumbnail: Option<egui::TextureHandle>, // Persistent thumbnail for preview panel
     selected_metadata: Option<(PathBuf, windows_infra::MediaMetadata)>,
     metadata_req_sender: Sender<(PathBuf, u64)>,
     metadata_res_receiver: Receiver<(PathBuf, u64, windows_infra::MediaMetadata)>,
@@ -432,6 +433,7 @@ impl ImageViewerApp {
             view_mode,
             // Selection & Preview
             selected_file: None,
+            selected_thumbnail: None,
             selected_metadata: None,
             show_preview_panel, // Loaded from SQLite
             is_computer_view: false,
@@ -1945,7 +1947,14 @@ impl ImageViewerApp {
                 );
 
                 self.cache_manager
-                    .put_thumbnail(thumbnail_data.path, texture);
+                    .put_thumbnail(thumbnail_data.path.clone(), texture.clone());
+
+                // Update selected_thumbnail if it matches the selected_file
+                if let Some(selected_file) = &self.selected_file {
+                    if selected_file.path == thumbnail_data.path {
+                        self.selected_thumbnail = Some(texture);
+                    }
+                }
             }
         }
 
@@ -2000,17 +2009,21 @@ impl ImageViewerApp {
             if let Some(idx) = new_index {
                 let clamped = idx.min(self.items.len().saturating_sub(1));
                 if let Some(item) = self.items.get(clamped) {
+                    let item_path = item.path.clone();
+                    let is_dir = item.is_dir;
+                    
                     self.selected_file = Some(item.clone());
                     self.selected_item = Some(clamped);
+                    self.update_selected_thumbnail();
                     self.scroll_to_selected = true; // Trigger scroll to selected item
                     self.last_keyboard_nav = Instant::now(); // Reset throttle timer
-
+                    
                     // Trigger thumbnail load for sidebar preview
-                    if !item.is_dir {
-                        if !self.cache_manager.has_thumbnail(&item.path)
-                            && !self.cache_manager.is_loading(&item.path)
+                    if !is_dir {
+                        if !self.cache_manager.has_thumbnail(&item_path)
+                            && !self.cache_manager.is_loading(&item_path)
                         {
-                            self.request_thumbnail_load(item.path.clone());
+                            self.request_thumbnail_load(item_path);
                         }
                     }
                 }
@@ -2128,14 +2141,18 @@ impl ImageViewerApp {
             Some(list_view::ListViewAction::Click(idx)) if !is_renaming => {
                 self.selected_item = Some(idx);
                 if let Some(item) = self.items.get(idx) {
+                    let item_path = item.path.clone();
+                    let is_dir = item.is_dir;
+                    
                     self.selected_file = Some(item.clone());
+                    self.update_selected_thumbnail();
 
                     // Trigger thumbnail load for sidebar preview
-                    if !item.is_dir {
-                        if !self.cache_manager.has_thumbnail(&item.path)
-                            && !self.cache_manager.is_loading(&item.path)
+                    if !is_dir {
+                        if !self.cache_manager.has_thumbnail(&item_path)
+                            && !self.cache_manager.is_loading(&item_path)
                         {
-                            self.request_thumbnail_load(item.path.clone());
+                            self.request_thumbnail_load(item_path);
                         }
                     }
                 }
@@ -2237,6 +2254,7 @@ impl ImageViewerApp {
                 if let Some(item) = self.items.get(clamped) {
                     self.selected_file = Some(item.clone());
                     self.selected_item = Some(clamped);
+                    self.update_selected_thumbnail();
                     self.scroll_to_selected = true; // Trigger scroll to selected item
                     self.last_keyboard_nav = Instant::now(); // Reset throttle timer
                 }
@@ -2349,6 +2367,7 @@ impl ImageViewerApp {
                 self.selected_item = Some(idx);
                 if let Some(item) = self.items.get(idx) {
                     self.selected_file = Some(item.clone());
+                    self.update_selected_thumbnail();
                 }
             }
             Some(grid_view::GridViewAction::DoubleClick(idx)) if !is_renaming => {
@@ -2566,6 +2585,22 @@ impl mtt_file_manager::ui::context_menu::ContextMenuOperations for ImageViewerAp
 }
 
 impl ImageViewerApp {
+    /// Atualiza o thumbnail persistente do arquivo selecionado de forma que
+    /// ele continue visível mesmo que o item saia do viewport (e seja removido do cache LRU).
+    fn update_selected_thumbnail(&mut self) {
+        if let Some(selected) = &self.selected_file {
+            // Tenta pegar do cache. Se não estiver lá, mantém None (será atualizado via message loop)
+            if let Some(tex) = self.cache_manager.texture_cache.peek(&selected.path) {
+                self.selected_thumbnail = Some(tex.clone());
+            } else {
+                // Se mudou de seleção e não tem no cache, limpa
+                self.selected_thumbnail = None;
+            }
+        } else {
+            self.selected_thumbnail = None;
+        }
+    }
+
     /// Resolve the target path for a context menu action.
     fn context_target_path(&self, item_idx: Option<usize>) -> Option<PathBuf> {
         if let Some(idx) = item_idx {
@@ -3405,8 +3440,11 @@ impl eframe::App for ImageViewerApp {
                             })
                             .unwrap_or(false);
 
-                                let texture =
-                                    self.cache_manager.texture_cache.peek(&file.path).cloned();
+                                let texture = if let Some(tex) = &self.selected_thumbnail {
+                                    Some(tex.clone())
+                                } else {
+                                    self.cache_manager.texture_cache.peek(&file.path).cloned()
+                                };
 
                                 if let (Some(tex), true) = (texture, is_media) {
                                     // Mostra thumbnail de imagem/video
