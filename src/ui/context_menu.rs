@@ -3,13 +3,14 @@
 
 use eframe::egui::{self, Sense};
 use std::cell::RefCell;
-use std::time::Instant;
 
 use crate::application::context_menu::{ContextMenuState, ContextMenuItem};
 
-// Track which item should have its submenu open (most recently hovered)
+// Track submenu hierarchy: each depth level stores which item is active at that level
+// Example: hovering "7-Zip" -> [Some(7zip_id)]
+// Hovering item inside 7-Zip submenu -> [Some(7zip_id), Some(sub_item_id)]
 thread_local! {
-    static SUBMENU_HOVER_STATE: RefCell<(Option<i32>, Instant)> = RefCell::new((None, Instant::now()));
+    static SUBMENU_HIERARCHY: RefCell<Vec<Option<i32>>> = RefCell::new(Vec::new());
 }
 
 /// Operations that can be performed from context menu
@@ -192,10 +193,10 @@ fn render_menu_items(
             if last_was_separator {
                 continue; // skip duplicate/leading separators
             }
-            render_single_item(ui, item, action);
+            render_single_item(ui, item, action, 0);  // Top-level items have depth 0
             last_was_separator = true;
         } else {
-            render_single_item(ui, item, action);
+            render_single_item(ui, item, action, 0);  // Top-level items have depth 0
             last_was_separator = false;
         }
     }
@@ -206,6 +207,7 @@ fn render_single_item(
     ui: &mut egui::Ui,
     item: &ContextMenuItem,
     action: &mut Option<i32>,
+    depth: usize,  // NEW: Track nesting depth for hierarchical state
 ) {
     if item.is_separator {
         ui.separator();
@@ -306,33 +308,41 @@ fn render_single_item(
             egui::vec2(MENU_MAX_WIDTH, estimated_height),
         );
         
-        // Create a bridge zone to connect item and submenu
+        // Create a bridge zone that covers the ENTIRE submenu height
+        // This allows cursor to move up/down freely within the submenu without closing it
         let bridge_rect = egui::Rect::from_min_max(
-            egui::pos2(rect.right() - 5.0, rect.top()),
-            egui::pos2(submenu_pos.x + 5.0, rect.bottom()),
+            egui::pos2(rect.right() - 5.0, submenu_pos.y.min(rect.top())),  // Top of submenu or item
+            egui::pos2(submenu_pos.x + 5.0, (submenu_pos.y + estimated_height).max(rect.bottom())),  // Bottom of submenu or item
         );
         
         let pointer_in_item = rect.contains(pointer_pos.unwrap_or(egui::Pos2::ZERO));
         let pointer_in_submenu = pointer_pos.map_or(false, |p| estimated_submenu_rect.contains(p));
         let pointer_in_bridge = pointer_pos.map_or(false, |p| bridge_rect.contains(p));
         
-        // If hovering over this item, update the global state
+        // If hovering over this item, update the hierarchy at this depth level
         if response.hovered() {
-            SUBMENU_HOVER_STATE.with(|state| {
-                *state.borrow_mut() = (Some(item.id), Instant::now());
+            SUBMENU_HIERARCHY.with(|hierarchy| {
+                let mut h = hierarchy.borrow_mut();
+                // Ensure vector is large enough
+                while h.len() <= depth {
+                    h.push(None);
+                }
+                h[depth] = Some(item.id);
+                // Clear deeper levels when a new item is selected at this depth
+                h.truncate(depth + 1);
             });
         }
         
-        // Check if THIS item is the currently active one
-        let is_active = SUBMENU_HOVER_STATE.with(|state| {
-            let (active_id, _hover_time) = *state.borrow();
-            active_id == Some(item.id)
+        // Check if THIS item is active at its depth level
+        let is_active = SUBMENU_HIERARCHY.with(|hierarchy| {
+            let h = hierarchy.borrow();
+            h.get(depth).copied().flatten() == Some(item.id)
         });
         
         // Show submenu ONLY if:
-        // 1. This is the active item, AND
-        // 2. Pointer is in interaction zone (hovered, item, bridge, or submenu)
-        let should_show_submenu = is_active && (response.hovered() || pointer_in_item || pointer_in_bridge || pointer_in_submenu);
+        // 1. This is the active item at this depth, AND
+        // 2. Pointer is in interaction zone (hovered, bridge, or submenu)
+        let should_show_submenu = is_active && (response.hovered() || pointer_in_bridge || pointer_in_submenu);
         
         // Show submenu only if pointer is in the interaction zone
         if should_show_submenu {
@@ -348,7 +358,7 @@ fn render_single_item(
                             ui.set_max_width(MENU_MAX_WIDTH);
                             ui.spacing_mut().item_spacing = egui::vec2(0.0, 1.0);
                             for sub in &item.sub_items {
-                                render_single_item(ui, sub, action);
+                                render_single_item(ui, sub, action, depth + 1);  // Pass depth + 1 for nested submenu
                             }
                         });
                 });
@@ -365,5 +375,5 @@ fn render_overflow_submenu(
     let overflow_item = ContextMenuItem::new(-100, "Mostrar mais opções")
         .with_subitems(items.iter().map(|i| (*i).clone()).collect());
 
-    render_single_item(ui, &overflow_item, action);
+    render_single_item(ui, &overflow_item, action, 0);  // Overflow is top-level
 }
