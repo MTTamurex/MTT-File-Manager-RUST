@@ -195,7 +195,27 @@ Win32::Media::MediaFoundation::{
     MF_MT_SUBTYPE,                    // Codec GUID
     MF_PD_DURATION,                   // Video duration
 }
+
+Win32::System::Registry::{          // Codec name resolution (NEW 2026-01-07)
+    RegOpenKeyExW, RegGetValueW,     // Query CLSID friendly names
+    HKEY_LOCAL_MACHINE,              // Root key for system codecs
+}
 ```
+
+**Codec Resolution Strategy** (Implements .cursorrules §7):
+1. **LRU Cache**: 128 entries, thread-safe `Mutex<LruCache>`
+2. **Windows Registry**: `HKLM\SOFTWARE\Classes\CLSID\{GUID}\FriendlyName`
+3. **Fallback**: Microsoft-defined constants (PCM, MP3, EAC3, etc.)
+4. **Future**: Media Foundation Transform enumeration (MFTEnumEx)
+
+**Supported GUID Formats**:
+- Full GUID with braces: `{A7FB87AF-0000-0010-8000-00AA00389B71}` → `EAC3`
+- Partial hex (8 digits): `A7FB87AF` → auto-expands to full GUID → `EAC3`
+- GUID without braces: `A7FB87AF-0000-0010-8000-00AA00389B71` → `EAC3`
+
+**Known Codecs** (via fallback constants):
+- **Audio**: PCM, MP3, AAC, AAC-LC, AAC-HE, Opus, WMA (v1/v2/Pro/Lossless), AC-3, DTS, **EAC3** (Dolby Digital Plus)
+- **Video**: H.264, H.265, MPEG-4, VC-1, VP8, VP9, AV1
 
 **Por que Windows Crate?**
 - ✅ **Bindings oficiais da Microsoft**
@@ -358,7 +378,8 @@ target/
 | **CacheManager Unificado** | `src/ui/cache.rs` | ✅ Implementado |
 | **Notification System** | `src/application/notification.rs` | ✅ Implementado |
 | **Thumbnail Worker** | `src/workers/thumbnail_worker.rs` | ✅ Implementado |
-| **Windows API Wrappers** | `src/infrastructure/windows/` | ✅ Implementado (7 módulos) |
+| **Codec Registry (Dynamic)** | `src/infrastructure/windows/codec_registry.rs` | ✅ Implementado (2026-01-07) |
+| **Windows API Wrappers** | `src/infrastructure/windows/` | ✅ Implementado (8 módulos) |
 | **Windows Clipboard (CF_HDROP)** | `src/infrastructure/windows_clipboard.rs` | ✅ Implementado (2026-01-04) |
 
 ### clipboard-win 5.4

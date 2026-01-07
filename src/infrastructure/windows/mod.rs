@@ -2,6 +2,7 @@
 //! Follows .cursorrules: separation of concerns, < 300 lines per file
 
 pub mod bitmap_conversion;
+pub mod codec_registry;
 pub mod device_change;
 pub mod drives;
 pub mod file_system;
@@ -16,6 +17,7 @@ pub mod system_info;
 
 // Re-export for convenience
 pub use bitmap_conversion::*;
+pub use codec_registry::*;
 pub use device_change::*;
 pub use drives::*;
 pub use file_system::*;

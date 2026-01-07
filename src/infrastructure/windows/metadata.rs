@@ -773,77 +773,21 @@ fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windows::
 }
 
 /// Convert GUID strings and technical codec identifiers to friendly names
+/// 
+/// Implements .cursorrules §7: Queries Windows Registry/MF instead of hardcoding.
 fn sanitize_codec_string(s: &str) -> String {
     let s = s.trim();
 
-    // Quick GUID substring checks for common audio codecs that sometimes leak as GUID strings
-    let upper = s.to_ascii_uppercase();
-    if upper.contains("0000704F") {
-        // {0000704F-0000-0010-8000-00AA00389B71} → Opus
-        return "Opus".to_string();
-    }
-    if upper.contains("00001FCA") {
-        // {00001FCA-0000-0010-8000-00AA00389B71} → AV1 (rare audio GUID form)
-        return "AV1".to_string();
-    }
-    if upper.contains("8D2FD10B") {
-        // {8D2FD10B-5841-4A6B-8905-588FEC1ADED9} → Vorbis (MEDIASUBTYPE_Vorbis2)
-        return "Vorbis".to_string();
-    }
-    if upper.contains("E06D802C") {
-        // {E06D802C-DB46-11CF-B4D1-00805F6CBBEA} → Dolby AC-3 (MEDIASUBTYPE_DOLBY_AC3)
-        return "Dolby AC-3".to_string();
-    }
-
     // Check if it's a GUID string like "{00001610-0000-0010-8000-00AA00389B71}"
     if s.starts_with('{') && s.contains('-') {
-        // Extract the first segment (data1)
-        if let Some(data1_str) = s.strip_prefix('{').and_then(|s| s.split('-').next()) {
-            if let Ok(data1) = u32::from_str_radix(data1_str, 16) {
-                // Common audio format tags
-                return match data1 {
-                    0x0001 => "PCM".to_string(),
-                    0x0003 => "IEEE Float".to_string(),
-                    0x0055 => "MP3".to_string(),
-                    0x00FF => "AAC".to_string(),
-                    0x004F70 => "Opus".to_string(), // GUIDs that encode Opus as 0x0000704F
-                    0x0000704F => "Opus".to_string(), // Another Opus variant seen in Property Store
-                    0x0160 => "WMA v1".to_string(),
-                    0x0161 => "WMA v2".to_string(),
-                    0x0162 => "WMA Pro".to_string(),
-                    0x0163 => "WMA Lossless".to_string(),
-                    0x1610 => "AAC-LC".to_string(),
-                    0x1612 => "AAC-HE".to_string(),
-                    0xA106 => "AAC (ADTS)".to_string(),
-                    0x2000 => "AC-3".to_string(),
-                    0x2001 => "DTS".to_string(),
+        // DEFINITIVE SOURCE: Query Windows Registry/Media Foundation
+        return super::codec_registry::resolve_codec_guid(s);
+    }
 
-                    // FourCC-based codecs (higher numbers)
-                    0x6134706D => "AAC".to_string(),        // 'mp4a'
-                    0x7375704F => "Opus".to_string(),       // 'Opus'
-                    0x43414C46 => "FLAC".to_string(),       // 'FLAC'
-                    0x30395056 => "VP9".to_string(),        // 'VP90'
-                    0x30385056 => "VP8".to_string(),        // 'VP80'
-                    0x31305641 => "AV1".to_string(),        // 'AV01'
-                    0x31435641 => "H.264/AVC".to_string(),  // 'AVC1'
-                    0x43564548 => "H.265/HEVC".to_string(), // 'HEVC'
-
-                    _ => {
-                        // Try to decode as FourCC
-                        let bytes = data1.to_le_bytes();
-                        if bytes
-                            .iter()
-                            .all(|&b| b.is_ascii_alphanumeric() || b == b' ' || b == b'-')
-                        {
-                            let fourcc: String = bytes.iter().map(|&b| b as char).collect();
-                            fourcc.trim().to_string()
-                        } else {
-                            s.to_string() // Return original if can't decode
-                        }
-                    }
-                };
-            }
-        }
+    // NEW: Check if it's a partial hex GUID (8 hex digits, no braces)
+    // Example: "A7FB87AF" → EAC3 codec
+    if s.len() == 8 && s.chars().all(|c| c.is_ascii_hexdigit()) {
+        return super::codec_registry::resolve_codec_guid(s);
     }
 
     // If it's already a readable name, return as-is

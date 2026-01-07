@@ -112,6 +112,7 @@ MTT File Manager/
 │   ├── infrastructure/    # Dependências externas
 │   │   ├── windows/       # Wrappers Win32
 │   │   │   ├── bitmap_conversion.rs
+│   │   │   ├── codec_registry.rs  # 🆕 Resolução dinâmica de codecs (2026-01-07)
 │   │   │   ├── drives.rs
 │   │   │   ├── file_system.rs
 │   │   │   ├── formatting.rs
