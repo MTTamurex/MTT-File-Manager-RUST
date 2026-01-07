@@ -2483,16 +2483,15 @@ impl ImageViewerApp {
         
         // ========== PRIMARY ITEMS (Header bar) - matching Files ==========
         // These appear as icon buttons in the header
-        items.push(ContextMenuItem::primary(-10, "Recortar").with_command("cut").with_shortcut("Ctrl+X"));
-        items.push(ContextMenuItem::primary(-11, "Copiar").with_command("copy").with_shortcut("Ctrl+C"));
+        items.push(ContextMenuItem::primary(-3, "Recortar").with_command("cut").with_shortcut("Ctrl+X"));
+        items.push(ContextMenuItem::primary(-2, "Copiar").with_command("copy").with_shortcut("Ctrl+C"));
         
         let can_paste = self.clipboard_file.is_some();
-        items.push(ContextMenuItem::primary(-12, "Colar").with_command("paste").with_shortcut("Ctrl+V").enabled(can_paste));
+        items.push(ContextMenuItem::primary(-4, "Colar").with_command("paste").with_shortcut("Ctrl+V").enabled(can_paste));
         
         if !is_empty_area {
-            items.push(ContextMenuItem::primary(-13, "Renomear").with_command("rename").with_shortcut("F2"));
-            items.push(ContextMenuItem::primary(-14, "Excluir").with_command("delete").with_shortcut("Del"));
-            items.push(ContextMenuItem::primary(-15, "Propriedades").with_command("properties").with_shortcut("Alt+Enter"));
+            items.push(ContextMenuItem::primary(-5, "Renomear").with_command("rename").with_shortcut("F2"));
+            items.push(ContextMenuItem::primary(-6, "Excluir").with_command("delete").with_shortcut("Del"));
         }
         
         // ========== SECONDARY ITEMS (App-specific) ==========
