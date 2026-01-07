@@ -117,28 +117,32 @@ pub fn render_tab_bar(
 
             // Dynamic icon based on path
             let icon_name = if tab.is_computer_view {
-                "home"
+                None // User requested to remove redundant home icon
             } else if tab.path.len() <= 3 && tab.path.ends_with(":\\") {
-                "drive"
+                Some("drive")
             } else {
-                "folder"
+                Some("folder")
             };
             
-            if let Some(texture) = svg_icons.get_icon(ui.ctx(), icon_name, icon_size as u32, icon_color) {
-                let icon_rect = egui::Rect::from_min_size(
-                    content_rect.min,
-                    Vec2::new(icon_size, icon_size),
-                );
-                ui.painter().image(
-                    texture.id(),
-                    icon_rect,
-                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    Color32::WHITE,
-                );
+            if let Some(name) = icon_name {
+                let render_size = (icon_size * 2.0) as u32;
+                if let Some(texture) = svg_icons.get_icon(ui.ctx(), name, render_size, icon_color) {
+                    let icon_rect = egui::Rect::from_min_size(
+                        content_rect.min,
+                        Vec2::new(icon_size, icon_size),
+                    );
+                    ui.painter().image(
+                        texture.id(),
+                        icon_rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                }
             }
             
             // Tab title
-            let title_pos = content_rect.min + Vec2::new(icon_size + 6.0, 2.0);
+            let icon_offset = if tab.is_computer_view { 0.0 } else { icon_size + 6.0 };
+            let title_pos = content_rect.min + Vec2::new(icon_offset, 2.0);
             let max_title_width = tab_width - icon_size - close_btn_size - tab_padding * 3.0;
             
             let display_title = if tab.title.len() > 15 {

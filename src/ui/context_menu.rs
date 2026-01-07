@@ -25,11 +25,12 @@ pub trait ContextMenuOperations {
 }
 
 /// Menu styling constants (matching Files app - compact)
-const HEADER_ICON_SIZE: f32 = 14.0;
-const HEADER_BUTTON_SIZE: f32 = 24.0;
-const HEADER_SPACING: f32 = 2.0;
-const ITEM_HEIGHT: f32 = 22.0;
-const ITEM_ICON_SIZE: f32 = 16.0;
+const HEADER_ICON_SIZE: f32 = 16.0;  // Display size
+const HEADER_ICON_RENDER_SIZE: u32 = 32;  // Render at 2x for HiDPI quality
+const HEADER_BUTTON_SIZE: f32 = 28.0;
+const HEADER_SPACING: f32 = 4.0;
+const ITEM_HEIGHT: f32 = 24.0;
+const ITEM_ICON_SIZE: f32 = 18.0;
 const MENU_ROUNDING: f32 = 6.0;
 const MENU_MIN_WIDTH: f32 = 180.0;
 const MENU_MAX_WIDTH: f32 = 400.0;
@@ -164,11 +165,11 @@ fn render_header_bar(
             // Choose color based on enabled state
             let color = if item.is_enabled { icon_color } else { disabled_color };
             
-            // Try to load SVG icon, fallback to text button if not available
+            // Try to load SVG icon at 2x resolution for HiDPI quality, fallback to text button
             let response = if let Some(texture) = svg_icon_manager.get_icon(
                 ui.ctx(),
                 svg_icon_name,
-                HEADER_ICON_SIZE as u32,
+                HEADER_ICON_RENDER_SIZE,  // Render at higher resolution
                 color,
             ) {
                 let img = egui::Image::from_texture(egui::load::SizedTexture::new(
