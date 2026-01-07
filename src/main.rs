@@ -2499,19 +2499,17 @@ impl ImageViewerApp {
         if is_empty_area {
             items.push(ContextMenuItem::separator());
             items.push(ContextMenuItem::new(-1, "Criar pasta").with_shortcut("Ctrl+Shift+N"));
-            items.push(ContextMenuItem::separator());
         } else {
             items.push(ContextMenuItem::separator());
             items.push(ContextMenuItem::new(-20, "Abrir"));
             items.push(ContextMenuItem::new(-21, "Abrir em nova guia"));
-            items.push(ContextMenuItem::new(-22, "Abrir em nova janela").with_shortcut("Alt+Ctrl+Enter"));
+            items.push(ContextMenuItem::new(-22, "Abrir em nova janela"));
             items.push(ContextMenuItem::new(-23, "Abrir em novo painel"));
             items.push(ContextMenuItem::separator());
-            items.push(ContextMenuItem::new(-24, "Copiar caminho do item").with_shortcut("Ctrl+Shift+C"));
+            items.push(ContextMenuItem::new(-24, "Copiar caminho").with_shortcut("Ctrl+Shift+C"));
             items.push(ContextMenuItem::new(-25, "Criar pasta com seleção"));
             items.push(ContextMenuItem::new(-26, "Criar atalho"));
             items.push(ContextMenuItem::new(-27, "Fixar na Barra Lateral"));
-            items.push(ContextMenuItem::separator());
         }
         
         // ========== SHELL ITEMS (Third-party extensions) ==========

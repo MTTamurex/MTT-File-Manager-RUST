@@ -16,22 +16,22 @@ pub trait ContextMenuOperations {
 }
 
 /// Menu styling constants (matching Files app - compact)
-const HEADER_ICON_SIZE: f32 = 16.0;
-const HEADER_BUTTON_SIZE: f32 = 28.0;
+const HEADER_ICON_SIZE: f32 = 14.0;
+const HEADER_BUTTON_SIZE: f32 = 24.0;
 const HEADER_SPACING: f32 = 2.0;
-const ITEM_HEIGHT: f32 = 24.0;
+const ITEM_HEIGHT: f32 = 22.0;
 const ITEM_ICON_SIZE: f32 = 16.0;
-const MENU_WIDTH: f32 = 200.0;
-const MENU_ROUNDING: f32 = 8.0;
+const MENU_ROUNDING: f32 = 6.0;
 const SHORTCUT_COLOR: egui::Color32 = egui::Color32::from_gray(128);
+const TEXT_SHORTCUT_GAP: f32 = 24.0; // Gap between text and shortcut
 
 /// Unicode icons for header bar (matching Files/Windows 11 style)
-const ICON_CUT: &str = "✂";      // Scissors
-const ICON_COPY: &str = "📋";    // Clipboard  
-const ICON_PASTE: &str = "📄";   // Document
-const ICON_RENAME: &str = "✏";  // Pencil
-const ICON_DELETE: &str = "🗑"; // Trash
-const ICON_PROPERTIES: &str = "⚙"; // Gear
+const ICON_CUT: &str = "✂";
+const ICON_COPY: &str = "📋";
+const ICON_PASTE: &str = "📄";
+const ICON_RENAME: &str = "✏";
+const ICON_DELETE: &str = "🗑";
+const ICON_PROPERTIES: &str = "⚙";
 
 /// Renders the Files-style context menu
 pub fn render_context_menu(
@@ -65,10 +65,9 @@ pub fn render_context_menu(
             egui::Frame::popup(ui.style())
                 .inner_margin(4.0)
                 .corner_radius(MENU_ROUNDING)
-                .shadow(egui::epaint::Shadow::NONE)
                 .show(ui, |ui| {
-                    ui.set_min_width(MENU_WIDTH);
-                    ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
+                    // NO fixed width - let egui auto-size based on content
+                    ui.spacing_mut().item_spacing = egui::vec2(0.0, 1.0);
 
                     // ========== HEADER BAR (Primary items as icons) ==========
                     if !primary_items.is_empty() {
@@ -117,7 +116,7 @@ pub fn render_context_menu(
     false
 }
 
-/// Render the header bar with primary action icons (Cut, Copy, Paste, Delete, Rename, Properties)
+/// Render the header bar with primary action icons
 fn render_header_bar(
     ui: &mut egui::Ui,
     items: &[&ContextMenuItem],
@@ -149,7 +148,7 @@ fn render_header_bar(
                 ui.add_sized(btn_size, egui::ImageButton::new(img))
             } else {
                 // Use Unicode icon
-                let btn = egui::Button::new(egui::RichText::new(icon_str).size(14.0));
+                let btn = egui::Button::new(egui::RichText::new(icon_str).size(12.0));
                 ui.add_sized(btn_size, btn)
             };
 
@@ -179,7 +178,7 @@ fn render_menu_items(
     }
 }
 
-/// Render a single menu item
+/// Render a single menu item using egui's natural layout
 fn render_single_item(
     ui: &mut egui::Ui,
     item: &ContextMenuItem,
@@ -191,91 +190,76 @@ fn render_single_item(
     }
 
     let has_submenu = !item.sub_items.is_empty();
-    let row_rect = ui.available_rect_before_wrap();
-    let desired_size = egui::vec2(ui.available_width(), ITEM_HEIGHT);
     
-    // Allocate space for the row
-    let (rect, response) = ui.allocate_at_least(desired_size, Sense::click());
+    // Build the label with icon + text + shortcut/arrow using horizontal layout
+    let response = ui.horizontal(|ui| {
+        ui.set_height(ITEM_HEIGHT);
+        ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
+        
+        // Icon space (fixed width for alignment)
+        ui.allocate_space(egui::vec2(4.0, ITEM_HEIGHT));
+        if let Some(icon) = &item.icon {
+            let img = egui::Image::from_texture(egui::load::SizedTexture::new(
+                icon.id(),
+                egui::vec2(ITEM_ICON_SIZE, ITEM_ICON_SIZE),
+            ));
+            ui.add(img);
+        } else {
+            ui.allocate_space(egui::vec2(ITEM_ICON_SIZE, ITEM_ICON_SIZE));
+        }
+        
+        // Text
+        let text_color = if item.is_enabled {
+            ui.visuals().text_color()
+        } else {
+            ui.visuals().weak_text_color()
+        };
+        ui.label(egui::RichText::new(&item.text).color(text_color).size(12.0));
+        
+        // Spacer to push shortcut/arrow to right
+        ui.add_space(TEXT_SHORTCUT_GAP);
+        
+        // Keyboard shortcut or submenu arrow
+        if has_submenu {
+            ui.label(egui::RichText::new("›").color(text_color).size(14.0));
+        } else if let Some(shortcut) = &item.keyboard_shortcut {
+            ui.label(egui::RichText::new(shortcut).color(SHORTCUT_COLOR).size(11.0));
+        }
+    });
+    
+    // Make the whole row clickable
+    let row_response = ui.interact(
+        response.response.rect,
+        egui::Id::new(format!("menu_item_{}", item.id)),
+        Sense::click(),
+    );
     
     // Hover highlight
-    if response.hovered() {
+    if row_response.hovered() {
         ui.painter().rect_filled(
-            rect,
-            4.0,
+            response.response.rect,
+            3.0,
             ui.visuals().widgets.hovered.bg_fill,
         );
     }
 
-    // Icon (16x16)
-    let icon_rect = egui::Rect::from_min_size(
-        rect.min + egui::vec2(8.0, (ITEM_HEIGHT - ITEM_ICON_SIZE) / 2.0),
-        egui::vec2(ITEM_ICON_SIZE, ITEM_ICON_SIZE),
-    );
-    
-    if let Some(icon) = &item.icon {
-        let img = egui::Image::from_texture(egui::load::SizedTexture::new(
-            icon.id(),
-            icon_rect.size(),
-        ));
-        img.paint_at(ui, icon_rect);
-    }
-
-    // Text
-    let text_pos = rect.min + egui::vec2(8.0 + ITEM_ICON_SIZE + 8.0, (ITEM_HEIGHT - 14.0) / 2.0);
-    let text_color = if item.is_enabled {
-        ui.visuals().text_color()
-    } else {
-        ui.visuals().weak_text_color()
-    };
-    
-    ui.painter().text(
-        text_pos,
-        egui::Align2::LEFT_TOP,
-        &item.text,
-        egui::FontId::proportional(13.0),
-        text_color,
-    );
-
-    // Keyboard shortcut or submenu arrow (right side)
-    let right_margin = 12.0;
-    if has_submenu {
-        let arrow_pos = egui::pos2(rect.right() - right_margin, rect.center().y);
-        ui.painter().text(
-            arrow_pos,
-            egui::Align2::RIGHT_CENTER,
-            "›",
-            egui::FontId::proportional(16.0),
-            text_color,
-        );
-    } else if let Some(shortcut) = &item.keyboard_shortcut {
-        let shortcut_pos = egui::pos2(rect.right() - right_margin, rect.center().y);
-        ui.painter().text(
-            shortcut_pos,
-            egui::Align2::RIGHT_CENTER,
-            shortcut,
-            egui::FontId::proportional(11.0),
-            SHORTCUT_COLOR,
-        );
-    }
-
     // Handle click
-    if response.clicked() && item.is_enabled && !has_submenu {
+    if row_response.clicked() && item.is_enabled && !has_submenu {
         *action = Some(item.id);
     }
 
     // Handle submenu on hover
-    if has_submenu && response.hovered() {
-        // Show submenu to the right
-        let submenu_pos = egui::pos2(rect.right() + 2.0, rect.top());
+    if has_submenu && row_response.hovered() {
+        let submenu_pos = egui::pos2(response.response.rect.right() + 2.0, response.response.rect.top());
         egui::Area::new(egui::Id::new(format!("submenu_{}", item.id)))
             .fixed_pos(submenu_pos)
             .order(egui::Order::Foreground)
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style())
-                    .inner_margin(8.0)
+                    .inner_margin(4.0)
                     .corner_radius(MENU_ROUNDING)
                     .show(ui, |ui| {
-                        ui.set_min_width(200.0);
+                        ui.spacing_mut().item_spacing = egui::vec2(0.0, 1.0);
                         for sub in &item.sub_items {
                             render_single_item(ui, sub, action);
                         }
@@ -290,7 +274,7 @@ fn render_overflow_submenu(
     items: &[&ContextMenuItem],
     action: &mut Option<i32>,
 ) {
-    let overflow_item = ContextMenuItem::new(-100, "Show more options")
+    let overflow_item = ContextMenuItem::new(-100, "Mostrar mais opções")
         .with_subitems(items.iter().map(|i| (*i).clone()).collect());
     
     render_single_item(ui, &overflow_item, action);
