@@ -47,6 +47,7 @@ impl Drop for ShellMenuContext {
 const KNOWN_VERBS: &[&str] = &[
     "cut", "copy", "paste", "delete", "properties", "rename",
     "open", "explore", "opennew", "opencontaining",
+    "pintohome", "rversions", "copyaspath", "link",
 ];
 
 /// Check if a verb should be filtered (handled by our UI)

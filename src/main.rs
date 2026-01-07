@@ -2707,6 +2707,18 @@ impl ImageViewerApp {
                         }
                     }
                     
+                    // Fallback text-based filter for localized or verbless items
+                    let lower_text = shell_item.text.to_lowercase();
+                    let blacklisted_texts = [
+                        "pin to quick access", "fixar no acesso rápido",
+                        "restore previous versions", "restaurar versões anteriores",
+                        "copy as path", "copiar como caminho",
+                        "create shortcut", "criar atalho"
+                    ];
+                    if blacklisted_texts.iter().any(|&t| lower_text.contains(t)) {
+                        return None;
+                    }
+                    
                     // Resize icon to 16x16 if needed
                     let icon = shell_item.icon_rgba.as_ref().map(|(rgba, w, h)| {
                         let (final_rgba, fw, fh) = if *w != 16 || *h != 16 {
