@@ -2438,6 +2438,7 @@ dependencies = [
  "thiserror 2.0.17",
  "tiny-skia",
  "usvg",
+ "walkdir",
  "webp",
  "windows",
 ]

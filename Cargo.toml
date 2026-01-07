@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 eframe = { version = "0.31", features = ["persistence"] }
 rayon = "1.10"
+walkdir = "2.5"
 rfd = "0.15"
 lru = "0.12"
 notify = "6.1.1"

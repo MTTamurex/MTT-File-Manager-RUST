@@ -5,6 +5,7 @@ use eframe::egui::{self, Sense};
 use std::cell::RefCell;
 
 use crate::application::context_menu::{ContextMenuState, ContextMenuItem};
+use crate::ui::svg_icons::SvgIconManager;
 
 // Track submenu hierarchy: each depth level stores which item is active at that level
 // Example: hovering "7-Zip" -> [Some(7zip_id)]
@@ -36,19 +37,19 @@ const SUBMENU_MIN_WIDTH: f32 = 220.0;
 const SUBMENU_X_OFFSET: f32 = 6.0;
 const SHORTCUT_COLOR: egui::Color32 = egui::Color32::from_gray(128);
 
-/// Unicode icons for header bar (matching Files/Windows 11 style)
-const ICON_CUT: &str = "✂";
-const ICON_COPY: &str = "📋";
-const ICON_PASTE: &str = "📄";
-const ICON_RENAME: &str = "✏";
-const ICON_DELETE: &str = "🗑";
-const ICON_PROPERTIES: &str = "⚙";
+/// SVG icon names for header bar (matching main toolbar style)
+const SVG_ICON_CUT: &str = "cut";
+const SVG_ICON_COPY: &str = "copy";
+const SVG_ICON_PASTE: &str = "paste";
+const SVG_ICON_RENAME: &str = "rename";
+const SVG_ICON_DELETE: &str = "delete";
+const SVG_ICON_PROPERTIES: &str = "properties";
 
 /// Renders the Files-style context menu
 pub fn render_context_menu(
     ctx: &egui::Context,
     menu_state: &mut ContextMenuState,
-    _ops: &mut dyn ContextMenuOperations,
+    svg_icon_manager: &mut SvgIconManager,
 ) -> bool {
     if !menu_state.is_open {
         return false;
@@ -83,7 +84,7 @@ pub fn render_context_menu(
 
                     // ========== HEADER BAR (Primary items as icons) ==========
                     if !primary_items.is_empty() {
-                        render_header_bar(ui, &primary_items, &mut action_executed);
+                        render_header_bar(ui, &primary_items, &mut action_executed, svg_icon_manager);
                         ui.separator();
                     }
 
@@ -133,34 +134,59 @@ fn render_header_bar(
     ui: &mut egui::Ui,
     items: &[&ContextMenuItem],
     action: &mut Option<i32>,
+    svg_icon_manager: &mut SvgIconManager,
 ) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(HEADER_SPACING, 0.0);
         
+        // Determine icon color based on theme
+        let icon_color = if ui.visuals().dark_mode {
+            [220, 220, 220, 255]
+        } else {
+            [60, 60, 60, 255]
+        };
+        let disabled_color = [128, 128, 128, 180];
+        
         for item in items {
             let btn_size = egui::vec2(HEADER_BUTTON_SIZE, HEADER_BUTTON_SIZE);
             
-            // Get icon based on command_string
-            let icon_str = match item.command_string.as_deref() {
-                Some("cut") => ICON_CUT,
-                Some("copy") => ICON_COPY,
-                Some("paste") => ICON_PASTE,
-                Some("rename") => ICON_RENAME,
-                Some("delete") => ICON_DELETE,
-                Some("properties") => ICON_PROPERTIES,
-                _ => "?",
+            // Get SVG icon name based on command_string
+            let svg_icon_name = match item.command_string.as_deref() {
+                Some("cut") => SVG_ICON_CUT,
+                Some("copy") => SVG_ICON_COPY,
+                Some("paste") => SVG_ICON_PASTE,
+                Some("rename") => SVG_ICON_RENAME,
+                Some("delete") => SVG_ICON_DELETE,
+                Some("properties") => SVG_ICON_PROPERTIES,
+                _ => "info", // Fallback icon
             };
             
-            let response = if let Some(icon) = &item.icon {
-                // Use texture icon if available
+            // Choose color based on enabled state
+            let color = if item.is_enabled { icon_color } else { disabled_color };
+            
+            // Try to load SVG icon, fallback to text button if not available
+            let response = if let Some(texture) = svg_icon_manager.get_icon(
+                ui.ctx(),
+                svg_icon_name,
+                HEADER_ICON_SIZE as u32,
+                color,
+            ) {
+                let img = egui::Image::from_texture(egui::load::SizedTexture::new(
+                    texture.id(),
+                    egui::vec2(HEADER_ICON_SIZE, HEADER_ICON_SIZE),
+                ));
+                ui.add_sized(btn_size, egui::ImageButton::new(img).frame(false))
+            } else if let Some(icon) = &item.icon {
+                // Use texture icon if available (from shell)
                 let img = egui::Image::from_texture(egui::load::SizedTexture::new(
                     icon.id(),
                     egui::vec2(HEADER_ICON_SIZE, HEADER_ICON_SIZE),
                 ));
                 ui.add_sized(btn_size, egui::ImageButton::new(img))
             } else {
-                // Use Unicode icon
-                let btn = egui::Button::new(egui::RichText::new(icon_str).size(12.0));
+                // Last resort: use first letter as fallback
+                let fallback = item.text.chars().next().unwrap_or('?').to_string();
+                let btn = egui::Button::new(egui::RichText::new(fallback).size(12.0));
                 ui.add_sized(btn_size, btn)
             };
 
