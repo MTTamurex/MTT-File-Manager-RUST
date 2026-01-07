@@ -293,37 +293,15 @@ fn render_single_item(
         *action = Some(item.id);
     }
 
-    // Handle submenu on hover (keep open while cursor is over item OR submenu)
+    // Handle submenu on hover - simplified approach
     if has_submenu {
         let pointer_pos = ui.ctx().pointer_latest_pos();
         let submenu_pos = egui::pos2(rect.right() + SUBMENU_X_OFFSET, rect.top());
-        
-        // Estimate submenu size for hover detection
-        let estimated_height = item
-            .sub_items
-            .iter()
-            .fold(8.0, |acc, sub| acc + if sub.is_separator { 6.0 } else { ITEM_HEIGHT + 1.0 });
-        let estimated_submenu_rect = egui::Rect::from_min_size(
-            submenu_pos,
-            egui::vec2(MENU_MAX_WIDTH, estimated_height),
-        );
-        
-        // Create a bridge zone that covers the ENTIRE submenu height
-        // This allows cursor to move up/down freely within the submenu without closing it
-        let bridge_rect = egui::Rect::from_min_max(
-            egui::pos2(rect.right() - 5.0, submenu_pos.y.min(rect.top())),  // Top of submenu or item
-            egui::pos2(submenu_pos.x + 5.0, (submenu_pos.y + estimated_height).max(rect.bottom())),  // Bottom of submenu or item
-        );
-        
-        let pointer_in_item = rect.contains(pointer_pos.unwrap_or(egui::Pos2::ZERO));
-        let pointer_in_submenu = pointer_pos.map_or(false, |p| estimated_submenu_rect.contains(p));
-        let pointer_in_bridge = pointer_pos.map_or(false, |p| bridge_rect.contains(p));
         
         // If hovering over this item, update the hierarchy at this depth level
         if response.hovered() {
             SUBMENU_HIERARCHY.with(|hierarchy| {
                 let mut h = hierarchy.borrow_mut();
-                // Ensure vector is large enough
                 while h.len() <= depth {
                     h.push(None);
                 }
@@ -339,14 +317,21 @@ fn render_single_item(
             h.get(depth).copied().flatten() == Some(item.id)
         });
         
-        // Show submenu ONLY if:
-        // 1. This is the active item at this depth, AND
-        // 2. Pointer is in interaction zone (hovered, bridge, or submenu)
-        let should_show_submenu = is_active && (response.hovered() || pointer_in_bridge || pointer_in_submenu);
+        // Check if any DEEPER level is active (meaning we're inside a nested submenu)
+        let deeper_active = SUBMENU_HIERARCHY.with(|hierarchy| {
+            let h = hierarchy.borrow();
+            h.len() > depth + 1 && h.get(depth + 1).copied().flatten().is_some()
+        });
         
-        // Show submenu only if pointer is in the interaction zone
+        // Show submenu if:
+        // 1. This is the active item at this depth, AND
+        // 2. Either hovering over parent item OR deeper level is active (inside nested submenu)
+        //    OR pointer is to the RIGHT of this item (in submenu area)
+        let pointer_to_right = pointer_pos.map_or(false, |p| p.x > rect.right());
+        let should_show_submenu = is_active && (response.hovered() || deeper_active || pointer_to_right);
+        
         if should_show_submenu {
-            egui::Area::new(egui::Id::new(format!("submenu_{}", item.id)))
+            let area_response = egui::Area::new(egui::Id::new(format!("submenu_{}", item.id)))
                 .order(egui::Order::Foreground)
                 .fixed_pos(submenu_pos)
                 .show(ui.ctx(), |ui| {
@@ -358,10 +343,26 @@ fn render_single_item(
                             ui.set_max_width(MENU_MAX_WIDTH);
                             ui.spacing_mut().item_spacing = egui::vec2(0.0, 1.0);
                             for sub in &item.sub_items {
-                                render_single_item(ui, sub, action, depth + 1);  // Pass depth + 1 for nested submenu
+                                render_single_item(ui, sub, action, depth + 1);
                             }
                         });
                 });
+            
+            // If pointer is inside the submenu area, keep the hierarchy active
+            if let Some(pos) = pointer_pos {
+                if area_response.response.rect.contains(pos) {
+                    // Pointer is inside submenu - ensure this item stays active
+                    SUBMENU_HIERARCHY.with(|hierarchy| {
+                        let mut h = hierarchy.borrow_mut();
+                        if h.get(depth).copied().flatten() != Some(item.id) {
+                            while h.len() <= depth {
+                                h.push(None);
+                            }
+                            h[depth] = Some(item.id);
+                        }
+                    });
+                }
+            }
         }
     }
 }
