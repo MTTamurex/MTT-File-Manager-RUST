@@ -332,35 +332,35 @@ fn render_single_item(
     if has_submenu {
         let pointer_pos = ui.ctx().pointer_latest_pos();
         
-        // Calculate submenu position with smart horizontal positioning
+        // Calculate submenu position: RIGHT by default, LEFT only if insufficient space
         let screen_rect = ui.ctx().screen_rect();
         let menu_width = SUBMENU_MIN_WIDTH; // Expected submenu width
-        
-        // Default: try to position to the right
-        let mut submenu_pos = egui::pos2(rect.right() + SUBMENU_X_OFFSET, rect.top());
-        
-        // Check if there's enough space on the right
+
         let space_on_right = screen_rect.right() - rect.right();
         let needs_flip = space_on_right < (menu_width + SUBMENU_X_OFFSET + 20.0); // 20px margin
-        
-        // If not enough space on right, flip to left
-        if needs_flip {
-            submenu_pos = egui::pos2(rect.left() - menu_width - SUBMENU_X_OFFSET, rect.top());
-        }
+
+        // Open to the right by default, flip to left only if not enough space
+        let open_left = needs_flip;
+
+        let mut submenu_pos = if open_left {
+            egui::pos2(rect.left() - menu_width - SUBMENU_X_OFFSET, rect.top())
+        } else {
+            egui::pos2(rect.right() + SUBMENU_X_OFFSET, rect.top())
+        };
         
         // Create an EXPANDED rect that includes the submenu direction area
         // This prevents flickering when mouse is between parent and submenu
-        let expanded_rect = if !needs_flip {
-            // Submenu is to the right - expand rect rightward
-            egui::Rect::from_min_max(
-                rect.min,
-                egui::pos2(rect.right() + SUBMENU_X_OFFSET + 10.0, rect.max.y)
-            )
-        } else {
+        let expanded_rect = if open_left {
             // Submenu is to the left - expand rect leftward
             egui::Rect::from_min_max(
                 egui::pos2(rect.left() - SUBMENU_X_OFFSET - 10.0, rect.min.y),
                 rect.max
+            )
+        } else {
+            // Submenu is to the right - expand rect rightward
+            egui::Rect::from_min_max(
+                rect.min,
+                egui::pos2(rect.right() + SUBMENU_X_OFFSET + 10.0, rect.max.y)
             )
         };
         
@@ -383,8 +383,29 @@ fn render_single_item(
         // Track submenu rect so we can keep it open when pointer is over it
         let mut submenu_rect: Option<egui::Rect> = None;
         
+        // Check if THIS item is active at its depth level FIRST (before updating hierarchy)
+        let is_currently_active = SUBMENU_HIERARCHY.with(|hierarchy| {
+            let h = hierarchy.borrow();
+            h.get(depth).copied().flatten() == Some(item.id)
+        });
+        
         // If hovering over expanded area AND no deeper submenus are active, update hierarchy
-        if pointer_in_expanded_area && !has_deeper_active {
+        // CRITICAL: Only check if there's a SIBLING active at the SAME depth (not any level)
+        // This allows nested submenus to open while preventing parent menu interference
+        let sibling_submenu_active = SUBMENU_HIERARCHY.with(|hierarchy| {
+            let h = hierarchy.borrow();
+            // Check if there's an active item at THIS depth that is NOT this item
+            if let Some(active_id) = h.get(depth).copied().flatten() {
+                active_id != item.id
+            } else {
+                false
+            }
+        });
+        
+        // Only update hierarchy if: in expanded area, no deeper active, AND (no sibling active OR this is already active)
+        let should_activate = pointer_in_expanded_area && !has_deeper_active && (!sibling_submenu_active || is_currently_active);
+        
+        if should_activate {
             SUBMENU_HIERARCHY.with(|hierarchy| {
                 let mut h = hierarchy.borrow_mut();
                 
