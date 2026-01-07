@@ -214,7 +214,8 @@ fn render_single_item(
         return;
     }
 
-    let has_submenu = !item.sub_items.is_empty();
+    // Items have submenu if they have sub_items OR a pending submenu to load
+    let has_submenu = !item.sub_items.is_empty() || item.has_pending_submenu;
     
     // Build the label with icon + text + shortcut/arrow
     let (rect, response) = ui.allocate_exact_size(

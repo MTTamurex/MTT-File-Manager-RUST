@@ -28,6 +28,8 @@ pub struct ContextMenuItem {
     pub command_string: Option<String>,
     /// Items that should go in "Show more options" overflow menu
     pub show_in_overflow: bool,
+    /// True if this item has a pending submenu that needs on-demand loading
+    pub has_pending_submenu: bool,
 }
 
 impl Default for ContextMenuItem {
@@ -43,6 +45,7 @@ impl Default for ContextMenuItem {
             keyboard_shortcut: None,
             command_string: None,
             show_in_overflow: false,
+            has_pending_submenu: false,
         }
     }
 }

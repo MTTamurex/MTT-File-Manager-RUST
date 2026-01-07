@@ -1494,6 +1494,9 @@ impl ImageViewerApp {
         if let Ok(hwnd) = hwnd_result {
             if !hwnd.0.is_null() {
                 self.native_hwnd = Some(hwnd);
+                
+                // Pre-initialize shell extensions so they're ready on first context menu
+                mtt_file_manager::infrastructure::windows::native_menu::warmup_shell_extensions(hwnd);
             }
         }
     }
@@ -2554,6 +2557,7 @@ impl ImageViewerApp {
                         keyboard_shortcut: None,
                         command_string: shell_item.command_string.clone(),
                         show_in_overflow: false,
+                        has_pending_submenu: shell_item.pending_submenu_handle.is_some(),
                     })
                 }
                 
@@ -2566,8 +2570,8 @@ impl ImageViewerApp {
                 let mut overflow_shell_items = Vec::new();
                 
                 for s_item in shell_items {
-                    // Keep only items with submenus (like 7-Zip, WinRAR) visible, rest to overflow
-                    if !s_item.sub_items.is_empty() {
+                    // Keep items with submenus OR pending submenus (like 7-Zip, WinRAR) visible
+                    if !s_item.sub_items.is_empty() || s_item.has_pending_submenu {
                         visible_shell_items.push(s_item);
                     } else if !s_item.is_separator {
                         overflow_shell_items.push(s_item);

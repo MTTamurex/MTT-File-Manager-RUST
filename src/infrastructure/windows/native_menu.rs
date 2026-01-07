@@ -20,12 +20,27 @@ pub struct ShellMenuItem {
     pub is_enabled: bool,
     /// Shell command verb (e.g., "copy", "delete", "openas") for filtering
     pub command_string: Option<String>,
+    /// For lazy-loaded submenus: stores the HMENU handle to load on demand
+    /// This is Some() when sub_items is empty but a submenu exists
+    pub pending_submenu_handle: Option<isize>,
+    /// Index of this item in parent menu (for WM_INITMENUPOPUP)
+    pub parent_index: u32,
 }
 
 /// Context holding the native objects alive
 pub struct ShellMenuContext {
     pub items: Vec<ShellMenuItem>,
     pub context_menu: IContextMenu,
+    /// Keep the root menu handle alive for on-demand submenu loading
+    hmenu: HMENU,
+}
+
+impl Drop for ShellMenuContext {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = DestroyMenu(self.hmenu);
+        }
+    }
 }
 
 /// Known items that we handle internally - filter from shell menu (matches Files)
@@ -44,14 +59,23 @@ pub fn is_known_verb(verb: &str) -> bool {
 }
 
 /// Extracts native shell menu items for a path
+/// Shell extensions may show fewer items on first call due to Windows lazy loading.
+/// Call warmup_shell_extensions() on app startup to pre-initialize.
 pub fn extract_shell_menu(hwnd: HWND, path: &Path) -> Result<ShellMenuContext> {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static CALL_COUNT: AtomicU32 = AtomicU32::new(0);
+    let call_num = CALL_COUNT.fetch_add(1, Ordering::SeqCst) + 1;
+    
     unsafe {
+        eprintln!("[ShellMenu] ===== EXTRACTION #{} for: {:?} =====", call_num, path);
+        
         // Parse the path to a PIDL
         let wide_path: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
         let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
         SHParseDisplayName(PCWSTR(wide_path.as_ptr()), None, &mut pidl, 0, None)?;
 
         if pidl.is_null() {
+            eprintln!("[ShellMenu] PIDL is null!");
             return Err(Error::from_win32());
         }
 
@@ -63,57 +87,53 @@ pub fn extract_shell_menu(hwnd: HWND, path: &Path) -> Result<ShellMenuContext> {
         // Get IContextMenu
         let context_menu: IContextMenu = parent_folder.GetUIObjectOf(hwnd, &items_ptr, None)?;
         
-        // Create a temporary popup menu to extract items
+        // Create popup menu to extract items
         let hmenu = CreatePopupMenu()?;
         context_menu.QueryContextMenu(hmenu, 0, 1, 0x7FFF, CMF_NORMAL)?;
 
         let count = GetMenuItemCount(hmenu);
-        
-        // Pre-initialize all submenus with WM_INITMENUPOPUP BEFORE extraction
-        // This is critical for lazy-loaded shell extensions (WinRAR, Send to, etc.)
-        if let Ok(ctx2) = context_menu.cast::<IContextMenu2>() {
-            for i in 0..count {
-                let mut info = MENUITEMINFOW {
-                    cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
-                    fMask: MIIM_SUBMENU,
-                    ..Default::default()
-                };
-                if GetMenuItemInfoW(hmenu, i as u32, true, &mut info).is_ok() {
-                    if !info.hSubMenu.0.is_null() {
-                        // Send WM_INITMENUPOPUP to trigger lazy loading
-                        let _ = ctx2.HandleMenuMsg(
-                            WM_INITMENUPOPUP,
-                            WPARAM(info.hSubMenu.0 as usize),
-                            LPARAM(i as isize),
-                        );
-                    }
-                }
-            }
-            
-            // Pump messages to allow shell extensions to process
-            // This simulates what happens when a real menu is opened
-            let mut msg = MSG::default();
-            while PeekMessageW(&mut msg, HWND::default(), 0, 0, PM_REMOVE).as_bool() {
-                let _ = TranslateMessage(&msg);
-                DispatchMessageW(&msg);
-            }
-        }
+        eprintln!("[ShellMenu] Total menu items: {}", count);
         
         // Extract items
         let mut items = Vec::new();
+        let mut pending_count = 0;
         for i in 0..count {
             if let Some(item) = extract_item_info(&context_menu, hmenu, i as u32) {
+                if item.pending_submenu_handle.is_some() {
+                    pending_count += 1;
+                    eprintln!("[ShellMenu] Item '{}' has PENDING submenu", item.text);
+                } else if !item.sub_items.is_empty() {
+                    eprintln!("[ShellMenu] Item '{}' has {} sub-items", item.text, item.sub_items.len());
+                }
                 items.push(item);
             }
         }
+        eprintln!("[ShellMenu] Extracted {} items, {} with pending submenus", items.len(), pending_count);
 
-        let _ = DestroyMenu(hmenu);
         CoTaskMemFree(Some(pidl as _));
 
         Ok(ShellMenuContext {
             items,
             context_menu,
+            hmenu,
         })
+    }
+}
+
+/// Warmup function to pre-initialize shell extensions
+/// Call this on app startup (e.g., with C:\ as path) to ensure
+/// shell extensions like WinRAR, Send to, Include in library are loaded
+pub fn warmup_shell_extensions(hwnd: HWND) {
+    // Use the system drive root to trigger shell extension loading
+    let system_drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_string());
+    let warmup_path = std::path::PathBuf::from(format!("{}\\", system_drive));
+    
+    eprintln!("[ShellMenu] Warming up shell extensions with {:?}...", warmup_path);
+    
+    if let Ok(_ctx) = extract_shell_menu(hwnd, &warmup_path) {
+        eprintln!("[ShellMenu] Warmup complete, shell extensions initialized");
+    } else {
+        eprintln!("[ShellMenu] Warmup failed");
     }
 }
 
@@ -187,23 +207,31 @@ unsafe fn extract_item_info(context_menu: &IContextMenu, hmenu: HMENU, index: u3
     };
 
     let mut sub_items = Vec::new();
+    let mut pending_submenu_handle = None;
+    
     if !info.hSubMenu.0.is_null() {
-        // Try to trigger lazy loading via IContextMenu2::HandleMenuMsg
+        // Send WM_INITMENUPOPUP BEFORE checking item count to trigger lazy loading
         // This is required for WinRAR, Send to, Include in library, etc.
         if let Ok(ctx2) = context_menu.cast::<IContextMenu2>() {
-            // Send WM_INITMENUPOPUP to populate the submenu
             let _ = ctx2.HandleMenuMsg(
                 WM_INITMENUPOPUP,
                 WPARAM(info.hSubMenu.0 as usize),
-                LPARAM(0), // Position 0, lParam usually ignored
+                LPARAM(index as isize),
             );
         }
         
         let sub_count = GetMenuItemCount(info.hSubMenu);
-        for i in 0..sub_count {
-            if let Some(sub_item) = extract_item_info(context_menu, info.hSubMenu, i as u32) {
-                sub_items.push(sub_item);
+        
+        if sub_count > 0 {
+            // Submenu has items - extract them recursively
+            for i in 0..sub_count {
+                if let Some(sub_item) = extract_item_info(context_menu, info.hSubMenu, i as u32) {
+                    sub_items.push(sub_item);
+                }
             }
+        } else {
+            // Submenu is still empty after WM_INITMENUPOPUP - store handle for on-demand loading
+            pending_submenu_handle = Some(info.hSubMenu.0 as isize);
         }
     }
 
@@ -215,7 +243,46 @@ unsafe fn extract_item_info(context_menu: &IContextMenu, hmenu: HMENU, index: u3
         is_separator,
         is_enabled,
         command_string,
+        pending_submenu_handle,
+        parent_index: index,
     })
+}
+
+impl ShellMenuContext {
+    /// Load a pending submenu on demand (called when user hovers over the submenu in UI)
+    /// This sends WM_INITMENUPOPUP to trigger lazy loading and extracts the items
+    pub fn load_pending_submenu(&self, item: &mut ShellMenuItem) -> bool {
+        if let Some(hmenu_ptr) = item.pending_submenu_handle.take() {
+            unsafe {
+                let hsubmenu = HMENU(hmenu_ptr as *mut _);
+                
+                // Send WM_INITMENUPOPUP to trigger lazy loading
+                if let Ok(ctx2) = self.context_menu.cast::<IContextMenu2>() {
+                    let _ = ctx2.HandleMenuMsg(
+                        WM_INITMENUPOPUP,
+                        WPARAM(hmenu_ptr as usize),
+                        LPARAM(item.parent_index as isize),
+                    );
+                }
+                
+                // Now extract the items
+                let sub_count = GetMenuItemCount(hsubmenu);
+                for i in 0..sub_count {
+                    if let Some(sub_item) = extract_item_info(&self.context_menu, hsubmenu, i as u32) {
+                        item.sub_items.push(sub_item);
+                    }
+                }
+                
+                return !item.sub_items.is_empty();
+            }
+        }
+        false
+    }
+    
+    /// Check if an item has a pending submenu that needs loading
+    pub fn has_pending_submenu(item: &ShellMenuItem) -> bool {
+        item.pending_submenu_handle.is_some()
+    }
 }
 
 pub fn invoke_menu_command(
