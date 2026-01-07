@@ -16,11 +16,11 @@ thread_local! {
 /// Operations that can be performed from context menu
 pub trait ContextMenuOperations {
     fn create_new_folder(&mut self);
-    fn command_copy(&mut self);
-    fn command_cut(&mut self);
-    fn command_paste(&mut self);
+    fn command_copy(&mut self, idx: Option<usize>);
+    fn command_cut(&mut self, idx: Option<usize>);
+    fn command_paste(&mut self, idx: Option<usize>);
     fn rename_item(&mut self, idx: usize);
-    fn delete_with_shell(&mut self);
+    fn delete_with_shell(&mut self, idx: Option<usize>);
 }
 
 /// Menu styling constants (matching Files app - compact)
@@ -35,7 +35,6 @@ const MENU_MAX_WIDTH: f32 = 400.0;
 const SUBMENU_MIN_WIDTH: f32 = 220.0;
 const SUBMENU_X_OFFSET: f32 = 6.0;
 const SHORTCUT_COLOR: egui::Color32 = egui::Color32::from_gray(128);
-const TEXT_SHORTCUT_GAP: f32 = 24.0; // Gap between text and shortcut
 
 /// Unicode icons for header bar (matching Files/Windows 11 style)
 const ICON_CUT: &str = "✂";

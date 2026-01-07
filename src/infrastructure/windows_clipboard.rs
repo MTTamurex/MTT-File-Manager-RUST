@@ -8,12 +8,9 @@ use std::path::PathBuf;
 
 /// Preferred drop effect values (from shlobj.h)
 /// Used to indicate if the clipboard operation is a Copy or Move (Cut)
-const DROPEFFECT_NONE: u32 = 0;
 const DROPEFFECT_COPY: u32 = 1;
 const DROPEFFECT_MOVE: u32 = 2;
 
-/// Clipboard format for preferred drop effect
-const CF_PREFERREDDROPEFFECT: u32 = 0; // Will be registered dynamically
 
 /// Represents the type of clipboard operation
 #[derive(Clone, Copy, Debug, PartialEq)]

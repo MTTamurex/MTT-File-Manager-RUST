@@ -43,14 +43,10 @@ impl Drop for ShellMenuContext {
     }
 }
 
-/// Known items that we handle internally - filter from shell menu (matches Files)
+/// Known items that we handle internally - filter from shell menu to avoid duplicates
 const KNOWN_VERBS: &[&str] = &[
-    "opennew", "opencontaining", "opennewprocess",
-    "runas", "runasuser", "pintohome", "PinToStartScreen",
-    "cut", "copy", "paste", "delete", "properties", "link",
-    "Windows.ModernShare", "Windows.Share", "setdesktopwallpaper",
-    "eject", "rename", "explore", "openinfiles", "extract",
-    "copyaspath", "undelete", "empty", "format", "rotate90", "rotate270",
+    "cut", "copy", "paste", "delete", "properties", "rename",
+    "open", "explore", "opennew", "opencontaining",
 ];
 
 /// Check if a verb should be filtered (handled by our UI)
@@ -307,5 +303,17 @@ pub fn invoke_menu_command(
         };
 
         context_menu.InvokeCommand(std::mem::transmute(&invoke))
+    }
+}
+
+pub fn show_properties_dialog(hwnd: HWND, path: &std::path::Path) -> Result<()> {
+    use windows::Win32::UI::Shell::{SHObjectProperties, SHOP_FILEPATH};
+    
+    let path_str = path.to_string_lossy();
+    let wide_path: Vec<u16> = path_str.encode_utf16().chain(std::iter::once(0)).collect();
+    
+    unsafe {
+        // SAFETY: wide_path is null-terminated, SHOP_FILEPATH specifies we are passing a path string
+        SHObjectProperties(hwnd, SHOP_FILEPATH, PCWSTR(wide_path.as_ptr()), None).ok()
     }
 }
