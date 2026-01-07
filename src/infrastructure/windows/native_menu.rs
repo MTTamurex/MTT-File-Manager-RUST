@@ -68,8 +68,39 @@ pub fn extract_shell_menu(hwnd: HWND, path: &Path) -> Result<ShellMenuContext> {
         context_menu.QueryContextMenu(hmenu, 0, 1, 0x7FFF, CMF_NORMAL)?;
 
         let count = GetMenuItemCount(hmenu);
+        
+        // Pre-initialize all submenus with WM_INITMENUPOPUP BEFORE extraction
+        // This is critical for lazy-loaded shell extensions (WinRAR, Send to, etc.)
+        if let Ok(ctx2) = context_menu.cast::<IContextMenu2>() {
+            for i in 0..count {
+                let mut info = MENUITEMINFOW {
+                    cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+                    fMask: MIIM_SUBMENU,
+                    ..Default::default()
+                };
+                if GetMenuItemInfoW(hmenu, i as u32, true, &mut info).is_ok() {
+                    if !info.hSubMenu.0.is_null() {
+                        // Send WM_INITMENUPOPUP to trigger lazy loading
+                        let _ = ctx2.HandleMenuMsg(
+                            WM_INITMENUPOPUP,
+                            WPARAM(info.hSubMenu.0 as usize),
+                            LPARAM(i as isize),
+                        );
+                    }
+                }
+            }
+            
+            // Pump messages to allow shell extensions to process
+            // This simulates what happens when a real menu is opened
+            let mut msg = MSG::default();
+            while PeekMessageW(&mut msg, HWND::default(), 0, 0, PM_REMOVE).as_bool() {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+        
+        // Extract items
         let mut items = Vec::new();
-
         for i in 0..count {
             if let Some(item) = extract_item_info(&context_menu, hmenu, i as u32) {
                 items.push(item);
@@ -157,6 +188,17 @@ unsafe fn extract_item_info(context_menu: &IContextMenu, hmenu: HMENU, index: u3
 
     let mut sub_items = Vec::new();
     if !info.hSubMenu.0.is_null() {
+        // Try to trigger lazy loading via IContextMenu2::HandleMenuMsg
+        // This is required for WinRAR, Send to, Include in library, etc.
+        if let Ok(ctx2) = context_menu.cast::<IContextMenu2>() {
+            // Send WM_INITMENUPOPUP to populate the submenu
+            let _ = ctx2.HandleMenuMsg(
+                WM_INITMENUPOPUP,
+                WPARAM(info.hSubMenu.0 as usize),
+                LPARAM(0), // Position 0, lParam usually ignored
+            );
+        }
+        
         let sub_count = GetMenuItemCount(info.hSubMenu);
         for i in 0..sub_count {
             if let Some(sub_item) = extract_item_info(context_menu, info.hSubMenu, i as u32) {
