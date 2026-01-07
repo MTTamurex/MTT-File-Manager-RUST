@@ -522,7 +522,8 @@ impl ImageViewerApp {
             _ => return ui.button(icon).on_hover_text(tooltip),
         };
 
-        mtt_file_manager::ui::svg_icons::icon_button(ui, &mut self.svg_icon_manager, icon_name, 20.0, tooltip)
+        // Use slightly larger icons to improve readability of the top bar controls.
+        mtt_file_manager::ui::svg_icons::icon_button(ui, &mut self.svg_icon_manager, icon_name, 24.0, tooltip)
     }
 
     fn delete_with_shell_for_idx(&mut self, idx: Option<usize>) {
@@ -767,7 +768,7 @@ impl ImageViewerApp {
             }
         };
 
-        let size = 20.0;
+        let size = 24.0;
         let color = if active {
             [0, 120, 215, 255] // Blue for active
         } else if ui.visuals().dark_mode {
@@ -2511,6 +2512,102 @@ impl mtt_file_manager::ui::context_menu::ContextMenuOperations for ImageViewerAp
 }
 
 impl ImageViewerApp {
+    /// Resolve the target path for a context menu action.
+    fn context_target_path(&self, item_idx: Option<usize>) -> Option<PathBuf> {
+        if let Some(idx) = item_idx {
+            return self.items.get(idx).map(|i| i.path.clone());
+        }
+
+        if let Some(p) = self.context_menu.target_path.clone() {
+            return Some(p);
+        }
+
+        if let Some(sel) = &self.selected_file {
+            return Some(sel.path.clone());
+        }
+
+        Some(PathBuf::from(&self.current_path))
+    }
+
+    /// Copy a filesystem path to the Windows clipboard as text.
+    fn copy_path_to_clipboard(&self, path: &Path) {
+        use clipboard_win::{formats, Clipboard, Setter};
+
+        if let Ok(_clip) = Clipboard::new_attempts(10) {
+            let _ = formats::Unicode.write_clipboard(&path.to_string_lossy());
+        }
+    }
+
+    /// Create a Windows shell shortcut (.lnk) pointing to `target` in the same directory.
+    fn create_shell_shortcut(&self, target: &Path) -> std::result::Result<PathBuf, String> {
+        use windows::core::PCWSTR;
+        use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+        use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+
+        let dest_dir = target
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from(&self.current_path));
+
+        let base_name = target
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| target.to_string_lossy().to_string());
+
+        let mut candidate = dest_dir.join(format!("{} - Atalho.lnk", base_name));
+        let mut counter = 2;
+        while candidate.exists() {
+            candidate = dest_dir.join(format!("{} - Atalho ({}).lnk", base_name, counter));
+            counter += 1;
+        }
+
+        let result = unsafe {
+            // SAFETY: COM is initialized for the current thread; errors are propagated as Strings.
+            CoInitializeEx(None, COINIT_APARTMENTTHREADED)
+                .ok()
+                .map_err(|e| format!("CoInitializeEx failed: {e}"))?;
+
+            let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
+                .map_err(|e| format!("CoCreateInstance ShellLink failed: {e}"))?;
+
+            let wide_target: Vec<u16> = target
+                .to_string_lossy()
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            let wide_workdir: Vec<u16> = dest_dir
+                .to_string_lossy()
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+
+            link.SetPath(PCWSTR(wide_target.as_ptr()))
+                .map_err(|e| format!("SetPath failed: {e}"))?;
+            link.SetWorkingDirectory(PCWSTR(wide_workdir.as_ptr()))
+                .map_err(|e| format!("SetWorkingDirectory failed: {e}"))?;
+
+            let persist: IPersistFile = link
+                .cast()
+                .map_err(|e| format!("IPersistFile cast failed: {e}"))?;
+
+            let wide_dest: Vec<u16> = candidate
+                .to_string_lossy()
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            persist
+                .Save(PCWSTR(wide_dest.as_ptr()), true)
+                .map_err(|e| format!("Persist Save failed: {e}"))?;
+
+            Ok(())
+        };
+
+        unsafe { CoUninitialize(); }
+
+        result.map(|_| candidate)
+    }
+
     fn populate_context_menu(&mut self, ctx: &egui::Context, path: &std::path::Path, is_empty_area: bool, _item_index: Option<usize>) {
         use mtt_file_manager::application::context_menu::ContextMenuItem;
         use mtt_file_manager::infrastructure::windows::native_menu::{extract_shell_menu, ShellMenuItem, is_known_verb};
@@ -2540,8 +2637,6 @@ impl ImageViewerApp {
             items.push(ContextMenuItem::separator());
             items.push(ContextMenuItem::new(-20, "Abrir"));
             items.push(ContextMenuItem::new(-21, "Abrir em nova guia"));
-            items.push(ContextMenuItem::new(-22, "Abrir em nova janela"));
-            items.push(ContextMenuItem::new(-23, "Abrir em novo painel"));
             items.push(ContextMenuItem::separator());
             // Basic file operations as text items (in addition to header icons)
             items.push(ContextMenuItem::new(-30, "Recortar").with_command("cut").with_shortcut("Ctrl+X"));
@@ -2551,9 +2646,7 @@ impl ImageViewerApp {
             items.push(ContextMenuItem::new(-34, "Excluir").with_command("delete").with_shortcut("Del"));
             items.push(ContextMenuItem::separator());
             items.push(ContextMenuItem::new(-24, "Copiar caminho").with_shortcut("Ctrl+Shift+C"));
-            items.push(ContextMenuItem::new(-25, "Criar pasta com seleção"));
             items.push(ContextMenuItem::new(-26, "Criar atalho"));
-            items.push(ContextMenuItem::new(-27, "Fixar na Barra Lateral"));
             items.push(ContextMenuItem::separator());
             items.push(ContextMenuItem::new(-28, "Propriedades").with_command("properties").with_shortcut("Alt+Enter"));
         }
@@ -3776,6 +3869,53 @@ impl eframe::App for ImageViewerApp {
                         }
                     }
                     -6 | -34 => self.delete_with_shell_for_idx(item_idx),
+                    -21 => {
+                        if let Some(path) = self.context_target_path(item_idx) {
+                            let target = if path.is_dir() {
+                                path
+                            } else {
+                                path.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from(&self.current_path))
+                            };
+
+                            self.sync_to_tab();
+                            self.tab_manager.new_tab_at(&target.to_string_lossy());
+                            self.sync_from_tab();
+
+                            if self.is_computer_view {
+                                self.setup_computer_view();
+                            } else {
+                                self.watch_current_folder();
+                                self.load_folder(false);
+                            }
+                        }
+                    }
+                    -24 => {
+                        if let Some(path) = self.context_target_path(item_idx) {
+                            self.copy_path_to_clipboard(&path);
+                        }
+                    }
+                    -26 => {
+                        if let Some(path) = self.context_target_path(item_idx) {
+                            match self.create_shell_shortcut(&path) {
+                                Ok(created) => {
+                                    // Refresh to show the new shortcut in the view
+                                    self.load_folder(false);
+                                    self.notifications.push(
+                                        mtt_file_manager::application::AppNotification::info(
+                                            format!("Atalho criado: {}", created.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()),
+                                        ),
+                                    );
+                                }
+                                Err(e) => {
+                                    self.notifications.push(
+                                        mtt_file_manager::application::AppNotification::error(
+                                            format!("Falha ao criar atalho: {e}"),
+                                        ),
+                                    );
+                                }
+                            }
+                        }
+                    }
                     -28 => self.show_properties_for_idx(item_idx),
                     _ => {}
                 }
