@@ -4074,6 +4074,9 @@ impl eframe::App for ImageViewerApp {
     }
 }
 fn main() -> eframe::Result<()> {
+    // Initialize codec name cache (queries Windows Registry on-demand)
+    mtt_file_manager::infrastructure::windows::codec_registry::init_codec_cache();
+    
     // 3-STAGE STARTUP: Start hidden and small (NOT maximized here)
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
