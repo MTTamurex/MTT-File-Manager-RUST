@@ -53,6 +53,10 @@ pub fn render_context_menu(
     svg_icon_manager: &mut SvgIconManager,
 ) -> bool {
     if !menu_state.is_open {
+        // CRITICAL: Clear hierarchy when menu is not open
+        SUBMENU_HIERARCHY.with(|hierarchy| {
+            hierarchy.borrow_mut().clear();
+        });
         return false;
     }
 
@@ -124,6 +128,10 @@ pub fn render_context_menu(
         if action_executed.is_none() {
             menu_state.close();
         }
+        // CRITICAL: Clear submenu hierarchy when menu closes
+        SUBMENU_HIERARCHY.with(|hierarchy| {
+            hierarchy.borrow_mut().clear();
+        });
         return true;
     }
 
@@ -320,21 +328,79 @@ fn render_single_item(
         *action = Some(item.id);
     }
 
-    // Handle submenu on hover - simplified approach
+    // Handle submenu on hover - stable approach with expanded hit area
     if has_submenu {
         let pointer_pos = ui.ctx().pointer_latest_pos();
-        let submenu_pos = egui::pos2(rect.right() + SUBMENU_X_OFFSET, rect.top());
         
-        // If hovering over this item, update the hierarchy at this depth level
-        if response.hovered() {
+        // Calculate submenu position with smart horizontal positioning
+        let screen_rect = ui.ctx().screen_rect();
+        let menu_width = SUBMENU_MIN_WIDTH; // Expected submenu width
+        
+        // Default: try to position to the right
+        let mut submenu_pos = egui::pos2(rect.right() + SUBMENU_X_OFFSET, rect.top());
+        
+        // Check if there's enough space on the right
+        let space_on_right = screen_rect.right() - rect.right();
+        let needs_flip = space_on_right < (menu_width + SUBMENU_X_OFFSET + 20.0); // 20px margin
+        
+        // If not enough space on right, flip to left
+        if needs_flip {
+            submenu_pos = egui::pos2(rect.left() - menu_width - SUBMENU_X_OFFSET, rect.top());
+        }
+        
+        // Create an EXPANDED rect that includes the submenu direction area
+        // This prevents flickering when mouse is between parent and submenu
+        let expanded_rect = if !needs_flip {
+            // Submenu is to the right - expand rect rightward
+            egui::Rect::from_min_max(
+                rect.min,
+                egui::pos2(rect.right() + SUBMENU_X_OFFSET + 10.0, rect.max.y)
+            )
+        } else {
+            // Submenu is to the left - expand rect leftward
+            egui::Rect::from_min_max(
+                egui::pos2(rect.left() - SUBMENU_X_OFFSET - 10.0, rect.min.y),
+                rect.max
+            )
+        };
+        
+        // Check if pointer is in the expanded area (item + gap to submenu)
+        let pointer_in_expanded_area = pointer_pos.map_or(false, |p| expanded_rect.contains(p));
+        
+        // CRITICAL: Check if there are DEEPER levels active (nested submenus)
+        // If so, don't interfere with them by activating this item
+        let has_deeper_active = SUBMENU_HIERARCHY.with(|hierarchy| {
+            let h = hierarchy.borrow();
+            // Check if any level deeper than current depth has an active item
+            for i in (depth + 1)..h.len() {
+                if h.get(i).copied().flatten().is_some() {
+                    return true;
+                }
+            }
+            false
+        });
+
+        // Track submenu rect so we can keep it open when pointer is over it
+        let mut submenu_rect: Option<egui::Rect> = None;
+        
+        // If hovering over expanded area AND no deeper submenus are active, update hierarchy
+        if pointer_in_expanded_area && !has_deeper_active {
             SUBMENU_HIERARCHY.with(|hierarchy| {
                 let mut h = hierarchy.borrow_mut();
+                
+                // Check if we're switching to a different item at this depth
+                let is_different_item = h.get(depth).copied().flatten() != Some(item.id);
+                
                 while h.len() <= depth {
                     h.push(None);
                 }
                 h[depth] = Some(item.id);
-                // Clear deeper levels when a new item is selected at this depth
-                h.truncate(depth + 1);
+                
+                // CRITICAL: Clear deeper levels when switching items at this depth
+                // This prevents submenu interference
+                if is_different_item {
+                    h.truncate(depth + 1);
+                }
             });
         }
         
@@ -344,20 +410,8 @@ fn render_single_item(
             h.get(depth).copied().flatten() == Some(item.id)
         });
         
-        // Check if any DEEPER level is active (meaning we're inside a nested submenu)
-        let deeper_active = SUBMENU_HIERARCHY.with(|hierarchy| {
-            let h = hierarchy.borrow();
-            h.len() > depth + 1 && h.get(depth + 1).copied().flatten().is_some()
-        });
-        
-        // Show submenu if:
-        // 1. This is the active item at this depth, AND
-        // 2. Either hovering over parent item OR deeper level is active (inside nested submenu)
-        //    OR pointer is to the RIGHT of this item (in submenu area)
-        let pointer_to_right = pointer_pos.map_or(false, |p| p.x > rect.right());
-        let should_show_submenu = is_active && (response.hovered() || deeper_active || pointer_to_right);
-        
-        if should_show_submenu {
+        // Show submenu if this is the active item at this depth
+        if is_active {
             let area_response = egui::Area::new(egui::Id::new(format!("submenu_{}", item.id)))
                 .order(egui::Order::Foreground)
                 .fixed_pos(submenu_pos)
@@ -374,6 +428,9 @@ fn render_single_item(
                             }
                         });
                 });
+
+            // Store submenu rect for hover detection outside the main menu rect
+            submenu_rect = Some(area_response.response.rect);
             
             // If pointer is inside the submenu area, keep the hierarchy active
             if let Some(pos) = pointer_pos {
@@ -390,6 +447,21 @@ fn render_single_item(
                     });
                 }
             }
+        }
+
+        // If pointer is neither on the parent nor on the submenu, and there's no deeper submenu active, clear this level
+        let pointer_in_submenu = pointer_pos.map_or(false, |p| {
+            submenu_rect.map_or(false, |r| r.contains(p))
+        });
+
+        if !pointer_in_expanded_area && !pointer_in_submenu && !has_deeper_active {
+            SUBMENU_HIERARCHY.with(|hierarchy| {
+                let mut h = hierarchy.borrow_mut();
+                if h.get(depth).copied().flatten() == Some(item.id) {
+                    h[depth] = None;
+                    h.truncate(depth + 1);
+                }
+            });
         }
     }
 }
