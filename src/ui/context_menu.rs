@@ -31,8 +31,8 @@ const ITEM_HEIGHT: f32 = 22.0;
 const ITEM_ICON_SIZE: f32 = 16.0;
 const MENU_ROUNDING: f32 = 6.0;
 const MENU_MIN_WIDTH: f32 = 180.0;
-const MENU_MAX_WIDTH: f32 = 320.0;
-const SUBMENU_MIN_WIDTH: f32 = 200.0;
+const MENU_MAX_WIDTH: f32 = 400.0;
+const SUBMENU_MIN_WIDTH: f32 = 220.0;
 const SUBMENU_X_OFFSET: f32 = 6.0;
 const SHORTCUT_COLOR: egui::Color32 = egui::Color32::from_gray(128);
 const TEXT_SHORTCUT_GAP: f32 = 24.0; // Gap between text and shortcut
@@ -254,8 +254,8 @@ fn render_single_item(
     };
     
     // Truncate very long names (like drive paths in "Send to") with ellipsis
-    let display_text = if item.text.len() > 32 {
-        format!("{}…", &item.text[..30])
+    let display_text = if item.text.len() > 45 {
+        format!("{}…", &item.text[..43])
     } else {
         item.text.clone()
     };
