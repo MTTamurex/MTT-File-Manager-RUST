@@ -4073,18 +4073,59 @@ impl eframe::App for ImageViewerApp {
         self.save_preferences();
     }
 }
+
+/// Load application icon from PNG file
+fn load_app_icon() -> Option<egui::IconData> {
+    let icon_path = std::path::PathBuf::from("appicon.png");
+    
+    if !icon_path.exists() {
+        eprintln!("Warning: appicon.png not found - using default icon");
+        return None;
+    }
+    
+    // Load PNG using image crate
+    match image::open(&icon_path) {
+        Ok(img) => {
+            // Resize to 256x256 for optimal display (Windows icon standard)
+            let resized = img.resize_exact(256, 256, image::imageops::FilterType::Lanczos3);
+            let rgba_image = resized.to_rgba8();
+            let pixels = rgba_image.into_raw();
+            
+            Some(egui::IconData {
+                rgba: pixels,
+                width: 256,
+                height: 256,
+            })
+        }
+        Err(e) => {
+            eprintln!("Warning: Failed to load appicon.png: {}", e);
+            None
+        }
+    }
+}
+
 fn main() -> eframe::Result<()> {
     // Initialize codec name cache (queries Windows Registry on-demand)
     mtt_file_manager::infrastructure::windows::codec_registry::init_codec_cache();
     
+    // Load application icon
+    let icon_data = load_app_icon();
+    
     // 3-STAGE STARTUP: Start hidden and small (NOT maximized here)
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_visible(false) // Start hidden
+        .with_maximized(false) // NOT maximized at creation
+        .with_inner_size([800.0, 600.0]) // Small initial size (will be maximized in update)
+        .with_title("MTT File Manager")
+        .with_app_id("mtt-file-manager");
+    
+    // Set window icon if loaded successfully
+    if let Some(icon) = icon_data {
+        viewport = viewport.with_icon(icon);
+    }
+    
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_visible(false) // Start hidden
-            .with_maximized(false) // NOT maximized at creation
-            .with_inner_size([800.0, 600.0]) // Small initial size (will be maximized in update)
-            .with_title("MTT File Manager")
-            .with_app_id("mtt-file-manager"),
+        viewport,
         persist_window: false, // Disable eframe persistence - we control manually
         ..Default::default()
     };

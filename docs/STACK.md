@@ -203,19 +203,23 @@ Win32::System::Registry::{          // Codec name resolution (NEW 2026-01-07)
 ```
 
 **Codec Resolution Strategy** (Implements .cursorrules §7):
-1. **LRU Cache**: 128 entries, thread-safe `Mutex<LruCache>`
-2. **Windows Registry**: `HKLM\SOFTWARE\Classes\CLSID\{GUID}\FriendlyName`
-3. **Fallback**: Microsoft-defined constants (PCM, MP3, EAC3, etc.)
-4. **Future**: Media Foundation Transform enumeration (MFTEnumEx)
+1. **Microsoft SDK Database**: Official codec GUIDs from Windows SDK headers (mfapi.h, wmcodecdsp.h, mmreg.h) - resolves codecs not registered in system
+2. **LRU Cache**: 128 entries, thread-safe `Mutex<LruCache>`
+3. **Windows Registry**: `HKLM\SOFTWARE\Classes\CLSID\{GUID}\FriendlyName`
+4. **Media Foundation Transform**: MFTEnumEx with input/output type filters across decoder/encoder categories
+5. **3-Layer Architecture**: SDK DB → Registry → MFT ensures maximum codec coverage
 
 **Supported GUID Formats**:
-- Full GUID with braces: `{A7FB87AF-0000-0010-8000-00AA00389B71}` → `EAC3`
-- Partial hex (8 digits): `A7FB87AF` → auto-expands to full GUID → `EAC3`
-- GUID without braces: `A7FB87AF-0000-0010-8000-00AA00389B71` → `EAC3`
+- Full GUID with braces: `{A7FB87AF-0000-0010-8000-00AA00389B71}` → `Dolby Digital Plus (EAC-3)`
+- Partial hex (8 digits): `E06D802C` → auto-expands to full GUID → `Dolby Digital Plus (DD+)`
+- GUID without braces: `A7FB87AF-0000-0010-8000-00AA00389B71` → `Dolby Digital Plus (EAC-3)`
 
-**Known Codecs** (via fallback constants):
-- **Audio**: PCM, MP3, AAC, AAC-LC, AAC-HE, Opus, WMA (v1/v2/Pro/Lossless), AC-3, DTS, **EAC3** (Dolby Digital Plus)
-- **Video**: H.264, H.265, MPEG-4, VC-1, VP8, VP9, AV1
+**Microsoft SDK Codec Database** (official GUIDs, not arbitrary hardcoding):
+- **Dolby**: EAC-3 (A7FB87AF), DD+ (E06D802C), AC-4 (0000240C)
+- **Windows Media**: WMA9 Lossless (00000162), WMA9 Pro (00000163), WMA10 Pro (00000166), WMAv2 (00000161)
+- **MPEG**: AAC (00006C75), MP3 (0000706D/00000055), MP2 (00000050)
+- **DivX**: DivX Audio (00004143)
+- **Video**: H.264, H.265, MPEG-4, VC-1, VP8, VP9, AV1 (via MFT enumeration)
 
 **Por que Windows Crate?**
 - ✅ **Bindings oficiais da Microsoft**
