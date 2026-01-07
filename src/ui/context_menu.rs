@@ -2,8 +2,15 @@
 //! Follows .cursorrules: single responsibility, < 300 lines
 
 use eframe::egui::{self, Sense};
+use std::cell::RefCell;
+use std::time::Instant;
 
 use crate::application::context_menu::{ContextMenuState, ContextMenuItem};
+
+// Track which item should have its submenu open (most recently hovered)
+thread_local! {
+    static SUBMENU_HOVER_STATE: RefCell<(Option<i32>, Instant)> = RefCell::new((None, Instant::now()));
+}
 
 /// Operations that can be performed from context menu
 pub trait ContextMenuOperations {
@@ -22,6 +29,10 @@ const HEADER_SPACING: f32 = 2.0;
 const ITEM_HEIGHT: f32 = 22.0;
 const ITEM_ICON_SIZE: f32 = 16.0;
 const MENU_ROUNDING: f32 = 6.0;
+const MENU_MIN_WIDTH: f32 = 180.0;
+const MENU_MAX_WIDTH: f32 = 320.0;
+const SUBMENU_MIN_WIDTH: f32 = 200.0;
+const SUBMENU_X_OFFSET: f32 = 6.0;
 const SHORTCUT_COLOR: egui::Color32 = egui::Color32::from_gray(128);
 const TEXT_SHORTCUT_GAP: f32 = 24.0; // Gap between text and shortcut
 
@@ -66,7 +77,8 @@ pub fn render_context_menu(
                 .inner_margin(4.0)
                 .corner_radius(MENU_ROUNDING)
                 .show(ui, |ui| {
-                    // NO fixed width - let egui auto-size based on content
+                    ui.set_min_width(MENU_MIN_WIDTH); // Ensure a base width for alignment
+                    ui.set_max_width(MENU_MAX_WIDTH); // Clamp width to avoid oversized menus
                     ui.spacing_mut().item_spacing = egui::vec2(0.0, 1.0);
 
                     // ========== HEADER BAR (Primary items as icons) ==========
@@ -173,8 +185,19 @@ fn render_menu_items(
     items: &[&ContextMenuItem],
     action: &mut Option<i32>,
 ) {
+    let mut last_was_separator = true; // collapse leading separators
+
     for item in items {
-        render_single_item(ui, item, action);
+        if item.is_separator {
+            if last_was_separator {
+                continue; // skip duplicate/leading separators
+            }
+            render_single_item(ui, item, action);
+            last_was_separator = true;
+        } else {
+            render_single_item(ui, item, action);
+            last_was_separator = false;
+        }
     }
 }
 
@@ -191,80 +214,145 @@ fn render_single_item(
 
     let has_submenu = !item.sub_items.is_empty();
     
-    // Build the label with icon + text + shortcut/arrow using horizontal layout
-    let response = ui.horizontal(|ui| {
-        ui.set_height(ITEM_HEIGHT);
-        ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
-        
-        // Icon space (fixed width for alignment)
-        ui.allocate_space(egui::vec2(4.0, ITEM_HEIGHT));
-        if let Some(icon) = &item.icon {
-            let img = egui::Image::from_texture(egui::load::SizedTexture::new(
-                icon.id(),
-                egui::vec2(ITEM_ICON_SIZE, ITEM_ICON_SIZE),
-            ));
-            ui.add(img);
-        } else {
-            ui.allocate_space(egui::vec2(ITEM_ICON_SIZE, ITEM_ICON_SIZE));
-        }
-        
-        // Text
-        let text_color = if item.is_enabled {
-            ui.visuals().text_color()
-        } else {
-            ui.visuals().weak_text_color()
-        };
-        ui.label(egui::RichText::new(&item.text).color(text_color).size(12.0));
-        
-        // Spacer to push shortcut/arrow to right
-        ui.add_space(TEXT_SHORTCUT_GAP);
-        
-        // Keyboard shortcut or submenu arrow
-        if has_submenu {
-            ui.label(egui::RichText::new("›").color(text_color).size(14.0));
-        } else if let Some(shortcut) = &item.keyboard_shortcut {
-            ui.label(egui::RichText::new(shortcut).color(SHORTCUT_COLOR).size(11.0));
-        }
-    });
-    
-    // Make the whole row clickable
-    let row_response = ui.interact(
-        response.response.rect,
-        egui::Id::new(format!("menu_item_{}", item.id)),
+    // Build the label with icon + text + shortcut/arrow
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), ITEM_HEIGHT),
         Sense::click(),
     );
     
     // Hover highlight
-    if row_response.hovered() {
+    if response.hovered() {
         ui.painter().rect_filled(
-            response.response.rect,
+            rect,
             3.0,
             ui.visuals().widgets.hovered.bg_fill,
         );
     }
 
+    // Icon (16x16)
+    let icon_rect = egui::Rect::from_min_size(
+        egui::pos2(rect.min.x + 8.0, rect.center().y - ITEM_ICON_SIZE / 2.0),
+        egui::vec2(ITEM_ICON_SIZE, ITEM_ICON_SIZE),
+    );
+    
+    if let Some(icon) = &item.icon {
+        let img = egui::Image::from_texture(egui::load::SizedTexture::new(
+            icon.id(),
+            icon_rect.size(),
+        ));
+        img.paint_at(ui, icon_rect);
+    }
+    
+    // Text with ellipsis truncation to prevent overflow
+    let text_x = icon_rect.right() + 8.0;
+    let text_color = if item.is_enabled {
+        ui.visuals().text_color()
+    } else {
+        ui.visuals().weak_text_color()
+    };
+    
+    // Truncate very long names (like drive paths in "Send to") with ellipsis
+    let display_text = if item.text.len() > 32 {
+        format!("{}…", &item.text[..30])
+    } else {
+        item.text.clone()
+    };
+    
+    ui.painter().text(
+        egui::pos2(text_x, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        &display_text,
+        egui::FontId::proportional(12.0),
+        text_color,
+    );
+    
+    // Right-aligned part (Shortcut or Arrow)
+    let right_alignment_pos = rect.right() - 10.0;
+    if has_submenu {
+        ui.painter().text(
+            egui::pos2(right_alignment_pos, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            "›",
+            egui::FontId::proportional(14.0),
+            text_color,
+        );
+    } else if let Some(shortcut) = &item.keyboard_shortcut {
+        ui.painter().text(
+            egui::pos2(right_alignment_pos, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            shortcut,
+            egui::FontId::proportional(10.0),
+            SHORTCUT_COLOR,
+        );
+    }
+
     // Handle click
-    if row_response.clicked() && item.is_enabled && !has_submenu {
+    if response.clicked() && item.is_enabled && !has_submenu {
         *action = Some(item.id);
     }
 
-    // Handle submenu on hover
-    if has_submenu && row_response.hovered() {
-        let submenu_pos = egui::pos2(response.response.rect.right() + 2.0, response.response.rect.top());
-        egui::Area::new(egui::Id::new(format!("submenu_{}", item.id)))
-            .fixed_pos(submenu_pos)
-            .order(egui::Order::Foreground)
-            .show(ui.ctx(), |ui| {
-                egui::Frame::popup(ui.style())
-                    .inner_margin(4.0)
-                    .corner_radius(MENU_ROUNDING)
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing = egui::vec2(0.0, 1.0);
-                        for sub in &item.sub_items {
-                            render_single_item(ui, sub, action);
-                        }
-                    });
+    // Handle submenu on hover (keep open while cursor is over item OR submenu)
+    if has_submenu {
+        let pointer_pos = ui.ctx().pointer_latest_pos();
+        let submenu_pos = egui::pos2(rect.right() + SUBMENU_X_OFFSET, rect.top());
+        
+        // Estimate submenu size for hover detection
+        let estimated_height = item
+            .sub_items
+            .iter()
+            .fold(8.0, |acc, sub| acc + if sub.is_separator { 6.0 } else { ITEM_HEIGHT + 1.0 });
+        let estimated_submenu_rect = egui::Rect::from_min_size(
+            submenu_pos,
+            egui::vec2(MENU_MAX_WIDTH, estimated_height),
+        );
+        
+        // Create a bridge zone to connect item and submenu
+        let bridge_rect = egui::Rect::from_min_max(
+            egui::pos2(rect.right() - 5.0, rect.top()),
+            egui::pos2(submenu_pos.x + 5.0, rect.bottom()),
+        );
+        
+        let pointer_in_item = rect.contains(pointer_pos.unwrap_or(egui::Pos2::ZERO));
+        let pointer_in_submenu = pointer_pos.map_or(false, |p| estimated_submenu_rect.contains(p));
+        let pointer_in_bridge = pointer_pos.map_or(false, |p| bridge_rect.contains(p));
+        
+        // If hovering over this item, update the global state
+        if response.hovered() {
+            SUBMENU_HOVER_STATE.with(|state| {
+                *state.borrow_mut() = (Some(item.id), Instant::now());
             });
+        }
+        
+        // Check if THIS item is the currently active one
+        let is_active = SUBMENU_HOVER_STATE.with(|state| {
+            let (active_id, _hover_time) = *state.borrow();
+            active_id == Some(item.id)
+        });
+        
+        // Show submenu ONLY if:
+        // 1. This is the active item, AND
+        // 2. Pointer is in interaction zone (hovered, item, bridge, or submenu)
+        let should_show_submenu = is_active && (response.hovered() || pointer_in_item || pointer_in_bridge || pointer_in_submenu);
+        
+        // Show submenu only if pointer is in the interaction zone
+        if should_show_submenu {
+            egui::Area::new(egui::Id::new(format!("submenu_{}", item.id)))
+                .order(egui::Order::Foreground)
+                .fixed_pos(submenu_pos)
+                .show(ui.ctx(), |ui| {
+                    egui::Frame::popup(ui.style())
+                        .inner_margin(4.0)
+                        .corner_radius(MENU_ROUNDING)
+                        .show(ui, |ui| {
+                            ui.set_min_width(SUBMENU_MIN_WIDTH);
+                            ui.set_max_width(MENU_MAX_WIDTH);
+                            ui.spacing_mut().item_spacing = egui::vec2(0.0, 1.0);
+                            for sub in &item.sub_items {
+                                render_single_item(ui, sub, action);
+                            }
+                        });
+                });
+        }
     }
 }
 
@@ -276,6 +364,6 @@ fn render_overflow_submenu(
 ) {
     let overflow_item = ContextMenuItem::new(-100, "Mostrar mais opções")
         .with_subitems(items.iter().map(|i| (*i).clone()).collect());
-    
+
     render_single_item(ui, &overflow_item, action);
 }
