@@ -21,18 +21,6 @@ impl Default for TextureCacheConfig {
     }
 }
 
-/// Icon cache configuration
-pub struct IconCacheConfig {
-    pub max_size: usize,
-}
-
-impl Default for IconCacheConfig {
-    fn default() -> Self {
-        Self {
-            max_size: 100, // Icons are shared by extension
-        }
-    }
-}
 
 /// Manages texture caches for thumbnails and icons
 pub struct CacheManager {
@@ -48,7 +36,6 @@ pub struct CacheManager {
     pub folder_preview_loading: std::collections::HashSet<PathBuf>,
 
     config: TextureCacheConfig,
-    icon_config: IconCacheConfig,
 }
 
 impl CacheManager {
@@ -65,15 +52,14 @@ impl CacheManager {
             folder_preview_loading: std::collections::HashSet::new(),
 
             config: TextureCacheConfig::default(),
-            icon_config: IconCacheConfig::default(),
         }
     }
 
     /// Creates a cache manager with custom configuration
-    pub fn with_config(config: TextureCacheConfig, icon_config: IconCacheConfig) -> Self {
+    pub fn with_config(config: TextureCacheConfig) -> Self {
         Self {
             texture_cache: LruCache::new(NonZeroUsize::new(config.max_size).unwrap()),
-            icon_cache: LruCache::new(NonZeroUsize::new(icon_config.max_size).unwrap()),
+            icon_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
             loading_set: std::collections::HashSet::new(),
             folder_icon_texture: None,
             computer_icon: None,
@@ -82,7 +68,6 @@ impl CacheManager {
             folder_preview_loading: std::collections::HashSet::new(),
 
             config,
-            icon_config,
         }
     }
 

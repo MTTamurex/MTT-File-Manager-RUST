@@ -37,7 +37,6 @@ use mtt_file_manager::infrastructure::windows as windows_infra;
 
 // Import UI modules
 // use mtt_file_manager::ui::status_bar; // Not used directly - imported in render_status_bar call
-use mtt_file_manager::ui::context_menu::render_context_menu;
 use mtt_file_manager::ui::icon_loader::IconLoader;
 use mtt_file_manager::ui::svg_icons::SvgIconManager;
 
@@ -47,7 +46,7 @@ use windows::{
     Win32::Storage::FileSystem::*,
     Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState,
     Win32::UI::Shell::*,
-    Win32::UI::WindowsAndMessaging::{FindWindowW, GetCursorPos},
+    Win32::UI::WindowsAndMessaging::{FindWindowW},
 };
 
 // OTIMIZAÃ‡ÃƒO: Imports para Win32 FindFirst/NextFileW (metadata em UMA syscall)
@@ -190,7 +189,7 @@ struct ImageViewerApp {
 
     // ONEDRIVE SIDEBAR SHORTCUT
     onedrive_path: Option<String>, // Caminho do OneDrive (se instalado)
-    onedrive_icon: Option<egui::TextureHandle>, // Ícone nativo do OneDrive
+    onedrive_icon: Option<egui::TextureHandle>, // Ãcone nativo do OneDrive
 
     // NAVEGAÇÃO / ADDRESS BAR (Breadcrumbs vs Edit)
     is_address_editing: bool,
@@ -526,8 +525,9 @@ impl ImageViewerApp {
         mtt_file_manager::ui::svg_icons::icon_button(ui, &mut self.svg_icon_manager, icon_name, 20.0, tooltip)
     }
 
-    fn delete_with_shell(&mut self) {
-        if let Some(idx) = self.selected_item {
+    fn delete_with_shell_for_idx(&mut self, idx: Option<usize>) {
+        let target_idx = idx.or(self.selected_item);
+        if let Some(idx) = target_idx {
             if let Some(item) = self.items.get(idx) {
                 let path = item.path.clone();
                 let path_str = path.to_string_lossy().to_string();
@@ -551,10 +551,26 @@ impl ImageViewerApp {
                         self.disk_cache.remove_cache_for_path(&path);
 
                         // O watcher vai cuidar do refresh, mas podemos limpar a seleção
-                        self.selected_item = None;
-                        self.selected_file = None;
+                        if self.selected_item == Some(idx) {
+                            self.selected_item = None;
+                            self.selected_file = None;
+                        }
                     }
                 }
+            }
+        }
+    }
+
+    fn show_properties_for_idx(&mut self, idx: Option<usize>) {
+        let target_idx = idx.or(self.selected_item);
+        if let Some(idx) = target_idx {
+            if let Some(item) = self.items.get(idx) {
+                let path = item.path.clone();
+                // We'll use the shell properties dialog
+                let _ = mtt_file_manager::infrastructure::windows::native_menu::show_properties_dialog(
+                    self.native_hwnd.unwrap_or_default(),
+                    &path
+                );
             }
         }
     }
@@ -595,8 +611,10 @@ impl ImageViewerApp {
     // ===== CLIPBOARD OPERATIONS (Ctrl+C, Ctrl+X, Ctrl+V) =====
 
     /// Copiar: Coloca o arquivo no clipboard do Windows (CF_HDROP format)
-    fn command_copy(&mut self) {
-        if let Some(idx) = self.selected_item {
+    fn command_copy(&mut self, idx: Option<usize>) {
+        eprintln!("[DEBUG] command_copy called with idx: {:?}", idx);
+        let target_idx = idx.or(self.selected_item);
+        if let Some(idx) = target_idx {
             if let Some(item) = self.items.get(idx) {
                 // Put file in Windows clipboard using CF_HDROP format
                 if let Err(e) =
@@ -614,8 +632,9 @@ impl ImageViewerApp {
     }
 
     /// Recortar: Coloca o arquivo no clipboard do Windows com flag de MOVE
-    fn command_cut(&mut self) {
-        if let Some(idx) = self.selected_item {
+    fn command_cut(&mut self, idx: Option<usize>) {
+        let target_idx = idx.or(self.selected_item);
+        if let Some(idx) = target_idx {
             if let Some(item) = self.items.get(idx) {
                 // Put file in Windows clipboard using CF_HDROP format with MOVE effect
                 if let Err(e) =
@@ -633,7 +652,8 @@ impl ImageViewerApp {
     }
 
     /// Colar: Lê do clipboard do Windows e executa SHFileOperationW
-    fn command_paste(&mut self) {
+    fn command_paste(&mut self, idx: Option<usize>) {
+        eprintln!("[DEBUG] command_paste called with idx: {:?}", idx);
         use mtt_file_manager::infrastructure::windows_clipboard;
 
         // 1. First try to read from Windows clipboard
@@ -655,8 +675,21 @@ impl ImageViewerApp {
             return;
         }
 
-        // 2. Destination folder (current directory)
-        let dest_folder = PathBuf::from(&self.current_path);
+        // 2. Destination folder
+        // If idx is provided and is a folder, use it as destination
+        let dest_folder = if let Some(idx) = idx {
+            if let Some(item) = self.items.get(idx) {
+                if item.is_dir {
+                    item.path.clone()
+                } else {
+                    PathBuf::from(&self.current_path)
+                }
+            } else {
+                PathBuf::from(&self.current_path)
+            }
+        } else {
+            PathBuf::from(&self.current_path)
+        };
 
         // 3. Perform operation for each file
         for src_path in &src_paths {
@@ -2453,16 +2486,16 @@ impl mtt_file_manager::ui::context_menu::ContextMenuOperations for ImageViewerAp
         self.create_new_folder();
     }
 
-    fn command_copy(&mut self) {
-        self.command_copy();
+    fn command_copy(&mut self, idx: Option<usize>) {
+        self.command_copy(idx);
     }
 
-    fn command_cut(&mut self) {
-        self.command_cut();
+    fn command_cut(&mut self, idx: Option<usize>) {
+        self.command_cut(idx);
     }
 
-    fn command_paste(&mut self) {
-        self.command_paste();
+    fn command_paste(&mut self, idx: Option<usize>) {
+        self.command_paste(idx);
     }
 
     fn rename_item(&mut self, idx: usize) {
@@ -2472,8 +2505,8 @@ impl mtt_file_manager::ui::context_menu::ContextMenuOperations for ImageViewerAp
         }
     }
 
-    fn delete_with_shell(&mut self) {
-        self.delete_with_shell();
+    fn delete_with_shell(&mut self, idx: Option<usize>) {
+        self.delete_with_shell_for_idx(idx);
     }
 }
 
@@ -2489,7 +2522,7 @@ impl ImageViewerApp {
         items.push(ContextMenuItem::primary(-3, "Recortar").with_command("cut").with_shortcut("Ctrl+X"));
         items.push(ContextMenuItem::primary(-2, "Copiar").with_command("copy").with_shortcut("Ctrl+C"));
         
-        let can_paste = self.clipboard_file.is_some();
+        let can_paste = self.clipboard_file.is_some() || mtt_file_manager::infrastructure::windows_clipboard::has_files_in_clipboard();
         items.push(ContextMenuItem::primary(-4, "Colar").with_command("paste").with_shortcut("Ctrl+V").enabled(can_paste));
         
         if !is_empty_area {
@@ -2498,8 +2531,10 @@ impl ImageViewerApp {
         }
         
         // ========== SECONDARY ITEMS (App-specific) ==========
+        let can_paste = self.clipboard_file.is_some() || mtt_file_manager::infrastructure::windows_clipboard::has_files_in_clipboard();
         if is_empty_area {
             items.push(ContextMenuItem::separator());
+            items.push(ContextMenuItem::new(-32, "Colar").with_command("paste").with_shortcut("Ctrl+V").enabled(can_paste));
             items.push(ContextMenuItem::new(-1, "Criar pasta").with_shortcut("Ctrl+Shift+N"));
         } else {
             items.push(ContextMenuItem::separator());
@@ -2508,10 +2543,19 @@ impl ImageViewerApp {
             items.push(ContextMenuItem::new(-22, "Abrir em nova janela"));
             items.push(ContextMenuItem::new(-23, "Abrir em novo painel"));
             items.push(ContextMenuItem::separator());
+            // Basic file operations as text items (in addition to header icons)
+            items.push(ContextMenuItem::new(-30, "Recortar").with_command("cut").with_shortcut("Ctrl+X"));
+            items.push(ContextMenuItem::new(-31, "Copiar").with_command("copy").with_shortcut("Ctrl+C"));
+            items.push(ContextMenuItem::new(-32, "Colar").with_command("paste").with_shortcut("Ctrl+V").enabled(can_paste));
+            items.push(ContextMenuItem::new(-33, "Renomear").with_command("rename").with_shortcut("F2"));
+            items.push(ContextMenuItem::new(-34, "Excluir").with_command("delete").with_shortcut("Del"));
+            items.push(ContextMenuItem::separator());
             items.push(ContextMenuItem::new(-24, "Copiar caminho").with_shortcut("Ctrl+Shift+C"));
             items.push(ContextMenuItem::new(-25, "Criar pasta com seleção"));
             items.push(ContextMenuItem::new(-26, "Criar atalho"));
             items.push(ContextMenuItem::new(-27, "Fixar na Barra Lateral"));
+            items.push(ContextMenuItem::separator());
+            items.push(ContextMenuItem::new(-28, "Propriedades").with_command("properties").with_shortcut("Alt+Enter"));
         }
         
         // ========== SHELL ITEMS (Third-party extensions) ==========
@@ -2747,18 +2791,18 @@ impl eframe::App for ImageViewerApp {
 
             // Executar ações de clipboard
             if do_copy {
-                self.command_copy();
+                self.command_copy(None);
             }
             if do_cut {
-                self.command_cut();
+                self.command_cut(None);
             }
             if do_paste {
-                self.command_paste();
+                self.command_paste(None);
             }
 
             // Delete: Excluir
             if ctx.input(|i| i.key_pressed(egui::Key::Delete)) {
-                self.delete_with_shell();
+                self.delete_with_shell_for_idx(None);
             }
 
             // Ctrl + Shift + N: Nova Pasta
@@ -3716,21 +3760,23 @@ impl eframe::App for ImageViewerApp {
                 }
             } else {
                 // Internal command handled via trait
-                use mtt_file_manager::ui::context_menu::ContextMenuOperations;
+                let item_idx = context_menu.item_index;
+                eprintln!("[DEBUG] Internal command id: {}, item_idx: {:?}", id, item_idx);
                 match id {
                     -1 => self.create_new_folder(),
-                    -2 => self.command_copy(),
-                    -3 => self.command_cut(),
-                    -4 => self.command_paste(),
-                    -5 => {
-                        if let Some(idx) = context_menu.item_index {
+                    -2 | -31 => self.command_copy(item_idx),
+                    -3 | -30 => self.command_cut(item_idx),
+                    -4 | -32 => self.command_paste(item_idx),
+                    -5 | -33 => {
+                        if let Some(idx) = item_idx.or(self.selected_item) {
                             if let Some(item) = self.items.get(idx) {
                                 self.renaming_state = Some((idx, item.name.clone()));
                                 self.focus_rename = true;
                             }
                         }
                     }
-                    -6 => self.delete_with_shell(),
+                    -6 | -34 => self.delete_with_shell_for_idx(item_idx),
+                    -28 => self.show_properties_for_idx(item_idx),
                     _ => {}
                 }
             }
