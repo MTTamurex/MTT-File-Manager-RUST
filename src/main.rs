@@ -216,6 +216,12 @@ struct ImageViewerApp {
     
     // TAB SYSTEM
     tab_manager: mtt_file_manager::tabs::TabManager,
+    
+    // FOLDER SIZE CALCULATOR (async for details panel)
+    folder_size_req_sender: Sender<PathBuf>,  // UI → Worker
+    folder_size_res_receiver: Receiver<(PathBuf, u64)>,  // Worker → UI
+    folder_size_cache: std::collections::HashMap<PathBuf, u64>,  // Calculated sizes
+    folder_size_loading: HashSet<PathBuf>,  // Currently calculating
 }
 
 impl ImageViewerApp {
@@ -371,6 +377,29 @@ impl ImageViewerApp {
             spawn_folder_preview_worker(folder_preview_rx, folder_preview_res_tx, ctx.clone());
         }
 
+        // --- FOLDER SIZE WORKER (async for details panel) ---
+        let (folder_size_req_tx, folder_size_req_rx) = mpsc::channel::<PathBuf>();
+        let (folder_size_res_tx, folder_size_res_rx) = mpsc::channel();
+        let folder_size_ctx = ctx.clone();
+
+        std::thread::spawn(move || {
+            while let Ok(folder_path) = folder_size_req_rx.recv() {
+                // Calculate folder size recursively using walkdir
+                let mut total_size: u64 = 0;
+                for entry in walkdir::WalkDir::new(&folder_path)
+                    .into_iter()
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.file_type().is_file())
+                {
+                    if let Ok(meta) = entry.metadata() {
+                        total_size += meta.len();
+                    }
+                }
+                let _ = folder_size_res_tx.send((folder_path, total_size));
+                folder_size_ctx.request_repaint();
+            }
+        });
+
         let disks = get_all_drives();
 
         let mut app = Self {
@@ -485,6 +514,12 @@ impl ImageViewerApp {
             
             // TAB SYSTEM
             tab_manager: mtt_file_manager::tabs::TabManager::new(),
+            
+            // FOLDER SIZE CALCULATOR
+            folder_size_req_sender: folder_size_req_tx,
+            folder_size_res_receiver: folder_size_res_rx,
+            folder_size_cache: std::collections::HashMap::new(),
+            folder_size_loading: HashSet::new(),
         };
 
         // Inicia monitoramento inicial
@@ -1921,6 +1956,12 @@ impl ImageViewerApp {
             self.cache_manager.put_folder_preview(data.path, texture);
         }
 
+        // 9. FOLDER SIZE RESULTS
+        while let Ok((folder_path, total_size)) = self.folder_size_res_receiver.try_recv() {
+            self.folder_size_loading.remove(&folder_path);
+            self.folder_size_cache.insert(folder_path, total_size);
+            received_any = true;
+        }
 
         if received_any {
             ctx.request_repaint();
@@ -3567,7 +3608,26 @@ impl eframe::App for ImageViewerApp {
                                         add_detail(ui, "BitLocker:", "Desligado".to_string());
                                     } else {
                                         add_detail(ui, "Nome:", file.name.clone());
-                                        add_detail(ui, "Tamanho:", format_size(file.size));
+                                        
+                                        // Tamanho: para pastas, calcular conteúdo assíncrono
+                                        let size_display = if file.is_dir {
+                                            // Check if we have cached size
+                                            if let Some(&cached_size) = self.folder_size_cache.get(&file.path) {
+                                                format_size(cached_size)
+                                            } else if self.folder_size_loading.contains(&file.path) {
+                                                // Currently calculating
+                                                "Calculando...".to_string()
+                                            } else {
+                                                // Trigger async calculation
+                                                self.folder_size_loading.insert(file.path.clone());
+                                                let _ = self.folder_size_req_sender.send(file.path.clone());
+                                                "Calculando...".to_string()
+                                            }
+                                        } else {
+                                            // Regular file - use file.size directly
+                                            format_size(file.size)
+                                        };
+                                        add_detail(ui, "Tamanho:", size_display);
 
                                         let type_label = if file.is_dir {
                                             "Pasta".to_string()
@@ -3834,7 +3894,7 @@ impl eframe::App for ImageViewerApp {
 
         // Exibe o menu de contexto (se aberto)
         let mut context_menu = std::mem::replace(&mut self.context_menu, mtt_file_manager::application::context_menu::ContextMenuState::default());
-        let _ = mtt_file_manager::ui::context_menu::render_context_menu(ctx, &mut context_menu, self);
+        let _ = mtt_file_manager::ui::context_menu::render_context_menu(ctx, &mut context_menu, &mut self.svg_icon_manager);
         
         // Handle selected command before putting state back
         if let Some(id) = context_menu.selected_command_id.take() {
@@ -3869,6 +3929,16 @@ impl eframe::App for ImageViewerApp {
                         }
                     }
                     -6 | -34 => self.delete_with_shell_for_idx(item_idx),
+                    -20 => {
+                        // Abrir: Navigate into folder or open file with shell
+                        if let Some(path) = self.context_target_path(item_idx) {
+                            if path.is_dir() {
+                                self.navigate_to(&path.to_string_lossy());
+                            } else {
+                                open_with_shell(&path);
+                            }
+                        }
+                    }
                     -21 => {
                         if let Some(path) = self.context_target_path(item_idx) {
                             let target = if path.is_dir() {
