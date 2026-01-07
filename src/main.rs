@@ -812,11 +812,14 @@ impl ImageViewerApp {
             [60, 60, 60, 255]
         };
 
-        if let Some(texture) = self.svg_icon_manager.get_icon(ui.ctx(), icon_name, size as u32, color) {
+        // Render at 2x resolution for HiDPI quality
+        let render_size = (size * 2.0) as u32;
+        
+        if let Some(texture) = self.svg_icon_manager.get_icon(ui.ctx(), icon_name, render_size, color) {
             let resp = ui.add(
                 egui::ImageButton::new(egui::load::SizedTexture::new(
                     texture.id(),
-                    egui::vec2(size, size),
+                    egui::vec2(size, size),  // Display at requested size
                 ))
                 .frame(false)
             );
@@ -3234,7 +3237,6 @@ impl eframe::App for ImageViewerApp {
                                     ui.spacing_mut().item_spacing.x = 2.0;
 
                                     if self.current_path == "Este Computador" {
-                                        mtt_file_manager::ui::svg_icons::icon_image(ui, &mut self.svg_icon_manager, "home", 16.0);
                                         ui.label(egui::RichText::new("Este Computador").size(13.0));
                                     } else {
                                         let path = Path::new(&self.current_path);

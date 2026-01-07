@@ -110,6 +110,7 @@ fn render_svg_to_image(svg_path: &Path, size: u32, color: [u8; 4]) -> Option<Col
 }
 
 /// Convenience function to render an SVG icon as a simple button
+/// Renders at 2x resolution for HiDPI quality
 pub fn icon_button(
     ui: &mut egui::Ui,
     icon_manager: &mut SvgIconManager,
@@ -123,11 +124,14 @@ pub fn icon_button(
         [60, 60, 60, 255]
     };
     
-    if let Some(texture) = icon_manager.get_icon(ui.ctx(), icon_name, size as u32, color) {
+    // Render at 2x resolution for HiDPI quality
+    let render_size = (size * 2.0) as u32;
+    
+    if let Some(texture) = icon_manager.get_icon(ui.ctx(), icon_name, render_size, color) {
         let response = ui.add(
             egui::ImageButton::new(egui::load::SizedTexture::new(
                 texture.id(),
-                egui::vec2(size, size),
+                egui::vec2(size, size),  // Display at requested size
             ))
             .frame(false)
         );
@@ -143,6 +147,7 @@ pub fn icon_button(
 }
 
 /// Draw an icon as a simple image (no button behavior)
+/// Renders at 2x resolution for HiDPI quality
 pub fn icon_image(
     ui: &mut egui::Ui,
     icon_manager: &mut SvgIconManager,
@@ -155,10 +160,13 @@ pub fn icon_image(
         [60, 60, 60, 255]
     };
     
-    if let Some(texture) = icon_manager.get_icon(ui.ctx(), icon_name, size as u32, color) {
+    // Render at 2x resolution for HiDPI quality
+    let render_size = (size * 2.0) as u32;
+    
+    if let Some(texture) = icon_manager.get_icon(ui.ctx(), icon_name, render_size, color) {
         ui.image(egui::load::SizedTexture::new(
             texture.id(),
-            egui::vec2(size, size),
+            egui::vec2(size, size),  // Display at requested size
         ));
     } else {
         ui.label("?");
