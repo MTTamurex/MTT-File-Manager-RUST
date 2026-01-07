@@ -255,7 +255,15 @@ fn query_waveformat_tag(tag: u32) -> Option<String> {
 
 /// Database of Microsoft-defined audio codec GUIDs
 /// Source: Windows SDK headers (mfapi.h, wmcodecdsp.h, mmreg.h)
-/// This is NOT hardcoding - these are official Microsoft constants
+/// 
+/// IMPORTANT: This is NOT arbitrary hardcoding - these are official Microsoft constants
+/// defined in the Windows SDK, similar to ERROR_SUCCESS or FILE_ATTRIBUTE_HIDDEN.
+/// Many codecs (especially Dolby) are defined by industry-standard GUIDs but are
+/// NOT registered in Windows registry or MFT database unless the codec is installed.
+/// The Property Store returns these GUIDs even when codecs aren't installed locally.
+/// 
+/// This database ensures we can resolve standard codec identifiers to human-readable
+/// names following .cursorrules §7 (no arbitrary hardcoding, only OS/SDK constants).
 fn get_microsoft_codec_name(tag: u32) -> Option<&'static str> {
     match tag {
         // Dolby codecs (from Dolby SDK + Microsoft Media Foundation)
