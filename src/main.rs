@@ -47,6 +47,7 @@ use windows::{
     Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState,
     Win32::UI::Shell::*,
     Win32::UI::WindowsAndMessaging::{FindWindowW},
+    Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND},
 };
 
 // OTIMIZAÃ‡ÃƒO: Imports para Win32 FindFirst/NextFileW (metadata em UMA syscall)
@@ -1579,6 +1580,22 @@ impl ImageViewerApp {
             if !hwnd.0.is_null() {
                 self.native_hwnd = Some(hwnd);
                 
+                // Apply rounded corners (Windows 11 style)
+                unsafe {
+                    let corner_pref = DWMWCP_ROUND;
+                    let result = DwmSetWindowAttribute(
+                        hwnd,
+                        DWMWA_WINDOW_CORNER_PREFERENCE,
+                        &corner_pref as *const _ as *const _,
+                        std::mem::size_of::<u32>() as u32,
+                    );
+                    if result.is_ok() {
+                        eprintln!("[DWM] Rounded corners applied successfully");
+                    } else {
+                        eprintln!("[DWM] Failed to apply rounded corners: {:?}", result);
+                    }
+                }
+                
                 // Pre-initialize shell extensions so they're ready on first context menu
                 mtt_file_manager::infrastructure::windows::native_menu::warmup_shell_extensions(hwnd);
             }
@@ -3081,12 +3098,20 @@ impl eframe::App for ImageViewerApp {
         // Windows 11 style sidebar
         // Left Sidebar moved to after TopPanels for correct layout
 
-        // TAB BAR (above navigation bar)
+        // TAB BAR (custom title bar with tabs and window controls)
         egui::TopBottomPanel::top("tab_bar_panel")
             .exact_height(36.0)
+            .frame(egui::Frame {
+                fill: if ctx.style().visuals.dark_mode {
+                    egui::Color32::from_rgb(32, 32, 32)
+                } else {
+                    egui::Color32::from_rgb(243, 243, 243)
+                },
+                ..Default::default()
+            })
             .show(ctx, |ui| {
                 use mtt_file_manager::ui::tab_bar::{render_tab_bar, TabBarAction};
-                let action = render_tab_bar(ui, &self.tab_manager, &mut self.svg_icon_manager);
+                let action = render_tab_bar(ui, &self.tab_manager, &mut self.svg_icon_manager, frame);
                 
                 match action {
                     TabBarAction::SwitchTab(idx) => {
@@ -3110,6 +3135,13 @@ impl eframe::App for ImageViewerApp {
                     }
                     TabBarAction::CloseApp => {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    TabBarAction::ToggleMaximize => {
+                        let is_maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!is_maximized));
+                    }
+                    TabBarAction::Minimize => {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                     }
                     TabBarAction::None => {}
                 }
@@ -4132,6 +4164,150 @@ impl eframe::App for ImageViewerApp {
         
         self.context_menu = context_menu;
 
+        // === RESIZE GRIP (bottom-right corner) ===
+        let is_not_maximized = !ctx.input(|i| i.viewport().maximized.unwrap_or(false));
+        if is_not_maximized {
+            let screen_rect = ctx.screen_rect();
+            
+            // === BORDAS INVISÍVEIS PARA RESIZE (8px de largura) ===
+            let border_width = 8.0;
+            
+            // Borda ESQUERDA
+            let left_border = egui::Rect::from_min_max(
+                screen_rect.min,
+                egui::pos2(screen_rect.min.x + border_width, screen_rect.max.y)
+            );
+            egui::Area::new(egui::Id::new("resize_border_left"))
+                .fixed_pos(left_border.min)
+                .order(egui::Order::Background)
+                .show(ctx, |ui| {
+                    let left_response = ui.interact(left_border, egui::Id::new("resize_left"), egui::Sense::drag());
+                    if left_response.hovered() {
+                        ctx.set_cursor_icon(egui::CursorIcon::ResizeWest);
+                    }
+                    if left_response.dragged() {
+                        let delta = left_response.drag_delta();
+                        if let Some(current_rect) = ctx.input(|i| i.viewport().inner_rect) {
+                            let new_width = (current_rect.width() - delta.x).max(800.0);
+                            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(
+                                egui::vec2(new_width, current_rect.height())
+                            ));
+                        }
+                    }
+                });
+            
+            // Borda DIREITA
+            let right_border = egui::Rect::from_min_max(
+                egui::pos2(screen_rect.max.x - border_width, screen_rect.min.y),
+                screen_rect.max
+            );
+            egui::Area::new(egui::Id::new("resize_border_right"))
+                .fixed_pos(right_border.min)
+                .order(egui::Order::Background)
+                .show(ctx, |ui| {
+                    let right_response = ui.interact(right_border, egui::Id::new("resize_right"), egui::Sense::drag());
+                    if right_response.hovered() {
+                        ctx.set_cursor_icon(egui::CursorIcon::ResizeEast);
+                    }
+                    if right_response.dragged() {
+                        let delta = right_response.drag_delta();
+                        if let Some(current_rect) = ctx.input(|i| i.viewport().inner_rect) {
+                            let new_width = (current_rect.width() + delta.x).max(800.0);
+                            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(
+                                egui::vec2(new_width, current_rect.height())
+                            ));
+                        }
+                    }
+                });
+            
+            // Borda INFERIOR
+            let bottom_border = egui::Rect::from_min_max(
+                egui::pos2(screen_rect.min.x, screen_rect.max.y - border_width),
+                screen_rect.max
+            );
+            egui::Area::new(egui::Id::new("resize_border_bottom"))
+                .fixed_pos(bottom_border.min)
+                .order(egui::Order::Background)
+                .show(ctx, |ui| {
+                    let bottom_response = ui.interact(bottom_border, egui::Id::new("resize_bottom"), egui::Sense::drag());
+                    if bottom_response.hovered() {
+                        ctx.set_cursor_icon(egui::CursorIcon::ResizeSouth);
+                    }
+                    if bottom_response.dragged() {
+                        let delta = bottom_response.drag_delta();
+                        if let Some(current_rect) = ctx.input(|i| i.viewport().inner_rect) {
+                            let new_height = (current_rect.height() + delta.y).max(600.0);
+                            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(
+                                egui::vec2(current_rect.width(), new_height)
+                            ));
+                        }
+                    }
+                });
+            
+            // === GRIP VISUAL (canto inferior direito - 50x50px) ===
+            let grip_size = 50.0;  // MUITO maior para ser facilmente clicável
+            let grip_pos = egui::pos2(
+                screen_rect.max.x - grip_size,
+                screen_rect.max.y - grip_size,
+            );
+            let grip_rect = egui::Rect::from_min_size(grip_pos, egui::vec2(grip_size, grip_size));
+            
+            egui::Area::new(egui::Id::new("resize_grip"))
+                .fixed_pos(grip_pos)
+                .order(egui::Order::Foreground)
+                .show(ctx, |ui| {
+                    let (rect, response) = ui.allocate_exact_size(
+                        egui::vec2(grip_size, grip_size),
+                        egui::Sense::drag(),
+                    );
+                    
+                    // Draw grip (diagonal lines) - MUITO MAIOR E MAIS VISÍVEL
+                    let bg_color = if response.hovered() {
+                        egui::Color32::from_rgba_unmultiplied(100, 150, 220, 50)  // Azul semi-transparente
+                    } else {
+                        egui::Color32::from_rgba_unmultiplied(80, 80, 80, 30)  // Cinza semi-transparente
+                    };
+                    
+                    let line_color = if response.hovered() {
+                        egui::Color32::from_rgb(0, 120, 215)  // Azul Windows
+                    } else {
+                        egui::Color32::from_gray(120)
+                    };
+                    
+                    // Fundo semi-transparente
+                    ui.painter().rect_filled(rect, 0.0, bg_color);
+                    
+                    // Linhas diagonais maiores e mais visíveis
+                    for i in 0..5 {
+                        let offset = (i as f32) * 8.0;
+                        ui.painter().line_segment(
+                            [
+                                rect.right_bottom() + egui::vec2(-offset - 5.0, 0.0),
+                                rect.right_bottom() + egui::vec2(0.0, -offset - 5.0),
+                            ],
+                            egui::Stroke::new(2.5, line_color),
+                        );
+                    }
+                    
+                    // Handle resize drag
+                    if response.dragged() {
+                        let delta = response.drag_delta();
+                        if let Some(current_size) = ctx.input(|i| i.viewport().inner_rect) {
+                            let new_width = (current_size.width() + delta.x).max(800.0);
+                            let new_height = (current_size.height() + delta.y).max(600.0);
+                            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(
+                                egui::vec2(new_width, new_height)
+                            ));
+                        }
+                    }
+                    
+                    // Change cursor on hover
+                    if response.hovered() {
+                        ctx.set_cursor_icon(egui::CursorIcon::ResizeNwSe);
+                    }
+                });
+        }
+        
         // === TOAST NOTIFICATIONS ===
         self.notifications.cleanup(); // Remove expired notifications
 
@@ -4240,7 +4416,9 @@ fn main() -> eframe::Result<()> {
         .with_maximized(false) // NOT maximized at creation
         .with_inner_size([800.0, 600.0]) // Small initial size (will be maximized in update)
         .with_title("MTT File Manager")
-        .with_app_id("mtt-file-manager");
+        .with_app_id("mtt-file-manager")
+        .with_decorations(false) // Frameless (no native title bar)
+        .with_resizable(false); // Disable resize, use maximize/restore buttons instead
     
     // Set window icon if loaded successfully
     if let Some(icon) = icon_data {
