@@ -1,0 +1,188 @@
+﻿cargo :    Compiling mtt-file-manager v0.1.0 
+(C:\MTT File Manager)
+At line:1 char:1
++ cargo build --release 2>&1 | Out-File 
+-Encoding UTF8 -FilePath build_ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (  
+     Compiling mt...T File Manager):String) 
+[], R    emoteException
+    + FullyQualifiedErrorId : 
+NativeCommandError
+ 
+warning: variable does not need to be mutable
+   --> src\ui\context_menu.rs:345:13
+    |
+345 |         let mut submenu_pos = if 
+open_left {
+    |             ----^^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of 
+`#[warn(unused)]`) on by default
+
+warning: unused variable: `drag_rect`
+   --> src\ui\tab_bar.rs:262:18
+    |
+262 |             let (drag_rect, 
+drag_response) = ui.allocate_exact_size(
+    |                  ^^^^^^^^^ help: if this 
+is intentional, prefix it with an underscore: 
+`_drag_rect`
+    |
+    = note: `#[warn(unused_variables)]` (part 
+of `#[warn(unused)]`) on by default
+
+warning: unused variable: `frame`
+  --> src\ui\tab_bar.rs:31:5
+   |
+31 |     frame: &mut eframe::Frame,
+   |     ^^^^^ help: if this is intentional, 
+prefix it with an underscore: `_frame`
+
+warning: unused variable: `frame`
+   --> src\ui\tab_bar.rs:321:5
+    |
+321 |     frame: &mut eframe::Frame,
+    |     ^^^^^ help: if this is intentional, 
+prefix it with an underscore: `_frame`
+
+warning: function `query_subkey_friendly_name` 
+is never used
+   --> src\infrastructure\windows\codec_registr
+y.rs:390:4
+    |
+390 | fn 
+query_subkey_friendly_name(parent_key: HKEY, 
+subkey_name: &str) -> Option<String> {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of 
+`#[warn(unused)]`) on by default
+
+warning: function `render_window_controls` is 
+never used
+   --> src\ui\tab_bar.rs:319:4
+    |
+319 | fn render_window_controls(
+    |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `mtt-file-manager` (lib) generated 6 
+warnings (run `cargo fix --lib -p 
+mtt-file-manager` to apply 4 suggestions)
+warning: unused imports: `SendMessageW`, 
+`WM_SYSCOMMAND`, and `Win32::UI::Input::Keyboar
+dAndMouse::ReleaseCapture`
+  --> src\main.rs:49:51
+   |
+49 |     
+Win32::UI::WindowsAndMessaging::{FindWindowW, 
+SendMessageW, WM_SYSCOMMAND},
+   |                                           
+        ^^^^^^^^^^^^  ^^^^^^^^^^^^^
+50 |     Win32::UI::Input::KeyboardAndMouse::Re
+leaseCapture,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of 
+`#[warn(unused)]`) on by default
+
+warning: use of deprecated method 
+`eframe::egui::ScrollArea::id_source`: Renamed 
+id_salt
+    --> src\main.rs:3552:26
+     |
+3552 |                         
+.id_source("preview_scroll")
+     |                          ^^^^^^^^^
+     |
+     = note: `#[warn(deprecated)]` on by 
+default
+
+warning: variable does not need to be mutable
+    --> src\main.rs:3798:37
+     |
+3798 | ...                   let mut 
+add_detail =
+     |                           ----^^^^^^^^^^
+     |                           |
+     |                           help: remove 
+this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of 
+`#[warn(unused)]`) on by default
+
+warning: unused variable: `grip_rect`
+    --> src\main.rs:4308:17
+     |
+4308 |             let grip_rect = 
+egui::Rect::from_min_size(grip_pos, 
+egui::vec2(grip_size, grip_size));
+     |                 ^^^^^^^^^ help: if this 
+is intentional, prefix it with an underscore: 
+`_grip_rect`
+     |
+     = note: `#[warn(unused_variables)]` (part 
+of `#[warn(unused)]`) on by default
+
+warning: constant `ICON_FOLDER` is never used
+  --> src\main.rs:26:7
+   |
+26 | const ICON_FOLDER: &str = "\u{ED9F}"; // 
+Folder (folder-line)
+   |       ^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of 
+`#[warn(unused)]`) on by default
+
+warning: constant `ICON_FILE` is never used
+  --> src\main.rs:27:7
+   |
+27 | const ICON_FILE: &str = "\u{ECD3}"; // 
+File (file-line)
+   |       ^^^^^^^^^
+
+warning: constant `CACHE_SIZE` is never used
+  --> src\main.rs:70:7
+   |
+70 | const CACHE_SIZE: usize = 200;
+   |       ^^^^^^^^^^
+
+warning: constant `ICON_CACHE_SIZE` is never 
+used
+  --> src\main.rs:73:7
+   |
+73 | const ICON_CACHE_SIZE: usize = 100;
+   |       ^^^^^^^^^^^^^^^
+
+warning: field `icon_req_sender` is never read
+   --> src\main.rs:186:5
+    |
+ 94 | struct ImageViewerApp {
+    |        -------------- field in this 
+struct
+...
+186 |     icon_req_sender: Sender<PathBuf>, // 
+UI ? Worker
+    |     ^^^^^^^^^^^^^^^
+
+warning: method `render_item_slot` is never 
+used
+    --> src\main.rs:2475:8
+     |
+ 579 | impl ImageViewerApp {
+     | ------------------- method in this 
+implementation
+...
+2475 |     fn render_item_slot(&mut self, ui: 
+&mut egui::Ui, idx: usize) {
+     |        ^^^^^^^^^^^^^^^^
+
+warning: `mtt-file-manager` (bin 
+"mtt-file-manager") generated 10 warnings (run 
+`cargo fix --bin "mtt-file-manager" -p 
+mtt-file-manager` to apply 3 suggestions)
+    Finished `release` profile [optimized] 
+target(s) in 3m 04s

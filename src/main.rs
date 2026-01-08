@@ -46,7 +46,8 @@ use windows::{
     Win32::Storage::FileSystem::*,
     Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState,
     Win32::UI::Shell::*,
-    Win32::UI::WindowsAndMessaging::{FindWindowW},
+    Win32::UI::WindowsAndMessaging::{FindWindowW, SendMessageW, WM_SYSCOMMAND},
+    Win32::UI::Input::KeyboardAndMouse::ReleaseCapture,
     Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND},
 };
 
@@ -219,6 +220,10 @@ struct ImageViewerApp {
     saved_window_height: f32,
     saved_is_maximized: bool,
     
+    // Sidebar widths persistence
+    sidebar_left_width: f32,
+    sidebar_right_width: f32,
+    
     // TAB SYSTEM
     tab_manager: mtt_file_manager::tabs::TabManager,
     
@@ -330,6 +335,21 @@ impl ImageViewerApp {
             .get_preference("window_is_maximized")
             .map(|s| s == "true")
             .unwrap_or(true); // Default to maximized
+        
+        // Load sidebar widths from SQLite
+        let sidebar_left_raw = disk_cache.get_preference("sidebar_left_width");
+        let sidebar_right_raw = disk_cache.get_preference("sidebar_right_width");
+        
+        eprintln!("[INIT] Raw sidebar values from DB: L={:?}, R={:?}", sidebar_left_raw, sidebar_right_raw);
+        
+        let sidebar_left_width = sidebar_left_raw
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(200.0);
+        let sidebar_right_width = sidebar_right_raw
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(300.0);
+        
+        eprintln!("[INIT] Parsed sidebar widths: L={}, R={}", sidebar_left_width, sidebar_right_width);
 
         // 8 threads: equilíbrio ideal entre SSD e HDD USB
         use mtt_file_manager::workers::thumbnail_worker::spawn_thumbnail_workers;
@@ -511,6 +531,10 @@ impl ImageViewerApp {
             saved_window_width,
             saved_window_height,
             saved_is_maximized,
+            
+            // Sidebar widths persistence
+            sidebar_left_width,
+            sidebar_right_width,
 
             // METADATA ASYNC
             metadata_req_sender: meta_req_tx,
@@ -989,6 +1013,14 @@ impl ImageViewerApp {
             "window_is_maximized",
             if self.saved_is_maximized { "true" } else { "false" },
         );
+        
+        // Sidebar widths persistence - só salva valores válidos
+        let left_to_save = self.sidebar_left_width.max(150.0);
+        let right_to_save = self.sidebar_right_width.max(250.0);
+        self.disk_cache
+            .set_preference("sidebar_left_width", &left_to_save.to_string());
+        self.disk_cache
+            .set_preference("sidebar_right_width", &right_to_save.to_string());
     }
 
     /// Requisita scan assÃ­ncrono de uma pasta para descobrir primeira imagem.
@@ -2931,16 +2963,35 @@ impl eframe::App for ImageViewerApp {
         // --- END STARTUP SEQUENCE ---
 
         // Track current window state for saving on exit
-        ctx.input(|i| {
+        let (size_changed, maximized_changed) = ctx.input(|i| {
+            let mut size_changed = false;
+            let mut maximized_changed = false;
+            
             if let Some(rect) = i.viewport().inner_rect {
                 // Only save size when NOT maximized
                 if !i.viewport().maximized.unwrap_or(false) {
+                    if (self.saved_window_width - rect.width()).abs() > 1.0 || 
+                       (self.saved_window_height - rect.height()).abs() > 1.0 {
+                        size_changed = true;
+                    }
                     self.saved_window_width = rect.width();
                     self.saved_window_height = rect.height();
                 }
             }
-            self.saved_is_maximized = i.viewport().maximized.unwrap_or(false);
+            
+            let new_maximized = i.viewport().maximized.unwrap_or(false);
+            if new_maximized != self.saved_is_maximized {
+                maximized_changed = true;
+            }
+            self.saved_is_maximized = new_maximized;
+            
+            (size_changed, maximized_changed)
         });
+        
+        // Save preferences when window state changes
+        if size_changed || maximized_changed {
+            self.save_preferences();
+        }
         // --- END STARTUP SEQUENCE ---
 
         self.ensure_window_handle(frame);
@@ -3439,8 +3490,11 @@ impl eframe::App for ImageViewerApp {
         });
 
         // Windows 11 style sidebar (Restored)
-        let sidebar_action = egui::SidePanel::left("sidebar")
-            .min_width(200.0)
+        
+        let sidebar_response = egui::SidePanel::left("sidebar")
+            .min_width(150.0)
+            .default_width(self.sidebar_left_width.max(150.0)) // Garante que nunca seja 0
+            .resizable(true)
             .show(ctx, |ui| {
                 use mtt_file_manager::ui::sidebar::{render_sidebar, SidebarContext};
 
@@ -3463,8 +3517,17 @@ impl eframe::App for ImageViewerApp {
                 };
 
                 render_sidebar(ui, &mut ctx)
-            })
-            .inner;
+            });
+        
+        // Captura a largura REAL do painel (não a disponível dentro dele)
+        // IMPORTANTE: Não atualiza se janela está minimizada (rect fica inválido)
+        let is_minimized = ctx.input(|i| i.viewport().minimized.unwrap_or(false));
+        let actual_panel_width = sidebar_response.response.rect.width();
+        if !is_minimized && actual_panel_width > 100.0 && (self.sidebar_left_width - actual_panel_width).abs() > 2.0 {
+            self.sidebar_left_width = actual_panel_width;
+        }
+        
+        let sidebar_action = sidebar_response.inner;
 
         // Processar ação da sidebar (após ctx ser dropado e self liberado)
         if let Some(action) = sidebar_action {
@@ -3478,9 +3541,10 @@ impl eframe::App for ImageViewerApp {
         // Preview Pane (Windows Explorer style) - ANTES do CentralPanel
         if self.show_preview_panel {
             self.refresh_selected_metadata();
-            egui::SidePanel::right("preview_panel")
+            
+            let right_panel_response = egui::SidePanel::right("preview_panel")
                 .resizable(true)
-                .default_width(300.0)
+                .default_width(self.sidebar_right_width.max(250.0)) // Garante que nunca seja 0
                 .min_width(250.0)
                 .max_width(500.0)
                 .show(ctx, |ui| {
@@ -3956,6 +4020,14 @@ impl eframe::App for ImageViewerApp {
                             }
                         });
                 });
+            
+            // Captura a largura REAL do painel direito
+            // IMPORTANTE: Não atualiza se janela está minimizada (rect fica inválido)
+            let is_minimized = ctx.input(|i| i.viewport().minimized.unwrap_or(false));
+            let actual_panel_width = right_panel_response.response.rect.width();
+            if !is_minimized && actual_panel_width > 200.0 && (self.sidebar_right_width - actual_panel_width).abs() > 2.0 {
+                self.sidebar_right_width = actual_panel_width;
+            }
         }
 
         // Central Panel
@@ -4170,7 +4242,7 @@ impl eframe::App for ImageViewerApp {
             let screen_rect = ctx.screen_rect();
             
             // === BORDAS INVISÍVEIS PARA RESIZE (8px de largura) ===
-            let border_width = 8.0;
+            let border_width = 12.0;  // mais fácil de clicar
             
             // Borda ESQUERDA
             let left_border = egui::Rect::from_min_max(
@@ -4179,20 +4251,15 @@ impl eframe::App for ImageViewerApp {
             );
             egui::Area::new(egui::Id::new("resize_border_left"))
                 .fixed_pos(left_border.min)
-                .order(egui::Order::Background)
+                .order(egui::Order::Foreground)
                 .show(ctx, |ui| {
-                    let left_response = ui.interact(left_border, egui::Id::new("resize_left"), egui::Sense::drag());
+                    let left_response = ui.interact(left_border, egui::Id::new("resize_left"), egui::Sense::click_and_drag());
                     if left_response.hovered() {
                         ctx.set_cursor_icon(egui::CursorIcon::ResizeWest);
                     }
-                    if left_response.dragged() {
-                        let delta = left_response.drag_delta();
-                        if let Some(current_rect) = ctx.input(|i| i.viewport().inner_rect) {
-                            let new_width = (current_rect.width() - delta.x).max(800.0);
-                            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(
-                                egui::vec2(new_width, current_rect.height())
-                            ));
-                        }
+                    if left_response.drag_started() {
+                        // Usa egui BeginResize - funciona mas tem efeito sanfona no lado esquerdo
+                        ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(egui::ResizeDirection::West));
                     }
                 });
             
@@ -4203,20 +4270,14 @@ impl eframe::App for ImageViewerApp {
             );
             egui::Area::new(egui::Id::new("resize_border_right"))
                 .fixed_pos(right_border.min)
-                .order(egui::Order::Background)
+                .order(egui::Order::Foreground)
                 .show(ctx, |ui| {
-                    let right_response = ui.interact(right_border, egui::Id::new("resize_right"), egui::Sense::drag());
+                    let right_response = ui.interact(right_border, egui::Id::new("resize_right"), egui::Sense::click_and_drag());
                     if right_response.hovered() {
                         ctx.set_cursor_icon(egui::CursorIcon::ResizeEast);
                     }
-                    if right_response.dragged() {
-                        let delta = right_response.drag_delta();
-                        if let Some(current_rect) = ctx.input(|i| i.viewport().inner_rect) {
-                            let new_width = (current_rect.width() + delta.x).max(800.0);
-                            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(
-                                egui::vec2(new_width, current_rect.height())
-                            ));
-                        }
+                    if right_response.drag_started() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(egui::ResizeDirection::East));
                     }
                 });
             
@@ -4227,20 +4288,14 @@ impl eframe::App for ImageViewerApp {
             );
             egui::Area::new(egui::Id::new("resize_border_bottom"))
                 .fixed_pos(bottom_border.min)
-                .order(egui::Order::Background)
+                .order(egui::Order::Foreground)
                 .show(ctx, |ui| {
-                    let bottom_response = ui.interact(bottom_border, egui::Id::new("resize_bottom"), egui::Sense::drag());
+                    let bottom_response = ui.interact(bottom_border, egui::Id::new("resize_bottom"), egui::Sense::click_and_drag());
                     if bottom_response.hovered() {
                         ctx.set_cursor_icon(egui::CursorIcon::ResizeSouth);
                     }
-                    if bottom_response.dragged() {
-                        let delta = bottom_response.drag_delta();
-                        if let Some(current_rect) = ctx.input(|i| i.viewport().inner_rect) {
-                            let new_height = (current_rect.height() + delta.y).max(600.0);
-                            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(
-                                egui::vec2(current_rect.width(), new_height)
-                            ));
-                        }
+                    if bottom_response.drag_started() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(egui::ResizeDirection::South));
                     }
                 });
             
@@ -4256,49 +4311,16 @@ impl eframe::App for ImageViewerApp {
                 .fixed_pos(grip_pos)
                 .order(egui::Order::Foreground)
                 .show(ctx, |ui| {
-                    let (rect, response) = ui.allocate_exact_size(
+                    let (_rect, response) = ui.allocate_exact_size(
                         egui::vec2(grip_size, grip_size),
-                        egui::Sense::drag(),
+                        egui::Sense::click_and_drag(),
                     );
                     
-                    // Draw grip (diagonal lines) - MUITO MAIOR E MAIS VISÍVEL
-                    let bg_color = if response.hovered() {
-                        egui::Color32::from_rgba_unmultiplied(100, 150, 220, 50)  // Azul semi-transparente
-                    } else {
-                        egui::Color32::from_rgba_unmultiplied(80, 80, 80, 30)  // Cinza semi-transparente
-                    };
+                    // SEM VISUAL - apenas área interativa (sem listras aparecendo por cima)
                     
-                    let line_color = if response.hovered() {
-                        egui::Color32::from_rgb(0, 120, 215)  // Azul Windows
-                    } else {
-                        egui::Color32::from_gray(120)
-                    };
-                    
-                    // Fundo semi-transparente
-                    ui.painter().rect_filled(rect, 0.0, bg_color);
-                    
-                    // Linhas diagonais maiores e mais visíveis
-                    for i in 0..5 {
-                        let offset = (i as f32) * 8.0;
-                        ui.painter().line_segment(
-                            [
-                                rect.right_bottom() + egui::vec2(-offset - 5.0, 0.0),
-                                rect.right_bottom() + egui::vec2(0.0, -offset - 5.0),
-                            ],
-                            egui::Stroke::new(2.5, line_color),
-                        );
-                    }
-                    
-                    // Handle resize drag
-                    if response.dragged() {
-                        let delta = response.drag_delta();
-                        if let Some(current_size) = ctx.input(|i| i.viewport().inner_rect) {
-                            let new_width = (current_size.width() + delta.x).max(800.0);
-                            let new_height = (current_size.height() + delta.y).max(600.0);
-                            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(
-                                egui::vec2(new_width, new_height)
-                            ));
-                        }
+                    // Handle resize drag - só dispara no início do drag
+                    if response.drag_started() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(egui::ResizeDirection::SouthEast));
                     }
                     
                     // Change cursor on hover
@@ -4369,7 +4391,9 @@ impl eframe::App for ImageViewerApp {
 
     /// Called when the app is exiting - save all preferences
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // Force save sidebar widths before exit
         self.save_preferences();
+        eprintln!("[EXIT] Saved sidebar widths: L={}, R={}", self.sidebar_left_width, self.sidebar_right_width);
     }
 }
 
@@ -4417,8 +4441,8 @@ fn main() -> eframe::Result<()> {
         .with_inner_size([800.0, 600.0]) // Small initial size (will be maximized in update)
         .with_title("MTT File Manager")
         .with_app_id("mtt-file-manager")
-        .with_decorations(false) // Frameless (no native title bar)
-        .with_resizable(false); // Disable resize, use maximize/restore buttons instead
+        .with_decorations(true) // Use native Windows title bar (fixes resize and sidebar issues)
+        .with_resizable(true); // HABILITA resize nativo do Windows
     
     // Set window icon if loaded successfully
     if let Some(icon) = icon_data {
