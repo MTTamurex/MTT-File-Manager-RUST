@@ -372,6 +372,7 @@ fn try_media_foundation_extraction(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
         return None;
     }
     
+    let mf_start = std::time::Instant::now();
     eprintln!("[Thumbnail] Stage 5 (Media Foundation) attempting: {:?}", path.file_name());
     
     use std::os::windows::ffi::OsStrExt;
@@ -558,7 +559,8 @@ fn try_media_foundation_extraction(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
             }
         }
         
-        eprintln!("[Thumbnail] Stage 5 SUCCESS: {:?} ({}x{})", path.file_name(), width, height);
+        let mf_elapsed = mf_start.elapsed();
+        eprintln!("[Thumbnail] Stage 5 SUCCESS: {:?} ({}x{}) in {:.2}s", path.file_name(), width, height, mf_elapsed.as_secs_f64());
         Some((rgba_data, width, height))
     }
 }

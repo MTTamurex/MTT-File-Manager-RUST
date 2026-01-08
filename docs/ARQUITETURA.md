@@ -1047,6 +1047,46 @@ Ver [ROADMAP_TECNICO.md](ROADMAP_TECNICO.md) para detalhes completos.
 - **Smart Sorting**: Usa `natord` para ordenação natural ("File1, File2, File10" em vez de "File1, File10, File2")
 - **Helper `to_win32_path()`**: Cria strings double-null terminated para APIs Win32
 
+### Fase 1.5: OneDrive Folder Scan Optimization (2026-01-07) ✅ **CRÍTICO**
+
+**Problema Crítico**: Pasta OneDrive com 840 arquivos em NVME levava 24.77 segundos para carregar.
+
+**Bottleneck #1 - is_file_open() (96.4% do tempo)**:
+- **Root Cause**: Tentava abrir handles de arquivo (`CreateFileW`) para verificar se o arquivo estava em uso.
+- **OneDrive Impact**: Cada tentativa de abrir handle disparava sync/network checks (28ms por arquivo!).
+- **Windows Explorer Behavior**: Não faz isso - usa apenas atributos de arquivo.
+- **Solução**: Removido completamente a chamada `is_file_open()` para arquivos OneDrive.
+- **Resultado**: 24.77s → 1.60s (15x speedup)
+
+**Bottleneck #2 - GetFileAttributesW() redundante (98.6% do tempo restante)**:
+- **Root Cause**: Chamada syscall adicional para cada arquivo OneDrive após `FindNextFileW`.
+- **Redundância Descoberta**: `FindFirstFileW`/`FindNextFileW` já retornam **todos** os atributos incluindo flags do OneDrive:
+  - `FILE_ATTRIBUTE_RECALL_ON_OPEN` (arquivo na nuvem)
+  - `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS` (precisa baixar)
+  - `FILE_ATTRIBUTE_PINNED` (sempre local)
+- **Defensive Programming Gone Wrong**: Verificação dupla causou 2ms de overhead por arquivo.
+- **Solução**: Removido `GetFileAttributesW()` - usa `find_data.dwFileAttributes` diretamente.
+- **Resultado**: 1.60s → 0.12s (13x speedup adicional)
+
+**Performance Final**:
+```
+❌ ANTES:  24.77s para 840 arquivos (28ms/arquivo)
+✅ DEPOIS: 0.12s para 840 arquivos (0.14ms/arquivo)
+🚀 GANHO:  206x mais rápido!
+```
+
+**Breakdown dos 0.12s**:
+- FindFirstFileW/NextFileW loop: 0.08s (62%) - **mínimo físico do I/O**
+- get_folder_cover (SQLite lookup): 0.07s (58%) - cache de capas
+- GetFileAttributesW: 0.00s (0%) ✅ ELIMINADO
+- is_file_open: 0.00s (0%) ✅ ELIMINADO
+
+**Lições Aprendidas**:
+1. **Virtual Filesystems são diferentes**: OneDrive/Dropbox/Google Drive têm I/O semantics completamente diferentes de discos locais.
+2. **Windows APIs têm redundância built-in**: `FindNextFileW` retorna estrutura completa - não precisa de chamadas extras.
+3. **Profiling é essencial**: Sem logs granulares, jamais teríamos descoberto que `is_file_open()` era o vilão (aparece em código como "verificação de segurança" inocente).
+4. **Imitar Windows Explorer**: Se o Explorer não faz algo, provavelmente não precisamos fazer também.
+
 ### Fase 2: Clone Optimization
 
 **Problema**: `render_grid_view()` e `render_list_view()` clonavam `Vec<FileEntry>` a cada frame (60x/segundo).
