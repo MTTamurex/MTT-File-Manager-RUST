@@ -308,8 +308,8 @@ pub fn render_tab_bar(
         // Push window controls to the right
         ui.add_space(ui.available_width() - window_controls_width);
         
-        // Window control buttons (Minimize, Maximize/Restore, Close)
-        render_window_controls(ui, frame, window_btn_width, tab_height, &mut action);
+        // NOTE: Window controls (min/max/close) are now provided by native Windows decorations
+        // render_window_controls(ui, frame, window_btn_width, tab_height, &mut action);
     });
     
     action
