@@ -140,6 +140,8 @@ pub fn get_folder_preview(
 /// Uses IThumbnailCache::GetThumbnail with WTS_FORCEEXTRACTION flag.
 /// This is useful when the cached thumbnail is corrupted or shows an icon instead of content.
 ///
+/// IMPORTANT: Single attempt only - if it fails, Stage 5 (Media Foundation) will handle it.
+///
 /// # Safety
 /// Uses COM interfaces (IShellItem, IThumbnailCache, ISharedBitmap).
 /// All COM objects are properly released.
@@ -150,9 +152,6 @@ pub fn force_extract_thumbnail(
         IThumbnailCache, ISharedBitmap, LocalThumbnailCache,
         WTS_FORCEEXTRACTION, WTS_SCALETOREQUESTEDSIZE, WTS_CACHEFLAGS,
     };
-    
-    const MAX_RETRIES: usize = 5;
-    const RETRY_DELAY_MS: u64 = 500;
     
     unsafe {
         // SAFETY: path_wide is valid for the duration of this call
@@ -176,47 +175,30 @@ pub fn force_extract_thumbnail(
         let flags = WTS_FORCEEXTRACTION | WTS_SCALETOREQUESTEDSIZE;
         let requested_size: u32 = 512; // Good balance for preview panel
         
-        // Retry loop for OneDrive/cloud files where extraction is async
-        for attempt in 0..MAX_RETRIES {
-            let mut shared_bitmap: Option<ISharedBitmap> = None;
-            let mut _cache_flags: WTS_CACHEFLAGS = WTS_CACHEFLAGS::default();
-            let mut _thumbnail_id = windows::Win32::UI::Shell::WTS_THUMBNAILID::default();
+        // Single attempt - no retries. Stage 5 (Media Foundation) handles failures.
+        let mut shared_bitmap: Option<ISharedBitmap> = None;
+        let mut _cache_flags: WTS_CACHEFLAGS = WTS_CACHEFLAGS::default();
+        let mut _thumbnail_id = windows::Win32::UI::Shell::WTS_THUMBNAILID::default();
+        
+        thumbnail_cache.GetThumbnail(
+            &shell_item,
+            requested_size,
+            flags,
+            Some(&mut shared_bitmap),
+            Some(&mut _cache_flags),
+            Some(&mut _thumbnail_id),
+        )?;
+        
+        if let Some(bitmap) = shared_bitmap {
+            // Get HBITMAP from ISharedBitmap
+            let hbitmap = bitmap.GetSharedBitmap()?;
             
-            let result = thumbnail_cache.GetThumbnail(
-                &shell_item,
-                requested_size,
-                flags,
-                Some(&mut shared_bitmap),
-                Some(&mut _cache_flags),
-                Some(&mut _thumbnail_id),
-            );
-            
-            match result {
-                Ok(()) => {
-                    if let Some(bitmap) = shared_bitmap {
-                        // Get HBITMAP from ISharedBitmap
-                        let hbitmap = bitmap.GetSharedBitmap()?;
-                        
-                        // Convert to RGBA
-                        let rgba_result = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
-                        return Ok(rgba_result);
-                    }
-                }
-                Err(e) => {
-                    // Compare as u32 to handle error codes correctly
-                    let code = e.code().0 as u32;
-                    if code == 0x8004B205 && attempt < MAX_RETRIES - 1 {
-                        // WTS_E_EXTRACTIONPENDING - extraction in progress (OneDrive)
-                        eprintln!("[Thumbnail] Extraction pending (0x{:08X}), retry {}/{}", code, attempt + 1, MAX_RETRIES);
-                        std::thread::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS));
-                        continue;
-                    }
-                    return Err(e.into());
-                }
-            }
+            // Convert to RGBA
+            let rgba_result = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
+            return Ok(rgba_result);
         }
         
-        Err("Max retries exceeded for thumbnail extraction".into())
+        Err("No bitmap returned from IThumbnailCache".into())
     }
 }
 

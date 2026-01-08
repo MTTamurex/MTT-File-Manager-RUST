@@ -247,11 +247,19 @@ impl ThumbnailDiskCache {
         let mut stmt = db
             .prepare_cached("SELECT cover_path FROM folder_covers WHERE folder_path = ?")
             .ok()?;
-        stmt.query_row([folder_path.to_string_lossy()], |row| {
+        let cover_path = stmt.query_row([folder_path.to_string_lossy()], |row| {
             let path_str: String = row.get(0)?;
             Ok(PathBuf::from(path_str))
         })
-        .ok()
+        .ok()?;
+        
+        // Validate that the cover path still exists before returning it
+        if cover_path.exists() {
+            Some(cover_path)
+        } else {
+            // Cover file no longer exists - return None to trigger re-scan
+            None
+        }
     }
 
     /// Salva a capa (thumbnail) descoberta para uma pasta
