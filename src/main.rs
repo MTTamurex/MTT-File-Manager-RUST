@@ -2593,6 +2593,13 @@ impl ImageViewerApp {
     /// ele continue visível mesmo que o item saia do viewport (e seja removido do cache LRU).
     fn update_selected_thumbnail(&mut self) {
         if let Some(selected) = &self.selected_file {
+            // Validate path exists before trying to load thumbnail
+            if !selected.path.exists() {
+                self.selected_file = None;
+                self.selected_thumbnail = None;
+                return;
+            }
+            
             // Tenta pegar do cache. Se não estiver lá, mantém None (será atualizado via message loop)
             if let Some(tex) = self.cache_manager.texture_cache.peek(&selected.path) {
                 self.selected_thumbnail = Some(tex.clone());
@@ -2858,6 +2865,17 @@ impl ImageViewerApp {
 
 impl eframe::App for ImageViewerApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Validate selected_file on first frame - clear if path no longer exists
+        if self.startup_tick == 0 {
+            if let Some(ref file) = self.selected_file {
+                if !file.path.exists() {
+                    self.selected_file = None;
+                    self.selected_thumbnail = None;
+                    self.selected_metadata = None;
+                }
+            }
+        }
+        
         // --- 3-STAGE STARTUP SEQUENCE ---
         // Stage 1 (frame 1): Apply saved geometry (maximize OR size) while hidden
         // Stage 2 (frames 2-5): Wait for layouts to stabilize  
@@ -3439,7 +3457,13 @@ impl eframe::App for ImageViewerApp {
                         .show(ui, |ui| {
                             ui.set_max_width(ui.available_width());
                             let effective_file = if let Some(file) = self.selected_file.clone() {
-                                Some(file)
+                                // Validate that the selected file still exists before trying to show it
+                                if file.path.exists() {
+                                    Some(file)
+                                } else {
+                                    // File no longer exists - clear selection
+                                    None
+                                }
                             } else if !self.is_computer_view {
                                 // Fallback: mostra informações da pasta ou drive atual
                                 let path = std::path::PathBuf::from(&self.current_path);
