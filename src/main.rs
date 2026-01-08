@@ -1231,8 +1231,7 @@ impl ImageViewerApp {
         // SYNC TAB STATE
         self.sync_to_tab();
 
-        // Limpa o context_menu.target_path para garantir sincronia com a pasta atual
-        self.context_menu.target_path = None;
+        self.reset_selection_and_search();
 
         // ATUALIZA O VIGIA
         self.watch_current_folder();
@@ -1256,6 +1255,7 @@ impl ImageViewerApp {
                 // SYNC TAB STATE
                 self.sync_to_tab();
                 
+                self.reset_selection_and_search();
                 self.setup_computer_view();
             } else {
                 let new_path = std::path::PathBuf::from(&path);
@@ -1269,6 +1269,7 @@ impl ImageViewerApp {
                 self.sync_to_tab();
                 self.path_input = self.current_path.clone();
                 self.is_computer_view = false;
+                self.reset_selection_and_search();
                 self.watch_current_folder(); // Atualiza o watcher
                 self.load_folder(false);
             }
@@ -1290,6 +1291,7 @@ impl ImageViewerApp {
                 // SYNC TAB STATE
                 self.sync_to_tab();
                 
+                self.reset_selection_and_search();
                 self.setup_computer_view();
             } else {
                 let new_path = std::path::PathBuf::from(&path);
@@ -1303,6 +1305,7 @@ impl ImageViewerApp {
                 self.sync_to_tab();
                 self.path_input = self.current_path.clone();
                 self.is_computer_view = false;
+                self.reset_selection_and_search();
                 self.watch_current_folder(); // Atualiza o watcher
                 self.load_folder(false);
             }
@@ -1314,6 +1317,8 @@ impl ImageViewerApp {
         if self.is_computer_view {
             return;
         }
+
+        self.reset_selection_and_search();
 
         // Corta histórico "futuro"
         if self.history_index < self.navigation_history.len().saturating_sub(1) {
@@ -1363,8 +1368,7 @@ impl ImageViewerApp {
 
         self.all_items = computer_items.clone();
         self.items = Arc::new(computer_items);
-        self.selected_item = None;
-        self.selected_file = None;
+        self.reset_selection_and_search();
         self.total_items = self.disks.len();
         self.is_loading_folder = false; // CRITICAL: Clear loading state for computer view
     }
@@ -2601,6 +2605,18 @@ impl ImageViewerApp {
         }
     }
 
+    /// Limpa a seleção atual, o thumbnail persistente, metadados e a busca.
+    /// Útil durante navegação entre pastas.
+    fn reset_selection_and_search(&mut self) {
+        self.selected_item = None;
+        self.selected_file = None;
+        self.selected_thumbnail = None;
+        self.selected_metadata = None;
+        self.search_query.clear();
+        self.context_menu.target_path = None;
+        self.renaming_state = None;
+    }
+
     /// Resolve the target path for a context menu action.
     fn context_target_path(&self, item_idx: Option<usize>) -> Option<PathBuf> {
         if let Some(idx) = item_idx {
@@ -3422,7 +3438,42 @@ impl eframe::App for ImageViewerApp {
                         .id_source("preview_scroll")
                         .show(ui, |ui| {
                             ui.set_max_width(ui.available_width());
-                            if let Some(file) = self.selected_file.clone() {
+                            let effective_file = if let Some(file) = self.selected_file.clone() {
+                                Some(file)
+                            } else if !self.is_computer_view {
+                                // Fallback: mostra informações da pasta ou drive atual
+                                let path = std::path::PathBuf::from(&self.current_path);
+                                let mut entry = FileEntry::from_path(path.clone(), true);
+                                
+                                // Verifica se é o root de um drive (ex: C:\)
+                                if path.to_string_lossy().len() <= 3 && path.to_string_lossy().contains(':') {
+                                    use mtt_file_manager::infrastructure::windows::get_volume_info;
+                                    let vol = get_volume_info(&self.current_path);
+                                    let drive_type = windows_infra::detect_drive_type(&self.current_path);
+                                    
+                                    let label = self.disks.iter()
+                                        .find(|(p, _)| p.starts_with(&self.current_path) || self.current_path.starts_with(p))
+                                        .map(|(_, l)| l.clone())
+                                        .unwrap_or_else(|| self.current_path.clone());
+                                        
+                                    entry.name = label;
+                                    entry.drive_info = Some(mtt_file_manager::domain::file_entry::DriveInfo {
+                                        file_system: vol.file_system,
+                                        total_space: vol.total_space,
+                                        free_space: vol.free_space,
+                                        drive_type,
+                                    });
+                                } else {
+                                    entry.name = path.file_name()
+                                        .map(|n| n.to_string_lossy().to_string())
+                                        .unwrap_or_else(|| self.current_path.clone());
+                                }
+                                Some(entry)
+                            } else {
+                                None
+                            };
+
+                            if let Some(file) = effective_file {
                                 ui.heading("Detalhes");
                                 ui.separator();
 
@@ -3843,8 +3894,8 @@ impl eframe::App for ImageViewerApp {
                             } else {
                                 ui.vertical_centered(|ui| {
                                     ui.add_space(100.0);
-                                    ui.label("Selecione um arquivo");
-                                    ui.label("ou drive para ver detalhes");
+                                    ui.label("Nenhum item selecionado");
+                                    ui.label("Selecione algo para ver detalhes");
                                 });
                             }
                         });

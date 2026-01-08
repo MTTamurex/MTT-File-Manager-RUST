@@ -1102,5 +1102,17 @@ std::thread::spawn(move || {
 
 ---
 
-*Última atualização: 2026-01-01*  
+### Fase 7: Refinamento de Navegação e Preview (2026-01-07)
+
+**Problema**: A busca persistia ao mudar de pasta, causando listas vazias. Além disso, o painel de detalhes ficava vazio por padrão, perdendo a oportunidade de mostrar informações Contextuais.
+
+**Solução**: Implementação de reset de estado em navegação e fallback inteligente no painel lateral.
+- **Reset de Navegação**: Centralizado na função `reset_selection_and_search()`. Limpa seleção, busca (`search_query`), thumbnail persistente e metadados. Chamado em todos os pontos de entrada de nova pasta.
+- **Preview Panel Fallback**: Se nada estiver selecionado, o painel agora exibe informações da **pasta atual** (ou drive).
+- **Drive Roots**: Navegação para a raiz de um drive (ex: `C:\`) agora popula automaticamente o painel lateral com as estatísticas do volume (rótulo, espaço total/livre), mantendo o usuário informado sem cliques extras.
+- **Persistent Thumbnail**: Adicionado campo `selected_thumbnail: Option<egui::TextureHandle>` para garantir que o preview do arquivo selecionado não desapareça caso o item saia do viewport (evitando desalocação do cache LRU).
+
+---
+
+*Última atualização: 2026-01-07*  
 *Responsável: Arquiteto de Software*

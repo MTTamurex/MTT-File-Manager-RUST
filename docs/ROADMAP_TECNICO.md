@@ -74,6 +74,7 @@
 - **Native Folder Previews (“Sandwich Effect”) ✅**: Implementado via `IShellItemImageFactory` com sistema de carregamento assíncrono e cache dedicado.
 - [x] **Folder Preview Auto-Refresh ✅**: Invalidação de cache em tempo real baseada em eventos de filesystem (subpastas) com normalização de paths para evitar bugs de prefixo UNC.
 - [x] **Persistent Selected Thumbnail ✅**: Implementado campo `selected_thumbnail` em `ImageViewerApp` que mantém o preview do arquivo selecionado visível mesmo que ele saia do viewport (evitando despejo do cache LRU).
+- [x] **Navigation Consistency & Preview Fallback (2026-01-07) ✅**: Implementado reset automático de seleção e busca (`search_query`) ao navegar entre pastas para evitar resultados vazios inesperados. O painel lateral agora exibe informações da pasta atual/drive como fallback inteligente quando nada está selecionado.
 
 ### Otimização do Garbage Collector (2026-01-02) ✅ CONCLUÍDO
 - **Problema Crítico Resolvido**: GC bloqueava database lock durante verificações de arquivos (I/O lento), travando navegação.
