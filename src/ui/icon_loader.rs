@@ -81,7 +81,7 @@ impl IconLoader {
         } else if let Some(ext) = path.extension() {
             // Virtual path (e.g., dummy.rar) - use extension-based extraction (force usefileattributes)
             let ext_str = ext.to_string_lossy();
-            windows::get_file_type_icon(&ext_str, IconSize::Large)
+            windows::get_file_type_icon(false, &ext_str, IconSize::Large)
         } else {
             // No extension - try path anyway
             windows::extract_file_icon_by_path(path, IconSize::Large)

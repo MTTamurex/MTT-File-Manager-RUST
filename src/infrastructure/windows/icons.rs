@@ -401,55 +401,74 @@ pub fn extract_drive_icon(
 
 /// Returns the default Windows icon for a file type (by extension), without requiring the file to exist.
 /// Initializes COM for proper Shell integration on secondary threads.
+///
+/// REFACTORED: Now uses simple filename logic (file.ext) instead of fake absolute C:\ path,
+/// which fixes issues with Recycle Bin items showing generic icons.
 pub fn get_file_type_icon(
+    is_folder: bool,
     extension: &str,
     size: IconSize,
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
+    use windows::Win32::System::Com::CoInitialize;
+    use windows::Win32::UI::Shell::{
+        SHGetFileInfoW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_LARGEICON, 
+        SHGFI_USEFILEATTRIBUTES, SHFILEINFOW
+    };
+    use windows::core::PCWSTR;
+
+    // Debug: Verifique se a extensão está chegando limpa no console
+    // println!("Buscando ícone para extensão: '{}', is_folder: {}", extension, is_folder);
+
     unsafe {
-        // 1. Initialize COM for this thread (required for Shell APIs)
-        // S_OK or S_FALSE are both acceptable (S_FALSE = already initialized)
+        // Inicializa COM para garantir acesso ao Registro do Windows
         let _ = CoInitialize(None);
 
-        // Accept extension with or without the leading dot
-        let ext = if extension.starts_with('.') {
-            extension.to_string()
-        } else {
-            format!(".{}", extension)
-        };
-
-        // 2. Use absolute path format (more reliable than relative)
-        // "C:\\fake_file.txt" triggers proper registry lookup
-        let dummy_path = format!("C:\\fake_file{}", ext);
-        let wide_path: Vec<u16> = dummy_path
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect();
-
         let mut shfi = SHFILEINFOW::default();
-
-        let flags = SHGFI_ICON
-            | SHGFI_USEFILEATTRIBUTES
+        
+        let flags = SHGFI_ICON 
+            | SHGFI_USEFILEATTRIBUTES 
             | match size {
                 IconSize::Small => SHGFI_SMALLICON,
-                IconSize::Large | IconSize::Jumbo => SHGFI_LARGEICON,
+                IconSize::Large | IconSize::Jumbo => SHGFI_LARGEICON, 
             };
+
+        let file_attributes = if is_folder {
+            windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY
+        } else {
+            windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL
+        };
+
+        // ESTRATÉGIA CORRIGIDA:
+        // Não use caminhos absolutos (C:\...). Use apenas um nome simples.
+        let dummy_name = if is_folder { 
+            "folder".to_string() 
+        } else {
+            // Remove pontos extras e garante um único ponto
+            let clean_ext = extension.trim_start_matches('.');
+            format!("file.{}", clean_ext) // ex: "file.rar"
+        };
+        
+        let wide_path: Vec<u16> = dummy_name.encode_utf16().chain(std::iter::once(0)).collect();
 
         let result = SHGetFileInfoW(
             PCWSTR(wide_path.as_ptr()),
-            FILE_ATTRIBUTE_NORMAL,
+            file_attributes,
             Some(&mut shfi),
             std::mem::size_of::<SHFILEINFOW>() as u32,
             flags,
         );
 
         if result == 0 || shfi.hIcon.is_invalid() {
-            return Err(format!("Failed to get icon for extension: {}", ext).into());
+            return Err(format!("Falha SHGetFileInfoW para: {}", dummy_name).into());
         }
 
         let hicon = shfi.hIcon;
+        
+        // Reutilize a função hicon_to_rgba que já implementamos e funciona
         let conversion_result = super::bitmap_conversion::hicon_to_rgba(hicon);
-        let _ = DestroyIcon(hicon);
-
+        
+        let _ = windows::Win32::UI::WindowsAndMessaging::DestroyIcon(hicon);
+        
         conversion_result
     }
 }

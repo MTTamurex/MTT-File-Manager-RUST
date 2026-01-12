@@ -1818,7 +1818,7 @@ impl ImageViewerApp {
         let icon_result = if matches!(extension.as_str(), "exe" | "lnk" | "ico") {
             extract_file_icon_by_path(path, icon_size)
         } else {
-            mtt_file_manager::infrastructure::windows::get_file_type_icon(&format!(".{}", extension), icon_size)
+            mtt_file_manager::infrastructure::windows::get_file_type_icon(false, &format!(".{}", extension), icon_size)
         };
 
         match icon_result {
@@ -3985,6 +3985,7 @@ impl eframe::App for ImageViewerApp {
                                                     .map(|(_, ext)| format!(".{}", ext))
                                                     .unwrap_or_else(|| ".bin".to_string());
                                                 mtt_file_manager::infrastructure::windows::get_file_type_icon(
+                                                    false,
                                                     &ext_str,
                                                     IconSize::Large,
                                                 )

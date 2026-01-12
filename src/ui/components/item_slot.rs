@@ -369,12 +369,9 @@ fn render_file_slot<O: ItemSlotOperations>(
         }
     }
 
-    // Carrega ícone (sempre, servirá como fallback) - pula para Lixeira
-    let file_icon = if ctx.is_recycle_bin_view {
-        None
-    } else {
-        ctx.icon_loader.get_or_load_icon(ui.ctx(), &path_clone)
-    };
+    // Carrega ícone (sempre, servirá como fallback)
+    // Na Lixeira, usa get_or_load_icon que agora suporta paths virtuais com extensão
+    let file_icon = ctx.icon_loader.get_or_load_icon(ui.ctx(), &path_clone);
 
     // GEOMETRIA - reduz tamanho para caber na area com margem
     let available_h = ui.available_height();
