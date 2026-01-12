@@ -12,6 +12,7 @@ pub mod icons;
 pub mod media_foundation;
 pub mod metadata;
 pub mod native_menu;
+pub mod recycle_bin;
 pub mod shell_operations;
 pub mod system_info;
 
@@ -27,5 +28,6 @@ pub use icons::*;
 pub use media_foundation::*;
 pub use metadata::*;
 pub use native_menu::*;
+pub use recycle_bin::*;
 pub use shell_operations::*;
 pub use system_info::*;

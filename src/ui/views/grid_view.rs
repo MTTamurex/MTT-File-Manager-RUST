@@ -17,6 +17,7 @@ pub struct GridViewContext<'a> {
     pub focus_rename: bool,
     pub scroll_to_selected: bool, // Scroll to selected item on keyboard navigation
     pub is_computer_view: bool,
+    pub is_recycle_bin_view: bool,
     pub texture_cache: &'a mut lru::LruCache<PathBuf, egui::TextureHandle>,
     pub loading_set: &'a mut std::collections::HashSet<PathBuf>,
     pub scanned_folders: &'a mut std::collections::HashSet<PathBuf>,
@@ -384,6 +385,7 @@ fn render_item_slot_for_grid(
             is_renaming,
             renaming_text,
             focus_rename: ctx.focus_rename,
+            is_recycle_bin_view: ctx.is_recycle_bin_view,
             texture_cache: ctx.texture_cache,
             icon_loader: ctx.item_icon_loader,
             scanned_folders: ctx.scanned_folders,

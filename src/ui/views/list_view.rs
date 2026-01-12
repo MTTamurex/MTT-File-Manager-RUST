@@ -18,6 +18,7 @@ pub struct ListViewContext<'a> {
     pub focus_rename: bool,
     pub scroll_to_selected: bool, // Scroll to selected item on keyboard navigation
     pub is_computer_view: bool,
+    pub is_recycle_bin_view: bool,
     pub is_onedrive_folder: bool,
     pub texture_cache: &'a mut lru::LruCache<PathBuf, egui::TextureHandle>,
     pub loading_set: &'a mut std::collections::HashSet<PathBuf>,
@@ -196,6 +197,7 @@ pub fn render_list_view(
                 // GATILHO LAZY LOAD PARA PASTAS: Descobre capa se ainda não tem
                 if item.is_dir
                     && !ctx.is_computer_view
+                    && !ctx.is_recycle_bin_view
                     && item.folder_cover.is_none()
                     && !ctx.scanned_folders.contains(&item.path)
                 {
@@ -204,7 +206,7 @@ pub fn render_list_view(
                 }
 
                 // GATILHO LAZY LOAD PARA ARQUIVOS DE MÍDIA: Carrega thumbnail proativamente
-                if !item.is_dir {
+                if !item.is_dir && !ctx.is_recycle_bin_view {
                     let is_media_file = item
                         .path
                         .extension()
@@ -333,7 +335,15 @@ pub fn render_list_view(
                         }
                     } else {
                         // File: load native Windows icon using IconLoader (same as grid view)
-                        if let Some(file_icon) =
+                        if ctx.is_recycle_bin_view {
+                            ui.painter().text(
+                                icon_rect.min,
+                                egui::Align2::LEFT_TOP,
+                                "📄",
+                                FontId::proportional(14.0),
+                                Color32::GRAY,
+                            );
+                        } else if let Some(file_icon) =
                             ctx.item_icon_loader.get_or_load_icon(ui.ctx(), &item.path)
                         {
                             ui.painter().image(

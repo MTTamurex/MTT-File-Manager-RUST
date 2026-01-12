@@ -6,6 +6,7 @@ pub struct SidebarContext<'a> {
     pub disks: &'a [(String, String)], // (path, label)
     pub current_path: &'a str,
     pub is_computer_view: bool,
+    pub is_recycle_bin_view: bool,
     pub computer_icon: Option<&'a egui::TextureHandle>,
     pub is_renaming: bool, // Bloqueia navegação durante renomeação
     pub icon_loader: &'a mut crate::ui::icon_loader::IconLoader,
@@ -17,6 +18,7 @@ pub struct SidebarContext<'a> {
 pub enum SidebarAction {
     NavigateTo(String),
     NavigateToComputer,
+    NavigateToRecycleBin,
 }
 
 /// Renders the sidebar with drives and computer view
@@ -84,6 +86,81 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
     }
 
     ui.add_space(4.0);
+    ui.separator();
+    ui.add_space(8.0);
+
+    // === LIXEIRA (RECYCLE BIN) ===
+    {
+        let is_selected = ctx.is_recycle_bin_view;
+        let (mut rect, response) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), Sense::click());
+
+        rect.min.x = ui.clip_rect().min.x;
+        rect.max.x = ui.clip_rect().max.x;
+
+        if ui.is_rect_visible(rect) {
+            if is_selected {
+                ui.painter()
+                    .rect_filled(rect, 0.0, Color32::from_rgb(200, 220, 240));
+            } else if response.hovered() {
+                ui.painter().rect_filled(
+                    rect,
+                    0.0,
+                    Color32::from_rgba_unmultiplied(200, 220, 240, 50),
+                );
+            }
+
+            let mut cursor_x = rect.min.x + 12.0;
+
+            // Ícone da Lixeira - carrega ícone nativo via IconLoader
+            let recycle_bin_path = "shell:RecycleBinFolder";
+            let recycle_icon = ctx
+                .icon_loader
+                .get_or_load_folder_path_icon(ui.ctx(), recycle_bin_path);
+            
+            if let Some(icon) = recycle_icon {
+                let icon_rect = Rect::from_center_size(
+                    Pos2::new(cursor_x + 8.0, rect.center().y),
+                    egui::vec2(16.0, 16.0),
+                );
+                ui.painter().image(
+                    icon.id(),
+                    icon_rect,
+                    Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
+                    Color32::WHITE,
+                );
+                cursor_x += 24.0;
+            } else {
+                // Fallback: trash emoji
+                ui.painter().text(
+                    Pos2::new(cursor_x + 8.0, rect.center().y),
+                    egui::Align2::CENTER_CENTER,
+                    "🗑",
+                    egui::FontId::proportional(14.0),
+                    ui.visuals().text_color(),
+                );
+                cursor_x += 24.0;
+            }
+
+            ui.painter().text(
+                Pos2::new(cursor_x, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                "Lixeira",
+                egui::FontId::proportional(11.5),
+                if is_selected {
+                    Color32::from_rgb(0, 50, 100)
+                } else {
+                    ui.visuals().text_color()
+                },
+            );
+        }
+
+        if response.clicked() && !ctx.is_renaming {
+            action = Some(SidebarAction::NavigateToRecycleBin);
+        }
+    }
+
+    ui.add_space(8.0);
     ui.separator();
     ui.add_space(8.0);
 
