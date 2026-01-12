@@ -2,7 +2,7 @@
 //!
 //! This module handles loading Windows shell icons for files and folders.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use eframe::egui;
@@ -22,6 +22,8 @@ pub struct IconLoader {
     computer_icon_texture: Option<egui::TextureHandle>,
     /// Drive icon cache (drive path -> texture)
     drive_icon_cache: HashMap<String, egui::TextureHandle>,
+    /// Remember failed drive/shell icon attempts to avoid retrying every frame
+    failed_drive_icons: HashSet<String>,
 }
 
 impl IconLoader {
@@ -32,6 +34,7 @@ impl IconLoader {
             folder_icon_texture: None,
             computer_icon_texture: None,
             drive_icon_cache: HashMap::new(),
+            failed_drive_icons: HashSet::new(),
         }
     }
 
@@ -121,6 +124,10 @@ impl IconLoader {
         ctx: &egui::Context,
         drive_path: &str,
     ) -> Option<egui::TextureHandle> {
+        if self.failed_drive_icons.contains(drive_path) {
+            return None;
+        }
+
         if let Some(icon) = self.drive_icon_cache.get(drive_path) {
             return Some(icon.clone());
         }
@@ -143,6 +150,9 @@ impl IconLoader {
             return Some(cloned);
         }
 
+        // Cache failure to prevent blocking retries
+        self.failed_drive_icons.insert(drive_path.to_string());
+
         None
     }
 
@@ -162,6 +172,10 @@ impl IconLoader {
     ) -> Option<egui::TextureHandle> {
         let cache_key = folder_path.to_string();
 
+        if self.failed_drive_icons.contains(&cache_key) {
+            return None;
+        }
+
         if let Some(icon) = self.drive_icon_cache.get(&cache_key) {
             return Some(icon.clone());
         }
@@ -176,12 +190,15 @@ impl IconLoader {
                     [width as usize, height as usize],
                     &rgba_data,
                 ),
-                egui::TextureOptions::NEAREST,
+                egui::TextureOptions::LINEAR,
             );
             let cloned = texture.clone();
             self.drive_icon_cache.insert(cache_key, texture);
             return Some(cloned);
         }
+
+        // Cache failure to avoid repeated slow attempts
+        self.failed_drive_icons.insert(folder_path.to_string());
 
         None
     }

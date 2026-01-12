@@ -149,6 +149,7 @@ struct ImageViewerApp {
     metadata_loading: HashSet<PathBuf>,
     show_preview_panel: bool,
     is_computer_view: bool, // Se estamos na view "Este Computador"
+    is_recycle_bin_view: bool, // Se estamos na view da Lixeira
 
     total_items: usize,
 
@@ -458,6 +459,7 @@ impl ImageViewerApp {
             selected_metadata: None,
             show_preview_panel, // Loaded from SQLite
             is_computer_view: false,
+            is_recycle_bin_view: false,
             // Navigation - comeÃ§a com path inicial no histÃ³rico
             navigation_history: vec![PATH_PADRAO.to_string()],
             history_index: 0,
@@ -1276,6 +1278,7 @@ impl ImageViewerApp {
         self.current_path = normalized_path.clone();
         self.path_input = normalized_path.clone();
         self.is_computer_view = false;
+        self.is_recycle_bin_view = false;  // Reset quando navega para qualquer pasta
 
         // SYNC TAB STATE
         self.sync_to_tab();
@@ -1306,6 +1309,12 @@ impl ImageViewerApp {
                 
                 self.reset_selection_and_search();
                 self.setup_computer_view();
+            } else if path == "Lixeira" {
+                // Invalida preview da pasta que estávamos
+                self.cache_manager.invalidate_folder_preview(&previous_path);
+                
+                self.reset_selection_and_search();
+                self.setup_recycle_bin_view();
             } else {
                 let new_path = std::path::PathBuf::from(&path);
                 
@@ -1318,6 +1327,7 @@ impl ImageViewerApp {
                 self.sync_to_tab();
                 self.path_input = self.current_path.clone();
                 self.is_computer_view = false;
+                self.is_recycle_bin_view = false;
                 self.reset_selection_and_search();
                 self.watch_current_folder(); // Atualiza o watcher
                 self.load_folder(false);
@@ -1342,6 +1352,11 @@ impl ImageViewerApp {
                 
                 self.reset_selection_and_search();
                 self.setup_computer_view();
+            } else if path == "Lixeira" {
+                self.cache_manager.invalidate_folder_preview(&previous_path);
+                
+                self.reset_selection_and_search();
+                self.setup_recycle_bin_view();
             } else {
                 let new_path = std::path::PathBuf::from(&path);
                 
@@ -1354,6 +1369,7 @@ impl ImageViewerApp {
                 self.sync_to_tab();
                 self.path_input = self.current_path.clone();
                 self.is_computer_view = false;
+                self.is_recycle_bin_view = false;
                 self.reset_selection_and_search();
                 self.watch_current_folder(); // Atualiza o watcher
                 self.load_folder(false);
@@ -1386,11 +1402,106 @@ impl ImageViewerApp {
         self.setup_computer_view();
     }
 
+    /// Navega para a Lixeira (adicionando ao histórico)
+    fn navigate_to_recycle_bin(&mut self) {
+        if self.is_recycle_bin_view {
+            return;
+        }
+
+        self.reset_selection_and_search();
+
+        // Corta histórico "futuro"
+        if self.history_index < self.navigation_history.len().saturating_sub(1) {
+            self.navigation_history.truncate(self.history_index + 1);
+        }
+
+        // Adiciona ao histórico
+        self.navigation_history.push("Lixeira".to_string());
+        self.history_index = self.navigation_history.len() - 1;
+
+        // SYNC TAB STATE
+        self.tab_manager.active_mut().navigate_to("Lixeira");
+
+        self.setup_recycle_bin_view();
+    }
+
+    /// Configura a visão da Lixeira de forma ASSÍNCRONA
+    fn setup_recycle_bin_view(&mut self) {
+        self.current_path = "Lixeira".to_string();
+        self.is_computer_view = false;
+        self.is_recycle_bin_view = true;
+        self.path_input = "Lixeira".to_string();
+        self.is_loading_folder = true;
+        self.items = Arc::new(Vec::new());
+        self.all_items.clear();
+        self.total_items = 0;
+
+        // Incrementa geração para invalidar thumbnails antigos
+        self.generation += 1;
+        self.current_generation
+            .store(self.generation, AtomicOrdering::Relaxed);
+
+        let my_gen = self.generation;
+        let gen_clone = self.current_generation.clone();
+        let file_entry_sender = self.file_entry_sender.clone();
+        let ctx = self.ui_ctx.clone();
+
+        // Carrega itens da lixeira em thread separada (ASYNC)
+        std::thread::spawn(move || {
+            use mtt_file_manager::infrastructure::windows::recycle_bin::enumerate_recycle_bin;
+
+            // Enumera itens da lixeira via COM
+            match enumerate_recycle_bin() {
+                Ok(recycle_items) => {
+                    // Converte para FileEntry (sem usar from_path que tenta acessar filesystem)
+                    let mut batch = Vec::with_capacity(recycle_items.len());
+                    for item in recycle_items {
+                        // Verifica se a geração ainda é válida (cancelamento rápido)
+                        if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
+                            break;
+                        }
+
+                        let entry = FileEntry {
+                            path: item.original_path.clone(),
+                            name: item.name,
+                            is_dir: item.is_directory,
+                            size: item.size,
+                            modified: 0, // Recycle Bin usa date_deleted (String), não timestamp
+                            folder_cover: None,
+                            drive_info: None,
+                            sync_status: mtt_file_manager::domain::file_entry::SyncStatus::None,
+                        };
+                        batch.push(entry);
+                    }
+
+                    // Envia em um único lote
+                    if !batch.is_empty() && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+                        let _ = file_entry_sender.send((my_gen, batch));
+                        ctx.request_repaint();
+                    }
+
+                    // Sinal de fim do carregamento
+                    if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+                        let _ = file_entry_sender.send((my_gen, Vec::new()));
+                        ctx.request_repaint();
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[RECYCLE BIN] Erro ao enumerar: {:?}", e);
+                    // Envia lote vazio para desativar spinner
+                    let _ = file_entry_sender.send((my_gen, Vec::new()));
+                    ctx.request_repaint();
+                }
+            }
+        });
+    }
+
     /// Configura a visão de "Este Computador" sem afetar o histórico
     fn setup_computer_view(&mut self) {
         // Set computer view
         self.current_path = "Este Computador".to_string();
         self.is_computer_view = true;
+        self.is_recycle_bin_view = false;
         self.path_input = "Este Computador".to_string();
 
         // ALWAYS reload drives to ensure fresh data
@@ -2139,6 +2250,7 @@ impl ImageViewerApp {
             focus_rename,
             scroll_to_selected,
             is_computer_view: self.is_computer_view,
+            is_recycle_bin_view: self.is_recycle_bin_view,
             is_onedrive_folder,
             texture_cache: &mut self.cache_manager.texture_cache,
             loading_set: &mut self.cache_manager.loading_set,
@@ -2365,6 +2477,7 @@ impl ImageViewerApp {
             focus_rename,
             scroll_to_selected,
             is_computer_view: self.is_computer_view,
+            is_recycle_bin_view: self.is_recycle_bin_view,
             texture_cache: &mut self.cache_manager.texture_cache,
             loading_set: &mut self.cache_manager.loading_set,
             scanned_folders: &mut self.scanned_folders,
@@ -2527,6 +2640,7 @@ impl ImageViewerApp {
                 is_renaming,
                 renaming_text,
                 focus_rename: self.focus_rename,
+                is_recycle_bin_view: self.is_recycle_bin_view,
                 texture_cache: &mut self.cache_manager.texture_cache,
                 icon_loader: &mut self.item_icon_loader,
                 scanned_folders: &mut self.scanned_folders,
@@ -3543,6 +3657,7 @@ impl eframe::App for ImageViewerApp {
                     disks: &disks,
                     current_path: &current_path,
                     is_computer_view,
+                    is_recycle_bin_view: self.is_recycle_bin_view,
                     computer_icon: computer_icon.as_ref(),
                     is_renaming: self.renaming_state.is_some(),
                     icon_loader: &mut self.item_icon_loader,
@@ -3569,6 +3684,7 @@ impl eframe::App for ImageViewerApp {
             match action {
                 SidebarAction::NavigateTo(path) => self.navigate_to(&path),
                 SidebarAction::NavigateToComputer => self.navigate_to_computer(),
+                SidebarAction::NavigateToRecycleBin => self.navigate_to_recycle_bin(),
             }
         }
 

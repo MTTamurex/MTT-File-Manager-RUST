@@ -32,6 +32,8 @@ pub struct ItemSlotContext<'a> {
     pub renaming_text: Option<&'a mut String>,
     /// Se deve focar no input de rename
     pub focus_rename: bool,
+    /// Se estamos na view de Lixeira (evita IO pesado e thumbnails)
+    pub is_recycle_bin_view: bool,
     /// Cache de texturas (LRU)
     pub texture_cache: &'a mut lru::LruCache<std::path::PathBuf, egui::TextureHandle>,
     /// Carregador de ícones (PERSISTENTE - não crie novo a cada chamada!)
@@ -166,21 +168,23 @@ fn render_directory_slot<O: ItemSlotOperations>(
 ) {
     let item = ctx.item;
 
-    // --- GATILHO LAZY LOAD ---
-    // Se não tem capa E ainda não foi escaneado: Dispara Scan.
-    if item.folder_cover.is_none() && !ctx.scanned_folders.contains(&item.path) {
-        ctx.scanned_folders.insert(item.path.clone());
-        ops.request_folder_scan(item.path.clone());
-    }
+    if !ctx.is_recycle_bin_view {
+        // --- GATILHO LAZY LOAD ---
+        // Se não tem capa E ainda não foi escaneado: Dispara Scan.
+        if item.folder_cover.is_none() && !ctx.scanned_folders.contains(&item.path) {
+            ctx.scanned_folders.insert(item.path.clone());
+            ops.request_folder_scan(item.path.clone());
+        }
 
-    // Se TEM capa (de SQLite ou descoberta recente) MAS a textura não está carregada: Carrega!
-    if let Some(ref cover_path) = item.folder_cover {
-        if !ctx.texture_cache.contains(cover_path)
-            && !ctx.loading_set.contains(cover_path)
-            && ctx.loading_set.len() < 50
-        {
-            ctx.loading_set.insert(cover_path.clone());
-            ops.request_thumbnail_load(cover_path.clone());
+        // Se TEM capa (de SQLite ou descoberta recente) MAS a textura não está carregada: Carrega!
+        if let Some(ref cover_path) = item.folder_cover {
+            if !ctx.texture_cache.contains(cover_path)
+                && !ctx.loading_set.contains(cover_path)
+                && ctx.loading_set.len() < 50
+            {
+                ctx.loading_set.insert(cover_path.clone());
+                ops.request_thumbnail_load(cover_path.clone());
+            }
         }
     }
 
@@ -203,8 +207,12 @@ fn render_directory_slot<O: ItemSlotOperations>(
 
     // === DESENHO DA PASTA ===
     // 1. Tenta usar o preview nativo (Shell Sandwich)
-    let native_preview = ctx.folder_preview_cache.get(&item.path);
-    let is_loading = ctx.folder_preview_loading.contains(&item.path);
+    let native_preview = if ctx.is_recycle_bin_view {
+        None
+    } else {
+        ctx.folder_preview_cache.get(&item.path)
+    };
+    let is_loading = !ctx.is_recycle_bin_view && ctx.folder_preview_loading.contains(&item.path);
 
     if let Some(tex) = native_preview {
         // Se temos o preview nativo, desenha mantendo aspect ratio e centralizando
@@ -273,9 +281,11 @@ fn render_directory_slot<O: ItemSlotOperations>(
         // Força repaint para animação contínua
         ui.ctx().request_repaint();
     } else {
-        // Se não tem preview e não está carregando, dispara o carregamento
-        ops.request_folder_preview_load(item.path.clone());
-        
+        // Se não tem preview e não está carregando, dispara o carregamento (exceto na Lixeira)
+        if !ctx.is_recycle_bin_view {
+            ops.request_folder_preview_load(item.path.clone());
+        }
+
         // Fallback temporário: mostra pasta customizada enquanto não iniciou loading
         crate::ui::components::item_slot::draw_custom_folder(
             ui.painter(),
@@ -347,8 +357,8 @@ fn render_file_slot<O: ItemSlotOperations>(
         .map(|ext| crate::infrastructure::windows::is_media_extension(&ext.to_string_lossy()))
         .unwrap_or(false);
 
-    // Thumbnail loading para arquivos de mídia
-    if is_media_file {
+    // Thumbnail loading para arquivos de mídia (desabilitado na Lixeira)
+    if is_media_file && !ctx.is_recycle_bin_view {
         let has_texture = ctx.texture_cache.contains(&path_clone);
         let is_loading = ctx.loading_set.contains(&path_clone);
 
@@ -359,8 +369,12 @@ fn render_file_slot<O: ItemSlotOperations>(
         }
     }
 
-    // Carrega ícone (sempre, servirá como fallback)
-    let file_icon = ctx.icon_loader.get_or_load_icon(ui.ctx(), &path_clone);
+    // Carrega ícone (sempre, servirá como fallback) - pula para Lixeira
+    let file_icon = if ctx.is_recycle_bin_view {
+        None
+    } else {
+        ctx.icon_loader.get_or_load_icon(ui.ctx(), &path_clone)
+    };
 
     // GEOMETRIA - reduz tamanho para caber na area com margem
     let available_h = ui.available_height();
