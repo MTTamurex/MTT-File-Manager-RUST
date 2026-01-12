@@ -20,6 +20,8 @@ pub struct IconLoader {
     folder_icon_texture: Option<egui::TextureHandle>,
     /// Computer icon texture (cached)
     computer_icon_texture: Option<egui::TextureHandle>,
+    /// Recycle bin icon texture (cached)
+    recycle_bin_icon_texture: Option<egui::TextureHandle>,
     /// Drive icon cache (drive path -> texture)
     drive_icon_cache: HashMap<String, egui::TextureHandle>,
     /// Remember failed drive/shell icon attempts to avoid retrying every frame
@@ -33,6 +35,7 @@ impl IconLoader {
             icon_cache: LruCache::new(NonZeroUsize::new(100).unwrap()), // ICON_CACHE_SIZE
             folder_icon_texture: None,
             computer_icon_texture: None,
+            recycle_bin_icon_texture: None,
             drive_icon_cache: HashMap::new(),
             failed_drive_icons: HashSet::new(),
         }
@@ -71,10 +74,20 @@ impl IconLoader {
             return Some(texture.clone());
         }
 
-        // Load icon from Windows API
-        if let Ok((pixels, width, height)) =
+        // Try to load icon - first by path, then by extension (for virtual paths like recycle bin)
+        let icon_result = if path.exists() {
+            // Real file - use path-based extraction
             windows::extract_file_icon_by_path(path, IconSize::Large)
-        {
+        } else if let Some(ext) = path.extension() {
+            // Virtual path (e.g., dummy.rar) - use extension-based extraction (force usefileattributes)
+            let ext_str = ext.to_string_lossy();
+            windows::get_file_type_icon(&ext_str, IconSize::Large)
+        } else {
+            // No extension - try path anyway
+            windows::extract_file_icon_by_path(path, IconSize::Large)
+        };
+
+        if let Ok((pixels, width, height)) = icon_result {
             let texture = ctx.load_texture(
                 cache_key.clone(),
                 egui::ColorImage::from_rgba_unmultiplied(
@@ -116,6 +129,24 @@ impl IconLoader {
     /// Gets the computer icon texture (must call ensure_computer_icon first)
     pub fn computer_icon(&self) -> Option<&egui::TextureHandle> {
         self.computer_icon_texture.as_ref()
+    }
+
+    /// Ensures the recycle bin icon texture is loaded and returns it
+    pub fn ensure_recycle_bin_icon(&mut self, ctx: &egui::Context) -> Option<egui::TextureHandle> {
+        if let Some(tex) = &self.recycle_bin_icon_texture {
+            return Some(tex.clone());
+        }
+
+        if let Ok((data, width, height)) = windows::extract_recycle_bin_icon(IconSize::Large) {
+            let image =
+                egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &data);
+
+            let texture = ctx.load_texture("recycle_bin_icon", image, egui::TextureOptions::NEAREST);
+            self.recycle_bin_icon_texture = Some(texture.clone());
+            return Some(texture);
+        }
+        
+        None
     }
 
     /// Gets or loads a drive icon

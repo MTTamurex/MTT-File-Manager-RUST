@@ -1814,11 +1814,11 @@ impl ImageViewerApp {
             IconSize::Large
         };
 
-        // Para executaveis, usa path real; para demais, usa extensao dummy
+        // Para executaveis, usa path real; para demais, usa extensao dummy com USEFILEATTRIBUTES
         let icon_result = if matches!(extension.as_str(), "exe" | "lnk" | "ico") {
             extract_file_icon_by_path(path, icon_size)
         } else {
-            extract_file_icon(&format!(".{}", extension), icon_size)
+            mtt_file_manager::infrastructure::windows::get_file_type_icon(&format!(".{}", extension), icon_size)
         };
 
         match icon_result {
@@ -3723,13 +3723,26 @@ impl eframe::App for ImageViewerApp {
                         .show(ui, |ui| {
                             ui.set_max_width(ui.available_width());
                             let effective_file = if let Some(file) = self.selected_file.clone() {
-                                // Validate that the selected file still exists before trying to show it
-                                if file.path.exists() {
+                                // Na lixeira, não verificar se o path existe (pois usamos paths virtuais)
+                                if self.is_recycle_bin_view || file.path.exists() {
                                     Some(file)
                                 } else {
                                     // File no longer exists - clear selection
                                     None
                                 }
+                            } else if self.is_recycle_bin_view {
+                                // Na lixeira sem seleção, mostra info da Lixeira
+                                let entry = FileEntry {
+                                    path: PathBuf::from("Lixeira"),
+                                    name: "Lixeira".to_string(),
+                                    is_dir: true,
+                                    size: 0,
+                                    modified: 0,
+                                    folder_cover: None,
+                                    drive_info: None,
+                                    sync_status: mtt_file_manager::domain::file_entry::SyncStatus::None,
+                                };
+                                Some(entry)
                             } else if !self.is_computer_view {
                                 // Fallback: mostra informações da pasta ou drive atual
                                 let path = std::path::PathBuf::from(&self.current_path);
@@ -3774,7 +3787,7 @@ impl eframe::App for ImageViewerApp {
                                 let is_media = file
                             .path
                             .extension()
-                            .map(|ext| {
+                            .map(|ext: &std::ffi::OsStr| {
                                 mtt_file_manager::infrastructure::windows::is_media_extension(
                                     &ext.to_string_lossy(),
                                 )
@@ -3851,8 +3864,35 @@ impl eframe::App for ImageViewerApp {
                                                     egui::RichText::new("??").size(icon_size * 0.8),
                                                 );
                                             }
+                                        } else if self.is_recycle_bin_view && file.name == "Lixeira" {
+                                            // LIXEIRA - mostra ícone da lixeira
+                                            if let Some(icon) = self.item_icon_loader.ensure_recycle_bin_icon(ui.ctx()) {
+                                                ui.add(
+                                                    egui::Image::new(&icon)
+                                                        .max_size(egui::vec2(icon_size, icon_size)),
+                                                );
+                                            } else {
+                                                ui.label(
+                                                    egui::RichText::new("🗑").size(icon_size * 0.6),
+                                                );
+                                            }
                                         } else if file.is_dir {
                                             // PASTA (Usa preview nativo do Windows - sandwich effect)
+                                            // Na lixeira, não tentar carregar preview de pastas
+                                            if self.is_recycle_bin_view {
+                                                // Pasta na lixeira - mostra ícone de pasta genérico
+                                                self.item_icon_loader.ensure_folder_icon(ui.ctx());
+                                                if let Some(icon) = self.item_icon_loader.folder_icon() {
+                                                    ui.add(
+                                                        egui::Image::new(icon)
+                                                            .max_size(egui::vec2(icon_size, icon_size)),
+                                                    );
+                                                } else {
+                                                    ui.label(
+                                                        egui::RichText::new("📁").size(icon_size * 0.6),
+                                                    );
+                                                }
+                                            } else {
                                             let folder_rect = ui
                                                 .allocate_exact_size(
                                                     egui::vec2(icon_size, icon_size),
@@ -3934,11 +3974,36 @@ impl eframe::App for ImageViewerApp {
                                                     egui::Color32::from_gray(180),
                                                 );
                                             }
+                                            } // fecha else !is_recycle_bin_view
                                         } else {
                                             // ARQUIVO SEM THUMBNAIL
-                                            if let Some(icon) =
+                                            // Na lixeira ou quando o arquivo não existe, use ícone por extensão
+                                            let icon_opt = if self.is_recycle_bin_view || !file.path.exists() {
+                                                let ext_str = file
+                                                    .name
+                                                    .rsplit_once('.')
+                                                    .map(|(_, ext)| format!(".{}", ext))
+                                                    .unwrap_or_else(|| ".bin".to_string());
+                                                mtt_file_manager::infrastructure::windows::get_file_type_icon(
+                                                    &ext_str,
+                                                    IconSize::Large,
+                                                )
+                                                .ok()
+                                                .and_then(|(rgba_data, w, h)| {
+                                                    Some(ui.ctx().load_texture(
+                                                        format!("icon_{}", ext_str),
+                                                        egui::ColorImage::from_rgba_unmultiplied(
+                                                            [w as usize, h as usize],
+                                                            &rgba_data,
+                                                        ),
+                                                        egui::TextureOptions::NEAREST,
+                                                    ))
+                                                })
+                                            } else {
                                                 self.get_or_load_icon(ui.ctx(), &file.path)
-                                            {
+                                            };
+
+                                            if let Some(icon) = icon_opt {
                                                 ui.add(egui::Image::new(&icon).max_size(
                                                     egui::vec2(icon_size * 0.6, icon_size * 0.6),
                                                 ));
@@ -4037,7 +4102,7 @@ impl eframe::App for ImageViewerApp {
                                         } else {
                                             file.path
                                                 .extension()
-                                                .and_then(|e| e.to_str())
+                                                .and_then(|e: &std::ffi::OsStr| e.to_str())
                                                 .unwrap_or("Arquivo")
                                                 .to_uppercase()
                                         };

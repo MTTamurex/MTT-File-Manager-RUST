@@ -398,3 +398,104 @@ pub fn extract_drive_icon(
         conversion_result
     }
 }
+
+/// Returns the default Windows icon for a file type (by extension), without requiring the file to exist.
+/// Initializes COM for proper Shell integration on secondary threads.
+pub fn get_file_type_icon(
+    extension: &str,
+    size: IconSize,
+) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
+    unsafe {
+        // 1. Initialize COM for this thread (required for Shell APIs)
+        // S_OK or S_FALSE are both acceptable (S_FALSE = already initialized)
+        let _ = CoInitialize(None);
+
+        // Accept extension with or without the leading dot
+        let ext = if extension.starts_with('.') {
+            extension.to_string()
+        } else {
+            format!(".{}", extension)
+        };
+
+        // 2. Use absolute path format (more reliable than relative)
+        // "C:\\fake_file.txt" triggers proper registry lookup
+        let dummy_path = format!("C:\\fake_file{}", ext);
+        let wide_path: Vec<u16> = dummy_path
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+
+        let mut shfi = SHFILEINFOW::default();
+
+        let flags = SHGFI_ICON
+            | SHGFI_USEFILEATTRIBUTES
+            | match size {
+                IconSize::Small => SHGFI_SMALLICON,
+                IconSize::Large | IconSize::Jumbo => SHGFI_LARGEICON,
+            };
+
+        let result = SHGetFileInfoW(
+            PCWSTR(wide_path.as_ptr()),
+            FILE_ATTRIBUTE_NORMAL,
+            Some(&mut shfi),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            flags,
+        );
+
+        if result == 0 || shfi.hIcon.is_invalid() {
+            return Err(format!("Failed to get icon for extension: {}", ext).into());
+        }
+
+        let hicon = shfi.hIcon;
+        let conversion_result = super::bitmap_conversion::hicon_to_rgba(hicon);
+        let _ = DestroyIcon(hicon);
+
+        conversion_result
+    }
+}
+
+/// Extracts the Recycle Bin icon using SHGetKnownFolderIDList
+pub fn extract_recycle_bin_icon(
+    size: IconSize,
+) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
+    use windows::Win32::UI::Shell::{
+        FOLDERID_RecycleBinFolder, SHGetKnownFolderIDList,
+        SHGetFileInfoW, SHGFI_PIDL, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_LARGEICON,
+        SHFILEINFOW,
+    };
+    
+    unsafe {
+        // Get the PIDL for the Recycle Bin
+        let pidl = SHGetKnownFolderIDList(&FOLDERID_RecycleBinFolder, 0, None)?;
+        
+        let mut shfi = SHFILEINFOW::default();
+        
+        let flags = SHGFI_PIDL
+            | SHGFI_ICON
+            | match size {
+                IconSize::Small => SHGFI_SMALLICON,
+                IconSize::Large | IconSize::Jumbo => SHGFI_LARGEICON,
+            };
+        
+        let result = SHGetFileInfoW(
+            PCWSTR(pidl as *const u16),
+            windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES(0),
+            Some(&mut shfi),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            flags,
+        );
+        
+        // Free the PIDL
+        windows::Win32::System::Com::CoTaskMemFree(Some(pidl as *mut _));
+        
+        if result == 0 || shfi.hIcon.is_invalid() {
+            return Err("Failed to get recycle bin icon".into());
+        }
+        
+        let hicon = shfi.hIcon;
+        let conversion_result = super::bitmap_conversion::hicon_to_rgba(hicon);
+        let _ = DestroyIcon(hicon);
+        
+        conversion_result
+    }
+}
