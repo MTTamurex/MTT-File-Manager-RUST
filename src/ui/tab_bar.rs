@@ -11,6 +11,7 @@
 use eframe::egui::{self, Color32, CornerRadius, Stroke, Vec2};
 use crate::tabs::TabManager;
 use crate::ui::svg_icons::SvgIconManager;
+use crate::ui::icon_loader::IconLoader;
 
 /// Result of tab bar interaction
 pub enum TabBarAction {
@@ -29,6 +30,8 @@ pub fn render_tab_bar(
     tab_manager: &TabManager,
     svg_icons: &mut SvgIconManager,
     frame: &mut eframe::Frame,
+    computer_icon: Option<&egui::TextureHandle>,
+    icon_loader: &mut IconLoader,
 ) -> TabBarAction {
     let ctx = ui.ctx().clone();
     let mut action = TabBarAction::None;
@@ -140,7 +143,20 @@ pub fn render_tab_bar(
                 [80, 80, 80, 255] // Dark gray for inactive
             };
             
-            if let Some(texture) = svg_icons.get_icon(ui.ctx(), icon_name, render_size, icon_color) {
+            let native_icon = if tab.is_computer_view {
+                computer_icon.cloned()
+            } else {
+                icon_loader.get_or_load_folder_path_icon(ui.ctx(), &tab.path)
+            };
+
+            if let Some(texture) = native_icon {
+                ui.painter().image(
+                    texture.id(),
+                    icon_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    Color32::WHITE,
+                );
+            } else if let Some(texture) = svg_icons.get_icon(ui.ctx(), icon_name, render_size, icon_color) {
                 ui.painter().image(
                     texture.id(),
                     icon_rect,
