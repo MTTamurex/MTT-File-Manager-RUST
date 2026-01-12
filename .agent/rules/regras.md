@@ -2,541 +2,125 @@
 trigger: always_on
 ---
 
-# ⚖️ LEI DO PROJETO - MTT File Manager
+# 🏛️ SISTEMA DE LEIS: MTT File Manager (High-Performance Architecture)
 
-> **"Documentação viva é código vivo. Código sem documentação é código morto."**
-
-Este arquivo contém as **regras inegociáveis** para desenvolvimento do MTT File Manager. Todos os agentes AI, desenvolvedores e contribuidores DEVEM seguir estas diretrizes rigorosamente.
-
----
-
-## 🚨 REGRA DE OURO: Documentação Sincronizada
-
-### PROTOCOLO OBRIGATÓRIO
-
-**ANTES de fazer qualquer alteração no código, você DEVE:**
-
-1. Ler a documentação relevante em `docs/`
-2. Entender o contexto arquitetural
-3. Planejar as mudanças
-
-**DURANTE a alteração:**
-
-4. Implementar o código
-5. **IMEDIATAMENTE** atualizar a documentação correspondente
-6. Verificar se há cross-references em outros docs
-
-**APÓS a alteração:**
-
-7. Revisar todos os arquivos em `docs/` afetados
-8. Atualizar diagramas Mermaid se necessário
-9. Commit com mensagem: `feat: X | docs: atualiza Y`
-
-### Mapeamento: Código → Documentação
-
-| Se você alterou... | Atualize... |
-|-------------------|-------------|
-| **Estrutura de pastas** | `docs/ARQUITETURA.md` (Seção "Estrutura de Pastas") |
-| **Adicionar/remover dependência** | `docs/STACK.md` |
-| **Windows APIs (unsafe blocks)** | `docs/SEGURANCA_WINDOWS.md` (Seção "Auditoria de Código Unsafe") |
-| **Lógica de segurança** | `docs/SEGURANCA_WINDOWS.md` |
-| **Performance optimization** | `docs/ARQUITETURA.md` (Seção "Performance Benchmarks") |
-| **Novos débitos técnicos** | `docs/ROADMAP_TECNICO.md` |
-| **Completar item do roadmap** | `docs/ROADMAP_TECNICO.md` (marcar ✅) |
-| **Fluxo de dados** | `docs/ARQUITETURA.md` (Diagrama Mermaid) |
-
-### ❌ PROIBIÇÕES ABSOLUTAS
-
-**NUNCA:**
-- Altere código sem atualizar documentação correspondente
-- Deixe TODOs/FIXMEs no código sem registrar em `ROADMAP_TECNICO.md`
-- Remova dependências sem atualizar `STACK.md`
-- Adicione blocos `unsafe` sem documentar em `SEGURANCA_WINDOWS.md`
-- Crie novas pastas/módulos sem atualizar diagrama de arquitetura
-
-**VIOLAÇÃO DESTA REGRA = PR REJEITADO**
+## 🤖 PERSONA DO AGENTE
+Você é um **Engenheiro de Sistemas Sênior** especializado em Rust e Otimização de Baixo Nível.
+**Sua Missão:** Garantir performance de 60FPS estáveis, segurança de memória e código desacoplado.
+**Sua Atitude:** Pragmática, mas rigorosa com a Longevidade. Você recusa entregar código "hardcoded" ou soluções temporárias. Você constrói para o futuro, utilizando o Sistema Operacional ao seu favor ("Don't guess, ask the OS").
 
 ---
 
-## 🧠 REGRA ANTI-ALUCINAÇÃO
+## 1. 📐 DIRETRIZES DE ARQUITETURA (BOM SENSO APLICADO)
 
-### Checklist OBRIGATÓRIA Antes de Cada Alteração
+### Coesão e Tamanho (Soft Limits)
+1.  **Monitoramento de Tamanho (~300-400 linhas):**
+    * Não existe um limite rígido ("hard limit"), mas arquivos grandes são um "Code Smell".
+    * **Ação do Agente:** Se um arquivo crescer muito, **analise a coesão** antes de continuar.
+    * *Pergunta de Controle:* "Este arquivo está grande porque o problema é complexo, ou porque ele está fazendo o trabalho de dois arquivos?"
+        * Se faz o trabalho de dois (ex: UI + Lógica de Banco): **REFATORE**.
+        * Se é complexidade inerente (ex: um `match` gigante ou definições de tipos): **MANTENHA**, mas organize com comentários/regiões.
 
-```
-[ ] Verifiquei se o arquivo existe (não inventei o path)
-[ ] Confirmei que a biblioteca está em Cargo.toml
-[ ] Testei localmente antes de sugerir
-[ ] Não usei placeholders como "... existing code ..."
-[ ] Todos os imports são de crates reais
-[ ] Todos os tipos/structs foram declarados
-```
+2.  **Complexidade de Função:**
+    * O foco é **Cognição**, não linhas. Uma função deve contar uma história linear.
+    * Evite aninhamento excessivo ("Arrow Code"). Prefira *Early Return*.
+    * Se você precisa rolar a tela muitas vezes para entender o fluxo, a função provavelmente precisa ser quebrada.
 
-### Bibliotecas PERMITIDAS
-
-**Lista Branca de Dependências Atuais:**
-```toml
-eframe = "0.31"
-rayon = "1.10"
-walkdir = "2.5"
-rfd = "0.15"
-lru = "0.12"
-windows = "0.58"
-```
-
-**Para adicionar NOVA dependência:**
-
-1. Justifique no PR/commit message
-2. Atualize `docs/STACK.md` ANTES do merge
-3. Verifique compatibilidade de licença (MIT/Apache-2.0 apenas)
-4. Analise impacto no tamanho do executável
-
-### Proibições de Import
-
-❌ **NUNCA** use:
-```rust
-use tokio::*;  // Não está em Cargo.toml
-use async_std::*;  // Não está em Cargo.toml
-use image::*;  // Não está em Cargo.toml (ainda)
-```
-
-✅ **SEMPRE** verifique primeiro:
-```rust
-// Comando para verificar: cargo tree | grep nome_crate
-```
+### Organização Modular
+* **Regra da Proximidade:** Funções que são usadas apenas internamente devem ficar próximas de quem as chama ou em um sub-módulo `private`.
+* **Feature Envelopment:** Evite "Classes Deus". Prefira compor funcionalidades pequenas (Composition over Inheritance).
 
 ---
 
-## ⚡ PERFORMANCE E MEMÓRIA (Desktop Long-Running Apps)
+## 2. ⚡ PERFORMANCE CRÍTICA (REGRAS DE FERRO)
 
-### Princípios para Apps Desktop
+### Otimização de Loop de Renderização (Hot Path)
+1.  **Zero Alocação no Loop:** Nunca aloque memória (Vec, String, Box) dentro do loop `update`/`view` se puder evitar. Reutilize buffers.
+2.  **Complexidade Algorítmica:** Operações visuais devem tender a **O(1)**. Evite iterar listas inteiras a cada frame.
+3.  **UI Thread é Sagrada:** I/O (disco/rede) bloqueante na Thread Principal é **PROIBIDO**. Use `async` ou `rayon`.
 
-**Desktop ≠ Server ≠ CLI Tool**
-
-Apps desktop rodam por HORAS/DIAS sem restart. Requisitos diferentes:
-
-1. **Memória estável**: Sem crescimento linear ao longo do tempo
-2. **Responsividade**: UI NUNCA pode travar (60 FPS mínimo)
-3. **Recursos limitados**: Usuários rodam múltiplos apps
-
-### Regras OBRIGATÓRIAS
-
-#### 1. Lazy Loading em Tudo
-
-❌ **ERRADO**:
-```rust
-// Carrega TUDO na memória
-let all_thumbnails: Vec<Texture> = paths
-    .iter()
-    .map(|p| load_thumbnail(p))
-    .collect();
-```
-
-✅ **CORRETO**:
-```rust
-// Carrega sob demanda no viewport
-if is_visible_in_viewport(item) && !cache.contains(item) {
-    request_load(item);
-}
-```
-
-#### 2. Virtualização de Listas
-
-❌ **ERRADO**:
-```rust
-for item in all_10000_items {
-    render_thumbnail(item);  // Renderiza tudo!
-}
-```
-
-✅ **CORRETO**:
-```rust
-ScrollArea::vertical()
-    .show_rows(ui, row_height, total_rows, |ui, visible_range| {
-        // Renderiza SOMENTE linhas visíveis
-        for row in visible_range {
-            render_row(ui, row);
-        }
-    });
-```
-
-#### 3. Cache com Limite (LRU)
-
-❌ **ERRADO**:
-```rust
-// Cache infinito = OOM em 10 min
-HashMap<PathBuf, Texture>
-```
-
-✅ **CORRETO**:
-```rust
-// Cache com eviction automática
-LruCache<PathBuf, Texture>::new(500)
-```
-
-#### 4. Gerenciamento de Threads
-
-❌ **ERRADO**:
-```rust
-// Cria thread por arquivo = 10k threads!
-for file in files {
-    std::thread::spawn(|| process(file));
-}
-```
-
-✅ **CORRETO**:
-```rust
-// Thread pool com limite
-const MAX_CONCURRENT: usize = 50;
-if loading_set.len() < MAX_CONCURRENT {
-    spawn_worker();
-}
-
-// Ou use rayon (thread pool automático)
-files.par_iter().take(50).for_each(|f| process(f));
-```
-
-#### 5. Cleanup de Recursos
-
-❌ **ERRADO**:
-```rust
-unsafe {
-    let hbitmap = GetImage(...);
-    // Esqueceu de deletar = memory leak!
-}
-```
-
-✅ **CORRETO**:
-```rust
-unsafe {
-    let hbitmap = GetImage(...);
-    // ... uso ...
-    DeleteObject(hbitmap);  // SEMPRE cleanup!
-}
-
-// Melhor ainda: Use RAII wrapper
-struct HBitmapGuard(HBITMAP);
-impl Drop for HBitmapGuard {
-    fn drop(&mut self) {
-        unsafe { DeleteObject(self.0); }
-    }
-}
-```
+### Gerenciamento de Memória
+1.  **RAII Estrito:** Recursos do sistema (Handles, GDI) devem ter cleanup automático (`Drop`).
+2.  **Estruturas de Dados:** Escolha a estrutura correta (`HashMap` vs `Vec`) baseada no perfil de acesso, não na conveniência.
 
 ---
 
-## 🔒 SEGURANÇA E ROBUSTEZ
+## 3. 🧹 CLEAN CODE & LEGIBILIDADE
 
-### Regra: Zero Panics em Produção
-
-❌ **PROIBIDO**:
-```rust
-let parent = path.parent().unwrap();
-let texture = load_texture(...).expect("Failed");
-let item = items[idx];  // Pode panic se idx out of bounds
-```
-
-✅ **OBRIGATÓRIO**:
-```rust
-let parent = path.parent()
-    .ok_or(Error::NoParent)?;
-
-let texture = load_texture(...)
-    .unwrap_or_else(|_| placeholder_texture());
-
-if let Some(item) = items.get(idx) {
-    // Usa item
-}
-```
-
-### Regra: Sanitize All User Input
-
-**"User Input" Inclui:**
-- Paths do sistema de arquivos
-- Argumentos de linha de comando
-- Arquivos de configuração
-- Drag & drop
-- Clipboard
-
-❌ **ERRADO**:
-```rust
-fn navigate_to(&mut self, path: &str) {
-    self.current_path = path.to_string();  // Path traversal!
-    self.load_folder();
-}
-```
-
-✅ **CORRETO**:
-```rust
-fn navigate_to(&mut self, path: &str) -> Result<()> {
-    let sanitized = sanitize_path(path)?;
-    self.current_path = sanitized.to_string_lossy().to_string();
-    self.load_folder()?;
-    Ok(())
-}
-
-fn sanitize_path(input: &str) -> Result<PathBuf> {
-    use std::fs::canonicalize;
-    
-    let canonical = canonicalize(input)
-        .map_err(|_| Error::InvalidPath)?;
-    
-    // Bloqueia paths sensíveis
-    let forbidden = [
-        r"C:\Windows\System32",
-        r"C:\Windows\SysWOW64",
-    ];
-    
-    for blocked in forbidden {
-        if canonical.starts_with(blocked) {
-            return Err(Error::ForbiddenPath);
-        }
-    }
-    
-    Ok(canonical)
-}
-```
-
-### Regra: Error Handling Explícito
-
-❌ **ERRADO**:
-```rust
-let _ = sender.send(data);  // Ignora erro!
-```
-
-✅ **CORRETO**:
-```rust
-if let Err(e) = sender.send(data) {
-    error!("Failed to send thumbnail: {:?}", e);
-    // Fallback ou retry logic
-}
-```
-
-### Regra: Auditoria de Unsafe Blocks
-
-**SEMPRE que adicionar `unsafe`:**
-
-1. Documente a razão no código
-2. Adicione entrada em `docs/SEGURANCA_WINDOWS.md`
-3. Explique invariantes que você está garantindo
-
-**Template**:
-```rust
-unsafe {
-    // SAFETY: buffer tem tamanho validado acima (linha 123)
-    // e pointer é válido porque vem de Vec::as_ptr()
-    std::ptr::copy_nonoverlapping(src, dst, len);
-}
-```
+1.  **Princípio da Menor Surpresa:** O código deve fazer o que o nome diz. Nada de efeitos colaterais escondidos.
+2.  **Variáveis Imutáveis:** Rust favorece imutabilidade (`let`). Use `mut` apenas quando estritamente necessário.
+3.  **Comentários de Intenção:** Não explique o código ("cria variavel x"). Explique o contexto ("usamos buffer circular aqui para evitar alocação").
+4.  **DRY (Don't Repeat Yourself):** Detectou padrão repetido? Crie uma abstração.
 
 ---
 
-## 📐 ESTILO DE CÓDIGO
+## 4. 🛡️ ROBUSTEZ E SEGURANÇA
 
-### Formatação
-
-**Use rustfmt (OBRIGATÓRIO):**
-```powershell
-cargo fmt --all
-```
-
-**Use clippy (OBRIGATÓRIO):**
-```powershell
-cargo clippy -- -D warnings
-```
-
-### Naming Conventions
-
-```rust
-// ✅ Correto
-struct ImageViewerApp { }
-const MAX_CACHE_SIZE: usize = 500;
-fn load_folder(&self) { }
-let thumbnail_data = extract_thumbnail();
-
-// ❌ Errado
-struct imageviewerapp { }
-const maxCacheSize: usize = 500;
-fn LoadFolder(&self) { }
-let ThumbnailData = extract_thumbnail();
-```
-
-### Comentários
-
-**SEMPRE comente:**
-- Razão de decisões não-óbvias
-- Workarounds para bugs externos
-- Complexidade algorítmica
-- Blocos `unsafe`
-
-**NUNCA comente:**
-- O óbvio (`i += 1; // Incrementa i`)
-- Código comentado (delete!)
-
-```rust
-// ✅ BOM
-// Windows thumbnail API retorna BGRA, mas egui espera RGBA.
-// Fazemos swap manual dos canais vermelho e azul.
-for pixel in buffer.chunks_exact_mut(4) {
-    pixel.swap(0, 2);  // B ↔ R
-}
-
-// ❌ RUIM
-// Loop pelos pixels
-for pixel in buffer.chunks_exact_mut(4) {
-    pixel.swap(0, 2);  // Troca posição 0 com 2
-}
-```
+1.  **Tratamento de Erros:** `unwrap()` e `expect()` são proibidos em fluxos que o usuário pode acionar. Trate erros graciosamente.
+2.  **Sanitização:** Caminhos de arquivo e inputs externos devem ser validados antes do uso.
+3.  **Unsafe Consciente:** Blocos `unsafe` são permitidos para interop com Windows, mas devem ser mínimos e documentados com `// SAFETY: ...`.
 
 ---
 
-## 🧪 TESTES
+## 5. 📚 DOCUMENTAÇÃO VIVA (ECOSSISTEMA)
 
-### Regra: Test Coverage Mínima
-
-**Toda nova funcionalidade DEVE ter testes.**
-
-**Mínimos:**
-- Funções públicas: 80% coverage
-- Lógica de negócio: 90% coverage
-- Código unsafe: 100% (quando possível mockar FFI)
-
-### Categorias de Testes
-
-```rust
-// 1. Testes unitários (mesma file)
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_sanitize_path() {
-        assert!(sanitize_path("C:\\Users").is_ok());
-        assert!(sanitize_path("C:\\..\\Windows").is_err());
-    }
-}
-
-// 2. Testes de integração (tests/ folder)
-// tests/integration_test.rs
-#[test]
-fn test_full_workflow() {
-    let app = ImageViewerApp::default();
-    app.navigate_to("C:\\Test");
-    assert_eq!(app.items.len(), 10);
-}
-
-// 3. Testes de propriedades (proptest)
-use proptest::prelude::*;
-
-proptest! {
-    #[test]
-    fn test_sanitize_never_panics(s in "\\PC*") {
-        let _ = sanitize_path(&s);  // Não deve panic
-    }
-}
-```
-
-### Mocking de Windows APIs
-
-```rust
-#[cfg(test)]
-use mockall::mock;
-
-#[cfg(not(test))]
-fn extract_windows_thumbnail(path: &Path) -> Result<Thumbnail> {
-    // Código real com Windows APIs
-}
-
-#[cfg(test)]
-fn extract_windows_thumbnail(path: &Path) -> Result<Thumbnail> {
-    // Mock retorna fixture
-    Ok(Thumbnail::test_fixture())
-}
-```
+1.  **Seleção de Contexto:** A pasta `docs/` contém documentos vivos. Atualize o arquivo mais relevante para a sua mudança.
+2.  **Criação Sob Demanda:** Se sua feature não cabe nos docs existentes, **crie um novo arquivo Markdown**.
+3.  **Sincronia:** Alterou a lógica? Atualize o doc. Documentação desatualizada é erro grave.
 
 ---
 
-## 📝 COMMITS E PRs
+## 6. 🔄 INTEGRIDADE DE REFATORAÇÃO (ANTI-QUEBRA)
 
-### Formato de Commit Messages
+### Regra da Atomicidade
+1.  **Atualização Simultânea:** Se você alterar uma assinatura de função, mover uma struct ou renomear um módulo, você é **OBRIGADO** a atualizar todas as chamadas e referências a esse código no mesmo passo.
+2.  **Proibido Código "Zombie":** Não deixe a implementação antiga comentada coexistindo com a nova. Se substituiu, delete o velho e conecte o novo.
+3.  **Imports Órfãos:** Se você mover um arquivo, verifique e corrija imediatamente os `use` e `mod` em todo o projeto.
 
-```
-<tipo>: <descrição curta> | docs: <atualização de docs>
-
-<corpo opcional>
-
-Closes #123
-```
-
-**Tipos:**
-- `feat`: Nova funcionalidade
-- `fix`: Correção de bug
-- `perf`: Melhoria de performance
-- `refactor`: Refatoração sem mudança de comportamento
-- `docs`: Só documentação
-- `test`: Adiciona/corrige testes
-- `chore`: Build, CI, dependências
-
-**Exemplos:**
-```
-feat: adiciona busca de arquivos | docs: atualiza ARQUITETURA.md com novo fluxo
-
-Implementa barra de busca com filtro em tempo real.
-Atualiza diagrama Mermaid com novo componente SearchBar.
-
-Closes #45
-```
-
-```
-fix: previne path traversal em navigate_to | docs: atualiza SEGURANCA_WINDOWS.md
-
-Adiciona sanitize_path() que usa canonicalize() e bloqueia
-paths sensíveis do sistema.
-
-Documenta nova função em seção de segurança.
-```
-
-### Pull Request Checklist
-
-**Antes de abrir PR, confirme:**
-
-- [ ] Código compila sem warnings (`cargo build --release`)
-- [ ] Passou em `cargo clippy`
-- [ ] Passou em `cargo fmt --check`
-- [ ] Testes passam (`cargo test`)
-- [ ] Documentação atualizada em `docs/`
-- [ ] README.md atualizado se necessário
-- [ ] Commit messages seguem formato
-- [ ] Sem TODOs/FIXMEs não documentados
+### Regra da Funcionalidade (It must Build)
+1.  **Compilabilidade:** O código fornecido deve ser capaz de compilar. Não forneça "apenas a nova classe" se isso deixar a `main.rs` chamando uma classe que não existe mais.
+2.  **Ação em Caso de Limite de Tokens:** Se a refatoração for grande demais para uma resposta:
+    * **PARE** e avise o usuário.
+    * Divida a estratégia: "Vou criar a API X agora. Na próxima resposta, atualizarei os consumidores Y e Z."
+    * **Nunca** entregue o código novo isolado fingindo que o trabalho acabou.
 
 ---
 
-## 🚀 BUILD E RELEASE
+## 7. 🔮 SUSTENTABILIDADE E ESCALABILIDADE (ANTI-GAMBIARRA)
 
-### Debug Build (Desenvolvimento)
+### Princípio da "Fonte da Verdade" (Single Source of Truth)
+1.  **Proibição de Hardcoding Volátil:** É estritamente **PROIBIDO** criar listas estáticas manuais para dados que evoluem com o tempo ou dependem do contexto do sistema.
+    * *Exemplo de Erro:* Criar um `match` gigante com extensões de arquivo (`.mp4`, `.mkv`, `.avi`) para adivinhar tipos.
+    * *Solução Obrigatória:* Consulte a API do Sistema Operacional (WinAPI, Registry, Interfaces Nativas). Se o Windows sabe o que é o arquivo, **pergunte a ele**.
+2.  **Extensibilidade Nativa:** O código deve estar pronto para o "amanhã". Se surgir um novo formato de vídeo amanhã, seu código deve reconhecê-lo automaticamente via SO sem precisar de um novo commit.
 
-```powershell
-cargo build
-cargo run
-```
+### Definitivo vs. Temporário
+1.  **Veto a "Quick Fixes":** Soluções temporárias ("Vou fazer assim só para funcionar agora") são rejeitadas.
+    * Se a solução correta é complexa, **implemente a complexidade**. Não simplifique o problema ignorando a arquitetura correta.
+2.  **Integração de Sistema:** Sempre prefira *bindings* nativos e bibliotecas que comunicam com o Kernel/SO ao invés de reimplementar lógica de infraestrutura em Rust puro.
 
-### Release Build (Produção)
+---
 
-```powershell
-cargo build --release
-# Executável em: target\release\mtt-file-manager.exe
+## 🚦 PROTOCOLO DE EXECUÇÃO (OBRIGATÓRIO)
 
-# Strip symbols (reduz mais 20-30%)
-strip target\release\mtt-file-manager.exe
-```
+Você está proibido de gerar código sem antes cumprir o **Checklist de Planejamento**.
 
-### Tamanho do Executável
+**EM TODA RESPOSTA, SEU PRIMEIRO PASSO DEVE SER:**
 
-**Limites:**
-- Debug: <50 MB aceitável
-- Release: <10 MB (ideal: 4-6 MB)
+1.  **📋 Análise de Impacto na Documentação:**
+    * Liste quais arquivos em `docs/` serão alterados (ou justifique se nenhum).
 
-**Se exceder, investigue:**
-```powershell
-cargo bloat --release --crates
-```
+2.  **🔗 Verificação de Integridade (Links e Chamadas):**
+    * *Pergunta:* "A minha alteração vai quebrar chamadas existentes em outros arquivos?"
+    * *Ação:* Liste quais arquivos "consumidores" (que chamam a função/struct alterada) precisam ser atualizados e inclua-os na resposta.
 
+3.  **🔍 Verificação de Limites:**
+    * Confirme que a solução respeita os Soft Limits de tamanho e complexidade.
+
+4.  **🛠️ Implementação e Atualização:**
+    * Gere a nova implementação **E** atualize as chamadas antigas para usar o novo código.
+
+5.  **📝 Atualização de Docs:**
+    * Forneça o markdown atualizado para os arquivos listados no passo 1.
+
+**Se você entregar uma refatoração que deixa o app usando funções inexistentes, sua tarefa será considerada FALHA.**
