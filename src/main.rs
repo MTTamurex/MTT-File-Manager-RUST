@@ -1446,35 +1446,56 @@ impl ImageViewerApp {
         let file_entry_sender = self.file_entry_sender.clone();
         let ctx = self.ui_ctx.clone();
 
-        // Carrega itens da lixeira em thread separada (ASYNC)
+        // Carrega itens da lixeira em thread separada (ASYNC) com batching
         std::thread::spawn(move || {
             use mtt_file_manager::infrastructure::windows::recycle_bin::enumerate_recycle_bin;
 
             // Enumera itens da lixeira via COM
             match enumerate_recycle_bin() {
                 Ok(recycle_items) => {
-                    // Converte para FileEntry (sem usar from_path que tenta acessar filesystem)
-                    let mut batch = Vec::with_capacity(recycle_items.len());
+                    const BATCH_SIZE: usize = 100;
+                    let mut batch = Vec::with_capacity(BATCH_SIZE);
+                    
                     for item in recycle_items {
                         // Verifica se a geração ainda é válida (cancelamento rápido)
                         if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
-                            break;
+                            return;
                         }
 
+                        // Cria um path "virtual" baseado na extensão para carregar ícone correto
+                        // O path real não existe mais, mas o ícone é baseado na extensão
+                        let icon_path = if item.is_directory {
+                            PathBuf::from("C:\\folder")
+                        } else if !item.extension.is_empty() {
+                            PathBuf::from(format!("dummy{}", item.extension))
+                        } else {
+                            item.original_path.clone()
+                        };
+
                         let entry = FileEntry {
-                            path: item.original_path.clone(),
+                            path: icon_path, // Path usado para ícone (extensão)
                             name: item.name,
                             is_dir: item.is_directory,
                             size: item.size,
-                            modified: 0, // Recycle Bin usa date_deleted (String), não timestamp
+                            modified: 0,
                             folder_cover: None,
                             drive_info: None,
                             sync_status: mtt_file_manager::domain::file_entry::SyncStatus::None,
                         };
                         batch.push(entry);
+
+                        // Envia batch quando cheio
+                        if batch.len() >= BATCH_SIZE {
+                            if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
+                                return;
+                            }
+                            let _ = file_entry_sender.send((my_gen, std::mem::take(&mut batch)));
+                            ctx.request_repaint();
+                            batch = Vec::with_capacity(BATCH_SIZE);
+                        }
                     }
 
-                    // Envia em um único lote
+                    // Envia itens restantes
                     if !batch.is_empty() && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                         let _ = file_entry_sender.send((my_gen, batch));
                         ctx.request_repaint();
@@ -1488,7 +1509,6 @@ impl ImageViewerApp {
                 }
                 Err(e) => {
                     eprintln!("[RECYCLE BIN] Erro ao enumerar: {:?}", e);
-                    // Envia lote vazio para desativar spinner
                     let _ = file_entry_sender.send((my_gen, Vec::new()));
                     ctx.request_repaint();
                 }
