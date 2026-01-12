@@ -590,6 +590,22 @@ impl ImageViewerApp {
             _ => return ui.button(icon).on_hover_text(tooltip),
         };
 
+        if icon == ICON_HOME {
+            if let Some(texture) = self.cache_manager.computer_icon.as_ref() {
+                let response = ui.add(
+                    egui::ImageButton::new(egui::load::SizedTexture::new(
+                        texture.id(),
+                        egui::vec2(22.0, 22.0), // Consistent with 24px SVG visual size
+                    ))
+                    .frame(false)
+                );
+                if !tooltip.is_empty() {
+                    return response.on_hover_text(tooltip);
+                }
+                return response;
+            }
+        }
+
         // Use slightly larger icons to improve readability of the top bar controls.
         mtt_file_manager::ui::svg_icons::icon_button(ui, &mut self.svg_icon_manager, icon_name, 24.0, tooltip)
     }
@@ -3151,6 +3167,7 @@ impl eframe::App for ImageViewerApp {
 
         // TAB BAR (custom title bar with tabs and window controls)
         egui::TopBottomPanel::top("tab_bar_panel")
+            .show_separator_line(false)
             .exact_height(36.0)
             .frame(egui::Frame {
                 fill: if ctx.style().visuals.dark_mode {
@@ -3162,7 +3179,14 @@ impl eframe::App for ImageViewerApp {
             })
             .show(ctx, |ui| {
                 use mtt_file_manager::ui::tab_bar::{render_tab_bar, TabBarAction};
-                let action = render_tab_bar(ui, &self.tab_manager, &mut self.svg_icon_manager, frame);
+                let action = render_tab_bar(
+                    ui,
+                    &self.tab_manager,
+                    &mut self.svg_icon_manager,
+                    frame,
+                    self.cache_manager.computer_icon.as_ref(), // Pass native computer icon
+                    &mut self.item_icon_loader,               // Pass icon loader for dynamic icons
+                );
                 
                 match action {
                     TabBarAction::SwitchTab(idx) => {
@@ -3199,7 +3223,17 @@ impl eframe::App for ImageViewerApp {
             });
 
         // Top navigation bar
-        egui::TopBottomPanel::top("nav_bar").show(ctx, |ui| {
+        egui::TopBottomPanel::top("nav_bar")
+            .show_separator_line(true)
+            .frame(egui::Frame {
+                fill: if ctx.style().visuals.dark_mode {
+                    egui::Color32::from_rgb(45, 45, 45) // Matches tab_bar.rs active_bg
+                } else {
+                    egui::Color32::from_rgb(255, 255, 255) // Matches tab_bar.rs active_bg
+                },
+                ..Default::default()
+            })
+            .show(ctx, |ui| {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.style_mut().spacing.item_spacing.x = 8.0;
