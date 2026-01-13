@@ -234,6 +234,12 @@ impl ImageViewerApp {
                 self.sort_items();
                 self.save_preferences();
             }
+            Some(list_view::ListViewAction::EmptyAreaSecondaryClick) if !is_renaming => {
+                let path = PathBuf::from(&self.current_path);
+                let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
+                self.populate_context_menu(ui.ctx(), &path, true, None);
+                self.context_menu.open(pointer_pos, None, Some(path), true);
+            }
             _ => {}
         }
 
@@ -438,6 +444,12 @@ impl ImageViewerApp {
                     self.context_menu
                         .open(pointer_pos, Some(idx), Some(item_path), false);
                 }
+            }
+            Some(grid_view::GridViewAction::EmptyAreaSecondaryClick) if !is_renaming => {
+                let path = PathBuf::from(&self.current_path);
+                let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
+                self.populate_context_menu(ui.ctx(), &path, true, None);
+                self.context_menu.open(pointer_pos, None, Some(path), true);
             }
             _ => {}
         }

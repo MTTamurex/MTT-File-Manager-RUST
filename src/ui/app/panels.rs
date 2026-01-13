@@ -238,53 +238,6 @@ fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 });
             }
         }
-
-        handle_central_panel_context_menu(app, ui);
     });
 }
 
-fn handle_central_panel_context_menu(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
-    if !app.context_menu.is_open && ui.input(|i| i.pointer.secondary_clicked()) {
-        let pointer_pos = ui.ctx().pointer_latest_pos();
-        let mut clicked_on_item = false;
-
-        if let Some(pos) = pointer_pos {
-            if app.view_mode == ViewMode::Grid && !app.items.is_empty() {
-                let padding = 8.0;
-                let item_w = app.thumbnail_size;
-                let item_h = app.thumbnail_size + 20.0;
-                let available_w = ui.available_width();
-                let cols = ((available_w - padding) / (item_w + padding)).floor().max(1.0) as usize;
-
-                let content_min = ui.min_rect().min;
-                let relative_x = pos.x - content_min.x;
-                let relative_y = pos.y - content_min.y;
-
-                let col = (relative_x / (item_w + padding)).floor() as usize;
-                let row = (relative_y / (item_h + padding)).floor() as usize;
-                let index = row * cols + col;
-
-                if index < app.items.len() {
-                    clicked_on_item = true;
-                }
-            } else if app.view_mode == ViewMode::List && !app.items.is_empty() {
-                let row_height = 24.0;
-                let total_rows = app.items.len();
-                let scroll_area_top = ui.min_rect().top();
-                let relative_y = pos.y - scroll_area_top;
-
-                let row = (relative_y / row_height).floor() as usize;
-                if row < total_rows {
-                    clicked_on_item = true;
-                }
-            }
-        }
-
-        if !clicked_on_item {
-            let path = PathBuf::from(&app.current_path);
-            let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
-            app.populate_context_menu(ui.ctx(), &path, true, None);
-            app.context_menu.open(pointer_pos, None, Some(path), true);
-        }
-    }
-}

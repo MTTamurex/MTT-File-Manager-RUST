@@ -41,8 +41,8 @@ impl eframe::App for ImageViewerApp {
         // 8. Layout: Main Panels (Sidebar, Preview, Central)
         app::panels::render_panels(self, ctx, frame);
 
-        // 9. Operations: Context Menu Command execution
-        app::menu_handler::handle_context_menu_actions(self);
+        // 9. Operations: Context Menu (Rendering & Actions)
+        app::menu_handler::handle_context_menu(self, ctx);
 
         // 10. Operations: Resize borders (on top)
         app::input::handle_resize_borders(self, ctx);

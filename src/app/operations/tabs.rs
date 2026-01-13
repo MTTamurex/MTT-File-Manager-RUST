@@ -11,6 +11,7 @@ impl ImageViewerApp {
         active.path = self.current_path.clone();
         active.path_input = self.path_input.clone();
         active.is_computer_view = self.is_computer_view;
+        active.is_recycle_bin_view = self.is_recycle_bin_view;
         active.navigation = self.navigation.clone();
         active.items = self.items.clone();
         active.all_items = self.all_items.clone();
@@ -37,6 +38,7 @@ impl ImageViewerApp {
         self.current_path = active.path;
         self.path_input = active.path_input;
         self.is_computer_view = active.is_computer_view;
+        self.is_recycle_bin_view = active.is_recycle_bin_view;
         self.navigation = active.navigation.clone();
         self.items = active.items;
         self.all_items = active.all_items;
