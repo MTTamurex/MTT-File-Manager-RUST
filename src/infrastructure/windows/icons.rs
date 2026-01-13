@@ -217,6 +217,10 @@ pub fn extract_file_icon(
             .chain(std::iter::once(0))
             .collect();
 
+        // For Jumbo icons, use IShellItemImageFactory even with dummy path (if possible)
+        // Note: SHCreateItemFromParsingName with dummy path rarely works for Jumbo.
+        // We stick to SHGetFileInfo for dummy icons, but ensure we use Large if Jumbo requested.
+        
         let mut shfi = SHFILEINFOW::default();
 
         // CORRECT FLAGS: USEFILEATTRIBUTES allows dummy path
@@ -256,6 +260,24 @@ pub fn extract_folder_icon(
     size: IconSize,
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     unsafe {
+        if matches!(size, IconSize::Jumbo) {
+            // High quality folder icon using known folder ID if possible, 
+            // or just a common path that is guaranteed to be a directory.
+            let windows_dir = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+            let path_wide: Vec<u16> = windows_dir.encode_utf16().chain(std::iter::once(0)).collect();
+            
+            if let Ok(shell_item) = SHCreateItemFromParsingName::<_, _, IShellItem>(PCWSTR(path_wide.as_ptr()), None) {
+                if let Ok(image_factory) = shell_item.cast::<IShellItemImageFactory>() {
+                    let size_factory = SIZE { cx: 256, cy: 256 };
+                    if let Ok(hbitmap) = image_factory.GetImage(size_factory, SIIGBF_ICONONLY) {
+                        let res = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
+                        let _ = DeleteObject(hbitmap);
+                        return Ok(res);
+                    }
+                }
+            }
+        }
+
         let dummy_path = "dummy_folder";
         let path_wide: Vec<u16> = dummy_path
             .encode_utf16()
@@ -304,6 +326,21 @@ pub fn extract_file_icon_by_path(
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect();
+
+        // For Jumbo icons, use IShellItemImageFactory (higher quality)
+        if matches!(size, IconSize::Jumbo) {
+            if let Ok(shell_item) = SHCreateItemFromParsingName::<_, _, IShellItem>(PCWSTR(path_wide.as_ptr()), None) {
+                if let Ok(image_factory) = shell_item.cast::<IShellItemImageFactory>() {
+                    let size_factory = SIZE { cx: 256, cy: 256 };
+                    // SIIGBF_ICONONLY to ensure we get the icon and not a thumbnail if it were a file
+                    if let Ok(hbitmap) = image_factory.GetImage(size_factory, SIIGBF_ICONONLY) {
+                        let res = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
+                        let _ = DeleteObject(hbitmap);
+                        return Ok(res);
+                    }
+                }
+            }
+        }
 
         let mut shfi = SHFILEINFOW::default();
 
@@ -418,6 +455,12 @@ pub fn get_file_type_icon(
     unsafe {
         // Inicializa COM para garantir acesso ao Registro do Windows
         let _ = CoInitialize(None);
+
+        if matches!(size, IconSize::Jumbo) && is_folder {
+             if let Ok(res) = extract_folder_icon(IconSize::Jumbo) {
+                 return Ok(res);
+             }
+        }
 
         let mut shfi = SHFILEINFOW::default();
 

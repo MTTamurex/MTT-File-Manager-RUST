@@ -10,10 +10,12 @@ use crate::infrastructure::windows as windows_infra;
 impl ImageViewerApp {
     pub fn ensure_folder_icon(&mut self, ctx: &egui::Context) {
         let thumbnail_size = self.thumbnail_size;
-        let icon_size = if thumbnail_size < 100.0 {
-            IconSize::Small
-        } else {
+        let icon_size = if thumbnail_size > 120.0 {
+            IconSize::Jumbo
+        } else if thumbnail_size > 64.0 {
             IconSize::Large
+        } else {
+            IconSize::Small
         };
 
         self.cache_manager

@@ -48,14 +48,14 @@ impl IconLoader {
         }
 
         // Try to load native Windows folder icon
-        if let Ok((pixels, width, height)) = windows::extract_folder_icon(IconSize::Large) {
+        if let Ok((pixels, width, height)) = windows::extract_folder_icon(IconSize::Jumbo) {
             let texture = ctx.load_texture(
                 "folder_icon",
                 egui::ColorImage::from_rgba_unmultiplied(
                     [width as usize, height as usize],
                     &pixels,
                 ),
-                egui::TextureOptions::NEAREST,
+                egui::TextureOptions::LINEAR,
             );
             self.folder_icon_texture = Some(texture);
         }
@@ -76,15 +76,15 @@ impl IconLoader {
 
         // Try to load icon - first by path, then by extension (for virtual paths like recycle bin)
         let icon_result = if path.exists() {
-            // Real file - use path-based extraction
-            windows::extract_file_icon_by_path(path, IconSize::Large)
+            // Real file - use path-based extraction. Use Jumbo for better quality.
+            windows::extract_file_icon_by_path(path, IconSize::Jumbo)
         } else if let Some(ext) = path.extension() {
             // Virtual path (e.g., dummy.rar) - use extension-based extraction (force usefileattributes)
             let ext_str = ext.to_string_lossy();
             windows::get_file_type_icon(false, &ext_str, IconSize::Large)
         } else {
             // No extension - try path anyway
-            windows::extract_file_icon_by_path(path, IconSize::Large)
+            windows::extract_file_icon_by_path(path, IconSize::Jumbo)
         };
 
         if let Ok((pixels, width, height)) = icon_result {
@@ -94,7 +94,7 @@ impl IconLoader {
                     [width as usize, height as usize],
                     &pixels,
                 ),
-                egui::TextureOptions::NEAREST,
+                egui::TextureOptions::LINEAR,
             );
 
             // Cache the texture
@@ -117,12 +117,12 @@ impl IconLoader {
             return;
         }
 
-        if let Ok((data, width, height)) = windows::extract_computer_icon(IconSize::Small) {
+        if let Ok((data, width, height)) = windows::extract_computer_icon(IconSize::Large) {
             let image =
                 egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &data);
 
             self.computer_icon_texture =
-                Some(ctx.load_texture("computer_icon", image, egui::TextureOptions::NEAREST));
+                Some(ctx.load_texture("computer_icon", image, egui::TextureOptions::LINEAR));
         }
     }
 
@@ -142,7 +142,7 @@ impl IconLoader {
                 egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &data);
 
             let texture =
-                ctx.load_texture("recycle_bin_icon", image, egui::TextureOptions::NEAREST);
+                ctx.load_texture("recycle_bin_icon", image, egui::TextureOptions::LINEAR);
             self.recycle_bin_icon_texture = Some(texture.clone());
             return Some(texture);
         }
@@ -174,7 +174,7 @@ impl IconLoader {
                     [width as usize, height as usize],
                     &rgba_data,
                 ),
-                egui::TextureOptions::NEAREST,
+                egui::TextureOptions::LINEAR,
             );
             let cloned = texture.clone();
             self.drive_icon_cache
