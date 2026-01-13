@@ -12,3 +12,4 @@ pub mod status_bar;
 pub mod svg_icons;
 pub mod tab_bar;
 pub mod views;
+pub mod theme;

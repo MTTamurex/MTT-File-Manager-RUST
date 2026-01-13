@@ -342,7 +342,7 @@ fn render_single_item(
         // Open to the right by default, flip to left only if not enough space
         let open_left = needs_flip;
 
-        let mut submenu_pos = if open_left {
+        let submenu_pos = if open_left {
             egui::pos2(rect.left() - menu_width - SUBMENU_X_OFFSET, rect.top())
         } else {
             egui::pos2(rect.right() + SUBMENU_X_OFFSET, rect.top())
