@@ -654,6 +654,97 @@ impl ImageViewerApp {
         }
     }
 
+    fn restore_from_recycle_bin(&mut self, physical_path: &Path) {
+        use mtt_file_manager::infrastructure::windows::recycle_bin::{restore_from_recycle_bin, enumerate_recycle_bin};
+        
+        // Get the original path from RecycleBinItem by re-enumerating
+        // This ensures we get the correct original_path stored in the $I file
+        let original_path = if let Ok(recycle_items) = enumerate_recycle_bin() {
+            recycle_items
+                .iter()
+                .find(|item| item.physical_path == physical_path)
+                .map(|item| item.original_path.clone())
+        } else {
+            None
+        };
+        
+        if let Some(item) = self.items.iter().find(|i| i.path == physical_path) {
+            let original_path = original_path.unwrap_or_else(|| {
+                // Fallback: use Desktop if we can't find original path
+                PathBuf::from("C:\\Users\\Public\\Desktop").join(item.name.clone())
+            });
+            
+            match restore_from_recycle_bin(physical_path, &original_path) {
+                Ok(_) => {
+                    self.notifications.push(
+                        mtt_file_manager::application::AppNotification::success(
+                            format!("'{}' restaurado com sucesso", item.name),
+                        ),
+                    );
+                    // Refresh recycle bin view
+                    self.setup_recycle_bin_view();
+                }
+                Err(e) => {
+                    self.notifications.push(
+                        mtt_file_manager::application::AppNotification::error(
+                            format!("Erro ao restaurar: {}", e),
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
+    fn delete_permanently(&mut self, physical_path: &Path) {
+        use mtt_file_manager::infrastructure::windows::recycle_bin::delete_permanently;
+        
+        if let Some(item) = self.items.iter().find(|i| i.path == physical_path) {
+            let item_name = item.name.clone();
+            
+            match delete_permanently(physical_path) {
+                Ok(_) => {
+                    self.notifications.push(
+                        mtt_file_manager::application::AppNotification::success(
+                            format!("'{}' excluído permanentemente", item_name),
+                        ),
+                    );
+                    // Refresh recycle bin view
+                    self.setup_recycle_bin_view();
+                }
+                Err(e) => {
+                    self.notifications.push(
+                        mtt_file_manager::application::AppNotification::error(
+                            format!("Erro ao excluir: {}", e),
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
+    fn empty_recycle_bin(&mut self) {
+        use mtt_file_manager::infrastructure::windows::recycle_bin::empty_recycle_bin;
+        
+        match empty_recycle_bin() {
+            Ok(_) => {
+                self.notifications.push(
+                    mtt_file_manager::application::AppNotification::success(
+                        "Lixeira esvaziada com sucesso".to_string(),
+                    ),
+                );
+                // Refresh recycle bin view
+                self.setup_recycle_bin_view();
+            }
+            Err(e) => {
+                self.notifications.push(
+                    mtt_file_manager::application::AppNotification::error(
+                        format!("Erro ao esvaziar lixeira: {}", e),
+                    ),
+                );
+            }
+        }
+    }
+
     fn show_properties_for_idx(&mut self, idx: Option<usize>) {
         let target_idx = idx.or(self.selected_item);
         if let Some(idx) = target_idx {
@@ -2938,6 +3029,25 @@ impl ImageViewerApp {
         
         let mut items = Vec::new();
         
+        // Special menu for Recycle Bin items
+        if self.is_recycle_bin_view && !is_empty_area {
+            // Menu items for recycle bin (no primary icons)
+            items.push(ContextMenuItem::new(-52, "Restaurar").with_command("restore"));
+            items.push(ContextMenuItem::new(-53, "Excluir permanentemente").with_command("delete_permanent"));
+            items.push(ContextMenuItem::separator());
+            items.push(ContextMenuItem::new(-28, "Propriedades").with_command("properties").with_shortcut("Alt+Enter"));
+            
+            self.context_menu.items = items;
+            return;
+        }
+        
+        // Special menu for empty area in Recycle Bin
+        if self.is_recycle_bin_view && is_empty_area {
+            items.push(ContextMenuItem::new(-54, "Esvaziar Lixeira").with_command("empty_recycle_bin"));
+            self.context_menu.items = items;
+            return;
+        }
+        
         // ========== PRIMARY ITEMS (Header bar) - matching Files ==========
         // These appear as icon buttons in the header
         items.push(ContextMenuItem::primary(-3, "Recortar").with_command("cut").with_shortcut("Ctrl+X"));
@@ -4478,6 +4588,29 @@ impl eframe::App for ImageViewerApp {
                         }
                     }
                     -28 => self.show_properties_for_idx(item_idx),
+                    // Recycle Bin actions
+                    -50 | -52 => {
+                        // Restaurar
+                        if let Some(idx) = item_idx.or(self.selected_item) {
+                            if let Some(item) = self.items.get(idx) {
+                                let path = item.path.clone();
+                                self.restore_from_recycle_bin(&path);
+                            }
+                        }
+                    }
+                    -51 | -53 => {
+                        // Excluir permanentemente
+                        if let Some(idx) = item_idx.or(self.selected_item) {
+                            if let Some(item) = self.items.get(idx) {
+                                let path = item.path.clone();
+                                self.delete_permanently(&path);
+                            }
+                        }
+                    }
+                    -54 => {
+                        // Esvaziar Lixeira
+                        self.empty_recycle_bin();
+                    }
                     _ => {}
                 }
             }
