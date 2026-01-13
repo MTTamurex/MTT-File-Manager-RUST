@@ -4,7 +4,7 @@
 use eframe::egui::{self, Sense};
 use std::cell::RefCell;
 
-use crate::application::context_menu::{ContextMenuState, ContextMenuItem};
+pub use crate::application::context_menu::{ContextMenuState, ContextMenuItem};
 use crate::ui::svg_icons::SvgIconManager;
 
 // Track submenu hierarchy: each depth level stores which item is active at that level

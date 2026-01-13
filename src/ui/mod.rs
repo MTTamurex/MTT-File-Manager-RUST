@@ -1,5 +1,6 @@
 // UI components and rendering logic
 
+pub mod app_impl;  // NEW - eframe::App implementation
 pub mod cache;
 pub mod components;
 pub mod context_menu;

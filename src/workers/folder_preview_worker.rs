@@ -41,14 +41,28 @@ pub fn spawn_folder_preview_worker(
             };
 
             // Get folder preview from Windows Shell
-            if let Ok((rgba_data, width, height)) = get_folder_preview(&path) {
-                let _ = tx.send(FolderPreviewData {
-                    path,
-                    rgba_data,
-                    width,
-                    height,
-                });
-                ctx.request_repaint();
+            // Get folder preview from Windows Shell
+            match get_folder_preview(&path) {
+                Ok((rgba_data, width, height)) => {
+                    let _ = tx.send(FolderPreviewData {
+                        path,
+                        rgba_data,
+                        width,
+                        height,
+                    });
+                    ctx.request_repaint();
+                }
+                Err(_) => {
+                    // Send empty data to signal failure/completion
+                    // This signals the UI to stop the loading spinner
+                    let _ = tx.send(FolderPreviewData {
+                        path,
+                        rgba_data: Vec::new(),
+                        width: 0,
+                        height: 0,
+                    });
+                    ctx.request_repaint();
+                }
             }
         }
 
