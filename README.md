@@ -1,234 +1,186 @@
 # MTT File Manager
 
-<div align="center">
+Um gerenciador de arquivos moderno e eficiente para Windows, desenvolvido em Rust com interface gráfica usando egui/eframe.
 
-![MTT File Manager](assets/icons/screenshot_placeholder.png)
+## 🚀 Características
 
-**Gerenciador de arquivos moderno e de alta performance para Windows, desenvolvido em Rust com interface Immediate Mode (egui).**
-
-[![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
-[![Windows](https://img.shields.io/badge/Platform-Windows%2010%2F11-blue.svg)](https://www.microsoft.com/windows)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-
-</div>
-
----
-
-## 📸 Screenshot
-
-![Screenshot da Interface](docs/screenshot.png)
-
-> *Adicione uma captura de tela da aplicação em `docs/screenshot.png`*
-
----
-
-## ✨ Funcionalidades
-
-### 🖼️ Visualização de Mídia
-- **Thumbnails de Imagens**: PNG, JPG, WEBP, HEIC, AVIF, BMP, GIF, TIFF, ICO
-- **Thumbnails de Vídeos**: MP4, MKV, AVI, MOV, WMV, WEBM, M4V, 3GP, TS
-- **API Nativa do Windows**: `IShellItemImageFactory` + WIC + Media Foundation
-- **Preview Nativo de Pastas**: Efeito "sanduíche" como o Windows Explorer
-
-### ⚡ Performance
-- **Carregamento Assíncrono**: Interface nunca congela (60+ FPS garantidos)
-- **Lazy Loading**: Thumbnails carregados sob demanda (viewport visível)
-- **Worker Pool**: 4 workers de thumbnail com controle de concorrência
-- **Cache Inteligente**: LRU em memória + SQLite persistente (WebP comprimido)
-- **Ordenação Paralela**: Usa `rayon` para listas >5000 itens
-
-### 🎨 Interface
-- **Grid & List Views**: Alterna entre visualização em grade e lista
-- **Zoom Dinâmico**: 64px até 256px com slider
-- **Sistema de Abas**: Múltiplas pastas abertas simultaneamente
-- **Sidebar**: Acesso rápido a drives, OneDrive e Lixeira
-- **Breadcrumbs**: Navegação visual por caminho
-- **Barra de Detalhes**: Preview, metadados de mídia, informações de arquivo
-
-### 📂 Gerenciamento de Arquivos
-- **Operações Shell**: Copiar, Recortar, Colar, Renomear, Excluir (com Undo)
-- **Clipboard Windows**: Integração nativa CF_HDROP
-- **Menu de Contexto**: Extensões de shell do Windows (Open With, Properties, etc.)
-- **File Watcher**: Auto-refresh ao detectar mudanças no sistema de arquivos
-- **Lixeira**: Visualização e restauração de itens excluídos
-
-### 🔧 Integração Windows
-- **OneDrive**: Detecção de status de sincronização (Cloud/Local/Syncing)
-- **Drives de Rede**: Suporte completo a unidades mapeadas
-- **Ícones Nativos**: Extração via Shell API para todos os tipos de arquivo
-- **Metadados de Mídia**: Resolução, duração, bitrate, codec via Media Foundation
-
----
+- **Interface moderna** com suporte a temas claro/escuro
+- **Navegação por abas** para múltiplos diretórios
+- **Visualização em grade e lista** com miniaturas
+- **Preview de arquivos** (imagens, vídeos, áudio)
+- **Integração nativa com Windows** (clipboard, menus de contexto, shell extensions)
+- **Suporte a OneDrive** com indicadores de status
+- **Metadados de mídia** (dimensões, duração, codec, bitrate)
+- **Operações de arquivo** (copiar, mover, renomear, excluir)
+- **Lixeira do Windows** com restauração
+- **Cache de miniaturas** para performance
 
 ## 🛠️ Tecnologias
 
-| Componente | Tecnologia |
-|------------|------------|
-| **Linguagem** | Rust 1.75+ |
-| **GUI Framework** | egui 0.31 + eframe |
-| **APIs Windows** | windows-rs 0.58 (Win32 Shell, COM, Media Foundation) |
-| **Cache** | SQLite (rusqlite) + LRU em memória |
-| **Processamento** | rayon (paralelo), image (codec), webp |
-| **File Watch** | notify 6.x |
+- **Rust 1.75+** - Linguagem de programação
+- **egui 0.31** - Framework de UI imediata
+- **eframe** - Integração nativa com Windows
+- **windows-rs 0.58** - Bindings para APIs do Windows
+- **Media Foundation** - Extração de metadados de mídia
 
----
-
-## 📦 Instalação
-
-### Pré-requisitos
-- **Windows 10** (build 1809+) ou **Windows 11**
-- **Rust** (stable 1.75+): [rustup.rs](https://rustup.rs/)
-- **Visual Studio Build Tools** (para compilação)
-
-### Build de Desenvolvimento
-
-```powershell
-# Clone o repositório
-git clone https://github.com/seu-usuario/mtt-file-manager.git
-cd mtt-file-manager
-
-# Compile e execute
-cargo run
-```
-
-### Build de Produção
-
-```powershell
-# Build otimizado com LTO
-cargo build --release
-
-# Executável gerado em:
-.\target\release\mtt-file-manager.exe
-```
-
----
-
-## ⚙️ Configuração de Build
-
-O projeto usa otimizações agressivas para produção (`Cargo.toml`):
-
-```toml
-[profile.release]
-opt-level = 3        # Máxima otimização
-lto = true           # Link-Time Optimization
-codegen-units = 1    # Melhor otimização cross-crate
-```
-
----
-
-## 🎹 Atalhos de Teclado
-
-| Atalho | Ação |
-|--------|------|
-| `F5` | Atualizar pasta atual |
-| `Enter` | Abrir item selecionado |
-| `Delete` | Excluir item (vai para Lixeira) |
-| `Ctrl+C` | Copiar |
-| `Ctrl+X` | Recortar |
-| `Ctrl+V` | Colar |
-| `Ctrl+Shift+N` | Nova pasta |
-| `F2` | Renomear |
-| `←` `→` `↑` `↓` | Navegar entre itens |
-| `Backspace` | Voltar nível |
-
----
-
-## 🏗️ Arquitetura
-
-### Estrutura de Módulos
+## 📁 Arquitetura do Projeto
 
 ```
 src/
-├── main.rs                # Aplicação principal (~5000 linhas)
-├── lib.rs                 # Re-exports dos módulos
-├── domain/                # Entidades e regras de domínio
-│   ├── file_entry.rs      # FileEntry, SortMode, ViewMode
-│   └── thumbnail.rs       # ThumbnailData
-├── application/           # Orquestração e casos de uso
-│   ├── state.rs           # AppState (gestão de estado)
-│   ├── clipboard.rs       # Operações de clipboard
-│   ├── context_menu.rs    # Estado do menu de contexto
-│   ├── navigation.rs      # Histórico de navegação
-│   └── notification.rs    # Sistema de toasts
-├── infrastructure/        # Implementações de baixo nível
-│   ├── disk_cache.rs      # Cache SQLite persistente
-│   ├── onedrive.rs        # Integração OneDrive
-│   └── windows/           # APIs Win32
-│       ├── icons.rs       # Extração de ícones
-│       ├── shell_operations.rs
-│       └── media_foundation.rs
-├── workers/               # Background threads
-│   ├── thumbnail_worker.rs # Pool de workers (4 threads)
-│   └── folder_preview_worker.rs
-└── ui/                    # Componentes de interface
-    ├── views/             # Grid, List, Computer view
-    ├── components/        # Item slots, sidebar
-    └── cache.rs           # Cache de texturas LRU
+├── main.rs                 # Bootstrap (115 linhas)
+├── lib.rs                  # Biblioteca pública
+│
+├── app/                    # Lógica de aplicação
+│   ├── mod.rs              # ImageViewerApp struct
+│   └── operations/         # Métodos da aplicação (19 módulos)
+│       ├── clipboard_ops.rs    # Operações de clipboard
+│       ├── context_menu.rs     # Menu de contexto
+│       ├── file_ops.rs         # Operações de arquivo
+│       ├── folder_loading.rs   # Carregamento de pastas
+│       ├── icons.rs            # Gerenciamento de ícones
+│       ├── message_handler.rs  # Processamento de mensagens
+│       ├── metadata.rs         # Metadados de arquivos
+│       ├── navigation.rs       # Navegação de diretórios
+│       ├── preferences.rs      # Preferências do usuário
+│       ├── recycle_bin_ops.rs  # Operações de lixeira
+│       ├── selection.rs        # Seleção de itens
+│       ├── tabs.rs             # Gerenciamento de abas
+│       ├── thumbnails.rs       # Carregamento de miniaturas
+│       ├── trait_impls.rs      # Implementações de traits
+│       ├── ui_rendering.rs     # Renderização de UI
+│       ├── view_setup.rs       # Configuração de views
+│       ├── watcher.rs          # Observador de arquivos
+│       └── window.rs           # Gerenciamento de janela
+│
+├── ui/                     # Componentes de interface
+│   ├── app/                # Implementação eframe::App
+│   │   ├── input.rs            # Processamento de entrada
+│   │   ├── lifecycle.rs        # Ciclo de vida da aplicação
+│   │   ├── menu_handler.rs     # Manipulação de menus
+│   │   ├── notifications.rs    # Sistema de notificações
+│   │   └── panels.rs           # Painéis principais
+│   │
+│   ├── components/         # Componentes reutilizáveis
+│   │   └── item_slot.rs        # Slot de item com preview
+│   │
+│   ├── views/              # Views de exibição
+│   │   ├── computer_view.rs    # View "Este Computador"
+│   │   ├── grid_view.rs        # View em grade
+│   │   ├── list_view.rs        # View em lista
+│   │   └── common.rs           # Funções compartilhadas
+│   │
+│   ├── context_menu.rs     # Menu de contexto UI
+│   ├── grid.rs             # Layout de grade
+│   ├── header.rs           # Cabeçalho da aplicação
+│   ├── icon_loader.rs      # Carregador de ícones
+│   ├── navigation.rs       # Barra de navegação
+│   ├── operations.rs       # Operações de UI
+│   ├── sidebar.rs          # Barra lateral
+│   ├── status_bar.rs       # Barra de status
+│   ├── svg_icons.rs        # Ícones SVG
+│   └── tab_bar.rs          # Barra de abas
+│
+├── infrastructure/         # Serviços de infraestrutura
+│   ├── windows/            # Integração Windows
+│   │   ├── metadata/           # Extração de metadados
+│   │   │   ├── image.rs        # Metadados de imagem
+│   │   │   ├── video.rs        # Metadados de vídeo
+│   │   │   ├── property_keys.rs
+│   │   │   └── utils.rs
+│   │   ├── bitmap_conversion.rs
+│   │   ├── codec_registry.rs
+│   │   ├── device_change.rs
+│   │   ├── drives.rs
+│   │   ├── file_system.rs
+│   │   ├── file_type.rs
+│   │   ├── formatting.rs
+│   │   ├── icons.rs
+│   │   ├── media_foundation.rs
+│   │   ├── native_menu.rs
+│   │   ├── recycle_bin.rs
+│   │   └── shell_operations.rs
+│   │
+│   ├── cache.rs            # Cache de miniaturas
+│   ├── disk_cache.rs       # Cache em disco
+│   ├── onedrive.rs         # Integração OneDrive
+│   ├── security.rs         # Verificações de segurança
+│   └── watcher.rs          # Observador de arquivos
+│
+├── domain/                 # Entidades de domínio
+│   ├── errors.rs           # Tipos de erro
+│   ├── file_entry.rs       # Entrada de arquivo
+│   └── thumbnail.rs        # Miniatura
+│
+├── application/            # Serviços de aplicação
+│   ├── clipboard.rs        # Serviço de clipboard
+│   ├── context_menu.rs     # Serviço de menu de contexto
+│   ├── navigation.rs       # Serviço de navegação
+│   ├── notification.rs     # Serviço de notificação
+│   ├── renaming.rs         # Serviço de renomeação
+│   ├── state.rs            # Estado da aplicação
+│   └── watcher.rs          # Serviço de observador
+│
+└── workers/                # Workers assíncronos
+    ├── batch_thumbnail_loader.rs
+    ├── folder_preview_worker.rs
+    ├── folder_scanner.rs
+    ├── thumbnail_loader.rs
+    └── thumbnail_worker.rs
 ```
 
-### Diagrama de Fluxo
+## 🏗️ Build
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         UI Thread (egui)                        │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────────────┐   │
-│  │ Sidebar │  │ Toolbar │  │ Grid/   │  │ Preview Panel   │   │
-│  │         │  │         │  │ List    │  │                 │   │
-│  └────┬────┘  └────┬────┘  └────┬────┘  └────────┬────────┘   │
-│       │            │            │                 │            │
-│       └────────────┴─────┬──────┴─────────────────┘            │
-│                          │                                      │
-│                    ┌─────▼─────┐                               │
-│                    │  State    │                               │
-│                    │  Manager  │                               │
-│                    └─────┬─────┘                               │
-└──────────────────────────┼─────────────────────────────────────┘
-                           │ mpsc channels
-          ┌────────────────┼────────────────┐
-          ▼                ▼                ▼
-    ┌──────────┐    ┌──────────┐    ┌──────────┐
-    │Thumbnail │    │  Folder  │    │ Metadata │
-    │ Workers  │    │  Scanner │    │  Worker  │
-    │  (4x)    │    │          │    │          │
-    └────┬─────┘    └────┬─────┘    └────┬─────┘
-         │               │               │
-         ▼               ▼               ▼
-    ┌─────────────────────────────────────────┐
-    │           Windows APIs                   │
-    │  Shell • WIC • Media Foundation • COM   │
-    └─────────────────────────────────────────┘
+### Requisitos
+
+- Rust 1.75 ou superior
+- Windows 10/11 (64-bit)
+- Visual Studio Build Tools (para windows-rs)
+
+### Compilação
+
+```bash
+# Debug
+cargo build
+
+# Release (otimizado)
+cargo build --release
 ```
 
----
+### Execução
 
-## 📄 Licença
+```bash
+# Debug
+cargo run
 
-MIT License - Veja [LICENSE](LICENSE) para detalhes.
+# Release
+cargo run --release
+```
 
----
+## 📝 Documentação
 
-## 🙏 Agradecimentos
+Documentação técnica disponível em `docs/`:
 
-- **[egui](https://github.com/emilk/egui)** - Framework de UI Immediate Mode
-- **[windows-rs](https://github.com/microsoft/windows-rs)** - Bindings oficiais Microsoft
-- **[rayon](https://github.com/rayon-rs/rayon)** - Paralelismo data-parallel
-- **[rusqlite](https://github.com/rusqlite/rusqlite)** - SQLite bindings
+- [AUDIT_REPORT.md](docs/AUDIT_REPORT.md) - Relatório de auditoria do código
+- [CLIPBOARD_INTEGRATION.md](docs/CLIPBOARD_INTEGRATION.md) - Integração com clipboard do Windows
+- [CODEC_RESOLUTION.md](docs/CODEC_RESOLUTION.md) - Resolução de codecs de mídia
+- [EAC3_CODEC_FIX.md](docs/EAC3_CODEC_FIX.md) - Correção de codec EAC3
+- [MEDIA_METADATA_FEATURE.md](docs/MEDIA_METADATA_FEATURE.md) - Feature de metadados de mídia
+- [PADROES_REUTILIZAVEIS.md](docs/PADROES_REUTILIZAVEIS.md) - Padrões de código reutilizáveis
 
----
+## 🎯 Métricas do Código
 
-<div align="center">
+| Módulo | Linhas | Descrição |
+|--------|--------|-----------|
+| main.rs | 115 | Bootstrap apenas |
+| app/operations/ | 19 módulos | Lógica de aplicação |
+| ui/app/ | 6 módulos | Implementação eframe::App |
+| ui/views/ | 4 módulos | Views de exibição |
+| infrastructure/windows/ | 15+ módulos | Integração Windows |
 
-Feito com ❤️ em Rust
+## 📜 Licença
 
-</div>
+Este projeto está licenciado sob a [MIT License](LICENSE).
 
-- **Bugs**: Abra uma [Issue no GitHub](https://github.com/seu-usuario/mtt-file-manager/issues)
-- **Features**: Consulte [ROADMAP_TECNICO.md](docs/ROADMAP_TECNICO.md) e vote/comente
-- **Discussões**: [GitHub Discussions](https://github.com/seu-usuario/mtt-file-manager/discussions)
-- **Segurança**: Reporte vulnerabilidades diretamente aos maintainers (NÃO abra issue pública)
+## 👨‍💻 Autor
 
----
-
-**Última Atualização**: 2025-12-27  
-**Versão**: 0.1.0  
-**Status**: ⚠️ Alpha (uso em produção não recomendado ainda)
+Desenvolvido por MTT (Matheus Tamer).

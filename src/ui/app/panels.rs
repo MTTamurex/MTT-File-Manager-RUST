@@ -4,7 +4,7 @@ use crate::domain::file_entry::{FileEntry, SyncStatus, ViewMode};
 use crate::infrastructure::windows as windows_infra;
 use crate::app::ImageViewerApp;
 
-pub fn render_panels(app: &mut ImageViewerApp, ctx: &egui::Context, frame: &mut eframe::Frame) {
+pub fn render_panels(app: &mut ImageViewerApp, ctx: &egui::Context, _frame: &mut eframe::Frame) {
     // 1. Sidebar
     render_sidebar_panel(app, ctx);
 
