@@ -172,11 +172,20 @@ pub fn render_grid_view(
                                                         )
                                                     ));
                                                 }
-                                                let date_lbl = if is_recycle { "Data de Exclusão" } else { "Última modificação" };
-                                                let date_val = if is_recycle {
-                                                    item_tooltip.deletion_date.clone().unwrap_or_else(|| "-".to_string())
+                                                let date_lbl = if is_recycle {
+                                                    "Data de Exclusão"
                                                 } else {
-                                                    crate::infrastructure::windows::format_date(item_tooltip.modified)
+                                                    "Última modificação"
+                                                };
+                                                let date_val = if is_recycle {
+                                                    item_tooltip
+                                                        .deletion_date
+                                                        .clone()
+                                                        .unwrap_or_else(|| "-".to_string())
+                                                } else {
+                                                    crate::infrastructure::windows::format_date(
+                                                        item_tooltip.modified,
+                                                    )
                                                 };
                                                 ui.label(format!("{}: {}", date_lbl, date_val));
                                             });
@@ -297,11 +306,20 @@ pub fn render_grid_view(
                                                     )
                                                 ));
                                             }
-                                            let date_lbl = if is_recycle { "Data de Exclusão" } else { "Última modificação" };
-                                            let date_val = if is_recycle {
-                                                item_tooltip.deletion_date.clone().unwrap_or_else(|| "-".to_string())
+                                            let date_lbl = if is_recycle {
+                                                "Data de Exclusão"
                                             } else {
-                                                crate::infrastructure::windows::format_date(item_tooltip.modified)
+                                                "Última modificação"
+                                            };
+                                            let date_val = if is_recycle {
+                                                item_tooltip
+                                                    .deletion_date
+                                                    .clone()
+                                                    .unwrap_or_else(|| "-".to_string())
+                                            } else {
+                                                crate::infrastructure::windows::format_date(
+                                                    item_tooltip.modified,
+                                                )
                                             };
                                             ui.label(format!("{}: {}", date_lbl, date_val));
                                         });

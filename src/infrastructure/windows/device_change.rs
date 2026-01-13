@@ -39,7 +39,7 @@ fn run_device_listener(sender: Sender<()>, ctx: egui::Context) -> Result<()> {
         if DEVICE_EVENT_SENDER.set(sender).is_err() {
             return Ok(()); // listener already initialized
         }
-        
+
         if EGUI_CONTEXT.set(ctx).is_err() {
             return Ok(()); // context already set
         }
@@ -110,7 +110,7 @@ unsafe extern "system" fn device_wnd_proc(
     match msg {
         WM_DEVICECHANGE => {
             let event = wparam.0 as u32;
-            
+
             if event == DBT_DEVICEARRIVAL || event == DBT_DEVICEREMOVECOMPLETE {
                 if let Some(sender) = DEVICE_EVENT_SENDER.get() {
                     let _ = sender.send(());

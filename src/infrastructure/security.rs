@@ -150,7 +150,7 @@ fn validate_path_components(path: &Path, config: &SecurityConfig) -> Result<(), 
 /// Valida se o path está em um drive permitido
 fn validate_drive(path: &Path, config: &SecurityConfig) -> Result<(), SecurityError> {
     let path_str = path.to_string_lossy().to_uppercase();
-    
+
     // Handle Windows extended-length paths (\\?\C:\...) from canonicalize()
     // These are NOT UNC paths but local paths with extended prefix
     let normalized_path = if path_str.starts_with("\\\\?\\") {
@@ -265,7 +265,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let test_file = temp_dir.path().join("test.txt");
         fs::write(&test_file, "test").unwrap();
-        
+
         let result = sanitize_path(&test_file, &config);
         if let Err(e) = &result {
             eprintln!("test_file path: {:?}", test_file);

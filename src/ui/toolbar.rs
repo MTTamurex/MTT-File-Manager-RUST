@@ -1,9 +1,9 @@
-use eframe::egui;
 use crate::application::navigation::NavigationHistory;
 use crate::domain::file_entry::{SortMode, ViewMode};
 use crate::ui::svg_icons::SvgIconManager;
-use crate::ui::widgets;
 use crate::ui::theme;
+use crate::ui::widgets;
+use eframe::egui;
 
 #[derive(Debug, Clone)]
 pub enum ToolbarAction {
@@ -44,7 +44,6 @@ pub fn render_toolbar(
     computer_icon: Option<&egui::TextureHandle>,
     svg_manager: &mut SvgIconManager,
 ) -> Option<ToolbarAction> {
-
     let mut action = None;
 
     ui.horizontal(|ui| {
@@ -52,30 +51,54 @@ pub fn render_toolbar(
 
         // 1. NAVEGAÇÃO (ESQUERDA) - Bloqueados durante renomeação
         let is_renaming = false; // TODO: Pass is_renaming as param? For now assume false or add to signature if critical. Plan didn't have it but main.rs uses it.
-        // Adding is_renaming to signature is better.
+                                 // Adding is_renaming to signature is better.
 
         let can_back = navigation.can_go_back() && !is_renaming;
-        if widgets::icon_button(ui, svg_manager, theme::ICON_ARROW_LEFT, "Voltar", None).clicked() && can_back {
+        if widgets::icon_button(ui, svg_manager, theme::ICON_ARROW_LEFT, "Voltar", None).clicked()
+            && can_back
+        {
             action = Some(ToolbarAction::GoBack);
         }
 
         let can_forward = navigation.can_go_forward() && !is_renaming;
-        if widgets::icon_button(ui, svg_manager, theme::ICON_ARROW_RIGHT, "Avançar", None).clicked() && can_forward {
+        if widgets::icon_button(ui, svg_manager, theme::ICON_ARROW_RIGHT, "Avançar", None).clicked()
+            && can_forward
+        {
             action = Some(ToolbarAction::GoForward);
         }
 
-        if widgets::icon_button(ui, svg_manager, theme::ICON_ARROW_UP, "Subir um nível", None).clicked() && !is_renaming {
+        if widgets::icon_button(
+            ui,
+            svg_manager,
+            theme::ICON_ARROW_UP,
+            "Subir um nível",
+            None,
+        )
+        .clicked()
+            && !is_renaming
+        {
             action = Some(ToolbarAction::GoUp);
         }
 
-        if widgets::icon_button(ui, svg_manager, theme::ICON_REFRESH, "Recarregar", None).clicked() && !is_renaming {
+        if widgets::icon_button(ui, svg_manager, theme::ICON_REFRESH, "Recarregar", None).clicked()
+            && !is_renaming
+        {
             action = Some(ToolbarAction::Refresh);
         }
 
         ui.separator();
 
         // Botão de Nova Pasta
-        if widgets::icon_button(ui, svg_manager, theme::ICON_FOLDER_ADD, "Criar Nova Pasta (Ctrl+Shift+N)", None).clicked() && !is_renaming {
+        if widgets::icon_button(
+            ui,
+            svg_manager,
+            theme::ICON_FOLDER_ADD,
+            "Criar Nova Pasta (Ctrl+Shift+N)",
+            None,
+        )
+        .clicked()
+            && !is_renaming
+        {
             action = Some(ToolbarAction::CreateFolder);
         }
 
@@ -84,7 +107,16 @@ pub fn render_toolbar(
         // Home / Computer
         // Note: We need the computer icon texture. Passing it as an Option<&TextureHandle> in signature would be good.
         // For now finding "home" icon usage.
-        if widgets::icon_button(ui, svg_manager, theme::ICON_HOME, "Este Computador", computer_icon).clicked() && !is_renaming {
+        if widgets::icon_button(
+            ui,
+            svg_manager,
+            theme::ICON_HOME,
+            "Este Computador",
+            computer_icon,
+        )
+        .clicked()
+            && !is_renaming
+        {
             action = Some(ToolbarAction::NavigateToComputer);
         }
 
@@ -103,12 +135,14 @@ pub fn render_toolbar(
 
             // Detalhes (Preview Panel Toggle)
             if widgets::toggle_icon_button(
-                ui, 
-                svg_manager, 
-                theme::ICON_DETAILS, 
-                show_preview_panel, 
-                "Detalhes"
-            ).clicked() {
+                ui,
+                svg_manager,
+                theme::ICON_DETAILS,
+                show_preview_panel,
+                "Detalhes",
+            )
+            .clicked()
+            {
                 action = Some(ToolbarAction::TogglePreviewPanel);
             }
 
@@ -116,29 +150,29 @@ pub fn render_toolbar(
 
             // View Mode
             if widgets::toggle_icon_button(
-                    ui,
-                    svg_manager,
-                    theme::ICON_LIST,
-                    matches!(view_mode, ViewMode::List),
-                    "Lista",
-                )
-                .clicked()
+                ui,
+                svg_manager,
+                theme::ICON_LIST,
+                matches!(view_mode, ViewMode::List),
+                "Lista",
+            )
+            .clicked()
             {
                 if !matches!(view_mode, ViewMode::List) {
-                     action = Some(ToolbarAction::ToggleViewMode);
+                    action = Some(ToolbarAction::ToggleViewMode);
                 }
             }
             if widgets::toggle_icon_button(
-                    ui,
-                    svg_manager,
-                    theme::ICON_GRID,
-                    matches!(view_mode, ViewMode::Grid),
-                    "Grade",
-                )
-                .clicked()
+                ui,
+                svg_manager,
+                theme::ICON_GRID,
+                matches!(view_mode, ViewMode::Grid),
+                "Grade",
+            )
+            .clicked()
             {
-                 if !matches!(view_mode, ViewMode::Grid) {
-                     action = Some(ToolbarAction::ToggleViewMode);
+                if !matches!(view_mode, ViewMode::Grid) {
+                    action = Some(ToolbarAction::ToggleViewMode);
                 }
             }
 
@@ -146,10 +180,14 @@ pub fn render_toolbar(
 
             // Ordenação
             let sort_symbol = if sort_descending { "↓" } else { "↑" };
-            if ui.button(sort_symbol).on_hover_text("Inverter Ordem").clicked() {
+            if ui
+                .button(sort_symbol)
+                .on_hover_text("Inverter Ordem")
+                .clicked()
+            {
                 action = Some(ToolbarAction::ToggleSortDescending);
             }
-            
+
             egui::ComboBox::from_id_salt("sort_mode")
                 .selected_text(match sort_mode {
                     SortMode::Name => "Nome",
@@ -158,17 +196,29 @@ pub fn render_toolbar(
                     SortMode::Type => "Tipo",
                 })
                 .show_ui(ui, |ui| {
-                    if ui.selectable_value(&mut SortMode::Name, sort_mode, "Nome").clicked() {
+                    if ui
+                        .selectable_value(&mut SortMode::Name, sort_mode, "Nome")
+                        .clicked()
+                    {
                         action = Some(ToolbarAction::ChangeSortMode(SortMode::Name));
                     }
-                    if ui.selectable_value(&mut SortMode::Date, sort_mode, "Data").clicked() {
+                    if ui
+                        .selectable_value(&mut SortMode::Date, sort_mode, "Data")
+                        .clicked()
+                    {
                         action = Some(ToolbarAction::ChangeSortMode(SortMode::Date));
                     }
-                    if ui.selectable_value(&mut SortMode::Size, sort_mode, "Tamanho").clicked() {
-                         action = Some(ToolbarAction::ChangeSortMode(SortMode::Size));
+                    if ui
+                        .selectable_value(&mut SortMode::Size, sort_mode, "Tamanho")
+                        .clicked()
+                    {
+                        action = Some(ToolbarAction::ChangeSortMode(SortMode::Size));
                     }
-                     if ui.selectable_value(&mut SortMode::Type, sort_mode, "Tipo").clicked() {
-                         action = Some(ToolbarAction::ChangeSortMode(SortMode::Type));
+                    if ui
+                        .selectable_value(&mut SortMode::Type, sort_mode, "Tipo")
+                        .clicked()
+                    {
+                        action = Some(ToolbarAction::ChangeSortMode(SortMode::Type));
                     }
                 });
 
@@ -183,12 +233,7 @@ pub fn render_toolbar(
             if search_response.changed() {
                 action = Some(ToolbarAction::Search(search_query.clone()));
             }
-            crate::ui::svg_icons::icon_image(
-                ui,
-                svg_manager,
-                "search",
-                16.0,
-            );
+            crate::ui::svg_icons::icon_image(ui, svg_manager, "search", 16.0);
 
             ui.separator();
 
@@ -219,7 +264,7 @@ pub fn render_toolbar(
                         }
 
                         if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                           action = Some(ToolbarAction::CommitPathInput(path_input.clone()));
+                            action = Some(ToolbarAction::CommitPathInput(path_input.clone()));
                         }
 
                         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -247,8 +292,7 @@ pub fn render_toolbar(
                                     full_accumulated.push(comp);
                                     // Normaliza drive roots: "Z:" -> "Z:\" para navegação correta
                                     let target_path = {
-                                        let p =
-                                            full_accumulated.to_string_lossy().to_string();
+                                        let p = full_accumulated.to_string_lossy().to_string();
                                         if p.len() == 2 && p.ends_with(':') {
                                             format!("{}\\", p)
                                         } else {
@@ -285,7 +329,7 @@ pub fn render_toolbar(
                                     egui::Sense::click(),
                                 );
                                 if resp.clicked() {
-                                     action = Some(ToolbarAction::StartAddressEdit);
+                                    action = Some(ToolbarAction::StartAddressEdit);
                                 }
                             }
                         });
@@ -294,7 +338,7 @@ pub fn render_toolbar(
             );
 
             if matches!(action, Some(ToolbarAction::StartAddressEdit)) {
-                 ui.ctx().memory_mut(|m| {
+                ui.ctx().memory_mut(|m| {
                     m.request_focus(egui::Id::from("address_edit").with("text_edit"))
                 });
             }

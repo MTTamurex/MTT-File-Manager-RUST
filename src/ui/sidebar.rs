@@ -197,7 +197,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
             let recycle_icon = ctx
                 .icon_loader
                 .get_or_load_folder_path_icon(ui.ctx(), recycle_bin_path);
-            
+
             if let Some(icon) = recycle_icon {
                 let icon_rect = Rect::from_center_size(
                     Pos2::new(cursor_x + 8.0, rect.center().y),
@@ -272,12 +272,12 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
 
         for (disk_path, disk_label) in drives {
             // Don't select drive if we're in OneDrive (OneDrive has priority)
-            let in_onedrive = ctx.onedrive_path
+            let in_onedrive = ctx
+                .onedrive_path
                 .map(|od| ctx.current_path.starts_with(od))
                 .unwrap_or(false);
-            let is_selected = !ctx.is_computer_view 
-                && !in_onedrive 
-                && ctx.current_path.starts_with(disk_path);
+            let is_selected =
+                !ctx.is_computer_view && !in_onedrive && ctx.current_path.starts_with(disk_path);
 
             let (mut rect, response) =
                 ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), Sense::click());

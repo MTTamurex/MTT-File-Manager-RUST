@@ -131,7 +131,11 @@ pub fn render_list_view(
                 return Some(SortMode::Size);
             }
         } else {
-            let date_label = if ctx.is_recycle_bin_view { "Data de Exclusão" } else { "Última modificação" };
+            let date_label = if ctx.is_recycle_bin_view {
+                "Data de Exclusão"
+            } else {
+                "Última modificação"
+            };
             let (clicked_date, _) = draw_header(ui, date_label, w_date, SortMode::Date);
             if clicked_date {
                 return Some(SortMode::Date);
@@ -278,9 +282,15 @@ pub fn render_list_view(
                                     if !item.is_dir {
                                         ui.label(format!("Tamanho: {}", format_size(item.size)));
                                     }
-                                    let date_lbl = if is_recycle_bin { "Data de Exclusão" } else { "Última modificação" };
+                                    let date_lbl = if is_recycle_bin {
+                                        "Data de Exclusão"
+                                    } else {
+                                        "Última modificação"
+                                    };
                                     let date_val = if is_recycle_bin {
-                                        item.deletion_date.clone().unwrap_or_else(|| "-".to_string())
+                                        item.deletion_date
+                                            .clone()
+                                            .unwrap_or_else(|| "-".to_string())
                                     } else {
                                         format_date(item.modified)
                                     };
@@ -473,9 +483,11 @@ pub fn render_list_view(
                     } else {
                         // 2. Date
                         let date_str = if ctx.is_recycle_bin_view {
-                             item.deletion_date.clone().unwrap_or_else(|| "-".to_string())
+                            item.deletion_date
+                                .clone()
+                                .unwrap_or_else(|| "-".to_string())
                         } else {
-                             crate::infrastructure::windows::formatting::format_date(item.modified)
+                            crate::infrastructure::windows::formatting::format_date(item.modified)
                         };
 
                         ui.painter().text(
@@ -636,9 +648,15 @@ pub fn render_list_view(
                                     if !item.is_dir {
                                         ui.label(format!("Tamanho: {}", format_size(item.size)));
                                     }
-                                    let date_lbl = if is_recycle_bin_virt { "Data de Exclusão" } else { "Última modificação" };
+                                    let date_lbl = if is_recycle_bin_virt {
+                                        "Data de Exclusão"
+                                    } else {
+                                        "Última modificação"
+                                    };
                                     let date_val = if is_recycle_bin_virt {
-                                        item.deletion_date.clone().unwrap_or_else(|| "-".to_string())
+                                        item.deletion_date
+                                            .clone()
+                                            .unwrap_or_else(|| "-".to_string())
                                     } else {
                                         format_date(item.modified)
                                     };
@@ -823,7 +841,9 @@ pub fn render_list_view(
                     } else {
                         // 2. Date
                         let date_str = if ctx.is_recycle_bin_view {
-                            item.deletion_date.clone().unwrap_or_else(|| "-".to_string())
+                            item.deletion_date
+                                .clone()
+                                .unwrap_or_else(|| "-".to_string())
                         } else {
                             format_date(item.modified)
                         };

@@ -60,7 +60,7 @@ impl ContextMenuItem {
             ..Default::default()
         }
     }
-    
+
     /// Creates a separator
     pub fn separator() -> Self {
         Self {
@@ -68,7 +68,7 @@ impl ContextMenuItem {
             ..Default::default()
         }
     }
-    
+
     /// Creates a primary item (appears in header bar)
     pub fn primary(id: i32, text: impl Into<String>) -> Self {
         Self {
@@ -79,37 +79,37 @@ impl ContextMenuItem {
             ..Default::default()
         }
     }
-    
+
     /// Builder: add keyboard shortcut
     pub fn with_shortcut(mut self, shortcut: impl Into<String>) -> Self {
         self.keyboard_shortcut = Some(shortcut.into());
         self
     }
-    
+
     /// Builder: add icon
     pub fn with_icon(mut self, icon: egui::TextureHandle) -> Self {
         self.icon = Some(icon);
         self
     }
-    
+
     /// Builder: set command string (shell verb)
     pub fn with_command(mut self, cmd: impl Into<String>) -> Self {
         self.command_string = Some(cmd.into());
         self
     }
-    
+
     /// Builder: mark as overflow item
     pub fn in_overflow(mut self) -> Self {
         self.show_in_overflow = true;
         self
     }
-    
+
     /// Builder: set enabled state
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.is_enabled = enabled;
         self
     }
-    
+
     /// Builder: add sub-items
     pub fn with_subitems(mut self, items: Vec<ContextMenuItem>) -> Self {
         self.sub_items = items;
@@ -138,13 +138,13 @@ pub struct ContextMenuState {
     pub item_index: Option<usize>,
     pub target_path: Option<PathBuf>,
     pub is_empty_area: bool,
-    
+
     /// Dynamic items extracted from Shell or built for empty area
     pub items: Vec<ContextMenuItem>,
-    
+
     /// The ID of the command selected by the user (positive for Shell, negative for internal)
     pub selected_command_id: Option<i32>,
-    
+
     /// Native shell context (holds IContextMenu and other COM objects alive)
     /// Stored as Any to keep the application layer agnostic of Win32 types
     /// Note: Not thread-safe - must only be accessed from main thread

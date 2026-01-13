@@ -21,7 +21,6 @@ impl Default for TextureCacheConfig {
     }
 }
 
-
 /// Manages texture caches for thumbnails and icons
 pub struct CacheManager {
     pub texture_cache: LruCache<PathBuf, egui::TextureHandle>,

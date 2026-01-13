@@ -1,4 +1,4 @@
-pub mod app;          // NEW - Application state and initialization
+pub mod app; // NEW - Application state and initialization
 pub mod application;
 pub mod domain;
 pub mod infrastructure;

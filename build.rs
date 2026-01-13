@@ -3,7 +3,7 @@ fn main() {
     #[cfg(target_os = "windows")]
     {
         use std::path::Path;
-        
+
         // Check if ICO file exists, otherwise skip (won't break build)
         if Path::new("appicon.ico").exists() {
             let mut res = winresource::WindowsResource::new();
@@ -11,7 +11,7 @@ fn main() {
             res.set("FileDescription", "MTT File Manager");
             res.set("ProductName", "MTT File Manager");
             res.set("CompanyName", "MTT");
-            
+
             // Only fail if ICO exists but compilation fails
             if let Err(e) = res.compile() {
                 eprintln!("Warning: Could not embed icon: {}", e);

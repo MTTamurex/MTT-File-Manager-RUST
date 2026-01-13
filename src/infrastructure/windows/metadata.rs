@@ -14,8 +14,8 @@ use windows::{
     Win32::Foundation::RPC_E_CHANGED_MODE,
     Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED},
     Win32::UI::Shell::PropertiesSystem::{
-        IPropertyStore, SHGetPropertyStoreFromParsingName, GETPROPERTYSTOREFLAGS, GPS_OPENSLOWITEM,
-        GPS_READWRITE, GPS_BESTEFFORT,
+        IPropertyStore, SHGetPropertyStoreFromParsingName, GETPROPERTYSTOREFLAGS, GPS_BESTEFFORT,
+        GPS_OPENSLOWITEM, GPS_READWRITE,
     },
 };
 
@@ -553,7 +553,7 @@ fn merge_video_metadata(
 /// The description often contains "Video: H.264 (AVC), 1920x1080" which we parse for the codec
 fn detect_codec_from_description(description: &str) -> Option<String> {
     let desc = description.to_uppercase();
-    
+
     // Priority 1: Look for specific codec keywords (K-Lite signature patterns)
     if desc.contains("H.264") || desc.contains("AVC") || desc.contains("X264") {
         return Some("H.264/AVC".to_string());
@@ -594,7 +594,7 @@ fn detect_codec_from_description(description: &str) -> Option<String> {
     if desc.contains("MPEG-2") || desc.contains("MPEG2") {
         return Some("MPEG-2".to_string());
     }
-    
+
     None
 }
 
@@ -639,12 +639,21 @@ fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windows::
 
     // Priority 1: Parse Stream Description for codec keywords (K-Lite primary source)
     // K-Lite often provides "Video: H.264 (AVC), 1920x1080" in this field
-    let video_codec = stream_description.as_ref()
+    let video_codec = stream_description
+        .as_ref()
         .and_then(|d| detect_codec_from_description(d))
         // Priority 2: Parse Stream Name for codec keywords
-        .or_else(|| stream_name.as_ref().and_then(|s| detect_codec_from_description(s)))
+        .or_else(|| {
+            stream_name
+                .as_ref()
+                .and_then(|s| detect_codec_from_description(s))
+        })
         // Priority 3: Parse subtitle field (used by some handlers)
-        .or_else(|| subtitle.as_ref().and_then(|s| detect_codec_from_description(s)))
+        .or_else(|| {
+            subtitle
+                .as_ref()
+                .and_then(|s| detect_codec_from_description(s))
+        })
         // Priority 4: FourCC (raw technical identifier)
         .or_else(|| fourcc.clone())
         // Priority 5: OGM video tracks
@@ -773,7 +782,7 @@ fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windows::
 }
 
 /// Convert GUID strings and technical codec identifiers to friendly names
-/// 
+///
 /// Implements .cursorrules §7: Queries Windows Registry/MF instead of hardcoding.
 fn sanitize_codec_string(s: &str) -> String {
     let s = s.trim();

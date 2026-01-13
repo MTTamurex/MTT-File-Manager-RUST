@@ -1,6 +1,6 @@
-use eframe::egui;
 use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::theme::{self, *};
+use eframe::egui;
 
 /// Renders an icon button with SVG support and optional texture override
 pub fn icon_button(
@@ -37,15 +37,18 @@ pub fn icon_button(
         };
         ui.painter().rect_filled(rect, theme::PADDING_SM, bg_color);
     }
-    
+
     // Cursor
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
 
     // 1. Texture Override (Essential for Home/Computer icon)
     // Always render this if provided, ignoring SVG lookup
     if let Some(texture) = texture_override {
-         let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(theme::ICON_SIZE_MD, theme::ICON_SIZE_MD));
-         ui.painter().image(
+        let icon_rect = egui::Rect::from_center_size(
+            rect.center(),
+            egui::vec2(theme::ICON_SIZE_MD, theme::ICON_SIZE_MD),
+        );
+        ui.painter().image(
             texture.id(),
             icon_rect,
             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
@@ -61,11 +64,14 @@ pub fn icon_button(
     } else {
         [60, 60, 60, 255]
     };
-    
+
     let render_size = theme::ICON_SIZE_LG; // 24.0 for high quality
-    
+
     if let Some(texture) = svg_manager.get_icon(ui.ctx(), icon_name, render_size as u32, color) {
-        let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(theme::ICON_SIZE_MD, theme::ICON_SIZE_MD));
+        let icon_rect = egui::Rect::from_center_size(
+            rect.center(),
+            egui::vec2(theme::ICON_SIZE_MD, theme::ICON_SIZE_MD),
+        );
         ui.painter().image(
             texture.id(),
             icon_rect,
@@ -73,7 +79,7 @@ pub fn icon_button(
             egui::Color32::WHITE,
         );
         return response.on_hover_text(tooltip);
-    } 
+    }
 
     // 3. Fallback: Text/Emoji
     // Use direct painting or non-interactive Label to avoid stealing clicks/hover
@@ -82,7 +88,7 @@ pub fn icon_button(
     } else {
         egui::Color32::from_rgb(60, 60, 60)
     };
-    
+
     // We can just paint text centered
     ui.painter().text(
         rect.center(),
@@ -91,7 +97,7 @@ pub fn icon_button(
         egui::FontId::proportional(theme::ICON_SIZE_MD),
         text_color,
     );
-    
+
     response.on_hover_text(tooltip)
 }
 
@@ -113,15 +119,15 @@ pub fn toggle_icon_button(
     let size = theme::ICON_SIZE_LG;
     let padding = theme::PADDING_SM;
     let button_size = egui::vec2(size + padding * 2.0, size + padding * 2.0);
-    
+
     let (rect, response) = ui.allocate_exact_size(button_size, egui::Sense::click());
-    
+
     // Cursor
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
-    
+
     // Hover Bg
     if response.hovered() {
-            let bg_color = if ui.visuals().dark_mode {
+        let bg_color = if ui.visuals().dark_mode {
             theme::color_dark_hover()
         } else {
             theme::color_hover()
@@ -157,7 +163,7 @@ pub fn toggle_icon_button(
     } else {
         ui.visuals().text_color()
     };
-    
+
     // Direct text painting for fallback
     ui.painter().text(
         rect.center(),
@@ -166,6 +172,6 @@ pub fn toggle_icon_button(
         egui::FontId::proportional(theme::ICON_SIZE_MD),
         text_color,
     );
-    
+
     response.on_hover_text(tooltip)
 }

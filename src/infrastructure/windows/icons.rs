@@ -109,8 +109,7 @@ pub fn get_folder_preview(
             .chain(std::iter::once(0))
             .collect();
 
-        let shell_item: IShellItem =
-            SHCreateItemFromParsingName(PCWSTR(path_wide.as_ptr()), None)?;
+        let shell_item: IShellItem = SHCreateItemFromParsingName(PCWSTR(path_wide.as_ptr()), None)?;
         let image_factory: IShellItemImageFactory = shell_item.cast()?;
 
         // Request 256px with SIIGBF_THUMBNAILONLY to get the sandwich preview
@@ -134,7 +133,6 @@ pub fn get_folder_preview(
     }
 }
 
-
 /// Forces extraction of a new thumbnail, bypassing the Windows thumbnail cache.
 ///
 /// Uses IThumbnailCache::GetThumbnail with WTS_FORCEEXTRACTION flag.
@@ -149,10 +147,10 @@ pub fn force_extract_thumbnail(
     path: &Path,
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     use windows::Win32::UI::Shell::{
-        IThumbnailCache, ISharedBitmap, LocalThumbnailCache,
-        WTS_FORCEEXTRACTION, WTS_SCALETOREQUESTEDSIZE, WTS_CACHEFLAGS,
+        ISharedBitmap, IThumbnailCache, LocalThumbnailCache, WTS_CACHEFLAGS, WTS_FORCEEXTRACTION,
+        WTS_SCALETOREQUESTEDSIZE,
     };
-    
+
     unsafe {
         // SAFETY: path_wide is valid for the duration of this call
         let path_wide: Vec<u16> = path
@@ -162,11 +160,10 @@ pub fn force_extract_thumbnail(
             .collect();
 
         // Create IShellItem for the file
-        let shell_item: IShellItem =
-            SHCreateItemFromParsingName(PCWSTR(path_wide.as_ptr()), None)?;
+        let shell_item: IShellItem = SHCreateItemFromParsingName(PCWSTR(path_wide.as_ptr()), None)?;
 
         // Create IThumbnailCache instance
-        let thumbnail_cache: IThumbnailCache = 
+        let thumbnail_cache: IThumbnailCache =
             CoCreateInstance(&LocalThumbnailCache, None, CLSCTX_INPROC_SERVER)?;
 
         // Request thumbnail with FORCE EXTRACTION (ignores cache)
@@ -174,12 +171,12 @@ pub fn force_extract_thumbnail(
         // WTS_SCALETOREQUESTEDSIZE = 0x100 - Scales to requested size
         let flags = WTS_FORCEEXTRACTION | WTS_SCALETOREQUESTEDSIZE;
         let requested_size: u32 = 512; // Good balance for preview panel
-        
+
         // Single attempt - no retries. Stage 5 (Media Foundation) handles failures.
         let mut shared_bitmap: Option<ISharedBitmap> = None;
         let mut _cache_flags: WTS_CACHEFLAGS = WTS_CACHEFLAGS::default();
         let mut _thumbnail_id = windows::Win32::UI::Shell::WTS_THUMBNAILID::default();
-        
+
         thumbnail_cache.GetThumbnail(
             &shell_item,
             requested_size,
@@ -188,20 +185,19 @@ pub fn force_extract_thumbnail(
             Some(&mut _cache_flags),
             Some(&mut _thumbnail_id),
         )?;
-        
+
         if let Some(bitmap) = shared_bitmap {
             // Get HBITMAP from ISharedBitmap
             let hbitmap = bitmap.GetSharedBitmap()?;
-            
+
             // Convert to RGBA
             let rgba_result = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
             return Ok(rgba_result);
         }
-        
+
         Err("No bitmap returned from IThumbnailCache".into())
     }
 }
-
 
 /// Extracts the native Windows icon for a file extension.
 ///
@@ -409,12 +405,12 @@ pub fn get_file_type_icon(
     extension: &str,
     size: IconSize,
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
+    use windows::core::PCWSTR;
     use windows::Win32::System::Com::CoInitialize;
     use windows::Win32::UI::Shell::{
-        SHGetFileInfoW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_LARGEICON, 
-        SHGFI_USEFILEATTRIBUTES, SHFILEINFOW
+        SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON, SHGFI_SMALLICON,
+        SHGFI_USEFILEATTRIBUTES,
     };
-    use windows::core::PCWSTR;
 
     // Debug: Verifique se a extensão está chegando limpa no console
     // println!("Buscando ícone para extensão: '{}', is_folder: {}", extension, is_folder);
@@ -424,12 +420,12 @@ pub fn get_file_type_icon(
         let _ = CoInitialize(None);
 
         let mut shfi = SHFILEINFOW::default();
-        
-        let flags = SHGFI_ICON 
-            | SHGFI_USEFILEATTRIBUTES 
+
+        let flags = SHGFI_ICON
+            | SHGFI_USEFILEATTRIBUTES
             | match size {
                 IconSize::Small => SHGFI_SMALLICON,
-                IconSize::Large | IconSize::Jumbo => SHGFI_LARGEICON, 
+                IconSize::Large | IconSize::Jumbo => SHGFI_LARGEICON,
             };
 
         let file_attributes = if is_folder {
@@ -440,15 +436,18 @@ pub fn get_file_type_icon(
 
         // ESTRATÉGIA CORRIGIDA:
         // Não use caminhos absolutos (C:\...). Use apenas um nome simples.
-        let dummy_name = if is_folder { 
-            "folder".to_string() 
+        let dummy_name = if is_folder {
+            "folder".to_string()
         } else {
             // Remove pontos extras e garante um único ponto
             let clean_ext = extension.trim_start_matches('.');
             format!("file.{}", clean_ext) // ex: "file.rar"
         };
-        
-        let wide_path: Vec<u16> = dummy_name.encode_utf16().chain(std::iter::once(0)).collect();
+
+        let wide_path: Vec<u16> = dummy_name
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
 
         let result = SHGetFileInfoW(
             PCWSTR(wide_path.as_ptr()),
@@ -463,12 +462,12 @@ pub fn get_file_type_icon(
         }
 
         let hicon = shfi.hIcon;
-        
+
         // Reutilize a função hicon_to_rgba que já implementamos e funciona
         let conversion_result = super::bitmap_conversion::hicon_to_rgba(hicon);
-        
+
         let _ = windows::Win32::UI::WindowsAndMessaging::DestroyIcon(hicon);
-        
+
         conversion_result
     }
 }
@@ -478,24 +477,23 @@ pub fn extract_recycle_bin_icon(
     size: IconSize,
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     use windows::Win32::UI::Shell::{
-        FOLDERID_RecycleBinFolder, SHGetKnownFolderIDList,
-        SHGetFileInfoW, SHGFI_PIDL, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_LARGEICON,
-        SHFILEINFOW,
+        FOLDERID_RecycleBinFolder, SHGetFileInfoW, SHGetKnownFolderIDList, SHFILEINFOW, SHGFI_ICON,
+        SHGFI_LARGEICON, SHGFI_PIDL, SHGFI_SMALLICON,
     };
-    
+
     unsafe {
         // Get the PIDL for the Recycle Bin
         let pidl = SHGetKnownFolderIDList(&FOLDERID_RecycleBinFolder, 0, None)?;
-        
+
         let mut shfi = SHFILEINFOW::default();
-        
+
         let flags = SHGFI_PIDL
             | SHGFI_ICON
             | match size {
                 IconSize::Small => SHGFI_SMALLICON,
                 IconSize::Large | IconSize::Jumbo => SHGFI_LARGEICON,
             };
-        
+
         let result = SHGetFileInfoW(
             PCWSTR(pidl as *const u16),
             windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES(0),
@@ -503,18 +501,18 @@ pub fn extract_recycle_bin_icon(
             std::mem::size_of::<SHFILEINFOW>() as u32,
             flags,
         );
-        
+
         // Free the PIDL
         windows::Win32::System::Com::CoTaskMemFree(Some(pidl as *mut _));
-        
+
         if result == 0 || shfi.hIcon.is_invalid() {
             return Err("Failed to get recycle bin icon".into());
         }
-        
+
         let hicon = shfi.hIcon;
         let conversion_result = super::bitmap_conversion::hicon_to_rgba(hicon);
         let _ = DestroyIcon(hicon);
-        
+
         conversion_result
     }
 }

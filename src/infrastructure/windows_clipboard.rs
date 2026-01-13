@@ -11,7 +11,6 @@ use std::path::PathBuf;
 const DROPEFFECT_COPY: u32 = 1;
 const DROPEFFECT_MOVE: u32 = 2;
 
-
 /// Represents the type of clipboard operation
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ClipboardFileOp {
@@ -188,7 +187,7 @@ fn get_preferred_drop_effect() -> Option<u32> {
                 return None;
             }
         };
-        
+
         if handle.is_invalid() {
             let _ = CloseClipboard();
             return None;
