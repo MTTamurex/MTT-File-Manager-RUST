@@ -233,6 +233,9 @@ struct ImageViewerApp {
     folder_size_res_receiver: Receiver<(PathBuf, u64)>,  // Worker → UI
     folder_size_cache: std::collections::HashMap<PathBuf, u64>,  // Calculated sizes
     folder_size_loading: HashSet<PathBuf>,  // Currently calculating
+    
+    // RECYCLE BIN CACHE
+    deletion_date_cache: LruCache<String, String>,
 }
 
 impl ImageViewerApp {
@@ -555,6 +558,9 @@ impl ImageViewerApp {
             folder_size_res_receiver: folder_size_res_rx,
             folder_size_cache: std::collections::HashMap::new(),
             folder_size_loading: HashSet::new(),
+            
+            // RECYCLE BIN CACHE
+            deletion_date_cache: LruCache::new(NonZeroUsize::new(200).unwrap()),
         };
 
         // Inicia monitoramento inicial
@@ -1204,6 +1210,7 @@ impl ImageViewerApp {
                                     folder_cover,
                                     drive_info: None,
                                     sync_status,
+                                    deletion_date: None,
                                 };
 
                                 // Adiciona ao lote
@@ -1464,16 +1471,20 @@ impl ImageViewerApp {
 
                         // Cria um path "virtual" baseado na extensão para carregar ícone correto
                         // O path real não existe mais, mas o ícone é baseado na extensão
-                        let icon_path = if item.is_directory {
-                            PathBuf::from("C:\\folder")
+                        // O path real ($R) é necessário para ler a data de exclusão ($I creation time)
+                        // Se physical_path estiver vazio (falha ao ler), usamos a lógica antiga de dummy.
+                        let file_path = if !item.physical_path.as_os_str().is_empty() {
+                            item.physical_path.clone()
+                        } else if item.is_directory {
+                             PathBuf::from("C:\\folder")
                         } else if !item.extension.is_empty() {
-                            PathBuf::from(format!("dummy{}", item.extension))
+                             PathBuf::from(format!("dummy{}", item.extension))
                         } else {
-                            item.original_path.clone()
+                             item.original_path.clone()
                         };
 
                         let entry = FileEntry {
-                            path: icon_path, // Path usado para ícone (extensão)
+                            path: file_path, // Path físico ($R) para permitir get_deletion_date
                             name: item.name,
                             is_dir: item.is_directory,
                             size: item.size,
@@ -1481,6 +1492,7 @@ impl ImageViewerApp {
                             folder_cover: None,
                             drive_info: None,
                             sync_status: mtt_file_manager::domain::file_entry::SyncStatus::None,
+                            deletion_date: Some(item.date_deleted),
                         };
                         batch.push(entry);
 
@@ -2279,6 +2291,7 @@ impl ImageViewerApp {
             computer_icon: computer_icon.as_ref(),
             drive_icon_cache: &mut self.cache_manager.drive_icon_cache,
             item_icon_loader: &mut self.item_icon_loader,
+            deletion_date_cache: Some(&mut self.deletion_date_cache),
         };
 
         // Usar uma abordagem diferente: coletar ações em vetores
@@ -3741,6 +3754,7 @@ impl eframe::App for ImageViewerApp {
                                     folder_cover: None,
                                     drive_info: None,
                                     sync_status: mtt_file_manager::domain::file_entry::SyncStatus::None,
+                                    deletion_date: None,
                                 };
                                 Some(entry)
                             } else if !self.is_computer_view {

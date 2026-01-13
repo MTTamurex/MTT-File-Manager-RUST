@@ -27,6 +27,7 @@ pub struct ListViewContext<'a> {
     pub computer_icon: Option<&'a egui::TextureHandle>,
     pub drive_icon_cache: &'a mut lru::LruCache<String, egui::TextureHandle>,
     pub item_icon_loader: &'a mut crate::ui::icon_loader::IconLoader,
+    pub deletion_date_cache: Option<&'a mut lru::LruCache<String, String>>, // Cache para datas de exclusão (Path string -> Data)
 }
 
 /// Action returned by list view
@@ -130,7 +131,8 @@ pub fn render_list_view(
                 return Some(SortMode::Size);
             }
         } else {
-            let (clicked_date, _) = draw_header(ui, "Última modificação", w_date, SortMode::Date);
+            let date_label = if ctx.is_recycle_bin_view { "Data de Exclusão" } else { "Última modificação" };
+            let (clicked_date, _) = draw_header(ui, date_label, w_date, SortMode::Date);
             if clicked_date {
                 return Some(SortMode::Date);
             }
@@ -228,6 +230,7 @@ pub fn render_list_view(
                 }
 
                 let is_selected = ctx.selected_item == Some(i);
+                let is_recycle_bin = ctx.is_recycle_bin_view;
 
                 ui.push_id(i, |ui| {
                     let (rect, response) = ui.allocate_exact_size(
@@ -275,10 +278,13 @@ pub fn render_list_view(
                                     if !item.is_dir {
                                         ui.label(format!("Tamanho: {}", format_size(item.size)));
                                     }
-                                    ui.label(format!(
-                                        "Última modificação: {}",
+                                    let date_lbl = if is_recycle_bin { "Data de Exclusão" } else { "Última modificação" };
+                                    let date_val = if is_recycle_bin {
+                                        item.deletion_date.clone().unwrap_or_else(|| "-".to_string())
+                                    } else {
                                         format_date(item.modified)
-                                    ));
+                                    };
+                                    ui.label(format!("{}: {}", date_lbl, date_val));
                                 });
                             },
                         );
@@ -466,10 +472,16 @@ pub fn render_list_view(
                         );
                     } else {
                         // 2. Date
+                        let date_str = if ctx.is_recycle_bin_view {
+                             item.deletion_date.clone().unwrap_or_else(|| "-".to_string())
+                        } else {
+                             crate::infrastructure::windows::formatting::format_date(item.modified)
+                        };
+
                         ui.painter().text(
                             Pos2::new(rect.min.x + w_name, rect.min.y + 5.0),
                             egui::Align2::LEFT_TOP,
-                            format_date(item.modified),
+                            date_str,
                             FontId::proportional(12.0),
                             secondary_color,
                         );
@@ -576,6 +588,7 @@ pub fn render_list_view(
                 }
 
                 let is_selected = ctx.selected_item == Some(i);
+                let is_recycle_bin_virt = ctx.is_recycle_bin_view;
 
                 ui.push_id(i, |ui| {
                     let (rect, response) = ui.allocate_exact_size(
@@ -623,10 +636,13 @@ pub fn render_list_view(
                                     if !item.is_dir {
                                         ui.label(format!("Tamanho: {}", format_size(item.size)));
                                     }
-                                    ui.label(format!(
-                                        "Última modificação: {}",
+                                    let date_lbl = if is_recycle_bin_virt { "Data de Exclusão" } else { "Última modificação" };
+                                    let date_val = if is_recycle_bin_virt {
+                                        item.deletion_date.clone().unwrap_or_else(|| "-".to_string())
+                                    } else {
                                         format_date(item.modified)
-                                    ));
+                                    };
+                                    ui.label(format!("{}: {}", date_lbl, date_val));
                                 });
                             },
                         );
@@ -806,10 +822,15 @@ pub fn render_list_view(
                         );
                     } else {
                         // 2. Date
+                        let date_str = if ctx.is_recycle_bin_view {
+                            item.deletion_date.clone().unwrap_or_else(|| "-".to_string())
+                        } else {
+                            format_date(item.modified)
+                        };
                         ui.painter().text(
                             Pos2::new(rect.min.x + w_name, rect.min.y + 5.0),
                             egui::Align2::LEFT_TOP,
-                            format_date(item.modified),
+                            date_str,
                             FontId::proportional(12.0),
                             secondary_color,
                         );

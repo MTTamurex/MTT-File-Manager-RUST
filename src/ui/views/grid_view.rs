@@ -147,6 +147,7 @@ pub fn render_grid_view(
                                 // Tooltip
                                 if response.hovered() {
                                     let item_tooltip = item.clone();
+                                    let is_recycle = ctx.is_recycle_bin_view;
                                     egui::show_tooltip_at_pointer(
                                         ui.ctx(),
                                         ui.layer_id(),
@@ -171,12 +172,13 @@ pub fn render_grid_view(
                                                         )
                                                     ));
                                                 }
-                                                ui.label(format!(
-                                                    "Última modificação: {}",
-                                                    crate::infrastructure::windows::format_date(
-                                                        item_tooltip.modified
-                                                    )
-                                                ));
+                                                let date_lbl = if is_recycle { "Data de Exclusão" } else { "Última modificação" };
+                                                let date_val = if is_recycle {
+                                                    item_tooltip.deletion_date.clone().unwrap_or_else(|| "-".to_string())
+                                                } else {
+                                                    crate::infrastructure::windows::format_date(item_tooltip.modified)
+                                                };
+                                                ui.label(format!("{}: {}", date_lbl, date_val));
                                             });
                                         },
                                     );
@@ -271,6 +273,7 @@ pub fn render_grid_view(
 
                             if response.hovered() {
                                 let item_tooltip = item.clone();
+                                let is_recycle = ctx.is_recycle_bin_view;
                                 egui::show_tooltip_at_pointer(
                                     ui.ctx(),
                                     ui.layer_id(),
@@ -294,12 +297,13 @@ pub fn render_grid_view(
                                                     )
                                                 ));
                                             }
-                                            ui.label(format!(
-                                                "Última modificação: {}",
-                                                crate::infrastructure::windows::format_date(
-                                                    item_tooltip.modified
-                                                )
-                                            ));
+                                            let date_lbl = if is_recycle { "Data de Exclusão" } else { "Última modificação" };
+                                            let date_val = if is_recycle {
+                                                item_tooltip.deletion_date.clone().unwrap_or_else(|| "-".to_string())
+                                            } else {
+                                                crate::infrastructure::windows::format_date(item_tooltip.modified)
+                                            };
+                                            ui.label(format!("{}: {}", date_lbl, date_val));
                                         });
                                     },
                                 );
