@@ -179,7 +179,7 @@ pub fn render_preview_panel(
             ui.add_space(10.0);
 
             // HELPER: add_detail
-            let mut add_detail = |ui: &mut egui::Ui, label: &str, value: String| {
+            let add_detail = |ui: &mut egui::Ui, label: &str, value: String| {
                 ui.horizontal_top(|ui| {
                     ui.add_sized(
                         egui::vec2(110.0, 0.0),

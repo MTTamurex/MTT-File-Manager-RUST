@@ -402,7 +402,7 @@ fn query_mft_by_subtype(tag: u32) -> Option<String> {
 }
 
 /// Helper to query FriendlyName from a registry subkey
-fn query_subkey_friendly_name(parent_key: HKEY, subkey_name: &str) -> Option<String> {
+fn _query_subkey_friendly_name(parent_key: HKEY, subkey_name: &str) -> Option<String> {
     use windows::Win32::System::Registry::{
         RegCloseKey, RegGetValueW, RegOpenKeyExW, HKEY, KEY_READ, REG_VALUE_TYPE, RRF_RT_REG_SZ,
     };
