@@ -10,7 +10,8 @@ use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::windows;
 
 // Import component states
-use super::{ClipboardState, ContextMenuState, NavigationHistory, RenamingState, WatcherState};
+use super::{ContextMenuState, NavigationHistory, RenamingState, WatcherState};
+use super::clipboard::{ClipboardManager, ClipboardOp};
 
 // Re-export for convenience
 pub use crate::domain::file_entry::{SortMode, ViewMode};
@@ -50,7 +51,7 @@ pub struct AppState {
 
     // Component states
     pub context_menu: ContextMenuState,
-    pub clipboard: ClipboardState,
+    pub clipboard: ClipboardManager,
     pub watcher: WatcherState,
     pub renaming_state: Option<RenamingState>,
 
@@ -93,7 +94,7 @@ impl AppState {
             current_generation: Arc::new(AtomicUsize::new(0)),
 
             context_menu: ContextMenuState::new(),
-            clipboard: ClipboardState::new(),
+            clipboard: ClipboardManager::new(),
             watcher: WatcherState::new(),
             renaming_state: None,
 
@@ -257,8 +258,7 @@ impl AppState {
     pub fn copy_to_clipboard(&mut self) {
         if let Some(index) = self.selected_item_index {
             if let Some(item) = self.items.get(index) {
-                self.clipboard
-                    .set(item.path.clone(), super::ClipboardOp::Copy);
+                self.clipboard.copy(&item.path);
             }
         }
     }
@@ -267,8 +267,7 @@ impl AppState {
     pub fn cut_to_clipboard(&mut self) {
         if let Some(index) = self.selected_item_index {
             if let Some(item) = self.items.get(index) {
-                self.clipboard
-                    .set(item.path.clone(), super::ClipboardOp::Move);
+                self.clipboard.cut(&item.path);
             }
         }
     }
@@ -279,8 +278,9 @@ impl AppState {
     }
 
     /// Gets clipboard state for paste operation
-    pub fn get_clipboard_for_paste(&self) -> Option<(&PathBuf, super::ClipboardOp)> {
-        self.clipboard.get_for_paste()
+    pub fn get_clipboard_for_paste(&self) -> Option<(&PathBuf, ClipboardOp)> {
+        let (file, op) = self.clipboard.internal_state();
+        file.zip(op)
     }
 
     /// Increments generation for async operations

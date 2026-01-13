@@ -163,3 +163,116 @@ pub fn show_shell_context_menu(
         })
     }
 }
+/// Helper to create a double-null-terminated wide string (required by SHFileOperation)
+fn to_double_null_terminated(s: &str) -> Vec<u16> {
+    s.encode_utf16()
+        .chain(std::iter::once(0))
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+/// Deletes a file or directory using Windows Shell (moves to Recycle Bin by default).
+/// Returns true if operation was successful (not cancelled).
+pub fn delete_item_with_shell(path: &Path, hwnd: HWND) -> bool {
+    let path_str = path.to_string_lossy();
+    let from_vec = to_double_null_terminated(&path_str);
+
+    let mut op = SHFILEOPSTRUCTW {
+        hwnd,
+        wFunc: FO_DELETE,
+        pFrom: PCWSTR(from_vec.as_ptr()),
+        pTo: PCWSTR(std::ptr::null()),
+        fFlags: (FOF_ALLOWUNDO | FOF_WANTNUKEWARNING).0 as u16,
+        ..Default::default()
+    };
+
+    // SAFETY: op is initialized with valid double-null terminated string
+    let result = unsafe { SHFileOperationW(&mut op) };
+
+    // Result 0 means success. fAnyOperationsAborted is set if user cancelled.
+    result == 0 && op.fAnyOperationsAborted.0 == 0
+}
+
+/// Renames a file or directory using Windows Shell.
+/// Returns true if operation was successful.
+pub fn rename_item_with_shell(path: &Path, new_name: &str, hwnd: HWND) -> bool {
+    let parent = match path.parent() {
+        Some(p) => p,
+        None => return false,
+    };
+    
+    let new_path = parent.join(new_name);
+    
+    let from_str = path.to_string_lossy();
+    let to_str = new_path.to_string_lossy();
+    
+    let from_vec = to_double_null_terminated(&from_str);
+    let to_vec = to_double_null_terminated(&to_str);
+
+    let mut op = SHFILEOPSTRUCTW {
+        hwnd,
+        wFunc: FO_RENAME,
+        pFrom: PCWSTR(from_vec.as_ptr()),
+        pTo: PCWSTR(to_vec.as_ptr()),
+        fFlags: (FOF_ALLOWUNDO | FOF_NO_UI).0 as u16,
+        ..Default::default()
+    };
+
+    // SAFETY: op is initialized with valid double-null terminated strings
+    let result = unsafe { SHFileOperationW(&mut op) };
+    
+    result == 0 && op.fAnyOperationsAborted.0 == 0
+}
+
+/// Copies a file or directory using Windows Shell.
+/// Returns true if operation was successful.
+pub fn copy_item_with_shell(path: &Path, dest_folder: &Path, hwnd: HWND) -> bool {
+    let from_str = path.to_string_lossy();
+    let to_str = dest_folder.to_string_lossy();
+    
+    let from_vec = to_double_null_terminated(&from_str);
+    let to_vec = to_double_null_terminated(&to_str);
+
+    let mut op = SHFILEOPSTRUCTW {
+        hwnd,
+        wFunc: FO_COPY,
+        pFrom: PCWSTR(from_vec.as_ptr()),
+        pTo: PCWSTR(to_vec.as_ptr()),
+        fFlags: (FOF_ALLOWUNDO).0 as u16,
+        ..Default::default()
+    };
+
+    // SAFETY: op is initialized with valid double-null terminated string
+    let result = unsafe { SHFileOperationW(&mut op) };
+    result == 0 && op.fAnyOperationsAborted.0 == 0
+}
+
+/// Moves a file or directory using Windows Shell.
+/// Returns true if operation was successful.
+pub fn move_item_with_shell(path: &Path, dest_folder: &Path, hwnd: HWND) -> bool {
+    // Skip if moving to same folder
+    if let Some(parent) = path.parent() {
+        if parent == dest_folder {
+            return false;
+        }
+    }
+
+    let from_str = path.to_string_lossy();
+    let to_str = dest_folder.to_string_lossy();
+    
+    let from_vec = to_double_null_terminated(&from_str);
+    let to_vec = to_double_null_terminated(&to_str);
+
+    let mut op = SHFILEOPSTRUCTW {
+        hwnd,
+        wFunc: FO_MOVE,
+        pFrom: PCWSTR(from_vec.as_ptr()),
+        pTo: PCWSTR(to_vec.as_ptr()),
+        fFlags: (FOF_ALLOWUNDO).0 as u16,
+        ..Default::default()
+    };
+
+    // SAFETY: op is initialized with valid double-null terminated string
+    let result = unsafe { SHFileOperationW(&mut op) };
+    result == 0 && op.fAnyOperationsAborted.0 == 0
+}

@@ -9,6 +9,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use crate::domain::file_entry::FileEntry;
+use crate::application::navigation::NavigationHistory;
 
 /// Represents a single browser tab
 #[derive(Clone)]
@@ -20,9 +21,7 @@ pub struct TabState {
     /// Display title (folder name or "Este Computador")
     pub title: String,
     /// Navigation history (linear)
-    pub navigation_history: Vec<String>,
-    /// Current position in history
-    pub history_index: usize,
+    pub navigation: NavigationHistory,
     /// Whether this tab is showing "Este Computador" view
     pub is_computer_view: bool,
     /// Items in this tab's view
@@ -48,8 +47,7 @@ impl TabState {
             id,
             path: "Este Computador".to_string(),
             title: "Este Computador".to_string(),
-            navigation_history: vec!["Este Computador".to_string()],
-            history_index: 0,
+            navigation: NavigationHistory::new("Este Computador".to_string()),
             is_computer_view: true,
             items: Arc::new(Vec::new()),
             all_items: Vec::new(),
@@ -72,8 +70,7 @@ impl TabState {
             id,
             path: path.to_string(),
             title,
-            navigation_history: vec![path.to_string()],
-            history_index: 0,
+            navigation: NavigationHistory::new(path.to_string()),
             is_computer_view: false,
             items: Arc::new(Vec::new()),
             all_items: Vec::new(),
@@ -91,14 +88,8 @@ impl TabState {
             return;
         }
         
-        // Truncate future history if we were in the middle
-        if self.history_index < self.navigation_history.len().saturating_sub(1) {
-            self.navigation_history.truncate(self.history_index + 1);
-        }
-        
-        // Add to history
-        self.navigation_history.push(new_path.to_string());
-        self.history_index = self.navigation_history.len() - 1;
+        // Delegate to navigation manager
+        self.navigation.navigate_to(new_path.to_string());
         
         // Update current path
         self.path = new_path.to_string();
@@ -118,8 +109,8 @@ impl TabState {
     
     /// Go back in history
     pub fn go_back(&mut self) -> bool {
-        if self.history_index > 0 {
-            self.history_index -= 1;
+        if let Some(path) = self.navigation.go_back().cloned() {
+            self.path = path.clone();
             self.sync_from_history();
             true
         } else {
@@ -129,8 +120,8 @@ impl TabState {
     
     /// Go forward in history
     pub fn go_forward(&mut self) -> bool {
-        if self.history_index + 1 < self.navigation_history.len() {
-            self.history_index += 1;
+        if let Some(path) = self.navigation.go_forward().cloned() {
+            self.path = path.clone();
             self.sync_from_history();
             true
         } else {
@@ -139,7 +130,7 @@ impl TabState {
     }
     
     fn sync_from_history(&mut self) {
-        if let Some(path) = self.navigation_history.get(self.history_index) {
+        if let Some(path) = self.navigation.current_path() {
             self.path = path.clone();
             self.path_input = path.clone();
             self.is_computer_view = path == "Este Computador";
@@ -156,11 +147,11 @@ impl TabState {
     }
     
     pub fn can_go_back(&self) -> bool {
-        self.history_index > 0
+        self.navigation.can_go_back()
     }
     
     pub fn can_go_forward(&self) -> bool {
-        self.history_index + 1 < self.navigation_history.len()
+        self.navigation.can_go_forward()
     }
 }
 
@@ -224,8 +215,7 @@ impl TabManager {
     pub fn duplicate_tab(&mut self) {
         let current = self.active().clone();
         let mut new_tab = TabState::new_at_path(self.next_id, &current.path);
-        new_tab.navigation_history = current.navigation_history.clone();
-        new_tab.history_index = current.history_index;
+        new_tab.navigation = current.navigation.clone();
         new_tab.is_computer_view = current.is_computer_view;
         new_tab.items = current.items.clone();
         new_tab.all_items = current.all_items.clone();
@@ -298,8 +288,7 @@ impl TabManager {
     pub fn reopen_closed_tab(&mut self) -> bool {
         if let Some(tab) = self.closed_tabs.pop() {
             let mut reopened = TabState::new_at_path(self.next_id, &tab.path);
-            reopened.navigation_history = tab.navigation_history;
-            reopened.history_index = tab.history_index;
+            reopened.navigation = tab.navigation;
             reopened.is_computer_view = tab.is_computer_view;
             reopened.items = tab.items;
             reopened.all_items = tab.all_items;

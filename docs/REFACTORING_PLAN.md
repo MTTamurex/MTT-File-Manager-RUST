@@ -14,8 +14,8 @@
 |------|-----------|--------|------|
 | **Fase 0** | Preparação | ✅ Completa | 13/01/2026 |
 | **Fase 1** | Extração de Constantes e Theme | ✅ Completa | 13/01/2026 |
-| **Fase 2** | Extração do State | ⬜ Pendente | - |
-| **Fase 3** | Extração de Operações | ⬜ Pendente | - |
+| **Fase 2** | Extração do State | ✅ Completa | 13/01/2026 |
+| **Fase 3** | Extração de Operações | ✅ Completa | 13/01/2026 |
 | **Fase 4** | Extração de UI Panels | ⬜ Pendente | - |
 | **Fase 5** | Extração do App Loop | ⬜ Pendente | - |
 | **Fase 6** | Cleanup e Documentação | ⬜ Pendente | - |
