@@ -1,5 +1,5 @@
 use eframe::egui;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use crate::domain::file_entry::{FileEntry, SyncStatus, ViewMode};
 use crate::infrastructure::windows as windows_infra;
 use crate::app::ImageViewerApp;

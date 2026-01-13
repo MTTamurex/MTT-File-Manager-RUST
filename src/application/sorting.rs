@@ -85,3 +85,110 @@ pub fn filter_items(items: &[FileEntry], query: &str) -> Vec<FileEntry> {
         .cloned()
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn create_test_file(name: &str, size: u64, modified: u64) -> FileEntry {
+        FileEntry {
+            path: PathBuf::from(name),
+            name: name.to_string(),
+            is_dir: false,
+            size,
+            modified,
+            folder_cover: None,
+            drive_info: None,
+            sync_status: crate::domain::file_entry::SyncStatus::None,
+            deletion_date: None,
+        }
+    }
+
+    fn create_test_dir(name: &str, modified: u64) -> FileEntry {
+        FileEntry {
+            path: PathBuf::from(name),
+            name: name.to_string(),
+            is_dir: true,
+            size: 0,
+            modified,
+            folder_cover: None,
+            drive_info: None,
+            sync_status: crate::domain::file_entry::SyncStatus::None,
+            deletion_date: None,
+        }
+    }
+
+    #[test]
+    fn test_sort_by_name_natural() {
+        let mut items = vec![
+            create_test_file("file10.txt", 0, 0),
+            create_test_file("file2.txt", 0, 0),
+            create_test_file("file1.txt", 0, 0),
+        ];
+
+        sort_items(&mut items, SortMode::Name, false, FoldersPosition::Mixed);
+        assert_eq!(items[0].name, "file1.txt");
+        assert_eq!(items[1].name, "file2.txt");
+        assert_eq!(items[2].name, "file10.txt");
+    }
+
+    #[test]
+    fn test_sort_by_size_descending() {
+        let mut items = vec![
+            create_test_file("small.txt", 100, 0),
+            create_test_file("large.txt", 1000, 0),
+            create_test_file("medium.txt", 500, 0),
+        ];
+
+        sort_items(&mut items, SortMode::Size, true, FoldersPosition::Mixed);
+        assert_eq!(items[0].name, "large.txt");
+        assert_eq!(items[1].name, "medium.txt");
+        assert_eq!(items[2].name, "small.txt");
+    }
+
+    #[test]
+    fn test_folders_first() {
+        let mut items = vec![
+            create_test_file("z_file.txt", 0, 0),
+            create_test_dir("a_dir", 0),
+            create_test_file("a_file.txt", 0, 0),
+        ];
+
+        sort_items(&mut items, SortMode::Name, false, FoldersPosition::First);
+        assert_eq!(items[0].name, "a_dir");
+        assert_eq!(items[1].name, "a_file.txt");
+        assert_eq!(items[2].name, "z_file.txt");
+    }
+
+    #[test]
+    fn test_folders_last() {
+        let mut items = vec![
+            create_test_dir("z_dir", 0),
+            create_test_file("a_file.txt", 0, 0),
+            create_test_dir("a_dir", 0),
+        ];
+
+        sort_items(&mut items, SortMode::Name, false, FoldersPosition::Last);
+        assert_eq!(items[0].name, "a_file.txt");
+        assert_eq!(items[1].name, "a_dir");
+        assert_eq!(items[2].name, "z_dir");
+    }
+
+    #[test]
+    fn test_filter_items() {
+        let items = vec![
+            create_test_file("apple.txt", 0, 0),
+            create_test_file("banana.txt", 0, 0),
+            create_test_file("pineapple.txt", 0, 0),
+        ];
+
+        let filtered = filter_items(&items, "apple");
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].name, "apple.txt");
+        assert_eq!(filtered[1].name, "pineapple.txt");
+
+        let filtered_empty = filter_items(&items, "");
+        assert_eq!(filtered_empty.len(), 3);
+    }
+}

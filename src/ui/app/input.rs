@@ -94,7 +94,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
     }
 }
 
-pub fn handle_resize_borders(app: &mut ImageViewerApp, ctx: &egui::Context) {
+pub fn handle_resize_borders(_app: &mut ImageViewerApp, ctx: &egui::Context) {
     let is_not_maximized = !ctx.input(|i| i.viewport().maximized.unwrap_or(false));
     if is_not_maximized {
         let screen_rect = ctx.screen_rect();
