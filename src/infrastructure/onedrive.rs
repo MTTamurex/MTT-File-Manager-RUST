@@ -107,25 +107,23 @@ pub fn get_sync_status(attrs: u32, is_onedrive: bool) -> SyncStatus {
 /// Returns true if the file data is on disk, false if it needs download.
 pub fn is_locally_available(path: &Path) -> bool {
     use windows::Win32::Storage::FileSystem::{GetFileAttributesW, INVALID_FILE_ATTRIBUTES};
-    
+
     let path_wide: Vec<u16> = path
         .to_string_lossy()
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect();
-    
-    let attrs = unsafe {
-        GetFileAttributesW(windows::core::PCWSTR(path_wide.as_ptr()))
-    };
-    
+
+    let attrs = unsafe { GetFileAttributesW(windows::core::PCWSTR(path_wide.as_ptr())) };
+
     if attrs == INVALID_FILE_ATTRIBUTES {
         return false; // File doesn't exist or error
     }
-    
+
     // Cloud-only indicators: need to be recalled/downloaded
     let is_cloud_only = (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0
         || (attrs & FILE_ATTRIBUTE_OFFLINE) != 0;
-    
+
     !is_cloud_only
 }
 

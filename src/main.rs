@@ -2,17 +2,15 @@ use eframe::egui;
 use mtt_file_manager::app::ImageViewerApp;
 use std::path::PathBuf;
 
-
-
 /// Load application icon from PNG file
 fn load_app_icon() -> Option<egui::IconData> {
     let icon_path = std::path::PathBuf::from("appicon.png");
-    
+
     if !icon_path.exists() {
         eprintln!("Warning: appicon.png not found - using default icon");
         return None;
     }
-    
+
     // Load PNG using image crate
     match image::open(&icon_path) {
         Ok(img) => {
@@ -20,7 +18,7 @@ fn load_app_icon() -> Option<egui::IconData> {
             let resized = img.resize_exact(256, 256, image::imageops::FilterType::Lanczos3);
             let rgba_image = resized.to_rgba8();
             let pixels = rgba_image.into_raw();
-            
+
             Some(egui::IconData {
                 rgba: pixels,
                 width: 256,
@@ -37,10 +35,10 @@ fn load_app_icon() -> Option<egui::IconData> {
 fn main() -> eframe::Result<()> {
     // Initialize codec name cache (queries Windows Registry on-demand)
     mtt_file_manager::infrastructure::windows::codec_registry::init_codec_cache();
-    
+
     // Load application icon
     let icon_data = load_app_icon();
-    
+
     // 3-STAGE STARTUP: Start hidden and small (NOT maximized here)
     let mut viewport = egui::ViewportBuilder::default()
         .with_visible(false) // Start hidden
@@ -50,12 +48,12 @@ fn main() -> eframe::Result<()> {
         .with_app_id("mtt-file-manager")
         .with_decorations(true) // Use native Windows title bar (fixes resize and sidebar issues)
         .with_resizable(true); // HABILITA resize nativo do Windows
-    
+
     // Set window icon if loaded successfully
     if let Some(icon) = icon_data {
         viewport = viewport.with_icon(icon);
     }
-    
+
     let options = eframe::NativeOptions {
         viewport,
         persist_window: false, // Disable eframe persistence - we control manually

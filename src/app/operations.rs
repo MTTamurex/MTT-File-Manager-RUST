@@ -1,32 +1,40 @@
-﻿// Application Operations - All ImageViewerApp methods
+// Application Operations - All ImageViewerApp methods
 // This file contains the business logic and operations for the file manager
 
+//! Application operations and business logic.
+//!
+//! This module implements the `ImageViewerApp` methods for handling file operations,
+//! navigation, searching, sorting, and UI interactions. It acts as the controller layer.
+
+// use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering as AtomicOrdering;
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::app::state::ImageViewerApp;
 use crate::application::file_operations;
 use crate::application::sorting;
-use crate::app::state::ImageViewerApp;
-use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode, SyncStatus, IconSize};
+use crate::domain::file_entry::{FileEntry, FoldersPosition, IconSize, SortMode, ViewMode};
 use crate::infrastructure::onedrive;
 use crate::infrastructure::windows as windows_infra;
 
+use std::os::windows::ffi::OsStringExt;
+use windows::core::PCWSTR;
 use windows::Win32::Foundation::*;
+use windows::Win32::Graphics::Dwm::{
+    DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+};
 use windows::Win32::Storage::FileSystem::*;
 use windows::Win32::UI::Shell::*;
-use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, SendMessageW};
-use windows::core::PCWSTR;
-use std::os::windows::ffi::OsStringExt;
-use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND};
+use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
 
-use std::time::{Duration, UNIX_EPOCH};
 use notify::{RecursiveMode, Watcher};
+use std::time::{Duration, UNIX_EPOCH};
 
-use eframe::egui; // For UI-related methods
-use crate::ui::theme; // For constants like DRIVE_REFRESH_INTERVAL_MS
 use crate::infrastructure::windows::{extract_file_icon_by_path, open_with_shell};
+use crate::ui::theme; // For constants like DRIVE_REFRESH_INTERVAL_MS
+use eframe::egui; // For UI-related methods
 
 const DRIVE_REFRESH_INTERVAL_MS: u64 = crate::ui::theme::DRIVE_REFRESH_MS;
 
@@ -36,8 +44,6 @@ const DRIVE_REFRESH_INTERVAL_MS: u64 = crate::ui::theme::DRIVE_REFRESH_MS;
 // PlaceHolder - este arquivo serÃ¡ reconstruÃ­do a partir do operations_temp.rs
 // com os imports corretos
 impl ImageViewerApp {
-
-
     pub fn delete_with_shell_for_idx(&mut self, idx: Option<usize>) {
         let target_idx = idx.or(self.selected_item);
         if let Some(idx) = target_idx {
@@ -58,8 +64,10 @@ impl ImageViewerApp {
     }
 
     pub fn restore_from_recycle_bin(&mut self, physical_path: &Path) {
-        use crate::infrastructure::windows::recycle_bin::{restore_from_recycle_bin, enumerate_recycle_bin};
-        
+        use crate::infrastructure::windows::recycle_bin::{
+            enumerate_recycle_bin, restore_from_recycle_bin,
+        };
+
         // Get the original path from RecycleBinItem by re-enumerating
         // This ensures we get the correct original_path stored in the $I file
         let original_path = if let Ok(recycle_items) = enumerate_recycle_bin() {
@@ -70,29 +78,29 @@ impl ImageViewerApp {
         } else {
             None
         };
-        
+
         if let Some(item) = self.items.iter().find(|i| i.path == physical_path) {
             let original_path = original_path.unwrap_or_else(|| {
                 // Fallback: use Desktop if we can't find original path
                 PathBuf::from("C:\\Users\\Public\\Desktop").join(item.name.clone())
             });
-            
+
             match restore_from_recycle_bin(physical_path, &original_path) {
                 Ok(_) => {
-                    self.notifications.push(
-                        crate::application::AppNotification::success(
-                            format!("'{}' restaurado com sucesso", item.name),
-                        ),
-                    );
+                    self.notifications
+                        .push(crate::application::AppNotification::success(format!(
+                            "'{}' restaurado com sucesso",
+                            item.name
+                        )));
                     // Refresh recycle bin view
                     self.setup_recycle_bin_view();
                 }
                 Err(e) => {
-                    self.notifications.push(
-                        crate::application::AppNotification::error(
-                            format!("Erro ao restaurar: {}", e),
-                        ),
-                    );
+                    self.notifications
+                        .push(crate::application::AppNotification::error(format!(
+                            "Erro ao restaurar: {}",
+                            e
+                        )));
                 }
             }
         }
@@ -100,26 +108,26 @@ impl ImageViewerApp {
 
     pub fn delete_permanently(&mut self, physical_path: &Path) {
         use crate::infrastructure::windows::recycle_bin::delete_permanently;
-        
+
         if let Some(item) = self.items.iter().find(|i| i.path == physical_path) {
             let item_name = item.name.clone();
-            
+
             match delete_permanently(physical_path) {
                 Ok(_) => {
-                    self.notifications.push(
-                        crate::application::AppNotification::success(
-                            format!("'{}' excluÃ­do permanentemente", item_name),
-                        ),
-                    );
+                    self.notifications
+                        .push(crate::application::AppNotification::success(format!(
+                            "'{}' excluído permanentemente",
+                            item_name
+                        )));
                     // Refresh recycle bin view
                     self.setup_recycle_bin_view();
                 }
                 Err(e) => {
-                    self.notifications.push(
-                        crate::application::AppNotification::error(
-                            format!("Erro ao excluir: {}", e),
-                        ),
-                    );
+                    self.notifications
+                        .push(crate::application::AppNotification::error(format!(
+                            "Erro ao excluir: {}",
+                            e
+                        )));
                 }
             }
         }
@@ -127,23 +135,22 @@ impl ImageViewerApp {
 
     pub fn empty_recycle_bin(&mut self) {
         use crate::infrastructure::windows::recycle_bin::empty_recycle_bin;
-        
+
         match empty_recycle_bin() {
             Ok(_) => {
-                self.notifications.push(
-                    crate::application::AppNotification::success(
+                self.notifications
+                    .push(crate::application::AppNotification::success(
                         "Lixeira esvaziada com sucesso".to_string(),
-                    ),
-                );
+                    ));
                 // Refresh recycle bin view
                 self.setup_recycle_bin_view();
             }
             Err(e) => {
-                self.notifications.push(
-                    crate::application::AppNotification::error(
-                        format!("Erro ao esvaziar lixeira: {}", e),
-                    ),
-                );
+                self.notifications
+                    .push(crate::application::AppNotification::error(format!(
+                        "Erro ao esvaziar lixeira: {}",
+                        e
+                    )));
             }
         }
     }
@@ -156,7 +163,7 @@ impl ImageViewerApp {
                 // We'll use the shell properties dialog
                 let _ = crate::infrastructure::windows::native_menu::show_properties_dialog(
                     self.native_hwnd.unwrap_or_default(),
-                    &path
+                    &path,
                 );
             }
         }
@@ -167,7 +174,11 @@ impl ImageViewerApp {
 
         match file_operations::create_new_folder(&base_path) {
             Ok(full_path) => {
-                let new_folder_name = full_path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                let new_folder_name = full_path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
 
                 // CRITICAL: Immediately create entry to allow renaming
                 let new_item = FileEntry::from_path(full_path.clone(), true);
@@ -199,9 +210,9 @@ impl ImageViewerApp {
     /// Copiar: Coloca o arquivo no clipboard do Windows e interno
     pub fn command_copy(&mut self, idx: Option<usize>) {
         if let Some(idx) = idx.or(self.selected_item) {
-             if let Some(item) = self.items.get(idx) {
-                 self.clipboard.copy(&item.path);
-             }
+            if let Some(item) = self.items.get(idx) {
+                self.clipboard.copy(&item.path);
+            }
         }
     }
 
@@ -228,38 +239,33 @@ impl ImageViewerApp {
                     PathBuf::from(&self.current_path)
                 }
             } else {
-               PathBuf::from(&self.current_path)
+                PathBuf::from(&self.current_path)
             }
         } else {
-             PathBuf::from(&self.current_path)
+            PathBuf::from(&self.current_path)
         };
 
         match self.clipboard.paste(&dest_folder, self.native_hwnd) {
             Ok(true) => {
-                 // Move successful
-                 self.load_folder(false);
-                 self.context_menu.target_path = None;
-            },
+                // Move successful
+                self.load_folder(false);
+                self.context_menu.target_path = None;
+            }
             Ok(false) => {
-                 // Copy successful
-                 self.load_folder(false);
-                 self.context_menu.target_path = None;
-            },
+                // Copy successful
+                self.load_folder(false);
+                self.context_menu.target_path = None;
+            }
             Err(e) => {
-                 eprintln!("[CLIPBOARD ERROR] {}", e);
+                eprintln!("[CLIPBOARD ERROR] {}", e);
             }
         }
     }
 
-
-
     /// Filtra itens baseado na query de busca e reaplica ordenaÃ§Ã£o
     /// Filtra itens baseado na query de busca e reaplica ordenaÃ§Ã£o
     pub fn filter_items(&mut self) {
-        self.items = Arc::new(sorting::filter_items(
-            &self.all_items,
-            &self.search_query,
-        ));
+        self.items = Arc::new(sorting::filter_items(&self.all_items, &self.search_query));
         self.total_items = self.items.len();
         self.sort_items();
     }
@@ -315,7 +321,11 @@ impl ImageViewerApp {
 
         self.disk_cache.set_preference(
             "show_preview_panel",
-            if self.show_preview_panel { "true" } else { "false" },
+            if self.show_preview_panel {
+                "true"
+            } else {
+                "false"
+            },
         );
 
         // Window state persistence
@@ -325,9 +335,13 @@ impl ImageViewerApp {
             .set_preference("window_height", &self.saved_window_height.to_string());
         self.disk_cache.set_preference(
             "window_is_maximized",
-            if self.saved_is_maximized { "true" } else { "false" },
+            if self.saved_is_maximized {
+                "true"
+            } else {
+                "false"
+            },
         );
-        
+
         // Sidebar widths persistence - sÃ³ salva valores vÃ¡lidos
         let left_to_save = self.sidebar_left_width.max(150.0);
         let right_to_save = self.sidebar_right_width.max(250.0);
@@ -407,7 +421,6 @@ impl ImageViewerApp {
                 // before the scope ends.
                 if let Ok(handle) = FindFirstFileW(PCWSTR(wide_path.as_ptr()), &mut find_data) {
                     loop {
-                        
                         // Verifica se a geraÃ§Ã£o mudou -> Aborta scan antigo
                         if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
                             break;
@@ -483,7 +496,7 @@ impl ImageViewerApp {
                                 // DISABLED: is_file_open() is EXTREMELY slow on OneDrive (28ms per file!)
                                 // It tries to open file handles which triggers sync/network checks.
                                 // Windows Explorer doesn't do this - it only uses file attributes.
-                                // 
+                                //
                                 // OLD CODE (removed for performance):
                                 // if is_onedrive && !is_dir && sync_status != SyncStatus::None {
                                 //     if onedrive::is_file_open(&full_path) {
@@ -514,7 +527,7 @@ impl ImageViewerApp {
                                 }
                             }
                         }
-                        
+
                         if FindNextFileW(handle, &mut find_data).is_err() {
                             break;
                         }
@@ -532,7 +545,11 @@ impl ImageViewerApp {
             // Envia vetor VAZIO para sinalizar FIM do carregamento (apenas se a geraÃ§Ã£o for a mesma)
             if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                 let scan_elapsed = scan_start.elapsed();
-                eprintln!("[PERF] Folder scan complete: {:?} took {:.2}s", current_path, scan_elapsed.as_secs_f64());
+                eprintln!(
+                    "[PERF] Folder scan complete: {:?} took {:.2}s",
+                    current_path,
+                    scan_elapsed.as_secs_f64()
+                );
                 let _ = file_entry_sender.send((my_gen, Vec::new()));
                 ctx.request_repaint();
             }
@@ -569,7 +586,7 @@ impl ImageViewerApp {
         self.current_path = normalized_path.clone();
         self.path_input = normalized_path.clone();
         self.is_computer_view = false;
-        self.is_recycle_bin_view = false;  // Reset quando navega para qualquer pasta
+        self.is_recycle_bin_view = false; // Reset quando navega para qualquer pasta
 
         // SYNC TAB STATE
         self.sync_to_tab();
@@ -590,26 +607,26 @@ impl ImageViewerApp {
             if path == "Este Computador" {
                 // Invalida preview da pasta que estÃ¡vamos
                 self.cache_manager.invalidate_folder_preview(&previous_path);
-                
+
                 // SYNC TAB STATE
                 self.sync_to_tab();
-                
+
                 self.reset_selection_and_search();
                 self.setup_computer_view();
             } else if path == "Lixeira" {
                 // Invalida preview da pasta que estÃ¡vamos
                 self.cache_manager.invalidate_folder_preview(&previous_path);
-                
+
                 self.reset_selection_and_search();
                 self.setup_recycle_bin_view();
             } else {
                 let new_path = std::path::PathBuf::from(&path);
-                
+
                 // Se estÃ¡vamos em uma subpasta do destino, invalida o preview dessa subpasta
                 if previous_path.starts_with(&new_path) && previous_path != new_path {
                     self.cache_manager.invalidate_folder_preview(&previous_path);
                 }
-                
+
                 self.current_path = path.clone();
                 self.sync_to_tab();
                 self.path_input = self.current_path.clone();
@@ -630,25 +647,25 @@ impl ImageViewerApp {
 
             if path == "Este Computador" {
                 self.cache_manager.invalidate_folder_preview(&previous_path);
-                
+
                 // SYNC TAB STATE
                 self.sync_to_tab();
-                
+
                 self.reset_selection_and_search();
                 self.setup_computer_view();
             } else if path == "Lixeira" {
                 self.cache_manager.invalidate_folder_preview(&previous_path);
-                
+
                 self.reset_selection_and_search();
                 self.setup_recycle_bin_view();
             } else {
                 let new_path = std::path::PathBuf::from(&path);
-                
+
                 // Se o destino Ã© pai do path atual, invalida o preview do path atual
                 if previous_path.starts_with(&new_path) && previous_path != new_path {
                     self.cache_manager.invalidate_folder_preview(&previous_path);
                 }
-                
+
                 self.current_path = path.clone();
                 self.sync_to_tab();
                 self.path_input = self.current_path.clone();
@@ -727,7 +744,7 @@ impl ImageViewerApp {
                 Ok(recycle_items) => {
                     const BATCH_SIZE: usize = 100;
                     let mut batch = Vec::with_capacity(BATCH_SIZE);
-                    
+
                     for item in recycle_items {
                         // Verifica se a geraÃ§Ã£o ainda Ã© vÃ¡lida (cancelamento rÃ¡pido)
                         if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
@@ -741,11 +758,11 @@ impl ImageViewerApp {
                         let file_path = if !item.physical_path.as_os_str().is_empty() {
                             item.physical_path.clone()
                         } else if item.is_directory {
-                             PathBuf::from("C:\\folder")
+                            PathBuf::from("C:\\folder")
                         } else if !item.extension.is_empty() {
-                             PathBuf::from(format!("dummy{}", item.extension))
+                            PathBuf::from(format!("dummy{}", item.extension))
                         } else {
-                             item.original_path.clone()
+                            item.original_path.clone()
                         };
 
                         let entry = FileEntry {
@@ -1012,7 +1029,10 @@ impl ImageViewerApp {
     }
 
     pub fn request_folder_preview_load(&mut self, path: PathBuf) {
-        if self.cache_manager.start_folder_preview_loading(path.clone()) {
+        if self
+            .cache_manager
+            .start_folder_preview_loading(path.clone())
+        {
             let _ = self.folder_preview_sender.send(path);
         }
     }
@@ -1031,7 +1051,7 @@ impl ImageViewerApp {
         if let Ok(hwnd) = hwnd_result {
             if !hwnd.0.is_null() {
                 self.native_hwnd = Some(hwnd);
-                
+
                 // Apply rounded corners (Windows 11 style)
                 unsafe {
                     let corner_pref = DWMWCP_ROUND;
@@ -1047,13 +1067,12 @@ impl ImageViewerApp {
                         eprintln!("[DWM] Failed to apply rounded corners: {:?}", result);
                     }
                 }
-                
+
                 // Pre-initialize shell extensions so they're ready on first context menu
                 crate::infrastructure::windows::native_menu::warmup_shell_extensions(hwnd);
             }
         }
     }
-
 
     /// Retorna icone para um arquivo, carregando sob demanda.
     /// Executaveis (.exe, .lnk, .ico) sao cacheados por path completo.
@@ -1091,7 +1110,11 @@ impl ImageViewerApp {
         let icon_result = if matches!(extension.as_str(), "exe" | "lnk" | "ico") {
             extract_file_icon_by_path(path, icon_size)
         } else {
-            crate::infrastructure::windows::get_file_type_icon(false, &format!(".{}", extension), icon_size)
+            crate::infrastructure::windows::get_file_type_icon(
+                false,
+                &format!(".{}", extension),
+                icon_size,
+            )
         };
 
         match icon_result {
@@ -1231,8 +1254,8 @@ impl ImageViewerApp {
         // 2. CHECK DE AUTO-REFRESH (WATCHER)
         fn normalize_for_match(p: &Path) -> String {
             let s = p.to_string_lossy().to_string().to_lowercase();
-            if s.starts_with(r"\\?\") {
-                s[4..].to_string()
+            if let Some(stripped) = s.strip_prefix(r"\\?\") {
+                stripped.to_string()
             } else {
                 s
             }
@@ -1240,15 +1263,15 @@ impl ImageViewerApp {
 
         fn clean_path(p: &Path) -> PathBuf {
             let s = p.to_string_lossy().to_string();
-            if s.starts_with(r"\\?\") {
-                PathBuf::from(&s[4..])
+            if let Some(stripped) = s.strip_prefix(r"\\?\") {
+                PathBuf::from(stripped)
             } else {
                 p.to_path_buf()
             }
         }
 
         let current_path_norm = normalize_for_match(Path::new(&self.current_path));
-        
+
         while let Ok(event) = self.fs_event_receiver.try_recv() {
             match event {
                 Ok(evt) => {
@@ -1256,25 +1279,30 @@ impl ImageViewerApp {
 
                     // Filter out hidden/system files to prevent infinite reload loops (e.g. C:\DumpStack.log.tmp)
                     let should_ignore = |p: &Path| -> bool {
-                        let name = p.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
+                        let name = p
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_lowercase();
                         // Ignore common noisy system files
-                        if name.starts_with("dumpstack.log") 
-                           || name.starts_with("hiberfil.sys")
-                           || name.starts_with("pagefile.sys")
-                           || name.starts_with("swapfile.sys") 
-                           || name == "desktop.ini" 
-                           || name == "thumbs.db" {
+                        if name.starts_with("dumpstack.log")
+                            || name.starts_with("hiberfil.sys")
+                            || name.starts_with("pagefile.sys")
+                            || name.starts_with("swapfile.sys")
+                            || name == "desktop.ini"
+                            || name == "thumbs.db"
+                        {
                             return true;
                         }
-                        
+
                         // Check attributes if file exists
                         if let Ok(metadata) = std::fs::metadata(p) {
-                             // 0x02 = Hidden, 0x04 = System
-                             use std::os::windows::fs::MetadataExt;
-                             let attrs = metadata.file_attributes();
-                             if (attrs & 0x02) != 0 || (attrs & 0x04) != 0 {
-                                 return true;
-                             }
+                            // 0x02 = Hidden, 0x04 = System
+                            use std::os::windows::fs::MetadataExt;
+                            let attrs = metadata.file_attributes();
+                            if (attrs & 0x02) != 0 || (attrs & 0x04) != 0 {
+                                return true;
+                            }
                         }
                         false
                     };
@@ -1282,18 +1310,25 @@ impl ImageViewerApp {
                     // Detecta eventos de Remove para limpar cache automaticamente
                     if matches!(evt.kind, notify::EventKind::Remove(_)) {
                         for path in &evt.paths {
-                            if should_ignore(path) { continue; }
+                            if should_ignore(path) {
+                                continue;
+                            }
                             meaningful_change = true;
-                            
+
                             let cleaned = clean_path(path);
-                            eprintln!("[FS] Detected removal, clearing disk cache for: {:?}", cleaned);
+                            eprintln!(
+                                "[FS] Detected removal, clearing disk cache for: {:?}",
+                                cleaned
+                            );
                             self.disk_cache.remove_cache_for_path(&cleaned);
                         }
                     }
-                    
+
                     // Detecta Modify para invalidar folder previews
                     for path in &evt.paths {
-                        if should_ignore(path) { continue; }
+                        if should_ignore(path) {
+                            continue;
+                        }
                         meaningful_change = true;
 
                         // 1. Se o path alterado Ã© uma subpasta direta da pasta atual
@@ -1301,24 +1336,31 @@ impl ImageViewerApp {
                             let parent_norm = normalize_for_match(parent);
                             if parent_norm == current_path_norm {
                                 let cleaned = clean_path(path);
-                                eprintln!("[FS] Direct subfolder modified: {:?}", cleaned.file_name());
+                                eprintln!(
+                                    "[FS] Direct subfolder modified: {:?}",
+                                    cleaned.file_name()
+                                );
                                 self.cache_manager.invalidate_folder_preview(&cleaned);
                             }
                         }
-                        
+
                         // 2. Se o path alterado Ã© UM ARQUIVO dentro de uma subpasta da pasta atual
                         if let Some(parent) = path.parent() {
                             if let Some(grandparent) = parent.parent() {
                                 let grandparent_norm = normalize_for_match(grandparent);
                                 if grandparent_norm == current_path_norm {
                                     let cleaned_parent = clean_path(parent);
-                                    eprintln!("[FS] File in subfolder modified, invalidating: {:?}", cleaned_parent.file_name());
-                                    self.cache_manager.invalidate_folder_preview(&cleaned_parent);
+                                    eprintln!(
+                                        "[FS] File in subfolder modified, invalidating: {:?}",
+                                        cleaned_parent.file_name()
+                                    );
+                                    self.cache_manager
+                                        .invalidate_folder_preview(&cleaned_parent);
                                 }
                             }
                         }
                     }
-                    
+
                     if meaningful_change {
                         self.pending_auto_reload = true;
                     }
@@ -1503,7 +1545,9 @@ impl ImageViewerApp {
 
         // Keyboard navigation for list view (ONLY when not renaming)
         // Throttle: 50ms between navigations to prevent scroll desync when holding keys
-        if self.renaming_state.is_none() && self.last_keyboard_nav.elapsed() >= Duration::from_millis(50) {
+        if self.renaming_state.is_none()
+            && self.last_keyboard_nav.elapsed() >= Duration::from_millis(50)
+        {
             let current_index = self.items.iter().position(|x| {
                 self.selected_file
                     .as_ref()
@@ -1522,13 +1566,13 @@ impl ImageViewerApp {
                 if let Some(item) = self.items.get(clamped) {
                     let item_path = item.path.clone();
                     let is_dir = item.is_dir;
-                    
+
                     self.selected_file = Some(item.clone());
                     self.selected_item = Some(clamped);
                     self.update_selected_thumbnail();
                     self.scroll_to_selected = true; // Trigger scroll to selected item
                     self.last_keyboard_nav = Instant::now(); // Reset throttle timer
-                    
+
                     // Trigger thumbnail load for sidebar preview
                     if !is_dir {
                         if !self.cache_manager.has_thumbnail(&item_path)
@@ -1565,9 +1609,8 @@ impl ImageViewerApp {
         let computer_icon = self.cache_manager.computer_icon.clone();
 
         // Check if current path is in OneDrive
-        let is_onedrive_folder = crate::infrastructure::onedrive::is_onedrive_path(
-            &PathBuf::from(&self.current_path),
-        );
+        let is_onedrive_folder =
+            crate::infrastructure::onedrive::is_onedrive_path(&PathBuf::from(&self.current_path));
 
         // Criar contexto com referÃªncias mutÃ¡veis separadas
         let scroll_to_selected = self.scroll_to_selected;
@@ -1627,7 +1670,8 @@ impl ImageViewerApp {
             }
 
             fn request_folder_preview_load(&mut self, path: PathBuf) {
-                self.actions.push(ListAction::RequestFolderPreviewLoad(path));
+                self.actions
+                    .push(ListAction::RequestFolderPreviewLoad(path));
             }
 
             fn rename_with_shell(&mut self, idx: usize) {
@@ -1656,7 +1700,7 @@ impl ImageViewerApp {
                 if let Some(item) = self.items.get(idx) {
                     let item_path = item.path.clone();
                     let is_dir = item.is_dir;
-                    
+
                     self.selected_file = Some(item.clone());
                     self.update_selected_thumbnail();
 
@@ -1673,7 +1717,9 @@ impl ImageViewerApp {
             Some(list_view::ListViewAction::DoubleClick(idx)) if !is_renaming => {
                 let path_to_navigate = self.items.get(idx).map(|item| {
                     if item.is_dir {
-                        if self.is_recycle_bin_view { return None; }
+                        if self.is_recycle_bin_view {
+                            return None;
+                        }
                         Some(item.path.clone())
                     } else {
                         open_with_shell(&item.path);
@@ -1696,12 +1742,8 @@ impl ImageViewerApp {
                     // Usar o novo sistema de menu estilizado
                     let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
                     self.populate_context_menu(ui.ctx(), &item_path, false, Some(idx));
-                    self.context_menu.open(
-                        pointer_pos,
-                        Some(idx),
-                        Some(item_path),
-                        false,
-                    );
+                    self.context_menu
+                        .open(pointer_pos, Some(idx), Some(item_path), false);
                 }
             }
             Some(list_view::ListViewAction::SortChange(mode)) => {
@@ -1725,7 +1767,9 @@ impl ImageViewerApp {
                 ListAction::OpenWithShell(path) => open_with_shell(&path),
                 ListAction::RequestThumbnailLoad(path) => self.request_thumbnail_load(path),
                 ListAction::RequestFolderScan(path) => self.request_folder_scan(path),
-                ListAction::RequestFolderPreviewLoad(path) => self.request_folder_preview_load(path),
+                ListAction::RequestFolderPreviewLoad(path) => {
+                    self.request_folder_preview_load(path)
+                }
                 ListAction::RenameWithShell(idx) => self.rename_with_shell(idx),
             }
         }
@@ -1745,7 +1789,9 @@ impl ImageViewerApp {
 
         // Keyboard navigation (ONLY when not renaming)
         // Throttle: 50ms between navigations to prevent scroll desync when holding keys
-        if self.renaming_state.is_none() && self.last_keyboard_nav.elapsed() >= Duration::from_millis(50) {
+        if self.renaming_state.is_none()
+            && self.last_keyboard_nav.elapsed() >= Duration::from_millis(50)
+        {
             let current_index = self.items.iter().position(|x| {
                 self.selected_file
                     .as_ref()
@@ -1855,7 +1901,8 @@ impl ImageViewerApp {
                 self.actions.push(GridAction::RequestFolderScan(path));
             }
             fn request_folder_preview_load(&mut self, path: PathBuf) {
-                self.actions.push(GridAction::RequestFolderPreviewLoad(path));
+                self.actions
+                    .push(GridAction::RequestFolderPreviewLoad(path));
             }
 
             fn rename_with_shell(&mut self, idx: usize) {
@@ -1888,7 +1935,9 @@ impl ImageViewerApp {
             Some(grid_view::GridViewAction::DoubleClick(idx)) if !is_renaming => {
                 let path_to_navigate = self.items.get(idx).map(|item| {
                     if item.is_dir {
-                        if self.is_recycle_bin_view { return None; }
+                        if self.is_recycle_bin_view {
+                            return None;
+                        }
                         Some(item.path.clone())
                     } else {
                         open_with_shell(&item.path);
@@ -1911,12 +1960,8 @@ impl ImageViewerApp {
                     // Usar o novo sistema de menu estilizado
                     let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
                     self.populate_context_menu(ui.ctx(), &item_path, false, Some(idx));
-                    self.context_menu.open(
-                        pointer_pos,
-                        Some(idx),
-                        Some(item_path),
-                        false,
-                    );
+                    self.context_menu
+                        .open(pointer_pos, Some(idx), Some(item_path), false);
                 }
             }
             _ => {}
@@ -1929,7 +1974,9 @@ impl ImageViewerApp {
                 GridAction::OpenWithShell(path) => open_with_shell(&path),
                 GridAction::RequestThumbnailLoad(path) => self.request_thumbnail_load(path),
                 GridAction::RequestFolderScan(path) => self.request_folder_scan(path),
-                GridAction::RequestFolderPreviewLoad(path) => self.request_folder_preview_load(path),
+                GridAction::RequestFolderPreviewLoad(path) => {
+                    self.request_folder_preview_load(path)
+                }
                 GridAction::RenameWithShell(idx) => self.rename_with_shell(idx),
             }
         }
@@ -2112,7 +2159,7 @@ impl ImageViewerApp {
                 self.selected_thumbnail = None;
                 return;
             }
-            
+
             // Tenta pegar do cache. Se nÃ£o estiver lÃ¡, mantÃ©m None (serÃ¡ atualizado via message loop)
             if let Some(tex) = self.cache_manager.texture_cache.peek(&selected.path) {
                 self.selected_thumbnail = Some(tex.clone());
@@ -2166,49 +2213,92 @@ impl ImageViewerApp {
         file_operations::create_shortcut(target, &self.current_path)
     }
 
-    pub fn populate_context_menu(&mut self, ctx: &egui::Context, path: &std::path::Path, is_empty_area: bool, _item_index: Option<usize>) {
+    pub fn populate_context_menu(
+        &mut self,
+        ctx: &egui::Context,
+        path: &std::path::Path,
+        is_empty_area: bool,
+        _item_index: Option<usize>,
+    ) {
         use crate::application::context_menu::ContextMenuItem;
-        use crate::infrastructure::windows::native_menu::{extract_shell_menu, ShellMenuItem, is_known_verb};
-        
+        use crate::infrastructure::windows::native_menu::{
+            extract_shell_menu, is_known_verb, ShellMenuItem,
+        };
+
         let mut items = Vec::new();
-        
+
         // Special menu for Recycle Bin items
         if self.is_recycle_bin_view && !is_empty_area {
             // Menu items for recycle bin (no primary icons)
             items.push(ContextMenuItem::new(-52, "Restaurar").with_command("restore"));
-            items.push(ContextMenuItem::new(-53, "Excluir permanentemente").with_command("delete_permanent"));
+            items.push(
+                ContextMenuItem::new(-53, "Excluir permanentemente")
+                    .with_command("delete_permanent"),
+            );
             items.push(ContextMenuItem::separator());
-            items.push(ContextMenuItem::new(-28, "Propriedades").with_command("properties").with_shortcut("Alt+Enter"));
-            
+            items.push(
+                ContextMenuItem::new(-28, "Propriedades")
+                    .with_command("properties")
+                    .with_shortcut("Alt+Enter"),
+            );
+
             self.context_menu.items = items;
             return;
         }
-        
+
         // Special menu for empty area in Recycle Bin
         if self.is_recycle_bin_view && is_empty_area {
-            items.push(ContextMenuItem::new(-54, "Esvaziar Lixeira").with_command("empty_recycle_bin"));
+            items.push(
+                ContextMenuItem::new(-54, "Esvaziar Lixeira").with_command("empty_recycle_bin"),
+            );
             self.context_menu.items = items;
             return;
         }
-        
+
         // ========== PRIMARY ITEMS (Header bar) - matching Files ==========
         // These appear as icon buttons in the header
-        items.push(ContextMenuItem::primary(-3, "Recortar").with_command("cut").with_shortcut("Ctrl+X"));
-        items.push(ContextMenuItem::primary(-2, "Copiar").with_command("copy").with_shortcut("Ctrl+C"));
-        
+        items.push(
+            ContextMenuItem::primary(-3, "Recortar")
+                .with_command("cut")
+                .with_shortcut("Ctrl+X"),
+        );
+        items.push(
+            ContextMenuItem::primary(-2, "Copiar")
+                .with_command("copy")
+                .with_shortcut("Ctrl+C"),
+        );
+
         let can_paste = self.clipboard.has_content();
-        items.push(ContextMenuItem::primary(-4, "Colar").with_command("paste").with_shortcut("Ctrl+V").enabled(can_paste));
-        
+        items.push(
+            ContextMenuItem::primary(-4, "Colar")
+                .with_command("paste")
+                .with_shortcut("Ctrl+V")
+                .enabled(can_paste),
+        );
+
         if !is_empty_area {
-            items.push(ContextMenuItem::primary(-5, "Renomear").with_command("rename").with_shortcut("F2"));
-            items.push(ContextMenuItem::primary(-6, "Excluir").with_command("delete").with_shortcut("Del"));
+            items.push(
+                ContextMenuItem::primary(-5, "Renomear")
+                    .with_command("rename")
+                    .with_shortcut("F2"),
+            );
+            items.push(
+                ContextMenuItem::primary(-6, "Excluir")
+                    .with_command("delete")
+                    .with_shortcut("Del"),
+            );
         }
-        
+
         // ========== SECONDARY ITEMS (App-specific) ==========
         let can_paste = self.clipboard.has_content();
         if is_empty_area {
             items.push(ContextMenuItem::separator());
-            items.push(ContextMenuItem::new(-32, "Colar").with_command("paste").with_shortcut("Ctrl+V").enabled(can_paste));
+            items.push(
+                ContextMenuItem::new(-32, "Colar")
+                    .with_command("paste")
+                    .with_shortcut("Ctrl+V")
+                    .enabled(can_paste),
+            );
             items.push(ContextMenuItem::new(-1, "Criar pasta").with_shortcut("Ctrl+Shift+N"));
         } else {
             items.push(ContextMenuItem::separator());
@@ -2216,42 +2306,74 @@ impl ImageViewerApp {
             items.push(ContextMenuItem::new(-21, "Abrir em nova guia"));
             items.push(ContextMenuItem::separator());
             // Basic file operations as text items (in addition to header icons)
-            items.push(ContextMenuItem::new(-30, "Recortar").with_command("cut").with_shortcut("Ctrl+X"));
-            items.push(ContextMenuItem::new(-31, "Copiar").with_command("copy").with_shortcut("Ctrl+C"));
-            items.push(ContextMenuItem::new(-32, "Colar").with_command("paste").with_shortcut("Ctrl+V").enabled(can_paste));
-            items.push(ContextMenuItem::new(-33, "Renomear").with_command("rename").with_shortcut("F2"));
-            items.push(ContextMenuItem::new(-34, "Excluir").with_command("delete").with_shortcut("Del"));
+            items.push(
+                ContextMenuItem::new(-30, "Recortar")
+                    .with_command("cut")
+                    .with_shortcut("Ctrl+X"),
+            );
+            items.push(
+                ContextMenuItem::new(-31, "Copiar")
+                    .with_command("copy")
+                    .with_shortcut("Ctrl+C"),
+            );
+            items.push(
+                ContextMenuItem::new(-32, "Colar")
+                    .with_command("paste")
+                    .with_shortcut("Ctrl+V")
+                    .enabled(can_paste),
+            );
+            items.push(
+                ContextMenuItem::new(-33, "Renomear")
+                    .with_command("rename")
+                    .with_shortcut("F2"),
+            );
+            items.push(
+                ContextMenuItem::new(-34, "Excluir")
+                    .with_command("delete")
+                    .with_shortcut("Del"),
+            );
             items.push(ContextMenuItem::separator());
             items.push(ContextMenuItem::new(-24, "Copiar caminho").with_shortcut("Ctrl+Shift+C"));
             items.push(ContextMenuItem::new(-26, "Criar atalho"));
             items.push(ContextMenuItem::separator());
-            items.push(ContextMenuItem::new(-28, "Propriedades").with_command("properties").with_shortcut("Alt+Enter"));
+            items.push(
+                ContextMenuItem::new(-28, "Propriedades")
+                    .with_command("properties")
+                    .with_shortcut("Alt+Enter"),
+            );
         }
-        
+
         // ========== SHELL ITEMS (Third-party extensions) ==========
         if let Some(hwnd) = self.native_hwnd {
             if let Ok(shell_ctx) = extract_shell_menu(hwnd, path) {
                 // Convert Shell items to UI items, filtering known verbs
-                fn convert(ui_ctx: &egui::Context, shell_item: &ShellMenuItem) -> Option<ContextMenuItem> {
+                fn convert(
+                    ui_ctx: &egui::Context,
+                    shell_item: &ShellMenuItem,
+                ) -> Option<ContextMenuItem> {
                     // Filter items we handle internally
                     if let Some(ref verb) = shell_item.command_string {
                         if is_known_verb(verb) {
                             return None;
                         }
                     }
-                    
+
                     // Fallback text-based filter for localized or verbless items
                     let lower_text = shell_item.text.to_lowercase();
                     let blacklisted_texts = [
-                        "pin to quick access", "fixar no acesso rÃ¡pido",
-                        "restore previous versions", "restaurar versÃµes anteriores",
-                        "copy as path", "copiar como caminho",
-                        "create shortcut", "criar atalho"
+                        "pin to quick access",
+                        "fixar no acesso rÃ¡pido",
+                        "restore previous versions",
+                        "restaurar versÃµes anteriores",
+                        "copy as path",
+                        "copiar como caminho",
+                        "create shortcut",
+                        "criar atalho",
                     ];
                     if blacklisted_texts.iter().any(|&t| lower_text.contains(t)) {
                         return None;
                     }
-                    
+
                     // Resize icon to 16x16 if needed
                     let icon = shell_item.icon_rgba.as_ref().map(|(rgba, w, h)| {
                         let (final_rgba, fw, fh) = if *w != 16 || *h != 16 {
@@ -2260,18 +2382,23 @@ impl ImageViewerApp {
                         } else {
                             (rgba.clone(), *w, *h)
                         };
-                        let color_image = egui::ColorImage::from_rgba_unmultiplied([fw as usize, fh as usize], &final_rgba);
+                        let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                            [fw as usize, fh as usize],
+                            &final_rgba,
+                        );
                         ui_ctx.load_texture(
                             format!("menu_icon_{}", shell_item.id),
                             color_image,
-                            Default::default()
+                            Default::default(),
                         )
                     });
-                    
-                    let sub_items: Vec<ContextMenuItem> = shell_item.sub_items.iter()
+
+                    let sub_items: Vec<ContextMenuItem> = shell_item
+                        .sub_items
+                        .iter()
                         .filter_map(|s| convert(ui_ctx, s))
                         .collect();
-                    
+
                     Some(ContextMenuItem {
                         id: shell_item.id as i32,
                         text: shell_item.text.clone(),
@@ -2286,15 +2413,17 @@ impl ImageViewerApp {
                         has_pending_submenu: shell_item.pending_submenu_handle.is_some(),
                     })
                 }
-                
-                let shell_items: Vec<ContextMenuItem> = shell_ctx.items.iter()
+
+                let shell_items: Vec<ContextMenuItem> = shell_ctx
+                    .items
+                    .iter()
                     .filter_map(|s| convert(ctx, s))
                     .collect();
-                
+
                 // Separate shell items: common ones visible, rest go to overflow
                 let mut visible_shell_items = Vec::new();
                 let mut overflow_shell_items = Vec::new();
-                
+
                 for s_item in shell_items {
                     // Keep items with submenus OR pending submenus (like 7-Zip, WinRAR) visible
                     if !s_item.sub_items.is_empty() || s_item.has_pending_submenu {
@@ -2303,7 +2432,7 @@ impl ImageViewerApp {
                         overflow_shell_items.push(s_item);
                     }
                 }
-                
+
                 // Add visible shell items (with submenus like 7-Zip)
                 if !visible_shell_items.is_empty() {
                     items.push(ContextMenuItem::separator());
@@ -2311,23 +2440,21 @@ impl ImageViewerApp {
                         items.push(s_item);
                     }
                 }
-                
+
                 // Add overflow submenu with remaining shell items
                 if !overflow_shell_items.is_empty() {
                     items.push(ContextMenuItem::separator());
-                    items.push(ContextMenuItem::new(-99, "Mostrar mais opÃ§Ãµes")
-                        .with_subitems(overflow_shell_items));
+                    items.push(
+                        ContextMenuItem::new(-99, "Mostrar mais opÃ§Ãµes")
+                            .with_subitems(overflow_shell_items),
+                    );
                 }
-                
+
                 // Keep the native context alive for command invocation
                 self.context_menu.native_context = Some(std::rc::Rc::new(shell_ctx));
             }
         }
-        
+
         self.context_menu.items = items;
     }
 }
-
-
-
-

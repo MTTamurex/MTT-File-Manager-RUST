@@ -1,12 +1,15 @@
-use std::path::{Path, PathBuf};
-use windows::Win32::Foundation::HWND;
 use clipboard_win::{formats, Clipboard, Setter};
-use windows::core::{PCWSTR, Interface};
-use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+use std::path::{Path, PathBuf};
+use windows::core::{Interface, PCWSTR};
+use windows::Win32::Foundation::HWND;
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER,
+    COINIT_APARTMENTTHREADED,
+};
 use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
 
-use crate::infrastructure::windows::shell_operations;
 use crate::infrastructure::windows::recycle_bin;
+use crate::infrastructure::windows::shell_operations;
 
 /// Error type for file operations
 type OpResult<T> = Result<T, String>;
@@ -16,9 +19,9 @@ pub fn delete_with_shell(path: &Path, hwnd: Option<HWND>) -> OpResult<bool> {
     let hwnd = hwnd.unwrap_or(HWND(std::ptr::null_mut()));
     let success = shell_operations::delete_item_with_shell(path, hwnd);
     if success {
-         Ok(true)
+        Ok(true)
     } else {
-         Err("Operação cancelada ou falhou".to_string())
+        Err("Operação cancelada ou falhou".to_string())
     }
 }
 
@@ -26,10 +29,10 @@ pub fn delete_with_shell(path: &Path, hwnd: Option<HWND>) -> OpResult<bool> {
 pub fn rename_with_shell(path: &Path, new_name: &str, hwnd: Option<HWND>) -> OpResult<bool> {
     let hwnd = hwnd.unwrap_or(HWND(std::ptr::null_mut()));
     let success = shell_operations::rename_item_with_shell(path, new_name, hwnd);
-   if success {
-         Ok(true)
+    if success {
+        Ok(true)
     } else {
-         Err("Operação cancelada ou falhou".to_string())
+        Err("Operação cancelada ou falhou".to_string())
     }
 }
 
@@ -54,7 +57,10 @@ pub fn create_new_folder(base_path: &Path) -> OpResult<PathBuf> {
 /// Copy path to clipboard as text.
 pub fn copy_path_to_clipboard(path: &Path) -> OpResult<()> {
     if let Ok(_clip) = Clipboard::new_attempts(10) {
-        if formats::Unicode.write_clipboard(&path.to_string_lossy()).is_ok() {
+        if formats::Unicode
+            .write_clipboard(&path.to_string_lossy())
+            .is_ok()
+        {
             return Ok(());
         }
     }
@@ -63,20 +69,17 @@ pub fn copy_path_to_clipboard(path: &Path) -> OpResult<()> {
 
 /// Restores file from Recycle Bin.
 pub fn restore_from_recycle_bin(physical_path: &Path, original_path: &Path) -> OpResult<()> {
-    recycle_bin::restore_from_recycle_bin(physical_path, original_path)
-        .map_err(|e| e.to_string())
+    recycle_bin::restore_from_recycle_bin(physical_path, original_path).map_err(|e| e.to_string())
 }
 
 /// Deletes file permanently (no Recycle Bin).
 pub fn delete_permanently(physical_path: &Path) -> OpResult<()> {
-    recycle_bin::delete_permanently(physical_path)
-        .map_err(|e| e.to_string())
+    recycle_bin::delete_permanently(physical_path).map_err(|e| e.to_string())
 }
 
 /// Empties Recycle Bin.
 pub fn empty_recycle_bin() -> OpResult<()> {
-    recycle_bin::empty_recycle_bin()
-        .map_err(|e| e.to_string())
+    recycle_bin::empty_recycle_bin().map_err(|e| e.to_string())
 }
 
 /// Creates a Windows shortcut (.lnk).

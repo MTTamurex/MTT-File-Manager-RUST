@@ -200,12 +200,12 @@ pub fn rename_item_with_shell(path: &Path, new_name: &str, hwnd: HWND) -> bool {
         Some(p) => p,
         None => return false,
     };
-    
+
     let new_path = parent.join(new_name);
-    
+
     let from_str = path.to_string_lossy();
     let to_str = new_path.to_string_lossy();
-    
+
     let from_vec = to_double_null_terminated(&from_str);
     let to_vec = to_double_null_terminated(&to_str);
 
@@ -220,7 +220,7 @@ pub fn rename_item_with_shell(path: &Path, new_name: &str, hwnd: HWND) -> bool {
 
     // SAFETY: op is initialized with valid double-null terminated strings
     let result = unsafe { SHFileOperationW(&mut op) };
-    
+
     result == 0 && op.fAnyOperationsAborted.0 == 0
 }
 
@@ -229,7 +229,7 @@ pub fn rename_item_with_shell(path: &Path, new_name: &str, hwnd: HWND) -> bool {
 pub fn copy_item_with_shell(path: &Path, dest_folder: &Path, hwnd: HWND) -> bool {
     let from_str = path.to_string_lossy();
     let to_str = dest_folder.to_string_lossy();
-    
+
     let from_vec = to_double_null_terminated(&from_str);
     let to_vec = to_double_null_terminated(&to_str);
 
@@ -259,7 +259,7 @@ pub fn move_item_with_shell(path: &Path, dest_folder: &Path, hwnd: HWND) -> bool
 
     let from_str = path.to_string_lossy();
     let to_str = dest_folder.to_string_lossy();
-    
+
     let from_vec = to_double_null_terminated(&from_str);
     let to_vec = to_double_null_terminated(&to_str);
 

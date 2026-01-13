@@ -1,11 +1,11 @@
-use eframe::egui;
-use std::path::PathBuf;
 use crate::domain::file_entry::FileEntry;
+use crate::infrastructure::windows::is_media_extension;
 use crate::infrastructure::windows::MediaMetadata;
+use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::widgets;
-use crate::infrastructure::windows::is_media_extension;
-use crate::ui::icon_loader::IconLoader;
+use eframe::egui;
+use std::path::PathBuf;
 
 pub enum PreviewPanelAction {
     RefreshThumbnail(PathBuf),
@@ -36,7 +36,9 @@ pub fn render_preview_panel(
 
         // Preview de imagem/video (se houver thumbnail)
         // Detecta se é mídia usando Windows Perceived Type API
-        let is_media = file.path.extension()
+        let is_media = file
+            .path
+            .extension()
             .map(|ext| is_media_extension(&ext.to_string_lossy()))
             .unwrap_or(false);
 
@@ -49,7 +51,7 @@ pub fn render_preview_panel(
         if let (Some(tex), true) = (texture, is_media) {
             // Mostra thumbnail de imagem/video
             // Use available width with a safety margin to prevent forcing sidebar expansion
-            let max_preview_width = ui.available_width() - 16.0; 
+            let max_preview_width = ui.available_width() - 16.0;
             let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
 
             ui.add(
@@ -57,10 +59,11 @@ pub fn render_preview_panel(
                     .max_size(max_preview_size)
                     .shrink_to_fit(),
             );
-            
-            
+
             // Botão de recarregar thumbnail
-            if widgets::icon_button(ui, svg_manager, "refresh", "Recarregar Thumbnail", None).clicked() {
+            if widgets::icon_button(ui, svg_manager, "refresh", "Recarregar Thumbnail", None)
+                .clicked()
+            {
                 action = Some(PreviewPanelAction::RefreshThumbnail(file.path.clone()));
             }
             // Removed redundant separator here (one exists at line 147)
@@ -71,7 +74,9 @@ pub fn render_preview_panel(
 
             if let Some(_) = &file.drive_info {
                 // DRIVE
-                if let Some(icon) = item_icon_loader.get_or_load_drive_icon(ui.ctx(), &file.path.to_string_lossy()) {
+                if let Some(icon) =
+                    item_icon_loader.get_or_load_drive_icon(ui.ctx(), &file.path.to_string_lossy())
+                {
                     ui.add(egui::Image::new(&icon).max_size(egui::vec2(icon_size, icon_size)));
                 } else {
                     ui.label(egui::RichText::new("??").size(icon_size * 0.8));
@@ -93,25 +98,27 @@ pub fn render_preview_panel(
                         ui.label(egui::RichText::new("📁").size(icon_size * 0.6));
                     }
                 } else {
-                    let folder_rect = ui.allocate_exact_size(egui::vec2(icon_size, icon_size), egui::Sense::hover()).0;
+                    let folder_rect = ui
+                        .allocate_exact_size(egui::vec2(icon_size, icon_size), egui::Sense::hover())
+                        .0;
 
                     if let Some(tex) = folder_preview_peek {
                         let tex_size = tex.size_vec2();
                         let aspect = tex_size.x / tex_size.y;
-                        
+
                         let (draw_w, draw_h) = if aspect > 1.0 {
                             (folder_rect.width(), folder_rect.width() / aspect)
                         } else {
                             (folder_rect.height() * aspect, folder_rect.height())
                         };
-                        
+
                         let offset_x = (folder_rect.width() - draw_w) / 2.0;
                         let offset_y = (folder_rect.height() - draw_h) / 2.0;
                         let draw_rect = egui::Rect::from_min_size(
                             folder_rect.min + egui::vec2(offset_x, offset_y),
                             egui::vec2(draw_w, draw_h),
                         );
-                        
+
                         ui.painter().image(
                             tex.id(),
                             draw_rect,
@@ -120,14 +127,16 @@ pub fn render_preview_panel(
                         );
                     } else if is_folder_preview_loading {
                         // Spinner
-                        ui.painter().rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
+                        ui.painter()
+                            .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
                         ui.add(egui::Spinner::new());
                     } else {
                         // Dispara carregamento
                         action = Some(PreviewPanelAction::LoadFolderPreview(file.path.clone()));
-                        
+
                         // Placeholder
-                        ui.painter().rect_filled(folder_rect, 4.0, egui::Color32::from_gray(240));
+                        ui.painter()
+                            .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(240));
                         ui.painter().text(
                             folder_rect.center(),
                             egui::Align2::CENTER_CENTER,
@@ -138,11 +147,14 @@ pub fn render_preview_panel(
                     }
                 }
             } else {
-                 if let Some(icon) = item_icon_loader.get_or_load_icon(ui.ctx(), &file.path) {
-                     ui.add(egui::Image::new(&icon).max_size(egui::vec2(icon_size * 0.6, icon_size * 0.6)));
-                 } else {
-                     ui.label(egui::RichText::new("??").size(icon_size * 0.6));
-                 }
+                if let Some(icon) = item_icon_loader.get_or_load_icon(ui.ctx(), &file.path) {
+                    ui.add(
+                        egui::Image::new(&icon)
+                            .max_size(egui::vec2(icon_size * 0.6, icon_size * 0.6)),
+                    );
+                } else {
+                    ui.label(egui::RichText::new("??").size(icon_size * 0.6));
+                }
             }
             ui.add_space(20.0);
         }
@@ -171,7 +183,9 @@ pub fn render_preview_panel(
                 ui.horizontal_top(|ui| {
                     ui.add_sized(
                         egui::vec2(110.0, 0.0),
-                        egui::Label::new(egui::RichText::new(label).color(ui.visuals().weak_text_color())),
+                        egui::Label::new(
+                            egui::RichText::new(label).color(ui.visuals().weak_text_color()),
+                        ),
                     );
                     ui.add(egui::Label::new(value).wrap());
                 });
@@ -180,40 +194,46 @@ pub fn render_preview_panel(
 
             // Remove generic "Nome" if we have the header above, or keep it if preferred.
             // Let's keep it for completeness but use the helper.
-            // add_detail(ui, "Nome:", file.name.clone()); 
+            // add_detail(ui, "Nome:", file.name.clone());
 
             // 2. Tipo (General)
             if let Some(drive) = &file.drive_info {
-                 add_detail(ui, "Tipo:", format!("{:?}", drive.drive_type));
+                add_detail(ui, "Tipo:", format!("{:?}", drive.drive_type));
             } else if file.is_dir {
-                 add_detail(ui, "Tipo:", "Pasta de Arquivos".to_string());
+                add_detail(ui, "Tipo:", "Pasta de Arquivos".to_string());
             } else {
-                 let ext = file.path.extension()
+                let ext = file
+                    .path
+                    .extension()
                     .map(|e| e.to_string_lossy().to_string().to_uppercase())
                     .unwrap_or_else(|| "Arquivo".to_string());
-                 add_detail(ui, "Tipo:", format!("Arquivo {}", ext));
+                add_detail(ui, "Tipo:", format!("Arquivo {}", ext));
             }
 
             // 3. Metadados do Arquivo (Data/Tamanho)
             if file.drive_info.is_none() {
-                 add_detail(ui, "Data modificada:", crate::infrastructure::windows::format_date(file.modified));
+                add_detail(
+                    ui,
+                    "Data modificada:",
+                    crate::infrastructure::windows::format_date(file.modified),
+                );
 
-                 // Tamanho (using helper for alignment)
-                 let size_str = if file.is_dir {
-                      if let Some(size) = folder_size {
-                          crate::infrastructure::windows::format_size(size)
-                      } else {
-                          "Calculando...".to_string()
-                      }
-                 } else {
-                      crate::infrastructure::windows::format_size(file.size)
-                 };
-                 
-                 add_detail(ui, "Tamanho:", size_str);
+                // Tamanho (using helper for alignment)
+                let size_str = if file.is_dir {
+                    if let Some(size) = folder_size {
+                        crate::infrastructure::windows::format_size(size)
+                    } else {
+                        "Calculando...".to_string()
+                    }
+                } else {
+                    crate::infrastructure::windows::format_size(file.size)
+                };
 
-                 if file.is_dir && folder_size.is_none() && !is_folder_size_loading {
-                     action = Some(PreviewPanelAction::CalculateFolderSize(file.path.clone()));
-                 }
+                add_detail(ui, "Tamanho:", size_str);
+
+                if file.is_dir && folder_size.is_none() && !is_folder_size_loading {
+                    action = Some(PreviewPanelAction::CalculateFolderSize(file.path.clone()));
+                }
             }
 
             // 4. Metadados de Mídia (Imagens/Vídeos)
@@ -229,7 +249,7 @@ pub fn render_preview_panel(
                 if let Some(fmt) = &meta.format {
                     add_detail(ui, "Formato:", fmt.clone());
                 }
-                
+
                 if let Some(codec) = &meta.video_codec {
                     add_detail(ui, "Video Codec:", codec.clone());
                 }
@@ -240,7 +260,11 @@ pub fn render_preview_panel(
 
                 // Audio Info
                 if let Some(br) = meta.audio_bitrate {
-                    add_detail(ui, "Audio BR:", crate::infrastructure::windows::format_bitrate(br));
+                    add_detail(
+                        ui,
+                        "Audio BR:",
+                        crate::infrastructure::windows::format_bitrate(br),
+                    );
                 }
 
                 if let Some(channels) = meta.audio_channels {
@@ -256,7 +280,11 @@ pub fn render_preview_panel(
 
                 // Video Info
                 if let Some(d) = meta.duration_100ns {
-                    add_detail(ui, "Duração:", crate::infrastructure::windows::format_media_duration(d));
+                    add_detail(
+                        ui,
+                        "Duração:",
+                        crate::infrastructure::windows::format_media_duration(d),
+                    );
                 }
 
                 if let Some(fps) = meta.frame_rate {
@@ -268,11 +296,16 @@ pub fn render_preview_panel(
                 // If bitrate is missing OR zero, try to approximate from file size
                 if bitrate_to_show.unwrap_or(0) == 0 {
                     if let Some(d) = meta.duration_100ns {
-                        bitrate_to_show = crate::infrastructure::windows::approximate_bitrate(file.size, d);
+                        bitrate_to_show =
+                            crate::infrastructure::windows::approximate_bitrate(file.size, d);
                     }
                 }
                 if let Some(bps) = bitrate_to_show.filter(|&b| b > 0) {
-                    add_detail(ui, "Bitrate:", crate::infrastructure::windows::format_bitrate(bps));
+                    add_detail(
+                        ui,
+                        "Bitrate:",
+                        crate::infrastructure::windows::format_bitrate(bps),
+                    );
                 }
 
                 // EXIF / Camera Data
@@ -313,15 +346,35 @@ pub fn render_preview_panel(
                     add_detail(ui, "Profundidade:", format!("{} bits", depth));
                 }
             }
-            
+
             // 5. Drive Details (Windows Explorer style)
             if let Some(drive) = &file.drive_info {
-                 let used_space = drive.total_space.saturating_sub(drive.free_space);
-                 
-                 add_detail(ui, "Espaço usado:", crate::infrastructure::windows::format_size(used_space));
-                 add_detail(ui, "Espaço livre:", crate::infrastructure::windows::format_size(drive.free_space));
-                 add_detail(ui, "Tamanho total:", crate::infrastructure::windows::format_size(drive.total_space));
-                 add_detail(ui, "Sist. Arq:", if drive.file_system.is_empty() { "NTFS".to_string() } else { drive.file_system.clone() });
+                let used_space = drive.total_space.saturating_sub(drive.free_space);
+
+                add_detail(
+                    ui,
+                    "Espaço usado:",
+                    crate::infrastructure::windows::format_size(used_space),
+                );
+                add_detail(
+                    ui,
+                    "Espaço livre:",
+                    crate::infrastructure::windows::format_size(drive.free_space),
+                );
+                add_detail(
+                    ui,
+                    "Tamanho total:",
+                    crate::infrastructure::windows::format_size(drive.total_space),
+                );
+                add_detail(
+                    ui,
+                    "Sist. Arq:",
+                    if drive.file_system.is_empty() {
+                        "NTFS".to_string()
+                    } else {
+                        drive.file_system.clone()
+                    },
+                );
             }
         });
     });

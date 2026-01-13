@@ -10,8 +10,8 @@ use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::windows;
 
 // Import component states
-use super::{ContextMenuState, NavigationHistory, RenamingState, WatcherState};
 use super::clipboard::{ClipboardManager, ClipboardOp};
+use super::{ContextMenuState, NavigationHistory, RenamingState, WatcherState};
 
 // Re-export for convenience
 pub use crate::domain::file_entry::{SortMode, ViewMode};

@@ -1,22 +1,27 @@
+//! Application state definition.
+//!
+//! This module defines the `ImageViewerApp` struct, which holds the entire state
+//! of the application, including UI state, file lists, worker channels, and configuration.
+
 use eframe::egui;
 use lru::LruCache;
 use notify::RecommendedWatcher;
 
-use std::collections::{HashMap, HashSet};
-use std::num::NonZeroUsize;
+use std::collections::HashSet;
+// use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::application::{ClipboardManager, NotificationManager};
-use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
 use crate::application::navigation::NavigationHistory;
+use crate::application::ClipboardManager;
+use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
 use crate::domain::thumbnail::ThumbnailData;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::windows as windows_infra;
-use crate::ui::cache::CacheManager;
+// use crate::ui::cache::CacheManager;
 use crate::ui::context_menu::ContextMenuState;
 use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
@@ -48,7 +53,6 @@ pub struct ImageViewerApp {
     pub folder_preview_receiver: Receiver<crate::workers::folder_preview_worker::FolderPreviewData>,
 
     // Cache Manager (unifica texture_cache, icon_cache, loading_set, etc.)
-
     pub cache_manager: crate::ui::cache::CacheManager,
 
     // Sorting state
@@ -64,7 +68,7 @@ pub struct ImageViewerApp {
 
     // Navigation state (histórico linear)
     pub navigation: NavigationHistory,
-    pub path_input: String,              // Barra de endereço editável
+    pub path_input: String, // Barra de endereço editável
 
     // UI state
     pub disks: Vec<(String, String)>, // (path, label)
@@ -79,7 +83,7 @@ pub struct ImageViewerApp {
     pub metadata_cache: LruCache<PathBuf, (u64, windows_infra::MediaMetadata)>,
     pub metadata_loading: HashSet<PathBuf>,
     pub show_preview_panel: bool,
-    pub is_computer_view: bool, // Se estamos na view "Este Computador"
+    pub is_computer_view: bool,    // Se estamos na view "Este Computador"
     pub is_recycle_bin_view: bool, // Se estamos na view da Lixeira
 
     pub total_items: usize,
@@ -90,7 +94,7 @@ pub struct ImageViewerApp {
     pub last_grid_cols: usize,                // Memória para navegação vertical (teclado)
     pub generation: usize,                    // Contador local (Main Thread)
     pub current_generation: Arc<AtomicUsize>, // Contador compartilhado (Workers)
-    pub ui_ctx: egui::Context,                // Referência ao contexto da UI para repaints assíncronos
+    pub ui_ctx: egui::Context, // Referência ao contexto da UI para repaints assíncronos
 
     // ESTADO DE RENOMEAÇÃO
     pub renaming_state: Option<(usize, String)>, // (Index, Texto Editável)
@@ -151,20 +155,20 @@ pub struct ImageViewerApp {
     pub saved_window_width: f32,
     pub saved_window_height: f32,
     pub saved_is_maximized: bool,
-    
+
     // Sidebar widths persistence
     pub sidebar_left_width: f32,
     pub sidebar_right_width: f32,
-    
+
     // TAB SYSTEM
     pub tab_manager: crate::tabs::TabManager,
-    
+
     // FOLDER SIZE CALCULATOR (async for details panel)
-    pub folder_size_req_sender: Sender<PathBuf>,  // UI → Worker
-    pub folder_size_res_receiver: Receiver<(PathBuf, u64)>,  // Worker → UI
-    pub folder_size_cache: std::collections::HashMap<PathBuf, u64>,  // Calculated sizes
-    pub folder_size_loading: HashSet<PathBuf>,  // Currently calculating
-    
+    pub folder_size_req_sender: Sender<PathBuf>, // UI → Worker
+    pub folder_size_res_receiver: Receiver<(PathBuf, u64)>, // Worker → UI
+    pub folder_size_cache: std::collections::HashMap<PathBuf, u64>, // Calculated sizes
+    pub folder_size_loading: HashSet<PathBuf>,   // Currently calculating
+
     // RECYCLE BIN CACHE
     pub deletion_date_cache: LruCache<String, String>,
 }

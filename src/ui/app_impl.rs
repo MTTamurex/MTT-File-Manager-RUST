@@ -23,25 +23,26 @@ impl eframe::App for ImageViewerApp {
                 }
             }
         }
-        
+
         // --- 3-STAGE STARTUP SEQUENCE ---
         // Stage 1 (frame 1): Apply saved geometry (maximize OR size) while hidden
-        // Stage 2 (frames 2-5): Wait for layouts to stabilize  
+        // Stage 2 (frames 2-5): Wait for layouts to stabilize
         // Stage 3 (frame 5): Reveal window
         if self.startup_tick < 5 {
             self.startup_tick += 1;
-            
+
             if self.startup_tick == 1 {
                 // Frame 1: Apply saved geometry while window is hidden
                 if self.saved_is_maximized {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
                 } else {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(
-                        egui::Vec2::new(self.saved_window_width, self.saved_window_height)
-                    ));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::Vec2::new(
+                        self.saved_window_width,
+                        self.saved_window_height,
+                    )));
                 }
             }
-            
+
             if self.startup_tick == 5 {
                 // Frame 5: Reveal the window
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
@@ -55,7 +56,7 @@ impl eframe::App for ImageViewerApp {
                 }
                 self.sync_to_tab();
             }
-            
+
             // Keep the loop running fast during startup
             ctx.request_repaint();
         }
@@ -65,28 +66,29 @@ impl eframe::App for ImageViewerApp {
         let (size_changed, maximized_changed) = ctx.input(|i| {
             let mut size_changed = false;
             let mut maximized_changed = false;
-            
+
             if let Some(rect) = i.viewport().inner_rect {
                 // Only save size when NOT maximized
                 if !i.viewport().maximized.unwrap_or(false) {
-                    if (self.saved_window_width - rect.width()).abs() > 1.0 || 
-                       (self.saved_window_height - rect.height()).abs() > 1.0 {
+                    if (self.saved_window_width - rect.width()).abs() > 1.0
+                        || (self.saved_window_height - rect.height()).abs() > 1.0
+                    {
                         size_changed = true;
                     }
                     self.saved_window_width = rect.width();
                     self.saved_window_height = rect.height();
                 }
             }
-            
+
             let new_maximized = i.viewport().maximized.unwrap_or(false);
             if new_maximized != self.saved_is_maximized {
                 maximized_changed = true;
             }
             self.saved_is_maximized = new_maximized;
-            
+
             (size_changed, maximized_changed)
         });
-        
+
         // Save preferences when window state changes
         if size_changed || maximized_changed {
             self.save_preferences();
@@ -268,9 +270,9 @@ impl eframe::App for ImageViewerApp {
                     &mut self.svg_icon_manager,
                     frame,
                     self.cache_manager.computer_icon.as_ref(), // Pass native computer icon
-                    &mut self.item_icon_loader,               // Pass icon loader for dynamic icons
+                    &mut self.item_icon_loader,                // Pass icon loader for dynamic icons
                 );
-                
+
                 match action {
                     TabBarAction::SwitchTab(idx) => {
                         self.sync_to_tab();
@@ -319,7 +321,7 @@ impl eframe::App for ImageViewerApp {
             .show(ctx, |ui| {
                 use crate::ui::toolbar::{render_toolbar, ToolbarAction};
                 // Make sure ViewMode is imported or available via crate::domain::file_entry
-                use crate::domain::file_entry::{SortMode, ViewMode};
+                use crate::domain::file_entry::ViewMode;
 
                 let action = render_toolbar(
                     ui,
@@ -353,26 +355,28 @@ impl eframe::App for ImageViewerApp {
                             } else {
                                 self.view_mode = ViewMode::List;
                             }
-                        },
-                        ToolbarAction::TogglePreviewPanel => self.show_preview_panel = !self.show_preview_panel,
+                        }
+                        ToolbarAction::TogglePreviewPanel => {
+                            self.show_preview_panel = !self.show_preview_panel
+                        }
                         ToolbarAction::ChangeSortMode(mode) => {
                             self.sort_mode = mode;
                             self.sort_items();
                             self.save_preferences();
-                        },
+                        }
                         ToolbarAction::ToggleSortDescending => {
                             self.sort_descending = !self.sort_descending;
                             self.sort_items();
                             self.save_preferences();
-                        },
+                        }
                         ToolbarAction::Search(_query) => {
                             self.filter_items();
-                        },
+                        }
                         ToolbarAction::Navigate(path) => self.navigate_to(&path),
                         ToolbarAction::StartAddressEdit => {
                             self.path_input = self.current_path.clone();
                             self.is_address_editing = true;
-                        },
+                        }
                         ToolbarAction::CommitPathInput(path) => {
                             if std::path::Path::new(&path).exists() {
                                 self.navigate_to(&path);
@@ -381,21 +385,21 @@ impl eframe::App for ImageViewerApp {
                                 self.path_input = self.current_path.clone();
                                 self.is_address_editing = false;
                             }
-                        },
-                         ToolbarAction::CancelPathInput => {
-                             self.is_address_editing = false;
-                             self.path_input = self.current_path.clone();
-                         },
-                         ToolbarAction::UpdatePathInput(_) => {
-                             // Handled by text edit binding
-                         },
-                         _ => {}
+                        }
+                        ToolbarAction::CancelPathInput => {
+                            self.is_address_editing = false;
+                            self.path_input = self.current_path.clone();
+                        }
+                        ToolbarAction::UpdatePathInput(_) => {
+                            // Handled by text edit binding
+                        }
+                        _ => {}
                     }
                 }
             });
 
         // Windows 11 style sidebar (Restored)
-        
+
         let sidebar_response = egui::SidePanel::left("sidebar")
             .min_width(150.0)
             .default_width(self.sidebar_left_width.max(150.0)) // Garante que nunca seja 0
@@ -424,15 +428,18 @@ impl eframe::App for ImageViewerApp {
 
                 render_sidebar(ui, &mut ctx)
             });
-        
+
         // Captura a largura REAL do painel (não a disponível dentro dele)
         // IMPORTANTE: Não atualiza se janela está minimizada (rect fica inválido)
         let is_minimized = ctx.input(|i| i.viewport().minimized.unwrap_or(false));
         let actual_panel_width = sidebar_response.response.rect.width();
-        if !is_minimized && actual_panel_width > 100.0 && (self.sidebar_left_width - actual_panel_width).abs() > 2.0 {
+        if !is_minimized
+            && actual_panel_width > 100.0
+            && (self.sidebar_left_width - actual_panel_width).abs() > 2.0
+        {
             self.sidebar_left_width = actual_panel_width;
         }
-        
+
         let sidebar_action = sidebar_response.inner;
 
         // Processar ação da sidebar (após ctx ser dropado e self liberado)
@@ -448,7 +455,7 @@ impl eframe::App for ImageViewerApp {
         // Preview Pane (Windows Explorer style) - ANTES do CentralPanel
         if self.show_preview_panel {
             self.refresh_selected_metadata();
-            
+
             let right_panel_response = egui::SidePanel::right("preview_panel")
                 .resizable(true)
                 .default_width(self.sidebar_right_width.max(250.0)) // Garante que nunca seja 0
@@ -458,10 +465,10 @@ impl eframe::App for ImageViewerApp {
                     use crate::ui::preview_panel::{render_preview_panel, PreviewPanelAction};
 
                     egui::ScrollArea::vertical()
-                        .id_source("preview_scroll")
+                        .id_salt("preview_scroll")
                         .show(ui, |ui| {
                             ui.set_max_width(ui.available_width());
-                            
+
                             // 1. Calculate effective_file (Logic from main.rs)
                             let effective_file = if let Some(file) = self.selected_file.clone() {
                                 if self.is_recycle_bin_view || file.path.exists() {
@@ -486,25 +493,34 @@ impl eframe::App for ImageViewerApp {
                                 // Fallback logic
                                 let path = std::path::PathBuf::from(&self.current_path);
                                 let mut entry = FileEntry::from_path(path.clone(), true);
-                                if path.to_string_lossy().len() <= 3 && path.to_string_lossy().contains(':') {
-                                     use crate::infrastructure::windows::get_volume_info;
-                                     let vol = get_volume_info(&self.current_path);
-                                     let drive_type = windows_infra::detect_drive_type(&self.current_path);
-                                     let label = self.disks.iter()
-                                         .find(|(p, _)| p.starts_with(&self.current_path) || self.current_path.starts_with(p))
-                                         .map(|(_, l)| l.clone())
-                                         .unwrap_or_else(|| self.current_path.clone());
-                                     entry.name = label;
-                                     entry.drive_info = Some(crate::domain::file_entry::DriveInfo {
-                                         file_system: vol.file_system,
-                                         total_space: vol.total_space,
-                                         free_space: vol.free_space,
-                                         drive_type,
-                                     });
+                                if path.to_string_lossy().len() <= 3
+                                    && path.to_string_lossy().contains(':')
+                                {
+                                    use crate::infrastructure::windows::get_volume_info;
+                                    let vol = get_volume_info(&self.current_path);
+                                    let drive_type =
+                                        windows_infra::detect_drive_type(&self.current_path);
+                                    let label = self
+                                        .disks
+                                        .iter()
+                                        .find(|(p, _)| {
+                                            p.starts_with(&self.current_path)
+                                                || self.current_path.starts_with(p)
+                                        })
+                                        .map(|(_, l)| l.clone())
+                                        .unwrap_or_else(|| self.current_path.clone());
+                                    entry.name = label;
+                                    entry.drive_info = Some(crate::domain::file_entry::DriveInfo {
+                                        file_system: vol.file_system,
+                                        total_space: vol.total_space,
+                                        free_space: vol.free_space,
+                                        drive_type,
+                                    });
                                 } else {
-                                     entry.name = path.file_name()
-                                         .map(|n| n.to_string_lossy().to_string())
-                                         .unwrap_or_else(|| self.current_path.clone());
+                                    entry.name = path
+                                        .file_name()
+                                        .map(|n| n.to_string_lossy().to_string())
+                                        .unwrap_or_else(|| self.current_path.clone());
                                 }
                                 Some(entry)
                             } else {
@@ -513,15 +529,23 @@ impl eframe::App for ImageViewerApp {
 
                             if let Some(file) = effective_file {
                                 // 2. Metadata
-                                let selected_metadata = self.selected_metadata.as_ref().and_then(|(p, meta)| {
-                                    if p == &file.path { Some(meta) } else { None }
-                                });
-                                
+                                let selected_metadata =
+                                    self.selected_metadata.as_ref().and_then(|(p, meta)| {
+                                        if p == &file.path {
+                                            Some(meta)
+                                        } else {
+                                            None
+                                        }
+                                    });
+
                                 // 3. Folder Size
                                 let folder_size = if file.is_dir {
                                     self.folder_size_cache.get(&file.path).copied()
-                                } else { None };
-                                let is_folder_size_loading = self.folder_size_loading.contains(&file.path);
+                                } else {
+                                    None
+                                };
+                                let is_folder_size_loading =
+                                    self.folder_size_loading.contains(&file.path);
 
                                 // 4. Render Panel
                                 let action = render_preview_panel(
@@ -530,8 +554,13 @@ impl eframe::App for ImageViewerApp {
                                     self.selected_thumbnail.as_ref(), // Passed from main
                                     selected_metadata,
                                     self.cache_manager.texture_cache.peek(&file.path).cloned(),
-                                    self.cache_manager.folder_preview_cache.get(&file.path).cloned(),
-                                    self.cache_manager.folder_preview_loading.contains(&file.path),
+                                    self.cache_manager
+                                        .folder_preview_cache
+                                        .get(&file.path)
+                                        .cloned(),
+                                    self.cache_manager
+                                        .folder_preview_loading
+                                        .contains(&file.path),
                                     self.metadata_loading.contains(&file.path),
                                     folder_size,
                                     is_folder_size_loading,
@@ -541,25 +570,34 @@ impl eframe::App for ImageViewerApp {
                                 );
 
                                 if let Some(act) = action {
-                                     match act {
-                                         PreviewPanelAction::RefreshThumbnail(path) => {
-                                              self.disk_cache.remove_cache_for_path(&path);
-                                              self.cache_manager.texture_cache.pop(&path);
-                                              self.cache_manager.loading_set.remove(&path);
-                                              let _ = self.thumbnail_req_sender.send((path, self.generation));
-                                              self.notifications.push(crate::application::AppNotification::info("Recarregando thumbnail...".to_string()));
-                                         },
-                                         PreviewPanelAction::LoadFolderPreview(path) => {
-                                              if self.cache_manager.folder_preview_loading.len() < 30 {
-                                                  self.cache_manager.folder_preview_loading.insert(path.clone());
-                                                  let _ = self.folder_preview_sender.send(path);
-                                              }
-                                         },
-                                         PreviewPanelAction::CalculateFolderSize(path) => {
-                                              self.folder_size_loading.insert(path.clone());
-                                              let _ = self.folder_size_req_sender.send(path);
-                                         }
-                                     }
+                                    match act {
+                                        PreviewPanelAction::RefreshThumbnail(path) => {
+                                            self.disk_cache.remove_cache_for_path(&path);
+                                            self.cache_manager.texture_cache.pop(&path);
+                                            self.cache_manager.loading_set.remove(&path);
+                                            let _ = self
+                                                .thumbnail_req_sender
+                                                .send((path, self.generation));
+                                            self.notifications.push(
+                                                crate::application::AppNotification::info(
+                                                    "Recarregando thumbnail...".to_string(),
+                                                ),
+                                            );
+                                        }
+                                        PreviewPanelAction::LoadFolderPreview(path) => {
+                                            if self.cache_manager.folder_preview_loading.len() < 30
+                                            {
+                                                self.cache_manager
+                                                    .folder_preview_loading
+                                                    .insert(path.clone());
+                                                let _ = self.folder_preview_sender.send(path);
+                                            }
+                                        }
+                                        PreviewPanelAction::CalculateFolderSize(path) => {
+                                            self.folder_size_loading.insert(path.clone());
+                                            let _ = self.folder_size_req_sender.send(path);
+                                        }
+                                    }
                                 }
                             } else {
                                 ui.vertical_centered(|ui| {
@@ -570,12 +608,15 @@ impl eframe::App for ImageViewerApp {
                             }
                         });
                 });
-            
+
             // Captura a largura REAL do painel direito
             // IMPORTANTE: Não atualiza se janela está minimizada (rect fica inválido)
             let is_minimized = ctx.input(|i| i.viewport().minimized.unwrap_or(false));
             let actual_panel_width = right_panel_response.response.rect.width();
-            if !is_minimized && actual_panel_width > 200.0 && (self.sidebar_right_width - actual_panel_width).abs() > 2.0 {
+            if !is_minimized
+                && actual_panel_width > 200.0
+                && (self.sidebar_right_width - actual_panel_width).abs() > 2.0
+            {
                 self.sidebar_right_width = actual_panel_width;
             }
         }
@@ -622,9 +663,7 @@ impl eframe::App for ImageViewerApp {
 
             // Detecção de clique direito na área vazia (fora dos itens)
             // Só abre menu de contexto se não houver item selecionado pelo clique direito
-            if !self.context_menu.is_open
-                && ui.input(|i| i.pointer.secondary_clicked())
-            {
+            if !self.context_menu.is_open && ui.input(|i| i.pointer.secondary_clicked()) {
                 // Verifica se o clique foi em um item
                 let pointer_pos = ui.ctx().pointer_latest_pos();
                 let mut clicked_on_item = false;
@@ -673,20 +712,19 @@ impl eframe::App for ImageViewerApp {
                     let path = PathBuf::from(&self.current_path);
                     let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
                     self.populate_context_menu(ui.ctx(), &path, true, None);
-                    self.context_menu.open(
-                        pointer_pos,
-                        None,
-                        Some(path),
-                        true,
-                    );
+                    self.context_menu.open(pointer_pos, None, Some(path), true);
                 }
             }
         });
 
         // Exibe o menu de contexto (se aberto)
-        let mut context_menu = std::mem::replace(&mut self.context_menu, crate::application::context_menu::ContextMenuState::default());
-        let _ = crate::ui::context_menu::render_context_menu(ctx, &mut context_menu, &mut self.svg_icon_manager);
-        
+        let mut context_menu = std::mem::take(&mut self.context_menu);
+        let _ = crate::ui::context_menu::render_context_menu(
+            ctx,
+            &mut context_menu,
+            &mut self.svg_icon_manager,
+        );
+
         // Handle selected command before putting state back
         if let Some(id) = context_menu.selected_command_id.take() {
             if id > 0 {
@@ -705,7 +743,10 @@ impl eframe::App for ImageViewerApp {
             } else {
                 // Internal command handled via trait
                 let item_idx = context_menu.item_index;
-                eprintln!("[DEBUG] Internal command id: {}, item_idx: {:?}", id, item_idx);
+                eprintln!(
+                    "[DEBUG] Internal command id: {}, item_idx: {:?}",
+                    id, item_idx
+                );
                 match id {
                     -1 => self.create_new_folder(),
                     -2 | -31 => self.command_copy(item_idx),
@@ -735,7 +776,9 @@ impl eframe::App for ImageViewerApp {
                             let target = if path.is_dir() {
                                 path
                             } else {
-                                path.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from(&self.current_path))
+                                path.parent()
+                                    .map(Path::to_path_buf)
+                                    .unwrap_or_else(|| PathBuf::from(&self.current_path))
                             };
 
                             self.sync_to_tab();
@@ -762,16 +805,20 @@ impl eframe::App for ImageViewerApp {
                                     // Refresh to show the new shortcut in the view
                                     self.load_folder(false);
                                     self.notifications.push(
-                                        crate::application::AppNotification::info(
-                                            format!("Atalho criado: {}", created.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()),
-                                        ),
+                                        crate::application::AppNotification::info(format!(
+                                            "Atalho criado: {}",
+                                            created
+                                                .file_name()
+                                                .map(|n| n.to_string_lossy())
+                                                .unwrap_or_default()
+                                        )),
                                     );
                                 }
                                 Err(e) => {
                                     self.notifications.push(
-                                        crate::application::AppNotification::error(
-                                            format!("Falha ao criar atalho: {e}"),
-                                        ),
+                                        crate::application::AppNotification::error(format!(
+                                            "Falha ao criar atalho: {e}"
+                                        )),
                                     );
                                 }
                             }
@@ -806,80 +853,95 @@ impl eframe::App for ImageViewerApp {
             }
             context_menu.close();
         }
-        
+
         self.context_menu = context_menu;
 
         // === RESIZE GRIP (bottom-right corner) ===
         let is_not_maximized = !ctx.input(|i| i.viewport().maximized.unwrap_or(false));
         if is_not_maximized {
             let screen_rect = ctx.screen_rect();
-            
+
             // === BORDAS INVISÍVEIS PARA RESIZE (8px de largura) ===
-            let border_width = 12.0;  // mais fácil de clicar
-            
+            let border_width = 12.0; // mais fácil de clicar
+
             // Borda ESQUERDA
             let left_border = egui::Rect::from_min_max(
                 screen_rect.min,
-                egui::pos2(screen_rect.min.x + border_width, screen_rect.max.y)
+                egui::pos2(screen_rect.min.x + border_width, screen_rect.max.y),
             );
             egui::Area::new(egui::Id::new("resize_border_left"))
                 .fixed_pos(left_border.min)
                 .order(egui::Order::Foreground)
                 .show(ctx, |ui| {
-                    let left_response = ui.interact(left_border, egui::Id::new("resize_left"), egui::Sense::click_and_drag());
+                    let left_response = ui.interact(
+                        left_border,
+                        egui::Id::new("resize_left"),
+                        egui::Sense::click_and_drag(),
+                    );
                     if left_response.hovered() {
                         ctx.set_cursor_icon(egui::CursorIcon::ResizeWest);
                     }
                     if left_response.drag_started() {
                         // Usa egui BeginResize - funciona mas tem efeito sanfona no lado esquerdo
-                        ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(egui::ResizeDirection::West));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(
+                            egui::ResizeDirection::West,
+                        ));
                     }
                 });
-            
+
             // Borda DIREITA
             let right_border = egui::Rect::from_min_max(
                 egui::pos2(screen_rect.max.x - border_width, screen_rect.min.y),
-                screen_rect.max
+                screen_rect.max,
             );
             egui::Area::new(egui::Id::new("resize_border_right"))
                 .fixed_pos(right_border.min)
                 .order(egui::Order::Foreground)
                 .show(ctx, |ui| {
-                    let right_response = ui.interact(right_border, egui::Id::new("resize_right"), egui::Sense::click_and_drag());
+                    let right_response = ui.interact(
+                        right_border,
+                        egui::Id::new("resize_right"),
+                        egui::Sense::click_and_drag(),
+                    );
                     if right_response.hovered() {
                         ctx.set_cursor_icon(egui::CursorIcon::ResizeEast);
                     }
                     if right_response.drag_started() {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(egui::ResizeDirection::East));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(
+                            egui::ResizeDirection::East,
+                        ));
                     }
                 });
-            
+
             // Borda INFERIOR
             let bottom_border = egui::Rect::from_min_max(
                 egui::pos2(screen_rect.min.x, screen_rect.max.y - border_width),
-                screen_rect.max
+                screen_rect.max,
             );
             egui::Area::new(egui::Id::new("resize_border_bottom"))
                 .fixed_pos(bottom_border.min)
                 .order(egui::Order::Foreground)
                 .show(ctx, |ui| {
-                    let bottom_response = ui.interact(bottom_border, egui::Id::new("resize_bottom"), egui::Sense::click_and_drag());
+                    let bottom_response = ui.interact(
+                        bottom_border,
+                        egui::Id::new("resize_bottom"),
+                        egui::Sense::click_and_drag(),
+                    );
                     if bottom_response.hovered() {
                         ctx.set_cursor_icon(egui::CursorIcon::ResizeSouth);
                     }
                     if bottom_response.drag_started() {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(egui::ResizeDirection::South));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(
+                            egui::ResizeDirection::South,
+                        ));
                     }
                 });
-            
+
             // === GRIP VISUAL (canto inferior direito - 50x50px) ===
-            let grip_size = 50.0;  // MUITO maior para ser facilmente clicável
-            let grip_pos = egui::pos2(
-                screen_rect.max.x - grip_size,
-                screen_rect.max.y - grip_size,
-            );
-            let grip_rect = egui::Rect::from_min_size(grip_pos, egui::vec2(grip_size, grip_size));
-            
+            let grip_size = 50.0; // MUITO maior para ser facilmente clicável
+            let grip_pos = egui::pos2(screen_rect.max.x - grip_size, screen_rect.max.y - grip_size);
+            let _grip_rect = egui::Rect::from_min_size(grip_pos, egui::vec2(grip_size, grip_size));
+
             egui::Area::new(egui::Id::new("resize_grip"))
                 .fixed_pos(grip_pos)
                 .order(egui::Order::Foreground)
@@ -888,21 +950,23 @@ impl eframe::App for ImageViewerApp {
                         egui::vec2(grip_size, grip_size),
                         egui::Sense::click_and_drag(),
                     );
-                    
+
                     // SEM VISUAL - apenas área interativa (sem listras aparecendo por cima)
-                    
+
                     // Handle resize drag - só dispara no início do drag
                     if response.drag_started() {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(egui::ResizeDirection::SouthEast));
+                        ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(
+                            egui::ResizeDirection::SouthEast,
+                        ));
                     }
-                    
+
                     // Change cursor on hover
                     if response.hovered() {
                         ctx.set_cursor_icon(egui::CursorIcon::ResizeNwSe);
                     }
                 });
         }
-        
+
         // === TOAST NOTIFICATIONS ===
         self.notifications.cleanup(); // Remove expired notifications
 
@@ -959,15 +1023,15 @@ impl eframe::App for ImageViewerApp {
             }
             ctx.request_repaint(); // Keep animating
         }
-
     }
 
     /// Called when the app is exiting - save all preferences
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         // Force save sidebar widths before exit
         self.save_preferences();
-        eprintln!("[EXIT] Saved sidebar widths: L={}, R={}", self.sidebar_left_width, self.sidebar_right_width);
+        eprintln!(
+            "[EXIT] Saved sidebar widths: L={}, R={}",
+            self.sidebar_left_width, self.sidebar_right_width
+        );
     }
 }
-
-

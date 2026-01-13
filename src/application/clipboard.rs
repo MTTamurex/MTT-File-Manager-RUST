@@ -1,8 +1,8 @@
+use crate::application::file_operations;
 use crate::infrastructure::windows::shell_operations;
 use crate::infrastructure::windows_clipboard;
-use crate::application::file_operations;
-use windows::Win32::Foundation::HWND;
 use std::path::PathBuf;
+use windows::Win32::Foundation::HWND;
 
 /// Clipboard operation type
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -53,7 +53,7 @@ impl ClipboardManager {
     pub fn copy(&mut self, path: &PathBuf) {
         // 1. System Clipboard
         let _ = file_operations::copy_path_to_clipboard(path);
-        
+
         // 2. Internal State
         self.internal_file = Some(path.clone());
         self.internal_op = Some(ClipboardOp::Copy);
@@ -62,10 +62,10 @@ impl ClipboardManager {
     /// Cut a file (System + Internal)
     pub fn cut(&mut self, path: &PathBuf) {
         // 1. System Clipboard (Cut usually sets DropEffect, but for now we copy path)
-        // Ideally we should use OLE clipboard with DropEffect::Move, 
+        // Ideally we should use OLE clipboard with DropEffect::Move,
         // but existing impl just copies path.
         let _ = file_operations::copy_path_to_clipboard(path);
-        
+
         // 2. Internal State
         self.internal_file = Some(path.clone());
         self.internal_op = Some(ClipboardOp::Move);
@@ -80,41 +80,47 @@ impl ClipboardManager {
         if let Some(files) = windows_clipboard::get_files_from_clipboard() {
             let op = windows_clipboard::get_clipboard_operation();
             let is_move = matches!(op, Some(windows_clipboard::ClipboardFileOp::Move));
-            
+
             self.execute_paste(files, is_move, dest_folder, hwnd)
         } else if let Some(path) = &self.internal_file {
             // 2. Fallback to Internal
             let is_move = matches!(self.internal_op, Some(ClipboardOp::Move));
             let files = vec![path.clone()];
-            
+
             let result = self.execute_paste(files, is_move, dest_folder, hwnd)?;
-            
+
             if result && is_move {
                 self.internal_file = None;
                 self.internal_op = None;
             }
             Ok(result)
         } else {
-             Err("Área de transferência vazia".to_string())
+            Err("Área de transferência vazia".to_string())
         }
     }
 
-    fn execute_paste(&self, files: Vec<PathBuf>, is_move: bool, dest_folder: &PathBuf, hwnd: HWND) -> Result<bool, String> {
+    fn execute_paste(
+        &self,
+        files: Vec<PathBuf>,
+        is_move: bool,
+        dest_folder: &PathBuf,
+        hwnd: HWND,
+    ) -> Result<bool, String> {
         let mut any_success = false;
 
         for src_path in files {
-             // Skip logic is inside shell_operations helper for move, but explicit check implies intention
-             if is_move {
+            // Skip logic is inside shell_operations helper for move, but explicit check implies intention
+            if is_move {
                 if shell_operations::move_item_with_shell(&src_path, dest_folder, hwnd) {
                     any_success = true;
                 }
-             } else {
+            } else {
                 if shell_operations::copy_item_with_shell(&src_path, dest_folder, hwnd) {
                     any_success = true;
                 }
-             }
+            }
         }
-        
+
         Ok(any_success)
     }
 }

@@ -1,6 +1,6 @@
-use crate::domain::file_entry::{FileEntry, SortMode, FoldersPosition};
-use std::cmp::Ordering;
+use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode};
 use rayon::prelude::*;
+use std::cmp::Ordering;
 
 /// Sorts a slice of FileEntry in place based on the given criteria.
 /// Uses Rayon for parallel sorting if the list is large (>5000 items).
@@ -35,13 +35,23 @@ pub fn sort_items(
             SortMode::Date => a.modified.cmp(&b.modified),
             SortMode::Size => a.size.cmp(&b.size),
             SortMode::Type => {
-                let ext_a = a.path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-                let ext_b = b.path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+                let ext_a = a
+                    .path
+                    .extension()
+                    .map(|e| e.to_string_lossy().to_lowercase())
+                    .unwrap_or_default();
+                let ext_b = b
+                    .path
+                    .extension()
+                    .map(|e| e.to_string_lossy().to_lowercase())
+                    .unwrap_or_default();
                 match ext_a.cmp(&ext_b) {
-                    Ordering::Equal => natord::compare(&a.name.to_lowercase(), &b.name.to_lowercase()),
+                    Ordering::Equal => {
+                        natord::compare(&a.name.to_lowercase(), &b.name.to_lowercase())
+                    }
                     other => other,
                 }
-            },
+            }
         };
 
         // 3. Apply Descending direction

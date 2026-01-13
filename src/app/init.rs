@@ -1,6 +1,11 @@
-use eframe::egui;
+//! Application initialization logic.
+//!
+//! This module handles the creation of the `ImageViewerApp` instance, setting up
+//! asynchronous workers, channels, and loading initial state/configuration.
+
+// use eframe::egui;
 use lru::LruCache;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
@@ -8,13 +13,13 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::application::navigation::NavigationHistory;
 use crate::application::ClipboardManager;
 use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
-use crate::application::navigation::NavigationHistory;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
-use crate::infrastructure::windows as windows_infra;
 use crate::infrastructure::onedrive;
-use crate::ui::cache::CacheManager;
+use crate::infrastructure::windows as windows_infra;
+// use crate::ui::cache::CacheManager;
 use crate::ui::context_menu::ContextMenuState;
 use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
@@ -25,7 +30,7 @@ use super::state::ImageViewerApp;
 // These are referenced from main.rs and need to be accessible
 const PATH_PADRAO: &str = "C:\\";
 
-// Função auxiliar que também está em main.rs - pode ser movida para infrastructure se necessário  
+// Função auxiliar que também está em main.rs - pode ser movida para infrastructure se necessário
 // Function removed: using crate::infrastructure::windows::get_all_drives instead
 
 impl ImageViewerApp {
@@ -129,21 +134,27 @@ impl ImageViewerApp {
             .get_preference("window_is_maximized")
             .map(|s| s == "true")
             .unwrap_or(true); // Default to maximized
-        
+
         // Load sidebar widths from SQLite
         let sidebar_left_raw = disk_cache.get_preference("sidebar_left_width");
         let sidebar_right_raw = disk_cache.get_preference("sidebar_right_width");
-        
-        eprintln!("[INIT] Raw sidebar values from DB: L={:?}, R={:?}", sidebar_left_raw, sidebar_right_raw);
-        
+
+        eprintln!(
+            "[INIT] Raw sidebar values from DB: L={:?}, R={:?}",
+            sidebar_left_raw, sidebar_right_raw
+        );
+
         let sidebar_left_width = sidebar_left_raw
             .and_then(|s| s.parse::<f32>().ok())
             .unwrap_or(200.0);
         let sidebar_right_width = sidebar_right_raw
             .and_then(|s| s.parse::<f32>().ok())
             .unwrap_or(300.0);
-        
-        eprintln!("[INIT] Parsed sidebar widths: L={}, R={}", sidebar_left_width, sidebar_right_width);
+
+        eprintln!(
+            "[INIT] Parsed sidebar widths: L={}, R={}",
+            sidebar_left_width, sidebar_right_width
+        );
 
         // 8 threads: equilíbrio ideal entre SSD e HDD USB
         use crate::workers::thumbnail_worker::spawn_thumbnail_workers;
@@ -273,7 +284,7 @@ impl ImageViewerApp {
             watcher: None,
             fs_event_receiver: fs_rx,
             fs_event_sender: fs_tx,
-            device_event_receiver: device_event_receiver,
+            device_event_receiver,
             last_auto_reload: Instant::now(),
             pending_auto_reload: false,
 
@@ -323,7 +334,7 @@ impl ImageViewerApp {
             saved_window_width,
             saved_window_height,
             saved_is_maximized,
-            
+
             // Sidebar widths persistence
             sidebar_left_width,
             sidebar_right_width,
@@ -336,16 +347,16 @@ impl ImageViewerApp {
 
             // SVG ICON MANAGER
             svg_icon_manager: SvgIconManager::new(PathBuf::from("assets/icons")),
-            
+
             // TAB SYSTEM
             tab_manager: crate::tabs::TabManager::new(),
-            
+
             // FOLDER SIZE CALCULATOR
             folder_size_req_sender: folder_size_req_tx,
             folder_size_res_receiver: folder_size_res_rx,
             folder_size_cache: std::collections::HashMap::new(),
             folder_size_loading: HashSet::new(),
-            
+
             // RECYCLE BIN CACHE
             deletion_date_cache: LruCache::new(NonZeroUsize::new(200).unwrap()),
         };
@@ -365,7 +376,6 @@ impl ImageViewerApp {
                 eprintln!("[GC] Removed {} orphaned cache entries", removed);
             }
         });
-
 
         app
     }

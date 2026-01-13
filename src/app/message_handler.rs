@@ -1,6 +1,13 @@
 // Message handler module - processes messages from background workers
 // This will be populated with message processing logic from the main event loop
 
+//! Message handling for asynchronous events.
+//!
+//! This module implements the `process_messages` method, which acts as the main
+//! event loop consumer, processing signals from background workers (icons, thumbnails, filesystem).
+
+use std::time::Duration;
+
 use super::state::ImageViewerApp;
 
 impl ImageViewerApp {

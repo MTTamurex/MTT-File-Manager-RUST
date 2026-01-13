@@ -3,13 +3,13 @@
 
 pub mod clipboard;
 pub mod context_menu;
+pub mod file_operations;
 pub mod navigation;
 pub mod notification;
 pub mod renaming;
+pub mod sorting;
 pub mod state;
 pub mod watcher;
-pub mod sorting;
-pub mod file_operations;
 
 // Re-export for convenience
 pub use clipboard::*;
