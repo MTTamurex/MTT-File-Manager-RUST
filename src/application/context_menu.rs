@@ -149,6 +149,9 @@ pub struct ContextMenuState {
     /// Stored as Any to keep the application layer agnostic of Win32 types
     /// Note: Not thread-safe - must only be accessed from main thread
     pub native_context: Option<std::rc::Rc<dyn std::any::Any>>,
+
+    /// ID of an item whose submenu needs lazy loading
+    pub pending_load_item: Option<i32>,
 }
 
 impl Default for ContextMenuState {
@@ -162,6 +165,7 @@ impl Default for ContextMenuState {
             items: Vec::new(),
             selected_command_id: None,
             native_context: None,
+            pending_load_item: None,
         }
     }
 }
@@ -196,6 +200,7 @@ impl ContextMenuState {
         self.items.clear();
         self.selected_command_id = None;
         self.native_context = None;
+        self.pending_load_item = None;
     }
 
     /// Checks if the context menu is open for a specific item
