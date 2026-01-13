@@ -11,7 +11,14 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
         &mut app.svg_icon_manager,
     );
 
-    // 2. Handle selected command before putting state back
+    // 2. Handle lazy load request
+    if let Some(id) = context_menu.pending_load_item.take() {
+        app.context_menu = context_menu;
+        app.handle_lazy_submenu_load(ctx, id);
+        context_menu = std::mem::take(&mut app.context_menu);
+    }
+
+    // 3. Handle selected command before putting state back
     if let Some(id) = context_menu.selected_command_id.take() {
         if id > 0 {
             // Shell command

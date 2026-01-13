@@ -61,6 +61,7 @@ pub fn render_context_menu(
     }
 
     let mut action_executed: Option<i32> = None;
+    let mut pending_load_item: Option<i32> = None;
     let mut should_close = false;
 
     // Separate primary (header) and secondary items
@@ -105,11 +106,21 @@ pub fn render_context_menu(
                     }
 
                     // ========== SECONDARY ITEMS (Regular menu items) ==========
-                    render_menu_items(ui, &secondary_items, &mut action_executed);
+                    render_menu_items(
+                        ui,
+                        &secondary_items,
+                        &mut action_executed,
+                        &mut pending_load_item,
+                    );
 
                     // ========== OVERFLOW ("Show more options") ==========
                     if !overflow_items.is_empty() {
-                        render_overflow_submenu(ui, &overflow_items, &mut action_executed);
+                        render_overflow_submenu(
+                            ui,
+                            &overflow_items,
+                            &mut action_executed,
+                            &mut pending_load_item,
+                        );
                     }
                 });
         });
@@ -118,6 +129,10 @@ pub fn render_context_menu(
     if let Some(id) = action_executed {
         menu_state.selected_command_id = Some(id);
         should_close = true;
+    }
+
+    if let Some(id) = pending_load_item {
+        menu_state.pending_load_item = Some(id);
     }
 
     // Close menu on left-click outside (use released to avoid capturing the opening click)
@@ -230,7 +245,12 @@ fn render_header_bar(
 }
 
 /// Render list of menu items with icons and keyboard shortcuts
-fn render_menu_items(ui: &mut egui::Ui, items: &[&ContextMenuItem], action: &mut Option<i32>) {
+fn render_menu_items(
+    ui: &mut egui::Ui,
+    items: &[&ContextMenuItem],
+    action: &mut Option<i32>,
+    lazy_load: &mut Option<i32>,
+) {
     let mut last_was_separator = true; // collapse leading separators
 
     for item in items {
@@ -238,10 +258,10 @@ fn render_menu_items(ui: &mut egui::Ui, items: &[&ContextMenuItem], action: &mut
             if last_was_separator {
                 continue; // skip duplicate/leading separators
             }
-            render_single_item(ui, item, action, 0); // Top-level items have depth 0
+            render_single_item(ui, item, action, 0, lazy_load); // Top-level items have depth 0
             last_was_separator = true;
         } else {
-            render_single_item(ui, item, action, 0); // Top-level items have depth 0
+            render_single_item(ui, item, action, 0, lazy_load); // Top-level items have depth 0
             last_was_separator = false;
         }
     }
@@ -252,7 +272,8 @@ fn render_single_item(
     ui: &mut egui::Ui,
     item: &ContextMenuItem,
     action: &mut Option<i32>,
-    depth: usize, // NEW: Track nesting depth for hierarchical state
+    depth: usize,
+    lazy_load: &mut Option<i32>,
 ) {
     if item.is_separator {
         ui.separator();
@@ -441,6 +462,11 @@ fn render_single_item(
 
         // Show submenu if this is the active item at this depth
         if is_active {
+            // Signal lazy load if submenu is active but empty
+            if item.has_pending_submenu && item.sub_items.is_empty() {
+                *lazy_load = Some(item.id);
+            }
+
             let area_response = egui::Area::new(egui::Id::new(format!("submenu_{}", item.id)))
                 .order(egui::Order::Foreground)
                 .fixed_pos(submenu_pos)
@@ -453,7 +479,7 @@ fn render_single_item(
                             ui.set_max_width(MENU_MAX_WIDTH);
                             ui.spacing_mut().item_spacing = egui::vec2(0.0, 1.0);
                             for sub in &item.sub_items {
-                                render_single_item(ui, sub, action, depth + 1);
+                                render_single_item(ui, sub, action, depth + 1, lazy_load);
                             }
                         });
                 });
@@ -499,9 +525,10 @@ fn render_overflow_submenu(
     ui: &mut egui::Ui,
     items: &[&ContextMenuItem],
     action: &mut Option<i32>,
+    lazy_load: &mut Option<i32>,
 ) {
     let overflow_item = ContextMenuItem::new(-100, "Mostrar mais opções")
         .with_subitems(items.iter().map(|i| (*i).clone()).collect());
 
-    render_single_item(ui, &overflow_item, action, 0); // Overflow is top-level
+    render_single_item(ui, &overflow_item, action, 0, lazy_load); // Overflow is top-level
 }

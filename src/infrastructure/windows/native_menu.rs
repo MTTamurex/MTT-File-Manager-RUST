@@ -32,7 +32,7 @@ pub struct ShellMenuItem {
 
 /// Context holding the native objects alive
 pub struct ShellMenuContext {
-    pub items: Vec<ShellMenuItem>,
+    pub items: std::cell::RefCell<Vec<ShellMenuItem>>,
     pub context_menu: IContextMenu,
     /// Keep the root menu handle alive for on-demand submenu loading
     hmenu: HMENU,
@@ -116,7 +116,7 @@ pub fn extract_shell_menu(hwnd: HWND, path: &Path) -> Result<ShellMenuContext> {
         let mut items = Vec::new();
         let mut pending_count = 0;
         for i in 0..count {
-            if let Some(item) = extract_item_info(&context_menu, hmenu, i as u32) {
+            if let Some(item) = extract_item_info(&context_menu, hmenu, i as u32, false) {
                 if item.pending_submenu_handle.is_some() {
                     pending_count += 1;
                     eprintln!("[ShellMenu] Item '{}' has PENDING submenu", item.text);
@@ -139,7 +139,7 @@ pub fn extract_shell_menu(hwnd: HWND, path: &Path) -> Result<ShellMenuContext> {
         CoTaskMemFree(Some(pidl as _));
 
         Ok(ShellMenuContext {
-            items,
+            items: std::cell::RefCell::new(items),
             context_menu,
             hmenu,
         })
@@ -160,10 +160,22 @@ pub fn warmup_shell_extensions(hwnd: HWND) {
     );
 
     if let Ok(_ctx) = extract_shell_menu(hwnd, &warmup_path) {
-        eprintln!("[ShellMenu] Warmup complete, shell extensions initialized");
+        eprintln!("[ShellMenu] Folder warmup complete");
     } else {
-        eprintln!("[ShellMenu] Warmup failed");
+        eprintln!("[ShellMenu] Folder warmup failed");
     }
+
+    // Use a temporary file to trigger file-level shell extensions (e.g., 7-Zip, WinRAR)
+    let temp_file = std::env::temp_dir().join("mtt_warmup_dummy.txt");
+    let _ = std::fs::File::create(&temp_file);
+    if let Ok(_ctx) = extract_shell_menu(hwnd, &temp_file) {
+        eprintln!("[ShellMenu] File warmup complete");
+    } else {
+        eprintln!("[ShellMenu] File warmup failed");
+    }
+    let _ = std::fs::remove_file(&temp_file);
+
+    eprintln!("[ShellMenu] Shell extensions initialized");
 }
 
 /// Get command string (verb) for a menu item
@@ -198,6 +210,7 @@ unsafe fn extract_item_info(
     context_menu: &IContextMenu,
     hmenu: HMENU,
     index: u32,
+    recursive: bool,
 ) -> Option<ShellMenuItem> {
     let mut info = MENUITEMINFOW {
         cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
@@ -244,27 +257,31 @@ unsafe fn extract_item_info(
     let mut pending_submenu_handle = None;
 
     if !info.hSubMenu.0.is_null() {
-        // Send WM_INITMENUPOPUP BEFORE checking item count to trigger lazy loading
-        // This is required for WinRAR, Send to, Include in library, etc.
-        if let Ok(ctx2) = context_menu.cast::<IContextMenu2>() {
-            let _ = ctx2.HandleMenuMsg(
-                WM_INITMENUPOPUP,
-                WPARAM(info.hSubMenu.0 as usize),
-                LPARAM(index as isize),
-            );
-        }
+        if recursive {
+            // Send WM_INITMENUPOPUP BEFORE checking item count to trigger lazy loading
+            if let Ok(ctx2) = context_menu.cast::<IContextMenu2>() {
+                let _ = ctx2.HandleMenuMsg(
+                    WM_INITMENUPOPUP,
+                    WPARAM(info.hSubMenu.0 as usize),
+                    LPARAM(index as isize),
+                );
+            }
 
-        let sub_count = GetMenuItemCount(info.hSubMenu);
-
-        if sub_count > 0 {
-            // Submenu has items - extract them recursively
-            for i in 0..sub_count {
-                if let Some(sub_item) = extract_item_info(context_menu, info.hSubMenu, i as u32) {
-                    sub_items.push(sub_item);
+            let sub_count = GetMenuItemCount(info.hSubMenu);
+            if sub_count > 0 {
+                // Submenu has items - extract them recursively (only if permitted)
+                for i in 0..sub_count {
+                    if let Some(sub_item) =
+                        extract_item_info(context_menu, info.hSubMenu, i as u32, true)
+                    {
+                        sub_items.push(sub_item);
+                    }
                 }
+            } else {
+                pending_submenu_handle = Some(info.hSubMenu.0 as isize);
             }
         } else {
-            // Submenu is still empty after WM_INITMENUPOPUP - store handle for on-demand loading
+            // Lazy mode: Store handle for on-demand loading
             pending_submenu_handle = Some(info.hSubMenu.0 as isize);
         }
     }
@@ -303,7 +320,7 @@ impl ShellMenuContext {
                 let sub_count = GetMenuItemCount(hsubmenu);
                 for i in 0..sub_count {
                     if let Some(sub_item) =
-                        extract_item_info(&self.context_menu, hsubmenu, i as u32)
+                        extract_item_info(&self.context_menu, hsubmenu, i as u32, false)
                     {
                         item.sub_items.push(sub_item);
                     }

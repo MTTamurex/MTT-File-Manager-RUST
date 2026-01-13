@@ -226,6 +226,7 @@ impl ImageViewerApp {
 
                 let shell_items: Vec<ContextMenuItem> = shell_ctx
                     .items
+                    .borrow()
                     .iter()
                     .filter_map(|s| convert(ctx, s))
                     .collect();
@@ -266,5 +267,74 @@ impl ImageViewerApp {
         }
 
         self.context_menu.items = items;
+    }
+
+    pub fn handle_lazy_submenu_load(&mut self, egui_ctx: &egui::Context, item_id: i32) {
+        use crate::infrastructure::windows::native_menu::{ShellMenuContext, ShellMenuItem, is_known_verb};
+        use crate::application::context_menu::ContextMenuItem;
+
+        let native_ctx = self.context_menu.native_context.clone();
+        let Some(native_ctx) = native_ctx else { return };
+        let Some(shell_ctx) = native_ctx.downcast_ref::<ShellMenuContext>() else { return };
+
+        // 1. Find the ShellMenuItem recursively
+        fn find_shell_item_mut<'a>(items: &'a mut [ShellMenuItem], id: u32) -> Option<&'a mut ShellMenuItem> {
+            for item in items {
+                if item.id == id {
+                    return Some(item);
+                }
+                if let Some(found) = find_shell_item_mut(&mut item.sub_items, id) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+
+        let mut items = shell_ctx.items.borrow_mut();
+        if let Some(shell_item) = find_shell_item_mut(&mut items, item_id as u32) {
+            if shell_ctx.load_pending_submenu(shell_item) {
+                // 2. Success! Now update the ContextMenuItem tree
+                fn convert_item(ui_ctx: &egui::Context, shell_item: &ShellMenuItem) -> ContextMenuItem {
+                    let icon = shell_item.icon_rgba.as_ref().map(|(rgba, w, h)| {
+                        ui_ctx.load_texture(
+                            format!("menu_icon_{}", shell_item.id),
+                            egui::ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], rgba),
+                            Default::default(),
+                        )
+                    });
+
+                    ContextMenuItem {
+                        id: shell_item.id as i32,
+                        text: shell_item.text.clone(),
+                        icon,
+                        sub_items: shell_item.sub_items.iter().map(|s| convert_item(ui_ctx, s)).collect(),
+                        is_separator: shell_item.is_separator,
+                        is_enabled: shell_item.is_enabled,
+                        is_primary: false,
+                        keyboard_shortcut: None,
+                        command_string: shell_item.command_string.clone(),
+                        show_in_overflow: false,
+                        has_pending_submenu: shell_item.pending_submenu_handle.is_some(),
+                    }
+                }
+
+                fn update_ui_item(items: &mut [ContextMenuItem], id: i32, new_subitems: Vec<ContextMenuItem>) -> bool {
+                    for item in items {
+                        if item.id == id {
+                            item.sub_items = new_subitems;
+                            item.has_pending_submenu = false;
+                            return true;
+                        }
+                        if update_ui_item(&mut item.sub_items, id, new_subitems.clone()) {
+                            return true;
+                        }
+                    }
+                    false
+                }
+
+                let new_subitems: Vec<ContextMenuItem> = shell_item.sub_items.iter().map(|s| convert_item(egui_ctx, s)).collect();
+                update_ui_item(&mut self.context_menu.items, item_id, new_subitems);
+            }
+        }
     }
 }
