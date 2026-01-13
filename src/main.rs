@@ -2465,6 +2465,7 @@ impl ImageViewerApp {
             Some(list_view::ListViewAction::DoubleClick(idx)) if !is_renaming => {
                 let path_to_navigate = self.items.get(idx).map(|item| {
                     if item.is_dir {
+                        if self.is_recycle_bin_view { return None; }
                         Some(item.path.clone())
                     } else {
                         open_with_shell(&item.path);
@@ -2679,6 +2680,7 @@ impl ImageViewerApp {
             Some(grid_view::GridViewAction::DoubleClick(idx)) if !is_renaming => {
                 let path_to_navigate = self.items.get(idx).map(|item| {
                     if item.is_dir {
+                        if self.is_recycle_bin_view { return None; }
                         Some(item.path.clone())
                     } else {
                         open_with_shell(&item.path);
