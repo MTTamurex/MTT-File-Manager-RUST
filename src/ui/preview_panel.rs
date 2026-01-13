@@ -1,6 +1,7 @@
 use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::windows::is_media_extension;
 use crate::infrastructure::windows::MediaMetadata;
+use crate::ui::components::MediaPreview;
 use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::widgets;
@@ -17,6 +18,7 @@ pub fn render_preview_panel(
     ui: &mut egui::Ui,
     file: &FileEntry,
     selected_thumbnail: Option<&egui::TextureHandle>,
+    media_preview: Option<&mut MediaPreview>,
     metadata: Option<&MediaMetadata>,
     texture_cache_peek: Option<egui::TextureHandle>, // Output of cache.peek
     folder_preview_peek: Option<egui::TextureHandle>, // Output of folder preview cache
@@ -48,8 +50,17 @@ pub fn render_preview_panel(
             texture_cache_peek
         };
 
-        if let (Some(tex), true) = (texture, is_media) {
-            // Mostra thumbnail de imagem/video
+        if let Some(preview) = media_preview {
+            preview.show(ui);
+
+            // Botão de recarregar thumbnail
+            if widgets::icon_button(ui, svg_manager, "refresh", "Recarregar Thumbnail", None)
+                .clicked()
+            {
+                action = Some(PreviewPanelAction::RefreshThumbnail(file.path.clone()));
+            }
+        } else if let (Some(tex), true) = (texture, is_media) {
+            // Mostra thumbnail de imagem/video (Fallback se media_preview não estiver pronto)
             // Use available width with a safety margin to prevent forcing sidebar expansion
             let max_preview_width = ui.available_width() - 16.0;
             let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
