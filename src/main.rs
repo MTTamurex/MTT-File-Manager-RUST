@@ -3132,296 +3132,82 @@ impl eframe::App for ImageViewerApp {
                 ..Default::default()
             })
             .show(ctx, |ui| {
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.style_mut().spacing.item_spacing.x = 8.0;
+                use mtt_file_manager::ui::toolbar::{render_toolbar, ToolbarAction};
+                // Make sure ViewMode is imported or available via crate::domain::file_entry
+                use mtt_file_manager::domain::file_entry::{SortMode, ViewMode};
 
-                // 1. NAVEGAÇÃO (ESQUERDA) - Bloqueados durante renomeação
-                let is_renaming = self.renaming_state.is_some();
+                let action = render_toolbar(
+                    ui,
+                    &self.current_path,
+                    &mut self.path_input,
+                    &mut self.is_address_editing,
+                    &mut self.search_query,
+                    &self.navigation,
+                    self.view_mode,
+                    self.sort_mode,
+                    self.sort_descending,
+                    &mut self.thumbnail_size,
+                    self.show_preview_panel,
+                    self.renaming_state.is_some(),
+                    self.cache_manager.computer_icon.as_ref(),
+                    &mut self.svg_icon_manager,
+                );
 
-                let can_back = self.can_go_back() && !is_renaming;
-                if widgets::icon_button(ui, &mut self.svg_icon_manager, ICON_ARROW_LEFT, "Voltar", None).clicked() && can_back {
-                    self.go_back();
-                }
-
-                let can_forward = self.can_go_forward() && !is_renaming;
-                if widgets::icon_button(ui, &mut self.svg_icon_manager, ICON_ARROW_RIGHT, "Avançar", None).clicked() && can_forward {
-                    self.go_forward();
-                }
-
-                if widgets::icon_button(ui, &mut self.svg_icon_manager, ICON_ARROW_UP, "Subir um nível", None).clicked()
-                    && !is_renaming
-                {
-                    self.go_up_one_level();
-                }
-
-                if widgets::icon_button(ui, &mut self.svg_icon_manager, ICON_REFRESH, "Recarregar", None).clicked() && !is_renaming {
-                    self.trigger_manual_refresh();
-                }
-
-                ui.separator();
-
-                // Botão de Nova Pasta
-                if widgets::icon_button(ui, &mut self.svg_icon_manager, ICON_FOLDER_ADD, "Criar Nova Pasta (Ctrl+Shift+N)", None).clicked() && !is_renaming {
-                    self.create_new_folder();
-                }
-
-                ui.separator();
-
-                if widgets::icon_button(ui, &mut self.svg_icon_manager, ICON_HOME, "Home", self.cache_manager.computer_icon.as_ref()).clicked() && !is_renaming {
-                    self.navigate_to_computer();
-                }
-
-                // 2. ELEMENTOS DA DIREITA (DIREITA -> ESQUERDA)
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_space(4.0);
-
-                    // Zoom
-                    ui.add_sized(
-                        egui::vec2(80.0, 20.0),
-                        egui::Slider::new(&mut self.thumbnail_size, 64.0..=256.0).show_value(false),
-                    );
-                    ui.label("Zoom");
-
-                    ui.separator();
-
-                    // Detalhes (Antigo Preview)
-                    // Detalhes (Antigo Preview)
-                    if widgets::toggle_icon_button(
-                        ui, 
-                        &mut self.svg_icon_manager, 
-                        ICON_DETAILS, 
-                        self.show_preview_panel, 
-                        "Detalhes"
-                    ).clicked() {
-                        self.show_preview_panel = !self.show_preview_panel;
-                    }
-
-                    ui.separator();
-
-                    // Modo de Visualização
-                    if widgets::toggle_icon_button(
-                            ui,
-                            &mut self.svg_icon_manager,
-                            ICON_LIST,
-                            self.view_mode == ViewMode::List,
-                            "Lista",
-                        )
-                        .clicked()
-                    {
-                        self.view_mode = ViewMode::List;
-                    }
-                    if widgets::toggle_icon_button(
-                            ui,
-                            &mut self.svg_icon_manager,
-                            ICON_GRID,
-                            self.view_mode == ViewMode::Grid,
-                            "Grade",
-                        )
-                        .clicked()
-                    {
-                        self.view_mode = ViewMode::Grid;
-                    }
-
-                    ui.separator();
-
-                    // Ordenação
-                    let sort_symbol = if self.sort_descending { "↓" } else { "↑" };
-                    if ui
-                        .button(sort_symbol)
-                        .on_hover_text("Inverter Ordem")
-                        .clicked()
-                    {
-                        self.sort_descending = !self.sort_descending;
-                        self.sort_items();
-                        self.save_preferences();
-                    }
-
-                    egui::ComboBox::from_id_salt("sort_mode")
-                        .selected_text(match self.sort_mode {
-                            SortMode::Name => "Nome",
-                            SortMode::Date => "Data",
-                            SortMode::Size => "Tamanho",
-                            SortMode::Type => "Tipo",
-                        })
-                        .show_ui(ui, |ui| {
-                            if ui
-                                .selectable_value(&mut self.sort_mode, SortMode::Name, "Nome")
-                                .clicked()
-                            {
-                                self.sort_items();
-                                self.save_preferences();
-                            }
-                            if ui
-                                .selectable_value(&mut self.sort_mode, SortMode::Date, "Data")
-                                .clicked()
-                            {
-                                self.sort_items();
-                                self.save_preferences();
-                            }
-                            if ui
-                                .selectable_value(&mut self.sort_mode, SortMode::Size, "Tamanho")
-                                .clicked()
-                            {
-                                self.sort_items();
-                                self.save_preferences();
-                            }
-                            if ui
-                                .selectable_value(&mut self.sort_mode, SortMode::Type, "Tipo")
-                                .clicked()
-                            {
-                                self.sort_items();
-                                self.save_preferences();
-                            }
-                        });
-
-                    ui.separator();
-
-                    // Busca
-                    let search_width = 120.0;
-                    let search_response = ui.add_sized(
-                        egui::vec2(search_width, 22.0),
-                        egui::TextEdit::singleline(&mut self.search_query).hint_text("Buscar..."),
-                    );
-                    if search_response.changed() {
-                        self.filter_items();
-                    }
-                    mtt_file_manager::ui::svg_icons::icon_image(
-                        ui,
-                        &mut self.svg_icon_manager,
-                        "search",
-                        16.0,
-                    );
-
-                    ui.separator();
-
-                    // 3. BARRA DE ENDEREÇO (Breadcrumbs ou Edição)
-                    // No layout reverse (right_to_left), o available_width() retorna o que sobrou à esquerda.
-                    let addr_width = (ui.available_width() - 4.0).max(100.0);
-                    let (addr_rect, _addr_response) =
-                        ui.allocate_exact_size(egui::vec2(addr_width, 24.0), egui::Sense::hover());
-
-                    let mut navigate_target = None;
-                    let mut start_editing = false;
-
-                    // IMPORTANTE: Usar allocate_new_ui com closure para ter o novo Ui com layout correto
-                    ui.allocate_new_ui(
-                        egui::UiBuilder::new()
-                            .max_rect(addr_rect)
-                            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-                        |ui| {
-                            if self.is_address_editing {
-                                let edit_response = ui.add_sized(
-                                    ui.available_size(),
-                                    egui::TextEdit::singleline(&mut self.path_input)
-                                        .hint_text("Caminho...")
-                                        .id_source("address_edit"),
-                                );
-
-                                if edit_response.clicked_elsewhere()
-                                    || (edit_response.lost_focus()
-                                        && !ui.input(|i| i.key_pressed(egui::Key::Enter)))
-                                {
-                                    self.is_address_editing = false;
-                                }
-
-                                if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                    let path = self.path_input.clone();
-                                    if Path::new(&path).exists() {
-                                        navigate_target = Some(path);
-                                        self.is_address_editing = false;
-                                    } else {
-                                        self.path_input = self.current_path.clone();
-                                        self.is_address_editing = false;
-                                    }
-                                }
-
-                                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                                    self.is_address_editing = false;
-                                    self.path_input = self.current_path.clone();
-                                }
+                if let Some(act) = action {
+                    match act {
+                        ToolbarAction::GoBack => self.go_back(),
+                        ToolbarAction::GoForward => self.go_forward(),
+                        ToolbarAction::GoUp => self.go_up_one_level(),
+                        ToolbarAction::Refresh => self.trigger_manual_refresh(),
+                        ToolbarAction::CreateFolder => self.create_new_folder(),
+                        ToolbarAction::NavigateToComputer => self.navigate_to_computer(),
+                        ToolbarAction::NavigateToRecycleBin => self.navigate_to_recycle_bin(),
+                        ToolbarAction::ToggleViewMode => {
+                            if self.view_mode == ViewMode::List {
+                                self.view_mode = ViewMode::Grid;
                             } else {
-                                ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 2.0;
-
-                                    if self.current_path == "Este Computador" {
-                                        ui.label(egui::RichText::new("Este Computador").size(13.0));
-                                    } else {
-                                        let path = Path::new(&self.current_path);
-                                        let mut full_accumulated = PathBuf::new();
-                                        let components: Vec<_> = path.components().collect();
-
-                                        for (i, comp) in components.iter().enumerate() {
-                                            let comp_str = comp.as_os_str().to_string_lossy();
-                                            let display_name = comp_str.trim_end_matches('\\');
-
-                                            if display_name.is_empty() && i > 0 {
-                                                continue;
-                                            }
-
-                                            full_accumulated.push(comp);
-                                            // Normaliza drive roots: "Z:" -> "Z:\" para navegação correta
-                                            let target_path = {
-                                                let p =
-                                                    full_accumulated.to_string_lossy().to_string();
-                                                if p.len() == 2 && p.ends_with(':') {
-                                                    format!("{}\\", p)
-                                                } else {
-                                                    p
-                                                }
-                                            };
-
-                                            // Nome do drive ou pasta
-                                            let display = if display_name.is_empty() {
-                                                comp_str.into_owned() // Root / ou C:\
-                                            } else {
-                                                display_name.to_string()
-                                            };
-
-                                            if ui.button(display).clicked() {
-                                                navigate_target = Some(target_path);
-                                            }
-
-                                            if i < components.len() - 1 {
-                                                ui.label(
-                                                    egui::RichText::new("›")
-                                                        .size(14.0)
-                                                        .color(egui::Color32::from_gray(120)),
-                                                );
-                                            }
-                                        }
-                                    }
-
-                                    // Espaço clicável à direita para entrar no modo edição
-                                    let remaining = ui.available_width();
-                                    if remaining > 0.0 {
-                                        let (_rect, resp) = ui.allocate_exact_size(
-                                            egui::vec2(remaining, ui.available_height()),
-                                            egui::Sense::click(),
-                                        );
-                                        if resp.clicked() {
-                                            start_editing = true;
-                                        }
-                                    }
-                                });
+                                self.view_mode = ViewMode::List;
                             }
                         },
-                    );
-
-                    if let Some(target) = navigate_target {
-                        self.navigate_to(&target);
+                        ToolbarAction::TogglePreviewPanel => self.show_preview_panel = !self.show_preview_panel,
+                        ToolbarAction::ChangeSortMode(mode) => {
+                            self.sort_mode = mode;
+                            self.sort_items();
+                            self.save_preferences();
+                        },
+                        ToolbarAction::ToggleSortDescending => {
+                            self.sort_descending = !self.sort_descending;
+                            self.sort_items();
+                            self.save_preferences();
+                        },
+                        ToolbarAction::Search(_query) => {
+                            self.filter_items();
+                        },
+                        ToolbarAction::Navigate(path) => self.navigate_to(&path),
+                        ToolbarAction::StartAddressEdit => {
+                            self.path_input = self.current_path.clone();
+                            self.is_address_editing = true;
+                        },
+                        ToolbarAction::CommitPathInput(path) => {
+                            if std::path::Path::new(&path).exists() {
+                                self.navigate_to(&path);
+                                self.is_address_editing = false;
+                            } else {
+                                self.path_input = self.current_path.clone();
+                                self.is_address_editing = false;
+                            }
+                        },
+                         ToolbarAction::CancelPathInput => {
+                             self.is_address_editing = false;
+                             self.path_input = self.current_path.clone();
+                         },
+                         ToolbarAction::UpdatePathInput(_) => {
+                             // Handled by text edit binding
+                         },
+                         _ => {}
                     }
-                    if start_editing {
-                        self.path_input = self.current_path.clone();
-                        self.is_address_editing = true;
-                        ui.ctx().memory_mut(|m| {
-                            m.request_focus(egui::Id::from("address_edit").with("text_edit"))
-                        });
-                    }
-                });
+                }
             });
-            ui.add_space(4.0);
-        });
 
         // Windows 11 style sidebar (Restored)
         
@@ -3484,21 +3270,23 @@ impl eframe::App for ImageViewerApp {
                 .min_width(250.0)
                 .max_width(500.0)
                 .show(ctx, |ui| {
+                    use mtt_file_manager::ui::preview_panel::{render_preview_panel, PreviewPanelAction};
+
                     egui::ScrollArea::vertical()
                         .id_source("preview_scroll")
                         .show(ui, |ui| {
                             ui.set_max_width(ui.available_width());
+                            
+                            // 1. Calculate effective_file (Logic from main.rs)
                             let effective_file = if let Some(file) = self.selected_file.clone() {
-                                // Na lixeira, não verificar se o path existe (pois usamos paths virtuais)
                                 if self.is_recycle_bin_view || file.path.exists() {
                                     Some(file)
                                 } else {
-                                    // File no longer exists - clear selection
                                     None
                                 }
                             } else if self.is_recycle_bin_view {
-                                // Na lixeira sem seleção, mostra info da Lixeira
-                                let entry = FileEntry {
+                                // Logic for Lixeira root...
+                                Some(FileEntry {
                                     path: PathBuf::from("Lixeira"),
                                     name: "Lixeira".to_string(),
                                     is_dir: true,
@@ -3506,37 +3294,32 @@ impl eframe::App for ImageViewerApp {
                                     modified: 0,
                                     folder_cover: None,
                                     drive_info: None,
-                                    sync_status: mtt_file_manager::domain::file_entry::SyncStatus::None,
+                                    sync_status: SyncStatus::None,
                                     deletion_date: None,
-                                };
-                                Some(entry)
+                                })
                             } else if !self.is_computer_view {
-                                // Fallback: mostra informações da pasta ou drive atual
+                                // Fallback logic
                                 let path = std::path::PathBuf::from(&self.current_path);
                                 let mut entry = FileEntry::from_path(path.clone(), true);
-                                
-                                // Verifica se é o root de um drive (ex: C:\)
                                 if path.to_string_lossy().len() <= 3 && path.to_string_lossy().contains(':') {
-                                    use mtt_file_manager::infrastructure::windows::get_volume_info;
-                                    let vol = get_volume_info(&self.current_path);
-                                    let drive_type = windows_infra::detect_drive_type(&self.current_path);
-                                    
-                                    let label = self.disks.iter()
-                                        .find(|(p, _)| p.starts_with(&self.current_path) || self.current_path.starts_with(p))
-                                        .map(|(_, l)| l.clone())
-                                        .unwrap_or_else(|| self.current_path.clone());
-                                        
-                                    entry.name = label;
-                                    entry.drive_info = Some(mtt_file_manager::domain::file_entry::DriveInfo {
-                                        file_system: vol.file_system,
-                                        total_space: vol.total_space,
-                                        free_space: vol.free_space,
-                                        drive_type,
-                                    });
+                                     use mtt_file_manager::infrastructure::windows::get_volume_info;
+                                     let vol = get_volume_info(&self.current_path);
+                                     let drive_type = windows_infra::detect_drive_type(&self.current_path);
+                                     let label = self.disks.iter()
+                                         .find(|(p, _)| p.starts_with(&self.current_path) || self.current_path.starts_with(p))
+                                         .map(|(_, l)| l.clone())
+                                         .unwrap_or_else(|| self.current_path.clone());
+                                     entry.name = label;
+                                     entry.drive_info = Some(mtt_file_manager::domain::file_entry::DriveInfo {
+                                         file_system: vol.file_system,
+                                         total_space: vol.total_space,
+                                         free_space: vol.free_space,
+                                         drive_type,
+                                     });
                                 } else {
-                                    entry.name = path.file_name()
-                                        .map(|n| n.to_string_lossy().to_string())
-                                        .unwrap_or_else(|| self.current_path.clone());
+                                     entry.name = path.file_name()
+                                         .map(|n| n.to_string_lossy().to_string())
+                                         .unwrap_or_else(|| self.current_path.clone());
                                 }
                                 Some(entry)
                             } else {
@@ -3544,476 +3327,55 @@ impl eframe::App for ImageViewerApp {
                             };
 
                             if let Some(file) = effective_file {
-                                ui.heading("Detalhes");
-                                ui.separator();
-
-                                // Preview de imagem/video (se houver thumbnail)
-                                let _has_thumbnail =
-                                    self.cache_manager.texture_cache.peek(&file.path).is_some();
-                                // Detecta se é mídia usando Windows Perceived Type API
-                                let is_media = file
-                            .path
-                            .extension()
-                            .map(|ext: &std::ffi::OsStr| {
-                                mtt_file_manager::infrastructure::windows::is_media_extension(
-                                    &ext.to_string_lossy(),
-                                )
-                            })
-                            .unwrap_or(false);
-
-                                let texture = if let Some(tex) = &self.selected_thumbnail {
-                                    Some(tex.clone())
-                                } else {
-                                    self.cache_manager.texture_cache.peek(&file.path).cloned()
-                                };
-
-                                if let (Some(tex), true) = (texture, is_media) {
-                                    // Mostra thumbnail de imagem/video
-                                    let max_preview_width = ui.available_width() - 8.0;
-                                    let max_preview_size =
-                                        egui::vec2(max_preview_width, max_preview_width);
-
-                                    ui.vertical_centered(|ui| {
-                                        ui.add(
-                                            egui::Image::new(&tex)
-                                                .max_size(max_preview_size)
-                                                .shrink_to_fit(),
-                                        );
-                                    });
-                                    
-                                    // Botão de recarregar thumbnail (centralizado)
-                                    ui.vertical_centered(|ui| {
-                                        if widgets::icon_button(ui, &mut self.svg_icon_manager, ICON_REFRESH, "Recarregar Thumbnail", None).clicked() {
-                                            // 1. Remove do cache SQLite
-                                            self.disk_cache.remove_cache_for_path(&file.path);
-                                            
-                                            // 2. Remove do cache RAM (texture_cache)
-                                            self.cache_manager.texture_cache.pop(&file.path);
-                                            
-                                            // 3. Remove do loading_set para permitir re-carregamento
-                                            self.cache_manager.loading_set.remove(&file.path);
-                                            
-                                            // 4. Dispara re-extração normal via worker pool
-                                            // O worker já tenta múltiplas abordagens, incluindo Shell API
-                                            let _ = self.thumbnail_req_sender.send((file.path.clone(), self.generation));
-                                            
-                                            // Notifica o usuário
-                                            self.notifications.push(
-                                                mtt_file_manager::application::AppNotification::info(
-                                                    "Recarregando thumbnail...".to_string(),
-                                                ),
-                                            );
-                                        }
-                                    });
-                                    
-                                    ui.separator();
-                                } else {
-                                    // Pasta ou Drive ou Arquivo sem Thumbnail
-                                    let max_w: f32 = ui.available_width() - 40.0;
-                                    let icon_size: f32 = (120.0f32).min(max_w);
-
-                                    ui.vertical_centered(|ui| {
-                                        ui.add_space(20.0);
-                                        if let Some(_) = &file.drive_info {
-                                            // DRIVE
-                                            if let Some(icon) =
-                                                self.item_icon_loader.get_or_load_drive_icon(
-                                                    ui.ctx(),
-                                                    &file.path.to_string_lossy(),
-                                                )
-                                            {
-                                                ui.add(
-                                                    egui::Image::new(&icon)
-                                                        .max_size(egui::vec2(icon_size, icon_size)),
-                                                );
-                                            } else {
-                                                ui.label(
-                                                    egui::RichText::new("??").size(icon_size * 0.8),
-                                                );
-                                            }
-                                        } else if self.is_recycle_bin_view && file.name == "Lixeira" {
-                                            // LIXEIRA - mostra ícone da lixeira
-                                            if let Some(icon) = self.item_icon_loader.ensure_recycle_bin_icon(ui.ctx()) {
-                                                ui.add(
-                                                    egui::Image::new(&icon)
-                                                        .max_size(egui::vec2(icon_size, icon_size)),
-                                                );
-                                            } else {
-                                                ui.label(
-                                                    egui::RichText::new("🗑").size(icon_size * 0.6),
-                                                );
-                                            }
-                                        } else if file.is_dir {
-                                            // PASTA (Usa preview nativo do Windows - sandwich effect)
-                                            // Na lixeira, não tentar carregar preview de pastas
-                                            if self.is_recycle_bin_view {
-                                                // Pasta na lixeira - mostra ícone de pasta genérico
-                                                self.item_icon_loader.ensure_folder_icon(ui.ctx());
-                                                if let Some(icon) = self.item_icon_loader.folder_icon() {
-                                                    ui.add(
-                                                        egui::Image::new(icon)
-                                                            .max_size(egui::vec2(icon_size, icon_size)),
-                                                    );
-                                                } else {
-                                                    ui.label(
-                                                        egui::RichText::new("📁").size(icon_size * 0.6),
-                                                    );
-                                                }
-                                            } else {
-                                            let folder_rect = ui
-                                                .allocate_exact_size(
-                                                    egui::vec2(icon_size, icon_size),
-                                                    egui::Sense::hover(),
-                                                )
-                                                .0;
-
-                                            // Tenta usar o preview nativo (Shell Sandwich)
-                                            let native_preview = self.cache_manager.folder_preview_cache.get(&file.path).cloned();
-                                            let is_loading = self.cache_manager.folder_preview_loading.contains(&file.path);
-
-                                            if let Some(tex) = native_preview {
-                                                // Preview nativo carregado - desenha mantendo aspect ratio
-                                                let tex_size = tex.size_vec2();
-                                                let aspect = tex_size.x / tex_size.y;
-                                                
-                                                let (draw_w, draw_h) = if aspect > 1.0 {
-                                                    (folder_rect.width(), folder_rect.width() / aspect)
-                                                } else {
-                                                    (folder_rect.height() * aspect, folder_rect.height())
-                                                };
-                                                
-                                                let offset_x = (folder_rect.width() - draw_w) / 2.0;
-                                                let offset_y = (folder_rect.height() - draw_h) / 2.0;
-                                                let draw_rect = egui::Rect::from_min_size(
-                                                    folder_rect.min + egui::vec2(offset_x, offset_y),
-                                                    egui::vec2(draw_w, draw_h),
-                                                );
-                                                
-                                                ui.painter().image(
-                                                    tex.id(),
-                                                    draw_rect,
-                                                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                                                    egui::Color32::WHITE,
-                                                );
-                                            } else if is_loading {
-                                                // Spinner enquanto carrega
-                                                ui.painter().rect_filled(
-                                                    folder_rect,
-                                                    4.0,
-                                                    egui::Color32::from_gray(245),
-                                                );
-                                                
-                                                let spinner_size = folder_rect.width().min(folder_rect.height()) * 0.3;
-                                                let center = folder_rect.center();
-                                                let radius = spinner_size / 2.0 - 2.0;
-                                                let time = ui.input(|i| i.time);
-                                                let angle = (time * 3.0) as f32;
-                                                let stroke = egui::Stroke::new(3.0, egui::Color32::from_rgb(100, 150, 220));
-                                                
-                                                let points: Vec<egui::Pos2> = (0..20)
-                                                    .map(|i| {
-                                                        let t = i as f32 / 19.0 * std::f32::consts::PI * 1.5;
-                                                        let a = angle + t;
-                                                        egui::pos2(center.x + radius * a.cos(), center.y + radius * a.sin())
-                                                    })
-                                                    .collect();
-                                                
-                                                ui.painter().add(egui::Shape::line(points, stroke));
-                                                ui.ctx().request_repaint();
-                                            } else {
-                                                // Não tem preview e não está carregando - dispara carregamento
-                                                if self.cache_manager.folder_preview_loading.len() < 30 {
-                                                    self.cache_manager.folder_preview_loading.insert(file.path.clone());
-                                                    let _ = self.folder_preview_sender.send(file.path.clone());
-                                                }
-                                                
-                                                // Mostra placeholder enquanto inicia
-                                                ui.painter().rect_filled(
-                                                    folder_rect,
-                                                    4.0,
-                                                    egui::Color32::from_gray(240),
-                                                );
-                                                ui.painter().text(
-                                                    folder_rect.center(),
-                                                    egui::Align2::CENTER_CENTER,
-                                                    "📁",
-                                                    egui::FontId::proportional(icon_size * 0.4),
-                                                    egui::Color32::from_gray(180),
-                                                );
-                                            }
-                                            } // fecha else !is_recycle_bin_view
-                                        } else {
-                                            // ARQUIVO SEM THUMBNAIL
-                                            // Na lixeira ou quando o arquivo não existe, use ícone por extensão
-                                            let icon_opt = if self.is_recycle_bin_view || !file.path.exists() {
-                                                let ext_str = file
-                                                    .name
-                                                    .rsplit_once('.')
-                                                    .map(|(_, ext)| format!(".{}", ext))
-                                                    .unwrap_or_else(|| ".bin".to_string());
-                                                mtt_file_manager::infrastructure::windows::get_file_type_icon(
-                                                    false,
-                                                    &ext_str,
-                                                    IconSize::Large,
-                                                )
-                                                .ok()
-                                                .and_then(|(rgba_data, w, h)| {
-                                                    Some(ui.ctx().load_texture(
-                                                        format!("icon_{}", ext_str),
-                                                        egui::ColorImage::from_rgba_unmultiplied(
-                                                            [w as usize, h as usize],
-                                                            &rgba_data,
-                                                        ),
-                                                        egui::TextureOptions::NEAREST,
-                                                    ))
-                                                })
-                                            } else {
-                                                self.get_or_load_icon(ui.ctx(), &file.path)
-                                            };
-
-                                            if let Some(icon) = icon_opt {
-                                                ui.add(egui::Image::new(&icon).max_size(
-                                                    egui::vec2(icon_size * 0.6, icon_size * 0.6),
-                                                ));
-                                            } else {
-                                                ui.label(
-                                                    egui::RichText::new("??").size(icon_size * 0.6),
-                                                );
-                                            }
-                                        }
-                                        ui.add_space(20.0);
-                                    });
-                                    ui.separator();
-                                }
-
-                                // Tabela de detalhes (Manual Responsive Grid)
-                                let selected_metadata =
-                                    self.selected_metadata.as_ref().and_then(|(p, meta)| {
-                                        if p == &file.path {
-                                            Some(meta)
-                                        } else {
-                                            None
-                                        }
-                                    });
-                                let is_loading_meta = self.metadata_loading.contains(&file.path);
-
-                                let key_w = 110.0;
-                                let mut add_detail =
-                                    |ui: &mut egui::Ui, label: &str, value: String| {
-                                        ui.horizontal_top(|ui| {
-                                            ui.add_sized(
-                                                egui::vec2(key_w, 0.0),
-                                                egui::Label::new(
-                                                    egui::RichText::new(label).strong(),
-                                                ),
-                                            );
-                                            ui.add(egui::Label::new(value).wrap());
-                                        });
-                                        ui.add_space(2.0);
-                                    };
-
-                                ui.scope(|ui| {
-                                    ui.set_max_width(ui.available_width());
-
-                                    if let Some(drive) = &file.drive_info {
-                                        add_detail(
-                                            ui,
-                                            "Tipo:",
-                                            drive.drive_type.label().to_string(),
-                                        );
-
-                                        let used_space = drive.total_space - drive.free_space;
-                                        let usage_percent = if drive.total_space > 0 {
-                                            (used_space as f64 / drive.total_space as f64) * 100.0
-                                        } else {
-                                            0.0
-                                        };
-
-                                        add_detail(ui, "Uso:", format!("{:.0}%", usage_percent));
-                                        add_detail(ui, "Livre:", format_size(drive.free_space));
-                                        add_detail(ui, "Total:", format_size(drive.total_space));
-                                        add_detail(
-                                            ui,
-                                            "Sist. Arq:",
-                                            if drive.file_system.is_empty() {
-                                                "NTFS".to_string()
-                                            } else {
-                                                drive.file_system.clone()
-                                            },
-                                        );
-                                        add_detail(ui, "BitLocker:", "Desligado".to_string());
-                                    } else {
-                                        add_detail(ui, "Nome:", file.name.clone());
-                                        
-                                        // Tamanho: para pastas, calcular conteúdo assíncrono
-                                        let size_display = if file.is_dir {
-                                            // Check if we have cached size
-                                            if let Some(&cached_size) = self.folder_size_cache.get(&file.path) {
-                                                format_size(cached_size)
-                                            } else if self.folder_size_loading.contains(&file.path) {
-                                                // Currently calculating
-                                                "Calculando...".to_string()
-                                            } else {
-                                                // Trigger async calculation
-                                                self.folder_size_loading.insert(file.path.clone());
-                                                let _ = self.folder_size_req_sender.send(file.path.clone());
-                                                "Calculando...".to_string()
-                                            }
-                                        } else {
-                                            // Regular file - use file.size directly
-                                            format_size(file.size)
-                                        };
-                                        add_detail(ui, "Tamanho:", size_display);
-
-                                        let type_label = if file.is_dir {
-                                            "Pasta".to_string()
-                                        } else {
-                                            file.path
-                                                .extension()
-                                                .and_then(|e: &std::ffi::OsStr| e.to_str())
-                                                .unwrap_or("Arquivo")
-                                                .to_uppercase()
-                                        };
-                                        add_detail(ui, "Tipo:", type_label);
-                                        add_detail(ui, "Data:", format_date(file.modified));
-
-                                        if let Some(meta) = selected_metadata {
-                                            if let (Some(w), Some(h)) = (meta.width, meta.height) {
-                                                add_detail(
-                                                    ui,
-                                                    "Resolução:",
-                                                    format!("{} x {} px", w, h),
-                                                );
-                                            }
-
-                                            if let Some(format) = &meta.format {
-                                                add_detail(ui, "Formato:", format.clone());
-                                            }
-
-                                            if let Some(bits) = meta.color_depth {
-                                                add_detail(
-                                                    ui,
-                                                    "Profundidade:",
-                                                    format!("{} bits", bits),
-                                                );
-                                            }
-
-                                            if let Some(maker) = &meta.camera_maker {
-                                                add_detail(ui, "Fabricante:", maker.clone());
-                                            }
-
-                                            if let Some(model) = &meta.camera_model {
-                                                add_detail(ui, "Modelo:", model.clone());
-                                            }
-
-                                            if let Some(date) = &meta.date_taken {
-                                                add_detail(ui, "Captura:", date.clone());
-                                            }
-
-                                            if let Some(f_stop) = &meta.f_stop {
-                                                add_detail(ui, "F-stop:", f_stop.clone());
-                                            }
-
-                                            if let Some(exposure) = &meta.exposure_time {
-                                                add_detail(ui, "Exposição:", exposure.clone());
-                                            }
-
-                                            if let Some(iso) = meta.iso_speed {
-                                                add_detail(ui, "ISO:", format!("ISO-{}", iso));
-                                            }
-
-                                            if let Some(focal) = &meta.focal_length {
-                                                add_detail(ui, "Dist. Focal:", focal.clone());
-                                            }
-
-                                            if let Some(aperture) = &meta.max_aperture {
-                                                add_detail(ui, "Abertura:", aperture.clone());
-                                            }
-
-                                            if let Some(metering) = &meta.metering_mode {
-                                                add_detail(ui, "Medição:", metering.clone());
-                                            }
-
-                                            if let Some(flash) = &meta.flash_mode {
-                                                add_detail(ui, "Flash:", flash.clone());
-                                            }
-
-                                            if let Some(subject) = &meta.subject {
-                                                add_detail(ui, "Assunto:", subject.clone());
-                                            }
-
-                                            if let Some(codec) = &meta.video_codec {
-                                                add_detail(ui, "Video Codec:", codec.clone());
-                                            }
-
-                                            if let Some(codec) = &meta.audio_codec {
-                                                add_detail(ui, "Audio Codec:", codec.clone());
-                                            }
-
-                                            if let Some(bitrate) = meta.audio_bitrate {
-                                                add_detail(
-                                                    ui,
-                                                    "Audio BR:",
-                                                    Self::format_bitrate(bitrate),
-                                                );
-                                            }
-
-                                            if let Some(channels) = meta.audio_channels {
-                                                let channel_name = match channels {
-                                                    1 => "Mono",
-                                                    2 => "Estéreo",
-                                                    6 => "5.1",
-                                                    8 => "7.1",
-                                                    _ => "Outro",
-                                                };
-                                                add_detail(
-                                                    ui,
-                                                    "Canais:",
-                                                    format!("{} ({})", channels, channel_name),
-                                                );
-                                            }
-
-                                            if let Some(duration) = meta.duration_100ns {
-                                                add_detail(
-                                                    ui,
-                                                    "Duração:",
-                                                    Self::format_media_duration(duration),
-                                                );
-                                            }
-
-                                            if let Some(fps) = meta.frame_rate {
-                                                add_detail(
-                                                    ui,
-                                                    "Frame rate:",
-                                                    format!("{:.2} fps", fps),
-                                                );
-                                            }
-
-                                            let mut bitrate_to_show = meta.bitrate;
-                                            if bitrate_to_show.is_none() {
-                                                if let Some(duration) = meta.duration_100ns {
-                                                    bitrate_to_show = Self::approximate_bitrate(
-                                                        file.size, duration,
-                                                    );
-                                                }
-                                            }
-
-                                            if let Some(bps) = bitrate_to_show {
-                                                add_detail(
-                                                    ui,
-                                                    "Bitrate:",
-                                                    Self::format_bitrate(bps),
-                                                );
-                                            }
-                                        } else if is_loading_meta {
-                                            add_detail(
-                                                ui,
-                                                "Metadados:",
-                                                "Carregando...".to_string(),
-                                            );
-                                        }
-                                    }
+                                // 2. Metadata
+                                let selected_metadata = self.selected_metadata.as_ref().and_then(|(p, meta)| {
+                                    if p == &file.path { Some(meta) } else { None }
                                 });
+                                
+                                // 3. Folder Size
+                                let folder_size = if file.is_dir {
+                                    self.folder_size_cache.get(&file.path).copied()
+                                } else { None };
+                                let is_folder_size_loading = self.folder_size_loading.contains(&file.path);
+
+                                // 4. Render Panel
+                                let action = render_preview_panel(
+                                    ui,
+                                    &file,
+                                    self.selected_thumbnail.as_ref(), // Passed from main
+                                    selected_metadata,
+                                    self.cache_manager.texture_cache.peek(&file.path).cloned(),
+                                    self.cache_manager.folder_preview_cache.get(&file.path).cloned(),
+                                    self.cache_manager.folder_preview_loading.contains(&file.path),
+                                    self.metadata_loading.contains(&file.path),
+                                    folder_size,
+                                    is_folder_size_loading,
+                                    self.is_recycle_bin_view,
+                                    &mut self.item_icon_loader,
+                                    &mut self.svg_icon_manager,
+                                );
+
+                                if let Some(act) = action {
+                                     match act {
+                                         PreviewPanelAction::RefreshThumbnail(path) => {
+                                              self.disk_cache.remove_cache_for_path(&path);
+                                              self.cache_manager.texture_cache.pop(&path);
+                                              self.cache_manager.loading_set.remove(&path);
+                                              let _ = self.thumbnail_req_sender.send((path, self.generation));
+                                              self.notifications.push(mtt_file_manager::application::AppNotification::info("Recarregando thumbnail...".to_string()));
+                                         },
+                                         PreviewPanelAction::LoadFolderPreview(path) => {
+                                              if self.cache_manager.folder_preview_loading.len() < 30 {
+                                                  self.cache_manager.folder_preview_loading.insert(path.clone());
+                                                  let _ = self.folder_preview_sender.send(path);
+                                              }
+                                         },
+                                         PreviewPanelAction::CalculateFolderSize(path) => {
+                                              self.folder_size_loading.insert(path.clone());
+                                              let _ = self.folder_size_req_sender.send(path);
+                                         }
+                                     }
+                                }
                             } else {
                                 ui.vertical_centered(|ui| {
                                     ui.add_space(100.0);
