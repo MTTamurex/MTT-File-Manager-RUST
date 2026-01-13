@@ -39,6 +39,7 @@ use mtt_file_manager::infrastructure::windows as windows_infra;
 // use mtt_file_manager::ui::status_bar; // Not used directly - imported in render_status_bar call
 use mtt_file_manager::ui::icon_loader::IconLoader;
 use mtt_file_manager::ui::svg_icons::SvgIconManager;
+use mtt_file_manager::ui::theme;
 
 use windows::{
     core::*,
@@ -67,12 +68,12 @@ use windows_infra::{
 const PATH_PADRAO: &str = "C:\\";
 
 // LRU cache - limita VRAM (~50-100MB)
-const CACHE_SIZE: usize = 200;
+const CACHE_SIZE: usize = theme::TEXTURE_CACHE_SIZE;
 
 // Icon cache (menor pois ícones são compartilhados por extensão)
-const ICON_CACHE_SIZE: usize = 100;
+const ICON_CACHE_SIZE: usize = theme::ICON_CACHE_SIZE;
 
-const DRIVE_REFRESH_INTERVAL_MS: u64 = 350;
+const DRIVE_REFRESH_INTERVAL_MS: u64 = theme::DRIVE_REFRESH_MS;
 
 /// Converte string para formato Win32 (double-null terminated)
 /// Requerido por APIs como SHFileOperationW
@@ -310,8 +311,8 @@ impl ImageViewerApp {
         let thumbnail_size = disk_cache
             .get_preference("thumbnail_size")
             .and_then(|s| s.parse::<f32>().ok())
-            .unwrap_or(128.0)
-            .clamp(64.0, 512.0); // Ensure valid range
+            .unwrap_or(theme::THUMBNAIL_DEFAULT)
+            .clamp(theme::THUMBNAIL_MIN, theme::THUMBNAIL_MAX); // Ensure valid range
 
         let view_mode = disk_cache
             .get_preference("view_mode")
@@ -544,7 +545,7 @@ impl ImageViewerApp {
             // METADATA ASYNC
             metadata_req_sender: meta_req_tx,
             metadata_res_receiver: meta_res_rx,
-            metadata_cache: LruCache::new(NonZeroUsize::new(512).unwrap()),
+            metadata_cache: LruCache::new(NonZeroUsize::new(theme::METADATA_CACHE_SIZE).unwrap()),
             metadata_loading: HashSet::new(),
 
             // SVG ICON MANAGER
@@ -601,19 +602,19 @@ impl ImageViewerApp {
         if icon == ICON_HOME {
             if let Some(texture) = self.cache_manager.computer_icon.as_ref() {
                 // Same logic as svg_icons::icon_button for consistency
-                let size = 22.0;
-                let padding = 4.0;
+                let size = theme::ICON_SIZE_MD;
+                let padding = theme::PADDING_SM;
                 let button_size = egui::vec2(size + padding * 2.0, size + padding * 2.0);
                 
                 let (rect, response) = ui.allocate_exact_size(button_size, egui::Sense::click());
                 
                 if response.hovered() {
                     let bg_color = if ui.visuals().dark_mode {
-                        egui::Color32::from_white_alpha(30)
+                        theme::color_dark_hover()
                     } else {
-                        egui::Color32::from_black_alpha(20)
+                        theme::color_hover()
                     };
-                    ui.painter().rect_filled(rect, 4.0, bg_color);
+                    ui.painter().rect_filled(rect, theme::PADDING_SM, bg_color);
                 }
 
                 let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(size, size));
@@ -632,7 +633,7 @@ impl ImageViewerApp {
         }
 
         // Use slightly larger icons to improve readability of the top bar controls.
-        mtt_file_manager::ui::svg_icons::icon_button(ui, &mut self.svg_icon_manager, icon_name, 24.0, tooltip)
+        mtt_file_manager::ui::svg_icons::icon_button(ui, &mut self.svg_icon_manager, icon_name, theme::ICON_SIZE_LG, tooltip)
     }
 
     fn delete_with_shell_for_idx(&mut self, idx: Option<usize>) {
@@ -962,13 +963,13 @@ impl ImageViewerApp {
                 };
                 let rich_text = egui::RichText::new(icon)
                     .family(egui::FontFamily::Name("icons".into()))
-                    .size(22.0)
+                    .size(theme::ICON_SIZE_MD)
                     .color(color);
                 return ui.add(egui::Button::new(rich_text).frame(false)).on_hover_text(tooltip);
             }
         };
 
-        let size = 24.0;
+        let size = theme::ICON_SIZE_LG;
         let color = if active {
             [0, 120, 215, 255] // Blue for active
         } else if ui.visuals().dark_mode {
@@ -981,18 +982,18 @@ impl ImageViewerApp {
         let render_size = (size * 2.0) as u32;
         
         // Manual rendering with hover effect
-        let padding = 4.0;
+        let padding = theme::PADDING_SM;
         let button_size = egui::vec2(size + padding * 2.0, size + padding * 2.0);
         
         let (rect, response) = ui.allocate_exact_size(button_size, egui::Sense::click());
         
         if response.hovered() {
              let bg_color = if ui.visuals().dark_mode {
-                egui::Color32::from_white_alpha(30)
+                theme::color_dark_hover()
             } else {
-                egui::Color32::from_black_alpha(20)
+                theme::color_hover()
             };
-            ui.painter().rect_filled(rect, 4.0, bg_color);
+            ui.painter().rect_filled(rect, theme::PADDING_SM, bg_color);
         }
 
         if let Some(texture) = self.svg_icon_manager.get_icon(ui.ctx(), icon_name, render_size, color) {
@@ -2166,7 +2167,7 @@ impl ImageViewerApp {
         // Executa reload apenas quando debounce permitir
         if self.pending_auto_reload {
             let elapsed = self.last_auto_reload.elapsed();
-            if elapsed > Duration::from_millis(500) {
+            if elapsed > Duration::from_millis(theme::AUTO_RELOAD_MS) {
                 // VALIDA SE O PATH ATUAL AINDA EXISTE (pode ter sido renomeado/deletado)
                 if Path::new(&self.current_path).exists() {
                     self.load_folder(true); // force_refresh para atualizar thumbnails modificados

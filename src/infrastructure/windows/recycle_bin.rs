@@ -7,7 +7,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use windows::{
     core::*,
-    Win32::Foundation::*,
     Win32::System::Com::*,
     Win32::UI::Shell::PropertiesSystem::*,
     Win32::System::Com::StructuredStorage::*,

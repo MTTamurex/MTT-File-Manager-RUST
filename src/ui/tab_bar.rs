@@ -29,7 +29,7 @@ pub fn render_tab_bar(
     ui: &mut egui::Ui,
     tab_manager: &TabManager,
     svg_icons: &mut SvgIconManager,
-    frame: &mut eframe::Frame,
+    _frame: &mut eframe::Frame,
     computer_icon: Option<&egui::TextureHandle>,
     icon_loader: &mut IconLoader,
 ) -> TabBarAction {
@@ -277,7 +277,7 @@ pub fn render_tab_bar(
         // Drag area (space between new tab button and window controls)
         let remaining_width = ui.available_width() - window_controls_width;
         if remaining_width > 0.0 {
-            let (drag_rect, drag_response) = ui.allocate_exact_size(
+            let (_drag_rect, drag_response) = ui.allocate_exact_size(
                 Vec2::new(remaining_width, tab_height),
                 egui::Sense::click_and_drag(),  // Mudado para click_and_drag
             );
@@ -334,9 +334,9 @@ pub fn render_tab_bar(
 }
 
 /// Render window control buttons (Minimize, Maximize, Close)
-fn render_window_controls(
+fn _render_window_controls(
     ui: &mut egui::Ui,
-    frame: &mut eframe::Frame,
+    _frame: &mut eframe::Frame,
     btn_width: f32,
     btn_height: f32,
     action: &mut TabBarAction,
