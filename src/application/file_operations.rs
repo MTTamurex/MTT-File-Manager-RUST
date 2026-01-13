@@ -25,6 +25,12 @@ pub fn delete_with_shell(path: &Path, hwnd: Option<HWND>) -> OpResult<bool> {
     }
 }
 
+/// Opens a file with its default application.
+pub fn open_with_shell(path: &Path, _hwnd: Option<HWND>) -> OpResult<()> {
+    shell_operations::open_with_shell(path);
+    Ok(())
+}
+
 /// Renames a file using Windows Shell.
 pub fn rename_with_shell(path: &Path, new_name: &str, hwnd: Option<HWND>) -> OpResult<bool> {
     let hwnd = hwnd.unwrap_or(HWND(std::ptr::null_mut()));
