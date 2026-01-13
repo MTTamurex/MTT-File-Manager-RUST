@@ -1,13 +1,17 @@
 //! Window handle management
 //!
-//! This module captures and stores the native window handle (HWND).
+//! This module captures and stores the native window handle (HWND)
+//! and performs initialization tasks that require it.
 
 use crate::app::state::ImageViewerApp;
+use crate::infrastructure::windows::native_menu::warmup_shell_extensions;
 use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
 use windows::core::PCWSTR;
 
 impl ImageViewerApp {
     /// Captura e armazena o HWND nativo a partir do título da janela principal.
+    /// Na primeira captura, também faz warmup das shell extensions para evitar
+    /// lentidão na primeira abertura do menu de contexto.
     pub fn ensure_window_handle(&mut self, _frame: &eframe::Frame) {
         if self.native_hwnd.is_some() {
             return;
@@ -22,6 +26,10 @@ impl ImageViewerApp {
             if let Ok(hwnd) = FindWindowW(None, PCWSTR(window_title.as_ptr())) {
                 if !hwnd.is_invalid() {
                     self.native_hwnd = Some(hwnd);
+                    
+                    // Warmup shell extensions to avoid first-use delay on context menu
+                    // This pre-loads extensions like WinRAR, Send to, etc.
+                    warmup_shell_extensions(hwnd);
                 }
             }
         }
