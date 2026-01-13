@@ -13,18 +13,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 // Mapeamento Remix Icon
-const ICON_ARROW_LEFT: &str = "\u{EA64}"; // Seta Esq
-const ICON_ARROW_RIGHT: &str = "\u{EA6E}"; // Seta Dir
-const ICON_ARROW_UP: &str = "\u{EA78}"; // Seta Cima
-const ICON_REFRESH: &str = "\u{F064}"; // Recarregar
-const ICON_HOME: &str = "\u{EE1B}"; // Casa/PC
-const ICON_GRID: &str = "\u{ED9E}"; // Grade (Nova sugestão)
-const ICON_LIST: &str = "\u{EF3E}"; // Lista
-const ICON_SEARCH: &str = "\u{F0D1}"; // Lupa
-const ICON_FOLDER_ADD: &str = "\u{ED5A}"; // Nova Pasta (Sugestão do usuário)
-const ICON_DETAILS: &str = "\u{ECEA}"; // Detalhes (file-info-line)
-const ICON_FOLDER: &str = "\u{ED9F}"; // Folder (folder-line)
-const ICON_FILE: &str = "\u{ECD3}"; // File (file-line)
+
 
 // Import domain types
 use mtt_file_manager::application::context_menu::ContextMenuState;
@@ -39,7 +28,8 @@ use mtt_file_manager::infrastructure::windows as windows_infra;
 // use mtt_file_manager::ui::status_bar; // Not used directly - imported in render_status_bar call
 use mtt_file_manager::ui::icon_loader::IconLoader;
 use mtt_file_manager::ui::svg_icons::SvgIconManager;
-use mtt_file_manager::ui::theme;
+use mtt_file_manager::ui::theme::{self, *};
+use mtt_file_manager::ui::widgets;
 
 use windows::{
     core::*,
@@ -586,55 +576,7 @@ impl ImageViewerApp {
 }
 
 impl ImageViewerApp {
-    // Helper para botÃµes de Ã­cone da Toolbar
-    fn icon_button(&mut self, ui: &mut egui::Ui, icon: &str, tooltip: &str) -> egui::Response {
-        let icon_name = match icon {
-            ICON_ARROW_LEFT => "nav_back",
-            ICON_ARROW_RIGHT => "nav_forward",
-            ICON_ARROW_UP => "nav_up",
-            ICON_REFRESH => "refresh",
-            ICON_HOME => "home",
-            ICON_SEARCH => "search",
-            ICON_FOLDER_ADD => "folder_new",
-            _ => return ui.button(icon).on_hover_text(tooltip),
-        };
 
-        if icon == ICON_HOME {
-            if let Some(texture) = self.cache_manager.computer_icon.as_ref() {
-                // Same logic as svg_icons::icon_button for consistency
-                let size = theme::ICON_SIZE_MD;
-                let padding = theme::PADDING_SM;
-                let button_size = egui::vec2(size + padding * 2.0, size + padding * 2.0);
-                
-                let (rect, response) = ui.allocate_exact_size(button_size, egui::Sense::click());
-                
-                if response.hovered() {
-                    let bg_color = if ui.visuals().dark_mode {
-                        theme::color_dark_hover()
-                    } else {
-                        theme::color_hover()
-                    };
-                    ui.painter().rect_filled(rect, theme::PADDING_SM, bg_color);
-                }
-
-                let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(size, size));
-                ui.painter().image(
-                    texture.id(),
-                    icon_rect,
-                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
-                );
-
-                if !tooltip.is_empty() {
-                    return response.on_hover_text(tooltip);
-                }
-                return response;
-            }
-        }
-
-        // Use slightly larger icons to improve readability of the top bar controls.
-        mtt_file_manager::ui::svg_icons::icon_button(ui, &mut self.svg_icon_manager, icon_name, theme::ICON_SIZE_LG, tooltip)
-    }
 
     fn delete_with_shell_for_idx(&mut self, idx: Option<usize>) {
         let target_idx = idx.or(self.selected_item);
@@ -943,84 +885,7 @@ impl ImageViewerApp {
         self.context_menu.target_path = None;
     }
 
-    // Helper para botÃµes "Toggle" (que ficam acesos se selecionados)
-    fn toggle_icon_button(
-        &mut self,
-        ui: &mut egui::Ui,
-        icon: &str,
-        active: bool,
-        tooltip: &str,
-    ) -> egui::Response {
-        let icon_name = match icon {
-            ICON_GRID => "view_grid",
-            ICON_LIST => "view_list",
-            ICON_DETAILS => "info",
-            _ => {
-                let color = if active {
-                    egui::Color32::from_rgb(0, 120, 215)
-                } else {
-                    ui.visuals().text_color()
-                };
-                let rich_text = egui::RichText::new(icon)
-                    .family(egui::FontFamily::Name("icons".into()))
-                    .size(theme::ICON_SIZE_MD)
-                    .color(color);
-                return ui.add(egui::Button::new(rich_text).frame(false)).on_hover_text(tooltip);
-            }
-        };
 
-        let size = theme::ICON_SIZE_LG;
-        let color = if active {
-            [0, 120, 215, 255] // Blue for active
-        } else if ui.visuals().dark_mode {
-            [220, 220, 220, 255]
-        } else {
-            [60, 60, 60, 255]
-        };
-
-        // Render at 2x resolution for HiDPI quality
-        let render_size = (size * 2.0) as u32;
-        
-        // Manual rendering with hover effect
-        let padding = theme::PADDING_SM;
-        let button_size = egui::vec2(size + padding * 2.0, size + padding * 2.0);
-        
-        let (rect, response) = ui.allocate_exact_size(button_size, egui::Sense::click());
-        
-        if response.hovered() {
-             let bg_color = if ui.visuals().dark_mode {
-                theme::color_dark_hover()
-            } else {
-                theme::color_hover()
-            };
-            ui.painter().rect_filled(rect, theme::PADDING_SM, bg_color);
-        }
-
-        if let Some(texture) = self.svg_icon_manager.get_icon(ui.ctx(), icon_name, render_size, color) {
-            let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(size, size));
-             ui.painter().image(
-                texture.id(),
-                icon_rect,
-                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                egui::Color32::WHITE,
-            );
-            
-            if !tooltip.is_empty() {
-                 response.clone().on_hover_text(tooltip)
-            } else {
-                response
-            }
-        } else {
-             ui.painter().text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "?",
-                egui::FontId::proportional(size * 0.8),
-                ui.visuals().text_color(),
-            );
-             response
-        }
-    }
 
     /// Filtra itens baseado na query de busca e reaplica ordenação
     fn filter_items(&mut self) {
@@ -3543,37 +3408,35 @@ impl eframe::App for ImageViewerApp {
                 let is_renaming = self.renaming_state.is_some();
 
                 let can_back = self.can_go_back() && !is_renaming;
-                if self.icon_button(ui, ICON_ARROW_LEFT, "Voltar").clicked() && can_back {
+                if widgets::icon_button(ui, &mut self.svg_icon_manager, ICON_ARROW_LEFT, "Voltar", None).clicked() && can_back {
                     self.go_back();
                 }
 
                 let can_forward = self.can_go_forward() && !is_renaming;
-                if self.icon_button(ui, ICON_ARROW_RIGHT, "Avançar").clicked() && can_forward {
+                if widgets::icon_button(ui, &mut self.svg_icon_manager, ICON_ARROW_RIGHT, "Avançar", None).clicked() && can_forward {
                     self.go_forward();
                 }
 
-                if self
-                    .icon_button(ui, ICON_ARROW_UP, "Subir um nível")
-                    .clicked()
+                if widgets::icon_button(ui, &mut self.svg_icon_manager, ICON_ARROW_UP, "Subir um nível", None).clicked()
                     && !is_renaming
                 {
                     self.go_up_one_level();
                 }
 
-                if self.icon_button(ui, ICON_REFRESH, "Recarregar").clicked() && !is_renaming {
+                if widgets::icon_button(ui, &mut self.svg_icon_manager, ICON_REFRESH, "Recarregar", None).clicked() && !is_renaming {
                     self.trigger_manual_refresh();
                 }
 
                 ui.separator();
 
                 // Botão de Nova Pasta
-                if self.icon_button(ui, ICON_FOLDER_ADD, "Criar Nova Pasta (Ctrl+Shift+N)").clicked() && !is_renaming {
+                if widgets::icon_button(ui, &mut self.svg_icon_manager, ICON_FOLDER_ADD, "Criar Nova Pasta (Ctrl+Shift+N)", None).clicked() && !is_renaming {
                     self.create_new_folder();
                 }
 
                 ui.separator();
 
-                if self.icon_button(ui, ICON_HOME, "Home").clicked() && !is_renaming {
+                if widgets::icon_button(ui, &mut self.svg_icon_manager, ICON_HOME, "Home", self.cache_manager.computer_icon.as_ref()).clicked() && !is_renaming {
                     self.navigate_to_computer();
                 }
 
@@ -3591,19 +3454,23 @@ impl eframe::App for ImageViewerApp {
                     ui.separator();
 
                     // Detalhes (Antigo Preview)
-                    if self
-                        .toggle_icon_button(ui, ICON_DETAILS, self.show_preview_panel, "Detalhes")
-                        .clicked()
-                    {
+                    // Detalhes (Antigo Preview)
+                    if widgets::toggle_icon_button(
+                        ui, 
+                        &mut self.svg_icon_manager, 
+                        ICON_DETAILS, 
+                        self.show_preview_panel, 
+                        "Detalhes"
+                    ).clicked() {
                         self.show_preview_panel = !self.show_preview_panel;
                     }
 
                     ui.separator();
 
                     // Modo de Visualização
-                    if self
-                        .toggle_icon_button(
+                    if widgets::toggle_icon_button(
                             ui,
+                            &mut self.svg_icon_manager,
                             ICON_LIST,
                             self.view_mode == ViewMode::List,
                             "Lista",
@@ -3612,9 +3479,9 @@ impl eframe::App for ImageViewerApp {
                     {
                         self.view_mode = ViewMode::List;
                     }
-                    if self
-                        .toggle_icon_button(
+                    if widgets::toggle_icon_button(
                             ui,
+                            &mut self.svg_icon_manager,
                             ICON_GRID,
                             self.view_mode == ViewMode::Grid,
                             "Grade",
@@ -3984,7 +3851,7 @@ impl eframe::App for ImageViewerApp {
                                     
                                     // Botão de recarregar thumbnail (centralizado)
                                     ui.vertical_centered(|ui| {
-                                        if self.icon_button(ui, ICON_REFRESH, "Recarregar Thumbnail").clicked() {
+                                        if widgets::icon_button(ui, &mut self.svg_icon_manager, ICON_REFRESH, "Recarregar Thumbnail", None).clicked() {
                                             // 1. Remove do cache SQLite
                                             self.disk_cache.remove_cache_for_path(&file.path);
                                             

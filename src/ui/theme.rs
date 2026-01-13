@@ -21,14 +21,14 @@ pub const COLOR_SELECTION_TEXT: Color32 = Color32::from_rgb(0, 50, 100);
 pub const COLOR_ACCENT: Color32 = Color32::from_rgb(0, 120, 215);
 
 pub fn color_hover() -> Color32 {
-    Color32::from_rgba_unmultiplied(200, 220, 240, 50)
+    Color32::from_black_alpha(40)
 }
 
 // === COLORS (Dark Mode) ===
 pub const COLOR_DARK_BG: Color32 = Color32::from_rgb(45, 45, 45);
 
 pub fn color_dark_hover() -> Color32 {
-    Color32::from_white_alpha(30)
+    Color32::from_white_alpha(40)
 }
 
 // === TIMING ===
@@ -39,4 +39,18 @@ pub const AUTO_RELOAD_MS: u64 = 500;
 // === CACHE SIZES ===
 pub const TEXTURE_CACHE_SIZE: usize = 200;
 pub const ICON_CACHE_SIZE: usize = 100;
+
 pub const METADATA_CACHE_SIZE: usize = 512;
+// === ICONS (Remix Icon Mappings) ===
+pub const ICON_ARROW_LEFT: &str = "\u{EA64}"; // Seta Esq
+pub const ICON_ARROW_RIGHT: &str = "\u{EA6E}"; // Seta Dir
+pub const ICON_ARROW_UP: &str = "\u{EA78}"; // Seta Cima
+pub const ICON_REFRESH: &str = "\u{F064}"; // Recarregar
+pub const ICON_HOME: &str = "\u{EE1B}"; // Casa/PC
+pub const ICON_GRID: &str = "\u{ED9E}"; // Grade (Nova sugestão)
+pub const ICON_LIST: &str = "\u{EF3E}"; // Lista
+pub const ICON_SEARCH: &str = "\u{F0D1}"; // Lupa
+pub const ICON_FOLDER_ADD: &str = "\u{ED5A}"; // Nova Pasta (Sugestão do usuário)
+pub const ICON_DETAILS: &str = "\u{ECEA}"; // Detalhes (file-info-line)
+pub const ICON_FOLDER: &str = "\u{ED9F}"; // Folder (folder-line)
+pub const ICON_FILE: &str = "\u{ECD3}"; // File (file-line)
