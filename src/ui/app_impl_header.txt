@@ -1,0 +1,13 @@
+use eframe::egui;
+use std::path::{Path, PathBuf};
+use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+
+use mtt_file_manager::domain::file_entry::{FileEntry, SyncStatus};
+use mtt_file_manager::infrastructure::windows as windows_infra;
+
+use crate::app::ImageViewerApp;
+
+fn open_with_shell(path: &Path) {
+    let _ = std::process::Command::new(" explorer\).arg(path).spawn();
+}
+
