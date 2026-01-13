@@ -600,13 +600,30 @@ impl ImageViewerApp {
 
         if icon == ICON_HOME {
             if let Some(texture) = self.cache_manager.computer_icon.as_ref() {
-                let response = ui.add(
-                    egui::ImageButton::new(egui::load::SizedTexture::new(
-                        texture.id(),
-                        egui::vec2(22.0, 22.0), // Consistent with 24px SVG visual size
-                    ))
-                    .frame(false)
+                // Same logic as svg_icons::icon_button for consistency
+                let size = 22.0;
+                let padding = 4.0;
+                let button_size = egui::vec2(size + padding * 2.0, size + padding * 2.0);
+                
+                let (rect, response) = ui.allocate_exact_size(button_size, egui::Sense::click());
+                
+                if response.hovered() {
+                    let bg_color = if ui.visuals().dark_mode {
+                        egui::Color32::from_white_alpha(30)
+                    } else {
+                        egui::Color32::from_black_alpha(20)
+                    };
+                    ui.painter().rect_filled(rect, 4.0, bg_color);
+                }
+
+                let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(size, size));
+                ui.painter().image(
+                    texture.id(),
+                    icon_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
                 );
+
                 if !tooltip.is_empty() {
                     return response.on_hover_text(tooltip);
                 }
@@ -963,20 +980,44 @@ impl ImageViewerApp {
         // Render at 2x resolution for HiDPI quality
         let render_size = (size * 2.0) as u32;
         
+        // Manual rendering with hover effect
+        let padding = 4.0;
+        let button_size = egui::vec2(size + padding * 2.0, size + padding * 2.0);
+        
+        let (rect, response) = ui.allocate_exact_size(button_size, egui::Sense::click());
+        
+        if response.hovered() {
+             let bg_color = if ui.visuals().dark_mode {
+                egui::Color32::from_white_alpha(30)
+            } else {
+                egui::Color32::from_black_alpha(20)
+            };
+            ui.painter().rect_filled(rect, 4.0, bg_color);
+        }
+
         if let Some(texture) = self.svg_icon_manager.get_icon(ui.ctx(), icon_name, render_size, color) {
-            let resp = ui.add(
-                egui::ImageButton::new(egui::load::SizedTexture::new(
-                    texture.id(),
-                    egui::vec2(size, size),  // Display at requested size
-                ))
-                .frame(false)
+            let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(size, size));
+             ui.painter().image(
+                texture.id(),
+                icon_rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
             );
+            
             if !tooltip.is_empty() {
-                resp.clone().on_hover_text(tooltip);
+                 response.clone().on_hover_text(tooltip)
+            } else {
+                response
             }
-            resp
         } else {
-            ui.add(egui::Button::new("?").min_size(egui::vec2(size, size)))
+             ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "?",
+                egui::FontId::proportional(size * 0.8),
+                ui.visuals().text_color(),
+            );
+             response
         }
     }
 
