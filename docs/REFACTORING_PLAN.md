@@ -3,8 +3,22 @@
 ## MTT File Manager - Refatoração do Arquivo Monolítico
 
 **Data de Criação**: Janeiro 2026  
-**Status**: 📋 Planejado  
+**Status**: � Em Andamento  
 **Versão**: 1.0
+
+---
+
+## ✅ Progresso das Fases
+
+| Fase | Descrição | Status | Data |
+|------|-----------|--------|------|
+| **Fase 0** | Preparação | ✅ Completa | 13/01/2026 |
+| **Fase 1** | Extração de Constantes e Theme | ⬜ Pendente | - |
+| **Fase 2** | Extração do State | ⬜ Pendente | - |
+| **Fase 3** | Extração de Operações | ⬜ Pendente | - |
+| **Fase 4** | Extração de UI Panels | ⬜ Pendente | - |
+| **Fase 5** | Extração do App Loop | ⬜ Pendente | - |
+| **Fase 6** | Cleanup e Documentação | ⬜ Pendente | - |
 
 ---
 
