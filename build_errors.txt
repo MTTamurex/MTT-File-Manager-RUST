@@ -1,2 +1,0 @@
-﻿   Compiling mtt-file-manager v0.1.0 (C:\Users\mtamu\github\MTT-File-Manager-RUST)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.25s
