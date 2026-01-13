@@ -8,7 +8,6 @@ use std::path::{Path, PathBuf};
 use eframe::egui;
 use crate::app::state::ImageViewerApp;
 use crate::ui::theme;
-use crate::infrastructure::onedrive;
 
 impl ImageViewerApp {
     pub fn process_incoming_messages(&mut self, ctx: &egui::Context) {

@@ -2,7 +2,7 @@
 //!
 //! This module handles scanning folders, filtering results, sorting, and manual refresh triggers.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::Ordering as AtomicOrdering;
 use std::time::Instant;

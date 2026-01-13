@@ -1,6 +1,5 @@
 use eframe::egui;
 use mtt_file_manager::app::ImageViewerApp;
-use std::path::PathBuf;
 
 /// Load application icon from PNG file
 fn load_app_icon() -> Option<egui::IconData> {

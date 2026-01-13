@@ -5,7 +5,6 @@
 use std::path::{Path, PathBuf};
 use eframe::egui;
 use crate::app::state::ImageViewerApp;
-use crate::application::file_operations;
 
 impl ImageViewerApp {
     pub fn context_target_path(&self, item_idx: Option<usize>) -> Option<PathBuf> {

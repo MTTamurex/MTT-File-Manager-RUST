@@ -40,7 +40,7 @@ pub fn render_toolbar(
     sort_descending: bool,
     thumbnail_size: &mut f32,
     show_preview_panel: bool,
-    is_renaming: bool,
+    _is_renaming: bool,
     computer_icon: Option<&egui::TextureHandle>,
     svg_manager: &mut SvgIconManager,
 ) -> Option<ToolbarAction> {
