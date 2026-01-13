@@ -99,6 +99,7 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
                                 ui,
                                 &file,
                                 app.selected_thumbnail.as_ref(),
+                                app.media_preview.as_mut(),
                                 selected_metadata,
                                 app.cache_manager.texture_cache.peek(&file.path).cloned(),
                                 app.cache_manager.folder_preview_cache.get(&file.path).cloned(),

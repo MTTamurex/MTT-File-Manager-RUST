@@ -23,6 +23,7 @@ use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::windows as windows_infra;
 // use crate::ui::cache::CacheManager;
 use crate::ui::context_menu::ContextMenuState;
+use crate::ui::components::media_preview::MediaPreview;
 use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
 
@@ -77,6 +78,7 @@ pub struct ImageViewerApp {
     pub selected_item: Option<usize>,
     pub selected_file: Option<FileEntry>,
     pub selected_thumbnail: Option<egui::TextureHandle>, // Persistent thumbnail for preview panel
+    pub media_preview: Option<MediaPreview>,            // Animated or static media preview
     pub selected_metadata: Option<(PathBuf, windows_infra::MediaMetadata)>,
     pub metadata_req_sender: Sender<(PathBuf, u64)>,
     pub metadata_res_receiver: Receiver<(PathBuf, u64, windows_infra::MediaMetadata)>,

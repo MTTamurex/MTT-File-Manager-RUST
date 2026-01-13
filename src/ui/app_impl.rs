@@ -10,6 +10,7 @@ impl eframe::App for ImageViewerApp {
                 if !file.path.exists() {
                     self.selected_file = None;
                     self.selected_thumbnail = None;
+                    self.media_preview = None;
                     self.selected_metadata = None;
                 }
             }

@@ -260,6 +260,7 @@ impl ImageViewerApp {
             // Selection & Preview
             selected_file: None,
             selected_thumbnail: None,
+            media_preview: None,
             selected_metadata: None,
             show_preview_panel, // Loaded from SQLite
             is_computer_view: false,

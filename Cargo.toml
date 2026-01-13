@@ -13,7 +13,7 @@ notify = "6.1.1"
 natord = "1.0"
 dirs = "5.0"
 dashmap = "5.5"
-image = { version = "0.25", features = ["webp"] }
+image = { version = "0.25", features = ["webp", "gif"] }
 thiserror = "2.0"
 tempfile = "3.10"
 rusqlite = { version = "0.32", features = ["bundled"] }
