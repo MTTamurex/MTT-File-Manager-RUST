@@ -210,7 +210,7 @@ impl CacheManager {
                         [width as usize, height as usize],
                         &rgba_data,
                     ),
-                    egui::TextureOptions::NEAREST,
+                    egui::TextureOptions::LINEAR,
                 );
 
                 let cloned = texture.clone();
@@ -252,7 +252,7 @@ impl CacheManager {
                         [width as usize, height as usize],
                         &rgba_data,
                     ),
-                    egui::TextureOptions::NEAREST,
+                    egui::TextureOptions::LINEAR,
                 );
 
                 let cloned = texture.clone();
@@ -281,7 +281,7 @@ impl CacheManager {
                         [width as usize, height as usize],
                         &rgba_data,
                     ),
-                    egui::TextureOptions::NEAREST,
+                    egui::TextureOptions::LINEAR,
                 );
                 self.folder_icon_texture = Some(texture);
             }
@@ -309,7 +309,7 @@ impl CacheManager {
                 );
 
                 self.computer_icon =
-                    Some(ctx.load_texture("computer_icon", image, egui::TextureOptions::NEAREST));
+                    Some(ctx.load_texture("computer_icon", image, egui::TextureOptions::LINEAR));
             }
             Err(_) => {
                 // Fallback
