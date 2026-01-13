@@ -145,6 +145,8 @@ pub fn render_tab_bar(
             
             let native_icon = if tab.is_computer_view {
                 computer_icon.cloned()
+            } else if tab.path == "Lixeira" {
+                icon_loader.ensure_recycle_bin_icon(ui.ctx())
             } else {
                 icon_loader.get_or_load_folder_path_icon(ui.ctx(), &tab.path)
             };
