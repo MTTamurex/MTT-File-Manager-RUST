@@ -14,7 +14,14 @@ use windows::{
     Win32::UI::Shell::Common::*,
     Win32::UI::Shell::*,
 };
-use windows::Win32::UI::Shell::{IShellFolder, IShellFolder2, IEnumIDList, SHGetDesktopFolder, SHCONTF_FOLDERS, SHCONTF_NONFOLDERS, SHCONTF_INCLUDEHIDDEN, SHCreateShellItem, SHGetKnownFolderItem, KF_FLAG_DEFAULT};
+use windows::Win32::UI::Shell::{
+    IShellFolder, IShellFolder2, IEnumIDList, SHGetDesktopFolder, 
+    SHCONTF_FOLDERS, SHCONTF_NONFOLDERS, SHCONTF_INCLUDEHIDDEN, 
+    SHCreateShellItem, SHGetKnownFolderItem, KF_FLAG_DEFAULT,
+    IFileOperation, FileOperation, SHCreateItemFromParsingName,
+    FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_SILENT, FOF_NOERRORUI,
+    SHEmptyRecycleBinW, SHERB_NOCONFIRMATION, SHERB_NOPROGRESSUI,
+};
 use windows::core::{Interface, PCWSTR, GUID};
 
 // Property keys for Recycle Bin items
@@ -461,4 +468,77 @@ unsafe fn get_date_deleted_from_pidl(folder: &IShellFolder, pidl: *const ITEMIDL
     }
     
     "Desconhecido".to_string()
+}
+
+/// Restore a file from the Recycle Bin to its original location
+pub fn restore_from_recycle_bin(physical_path: &std::path::Path, original_path: &std::path::Path) -> Result<()> {
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        
+        // Use IFileOperation for undo/restore
+        let file_op: IFileOperation = CoCreateInstance(&FileOperation, None, CLSCTX_ALL)?;
+        
+        // Set operation flags
+        file_op.SetOperationFlags(
+            FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT
+        )?;
+        
+        // Create shell item for the physical path ($R file)
+        let physical_str = physical_path.to_string_lossy();
+        let physical_wide: Vec<u16> = physical_str.encode_utf16().chain(Some(0)).collect();
+        let source_item: IShellItem = SHCreateItemFromParsingName(PCWSTR::from_raw(physical_wide.as_ptr()), None)?;
+        
+        // Create shell item for destination folder
+        let dest_folder = original_path.parent().unwrap_or(original_path);
+        let dest_str = dest_folder.to_string_lossy();
+        let dest_wide: Vec<u16> = dest_str.encode_utf16().chain(Some(0)).collect();
+        let dest_folder_item: IShellItem = SHCreateItemFromParsingName(PCWSTR::from_raw(dest_wide.as_ptr()), None)?;
+        
+        // Get original filename
+        let file_name = original_path.file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| Error::from_win32())?;
+        let name_wide: Vec<u16> = file_name.encode_utf16().chain(Some(0)).collect();
+        
+        // Move the item
+        file_op.MoveItem(&source_item, &dest_folder_item, PCWSTR::from_raw(name_wide.as_ptr()), None)?;
+        file_op.PerformOperations()?;
+        
+        Ok(())
+    }
+}
+
+/// Permanently delete a file from the Recycle Bin (no undo)
+pub fn delete_permanently(physical_path: &std::path::Path) -> Result<()> {
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        
+        // Use IFileOperation for permanent deletion
+        let file_op: IFileOperation = CoCreateInstance(&FileOperation, None, CLSCTX_ALL)?;
+        
+        // Set operation flags - NO FOF_ALLOWUNDO means permanent deletion
+        file_op.SetOperationFlags(
+            FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT
+        )?;
+        
+        // Create shell item for the physical path
+        let path_str = physical_path.to_string_lossy();
+        let path_wide: Vec<u16> = path_str.encode_utf16().chain(Some(0)).collect();
+        let item: IShellItem = SHCreateItemFromParsingName(PCWSTR::from_raw(path_wide.as_ptr()), None)?;
+        
+        // Delete the item permanently
+        file_op.DeleteItem(&item, None)?;
+        file_op.PerformOperations()?;
+        
+        Ok(())
+    }
+}
+
+/// Empty the entire Recycle Bin
+pub fn empty_recycle_bin() -> Result<()> {
+    unsafe {
+        // SHEmptyRecycleBinW with NULL path empties all drives
+        SHEmptyRecycleBinW(None, PCWSTR::null(), SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI)?;
+        Ok(())
+    }
 }
