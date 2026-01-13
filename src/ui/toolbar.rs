@@ -1,0 +1,305 @@
+use eframe::egui;
+use crate::application::navigation::NavigationHistory;
+use crate::domain::file_entry::{SortMode, ViewMode};
+use crate::ui::svg_icons::SvgIconManager;
+use crate::ui::widgets;
+use crate::ui::theme;
+
+#[derive(Debug, Clone)]
+pub enum ToolbarAction {
+    Navigate(String),
+    GoBack,
+    GoForward,
+    GoUp,
+    Refresh,
+    CreateFolder,
+    NavigateToComputer,
+    NavigateToRecycleBin,
+    ToggleViewMode,
+    TogglePreviewPanel,
+    ChangeSortMode(SortMode),
+    ToggleSortDescending,
+    ChangeZoom(f32),
+    Search(String),
+    OpenSettings,
+    StartAddressEdit,
+    UpdatePathInput(String),
+    CommitPathInput(String),
+    CancelPathInput,
+}
+
+pub fn render_toolbar(
+    ui: &mut egui::Ui,
+    current_path: &str,
+    path_input: &mut String,
+    is_editing_path: &mut bool,
+    search_query: &mut String,
+    navigation: &NavigationHistory,
+    view_mode: ViewMode,
+    sort_mode: SortMode,
+    sort_descending: bool,
+    thumbnail_size: &mut f32,
+    show_preview_panel: bool,
+    is_renaming: bool,
+    computer_icon: Option<&egui::TextureHandle>,
+    svg_manager: &mut SvgIconManager,
+) -> Option<ToolbarAction> {
+
+    let mut action = None;
+
+    ui.horizontal(|ui| {
+        ui.style_mut().spacing.item_spacing.x = 8.0;
+
+        // 1. NAVEGAÇÃO (ESQUERDA) - Bloqueados durante renomeação
+        let is_renaming = false; // TODO: Pass is_renaming as param? For now assume false or add to signature if critical. Plan didn't have it but main.rs uses it.
+        // Adding is_renaming to signature is better.
+
+        let can_back = navigation.can_go_back() && !is_renaming;
+        if widgets::icon_button(ui, svg_manager, theme::ICON_ARROW_LEFT, "Voltar", None).clicked() && can_back {
+            action = Some(ToolbarAction::GoBack);
+        }
+
+        let can_forward = navigation.can_go_forward() && !is_renaming;
+        if widgets::icon_button(ui, svg_manager, theme::ICON_ARROW_RIGHT, "Avançar", None).clicked() && can_forward {
+            action = Some(ToolbarAction::GoForward);
+        }
+
+        if widgets::icon_button(ui, svg_manager, theme::ICON_ARROW_UP, "Subir um nível", None).clicked() && !is_renaming {
+            action = Some(ToolbarAction::GoUp);
+        }
+
+        if widgets::icon_button(ui, svg_manager, theme::ICON_REFRESH, "Recarregar", None).clicked() && !is_renaming {
+            action = Some(ToolbarAction::Refresh);
+        }
+
+        ui.separator();
+
+        // Botão de Nova Pasta
+        if widgets::icon_button(ui, svg_manager, theme::ICON_FOLDER_ADD, "Criar Nova Pasta (Ctrl+Shift+N)", None).clicked() && !is_renaming {
+            action = Some(ToolbarAction::CreateFolder);
+        }
+
+        ui.separator();
+
+        // Home / Computer
+        // Note: We need the computer icon texture. Passing it as an Option<&TextureHandle> in signature would be good.
+        // For now finding "home" icon usage.
+        if widgets::icon_button(ui, svg_manager, theme::ICON_HOME, "Este Computador", computer_icon).clicked() && !is_renaming {
+            action = Some(ToolbarAction::NavigateToComputer);
+        }
+
+        // 2. ELEMENTOS DA DIREITA (DIREITA -> ESQUERDA)
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(4.0);
+
+            // Zoom
+            ui.add_sized(
+                egui::vec2(80.0, 20.0),
+                egui::Slider::new(thumbnail_size, 64.0..=256.0).show_value(false),
+            );
+            ui.label("Zoom");
+
+            ui.separator();
+
+            // Detalhes (Preview Panel Toggle)
+            if widgets::toggle_icon_button(
+                ui, 
+                svg_manager, 
+                theme::ICON_DETAILS, 
+                show_preview_panel, 
+                "Detalhes"
+            ).clicked() {
+                action = Some(ToolbarAction::TogglePreviewPanel);
+            }
+
+            ui.separator();
+
+            // View Mode
+            if widgets::toggle_icon_button(
+                    ui,
+                    svg_manager,
+                    theme::ICON_LIST,
+                    matches!(view_mode, ViewMode::List),
+                    "Lista",
+                )
+                .clicked()
+            {
+                if !matches!(view_mode, ViewMode::List) {
+                     action = Some(ToolbarAction::ToggleViewMode);
+                }
+            }
+            if widgets::toggle_icon_button(
+                    ui,
+                    svg_manager,
+                    theme::ICON_GRID,
+                    matches!(view_mode, ViewMode::Grid),
+                    "Grade",
+                )
+                .clicked()
+            {
+                 if !matches!(view_mode, ViewMode::Grid) {
+                     action = Some(ToolbarAction::ToggleViewMode);
+                }
+            }
+
+            ui.separator();
+
+            // Ordenação
+            let sort_symbol = if sort_descending { "↓" } else { "↑" };
+            if ui.button(sort_symbol).on_hover_text("Inverter Ordem").clicked() {
+                action = Some(ToolbarAction::ToggleSortDescending);
+            }
+            
+            egui::ComboBox::from_id_salt("sort_mode")
+                .selected_text(match sort_mode {
+                    SortMode::Name => "Nome",
+                    SortMode::Date => "Data",
+                    SortMode::Size => "Tamanho",
+                    SortMode::Type => "Tipo",
+                })
+                .show_ui(ui, |ui| {
+                    if ui.selectable_value(&mut SortMode::Name, sort_mode, "Nome").clicked() {
+                        action = Some(ToolbarAction::ChangeSortMode(SortMode::Name));
+                    }
+                    if ui.selectable_value(&mut SortMode::Date, sort_mode, "Data").clicked() {
+                        action = Some(ToolbarAction::ChangeSortMode(SortMode::Date));
+                    }
+                    if ui.selectable_value(&mut SortMode::Size, sort_mode, "Tamanho").clicked() {
+                         action = Some(ToolbarAction::ChangeSortMode(SortMode::Size));
+                    }
+                     if ui.selectable_value(&mut SortMode::Type, sort_mode, "Tipo").clicked() {
+                         action = Some(ToolbarAction::ChangeSortMode(SortMode::Type));
+                    }
+                });
+
+            ui.separator();
+
+            // Busca
+            let search_width = 120.0;
+            let search_response = ui.add_sized(
+                egui::vec2(search_width, 22.0),
+                egui::TextEdit::singleline(search_query).hint_text("Buscar..."),
+            );
+            if search_response.changed() {
+                action = Some(ToolbarAction::Search(search_query.clone()));
+            }
+            crate::ui::svg_icons::icon_image(
+                ui,
+                svg_manager,
+                "search",
+                16.0,
+            );
+
+            ui.separator();
+
+            // 3. BARRA DE ENDEREÇO (Breadcrumbs ou Edição)
+            let addr_width = (ui.available_width() - 4.0).max(100.0);
+            let (addr_rect, _addr_response) =
+                ui.allocate_exact_size(egui::vec2(addr_width, 24.0), egui::Sense::hover());
+
+            // IMPORTANTE: Usar allocate_new_ui com closure para ter o novo Ui com layout correto
+            ui.allocate_new_ui(
+                egui::UiBuilder::new()
+                    .max_rect(addr_rect)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                |ui| {
+                    if *is_editing_path {
+                        let edit_response = ui.add_sized(
+                            ui.available_size(),
+                            egui::TextEdit::singleline(path_input)
+                                .hint_text("Caminho...")
+                                .id_source("address_edit"),
+                        );
+
+                        if edit_response.clicked_elsewhere()
+                            || (edit_response.lost_focus()
+                                && !ui.input(|i| i.key_pressed(egui::Key::Enter)))
+                        {
+                            action = Some(ToolbarAction::CancelPathInput);
+                        }
+
+                        if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                           action = Some(ToolbarAction::CommitPathInput(path_input.clone()));
+                        }
+
+                        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                            action = Some(ToolbarAction::CancelPathInput);
+                        }
+                    } else {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 2.0;
+
+                            if current_path == "Este Computador" {
+                                ui.label(egui::RichText::new("Este Computador").size(13.0));
+                            } else {
+                                let path = std::path::Path::new(current_path);
+                                let mut full_accumulated = std::path::PathBuf::new();
+                                let components: Vec<_> = path.components().collect();
+
+                                for (i, comp) in components.iter().enumerate() {
+                                    let comp_str = comp.as_os_str().to_string_lossy();
+                                    let display_name = comp_str.trim_end_matches('\\');
+
+                                    if display_name.is_empty() && i > 0 {
+                                        continue;
+                                    }
+
+                                    full_accumulated.push(comp);
+                                    // Normaliza drive roots: "Z:" -> "Z:\" para navegação correta
+                                    let target_path = {
+                                        let p =
+                                            full_accumulated.to_string_lossy().to_string();
+                                        if p.len() == 2 && p.ends_with(':') {
+                                            format!("{}\\", p)
+                                        } else {
+                                            p
+                                        }
+                                    };
+
+                                    // Nome do drive ou pasta
+                                    let display = if display_name.is_empty() {
+                                        comp_str.into_owned() // Root / ou C:\
+                                    } else {
+                                        display_name.to_string()
+                                    };
+
+                                    if ui.button(display).clicked() {
+                                        action = Some(ToolbarAction::Navigate(target_path));
+                                    }
+
+                                    if i < components.len() - 1 {
+                                        ui.label(
+                                            egui::RichText::new("›")
+                                                .size(14.0)
+                                                .color(egui::Color32::from_gray(120)),
+                                        );
+                                    }
+                                }
+                            }
+
+                            // Espaço clicável à direita para entrar no modo edição
+                            let remaining = ui.available_width();
+                            if remaining > 0.0 {
+                                let (_rect, resp) = ui.allocate_exact_size(
+                                    egui::vec2(remaining, ui.available_height()),
+                                    egui::Sense::click(),
+                                );
+                                if resp.clicked() {
+                                     action = Some(ToolbarAction::StartAddressEdit);
+                                }
+                            }
+                        });
+                    }
+                },
+            );
+
+            if matches!(action, Some(ToolbarAction::StartAddressEdit)) {
+                 ui.ctx().memory_mut(|m| {
+                    m.request_focus(egui::Id::from("address_edit").with("text_edit"))
+                });
+            }
+        });
+    });
+
+    action
+}

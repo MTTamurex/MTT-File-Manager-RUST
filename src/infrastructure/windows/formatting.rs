@@ -50,3 +50,42 @@ pub fn format_date(timestamp: u64) -> String {
         d, m, display_y, hour, minute
     )
 }
+
+/// Formats duration in 100-nanosecond units to HH:MM:SS or MM:SS.
+pub fn format_media_duration(duration_100ns: u64) -> String {
+    let total_seconds = duration_100ns / 10_000_000;
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    let seconds = total_seconds % 60;
+
+    if hours > 0 {
+        format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+    } else {
+        format!("{:02}:{:02}", minutes, seconds)
+    }
+}
+
+/// Formats bitrate in bits per second to bps, Kbps, or Mbps.
+pub fn format_bitrate(bps: u32) -> String {
+    let bps = bps as f64;
+    if bps >= 1_000_000.0 {
+        format!("{:.1} Mbps", bps / 1_000_000.0)
+    } else if bps >= 1_000.0 {
+        format!("{:.0} Kbps", bps / 1_000.0)
+    } else {
+        format!("{:.0} bps", bps)
+    }
+}
+
+/// Approximates bitrate from file size and duration.
+pub fn approximate_bitrate(size_bytes: u64, duration_100ns: u64) -> Option<u32> {
+    if duration_100ns == 0 {
+        return None;
+    }
+    let seconds = duration_100ns as f64 / 10_000_000.0;
+    if seconds <= 0.0 {
+        return None;
+    }
+    let bits_per_sec = (size_bytes as f64 * 8.0) / seconds;
+    Some(bits_per_sec.max(0.0) as u32)
+}

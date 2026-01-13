@@ -9,6 +9,8 @@ pub mod icon_loader;
 pub mod navigation;
 pub mod sidebar;
 pub mod status_bar;
+pub mod toolbar;
+pub mod preview_panel;
 pub mod svg_icons;
 pub mod tab_bar;
 pub mod views;
