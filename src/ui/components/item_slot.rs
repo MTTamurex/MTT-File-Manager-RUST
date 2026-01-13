@@ -284,16 +284,40 @@ fn render_directory_slot<O: ItemSlotOperations>(
         // Se não tem preview e não está carregando, dispara o carregamento (exceto na Lixeira)
         if !ctx.is_recycle_bin_view {
             ops.request_folder_preview_load(item.path.clone());
+            
+             // Fallback temporário: mostra pasta customizada enquanto não iniciou loading
+            crate::ui::components::item_slot::draw_custom_folder(
+                ui.painter(),
+                folder_rect,
+                item.folder_cover
+                    .as_ref()
+                    .and_then(|p| ctx.texture_cache.get(p)),
+            );
+        } else {
+             // NA LIXEIRA: Tenta carregar ícone do sistema em vez de desenhar pasta amarela
+             if let Some(icon) = ctx.icon_loader.get_or_load_icon(ui.ctx(), &item.path) {
+                // Desenha o ícone do sistema
+                let icon_size = folder_w.min(folder_h); // Ícone quadrado
+                let icon_rect = egui::Rect::from_center_size(
+                    folder_rect.center(),
+                    egui::vec2(icon_size, icon_size)
+                );
+                
+                ui.painter().image(
+                    icon.id(),
+                    icon_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+             } else {
+                 // Fallback se falhar o ícone: pasta customizada
+                crate::ui::components::item_slot::draw_custom_folder(
+                    ui.painter(),
+                    folder_rect,
+                    None,
+                );
+             }
         }
-
-        // Fallback temporário: mostra pasta customizada enquanto não iniciou loading
-        crate::ui::components::item_slot::draw_custom_folder(
-            ui.painter(),
-            folder_rect,
-            item.folder_cover
-                .as_ref()
-                .and_then(|p| ctx.texture_cache.get(p)),
-        );
     }
 
     // Render sync status badge (OneDrive) for folders
