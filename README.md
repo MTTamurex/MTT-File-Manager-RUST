@@ -183,4 +183,4 @@ Este projeto está licenciado sob a [MIT License](LICENSE).
 
 ## 👨‍💻 Autor
 
-Desenvolvido por MTT (Matheus Tamer).
+Desenvolvido por MTT (Marcio T. Tamura).
