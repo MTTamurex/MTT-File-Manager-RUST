@@ -8,6 +8,8 @@ pub mod notification;
 pub mod renaming;
 pub mod state;
 pub mod watcher;
+pub mod sorting;
+pub mod file_operations;
 
 // Re-export for convenience
 pub use clipboard::*;

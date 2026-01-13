@@ -2,8 +2,7 @@ use eframe::egui;
 use lru::LruCache;
 use mtt_file_manager::infrastructure::disk_cache::ThumbnailDiskCache;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use rayon::prelude::*;
-use std::cmp::Ordering;
+
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
@@ -17,6 +16,10 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 
 // Import domain types
 use mtt_file_manager::application::context_menu::ContextMenuState;
+use mtt_file_manager::application::sorting;
+use mtt_file_manager::application::file_operations;
+use mtt_file_manager::application::clipboard::{ClipboardManager, ClipboardOp};
+use mtt_file_manager::application::navigation::NavigationHistory;
 use mtt_file_manager::domain::file_entry::*;
 use mtt_file_manager::domain::thumbnail::*;
 
@@ -74,12 +77,7 @@ fn to_win32_path(path: &str) -> Vec<u16> {
         .collect()
 }
 
-// Operações de Clipboard (Copiar/Recortar)
-#[derive(Clone, Copy, PartialEq, Debug)]
-enum ClipboardOp {
-    Copy,
-    Move,
-}
+
 
 // AplicaÃ§Ã£o principal
 struct ImageViewerApp {
@@ -122,8 +120,7 @@ struct ImageViewerApp {
     view_mode: ViewMode,
 
     // Navigation state (histÃ³rico linear)
-    navigation_history: Vec<String>, // HistÃ³rico completo de paths
-    history_index: usize,            // PosiÃ§Ã£o atual no histÃ³rico
+    navigation: NavigationHistory,
     path_input: String,              // Barra de endereÃ§o editÃ¡vel
 
     // UI state
@@ -165,8 +162,8 @@ struct ImageViewerApp {
     pending_auto_reload: bool,
 
     // CLIPBOARD (Copiar/Recortar/Colar)
-    clipboard_file: Option<PathBuf>,
-    clipboard_op: Option<ClipboardOp>,
+    // CLIPBOARD (Copiar/Recortar/Colar)
+    clipboard: ClipboardManager,
 
     // CONTEXT MENU STATE
     context_menu: ContextMenuState,
@@ -454,9 +451,7 @@ impl ImageViewerApp {
             show_preview_panel, // Loaded from SQLite
             is_computer_view: false,
             is_recycle_bin_view: false,
-            // Navigation - comeÃ§a com path inicial no histÃ³rico
-            navigation_history: vec![PATH_PADRAO.to_string()],
-            history_index: 0,
+            navigation: NavigationHistory::new(PATH_PADRAO.to_string()),
             path_input: PATH_PADRAO.to_string(),
             disks,
             last_drive_refresh: Instant::now(),
@@ -481,8 +476,8 @@ impl ImageViewerApp {
             pending_auto_reload: false,
 
             // CLIPBOARD
-            clipboard_file: None,
-            clipboard_op: None,
+            // CLIPBOARD
+            clipboard: ClipboardManager::new(),
 
             // CONTEXT MENU STATE
             context_menu: ContextMenuState::new(),
@@ -582,32 +577,15 @@ impl ImageViewerApp {
         let target_idx = idx.or(self.selected_item);
         if let Some(idx) = target_idx {
             if let Some(item) = self.items.get(idx) {
-                let path = item.path.clone();
-                let path_str = path.to_string_lossy().to_string();
-                let from_vec = to_win32_path(&path_str);
+                // Delegate to application layer
+                if let Ok(true) = file_operations::delete_with_shell(&item.path, self.native_hwnd) {
+                    // Limpa cache do item deletado
+                    self.disk_cache.remove_cache_for_path(&item.path);
 
-                let mut op = SHFILEOPSTRUCTW {
-                    hwnd: HWND(std::ptr::null_mut()),
-                    wFunc: FO_DELETE,
-                    pFrom: PCWSTR(from_vec.as_ptr()),
-                    pTo: PCWSTR(std::ptr::null()),
-                    fFlags: (FOF_ALLOWUNDO | FOF_WANTNUKEWARNING).0 as u16,
-                    ..Default::default()
-                };
-
-                unsafe {
-                    // SAFETY: `op` is properly initialized with a double-null terminated wide string
-                    // from `to_win32_path`, which is required by `SHFileOperationW`.
-                    let result = SHFileOperationW(&mut op);
-                    if result == 0 {
-                        // Limpa cache do item deletado
-                        self.disk_cache.remove_cache_for_path(&path);
-
-                        // O watcher vai cuidar do refresh, mas podemos limpar a seleção
-                        if self.selected_item == Some(idx) {
-                            self.selected_item = None;
-                            self.selected_file = None;
-                        }
+                    // O watcher vai cuidar do refresh, mas podemos limpar a seleção
+                    if self.selected_item == Some(idx) {
+                        self.selected_item = None;
+                        self.selected_file = None;
                     }
                 }
             }
@@ -721,57 +699,44 @@ impl ImageViewerApp {
 
     fn create_new_folder(&mut self) {
         let base_path = PathBuf::from(&self.current_path);
-        let mut new_folder_name = "Nova Pasta".to_string();
-        let mut counter = 1;
 
-        while base_path.join(&new_folder_name).exists() {
-            counter += 1;
-            new_folder_name = format!("Nova Pasta ({})", counter);
-        }
+        match file_operations::create_new_folder(&base_path) {
+            Ok(full_path) => {
+                let new_folder_name = full_path.file_name().unwrap_or_default().to_string_lossy().to_string();
 
-        let full_path = base_path.join(&new_folder_name);
+                // CRITICAL: Immediately create entry to allow renaming
+                let new_item = FileEntry::from_path(full_path.clone(), true);
 
-        if std::fs::create_dir(&full_path).is_ok() {
-            // CRÍTICO: Para renomear imediatamente, usamos o helper from_path
-            let new_item = FileEntry::from_path(full_path.clone(), true);
+                self.all_items.push(new_item);
+                self.filter_items();
+                self.sort_items();
 
-            self.all_items.push(new_item);
-            self.filter_items();
-            self.sort_items();
+                // Find index in filtered vector
+                if let Some(idx) = self.items.iter().position(|i| i.path == full_path) {
+                    self.selected_item = Some(idx);
+                    self.selected_file = Some(self.items[idx].clone());
+                    self.renaming_state = Some((idx, new_folder_name));
+                    self.focus_rename = true;
+                }
 
-            // Acha o índice no vetor filtrado (items)
-            if let Some(idx) = self.items.iter().position(|i| i.path == full_path) {
-                self.selected_item = Some(idx);
-                self.selected_file = Some(self.items[idx].clone());
-                self.renaming_state = Some((idx, new_folder_name));
-                self.focus_rename = true;
+                // Request background real load to sync with disk
+                self.load_folder(false);
             }
-
-            // Requisita load real em background para garantir sincronia com disco
-            self.load_folder(false);
+            Err(e) => {
+                eprintln!("Erro ao criar pasta: {}", e);
+            }
         }
     }
 
     // ===== CLIPBOARD OPERATIONS (Ctrl+C, Ctrl+X, Ctrl+V) =====
 
     /// Copiar: Coloca o arquivo no clipboard do Windows (CF_HDROP format)
+    /// Copiar: Coloca o arquivo no clipboard do Windows e interno
     fn command_copy(&mut self, idx: Option<usize>) {
-        eprintln!("[DEBUG] command_copy called with idx: {:?}", idx);
-        let target_idx = idx.or(self.selected_item);
-        if let Some(idx) = target_idx {
-            if let Some(item) = self.items.get(idx) {
-                // Put file in Windows clipboard using CF_HDROP format
-                if let Err(e) =
-                    mtt_file_manager::infrastructure::windows_clipboard::copy_files_to_clipboard(&[
-                        item.path.clone(),
-                    ])
-                {
-                    eprintln!("[CLIPBOARD ERROR] Failed to copy: {}", e);
-                }
-                // Also keep internal state as backup
-                self.clipboard_file = Some(item.path.clone());
-                self.clipboard_op = Some(ClipboardOp::Copy);
-            }
+        if let Some(idx) = idx.or(self.selected_item) {
+             if let Some(item) = self.items.get(idx) {
+                 self.clipboard.copy(&item.path);
+             }
         }
     }
 
@@ -780,47 +745,16 @@ impl ImageViewerApp {
         let target_idx = idx.or(self.selected_item);
         if let Some(idx) = target_idx {
             if let Some(item) = self.items.get(idx) {
-                // Put file in Windows clipboard using CF_HDROP format with MOVE effect
-                if let Err(e) =
-                    mtt_file_manager::infrastructure::windows_clipboard::cut_files_to_clipboard(&[
-                        item.path.clone(),
-                    ])
-                {
-                    eprintln!("[CLIPBOARD ERROR] Failed to cut: {}", e);
-                }
-                // Also keep internal state as backup
-                self.clipboard_file = Some(item.path.clone());
-                self.clipboard_op = Some(ClipboardOp::Move);
+                self.clipboard.cut(&item.path);
             }
         }
     }
 
-    /// Colar: Lê do clipboard do Windows e executa SHFileOperationW
+    /// Colar: Lê do clipboard usando ClipboardManager
     fn command_paste(&mut self, idx: Option<usize>) {
         eprintln!("[DEBUG] command_paste called with idx: {:?}", idx);
-        use mtt_file_manager::infrastructure::windows_clipboard;
 
-        // 1. First try to read from Windows clipboard
-        let (src_paths, is_move) =
-            if let Some(files) = windows_clipboard::get_files_from_clipboard() {
-                let op = windows_clipboard::get_clipboard_operation();
-                let is_move = matches!(op, Some(windows_clipboard::ClipboardFileOp::Move));
-                (files, is_move)
-            } else if let Some(path) = &self.clipboard_file {
-                // Fallback to internal clipboard
-                let is_move = matches!(self.clipboard_op, Some(ClipboardOp::Move));
-                (vec![path.clone()], is_move)
-            } else {
-                // Nothing to paste
-                return;
-            };
-
-        if src_paths.is_empty() {
-            return;
-        }
-
-        // 2. Destination folder
-        // If idx is provided and is a folder, use it as destination
+        // Destination folder
         let dest_folder = if let Some(idx) = idx {
             if let Some(item) = self.items.get(idx) {
                 if item.is_dir {
@@ -829,159 +763,52 @@ impl ImageViewerApp {
                     PathBuf::from(&self.current_path)
                 }
             } else {
-                PathBuf::from(&self.current_path)
+               PathBuf::from(&self.current_path)
             }
         } else {
-            PathBuf::from(&self.current_path)
+             PathBuf::from(&self.current_path)
         };
 
-        // 3. Perform operation for each file
-        for src_path in &src_paths {
-            // Skip if trying to move to same folder
-            if is_move && src_path.parent() == Some(&dest_folder) {
-                continue;
-            }
-
-            // Prepare strings for Windows API (double-null terminated)
-            let mut from_vec: Vec<u16> = src_path.to_string_lossy().encode_utf16().collect();
-            from_vec.push(0);
-            from_vec.push(0);
-
-            let mut to_vec: Vec<u16> = dest_folder.to_string_lossy().encode_utf16().collect();
-            to_vec.push(0);
-            to_vec.push(0);
-
-            let w_func = if is_move { FO_MOVE } else { FO_COPY };
-
-            let mut op = SHFILEOPSTRUCTW {
-                hwnd: HWND(std::ptr::null_mut()),
-                wFunc: w_func,
-                pFrom: PCWSTR(from_vec.as_ptr()),
-                pTo: PCWSTR(to_vec.as_ptr()),
-                fFlags: (FOF_ALLOWUNDO).0 as u16,
-                ..Default::default()
-            };
-
-            unsafe {
-                // SAFETY: from_vec and to_vec are properly double-null terminated
-                let result = SHFileOperationW(&mut op);
-                if result != 0 {
-                    eprintln!("[PASTE ERROR] SHFileOperationW returned: {}", result);
-                }
+        match self.clipboard.paste(&dest_folder, self.native_hwnd) {
+            Ok(true) => {
+                 // Move successful
+                 self.load_folder(false);
+                 self.context_menu.target_path = None;
+            },
+            Ok(false) => {
+                 // Copy successful
+                 self.load_folder(false);
+                 self.context_menu.target_path = None;
+            },
+            Err(e) => {
+                 eprintln!("[CLIPBOARD ERROR] {}", e);
             }
         }
-
-        // 4. If it was a Move operation, clear clipboards
-        if is_move {
-            self.clipboard_file = None;
-            self.clipboard_op = None;
-            // Note: Windows clipboard is managed by the shell, we don't clear it
-        }
-
-        // 5. Reload folder to show result
-        self.load_folder(false);
-
-        // 6. Clear context menu target
-        self.context_menu.target_path = None;
     }
 
 
 
     /// Filtra itens baseado na query de busca e reaplica ordenação
+    /// Filtra itens baseado na query de busca e reaplica ordenação
     fn filter_items(&mut self) {
-        if self.search_query.is_empty() {
-            self.items = Arc::new(self.all_items.clone());
-        } else {
-            let query = self.search_query.to_lowercase();
-            self.items = Arc::new(
-                self.all_items
-                    .iter()
-                    .filter(|item| item.name.to_lowercase().contains(&query))
-                    .cloned()
-                    .collect(),
-            );
-        }
+        self.items = Arc::new(sorting::filter_items(
+            &self.all_items,
+            &self.search_query,
+        ));
         self.total_items = self.items.len();
-
-        // SEMPRE ordena após filtrar para manter consistência
         self.sort_items();
     }
 
     /// Ordena itens baseado no modo atual e preferência de posição de pastas
     /// OTIMIZADO: Usa par_sort_by para listas >5000 itens (rayon)
     fn sort_items(&mut self) {
-        // Clone interno para mutação, depois wrap em novo Arc
-        let mut items_vec = (*self.items).clone();
-
-        // Closure de comparação
-        let sort_mode = self.sort_mode;
-        let sort_descending = self.sort_descending;
-        let folders_position = self.folders_position;
-
-        let compare = |a: &FileEntry, b: &FileEntry| -> Ordering {
-            // 1. Posição das pastas (se não for Mixed)
-            if folders_position != FoldersPosition::Mixed && a.is_dir != b.is_dir {
-                let folders_come_first = folders_position == FoldersPosition::First;
-                return if a.is_dir {
-                    if folders_come_first {
-                        Ordering::Less
-                    } else {
-                        Ordering::Greater
-                    }
-                } else {
-                    if folders_come_first {
-                        Ordering::Greater
-                    } else {
-                        Ordering::Less
-                    }
-                };
-            }
-
-            // 2. Ordena por modo selecionado (Smart Sorting com natord)
-            let ordering = match sort_mode {
-                SortMode::Name => natord::compare(&a.name.to_lowercase(), &b.name.to_lowercase()),
-                SortMode::Date => a.modified.cmp(&b.modified),
-                SortMode::Size => a.size.cmp(&b.size),
-                SortMode::Type => {
-                    let ext_a = a
-                        .path
-                        .extension()
-                        .map(|e| e.to_string_lossy().to_lowercase())
-                        .unwrap_or_default();
-                    let ext_b = b
-                        .path
-                        .extension()
-                        .map(|e| e.to_string_lossy().to_lowercase())
-                        .unwrap_or_default();
-                    match ext_a.cmp(&ext_b) {
-                        std::cmp::Ordering::Equal => {
-                            natord::compare(&a.name.to_lowercase(), &b.name.to_lowercase())
-                        }
-                        other => other,
-                    }
-                }
-            };
-
-            // 3. Inverte se descending está ativo
-            if sort_descending {
-                ordering.reverse()
-            } else {
-                ordering
-            }
-        };
-
-        // Threshold adaptativo: paralelo para listas grandes, sequencial para pequenas
-        const PARALLEL_THRESHOLD: usize = 5000;
-
-        if items_vec.len() > PARALLEL_THRESHOLD {
-            // Paralelo: usa todos os núcleos da CPU
-            items_vec.par_sort_by(compare);
-        } else {
-            // Sequencial: evita overhead de threads para listas pequenas
-            items_vec.sort_by(compare);
-        }
-
-        self.items = Arc::new(items_vec);
+        // Delegate to pure function in sorting module
+        sorting::sort_items(
+            Arc::make_mut(&mut self.items).as_mut_slice(),
+            self.sort_mode,
+            self.sort_descending,
+            self.folders_position,
+        );
     }
 
     /// Salva as preferências atuais no SQLite
@@ -1271,14 +1098,8 @@ impl ImageViewerApp {
             return;
         }
 
-        // Corta histÃ³rico "futuro" (se voltamos e navegamos para outro lugar)
-        if self.history_index < self.navigation_history.len().saturating_sub(1) {
-            self.navigation_history.truncate(self.history_index + 1);
-        }
-
         // Adiciona novo caminho ao histÃ³rico
-        self.navigation_history.push(normalized_path.clone());
-        self.history_index = self.navigation_history.len() - 1;
+        self.navigation.navigate_to(normalized_path.clone());
 
         self.current_path = normalized_path.clone();
         self.path_input = normalized_path.clone();
@@ -1296,14 +1117,10 @@ impl ImageViewerApp {
         self.load_folder(false);
     }
 
-    /// Volta no histórico (sem adicionar ao histórico)
     fn go_back(&mut self) {
-        if self.can_go_back() {
+        if let Some(path) = self.navigation.go_back().cloned() {
             // Guarda o path atual antes de voltar (para invalidar o preview)
             let previous_path = std::path::PathBuf::from(&self.current_path);
-            
-            self.history_index -= 1;
-            let path = self.navigation_history[self.history_index].clone();
 
             if path == "Este Computador" {
                 // Invalida preview da pasta que estávamos
@@ -1342,12 +1159,9 @@ impl ImageViewerApp {
 
     /// Avança no histórico
     fn go_forward(&mut self) {
-        if self.history_index + 1 < self.navigation_history.len() {
+        if let Some(path) = self.navigation.go_forward().cloned() {
             // Guarda o path atual antes de avançar (para invalidar o preview)
             let previous_path = std::path::PathBuf::from(&self.current_path);
-            
-            self.history_index += 1;
-            let path = self.navigation_history[self.history_index].clone();
 
             if path == "Este Computador" {
                 self.cache_manager.invalidate_folder_preview(&previous_path);
@@ -1390,14 +1204,8 @@ impl ImageViewerApp {
 
         self.reset_selection_and_search();
 
-        // Corta histórico "futuro"
-        if self.history_index < self.navigation_history.len().saturating_sub(1) {
-            self.navigation_history.truncate(self.history_index + 1);
-        }
-
-        // Adiciona ao histórico
-        self.navigation_history.push("Este Computador".to_string());
-        self.history_index = self.navigation_history.len() - 1;
+        // Adiciona ao histórico (via manager)
+        self.navigation.navigate_to("Este Computador".to_string());
 
         // SYNC TAB STATE
         self.tab_manager.active_mut().navigate_to("Este Computador");
@@ -1415,14 +1223,8 @@ impl ImageViewerApp {
 
         self.reset_selection_and_search();
 
-        // Corta histórico "futuro"
-        if self.history_index < self.navigation_history.len().saturating_sub(1) {
-            self.navigation_history.truncate(self.history_index + 1);
-        }
-
         // Adiciona ao histórico
-        self.navigation_history.push("Lixeira".to_string());
-        self.history_index = self.navigation_history.len() - 1;
+        self.navigation.navigate_to("Lixeira".to_string());
 
         // SYNC TAB STATE
         self.tab_manager.active_mut().navigate_to("Lixeira");
@@ -1598,8 +1400,7 @@ impl ImageViewerApp {
         active.path = self.current_path.clone();
         active.path_input = self.path_input.clone();
         active.is_computer_view = self.is_computer_view;
-        active.navigation_history = self.navigation_history.clone();
-        active.history_index = self.history_index;
+        active.navigation = self.navigation.clone();
         active.items = self.items.clone();
         active.all_items = self.all_items.clone();
         active.selected_item = self.selected_item;
@@ -1625,8 +1426,7 @@ impl ImageViewerApp {
         self.current_path = active.path;
         self.path_input = active.path_input;
         self.is_computer_view = active.is_computer_view;
-        self.navigation_history = active.navigation_history;
-        self.history_index = active.history_index;
+        self.navigation = active.navigation.clone();
         self.items = active.items;
         self.all_items = active.all_items;
         self.selected_item = active.selected_item;
@@ -1733,14 +1533,13 @@ impl ImageViewerApp {
         }
     }
 
-    /// Pode voltar no histÃ³rico?
     fn can_go_back(&self) -> bool {
-        self.history_index > 0
+        self.navigation.can_go_back()
     }
 
     /// Pode avanÃ§ar no histÃ³rico?
     fn can_go_forward(&self) -> bool {
-        self.history_index < self.navigation_history.len().saturating_sub(1)
+        self.navigation.can_go_forward()
     }
 
     fn request_thumbnail_load(&self, path: PathBuf) {
@@ -2855,81 +2654,14 @@ impl ImageViewerApp {
 
     /// Copy a filesystem path to the Windows clipboard as text.
     fn copy_path_to_clipboard(&self, path: &Path) {
-        use clipboard_win::{formats, Clipboard, Setter};
-
-        if let Ok(_clip) = Clipboard::new_attempts(10) {
-            let _ = formats::Unicode.write_clipboard(&path.to_string_lossy());
+        if let Err(e) = file_operations::copy_path_to_clipboard(path) {
+            eprintln!("Erro clipboard: {}", e);
         }
     }
 
     /// Create a Windows shell shortcut (.lnk) pointing to `target` in the same directory.
     fn create_shell_shortcut(&self, target: &Path) -> std::result::Result<PathBuf, String> {
-        use windows::core::PCWSTR;
-        use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
-        use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
-
-        let dest_dir = target
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from(&self.current_path));
-
-        let base_name = target
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| target.to_string_lossy().to_string());
-
-        let mut candidate = dest_dir.join(format!("{} - Atalho.lnk", base_name));
-        let mut counter = 2;
-        while candidate.exists() {
-            candidate = dest_dir.join(format!("{} - Atalho ({}).lnk", base_name, counter));
-            counter += 1;
-        }
-
-        let result = unsafe {
-            // SAFETY: COM is initialized for the current thread; errors are propagated as Strings.
-            CoInitializeEx(None, COINIT_APARTMENTTHREADED)
-                .ok()
-                .map_err(|e| format!("CoInitializeEx failed: {e}"))?;
-
-            let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
-                .map_err(|e| format!("CoCreateInstance ShellLink failed: {e}"))?;
-
-            let wide_target: Vec<u16> = target
-                .to_string_lossy()
-                .encode_utf16()
-                .chain(std::iter::once(0))
-                .collect();
-            let wide_workdir: Vec<u16> = dest_dir
-                .to_string_lossy()
-                .encode_utf16()
-                .chain(std::iter::once(0))
-                .collect();
-
-            link.SetPath(PCWSTR(wide_target.as_ptr()))
-                .map_err(|e| format!("SetPath failed: {e}"))?;
-            link.SetWorkingDirectory(PCWSTR(wide_workdir.as_ptr()))
-                .map_err(|e| format!("SetWorkingDirectory failed: {e}"))?;
-
-            let persist: IPersistFile = link
-                .cast()
-                .map_err(|e| format!("IPersistFile cast failed: {e}"))?;
-
-            let wide_dest: Vec<u16> = candidate
-                .to_string_lossy()
-                .encode_utf16()
-                .chain(std::iter::once(0))
-                .collect();
-            persist
-                .Save(PCWSTR(wide_dest.as_ptr()), true)
-                .map_err(|e| format!("Persist Save failed: {e}"))?;
-
-            Ok(())
-        };
-
-        unsafe { CoUninitialize(); }
-
-        result.map(|_| candidate)
+        file_operations::create_shortcut(target, &self.current_path)
     }
 
     fn populate_context_menu(&mut self, ctx: &egui::Context, path: &std::path::Path, is_empty_area: bool, _item_index: Option<usize>) {
@@ -2962,7 +2694,7 @@ impl ImageViewerApp {
         items.push(ContextMenuItem::primary(-3, "Recortar").with_command("cut").with_shortcut("Ctrl+X"));
         items.push(ContextMenuItem::primary(-2, "Copiar").with_command("copy").with_shortcut("Ctrl+C"));
         
-        let can_paste = self.clipboard_file.is_some() || mtt_file_manager::infrastructure::windows_clipboard::has_files_in_clipboard();
+        let can_paste = self.clipboard.has_content();
         items.push(ContextMenuItem::primary(-4, "Colar").with_command("paste").with_shortcut("Ctrl+V").enabled(can_paste));
         
         if !is_empty_area {
@@ -2971,7 +2703,7 @@ impl ImageViewerApp {
         }
         
         // ========== SECONDARY ITEMS (App-specific) ==========
-        let can_paste = self.clipboard_file.is_some() || mtt_file_manager::infrastructure::windows_clipboard::has_files_in_clipboard();
+        let can_paste = self.clipboard.has_content();
         if is_empty_area {
             items.push(ContextMenuItem::separator());
             items.push(ContextMenuItem::new(-32, "Colar").with_command("paste").with_shortcut("Ctrl+V").enabled(can_paste));
