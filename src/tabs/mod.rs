@@ -38,6 +38,8 @@ pub struct TabState {
     pub scroll_to_selected: bool,
     /// Address bar input text
     pub path_input: String,
+    /// Whether this tab is showing the Recycle Bin view
+    pub is_recycle_bin_view: bool,
 }
 
 impl TabState {
@@ -56,6 +58,7 @@ impl TabState {
             search_query: String::new(),
             scroll_to_selected: false,
             path_input: "Este Computador".to_string(),
+            is_recycle_bin_view: false,
         }
     }
 
@@ -79,6 +82,7 @@ impl TabState {
             search_query: String::new(),
             scroll_to_selected: false,
             path_input: path.to_string(),
+            is_recycle_bin_view: path == "Lixeira",
         }
     }
 
@@ -95,6 +99,7 @@ impl TabState {
         self.path = new_path.to_string();
         self.path_input = new_path.to_string();
         self.is_computer_view = new_path == "Este Computador";
+        self.is_recycle_bin_view = new_path == "Lixeira";
 
         // Update title
         if self.is_computer_view {
@@ -131,9 +136,9 @@ impl TabState {
 
     fn sync_from_history(&mut self) {
         if let Some(path) = self.navigation.current_path() {
-            self.path = path.clone();
             self.path_input = path.clone();
             self.is_computer_view = path == "Este Computador";
+            self.is_recycle_bin_view = path == "Lixeira";
 
             if self.is_computer_view {
                 self.title = "Este Computador".to_string();

@@ -36,6 +36,7 @@ pub enum ListViewAction {
     DoubleClick(usize),
     SecondaryClick(usize),
     SortChange(SortMode),
+    EmptyAreaSecondaryClick,
 }
 
 /// Operations that can be performed from list view
@@ -179,8 +180,10 @@ pub fn render_list_view(
     let mut clicked_item = None;
     let mut double_clicked_item = None;
     let mut secondary_clicked_item = None;
+    let mut empty_area_secondary_click = false;
 
     let scroll_area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+    let available_rect = ui.available_rect_before_wrap();
 
     if ctx.is_computer_view {
         // Grouped view for "Este Computador"
@@ -563,9 +566,17 @@ pub fn render_list_view(
                 ui.add_space(10.0);
             }
         });
+
+        if ui.input(|i| i.pointer.secondary_clicked()) {
+            if let Some(pos) = ui.ctx().pointer_latest_pos() {
+                if available_rect.contains(pos) {
+                    empty_area_secondary_click = true;
+                }
+            }
+        }
     } else {
         // Regular virtualized list
-        scroll_area.show_rows(ui, row_height + 2.0, total_rows, |ui, row_range| {
+        let scroll_res = scroll_area.show_rows(ui, row_height + 2.0, total_rows, |ui, row_range| {
             let mut render_item = |ui: &mut Ui, i: usize, item: &FileEntry| {
                 // GATILHO LAZY LOAD PARA PASTAS: Descobre capa se ainda não tem
                 if item.is_dir
@@ -910,6 +921,19 @@ pub fn render_list_view(
                 render_item(ui, i, &ctx.items[i]);
             }
         });
+
+        if ui.input(|i| i.pointer.secondary_clicked()) {
+            if let Some(pos) = ui.ctx().pointer_latest_pos() {
+                if available_rect.contains(pos) {
+                    empty_area_secondary_click = true;
+                }
+            }
+        }
+    }
+
+    // Capture secondary click on the scroll area if no item was clicked
+    if empty_area_secondary_click && secondary_clicked_item.is_none() {
+        return Some(ListViewAction::EmptyAreaSecondaryClick);
     }
 
     // Header helper

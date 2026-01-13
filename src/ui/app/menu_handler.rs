@@ -1,9 +1,17 @@
+use eframe::egui;
 use std::path::{Path, PathBuf};
 use crate::app::ImageViewerApp;
 
-pub fn handle_context_menu_actions(app: &mut ImageViewerApp) {
+pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
+    // 1. Render the menu (ui construction)
     let mut context_menu = std::mem::take(&mut app.context_menu);
-    
+    let _ = crate::ui::context_menu::render_context_menu(
+        ctx,
+        &mut context_menu,
+        &mut app.svg_icon_manager,
+    );
+
+    // 2. Handle selected command before putting state back
     if let Some(id) = context_menu.selected_command_id.take() {
         if id > 0 {
             // Shell command

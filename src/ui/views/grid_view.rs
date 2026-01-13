@@ -44,6 +44,7 @@ pub enum GridViewAction {
     Click(usize),
     DoubleClick(usize),
     SecondaryClick(usize),
+    EmptyAreaSecondaryClick,
 }
 
 /// Renders the grid view
@@ -68,8 +69,11 @@ pub fn render_grid_view(
     let mut clicked_item = None;
     let mut double_clicked_item = None;
     let mut secondary_clicked_item = None;
+    let mut empty_area_secondary_click = false;
 
-    egui::ScrollArea::vertical()
+    let available_rect = ui.available_rect_before_wrap();
+
+    let scroll_res = egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
             if ctx.is_computer_view {
@@ -337,6 +341,14 @@ pub fn render_grid_view(
             }
         });
 
+    if ui.input(|i| i.pointer.secondary_clicked()) {
+        if let Some(pos) = ui.ctx().pointer_latest_pos() {
+            if available_rect.contains(pos) {
+                empty_area_secondary_click = true;
+            }
+        }
+    }
+
     // Header helper
     fn render_section_header(ui: &mut Ui, title: &str) {
         ui.add_space(8.0);
@@ -358,6 +370,10 @@ pub fn render_grid_view(
 
     if let Some(idx) = secondary_clicked_item {
         return Some(GridViewAction::SecondaryClick(idx));
+    }
+
+    if empty_area_secondary_click && secondary_clicked_item.is_none() {
+        return Some(GridViewAction::EmptyAreaSecondaryClick);
     }
 
     if let Some(idx) = clicked_item {
