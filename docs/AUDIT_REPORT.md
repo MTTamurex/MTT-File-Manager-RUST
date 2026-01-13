@@ -1,449 +1,391 @@
-# 📊 Relatório de Auditoria Técnica - MTT File Manager
+# 📋 RELATÓRIO DE AUDITORIA COMPLETA
 
-**Data:** 02/01/2026  
-**Versão:** 0.1.0  
-**Linguagem:** Rust  
-**Framework UI:** eframe/egui  
-**Plataforma:** Windows (Win32 API)
+## MTT File Manager - Análise Arquitetural (egui/eframe)
 
----
-
-## 📋 Resumo Executivo
-
-| Categoria | Nota | Comentário |
-|-----------|------|------------|
-| **Qualidade de Código** | 6/10 | God Object em `main.rs` (2525 linhas), refatoração incompleta |
-| **Arquitetura** | 5/10 | Separação de camadas iniciada mas inconsistente |
-| **Performance** | 7.5/10 | Boas práticas de async, LRU cache, thread pools |
-| **Segurança** | 6.5/10 | Módulo de segurança existe mas não é usado |
-| **Bugs Potenciais** | 6/10 | Vários pontos de panic, edge cases não tratados |
-| **NOTA GLOBAL** | **6.2/10** | Projeto funcional com débitos técnicos significativos |
-
-### 🎯 Pontos Positivos
-- ✅ Sistema de cache em camadas (LRU + SQLite) bem implementado
-- ✅ Worker pool com controle de concorrência
-- ✅ Separação inicial em módulos (domain, infrastructure, application, ui)
-- ✅ Testes unitários em módulos críticos (security, cache, errors)
-- ✅ Regras de projeto bem definidas em `.cursorrules`
-- ✅ Tratamento de erros com `thiserror` e tipos personalizados
-
-### ⚠️ Pontos Críticos
-- ❌ `main.rs` com 2525 linhas (God Object anti-pattern)
-- ❌ Módulo de segurança (`security.rs`) não é utilizado no código principal
-- ❌ Blocos `unsafe` sem documentação completa de invariantes
-- ❌ `.unwrap()` e `.expect()` em código de produção
-- ❌ Arquivos backup (`.rs.bak`, `.rs.backup`) no repositório
+**Data da Auditoria**: Janeiro 2026  
+**Auditor**: Arquiteto de Software Sênior - Especialista em Rust e GUI Immediate Mode
 
 ---
 
-## 📊 Tabela de Prioridades
+## 1. Visão Geral e Stack
 
-| ID | Issue | Impacto | Esforço | Prioridade |
-|----|-------|---------|---------|------------|
-| C01 | God Object em `main.rs` | 🔴 Alto | 🔴 Alto | **P1** |
-| C02 | Módulo security não utilizado | 🔴 Alto | 🟡 Médio | **P1** |
-| C03 | `.unwrap()`/`.expect()` em produção | 🔴 Alto | 🟡 Médio | **P1** |
-| C04 | Blocos `unsafe` sem SAFETY docs | 🟡 Médio | 🟢 Baixo | **P2** |
-| C05 | Race condition em file watcher | 🟡 Médio | 🟡 Médio | **P2** |
-| M01 | Duplicação de código ListView/GridView | 🟡 Médio | 🟡 Médio | **P2** |
-| M02 | Config hardcoded (cache sizes) | 🟢 Baixo | 🟢 Baixo | **P3** |
-| M03 | Logging inconsistente (eprintln!) | 🟢 Baixo | 🟢 Baixo | **P3** |
-| M04 | Arquivos backup no repositório | 🟢 Baixo | 🟢 Baixo | **P3** |
+### 1.1 Propósito da Aplicação
+
+Um **gerenciador de arquivos nativo para Windows** que foca em visualização de thumbnails de alta performance para imagens e vídeos, usando APIs nativas do Windows (Shell, WIC, Media Foundation).
+
+### 1.2 Análise de Dependências (`Cargo.toml`)
+
+| Dependência | Versão | Propósito |
+|-------------|--------|-----------|
+| `eframe` | 0.31 | Framework egui com persistence |
+| `rayon` | 1.10 | Paralelismo para ordenação de listas grandes |
+| `walkdir` | 2.5 | Iteração recursiva em diretórios |
+| `notify` | 6.1.1 | File system watcher (auto-refresh) |
+| `lru` | 0.12 | Cache LRU para texturas e ícones |
+| `dashmap` | 5.5 | Concurrent HashMap (não usado ativamente) |
+| `image` | 0.25 | Decodificação de imagens |
+| `rusqlite` | 0.32 | Cache SQLite persistente |
+| `webp` | 0.3 | Compressão lossy de thumbnails |
+| `windows` | 0.58 | APIs Win32 (Shell, COM, Media Foundation) |
+| `resvg/usvg` | 0.44 | Renderização de ícones SVG |
+
+**Observação**: A stack é bem escolhida para o propósito, com destaque para `windows-rs` que permite acesso direto às APIs nativas sem overhead de FFI manual.
+
+### 1.3 Configuração de Build
+
+```toml
+[profile.release]
+opt-level = 3      # ✅ Máxima otimização
+lto = true         # ✅ Link-Time Optimization
+codegen-units = 1  # ✅ Melhor inlining cross-crate
+```
+
+**✅ Bem configurado** - Produz executável ~4-6MB com performance otimizada.
 
 ---
 
-## 🔴 Análise Crítica (Bugs/Segurança)
+## 2. Arquitetura Específica para Immediate Mode
 
-### C01: God Object - `main.rs` com 2525 linhas
+### 2.1 Separação Lógica vs. UI
 
-**Arquivo:** [main.rs](file:///c:/MTT%20File%20Manager/src/main.rs)
+| Critério | Status | Observação |
+|----------|--------|------------|
+| Lógica de negócios isolada | ⚠️ **Parcial** | `main.rs` tem **~5000 linhas** com UI e lógica misturadas |
+| Domain layer | ✅ **Bom** | `domain/` contém `FileEntry`, `SortMode`, `ThumbnailData` |
+| Infrastructure layer | ✅ **Bom** | `infrastructure/` isola Windows APIs |
+| Workers assíncronos | ✅ **Excelente** | Thumbnails, metadata, folder scan em threads separadas |
 
-A struct `ImageViewerApp` contém **35+ campos** e **40+ métodos**, violando o Princípio da Responsabilidade Única (SRP).
+**⚠️ Anti-pattern Identificado**: O arquivo `main.rs` é um "God Object" com `ImageViewerApp` contendo:
+- 50+ campos de estado
+- Funções de renderização UI
+- Lógica de navegação
+- Clipboard handling
+- Context menu
+- Todos em um único arquivo
+
+### 2.2 Gerenciamento de Estado
 
 ```rust
-// Exemplo do problema (linhas 94-186)
 struct ImageViewerApp {
-    // Estado de navegação (deveria estar em NavigationState)
+    // Estado de UI (~15 campos)
     current_path: String,
-    navigation_history: Vec<String>,
-    history_index: usize,
-    
-    // Estado de cache (deveria estar em CacheState)
-    thumbnail_req_sender: Sender<...>,
-    image_receiver: Receiver<...>,
-    cache_manager: CacheManager,
-    
-    // Estado de UI (deveria estar em UIState)
-    thumbnail_size: f32,
     selected_item: Option<usize>,
-    show_preview_panel: bool,
+    view_mode: ViewMode,
+    thumbnail_size: f32,
+    // ...
     
-    // ... + 25 outros campos misturados
-}
-```
-
-**Solução Proposta:**
-
-```rust
-// ANTES: Uma struct monolítica
-struct ImageViewerApp { /* 35 campos */ }
-
-// DEPOIS: Composição de estados
-struct ImageViewerApp {
-    navigation: NavigationState,
-    cache: CacheState,
-    ui: UIState,
-    workers: WorkerChannels,
-    clipboard: ClipboardState,
-}
-
-struct NavigationState {
-    current_path: String,
-    history: Vec<String>,
-    history_index: usize,
-    is_computer_view: bool,
-}
-
-struct CacheState {
-    texture_cache: LruCache<PathBuf, TextureHandle>,
-    icon_cache: LruCache<String, TextureHandle>,
-    loading_set: HashSet<PathBuf>,
-}
-
-struct WorkerChannels {
-    thumbnail_sender: Sender<(PathBuf, usize)>,
-    thumbnail_receiver: Receiver<ThumbnailData>,
-    cover_sender: Sender<PathBuf>,
+    // Canais de Workers (~10 canais)
+    thumbnail_req_sender: Sender<(PathBuf, usize)>,
+    image_receiver: Receiver<ThumbnailData>,
+    // ...
+    
+    // Caches (~8 caches diferentes)
+    cache_manager: CacheManager,
+    metadata_cache: LruCache<...>,
     // ...
 }
 ```
 
----
+**Persistência**: Usa SQLite via `disk_cache.rs` para:
+- Thumbnails comprimidos (WebP)
+- Preferências do usuário
+- Capas de pastas
 
-### C02: Módulo de Segurança Não Utilizado
+✅ **Bem implementado** - Não usa `eframe::Storage` (muito limitado), preferindo SQLite próprio.
 
-**Arquivo:** [security.rs](file:///c:/MTT%20File%20Manager/src/infrastructure/security.rs)
+### 2.3 Modularização
 
-O módulo `security.rs` implementa sanitização de paths, mas **nunca é chamado** no código principal:
+| Módulo | Linhas | Responsabilidade |
+|--------|--------|------------------|
+| `main.rs` | ~5000 | **Monolítico** - precisa quebrar |
+| `ui/views/grid_view.rs` | ~472 | ✅ Bem isolado |
+| `ui/sidebar.rs` | ~355 | ✅ Bem isolado |
+| `workers/thumbnail_worker.rs` | ~750 | ✅ Worker completo |
+| `infrastructure/disk_cache.rs` | ~427 | ✅ Persistência isolada |
 
-```rust
-// security.rs (implementado mas não usado)
-pub fn sanitize_path(path: &Path, config: &SecurityConfig) -> Result<PathBuf, SecurityError>
-
-// main.rs (navega para paths SEM sanitização!)
-fn navigate_to(&mut self, path: &str) {
-    // ❌ Nenhuma validação de segurança!
-    let normalized_path = if path.len() >= 2 && path.chars().nth(1) == Some(':') {
-        // Apenas normalização básica, sem sanitização
-        // ...
-    };
-    self.current_path = normalized_path;
-    self.load_folder(false);
-}
-```
-
-**Solução Proposta:**
-
-```rust
-// ANTES (main.rs linha 821)
-fn navigate_to(&mut self, path: &str) {
-    let normalized_path = /* ... */;
-    self.current_path = normalized_path;
-}
-
-// DEPOIS (com sanitização)
-use crate::infrastructure::security::{sanitize_path, SecurityConfig};
-
-fn navigate_to(&mut self, path: &str) -> Result<(), SecurityError> {
-    let config = SecurityConfig::default();
-    let safe_path = sanitize_path(Path::new(path), &config)?;
-    
-    self.current_path = safe_path.to_string_lossy().to_string();
-    self.load_folder(false);
-    Ok(())
-}
-```
+**⚠️ Problema**: Existe uma tentativa de refatoração em `ui/app.rs` e `application/state.rs`, mas estes arquivos **não são usados** - o código real ainda está em `main.rs`.
 
 ---
 
-### C03: Uso de `.unwrap()` e `.expect()` em Produção
+## 3. Performance Crítica (Update Loop)
 
-**Arquivos Afetados:** `main.rs`, `disk_cache.rs`, `thumbnail_worker.rs`
+### 3.1 Bloqueio da Thread Principal
+
+| Operação | Status | Localização |
+|----------|--------|-------------|
+| Scan de pasta | ✅ **Assíncrono** | `load_folder()` usa `std::thread::spawn` |
+| Carregamento de thumbnails | ✅ **Assíncrono** | Worker pool com 4 threads |
+| Extração de metadados | ✅ **Assíncrono** | Worker dedicado |
+| Refresh de drives | ⚠️ **Síncrono** | `get_all_drives()` no main thread (rápido, OK) |
+| Ordenação | ✅ **Paralelo p/ >5000 itens** | Usa `rayon::par_sort_by` |
+
+**✅ Excelente**: Nenhuma operação de I/O pesada no loop `update()`.
+
+### 3.2 Alocações no Hot Path
 
 ```rust
-// disk_cache.rs linha 32 - CRÍTICO
-let conn = Connection::open(db_path).expect("Failed to open thumbnail database");
-// ❌ Crash total se não conseguir abrir o banco!
-
-// main.rs linha 2509-2511
-fonts.families.get_mut(&egui::FontFamily::Proportional)
-    .unwrap()  // ❌ Panic se não existir!
-    .extend(loaded_fonts.clone());
-
-// thumbnail_worker.rs linha 56-58
-let work = match rx.lock() {
-    Ok(lock) => lock.recv(),
-    Err(_) => break,  // ✅ Este está correto
-};
+// PROBLEMA: Clone de Vec a cada frame para evitar borrow checker
+let items = self.items.clone(); // Arc clone (barato, OK)
+let selected_file = self.selected_file.clone(); // FileEntry clone (evitável)
 ```
 
-**Solução:**
+**Mitigação existente**: 
+- `items: Arc<Vec<FileEntry>>` - Clone do Arc é O(1)
+- Tooltips usam `.clone()` do item apenas quando hover
+
+**⚠️ Potencial melhoria**: Usar índices ao invés de clonar `selected_file`.
+
+### 3.3 Repaint Request
 
 ```rust
-// ANTES (disk_cache.rs)
-let conn = Connection::open(db_path).expect("Failed to open thumbnail database");
-
-// DEPOIS (graceful degradation)
-let conn = match Connection::open(db_path) {
-    Ok(c) => c,
-    Err(e) => {
-        eprintln!("[Cache] Failed to open database: {:?}", e);
-        // Fallback: use in-memory database
-        Connection::open_in_memory()
-            .expect("[FATAL] Cannot create even in-memory database")
-    }
-};
-```
-
----
-
-### C04: Blocos `unsafe` sem Documentação de SAFETY
-
-**Arquivo:** [main.rs](file:///c:/MTT%20File%20Manager/src/main.rs#L414-424)
-
-```rust
-// main.rs linhas 414-424
-unsafe {
-    let result = SHFileOperationW(&mut op);  // ❌ Falta SAFETY comment!
-    if result == 0 {
-        self.disk_cache.remove_cache_for_path(&path);
-        self.selected_item = None;
-        self.selected_file = None;
-    }
-}
-```
-
-**Correção:**
-
-```rust
-// SAFETY: 
-// 1. `op` é inicializado corretamente com todos os campos obrigatórios
-// 2. `from_vec` permanece válido durante toda a chamada (não é dropado)
-// 3. A API SHFileOperationW é thread-safe para uso em single thread
-// 4. Resultado 0 indica sucesso conforme documentação do Windows
-unsafe {
-    let result = SHFileOperationW(&mut op);
-    // ...
-}
-```
-
----
-
-### C05: Race Condition no File Watcher
-
-**Arquivo:** [main.rs](file:///c:/MTT%20File%20Manager/src/main.rs#L1146-1176)
-
-```rust
-// O watcher envia eventos, mas o debounce de 500ms pode causar perda de eventos
-while let Ok(event) = self.fs_event_receiver.try_recv() {
-    match event {
-        Ok(evt) => {
-            // ❌ Se múltiplos eventos chegarem em 500ms, só o primeiro é processado
-            self.pending_auto_reload = true;
-        },
-        Err(e) => eprintln!("Erro de watch: {:?}", e),
-    }
+// ✅ CORRETO: Apenas quando há dados novos
+if received_any {
+    ctx.request_repaint();
 }
 
-// Debounce ignora eventos intermediários
-if self.pending_auto_reload {
-    let elapsed = self.last_auto_reload.elapsed();
-    if elapsed > Duration::from_millis(500) {
-        self.load_folder(true);  // ❌ Pode perder eventos Create seguidos de Modify
+// ✅ CORRETO: Workers disparam repaint após enviar dados
+ctx.request_repaint(); // Em thumbnail_worker_loop após enviar resultado
 ```
 
-**Solução:** Usar um sistema de batch de eventos em vez de simples flag boolean.
+**✅ Bem implementado** - Não há `request_repaint()` incondicional.
 
 ---
 
-## 🟡 Melhorias (Refatoração/Performance)
+## 4. Qualidade de Código e "Rust Idioms"
 
-### M01: Duplicação de Código ListView/GridView
+### 4.1 Uso Idiomático do Rust
 
-**Arquivos:** `grid_view.rs`, `list_view.rs`, `main.rs`
+| Critério | Status |
+|----------|--------|
+| Pattern Matching | ✅ Usado extensivamente |
+| Option/Result handling | ⚠️ Alguns `.unwrap()` em paths não críticos |
+| Iterators | ✅ Preferidos sobre loops |
+| Lifetimes | ✅ Evitados via clones quando necessário |
 
-As ações `GridAction` e `ListAction` são **idênticas**:
+### 4.2 Thread Safety
 
 ```rust
-// main.rs linhas 1319-1325 (ListAction)
-enum ListAction {
-    NavigateTo(String),
-    OpenWithShell(PathBuf),
-    RequestThumbnailLoad(PathBuf),
-    RequestFolderScan(PathBuf),
-    RenameWithShell(usize),
-}
+// ✅ Correto: Arc<AtomicUsize> para tracking de geração
+current_generation: Arc<AtomicUsize>,
 
-// main.rs linhas 1526-1532 (GridAction)
-enum GridAction {
-    NavigateTo(String),
-    OpenWithShell(PathBuf),
-    RequestThumbnailLoad(PathBuf),
-    RequestFolderScan(PathBuf),
-    RenameWithShell(usize),  // ❌ 100% idêntico!
-}
+// ✅ Correto: Mutex apenas onde necessário
+shared_req_rx: Arc<Mutex<Receiver<...>>>,
+
+// ✅ Correto: mpsc channels para comunicação unidirecional
+thumbnail_req_sender: Sender<(PathBuf, usize)>,
 ```
 
-**Solução:**
+**✅ Bem implementado** - Uso correto de primitivas de sincronização.
+
+### 4.3 Tratamento de Erros
 
 ```rust
-// src/ui/views/common.rs (já existe mas subutilizado)
-pub enum ViewAction {
-    NavigateTo(String),
-    OpenWithShell(PathBuf),
-    RequestThumbnailLoad(PathBuf),
-    RequestFolderScan(PathBuf),
-    RenameWithShell(usize),
-}
+// ⚠️ PROBLEMA: Erros silenciosos em alguns lugares
+let _ = FindClose(handle); // Ignora erro
+let _ = conn.execute("PRAGMA...", []); // Ignora erro de DB
+
+// ✅ BOM: Sistema de notificações toast
+self.notifications.push(
+    AppNotification::error(format!("Erro ao restaurar: {}", e)),
+);
 ```
+
+**⚠️ Melhoria**: Implementar logging estruturado (tracing) ao invés de `eprintln!`.
 
 ---
 
-### M02: Configurações Hardcoded
+## 5. UI/UX e Layout
+
+### 5.1 Estrutura de Layout
 
 ```rust
-// main.rs linhas 72-75
-const CACHE_SIZE: usize = 200;  // ❌ Hardcoded
-const ICON_CACHE_SIZE: usize = 100;  // ❌ Hardcoded
-
-// thumbnail_worker.rs linha 17
-const MAX_CONCURRENT_DECODES: usize = 4;  // ❌ Hardcoded
-
-// disk_cache.rs linha 139
-if width > 512 || height > 512  // ❌ Magic number
+// Hierarquia bem definida
+egui::TopBottomPanel::top("tab_bar")...  // Tab bar (custom title bar)
+egui::TopBottomPanel::top("nav_bar")...  // Navigation toolbar
+egui::SidePanel::left("sidebar")...       // Drives + Quick access
+egui::SidePanel::right("preview_panel")... // Details pane
+egui::CentralPanel::default()...           // Grid/List content
 ```
 
-**Solução:** Criar `config.rs` com todas as constantes externalizadas.
+**✅ Layout lógico** similar ao Windows Explorer.
 
----
-
-### M03: Logging Inconsistente
+### 5.2 Constantes e Estilo
 
 ```rust
-// Alguns lugares usam eprintln! (não profissional)
-eprintln!("[GC] Removed {} orphaned cache entries", removed);  // disk_cache.rs
-eprintln!("[Cache] Cleaned {} entries for: {}", deleted, path_str);  // disk_cache.rs
+// ⚠️ PROBLEMA: Magic numbers espalhados
+let padding = 8.0;
+let icon_size = 22.0;
+let button_size = egui::vec2(size + padding * 2.0, size + padding * 2.0);
 
-// errors.rs tem macros de tracing, mas não são usadas
-#[macro_export]
-macro_rules! safe_unwrap {
-    ($expr:expr, $context:expr) => {
-        match $expr {
-            Ok(val) => val,
-            Err(e) => {
-                tracing::error!("{}: {:?}", $context, e);  // ← Definido mas não usado
+// ⚠️ PROBLEMA: Cores hardcoded
+Color32::from_rgb(200, 220, 240) // Selection color
+Color32::from_rgb(45, 45, 45)    // Dark mode background
 ```
 
-**Solução:** Adicionar `tracing` ao `Cargo.toml` e substituir todos os `eprintln!`.
+**⚠️ Melhoria**: Criar módulo `ui/theme.rs` com constantes centralizadas.
 
----
-
-## 🟢 Boas Práticas (Nitpicking)
-
-### BP01: Arquivos de Backup no Repositório
-
-```
-src/main.rs.backup (150KB)
-src/main.rs.refactored
-src/main_functional_backup.rs (136KB)
-src/ui/components.rs.bak
-src/ui/icon_loader.rs.bak
-src/ui/render_drive_slot.rs.bak
-src/ui/render_item_slot.rs.bak
-src/ui/texture_cache.rs.bak
-```
-
-**Solução:** Adicionar ao `.gitignore`:
-
-```gitignore
-*.bak
-*.backup
-*.refactored
-*_backup.rs
-```
-
----
-
-### BP02: Comentários em Português Misturados com Inglês
+### 5.3 IDs do egui
 
 ```rust
-// Caminho padrão (PT)
-const PATH_PADRAO: &str = "C:\\";
-
-// Persistent SQLite cache for thumbnails (EN)
-pub struct ThumbnailDiskCache { ... }
-
-/// Salva as preferências atuais no SQLite (PT)
-fn save_preferences(&self) { ... }
+// ✅ CORRETO: IDs únicos para elementos
+egui::Area::new(egui::Id::new("resize_grip"))...
+egui::ComboBox::from_id_salt("sort_mode")...
+ui.interact(item_rect, ui.id().with(index), Sense::click())
 ```
 
-**Solução:** Padronizar em um único idioma (preferencialmente inglês para código público).
+**✅ Bem implementado** - IDs manuais onde necessário.
 
 ---
 
-### BP03: Imports Redundantes
+## 6. Pontos Fortes e Fracos
 
-```rust
-// main.rs linhas 50-52 - import duplicado
-use windows::Win32::Storage::FileSystem::{
-    FindFirstFileW, FindNextFileW, FindClose, WIN32_FIND_DATAW, FILE_ATTRIBUTE_DIRECTORY
-};
-// Já importado indiretamente via windows::Win32::Storage::FileSystem::* (linha 45)
-```
+### ✅ Pontos Fortes (Highs)
 
----
+1. **Arquitetura de Workers**
+   - Pool de 4 threads para thumbnails com controle de concorrência (`MAX_CONCURRENT_DECODES = 4`)
+   - Sistema de "geração" para cancelar operações obsoletas
+   - Cache em dois níveis (memória LRU + SQLite persistente)
 
-## 📈 Métricas do Código
+2. **Integração Windows Nativa**
+   - Uso direto de `IShellItemImageFactory`, `IContextMenu`, Media Foundation
+   - Detecção de OneDrive com sync status
+   - Menu de contexto com extensões do shell
 
-| Arquivo | Linhas | Complexidade | Observação |
-|---------|--------|--------------|------------|
-| `main.rs` | 2525 | 🔴 Muito Alta | God Object |
-| `list_view.rs` | 450 | 🟡 Média | OK |
-| `item_slot.rs` | 500 | 🟡 Média | OK, bem documentado |
-| `thumbnail_worker.rs` | 316 | 🟢 Baixa | Excelente |
-| `disk_cache.rs` | 323 | 🟢 Baixa | Bem estruturado |
-| `security.rs` | 275 | 🟢 Baixa | Com testes! |
-| `icons.rs` | 294 | 🟢 Baixa | <300 linhas (meta atingida) |
+3. **Performance de UI**
+   - Zero I/O no render loop
+   - Virtualização de grid (apenas itens visíveis renderizados)
+   - Lazy loading de thumbnails
 
----
+4. **Persistência de Estado**
+   - SQLite para preferências, cache de thumbnails, capas de pastas
+   - Restaura tamanho de janela, largura de sidebars, modo de visualização
 
-## 🎯 Plano de Ação Recomendado
+### ⚠️ Pontos Fracos (Lows)
 
-### Fase 1: Correções Críticas (1-2 dias)
-1. [ ] Integrar `sanitize_path()` em `navigate_to()`
-2. [ ] Substituir `.expect()` em `disk_cache.rs` por fallback
-3. [ ] Adicionar SAFETY comments a todos os blocos `unsafe`
+1. **Arquivo `main.rs` Monolítico (~5000 linhas)**
+   - Violação do princípio de responsabilidade única
+   - Dificulta testes unitários
+   - Causa conflitos em merges
 
-### Fase 2: Refatoração Estrutural (3-5 dias)
-1. [ ] Extrair `NavigationState` de `ImageViewerApp`
-2. [ ] Extrair `ClipboardState` de `ImageViewerApp`
-3. [ ] Unificar `GridAction`/`ListAction` em `ViewAction`
-4. [ ] Remover arquivos `.bak` e `.backup`
+2. **Refatoração Incompleta**
+   - `ui/app.rs` e `application/state.rs` existem mas **não são usados**
+   - Código duplicado entre versões
 
-### Fase 3: Qualidade de Código (2-3 dias)
-1. [ ] Adicionar `tracing` e substituir `eprintln!`
-2. [ ] Criar `config.rs` para constantes
-3. [ ] Padronizar idioma dos comentários (EN)
-4. [ ] Rodar `cargo clippy -- -D warnings`
+3. **Tratamento de Erros Inconsistente**
+   - Mix de `.unwrap()`, `let _ =`, e `eprintln!`
+   - Sem logging estruturado
 
----
+4. **Magic Numbers**
+   - Cores, tamanhos, paddings hardcoded
+   - Dificulta theming
 
-## 📎 Referências
-
-- [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/)
-- [The Rust Performance Book](https://nnethercote.github.io/perf-book/)
-- [Windows Crate Documentation](https://microsoft.github.io/windows-docs-rs/)
+5. **Código em Português/Inglês Misturado**
+   - Comentários e variáveis em português (`filtrar_items`, `Lixeira`)
+   - UI strings hardcoded (dificulta i18n)
 
 ---
 
-*Relatório gerado por análise automatizada de código. Revisão humana recomendada.*
+## 7. Sugestões de Melhoria (Roadmap)
+
+### Prioridade Alta (Dívida Técnica)
+
+1. **Quebrar `main.rs` em módulos**
+   - Extrair `impl eframe::App` para `ui/app_impl.rs`
+   - Mover renderização de views para `ui/views/`
+   - Criar `app/commands.rs` para ações (copy, paste, delete)
+
+2. **Completar refatoração de estado**
+   - Usar `AppState` de `application/state.rs`
+   - Implementar traits para operações (`ClipboardOps`, `NavigationOps`)
+
+3. **Centralizar constantes de UI**
+   ```rust
+   // ui/theme.rs
+   pub const PADDING_SM: f32 = 4.0;
+   pub const PADDING_MD: f32 = 8.0;
+   pub const COLOR_SELECTION: Color32 = Color32::from_rgb(200, 220, 240);
+   ```
+
+### Prioridade Média (Qualidade)
+
+4. **Implementar logging com `tracing`**
+   ```rust
+   tracing::info!(path = %folder_path, "Starting folder scan");
+   tracing::error!(error = %e, "Thumbnail extraction failed");
+   ```
+
+5. **Testes unitários**
+   - Testar `sort_items()`, `filter_items()` isoladamente
+   - Mock de `CacheManager` para testes de UI
+
+6. **Extrair strings para i18n**
+   ```rust
+   // i18n/pt_BR.rs
+   pub const RECYCLE_BIN: &str = "Lixeira";
+   pub const THIS_PC: &str = "Este Computador";
+   ```
+
+### Prioridade Baixa (Nice-to-Have)
+
+7. **Adicionar CI/CD**
+   - GitHub Actions para `cargo clippy`, `cargo fmt`, `cargo test`
+
+8. **Documentação inline**
+   - `///` docs para funções públicas
+   - Exemplos de uso em módulos
+
+---
+
+## 8. Métricas do Projeto
+
+### Estatísticas de Código
+
+| Arquivo/Módulo | Linhas | Complexidade |
+|----------------|--------|--------------|
+| `src/main.rs` | ~5000 | ⚠️ Alta |
+| `src/workers/thumbnail_worker.rs` | ~750 | Média |
+| `src/ui/views/grid_view.rs` | ~472 | Média |
+| `src/infrastructure/disk_cache.rs` | ~427 | Baixa |
+| `src/ui/sidebar.rs` | ~355 | Baixa |
+| `src/ui/cache.rs` | ~369 | Baixa |
+| `src/application/state.rs` | ~304 | Baixa |
+
+### Dependências Windows APIs
+
+| API | Uso |
+|-----|-----|
+| `IShellItemImageFactory` | Thumbnails nativos |
+| `IContextMenu` | Menu de contexto do shell |
+| `Media Foundation` | Metadados de vídeo |
+| `WIC (Windows Imaging Component)` | Decodificação HEIC/AVIF |
+| `SHFileOperationW` | Copiar/Mover/Excluir com Undo |
+| `FindFirstFileW/FindNextFileW` | Scan de diretórios |
+
+---
+
+## 9. Conclusão
+
+O **MTT File Manager** é um projeto bem arquitetado para performance, com excelente uso de workers assíncronos e integração Windows nativa. A principal dívida técnica é o arquivo `main.rs` monolítico que precisa ser quebrado em módulos menores para facilitar manutenção e testes.
+
+### Nota Geral: ⭐⭐⭐⭐ (4/5)
+
+| Critério | Nota |
+|----------|------|
+| **Performance** | ⭐⭐⭐⭐⭐ (5/5) |
+| **Arquitetura** | ⭐⭐⭐⭐ (4/5) |
+| **Manutenibilidade** | ⭐⭐⭐ (3/5) |
+| **Qualidade de Código** | ⭐⭐⭐⭐ (4/5) |
+| **Integração Windows** | ⭐⭐⭐⭐⭐ (5/5) |
+
+### Recomendação Final
+
+O projeto está em um bom estado para uso, mas precisa de uma **refatoração planejada** do `main.rs` antes de adicionar novas features significativas. Sugerimos:
+
+1. Congelar novas features por 1-2 sprints
+2. Quebrar `main.rs` em módulos (prioridade 1-3 do roadmap)
+3. Adicionar testes unitários para código extraído
+4. Retomar desenvolvimento de features
+
+---
+
+*Relatório gerado em Janeiro 2026*
