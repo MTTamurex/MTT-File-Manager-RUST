@@ -1,5 +1,5 @@
 use crate::domain::file_entry::FileEntry;
-use crate::infrastructure::windows::{is_media_extension, is_webview_compatible};
+use crate::infrastructure::windows::is_webview_compatible;
 use crate::infrastructure::windows::MediaMetadata;
 use crate::ui::components::MediaPreview;
 use crate::ui::icon_loader::IconLoader;
@@ -44,12 +44,6 @@ pub fn render_preview_panel(
         ui.add_space(20.0);
 
         // Preview de imagem/video (se houver thumbnail)
-        let is_media = file
-            .path
-            .extension()
-            .map(|ext| is_media_extension(&ext.to_string_lossy()))
-            .unwrap_or(false);
-
         let texture = if let Some(tex) = selected_thumbnail {
             Some(tex.clone())
         } else {
@@ -189,31 +183,19 @@ pub fn render_preview_panel(
                     }
                 }
             } else {
-                // Show media preview for images/GIFs
+                // GIF/Animated Image
                 preview.show(ui, frame);
-
-                if widgets::icon_button(ui, svg_manager, "refresh", "Recarregar Thumbnail", None)
-                    .clicked()
-                {
-                    action = Some(PreviewPanelAction::RefreshThumbnail(file.path.clone()));
-                }
             }
-        } else if let (Some(tex), true) = (texture, is_media) {
-            // Fallback: Show thumbnail
+        } else if let Some(tex) = &texture {
+            // Fallback: Static Thumbnail (No MediaPreview state)
             let max_preview_width = ui.available_width() - 16.0;
             let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
 
             ui.add(
-                egui::Image::new(&tex)
+                egui::Image::new(tex)
                     .max_size(max_preview_size)
                     .shrink_to_fit(),
             );
-
-            if widgets::icon_button(ui, svg_manager, "refresh", "Recarregar Thumbnail", None)
-                .clicked()
-            {
-                action = Some(PreviewPanelAction::RefreshThumbnail(file.path.clone()));
-            }
         } else {
             // Pasta ou Drive ou Arquivo sem Thumbnail
             let max_w: f32 = ui.available_width() - 40.0;
@@ -304,6 +286,7 @@ pub fn render_preview_panel(
             }
             ui.add_space(20.0);
         }
+
     });
 
     // Tabela de Detalhes
@@ -520,6 +503,19 @@ pub fn render_preview_panel(
                         drive.file_system.clone()
                     },
                 );
+            }
+
+            // 6. Technical Actions (Refresh Thumbnail)
+            if !file.is_dir && file.drive_info.is_none() {
+                ui.add_space(15.0);
+                ui.separator();
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if widgets::icon_button(ui, svg_manager, "refresh", "Recarregar", None).clicked() {
+                        action = Some(PreviewPanelAction::RefreshThumbnail(file.path.clone()));
+                    }
+                    ui.label(egui::RichText::new("Recarregar Thumbnail").size(13.0));
+                });
             }
         });
     });
