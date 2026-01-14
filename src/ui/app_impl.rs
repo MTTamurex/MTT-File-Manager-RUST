@@ -1,9 +1,13 @@
 use eframe::egui;
 use crate::app::ImageViewerApp;
 use crate::ui::app;
+use crate::infrastructure::windows::window_subclass::is_in_size_move;
 
 impl eframe::App for ImageViewerApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Check if window is being resized/dragged (for UI optimization)
+        let is_resizing = is_in_size_move();
+
         // 1. Initial validation
         if self.startup_tick == 0 {
             if let Some(ref file) = self.selected_file {
@@ -20,36 +24,50 @@ impl eframe::App for ImageViewerApp {
         app::lifecycle::handle_startup_sequence(self, ctx);
         app::lifecycle::track_window_state(self, ctx);
 
-        // 3. Infrastructure updates
+        // 3. Infrastructure updates (skip heavy processing during resize)
         self.ensure_window_handle(frame);
-        self.process_incoming_messages(ctx);
-        self.refresh_drives_if_needed();
+        if !is_resizing {
+            self.process_incoming_messages(ctx);
+            self.refresh_drives_if_needed();
+        }
         self.ensure_folder_icon(ctx);
         self.ensure_computer_icon(ctx);
 
-        // 4. Input: Keyboard shortcuts & resize borders
-        app::input::handle_input(self, ctx);
+        // 4. Input: Keyboard shortcuts (resize borders handled by native subclass)
+        if !is_resizing {
+            app::input::handle_input(self, ctx);
+        }
 
-        // 5. Layout: Status Bar (Bottom)
+        // 5. Layout: Status Bar (Bottom) - lightweight, always render
         render_status_bar_layer(self, ctx);
 
-        // 6. Layout: Tab Bar (Top 1)
+        // 6. Layout: Tab Bar (Top 1) - lightweight, always render
         render_tab_bar_layer(self, ctx, frame);
 
-        // 7. Layout: Toolbar (Top 2)
+        // 7. Layout: Toolbar (Top 2) - lightweight, always render
         render_toolbar_layer(self, ctx);
 
-        // 8. Layout: Main Panels (Sidebar, Preview, Central)
-        app::panels::render_panels(self, ctx, frame);
+        // 8-11. Heavy operations: Skip during resize for smooth animation
+        if is_resizing {
+            // Simplified placeholder during resize
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(ctx.style().visuals.panel_fill))
+                .show(ctx, |_ui| {
+                    // Empty panel - just fill with background color
+                });
+        } else {
+            // 8. Layout: Main Panels (Sidebar, Preview, Central)
+            app::panels::render_panels(self, ctx, frame);
 
-        // 9. Operations: Context Menu (Rendering & Actions)
-        app::menu_handler::handle_context_menu(self, ctx);
+            // 9. Operations: Context Menu (Rendering & Actions)
+            app::menu_handler::handle_context_menu(self, ctx);
 
-        // 10. Operations: Resize borders (on top)
-        app::input::handle_resize_borders(self, ctx);
+            // 10. Operations: Resize borders (on top) - REMOVED, handled by native subclass
+            // app::input::handle_resize_borders(self, ctx);
 
-        // 11. Notifications
-        app::notifications::render_notifications(self, ctx);
+            // 11. Notifications
+            app::notifications::render_notifications(self, ctx);
+        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {

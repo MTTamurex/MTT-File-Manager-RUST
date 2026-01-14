@@ -2,6 +2,7 @@
 //!
 //! This module provides native Windows message handling for borderless windows.
 //! It intercepts WM_NCHITTEST to provide resize borders when decorations are disabled.
+//! It also tracks WM_ENTERSIZEMOVE/WM_EXITSIZEMOVE for UI optimization during resize.
 //!
 //! # Why This Is Required
 //! - egui/winit cannot handle native window chrome
@@ -12,7 +13,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetClientRect, IsZoomed, WM_NCHITTEST, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCLIENT,
+    GetClientRect, IsZoomed, WM_NCHITTEST, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE,
+    HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCLIENT,
     HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT,
 };
 
@@ -24,6 +26,17 @@ const BORDERLESS_SUBCLASS_ID: usize = 1;
 
 /// Flag to track if subclass is installed (prevents double-install)
 static SUBCLASS_INSTALLED: AtomicBool = AtomicBool::new(false);
+
+/// Flag to track if window is currently being resized or dragged
+/// Set true on WM_ENTERSIZEMOVE, false on WM_EXITSIZEMOVE
+static IS_IN_SIZE_MOVE: AtomicBool = AtomicBool::new(false);
+
+/// Check if the window is currently being resized or dragged.
+/// Use this to gate expensive rendering during resize operations.
+#[inline]
+pub fn is_in_size_move() -> bool {
+    IS_IN_SIZE_MOVE.load(Ordering::Relaxed)
+}
 
 /// Install the borderless window subclass on the given HWND.
 ///
@@ -77,6 +90,8 @@ pub fn remove_borderless_subclass(hwnd: HWND) {
 ///
 /// # Message Handling
 /// - WM_NCHITTEST: Returns edge/corner codes for resize zones, HTCLIENT otherwise
+/// - WM_ENTERSIZEMOVE: Sets IS_IN_SIZE_MOVE flag (user started drag/resize)
+/// - WM_EXITSIZEMOVE: Clears IS_IN_SIZE_MOVE flag (user finished drag/resize)
 /// - All other messages: Passed to DefSubclassProc
 extern "system" fn borderless_subclass_proc(
     hwnd: HWND,
@@ -86,6 +101,13 @@ extern "system" fn borderless_subclass_proc(
     _uid_subclass: usize,
     _dw_ref_data: usize,
 ) -> LRESULT {
+    // Handle resize state tracking for UI optimization
+    if msg == WM_ENTERSIZEMOVE {
+        IS_IN_SIZE_MOVE.store(true, Ordering::SeqCst);
+    } else if msg == WM_EXITSIZEMOVE {
+        IS_IN_SIZE_MOVE.store(false, Ordering::SeqCst);
+    }
+
     if msg == WM_NCHITTEST {
         return handle_nchittest(hwnd, lparam);
     }
