@@ -15,12 +15,9 @@ Implemented rich media metadata extraction and display for images and videos in 
 - **Color Depth**: Bits per pixel (images only)
 - **Data Source**: `image` crate headers (fast, no full decode)
 
-### 2. Video Metadata
-- **Resolution**: Width × Height in pixels
-- **Duration**: Displayed as HH:MM:SS or MM:SS
-- **Frame Rate**: FPS (frames per second)
 - **Bitrate**: Estimated from file size / duration if not available in metadata
-- **Data Source**: Windows Property Store APIs
+- **Codec Detection**: Deterministic 4-layer resolution (Cache -> Registry -> MF -> Bitstream Sniffing)
+- **Data Source**: Windows Property Store + Pure-Rust Bitstream Sniffer
 
 ### 3. Drive Grouping (Sidebar)
 - Drives are now organized into two sections:
@@ -282,7 +279,10 @@ Updated [SEGURANCA_WINDOWS.md](SEGURANCA_WINDOWS.md) with:
 - M4V
 - MPG/MPEG
 - 3GP
-- TS
+- 3GP
+- TS / MTS / M2TS
+- OGM / OGG
+- VOB
 
 ## Known Limitations
 
@@ -293,11 +293,11 @@ Updated [SEGURANCA_WINDOWS.md](SEGURANCA_WINDOWS.md) with:
 
 ## Future Enhancements
 
-- [ ] Extract color depth for images
-- [ ] Add codec information (H.264, HEVC, etc.)
-- [ ] Display audio track metadata
+- [x] Extract color depth for images
+- [x] Add codec information (H.264, HEVC, AV1, VP9, etc.)
+- [x] Display audio track metadata
 - [ ] Show subtitle track information
-- [ ] Add thumbnail extraction for video files
+- [x] Add thumbnail extraction for video files
 - [ ] Support RAW image formats (CR2, NEF, ARW, etc.)
 
 ## Testing Checklist
