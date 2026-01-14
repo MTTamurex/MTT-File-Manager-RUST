@@ -265,9 +265,10 @@ pub fn render_list_view(
                             ui.scroll_to_rect(rect, Some(egui::Align::Center));
                         }
                         ui.painter()
-                            .rect_filled(rect, 0.0, Color32::from_rgb(205, 232, 255));
+                            .rect_filled(rect, 0.0, crate::ui::theme::COLOR_SELECTION);
                     } else if response.hovered() {
-                        ui.painter().rect_filled(rect, 0.0, Color32::from_gray(245));
+                        ui.painter()
+                            .rect_filled(rect, 0.0, crate::ui::theme::color_selection_hover());
                     }
 
                     // Tooltip at cursor
@@ -303,8 +304,16 @@ pub fn render_list_view(
                         );
                     }
 
-                    let text_color = Color32::BLACK;
-                    let secondary_color = Color32::from_gray(100);
+                    let text_color = if is_selected {
+                        crate::ui::theme::COLOR_SELECTION_TEXT
+                    } else {
+                        Color32::BLACK
+                    };
+                    let secondary_color = if is_selected {
+                        crate::ui::theme::COLOR_SELECTION_TEXT
+                    } else {
+                        Color32::from_gray(100)
+                    };
 
                     // 1. Icon + Name
                     let icon_size_px = 16.0;
@@ -639,9 +648,10 @@ pub fn render_list_view(
                             ui.scroll_to_rect(rect, Some(egui::Align::Center));
                         }
                         ui.painter()
-                            .rect_filled(rect, 0.0, Color32::from_rgb(205, 232, 255));
+                            .rect_filled(rect, 0.0, crate::ui::theme::COLOR_SELECTION);
                     } else if response.hovered() {
-                        ui.painter().rect_filled(rect, 0.0, Color32::from_gray(245));
+                        ui.painter()
+                            .rect_filled(rect, 0.0, crate::ui::theme::color_selection_hover());
                     }
 
                     // Tooltip at cursor
@@ -677,8 +687,16 @@ pub fn render_list_view(
                         );
                     }
 
-                    let text_color = Color32::BLACK;
-                    let secondary_color = Color32::from_gray(100);
+                    let text_color = if is_selected {
+                        crate::ui::theme::COLOR_SELECTION_TEXT
+                    } else {
+                        Color32::BLACK
+                    };
+                    let secondary_color = if is_selected {
+                        crate::ui::theme::COLOR_SELECTION_TEXT
+                    } else {
+                        Color32::from_gray(100)
+                    };
 
                     // 1. Icon + Name
                     let icon_size_px = 16.0;

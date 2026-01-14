@@ -135,16 +135,10 @@ pub fn render_grid_view(
                                     if ctx.scroll_to_selected {
                                         ui.scroll_to_rect(item_rect, Some(egui::Align::Center));
                                     }
-                                    ui.painter().rect_stroke(
-                                        item_rect,
-                                        2.0,
-                                        egui::Stroke::new(2.0, Color32::from_rgb(0, 120, 215)),
-                                        egui::StrokeKind::Inside,
-                                    );
                                     ui.painter().rect_filled(
                                         item_rect,
-                                        4.0,
-                                        Color32::from_rgba_unmultiplied(0, 120, 215, 30),
+                                        0.0,
+                                        crate::ui::theme::COLOR_SELECTION,
                                     );
                                 }
 
@@ -271,16 +265,10 @@ pub fn render_grid_view(
                                 if ctx.scroll_to_selected {
                                     ui.scroll_to_rect(rect, Some(egui::Align::Center));
                                 }
-                                ui.painter().rect_stroke(
-                                    rect,
-                                    2.0,
-                                    egui::Stroke::new(2.0, Color32::from_rgb(0, 120, 215)),
-                                    egui::StrokeKind::Inside,
-                                );
                                 ui.painter().rect_filled(
                                     rect,
-                                    4.0,
-                                    Color32::from_rgba_unmultiplied(0, 120, 215, 30),
+                                    0.0,
+                                    crate::ui::theme::COLOR_SELECTION,
                                 );
                             }
 
