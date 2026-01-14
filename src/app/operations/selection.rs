@@ -15,27 +15,27 @@ impl ImageViewerApp {
             }
 
             // Atualiza o MediaPreview
-            let is_gif = selected.path.extension()
-                .map(|ext| ext.to_string_lossy().to_lowercase() == "gif")
-                .unwrap_or(false);
+            let ext = selected.path.extension()
+                .map(|ext| ext.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+
+            let is_gif = ext == "gif";
+            let is_video = crate::infrastructure::windows::is_video_extension(&ext);
 
             if is_gif {
                 use crate::ui::components::media_preview::GifPlayer;
                 use crate::ui::components::media_preview::MediaPreview;
                 
-                // Só recarrega se for um caminho diferente do que já está no player
-                let should_load = match &self.media_preview {
-                    Some(MediaPreview::AnimatedGif(_)) => true, // Simplificado: recarrega sempre por enquanto
-                    _ => true,
-                };
-
-                if should_load {
-                    if let Ok(player) = GifPlayer::load(&self.ui_ctx, &selected.path) {
-                        self.media_preview = Some(MediaPreview::AnimatedGif(player));
-                    } else {
-                        self.media_preview = None;
-                    }
+                if let Ok(player) = GifPlayer::load(&self.ui_ctx, &selected.path) {
+                    self.media_preview = Some(MediaPreview::AnimatedGif(player));
+                } else {
+                    self.media_preview = None;
                 }
+            } else if is_video {
+                use crate::ui::components::WebviewPreview;
+                use crate::ui::components::media_preview::MediaPreview;
+
+                self.media_preview = Some(MediaPreview::Video(WebviewPreview::new(selected.path.clone())));
             } else if let Some(tex) = self.cache_manager.texture_cache.peek(&selected.path) {
                 use crate::ui::components::media_preview::MediaPreview;
                 self.selected_thumbnail = Some(tex.clone());

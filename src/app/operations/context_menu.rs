@@ -270,7 +270,7 @@ impl ImageViewerApp {
     }
 
     pub fn handle_lazy_submenu_load(&mut self, egui_ctx: &egui::Context, item_id: i32) {
-        use crate::infrastructure::windows::native_menu::{ShellMenuContext, ShellMenuItem, is_known_verb};
+        use crate::infrastructure::windows::native_menu::{ShellMenuContext, ShellMenuItem};
         use crate::application::context_menu::ContextMenuItem;
 
         let native_ctx = self.context_menu.native_context.clone();

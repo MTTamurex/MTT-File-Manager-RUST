@@ -576,7 +576,7 @@ pub fn render_list_view(
         }
     } else {
         // Regular virtualized list
-        let scroll_res = scroll_area.show_rows(ui, row_height + 2.0, total_rows, |ui, row_range| {
+        let _scroll_res = scroll_area.show_rows(ui, row_height + 2.0, total_rows, |ui, row_range| {
             let mut render_item = |ui: &mut Ui, i: usize, item: &FileEntry| {
                 // GATILHO LAZY LOAD PARA PASTAS: Descobre capa se ainda não tem
                 if item.is_dir

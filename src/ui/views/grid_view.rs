@@ -73,7 +73,7 @@ pub fn render_grid_view(
 
     let available_rect = ui.available_rect_before_wrap();
 
-    let scroll_res = egui::ScrollArea::vertical()
+    let _scroll_res = egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
             if ctx.is_computer_view {
