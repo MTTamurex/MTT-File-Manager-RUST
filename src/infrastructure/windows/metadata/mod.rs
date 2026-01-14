@@ -5,10 +5,12 @@ pub mod utils;
 pub mod image;
 pub mod video;
 pub mod video_sniffing;
+pub mod audio_sniffing;
 
 pub use image::read_image_metadata;
 pub use video::read_video_metadata;
 pub use video_sniffing::sniff_video_codec;
+pub use audio_sniffing::{sniff_audio_codec, AudioCodec};
 
 /// Generic media metadata used by the preview panel.
 #[derive(Clone, Debug, Default)]
