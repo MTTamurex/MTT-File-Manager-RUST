@@ -275,7 +275,8 @@ impl ImageViewerApp {
 
         let native_ctx = self.context_menu.native_context.clone();
         let Some(native_ctx) = native_ctx else { return };
-        let Some(shell_ctx) = native_ctx.downcast_ref::<ShellMenuContext>() else { return };
+        // Use as_ref() to get &dyn Any before downcasting
+        let Some(shell_ctx) = native_ctx.as_ref().downcast_ref::<ShellMenuContext>() else { return };
 
         // 1. Find the ShellMenuItem recursively
         fn find_shell_item_mut<'a>(items: &'a mut [ShellMenuItem], id: u32) -> Option<&'a mut ShellMenuItem> {

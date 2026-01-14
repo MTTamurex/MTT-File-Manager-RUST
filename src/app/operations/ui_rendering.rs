@@ -218,9 +218,10 @@ impl ImageViewerApp {
 
                     // Usar o novo sistema de menu estilizado
                     let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
+                    let right_bound = ui.available_rect_before_wrap().right();
                     self.populate_context_menu(ui.ctx(), &item_path, false, Some(idx));
                     self.context_menu
-                        .open(pointer_pos, Some(idx), Some(item_path), false);
+                        .open(pointer_pos, right_bound, Some(idx), Some(item_path), false);
                 }
             }
             Some(list_view::ListViewAction::SortChange(mode)) => {
@@ -237,8 +238,9 @@ impl ImageViewerApp {
             Some(list_view::ListViewAction::EmptyAreaSecondaryClick) if !is_renaming => {
                 let path = PathBuf::from(&self.current_path);
                 let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
+                let right_bound = ui.available_rect_before_wrap().right();
                 self.populate_context_menu(ui.ctx(), &path, true, None);
-                self.context_menu.open(pointer_pos, None, Some(path), true);
+                self.context_menu.open(pointer_pos, right_bound, None, Some(path), true);
             }
             _ => {}
         }
@@ -440,16 +442,18 @@ impl ImageViewerApp {
 
                     // Usar o novo sistema de menu estilizado
                     let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
+                    let right_bound = ui.available_rect_before_wrap().right();
                     self.populate_context_menu(ui.ctx(), &item_path, false, Some(idx));
                     self.context_menu
-                        .open(pointer_pos, Some(idx), Some(item_path), false);
+                        .open(pointer_pos, right_bound, Some(idx), Some(item_path), false);
                 }
             }
             Some(grid_view::GridViewAction::EmptyAreaSecondaryClick) if !is_renaming => {
                 let path = PathBuf::from(&self.current_path);
                 let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
+                let right_bound = ui.available_rect_before_wrap().right();
                 self.populate_context_menu(ui.ctx(), &path, true, None);
-                self.context_menu.open(pointer_pos, None, Some(path), true);
+                self.context_menu.open(pointer_pos, right_bound, None, Some(path), true);
             }
             _ => {}
         }
