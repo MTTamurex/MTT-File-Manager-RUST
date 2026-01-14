@@ -44,6 +44,7 @@ While the video is rendered by WebView, the **Controls** are rendered in pure **
 | **Controls** | Custom egui Widgets |
 | **Styles** | CSS-injected for background matching (`#FDFDFD` / `#2D2D2D`) |
 | **Performance** | Zero-copy streaming from disk to WebView |
+| **Metadata** | 4-Layer Hybrid (Cache -> Registry -> MF -> Sniffing) |
 
 ## ⚠️ Known Constraints
 - **Native Window Precedence**: Being a native child window, the WebView window always stays on top of any `egui` painting in its area. This is why controls are placed **below** the video instead of as an overlay during active playback.

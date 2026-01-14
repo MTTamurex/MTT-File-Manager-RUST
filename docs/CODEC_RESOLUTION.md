@@ -53,7 +53,15 @@ match data1 {
 │     - PCM (0x0001)                              │
 │     - MP3 (0x0055)                              │
 │     - AAC (0x00FF)                              │
+│     - H.264 ES (0x3F40F4F0)                     │
 │     - FourCC decode (last resort)               │
+└─────────────────────────────────────────────────┘
+                      ↓ Unknown / Cryptic
+┌─────────────────────────────────────────────────┐
+│  4. Bitstream Sniffing (Ultimate Fallback)     │
+│     - Pure-Rust NAL unit & syncword probe       │
+│     - Scans first 128KB - 256KB of the file     │
+│     - Handles OGM, TS, and missing OS support   │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -187,11 +195,12 @@ features = [
 - [x] Fallback para Microsoft constants
 - [x] Testes unitários
 
-### Phase 2 (Futuro)
-- [ ] **Media Foundation Transform Enumeration** (`MFTEnumEx`)
-  - Enumeração direta de codecs instalados
-  - Extração de nomes via `IMFAttributes`
-  - Suporte para codecs de terceiros (LAV, ffdshow)
+### Phase 2 (Atual) ✅
+- [x] **Bitstream Sniffing Support**
+  - Pure-Rust probe for H.264, HEVC, AV1, VP9
+  - Bitstream syncwords for AAC, MP3, FLAC, AC-3
+  - MP4/MKV/WAV container deep-sniffing
+- [x] **Media Foundation Transform Enumeration** (Basic GUID Mapping)
 
 ### Phase 3 (Avançado)
 - [ ] **Codec Capabilities Query**
