@@ -142,20 +142,31 @@ pub fn render_grid_view(
                                     );
                                 }
 
-                                // Tooltip
                                 if response.hovered() {
                                     let item_tooltip = item.clone();
                                     let is_recycle = ctx.is_recycle_bin_view;
-                                    egui::show_tooltip_at_pointer(
+                                    let right_bound = available_rect.right();
+                                    let mouse_pos =
+                                        ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
+
+                                    // SMART TOOLTIP: Se estiver perto da borda direita do painel central,
+                                    // inverte a posição do tooltip para a esquerda para não ficar atrás do player (WebView)
+                                    let tooltip_pos = if mouse_pos.x + 320.0 > right_bound {
+                                        mouse_pos - egui::vec2(320.0, 0.0)
+                                    } else {
+                                        mouse_pos
+                                    };
+
+                                    egui::show_tooltip_at(
                                         ui.ctx(),
                                         ui.layer_id(),
                                         response.id,
+                                        tooltip_pos,
                                         |ui: &mut Ui| {
                                             ui.set_max_width(300.0);
                                             ui.vertical(|ui| {
                                                 ui.label(
-                                                    egui::RichText::new(&item_tooltip.name)
-                                                        .strong(),
+                                                    egui::RichText::new(&item_tooltip.name).strong(),
                                                 );
                                                 ui.separator();
                                                 ui.label(format!(
@@ -275,10 +286,22 @@ pub fn render_grid_view(
                             if response.hovered() {
                                 let item_tooltip = item.clone();
                                 let is_recycle = ctx.is_recycle_bin_view;
-                                egui::show_tooltip_at_pointer(
+                                let right_bound = available_rect.right();
+                                let mouse_pos =
+                                    ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
+
+                                // SMART TOOLTIP: Inverte se estiver perto da borda direita (WebView airspace)
+                                let tooltip_pos = if mouse_pos.x + 320.0 > right_bound {
+                                    mouse_pos - egui::vec2(320.0, 0.0)
+                                } else {
+                                    mouse_pos
+                                };
+
+                                egui::show_tooltip_at(
                                     ui.ctx(),
                                     ui.layer_id(),
                                     response.id,
+                                    tooltip_pos,
                                     |ui: &mut Ui| {
                                         ui.set_max_width(300.0);
                                         ui.vertical(|ui| {

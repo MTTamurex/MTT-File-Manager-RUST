@@ -273,10 +273,22 @@ pub fn render_list_view(
 
                     // Tooltip at cursor
                     if response.hovered() {
-                        egui::show_tooltip_at_pointer(
+                        let right_bound = available_rect.right();
+                        let mouse_pos =
+                            ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
+
+                        // SMART TOOLTIP: Inverte se estiver perto da borda direita (WebView airspace)
+                        let tooltip_pos = if mouse_pos.x + 320.0 > right_bound {
+                            mouse_pos - egui::vec2(320.0, 0.0)
+                        } else {
+                            mouse_pos
+                        };
+
+                        egui::show_tooltip_at(
                             ui.ctx(),
                             ui.layer_id(),
                             response.id,
+                            tooltip_pos,
                             |ui: &mut Ui| {
                                 ui.set_max_width(300.0);
                                 ui.vertical(|ui| {
@@ -656,10 +668,22 @@ pub fn render_list_view(
 
                     // Tooltip at cursor
                     if response.hovered() {
-                        egui::show_tooltip_at_pointer(
+                        let right_bound = available_rect.right();
+                        let mouse_pos =
+                            ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
+
+                        // SMART TOOLTIP: Inverte se estiver perto da borda direita (WebView airspace)
+                        let tooltip_pos = if mouse_pos.x + 320.0 > right_bound {
+                            mouse_pos - egui::vec2(320.0, 0.0)
+                        } else {
+                            mouse_pos
+                        };
+
+                        egui::show_tooltip_at(
                             ui.ctx(),
                             ui.layer_id(),
                             response.id,
+                            tooltip_pos,
                             |ui: &mut Ui| {
                                 ui.set_max_width(300.0);
                                 ui.vertical(|ui| {
