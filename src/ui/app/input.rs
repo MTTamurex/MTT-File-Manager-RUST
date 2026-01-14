@@ -94,88 +94,19 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
     }
 }
 
-pub fn handle_resize_borders(_app: &mut ImageViewerApp, ctx: &egui::Context) {
-    let is_not_maximized = !ctx.input(|i| i.viewport().maximized.unwrap_or(false));
-    if is_not_maximized {
-        let screen_rect = ctx.screen_rect();
-        let border_width = 12.0;
-
-        // Borda ESQUERDA
-        let left_border = egui::Rect::from_min_max(
-            screen_rect.min,
-            egui::pos2(screen_rect.min.x + border_width, screen_rect.max.y),
-        );
-        egui::Area::new(egui::Id::new("resize_border_left"))
-            .fixed_pos(left_border.min)
-            .order(egui::Order::Foreground)
-            .show(ctx, |ui| {
-                let left_response = ui.interact(
-                    left_border,
-                    egui::Id::new("resize_left"),
-                    egui::Sense::click_and_drag(),
-                );
-                if left_response.hovered() { ctx.set_cursor_icon(egui::CursorIcon::ResizeWest); }
-                if left_response.drag_started() {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(egui::ResizeDirection::West));
-                }
-            });
-
-        // Borda DIREITA
-        let right_border = egui::Rect::from_min_max(
-            egui::pos2(screen_rect.max.x - border_width, screen_rect.min.y),
-            screen_rect.max,
-        );
-        egui::Area::new(egui::Id::new("resize_border_right"))
-            .fixed_pos(right_border.min)
-            .order(egui::Order::Foreground)
-            .show(ctx, |ui| {
-                let right_response = ui.interact(
-                    right_border,
-                    egui::Id::new("resize_right"),
-                    egui::Sense::click_and_drag(),
-                );
-                if right_response.hovered() { ctx.set_cursor_icon(egui::CursorIcon::ResizeEast); }
-                if right_response.drag_started() {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(egui::ResizeDirection::East));
-                }
-            });
-
-        // Borda INFERIOR
-        let bottom_border = egui::Rect::from_min_max(
-            egui::pos2(screen_rect.min.x, screen_rect.max.y - border_width),
-            screen_rect.max,
-        );
-        egui::Area::new(egui::Id::new("resize_border_bottom"))
-            .fixed_pos(bottom_border.min)
-            .order(egui::Order::Foreground)
-            .show(ctx, |ui| {
-                let bottom_response = ui.interact(
-                    bottom_border,
-                    egui::Id::new("resize_bottom"),
-                    egui::Sense::click_and_drag(),
-                );
-                if bottom_response.hovered() { ctx.set_cursor_icon(egui::CursorIcon::ResizeSouth); }
-                if bottom_response.drag_started() {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(egui::ResizeDirection::South));
-                }
-            });
-
-        // GRIP VISUAL
-        let grip_size = 50.0;
-        let grip_pos = egui::pos2(screen_rect.max.x - grip_size, screen_rect.max.y - grip_size);
-
-        egui::Area::new(egui::Id::new("resize_grip"))
-            .fixed_pos(grip_pos)
-            .order(egui::Order::Foreground)
-            .show(ctx, |ui| {
-                let (_rect, response) = ui.allocate_exact_size(
-                    egui::vec2(grip_size, grip_size),
-                    egui::Sense::click_and_drag(),
-                );
-                if response.drag_started() {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::BeginResize(egui::ResizeDirection::SouthEast));
-                }
-                if response.hovered() { ctx.set_cursor_icon(egui::CursorIcon::ResizeNwSe); }
-            });
-    }
+/// Handle resize borders for borderless window.
+/// 
+/// NOTE: This is now a no-op. Resize hit-testing is handled by the native
+/// WM_NCHITTEST subclass in `infrastructure::windows::window_subclass`.
+/// Keeping this function signature for compatibility but removing the
+/// expensive egui Area overlays that were created every frame.
+#[allow(dead_code)]
+pub fn handle_resize_borders(_app: &mut ImageViewerApp, _ctx: &egui::Context) {
+    // Resize borders are now handled natively via WM_NCHITTEST subclass
+    // See: infrastructure/windows/window_subclass.rs
+    //
+    // The native approach:
+    // 1. Has zero per-frame cost (no egui widgets)
+    // 2. Provides proper Windows resize cursors automatically
+    // 3. Integrates with Windows DWM for smooth resize
 }
