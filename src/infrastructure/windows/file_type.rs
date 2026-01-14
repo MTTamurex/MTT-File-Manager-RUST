@@ -137,6 +137,22 @@ pub fn is_image_extension(extension: &str) -> bool {
     get_perceived_type(extension) == PerceivedType::Image
 }
 
+/// Check if a file extension is compatible with the WebView2 media player.
+/// Based on standard Chromium/Edge media support.
+pub fn is_webview_compatible(path: &Path) -> bool {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+
+    // Whitelist (Chromium supported)
+    matches!(
+        ext.as_str(),
+        "mp4" | "m4v" | "webm" | "ogv" | "mov" | "mkv" | "mp3" | "wav" | "flac" | "ogg"
+    )
+}
+
 /// Busca primeiro item de mídia (imagem ou vídeo) em uma pasta para usar como preview
 /// Verifica apenas os primeiros 15 arquivos para performance
 pub fn find_folder_preview_item(folder_path: &Path) -> Option<PathBuf> {
@@ -175,5 +191,14 @@ mod tests {
     fn test_common_image_extensions() {
         assert_eq!(get_perceived_type("jpg"), PerceivedType::Image);
         assert_eq!(get_perceived_type("png"), PerceivedType::Image);
+    }
+
+    #[test]
+    fn test_webview_compatibility() {
+        assert!(is_webview_compatible(Path::new("video.mp4")));
+        assert!(is_webview_compatible(Path::new("video.mkv")));
+        assert!(is_webview_compatible(Path::new("audio.mp3")));
+        assert!(!is_webview_compatible(Path::new("video.avi")));
+        assert!(!is_webview_compatible(Path::new("video.wmv")));
     }
 }
