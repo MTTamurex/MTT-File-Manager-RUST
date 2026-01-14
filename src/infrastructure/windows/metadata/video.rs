@@ -59,6 +59,12 @@ pub fn read_video_metadata(path: &Path) -> Result<MediaMetadata, windows::core::
         }
     }
 
+    if is_cryptic(&final_meta.audio_codec) {
+        if let Some(guess) = super::audio_sniffing::sniff_audio_codec(path) {
+            final_meta.audio_codec = Some(format!("{} (Sniffed)", guess.codec.as_str()));
+        }
+    }
+
     Ok(final_meta)
 }
 
@@ -121,7 +127,7 @@ pub fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windo
     let mut height = height;
     let mut frame_rate = frame_rate;
 
-    if (width.is_none() || height.is_none() || frame_rate.is_none()) {
+    if width.is_none() || height.is_none() || frame_rate.is_none() {
         if let Some(desc) = &stream_description {
             let (ext_w, ext_h, ext_fps) = parse_resolution_and_fps_from_description(desc);
             if width.is_none() { width = ext_w; }
