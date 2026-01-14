@@ -1,5 +1,5 @@
 use crate::domain::file_entry::FileEntry;
-use crate::infrastructure::windows::is_media_extension;
+use crate::infrastructure::windows::{is_media_extension, is_webview_compatible};
 use crate::infrastructure::windows::MediaMetadata;
 use crate::ui::components::MediaPreview;
 use crate::ui::icon_loader::IconLoader;
@@ -152,14 +152,36 @@ pub fn render_preview_panel(
                         let is_hovered = hover_pos.map_or(false, |pos| media_rect.contains(pos));
 
                         if is_hovered {
-                            let center_size = 64.0;
-                            let center_rect = egui::Rect::from_center_size(media_rect.center(), egui::vec2(center_size, center_size));
-                            ui.painter().rect_filled(center_rect, center_size / 2.0, egui::Color32::from_black_alpha(160));
-                            if let Some(tex) = svg_manager.get_icon(ui.ctx(), "play", 96, [255, 255, 255, 255]) {
-                                ui.painter().image(tex.id(), center_rect.shrink(14.0), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
-                            }
-                            if ui.put(center_rect, egui::Button::new("").frame(false)).clicked() {
-                                preview.toggle_play();
+                            if is_webview_compatible(&file.path) {
+                                let center_size = 64.0;
+                                let center_rect = egui::Rect::from_center_size(media_rect.center(), egui::vec2(center_size, center_size));
+                                ui.painter().rect_filled(center_rect, center_size / 2.0, egui::Color32::from_black_alpha(160));
+                                if let Some(tex) = svg_manager.get_icon(ui.ctx(), "play", 96, [255, 255, 255, 255]) {
+                                    ui.painter().image(tex.id(), center_rect.shrink(14.0), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                                }
+                                if ui.put(center_rect, egui::Button::new("").frame(false)).clicked() {
+                                    preview.toggle_play();
+                                }
+                            } else {
+                                // Incompatible format overlay - Render as a centered vertical box on the painter
+                                let bg_rect = egui::Rect::from_center_size(media_rect.center(), egui::vec2(160.0, 90.0));
+                                ui.painter().rect_filled(bg_rect, 8.0, egui::Color32::from_black_alpha(180));
+                                
+                                ui.painter().text(
+                                    media_rect.center() - egui::vec2(0.0, 15.0),
+                                    egui::Align2::CENTER_CENTER,
+                                    "🚫",
+                                    egui::FontId::proportional(32.0),
+                                    egui::Color32::WHITE,
+                                );
+                                
+                                ui.painter().text(
+                                    media_rect.center() + egui::vec2(0.0, 20.0),
+                                    egui::Align2::CENTER_CENTER,
+                                    "Preview não disponível",
+                                    egui::FontId::proportional(13.0),
+                                    egui::Color32::WHITE,
+                                );
                             }
                         }
                     } else {
