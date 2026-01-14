@@ -4,9 +4,11 @@ pub mod property_keys;
 pub mod utils;
 pub mod image;
 pub mod video;
+pub mod video_sniffing;
 
 pub use image::read_image_metadata;
 pub use video::read_video_metadata;
+pub use video_sniffing::sniff_video_codec;
 
 /// Generic media metadata used by the preview panel.
 #[derive(Clone, Debug, Default)]

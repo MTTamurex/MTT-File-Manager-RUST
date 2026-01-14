@@ -36,11 +36,30 @@ pub fn read_video_metadata(path: &Path) -> Result<MediaMetadata, windows::core::
         }
     }
 
-    if let Some(meta) = ps_meta_opt {
-        Ok(meta)
+    let mut final_meta = if let Some(meta) = ps_meta_opt {
+        meta
+    } else if let Some(ps_err) = ps_err_opt {
+        return Err(ps_err);
     } else {
-        Err(ps_err_opt.unwrap())
+        MediaMetadata::default()
+    };
+
+    // Final Fallback: Bitstream Sniffing (if codec is unknown or cryptic)
+    let is_cryptic = |c: &Option<String>| {
+        if let Some(s) = c {
+            s.len() == 8 && s.chars().all(|ch| ch.is_ascii_hexdigit())
+        } else {
+            true
+        }
+    };
+
+    if is_cryptic(&final_meta.video_codec) {
+        if let Some(guess) = super::video_sniffing::sniff_video_codec(path) {
+            final_meta.video_codec = Some(format!("{} (Sniffed)", guess.codec.as_str()));
+        }
     }
+
+    Ok(final_meta)
 }
 
 pub fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windows::core::Error> {
@@ -96,6 +115,21 @@ pub fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windo
                 Some(comp)
             }
         });
+
+    // --- NEW: Robust Fallback for Resolution and FPS from Description ---
+    let mut width = width;
+    let mut height = height;
+    let mut frame_rate = frame_rate;
+
+    if (width.is_none() || height.is_none() || frame_rate.is_none()) {
+        if let Some(desc) = &stream_description {
+            let (ext_w, ext_h, ext_fps) = parse_resolution_and_fps_from_description(desc);
+            if width.is_none() { width = ext_w; }
+            if height.is_none() { height = ext_h; }
+            if frame_rate.is_none() { frame_rate = ext_fps; }
+        }
+    }
+    // --------------------------------------------------------------------
 
     let audio_compression = unsafe { read_string(&store, &PKEY_AUDIO_COMPRESSION) };
     let audio_stream_name = unsafe { read_string(&store, &PKEY_AUDIO_STREAMNAME) };
@@ -279,6 +313,12 @@ pub fn detect_codec_from_description(description: &str) -> Option<String> {
     if desc.contains("THEORA") {
         return Some("Theora".to_string());
     }
+    if desc.contains("VORBIS") {
+        return Some("Vorbis".to_string());
+    }
+    if desc.contains("FLAC") {
+        return Some("FLAC".to_string());
+    }
     if desc.contains("MPEG-2") || desc.contains("MPEG2") {
         return Some("MPEG-2".to_string());
     }
@@ -335,9 +375,47 @@ pub fn is_container_name(codec: &str, path: &Path) -> bool {
             | "mov"
             | "wmv"
             | "flv"
+            | "ogm"
+            | "ogg"
             | "video"
             | "audio"
             | "matroska"
             | "container"
     )
+}
+
+/// Helper to parse resolution (e.g., \"1920x1080\") and FPS (e.g., \"23.97 fps\") from a description string.
+fn parse_resolution_and_fps_from_description(desc: &str) -> (Option<u32>, Option<u32>, Option<f32>) {
+    let mut width = None;
+    let mut height = None;
+    let mut fps = None;
+
+    // Use regex-free parsing for performance
+    let parts: Vec<&str> = desc.split(|c: char| !c.is_ascii_alphanumeric() && c != '.').filter(|s| !s.is_empty()).collect();
+
+    for i in 0..parts.len() {
+        let p = parts[i].to_uppercase();
+        
+        // Look for 1920x1080 pattern
+        if p.contains('X') {
+            let dim_parts: Vec<&str> = p.split('X').collect();
+            if dim_parts.len() == 2 {
+                let w = dim_parts[0].parse::<u32>().ok();
+                let h = dim_parts[1].parse::<u32>().ok();
+                if w.is_some() && h.is_some() {
+                    width = w;
+                    height = h;
+                }
+            }
+        }
+
+        // Look for numbers followed by \"FPS\"
+        if p == "FPS" && i > 0 {
+            if let Ok(val) = parts[i-1].parse::<f32>() {
+                fps = Some(val);
+            }
+        }
+    }
+
+    (width, height, fps)
 }

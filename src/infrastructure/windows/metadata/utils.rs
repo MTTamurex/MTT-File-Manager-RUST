@@ -5,7 +5,7 @@ use windows::Win32::Foundation::RPC_E_CHANGED_MODE;
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 use windows::Win32::UI::Shell::PropertiesSystem::{
     IPropertyStore, SHGetPropertyStoreFromParsingName, GETPROPERTYSTOREFLAGS, GPS_BESTEFFORT,
-    GPS_OPENSLOWITEM, GPS_READWRITE,
+    GPS_OPENSLOWITEM,
 };
 
 use super::property_keys::*;
@@ -51,7 +51,7 @@ pub unsafe fn open_property_store(path: &Path) -> Result<IPropertyStore, windows
     SHGetPropertyStoreFromParsingName(
         PCWSTR(wide_path.as_ptr()),
         None,
-        GETPROPERTYSTOREFLAGS(GPS_READWRITE.0 | GPS_OPENSLOWITEM.0 | GPS_BESTEFFORT.0),
+        GETPROPERTYSTOREFLAGS(GPS_BESTEFFORT.0 | GPS_OPENSLOWITEM.0),
     )
 }
 
@@ -72,11 +72,13 @@ pub unsafe fn read_u32(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<u32>
         VT_I4 => Some(raw.Anonymous.Anonymous.Anonymous.lVal as u32),
         VT_UI2 => Some(raw.Anonymous.Anonymous.Anonymous.uiVal as u32),
         VT_I2 => Some(raw.Anonymous.Anonymous.Anonymous.iVal as u32),
-        VT_EMPTY => None,
-        other => {
-            eprintln!("    [DEBUG] Unexpected VT type for u32: {}", other);
-            None
+        VT_LPWSTR | VT_BSTR => {
+            // Fallback: Try parsing string as number
+            let s = read_string(store, key)?;
+            s.chars().filter(|c| c.is_ascii_digit()).collect::<String>().parse::<u32>().ok()
         }
+        VT_EMPTY => None,
+        _ => None,
     }
 }
 
@@ -97,6 +99,10 @@ pub unsafe fn read_u64(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<u64>
         VT_I8 => Some(raw.Anonymous.Anonymous.Anonymous.hVal as u64),
         VT_UI4 => Some(raw.Anonymous.Anonymous.Anonymous.ulVal as u64),
         VT_I4 => Some(raw.Anonymous.Anonymous.Anonymous.lVal as u64),
+        VT_LPWSTR | VT_BSTR => {
+            let s = read_string(store, key)?;
+            s.chars().filter(|c| c.is_ascii_digit()).collect::<String>().parse::<u64>().ok()
+        }
         _ => None,
     }
 }
