@@ -90,6 +90,7 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, fr
                         let effective_file = calculate_effective_file(app);
 
                         if let Some(file) = effective_file {
+                            let tab_id = app.tab_manager.active().id;
                             let selected_metadata =
                                 app.selected_metadata.as_ref().and_then(|(p, meta)| {
                                     if p == &file.path { Some(meta) } else { None }
@@ -103,27 +104,13 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, fr
                             let is_folder_size_loading =
                                 app.folder_size_loading.contains(&file.path);
 
-                            // Get media preview - only show video if current tab is owner
-                            let tab_id = app.tab_manager.active().id;
                             let is_owner = app.media_preview_owner_tab_id == Some(tab_id);
-                            
-                            // For videos, only pass preview if this tab is the owner
-                            // This prevents video from visually leaking to other tabs
-                            let media_preview = if is_owner {
-                                app.media_preview.as_mut()
-                            } else {
-                                // Not owner - check if it's a video (needs hiding) vs static (can show)
-                                match &app.media_preview {
-                                    Some(crate::ui::components::media_preview::MediaPreview::Video(_)) => None,
-                                    _ => app.media_preview.as_mut(),
-                                }
-                            };
 
                             let action = render_preview_panel(
                                 ui,
                                 &file,
                                 app.selected_thumbnail.as_ref(),
-                                media_preview,
+                                app.media_preview.as_mut(), // Always pass mut if it exists, visibility is controlled by HWND
                                 selected_metadata,
                                 app.cache_manager.texture_cache.peek(&file.path).cloned(),
                                 app.cache_manager.folder_preview_cache.get(&file.path).cloned(),
@@ -135,10 +122,32 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, fr
                                 &mut app.item_icon_loader,
                                 &mut app.svg_icon_manager,
                                 Some(frame),
+                                is_owner,
                             );
 
                             if let Some(act) = action {
                                 match act {
+                                    PreviewPanelAction::RequestPlay(path) => {
+                                        use crate::ui::components::media_preview::MediaPreview;
+                                        use crate::ui::components::WebviewPreview;
+                                        
+                                        // TAKE OVER: Stop and drop existing player if any
+                                        if let Some(MediaPreview::Video(ref mut old_player)) = app.media_preview {
+                                            old_player.pause();
+                                            // Dropping app.media_preview will shutdown the old server and webview
+                                        }
+                                        app.media_preview = None;
+
+                                        // Take ownership and start new player
+                                        let mut player = WebviewPreview::new(path);
+                                        player.play_on_init = true; // Start playing as soon as initialized
+                                        player.show_player = true;  // Ensure player is visible immediately
+                                        app.media_preview = Some(MediaPreview::Video(player));
+                                        app.media_preview_owner_tab_id = Some(tab_id);
+                                        
+                                        // Final sync: hide/show correctly
+                                        app.update_video_visibility();
+                                    }
                                     PreviewPanelAction::RefreshThumbnail(path) => {
                                         app.disk_cache.remove_cache_for_path(&path);
                                         app.cache_manager.texture_cache.pop(&path);
