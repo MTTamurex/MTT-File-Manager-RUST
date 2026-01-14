@@ -13,6 +13,7 @@ pub struct VideoState {
     pub current_time: f64,
     pub duration: f64,
     pub volume: f32,
+    pub is_muted: bool,
 }
 
 pub struct WebviewPreview {
@@ -43,6 +44,7 @@ impl WebviewPreview {
                 current_time: 0.0,
                 duration: 0.0,
                 volume: 1.0,
+                is_muted: false,
             })),
         }
     }
@@ -94,11 +96,24 @@ impl WebviewPreview {
     pub fn set_volume(&self, volume: f32) {
         if let Some(webview) = &self.webview {
             let _ = webview.evaluate_script(&format!(
-                "document.getElementById('player').volume = {}", volume.clamp(0.0, 1.0)
+                "document.getElementById('player').volume = {}; document.getElementById('player').muted = false;", volume.clamp(0.0, 1.0)
             ));
         }
         if let Ok(mut state) = self.state.lock() {
             state.volume = volume;
+            state.is_muted = false;
+        }
+    }
+
+    /// Set muted state
+    pub fn set_muted(&self, muted: bool) {
+        if let Some(webview) = &self.webview {
+            let _ = webview.evaluate_script(&format!(
+                "document.getElementById('player').muted = {}", muted
+            ));
+        }
+        if let Ok(mut state) = self.state.lock() {
+            state.is_muted = muted;
         }
     }
 
@@ -218,7 +233,8 @@ impl WebviewPreview {
                     playing: !video.paused,
                     currentTime: video.currentTime,
                     duration: video.duration || 0,
-                    volume: video.volume
+                    volume: video.volume,
+                    muted: video.muted
                 }});
                 window.ipc.postMessage(state);
             }} catch(e) {{
@@ -264,6 +280,8 @@ impl WebviewPreview {
                                             .and_then(|v: &serde_json::Value| v.as_f64()).unwrap_or(0.0);
                                         state.volume = json.get("volume")
                                             .and_then(|v: &serde_json::Value| v.as_f64()).unwrap_or(1.0) as f32;
+                                        state.is_muted = json.get("muted")
+                                            .and_then(|v: &serde_json::Value| v.as_bool()).unwrap_or(false);
                                     }
                                 }
                                 "play" => {
