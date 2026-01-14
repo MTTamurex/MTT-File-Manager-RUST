@@ -337,18 +337,16 @@ pub fn render_tab_bar(
             plus_stroke,
         );
 
-        // Push window controls to the right
-        ui.add_space(ui.available_width() - window_controls_width);
-
-        // NOTE: Window controls (min/max/close) are now provided by native Windows decorations
-        // render_window_controls(ui, frame, window_btn_width, tab_height, &mut action);
+        // Render window controls (min/max/close) for borderless window
+        render_window_controls(ui, _frame, window_btn_width, tab_height, &mut action);
     });
 
     action
 }
 
 /// Render window control buttons (Minimize, Maximize, Close)
-fn _render_window_controls(
+/// Used for borderless window mode where native decorations are disabled.
+fn render_window_controls(
     ui: &mut egui::Ui,
     _frame: &mut eframe::Frame,
     btn_width: f32,
