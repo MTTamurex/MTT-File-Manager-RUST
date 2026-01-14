@@ -15,6 +15,8 @@ pub mod native_menu;
 pub mod recycle_bin;
 pub mod shell_operations;
 pub mod system_info;
+pub mod window_subclass;
+
 
 // Re-export for convenience
 pub use bitmap_conversion::*;
@@ -34,3 +36,4 @@ pub use native_menu::*;
 pub use recycle_bin::*;
 pub use shell_operations::*;
 pub use system_info::*;
+pub use window_subclass::*;

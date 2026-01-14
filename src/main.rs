@@ -45,8 +45,8 @@ fn main() -> eframe::Result<()> {
         .with_inner_size([800.0, 600.0]) // Small initial size (will be maximized in update)
         .with_title("MTT File Manager")
         .with_app_id("mtt-file-manager")
-        .with_decorations(true) // Use native Windows title bar (fixes resize and sidebar issues)
-        .with_resizable(true); // HABILITA resize nativo do Windows
+        .with_decorations(false) // Borderless window - resize handled by native subclass
+        .with_resizable(true); // Enable resize (handled by WM_NCHITTEST subclass)
 
     // Set window icon if loaded successfully
     if let Some(icon) = icon_data {
