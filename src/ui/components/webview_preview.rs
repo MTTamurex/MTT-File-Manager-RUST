@@ -382,6 +382,15 @@ impl WebviewPreview {
     pub fn is_initialized(&self) -> bool {
         self.webview.is_some()
     }
+
+    /// Set WebView visibility (show/hide).
+    /// Used for tab isolation - hides video when not on owner tab.
+    /// Audio continues when hidden.
+    pub fn set_visibility(&self, visible: bool) {
+        if let Some(ref wv) = self.webview {
+            let _ = wv.set_visible(visible);
+        }
+    }
 }
 
 fn handle_video_request(mut stream: TcpStream, video_path: &PathBuf) {

@@ -78,7 +78,8 @@ pub struct ImageViewerApp {
     pub selected_item: Option<usize>,
     pub selected_file: Option<FileEntry>,
     pub selected_thumbnail: Option<egui::TextureHandle>, // Persistent thumbnail for preview panel
-    pub media_preview: Option<MediaPreview>,            // Animated or static media preview
+    pub media_preview: Option<MediaPreview>,              // Global media preview (video/gif/image)
+    pub media_preview_owner_tab_id: Option<usize>,        // Tab that owns the current media preview
     pub selected_metadata: Option<(PathBuf, windows_infra::MediaMetadata)>,
     pub metadata_req_sender: Sender<(PathBuf, u64)>,
     pub metadata_res_receiver: Receiver<(PathBuf, u64, windows_infra::MediaMetadata)>,
