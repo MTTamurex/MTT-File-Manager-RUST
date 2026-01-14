@@ -15,6 +15,7 @@ impl eframe::App for ImageViewerApp {
                     self.selected_file = None;
                     self.selected_thumbnail = None;
                     self.media_preview = None;
+                    self.media_preview_owner_tab_id = None;
                     self.selected_metadata = None;
                 }
             }
@@ -130,6 +131,8 @@ fn render_tab_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context, frame: &m
                     app.sync_to_tab();
                     app.tab_manager.switch_to(idx);
                     app.sync_from_tab();
+                    // Control WebView visibility based on owner
+                    app.update_video_visibility();
                 }
                 TabBarAction::NewTab => {
                     app.sync_to_tab();

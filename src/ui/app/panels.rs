@@ -103,11 +103,27 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, fr
                             let is_folder_size_loading =
                                 app.folder_size_loading.contains(&file.path);
 
+                            // Get media preview - only show video if current tab is owner
+                            let tab_id = app.tab_manager.active().id;
+                            let is_owner = app.media_preview_owner_tab_id == Some(tab_id);
+                            
+                            // For videos, only pass preview if this tab is the owner
+                            // This prevents video from visually leaking to other tabs
+                            let media_preview = if is_owner {
+                                app.media_preview.as_mut()
+                            } else {
+                                // Not owner - check if it's a video (needs hiding) vs static (can show)
+                                match &app.media_preview {
+                                    Some(crate::ui::components::media_preview::MediaPreview::Video(_)) => None,
+                                    _ => app.media_preview.as_mut(),
+                                }
+                            };
+
                             let action = render_preview_panel(
                                 ui,
                                 &file,
                                 app.selected_thumbnail.as_ref(),
-                                app.media_preview.as_mut(),
+                                media_preview,
                                 selected_metadata,
                                 app.cache_manager.texture_cache.peek(&file.path).cloned(),
                                 app.cache_manager.folder_preview_cache.get(&file.path).cloned(),
