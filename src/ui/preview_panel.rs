@@ -7,7 +7,6 @@ use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::widgets;
 use eframe::egui;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 pub enum PreviewPanelAction {
     RefreshThumbnail(PathBuf),
@@ -61,98 +60,114 @@ pub fn render_preview_panel(
 
         if let Some(preview) = media_preview {
             if is_video {
-                // VIDEO PLAYER LOGIC (Top Area)
+                // VIDEO PLAYER LOGIC
                 let is_player_visible = preview.is_player_visible();
                 let video_state = preview.get_video_state();
                 let is_playing = video_state.as_ref().map(|s| s.is_playing).unwrap_or(false);
                 let current_time = video_state.as_ref().map(|s| s.current_time).unwrap_or(0.0);
                 let duration = video_state.as_ref().map(|s| s.duration).unwrap_or(0.0);
+                let volume = video_state.as_ref().map(|s| s.volume).unwrap_or(1.0);
+                let is_muted = video_state.as_ref().map(|s| s.is_muted).unwrap_or(false);
+
+                let max_preview_width = ui.available_width() - 16.0;
+                let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
 
                 if is_player_visible {
-                    // Render the actual video player
+                    // === ACTIVE PLAYER ===
                     preview.show(ui, frame);
-                } else if let Some(tex) = texture {
-                    // Show thumbnail with Play button overlay
-                    let max_preview_width = ui.available_width() - 16.0;
-                    let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
 
-                    let image_resp = ui.add(
-                        egui::Image::new(&tex)
-                            .max_size(max_preview_size)
-                            .shrink_to_fit(),
-                    );
-                    
-                    // Overlay Play Button on Thumbnail
-                    let rect = image_resp.rect;
-                    if ui.put(rect, egui::Button::new(egui::RichText::new("▶").size(40.0))
-                           .frame(false)
-                           .fill(egui::Color32::from_black_alpha(100)))
-                       .clicked() 
-                    {
-                        preview.toggle_play();
+                    // Controls bar BELOW the video (no extra frames/lines)
+                    ui.add_space(8.0);
+                    ui.vertical(|ui| {
+                        ui.set_width(max_preview_width);
+
+                        // Seek Bar - YouTube Red
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().slider_width = max_preview_width;
+                            ui.visuals_mut().selection.bg_fill = egui::Color32::from_rgb(230, 0, 0); // YouTube Red
+
+                            let mut seek_value = current_time;
+                            if ui.add(egui::Slider::new(&mut seek_value, 0.0..=duration.max(0.1))
+                                .show_value(false)
+                                .trailing_fill(true)).changed() {
+                                preview.seek(seek_value);
+                            }
+                        });
+
+                        ui.add_space(8.0);
+
+                        // Buttons & Time
+                        ui.horizontal(|ui| {
+                            let icon_color = if ui.visuals().dark_mode { [240, 240, 240, 255] } else { [60, 60, 60, 255] };
+
+                            // Play/Pause
+                            let play_icon = if is_playing { "pause" } else { "play" };
+                            if let Some(tex) = svg_manager.get_icon(ui.ctx(), play_icon, 48, icon_color) {
+                                if ui.add(egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(22.0, 22.0))).frame(false)).clicked() {
+                                    preview.toggle_play();
+                                }
+                            }
+
+                            ui.add_space(10.0);
+
+                            // Volume
+                            let vol_icon = if is_muted { "vol_mute" } else { "vol_high" };
+                            if let Some(tex) = svg_manager.get_icon(ui.ctx(), vol_icon, 48, icon_color) {
+                                if ui.add(egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(22.0, 22.0))).frame(false)).clicked() {
+                                    preview.toggle_mute();
+                                }
+                            }
+
+                            // Volume Slider
+                            let mut vol = volume;
+                            ui.add_space(5.0);
+                            ui.spacing_mut().slider_width = 80.0;
+                            ui.visuals_mut().selection.bg_fill = if ui.visuals().dark_mode { egui::Color32::WHITE } else { egui::Color32::from_rgb(100, 100, 100) };
+                            if ui.add(egui::Slider::new(&mut vol, 0.0..=1.0).show_value(false)).changed() {
+                                preview.set_volume(vol);
+                            }
+
+                            ui.add_space(15.0);
+
+                            // Time
+                            let time_text = format!(
+                                "{} / {}",
+                                crate::ui::components::webview_preview::format_time(current_time),
+                                crate::ui::components::webview_preview::format_time(duration)
+                            );
+                            let time_color = if ui.visuals().dark_mode { egui::Color32::LIGHT_GRAY } else { egui::Color32::DARK_GRAY };
+                            ui.label(egui::RichText::new(time_text).size(13.0).color(time_color));
+                        });
+                    });
+                } else {
+                    // === THUMBNAIL ===
+                    if let Some(tex) = &texture {
+                        let image_resp = ui.add(
+                            egui::Image::new(tex)
+                                .max_size(max_preview_size)
+                                .shrink_to_fit(),
+                        );
+                        let media_rect = image_resp.rect;
+
+                        // Central play button on hover
+                        let hover_pos = ui.input(|i| i.pointer.hover_pos());
+                        let is_hovered = hover_pos.map_or(false, |pos| media_rect.contains(pos));
+
+                        if is_hovered {
+                            let center_size = 64.0;
+                            let center_rect = egui::Rect::from_center_size(media_rect.center(), egui::vec2(center_size, center_size));
+                            ui.painter().rect_filled(center_rect, center_size / 2.0, egui::Color32::from_black_alpha(160));
+                            if let Some(tex) = svg_manager.get_icon(ui.ctx(), "play", 96, [255, 255, 255, 255]) {
+                                ui.painter().image(tex.id(), center_rect.shrink(14.0), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                            }
+                            if ui.put(center_rect, egui::Button::new("").frame(false)).clicked() {
+                                preview.toggle_play();
+                            }
+                        }
+                    } else {
+                        ui.allocate_space(egui::vec2(max_preview_width, 200.0));
                     }
                 }
-
-                // ===== Custom Controls Bar (YouTube-style) =====
-                ui.add_space(5.0);
-                
-                // Seek bar
-                let seek_bar_width = ui.available_width() - 20.0;
-                let mut seek_value = current_time;
-                ui.horizontal(|ui| {
-                    ui.add_space(10.0);
-                    ui.spacing_mut().slider_width = seek_bar_width;
-                    let slider = egui::Slider::new(&mut seek_value, 0.0..=duration.max(0.1))
-                        .show_value(false)
-                        .trailing_fill(true);
-                    if ui.add(slider).changed() {
-                        preview.seek(seek_value);
-                    }
-                });
-                
-                ui.add_space(3.0);
-                
-                // Controls row
-                ui.horizontal(|ui| {
-                    ui.add_space(10.0);
-                    
-                    if ui.add(egui::Button::new(egui::RichText::new(if is_playing { "⏸" } else { "▶" }).size(18.0))
-                        .min_size(egui::vec2(32.0, 28.0)))
-                        .clicked() 
-                    {
-                        preview.toggle_play();
-                    }
-                    
-                    ui.add_space(5.0);
-                    
-                    if ui.add(egui::Button::new(egui::RichText::new("🔊").size(16.0))
-                        .min_size(egui::vec2(28.0, 28.0)))
-                        .clicked() 
-                    {
-                        preview.toggle_mute();
-                    }
-                    
-                    // Volume Slider
-                    let mut vol = video_state.as_ref().map(|s| s.volume).unwrap_or(1.0);
-                    ui.add_space(5.0);
-                    ui.spacing_mut().slider_width = 60.0;
-                    if ui.add(egui::Slider::new(&mut vol, 0.0..=1.0)
-                        .show_value(false))
-                        .changed() 
-                    {
-                        preview.set_volume(vol);
-                    }
-                    
-                    ui.add_space(10.0);
-                    
-                    let time_text = format!(
-                        "{} / {}",
-                        crate::ui::components::webview_preview::format_time(current_time),
-                        crate::ui::components::webview_preview::format_time(duration)
-                    );
-                    ui.label(egui::RichText::new(time_text).size(12.0).color(egui::Color32::GRAY));
-                });
-                ui.add_space(10.0);
             } else {
                 // Show media preview for images/GIFs
                 preview.show(ui, frame);
