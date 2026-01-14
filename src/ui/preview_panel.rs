@@ -7,6 +7,7 @@ use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::widgets;
 use eframe::egui;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 pub enum PreviewPanelAction {
     RefreshThumbnail(PathBuf),
@@ -29,15 +30,23 @@ pub fn render_preview_panel(
     is_recycle_bin_view: bool,
     item_icon_loader: &mut IconLoader,
     svg_manager: &mut SvgIconManager,
+    frame: Option<&eframe::Frame>,
 ) -> Option<PreviewPanelAction> {
     // Metadados são processados de forma assíncrona; se chegarem, o metadata será Some(...)
     let mut action = None;
+    
+    // Check if this is a video file
+    let is_video = file.path.extension()
+        .map(|ext| {
+            let e = ext.to_string_lossy().to_lowercase();
+            matches!(e.as_str(), "mp4" | "mkv" | "avi" | "webm" | "mov" | "wmv" | "flv")
+        })
+        .unwrap_or(false);
 
     ui.vertical_centered(|ui| {
         ui.add_space(20.0);
 
         // Preview de imagem/video (se houver thumbnail)
-        // Detecta se é mídia usando Windows Perceived Type API
         let is_media = file
             .path
             .extension()
@@ -51,17 +60,111 @@ pub fn render_preview_panel(
         };
 
         if let Some(preview) = media_preview {
-            preview.show(ui);
+            if is_video {
+                // VIDEO PLAYER LOGIC (Top Area)
+                let is_player_visible = preview.is_player_visible();
+                let video_state = preview.get_video_state();
+                let is_playing = video_state.as_ref().map(|s| s.is_playing).unwrap_or(false);
+                let current_time = video_state.as_ref().map(|s| s.current_time).unwrap_or(0.0);
+                let duration = video_state.as_ref().map(|s| s.duration).unwrap_or(0.0);
 
-            // Botão de recarregar thumbnail
-            if widgets::icon_button(ui, svg_manager, "refresh", "Recarregar Thumbnail", None)
-                .clicked()
-            {
-                action = Some(PreviewPanelAction::RefreshThumbnail(file.path.clone()));
+                if is_player_visible {
+                    // Render the actual video player
+                    preview.show(ui, frame);
+                } else if let Some(tex) = texture {
+                    // Show thumbnail with Play button overlay
+                    let max_preview_width = ui.available_width() - 16.0;
+                    let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
+
+                    let image_resp = ui.add(
+                        egui::Image::new(&tex)
+                            .max_size(max_preview_size)
+                            .shrink_to_fit(),
+                    );
+                    
+                    // Overlay Play Button on Thumbnail
+                    let rect = image_resp.rect;
+                    if ui.put(rect, egui::Button::new(egui::RichText::new("▶").size(40.0))
+                           .frame(false)
+                           .fill(egui::Color32::from_black_alpha(100)))
+                       .clicked() 
+                    {
+                        preview.toggle_play();
+                    }
+                }
+
+                // ===== Custom Controls Bar (YouTube-style) =====
+                ui.add_space(5.0);
+                
+                // Seek bar
+                let seek_bar_width = ui.available_width() - 20.0;
+                let mut seek_value = current_time;
+                ui.horizontal(|ui| {
+                    ui.add_space(10.0);
+                    ui.spacing_mut().slider_width = seek_bar_width;
+                    let slider = egui::Slider::new(&mut seek_value, 0.0..=duration.max(0.1))
+                        .show_value(false)
+                        .trailing_fill(true);
+                    if ui.add(slider).changed() {
+                        preview.seek(seek_value);
+                    }
+                });
+                
+                ui.add_space(3.0);
+                
+                // Controls row
+                ui.horizontal(|ui| {
+                    ui.add_space(10.0);
+                    
+                    if ui.add(egui::Button::new(egui::RichText::new(if is_playing { "⏸" } else { "▶" }).size(18.0))
+                        .min_size(egui::vec2(32.0, 28.0)))
+                        .clicked() 
+                    {
+                        preview.toggle_play();
+                    }
+                    
+                    ui.add_space(5.0);
+                    
+                    if ui.add(egui::Button::new(egui::RichText::new("🔊").size(16.0))
+                        .min_size(egui::vec2(28.0, 28.0)))
+                        .clicked() 
+                    {
+                        preview.toggle_mute();
+                    }
+                    
+                    // Volume Slider
+                    let mut vol = video_state.as_ref().map(|s| s.volume).unwrap_or(1.0);
+                    ui.add_space(5.0);
+                    ui.spacing_mut().slider_width = 60.0;
+                    if ui.add(egui::Slider::new(&mut vol, 0.0..=1.0)
+                        .show_value(false))
+                        .changed() 
+                    {
+                        preview.set_volume(vol);
+                    }
+                    
+                    ui.add_space(10.0);
+                    
+                    let time_text = format!(
+                        "{} / {}",
+                        crate::ui::components::webview_preview::format_time(current_time),
+                        crate::ui::components::webview_preview::format_time(duration)
+                    );
+                    ui.label(egui::RichText::new(time_text).size(12.0).color(egui::Color32::GRAY));
+                });
+                ui.add_space(10.0);
+            } else {
+                // Show media preview for images/GIFs
+                preview.show(ui, frame);
+
+                if widgets::icon_button(ui, svg_manager, "refresh", "Recarregar Thumbnail", None)
+                    .clicked()
+                {
+                    action = Some(PreviewPanelAction::RefreshThumbnail(file.path.clone()));
+                }
             }
         } else if let (Some(tex), true) = (texture, is_media) {
-            // Mostra thumbnail de imagem/video (Fallback se media_preview não estiver pronto)
-            // Use available width with a safety margin to prevent forcing sidebar expansion
+            // Fallback: Show thumbnail
             let max_preview_width = ui.available_width() - 16.0;
             let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
 
@@ -71,20 +174,17 @@ pub fn render_preview_panel(
                     .shrink_to_fit(),
             );
 
-            // Botão de recarregar thumbnail
             if widgets::icon_button(ui, svg_manager, "refresh", "Recarregar Thumbnail", None)
                 .clicked()
             {
                 action = Some(PreviewPanelAction::RefreshThumbnail(file.path.clone()));
             }
-            // Removed redundant separator here (one exists at line 147)
         } else {
             // Pasta ou Drive ou Arquivo sem Thumbnail
             let max_w: f32 = ui.available_width() - 40.0;
             let icon_size: f32 = (120.0f32).min(max_w);
 
             if let Some(_) = &file.drive_info {
-                // DRIVE
                 if let Some(icon) =
                     item_icon_loader.get_or_load_drive_icon(ui.ctx(), &file.path.to_string_lossy())
                 {

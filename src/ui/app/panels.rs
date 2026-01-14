@@ -9,7 +9,7 @@ pub fn render_panels(app: &mut ImageViewerApp, ctx: &egui::Context, _frame: &mut
     render_sidebar_panel(app, ctx);
 
     // 2. Preview Panel
-    render_preview_panel_layout(app, ctx);
+    render_preview_panel_layout(app, ctx, _frame);
 
     // 3. Central Panel
     render_central_panel_layout(app, ctx);
@@ -62,7 +62,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) {
     }
 }
 
-fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
+fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, frame: &eframe::Frame) {
     if app.show_preview_panel {
         app.refresh_selected_metadata();
 
@@ -110,6 +110,7 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
                                 app.is_recycle_bin_view,
                                 &mut app.item_icon_loader,
                                 &mut app.svg_icon_manager,
+                                Some(frame),
                             );
 
                             if let Some(act) = action {

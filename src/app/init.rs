@@ -232,6 +232,8 @@ impl ImageViewerApp {
 
         let disks = windows_infra::get_all_drives();
 
+        // Initialize Audio Device (Removed: using WebView2)
+
         let mut app = Self {
             current_path: PATH_PADRAO.to_string(),
             thumbnail_req_sender: req_tx,
@@ -245,6 +247,7 @@ impl ImageViewerApp {
             cover_worker_sender: cover_req_tx,
             cover_worker_receiver: cover_res_rx,
             scanned_folders: HashSet::new(),
+            // audio_device, // Removed
             // Folder Preview Worker (Native Windows Shell)
             folder_preview_sender: folder_preview_tx,
             folder_preview_receiver: folder_preview_res_rx,

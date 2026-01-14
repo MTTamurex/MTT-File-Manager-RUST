@@ -1,0 +1,6 @@
+[env]
+FFMPEG_DIR = "C:/ffmpeg"
+FFMPEG_INCLUDE_DIR = "C:/ffmpeg/include"
+FFMPEG_LIB_DIR = "C:/ffmpeg/lib"
+INCLUDE = "C:/ffmpeg/include"
+LIB = "C:/ffmpeg/lib"
