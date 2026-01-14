@@ -36,10 +36,8 @@ pub fn render_preview_panel(
     
     // Check if this is a video file
     let is_video = file.path.extension()
-        .map(|ext| {
-            let e = ext.to_string_lossy().to_lowercase();
-            matches!(e.as_str(), "mp4" | "mkv" | "avi" | "webm" | "mov" | "wmv" | "flv")
-        })
+        .and_then(|ext| ext.to_str())
+        .map(|ext| crate::infrastructure::windows::is_video_extension(ext))
         .unwrap_or(false);
 
     ui.vertical_centered(|ui| {
