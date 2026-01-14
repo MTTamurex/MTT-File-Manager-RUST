@@ -40,6 +40,10 @@ pub struct TabState {
     pub path_input: String,
     /// Whether this tab is showing the Recycle Bin view
     pub is_recycle_bin_view: bool,
+    /// Persistent thumbnail for preview panel
+    pub selected_thumbnail: Option<eframe::egui::TextureHandle>,
+    /// Selected metadata for preview panel
+    pub selected_metadata: Option<(PathBuf, crate::infrastructure::windows::MediaMetadata)>,
 }
 
 impl TabState {
@@ -59,6 +63,8 @@ impl TabState {
             scroll_to_selected: false,
             path_input: "Este Computador".to_string(),
             is_recycle_bin_view: false,
+            selected_thumbnail: None,
+            selected_metadata: None,
         }
     }
 
@@ -83,6 +89,8 @@ impl TabState {
             scroll_to_selected: false,
             path_input: path.to_string(),
             is_recycle_bin_view: path == "Lixeira",
+            selected_thumbnail: None,
+            selected_metadata: None,
         }
     }
 
@@ -226,6 +234,8 @@ impl TabManager {
         new_tab.all_items = current.all_items.clone();
         new_tab.selected_item = current.selected_item;
         new_tab.selected_file = current.selected_file.clone();
+        new_tab.selected_thumbnail = current.selected_thumbnail.clone();
+        new_tab.selected_metadata = current.selected_metadata.clone();
         new_tab.search_query = current.search_query.clone();
 
         self.next_id += 1;
@@ -299,6 +309,8 @@ impl TabManager {
             reopened.all_items = tab.all_items;
             reopened.selected_item = tab.selected_item;
             reopened.selected_file = tab.selected_file;
+            reopened.selected_thumbnail = tab.selected_thumbnail;
+            reopened.selected_metadata = tab.selected_metadata;
             reopened.search_query = tab.search_query;
 
             self.next_id += 1;
