@@ -140,12 +140,16 @@ fn render_tab_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context, frame: &m
                     app.sync_from_tab();
                     app.setup_computer_view();
                     app.sync_to_tab();
+                    // Control WebView visibility based on owner
+                    app.update_video_visibility();
                 }
                 TabBarAction::CloseTab(idx) => {
                     if app.tab_manager.close_tab(idx) {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     } else {
                         app.sync_from_tab();
+                        // Control WebView visibility based on (new) owner/active tab
+                        app.update_video_visibility();
                     }
                 }
                 TabBarAction::CloseApp => {
