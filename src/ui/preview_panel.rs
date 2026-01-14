@@ -81,10 +81,10 @@ pub fn render_preview_panel(
                     ui.vertical(|ui| {
                         ui.set_width(max_preview_width);
 
-                        // Seek Bar - YouTube Red
+                        // Seek Bar - App Blue
                         ui.horizontal(|ui| {
                             ui.spacing_mut().slider_width = max_preview_width;
-                            ui.visuals_mut().selection.bg_fill = egui::Color32::from_rgb(230, 0, 0); // YouTube Red
+                            ui.visuals_mut().selection.bg_fill = crate::ui::theme::COLOR_ACCENT;
 
                             let mut seek_value = current_time;
                             if ui.add(egui::Slider::new(&mut seek_value, 0.0..=duration.max(0.1))
@@ -122,7 +122,7 @@ pub fn render_preview_panel(
                             let mut vol = volume;
                             ui.add_space(5.0);
                             ui.spacing_mut().slider_width = 80.0;
-                            ui.visuals_mut().selection.bg_fill = if ui.visuals().dark_mode { egui::Color32::WHITE } else { egui::Color32::from_rgb(100, 100, 100) };
+                            ui.visuals_mut().selection.bg_fill = crate::ui::theme::COLOR_ACCENT;
                             if ui.add(egui::Slider::new(&mut vol, 0.0..=1.0).show_value(false)).changed() {
                                 preview.set_volume(vol);
                             }
@@ -284,7 +284,6 @@ pub fn render_preview_panel(
             }
             ui.add_space(20.0);
         }
-        ui.separator();
     });
 
     // Tabela de Detalhes
