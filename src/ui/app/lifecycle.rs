@@ -37,9 +37,16 @@ pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
 }
 
 pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
-    let (size_changed, maximized_changed) = ctx.input(|i| {
+    use crate::infrastructure::windows::window_subclass::{
+        freeze_layout, layout_phase, WindowLayoutPhase
+    };
+    
+    let (size_changed, maximized_changed, is_about_to_minimize) = ctx.input(|i| {
         let mut size_changed = false;
         let mut maximized_changed = false;
+
+        // Detect if window is about to minimize
+        let minimized = i.viewport().minimized.unwrap_or(false);
 
         if let Some(rect) = i.viewport().inner_rect {
             // Only save size when NOT maximized
@@ -60,8 +67,15 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
         }
         app.saved_is_maximized = new_maximized;
 
-        (size_changed, maximized_changed)
+        (size_changed, maximized_changed, minimized)
     });
+
+    // LAYOUT FREEZE: Capture sidebar widths before minimize
+    // This happens when egui reports minimized but we haven't frozen yet
+    if is_about_to_minimize && layout_phase() == WindowLayoutPhase::Normal {
+        // Freeze layout with current sidebar widths
+        freeze_layout(app.sidebar_left_width, app.sidebar_right_width);
+    }
 
     // Save preferences when window state changes
     if size_changed || maximized_changed {

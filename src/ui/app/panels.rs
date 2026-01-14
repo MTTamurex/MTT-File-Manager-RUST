@@ -4,22 +4,36 @@ use crate::domain::file_entry::{FileEntry, SyncStatus, ViewMode};
 use crate::infrastructure::windows as windows_infra;
 use crate::app::ImageViewerApp;
 
+// Sidebar width constraints
+const LEFT_SIDEBAR_MIN: f32 = 150.0;
+const LEFT_SIDEBAR_MAX: f32 = 500.0;
+const RIGHT_SIDEBAR_MIN: f32 = 250.0;
+const RIGHT_SIDEBAR_MAX: f32 = 500.0;
+const RESIZE_HANDLE_WIDTH: f32 = 6.0;
+
 pub fn render_panels(app: &mut ImageViewerApp, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-    // 1. Sidebar
+    // 1. Left Sidebar (forced width from app state)
     render_sidebar_panel(app, ctx);
 
-    // 2. Preview Panel
+    // 2. Right Preview Panel (forced width from app state)
     render_preview_panel_layout(app, ctx, _frame);
 
-    // 3. Central Panel
+    // 3. Manual resize handles (rendered AFTER panels so they appear on top)
+    render_resize_handles(app, ctx);
+
+    // 4. Central Panel
     render_central_panel_layout(app, ctx);
 }
 
 fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) {
+    // Clamp width to valid range BEFORE using it
+    let target_width = app.sidebar_left_width.clamp(LEFT_SIDEBAR_MIN, LEFT_SIDEBAR_MAX);
+    
+    // Use exact_width + resizable(false) to FORCE the width from app state
+    // Resize is handled via manual drag handles rendered separately
     let sidebar_response = egui::SidePanel::left("sidebar")
-        .min_width(150.0)
-        .default_width(app.sidebar_left_width.max(150.0))
-        .resizable(true)
+        .exact_width(target_width)
+        .resizable(false)  // Resize handled manually via drag handles
         .show(ctx, |ui| {
             use crate::ui::sidebar::{render_sidebar, SidebarContext};
 
@@ -28,7 +42,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) {
             let is_computer_view = app.is_computer_view;
             let computer_icon = app.cache_manager.computer_icon.clone();
 
-            let mut ctx = SidebarContext {
+            let mut sidebar_ctx = SidebarContext {
                 disks: &disks,
                 current_path: &current_path,
                 is_computer_view,
@@ -40,17 +54,8 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 onedrive_icon: app.onedrive_icon.as_ref(),
             };
 
-            render_sidebar(ui, &mut ctx)
+            render_sidebar(ui, &mut sidebar_ctx)
         });
-
-    let is_minimized = ctx.input(|i| i.viewport().minimized.unwrap_or(false));
-    let actual_panel_width = sidebar_response.response.rect.width();
-    if !is_minimized
-        && actual_panel_width > 100.0
-        && (app.sidebar_left_width - actual_panel_width).abs() > 2.0
-    {
-        app.sidebar_left_width = actual_panel_width;
-    }
 
     if let Some(action) = sidebar_response.inner {
         use crate::ui::sidebar::SidebarAction;
@@ -66,11 +71,14 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, fr
     if app.show_preview_panel {
         app.refresh_selected_metadata();
 
-        let right_panel_response = egui::SidePanel::right("preview_panel")
-            .resizable(true)
-            .default_width(app.sidebar_right_width.max(250.0))
-            .min_width(250.0)
-            .max_width(500.0)
+        // Clamp width to valid range BEFORE using it
+        let target_width = app.sidebar_right_width.clamp(RIGHT_SIDEBAR_MIN, RIGHT_SIDEBAR_MAX);
+
+        // Use exact_width + resizable(false) to FORCE the width from app state
+        // Resize is handled via manual drag handles rendered separately
+        let _right_panel_response = egui::SidePanel::right("preview_panel")
+            .exact_width(target_width)
+            .resizable(false)  // Resize handled manually via drag handles
             .show(ctx, |ui| {
                 use crate::ui::preview_panel::{render_preview_panel, PreviewPanelAction};
 
@@ -145,15 +153,74 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, fr
                         }
                     });
             });
+    }
+}
 
-        let is_minimized = ctx.input(|i| i.viewport().minimized.unwrap_or(false));
-        let actual_panel_width = right_panel_response.response.rect.width();
-        if !is_minimized
-            && actual_panel_width > 200.0
-            && (app.sidebar_right_width - actual_panel_width).abs() > 2.0
-        {
-            app.sidebar_right_width = actual_panel_width;
-        }
+/// Render manual resize handles for sidebars.
+/// These are thin vertical areas at the edge of each sidebar that respond to drag.
+fn render_resize_handles(app: &mut ImageViewerApp, ctx: &egui::Context) {
+    let screen = ctx.screen_rect();
+    let tab_bar_height = 35.0; // Approximate tab bar height
+    
+    // Left sidebar resize handle (right edge of left sidebar)
+    let left_width = app.sidebar_left_width.clamp(LEFT_SIDEBAR_MIN, LEFT_SIDEBAR_MAX);
+    let left_handle_rect = egui::Rect::from_min_size(
+        egui::pos2(left_width - RESIZE_HANDLE_WIDTH / 2.0, tab_bar_height),
+        egui::vec2(RESIZE_HANDLE_WIDTH, screen.height() - tab_bar_height),
+    );
+    
+    egui::Area::new(egui::Id::new("left_sidebar_resize"))
+        .fixed_pos(left_handle_rect.min)
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            let response = ui.allocate_rect(
+                left_handle_rect,
+                egui::Sense::drag(),
+            );
+            
+            // Set cursor on hover/drag
+            if response.hovered() || response.dragged() {
+                ctx.set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+            }
+            
+            // Update width on drag
+            if response.dragged() {
+                let delta = response.drag_delta().x;
+                app.sidebar_left_width = (app.sidebar_left_width + delta)
+                    .clamp(LEFT_SIDEBAR_MIN, LEFT_SIDEBAR_MAX);
+            }
+        });
+    
+    // Right sidebar resize handle (left edge of right sidebar) - only if panel is visible
+    if app.show_preview_panel {
+        let right_width = app.sidebar_right_width.clamp(RIGHT_SIDEBAR_MIN, RIGHT_SIDEBAR_MAX);
+        let right_handle_x = screen.width() - right_width - RESIZE_HANDLE_WIDTH / 2.0;
+        let right_handle_rect = egui::Rect::from_min_size(
+            egui::pos2(right_handle_x, tab_bar_height),
+            egui::vec2(RESIZE_HANDLE_WIDTH, screen.height() - tab_bar_height),
+        );
+        
+        egui::Area::new(egui::Id::new("right_sidebar_resize"))
+            .fixed_pos(right_handle_rect.min)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                let response = ui.allocate_rect(
+                    right_handle_rect,
+                    egui::Sense::drag(),
+                );
+                
+                // Set cursor on hover/drag
+                if response.hovered() || response.dragged() {
+                    ctx.set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                }
+                
+                // Update width on drag (note: dragging LEFT increases right panel width)
+                if response.dragged() {
+                    let delta = -response.drag_delta().x; // Inverted for right panel
+                    app.sidebar_right_width = (app.sidebar_right_width + delta)
+                        .clamp(RIGHT_SIDEBAR_MIN, RIGHT_SIDEBAR_MAX);
+                }
+            });
     }
 }
 
