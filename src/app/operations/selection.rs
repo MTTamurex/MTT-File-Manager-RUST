@@ -47,6 +47,7 @@ impl ImageViewerApp {
             }
         } else {
             self.selected_thumbnail = None;
+            self.media_preview = None;
         }
     }
 
