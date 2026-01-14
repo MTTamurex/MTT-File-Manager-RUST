@@ -17,6 +17,8 @@ impl ImageViewerApp {
         active.all_items = self.all_items.clone();
         active.selected_item = self.selected_item;
         active.selected_file = self.selected_file.clone();
+        active.selected_thumbnail = self.selected_thumbnail.clone();
+        active.selected_metadata = self.selected_metadata.clone();
         active.search_query = self.search_query.clone();
         active.scroll_to_selected = self.scroll_to_selected;
 
@@ -44,6 +46,8 @@ impl ImageViewerApp {
         self.all_items = active.all_items;
         self.selected_item = active.selected_item;
         self.selected_file = active.selected_file;
+        self.selected_thumbnail = active.selected_thumbnail;
+        self.selected_metadata = active.selected_metadata;
         self.search_query = active.search_query;
         self.scroll_to_selected = active.scroll_to_selected;
 
