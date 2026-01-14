@@ -6,11 +6,14 @@ use crate::app::state::ImageViewerApp;
 
 impl ImageViewerApp {
     pub fn update_selected_thumbnail(&mut self) {
+        // Reset state to avoid "stale" content from previous selection
+        self.selected_thumbnail = None;
+        self.media_preview = None;
+
         if let Some(selected) = &self.selected_file {
             // Validate path exists before trying to load thumbnail
             if !selected.path.exists() {
                 self.selected_file = None;
-                self.selected_thumbnail = None;
                 return;
             }
 

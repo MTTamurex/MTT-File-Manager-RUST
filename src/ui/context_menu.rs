@@ -81,9 +81,18 @@ pub fn render_context_menu(
         .filter(|i| i.show_in_overflow)
         .collect();
 
+    // SMART ALIGNMENT: Se o menu for abrir sobre a área do player (WebView), desloca para a esquerda
+    let mut menu_pos = menu_state.position;
+    let expected_width = MENU_MAX_WIDTH; // Usamos o máximo para segurança ou detectamos dinamicamente
+
+    if menu_pos.x + expected_width > menu_state.right_bound {
+        // Se bater na borda direita, move o menu para a esquerda do cursor
+        menu_pos.x = (menu_state.right_bound - expected_width).max(0.0);
+    }
+
     // Render the menu popup
     let response = egui::Area::new(egui::Id::new("context_menu"))
-        .fixed_pos(menu_state.position)
+        .fixed_pos(menu_pos)
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style())
@@ -111,6 +120,7 @@ pub fn render_context_menu(
                         &secondary_items,
                         &mut action_executed,
                         &mut pending_load_item,
+                        menu_state.right_bound,
                     );
 
                     // ========== OVERFLOW ("Show more options") ==========
@@ -120,6 +130,7 @@ pub fn render_context_menu(
                             &overflow_items,
                             &mut action_executed,
                             &mut pending_load_item,
+                            menu_state.right_bound,
                         );
                     }
                 });
@@ -250,6 +261,7 @@ fn render_menu_items(
     items: &[&ContextMenuItem],
     action: &mut Option<i32>,
     lazy_load: &mut Option<i32>,
+    right_bound: f32,
 ) {
     let mut last_was_separator = true; // collapse leading separators
 
@@ -258,10 +270,10 @@ fn render_menu_items(
             if last_was_separator {
                 continue; // skip duplicate/leading separators
             }
-            render_single_item(ui, item, action, 0, lazy_load); // Top-level items have depth 0
+            render_single_item(ui, item, action, 0, lazy_load, right_bound); // Top-level items have depth 0
             last_was_separator = true;
         } else {
-            render_single_item(ui, item, action, 0, lazy_load); // Top-level items have depth 0
+            render_single_item(ui, item, action, 0, lazy_load, right_bound); // Top-level items have depth 0
             last_was_separator = false;
         }
     }
@@ -274,6 +286,7 @@ fn render_single_item(
     action: &mut Option<i32>,
     depth: usize,
     lazy_load: &mut Option<i32>,
+    right_bound: f32,
 ) {
     if item.is_separator {
         ui.separator();
@@ -363,7 +376,9 @@ fn render_single_item(
         let screen_rect = ui.ctx().screen_rect();
         let menu_width = SUBMENU_MIN_WIDTH; // Expected submenu width
 
-        let space_on_right = screen_rect.right() - rect.right();
+        // SMART ALIGNMENT: Usa a borda real (levando em conta o player de vídeo/WebView)
+        let effective_right = screen_rect.right().min(right_bound);
+        let space_on_right = effective_right - rect.right();
         let needs_flip = space_on_right < (menu_width + SUBMENU_X_OFFSET + 20.0); // 20px margin
 
         // Open to the right by default, flip to left only if not enough space
@@ -479,7 +494,7 @@ fn render_single_item(
                             ui.set_max_width(MENU_MAX_WIDTH);
                             ui.spacing_mut().item_spacing = egui::vec2(0.0, 1.0);
                             for sub in &item.sub_items {
-                                render_single_item(ui, sub, action, depth + 1, lazy_load);
+                                render_single_item(ui, sub, action, depth + 1, lazy_load, right_bound);
                             }
                         });
                 });
@@ -526,9 +541,10 @@ fn render_overflow_submenu(
     items: &[&ContextMenuItem],
     action: &mut Option<i32>,
     lazy_load: &mut Option<i32>,
+    right_bound: f32,
 ) {
     let overflow_item = ContextMenuItem::new(-100, "Mostrar mais opções")
         .with_subitems(items.iter().map(|i| (*i).clone()).collect());
 
-    render_single_item(ui, &overflow_item, action, 0, lazy_load); // Overflow is top-level
+    render_single_item(ui, &overflow_item, action, 0, lazy_load, right_bound); // Overflow is top-level
 }

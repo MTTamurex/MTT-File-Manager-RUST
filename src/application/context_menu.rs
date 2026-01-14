@@ -135,6 +135,7 @@ impl std::fmt::Debug for ContextMenuItem {
 pub struct ContextMenuState {
     pub is_open: bool,
     pub position: egui::Pos2,
+    pub right_bound: f32,
     pub item_index: Option<usize>,
     pub target_path: Option<PathBuf>,
     pub is_empty_area: bool,
@@ -159,6 +160,7 @@ impl Default for ContextMenuState {
         Self {
             is_open: false,
             position: egui::Pos2::ZERO,
+            right_bound: f32::MAX, // Default to no restriction
             item_index: None,
             target_path: None,
             is_empty_area: false,
@@ -180,12 +182,14 @@ impl ContextMenuState {
     pub fn open(
         &mut self,
         position: egui::Pos2,
+        right_bound: f32,
         item_index: Option<usize>,
         target_path: Option<PathBuf>,
         is_empty_area: bool,
     ) {
         self.is_open = true;
         self.position = position;
+        self.right_bound = right_bound;
         self.item_index = item_index;
         self.target_path = target_path;
         self.is_empty_area = is_empty_area;
@@ -219,6 +223,7 @@ impl std::fmt::Debug for ContextMenuState {
         f.debug_struct("ContextMenuState")
             .field("is_open", &self.is_open)
             .field("position", &self.position)
+            .field("right_bound", &self.right_bound)
             .field("item_index", &self.item_index)
             .field("target_path", &self.target_path)
             .field("is_empty_area", &self.is_empty_area)
