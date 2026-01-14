@@ -124,6 +124,7 @@ pub fn resolve_codec_guid(guid_str: &str) -> String {
         0xA106 => "AAC (ADTS)",
         0x2000 => "AC-3",
         0x2001 => "DTS",
+        0x3F40F4F0 => "H.264/AVC (ES)",
         _ => {
             // Try to decode data1 as FourCC (last resort)
             let bytes = guid.data1.to_le_bytes();

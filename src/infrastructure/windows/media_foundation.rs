@@ -237,7 +237,7 @@ fn guid_to_codec_name(guid: &windows::core::GUID) -> String {
         // H.264/AVC variants
         0x31435641 | 0x31637661 => return "H.264/AVC".to_string(), // 'AVC1', 'avc1'
         0x34363248 | 0x34363268 => return "H.264/AVC".to_string(), // 'H264', 'h264'
-        0x3436324E => return "H.264/AVC".to_string(),              // Various encoders
+        0x3436324E | 0x3F40F4F0 => return "H.264/AVC".to_string(), // Various encoders + H264 ES
 
         // H.265/HEVC variants
         0x35365648 | 0x31435648 => return "H.265/HEVC".to_string(), // 'HV51', 'HVC1'
