@@ -6,6 +6,11 @@ use std::net::{TcpListener, TcpStream};
 use eframe::egui;
 use wry::{WebView, WebViewBuilder};
 
+#[cfg(target_os = "windows")]
+use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE, SW_SHOW, FindWindowExW};
+#[cfg(target_os = "windows")]
+use windows::Win32::Foundation::HWND;
+
 /// Shared state for video playback (updated via IPC from JavaScript)
 #[derive(Clone, Default)]
 pub struct VideoState {
@@ -27,6 +32,9 @@ pub struct WebviewPreview {
     pub show_player: bool,     // false = show thumbnail, true = show video
     pub play_on_init: bool,    // if true, play as soon as webview is ready
     pub state: Arc<Mutex<VideoState>>,
+    
+    #[cfg(target_os = "windows")]
+    webview_hwnd: Arc<Mutex<Option<HWND>>>,
 }
 
 impl WebviewPreview {
@@ -46,6 +54,8 @@ impl WebviewPreview {
                 volume: 1.0,
                 is_muted: false,
             })),
+            #[cfg(target_os = "windows")]
+            webview_hwnd: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -306,6 +316,30 @@ impl WebviewPreview {
             match webview {
                 Ok(wv) => {
                     println!("[WebviewPreview] WebView created successfully");
+                    
+                    #[cfg(target_os = "windows")]
+                    {
+                        // Get the child HWND created by wry.
+                        // Since we created it 'as_child' of 'handle', it will be a child window.
+                        unsafe {
+                            if let Ok(parent_handle) = window.window_handle() {
+                                if let raw_window_handle::RawWindowHandle::Win32(wh) = parent_handle.as_raw() {
+                                    let parent_hwnd = HWND(wh.hwnd.get() as _);
+                                    // Find child by trying to find any window inside parent.
+                                    // WebView2 creates a child window.
+                                    if let Ok(child) = FindWindowExW(parent_hwnd, None, None, None) {
+                                        if !child.is_invalid() {
+                                            println!("[WebviewPreview] Found Child HWND: {:?}", child);
+                                            if let Ok(mut h) = self.webview_hwnd.lock() {
+                                                *h = Some(child);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     self.webview = Some(wv);
                     
                     if self.play_on_init {
@@ -388,7 +422,22 @@ impl WebviewPreview {
     /// Audio continues when hidden.
     pub fn set_visibility(&self, visible: bool) {
         if let Some(ref wv) = self.webview {
+            // 1. Try wry's built-in visibility logic
             let _ = wv.set_visible(visible);
+
+            // 2. FORCE visibility using native Windows API for the HWND.
+            // This is essential to prevent visual leaks between tabs and 
+            // ensure the WebView doesn't intercept mouse input in non-owner tabs.
+            #[cfg(target_os = "windows")]
+            {
+                if let Ok(hwnd_opt) = self.webview_hwnd.lock() {
+                    if let Some(hwnd) = *hwnd_opt {
+                        unsafe {
+                            let _ = ShowWindow(hwnd, if visible { SW_SHOW } else { SW_HIDE });
+                        }
+                    }
+                }
+            }
         }
     }
 }
