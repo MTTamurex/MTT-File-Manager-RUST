@@ -30,12 +30,14 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
                                     app.sync_from_tab();
                                     app.setup_computer_view();
                                     app.sync_to_tab();
+                                    app.update_video_visibility();
                                 }
                                 egui::Key::W => {
                                     if app.tab_manager.close_active_tab() {
                                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                                     } else {
                                         app.sync_from_tab();
+                                        app.update_video_visibility();
                                     }
                                 }
                                 egui::Key::Tab => {
@@ -46,6 +48,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
                                         app.tab_manager.next_tab();
                                     }
                                     app.sync_from_tab();
+                                    app.update_video_visibility();
                                 }
                                 _ => {}
                             }

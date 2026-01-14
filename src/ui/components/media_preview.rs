@@ -195,4 +195,13 @@ impl MediaPreview {
             player.toggle_mute();
         }
     }
+
+    pub fn path(&self) -> Option<&std::path::Path> {
+        match self {
+            MediaPreview::StaticImage(_) => None,
+            MediaPreview::AnimatedGif(_) => None, // GIF player doesn't currently store path, but we could add it
+            MediaPreview::Video(player) => Some(&player.path),
+            MediaPreview::Error(_) => None,
+        }
+    }
 }

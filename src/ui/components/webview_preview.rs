@@ -32,6 +32,7 @@ pub struct WebviewPreview {
     pub show_player: bool,     // false = show thumbnail, true = show video
     pub play_on_init: bool,    // if true, play as soon as webview is ready
     pub state: Arc<Mutex<VideoState>>,
+    pub is_visible: bool,      // Track intended visibility state
     
     #[cfg(target_os = "windows")]
     webview_hwnd: Arc<Mutex<Option<HWND>>>,
@@ -54,6 +55,7 @@ impl WebviewPreview {
                 volume: 1.0,
                 is_muted: false,
             })),
+            is_visible: true, 
             #[cfg(target_os = "windows")]
             webview_hwnd: Arc::new(Mutex::new(None)),
         }
@@ -395,7 +397,10 @@ impl WebviewPreview {
                 self.last_rect = rect;
             }
             
-            if !ui.is_rect_visible(rect) {
+            // Respect the is_visible flag - if false, we keep it hidden
+            if !self.is_visible {
+                let _ = webview.set_visible(false);
+            } else if !ui.is_rect_visible(rect) {
                 let _ = webview.set_visible(false);
             } else {
                 let _ = webview.set_visible(true);
@@ -420,7 +425,8 @@ impl WebviewPreview {
     /// Set WebView visibility (show/hide).
     /// Used for tab isolation - hides video when not on owner tab.
     /// Audio continues when hidden.
-    pub fn set_visibility(&self, visible: bool) {
+    pub fn set_visibility(&mut self, visible: bool) {
+        self.is_visible = visible;
         if let Some(ref wv) = self.webview {
             // 1. Try wry's built-in visibility logic
             let _ = wv.set_visible(visible);

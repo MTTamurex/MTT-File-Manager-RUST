@@ -12,6 +12,7 @@ pub enum PreviewPanelAction {
     RefreshThumbnail(PathBuf),
     LoadFolderPreview(PathBuf),
     CalculateFolderSize(PathBuf),
+    RequestPlay(PathBuf),
 }
 
 pub fn render_preview_panel(
@@ -30,6 +31,7 @@ pub fn render_preview_panel(
     item_icon_loader: &mut IconLoader,
     svg_manager: &mut SvgIconManager,
     frame: Option<&eframe::Frame>,
+    is_owner: bool,
 ) -> Option<PreviewPanelAction> {
     // Metadados são processados de forma assíncrona; se chegarem, o metadata será Some(...)
     let mut action = None;
@@ -64,7 +66,10 @@ pub fn render_preview_panel(
                 let max_preview_width = ui.available_width() - 16.0;
                 let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
 
-                if is_player_visible {
+                // PATH CHECK: Only show active player if the file is the one playing AND we are the owner
+                let paths_match = preview.path() == Some(&file.path);
+                
+                if is_player_visible && paths_match && is_owner {
                     // === ACTIVE PLAYER ===
                     preview.show(ui, frame);
 
@@ -132,7 +137,7 @@ pub fn render_preview_panel(
                         });
                     });
                 } else {
-                    // === THUMBNAIL ===
+                    // === THUMBNAIL WITH PLAY OVERLAY ===
                     if let Some(tex) = &texture {
                         let image_resp = ui.add(
                             egui::Image::new(tex)
@@ -150,14 +155,14 @@ pub fn render_preview_panel(
                                 let center_size = 64.0;
                                 let center_rect = egui::Rect::from_center_size(media_rect.center(), egui::vec2(center_size, center_size));
                                 ui.painter().rect_filled(center_rect, center_size / 2.0, egui::Color32::from_black_alpha(160));
-                                if let Some(tex) = svg_manager.get_icon(ui.ctx(), "play", 96, [255, 255, 255, 255]) {
-                                    ui.painter().image(tex.id(), center_rect.shrink(14.0), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                                if let Some(tex_play) = svg_manager.get_icon(ui.ctx(), "play", 96, [255, 255, 255, 255]) {
+                                    ui.painter().image(tex_play.id(), center_rect.shrink(14.0), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
                                 }
-                                if ui.put(center_rect, egui::Button::new("").frame(false)).clicked() {
-                                    preview.toggle_play();
+                                if ui.put(center_rect, egui::Button::new("").frame(false).sense(egui::Sense::click())).clicked() {
+                                    action = Some(PreviewPanelAction::RequestPlay(file.path.clone()));
                                 }
                             } else {
-                                // Incompatible format overlay - Render as a centered vertical box on the painter
+                                // Incompatible format overlay
                                 let bg_rect = egui::Rect::from_center_size(media_rect.center(), egui::vec2(160.0, 90.0));
                                 ui.painter().rect_filled(bg_rect, 8.0, egui::Color32::from_black_alpha(180));
                                 
@@ -185,6 +190,39 @@ pub fn render_preview_panel(
             } else {
                 // GIF/Animated Image
                 preview.show(ui, frame);
+            }
+        } else if is_video {
+            // === NO ACTIVE MEDIA PREVIEW YET (Non-owner tab or first selection) ===
+            // Show thumbnail with Play Overlay
+            if let Some(tex) = &texture {
+                let max_preview_width = ui.available_width() - 16.0;
+                let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
+
+                let image_resp = ui.add(
+                    egui::Image::new(tex)
+                        .max_size(max_preview_size)
+                        .shrink_to_fit(),
+                );
+                let media_rect = image_resp.rect;
+
+                let hover_pos = ui.input(|i| i.pointer.hover_pos());
+                let is_hovered = hover_pos.map_or(false, |pos| media_rect.contains(pos));
+
+                if is_hovered {
+                    if is_webview_compatible(&file.path) {
+                        let center_size = 64.0;
+                        let center_rect = egui::Rect::from_center_size(media_rect.center(), egui::vec2(center_size, center_size));
+                        ui.painter().rect_filled(center_rect, center_size / 2.0, egui::Color32::from_black_alpha(160));
+                        if let Some(tex_play) = svg_manager.get_icon(ui.ctx(), "play", 96, [255, 255, 255, 255]) {
+                            ui.painter().image(tex_play.id(), center_rect.shrink(14.0), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                        }
+                        if ui.put(center_rect, egui::Button::new("").frame(false).sense(egui::Sense::click())).clicked() {
+                            action = Some(PreviewPanelAction::RequestPlay(file.path.clone()));
+                        }
+                    }
+                }
+            } else {
+                ui.allocate_space(egui::vec2(ui.available_width() - 16.0, 200.0));
             }
         } else if let Some(tex) = &texture {
             // Fallback: Static Thumbnail (No MediaPreview state)
