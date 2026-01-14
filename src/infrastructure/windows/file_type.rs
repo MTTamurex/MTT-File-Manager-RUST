@@ -61,7 +61,15 @@ pub fn get_perceived_type(extension: &str) -> PerceivedType {
     }
 
     // Query Windows API
-    let perceived = query_perceived_type(&ext_with_dot);
+    let mut perceived = query_perceived_type(&ext_with_dot);
+
+    // Fallback for common video extensions if Windows query fails
+    if perceived == PerceivedType::Other {
+        let clean_ext = ext_with_dot.trim_start_matches('.');
+        if matches!(clean_ext, "mp4" | "mkv" | "avi" | "webm" | "mov" | "wmv" | "flv" | "ogm" | "ts" | "mts" | "m2ts" | "vob" | "3gp" | "vtt" | "m4v" | "m4a" | "m4b" | "m4p" | "m4r" | "3g2" | "3gp2" | "3gpp" | "amv" | "asf" | "avs" | "bik" | "divx" | "drc" | "dvr-ms" | "f4v" | "gvi" | "gxf" | "ismv" | "ivf" | "k3g" | "m2v" | "m4u" | "mj2" | "mjp2" | "mod" | "mp2v" | "mp4v" | "mpa" | "mpe" | "mpeg" | "mpg" | "mpv2" | "mqv" | "nsv" | "nuv" | "ogv" | "pva" | "qt" | "rec" | "rm" | "rmvb" | "rpl" | "thp" | "tod" | "trp" | "ty" | "vid" | "vro" | "weba" | "wm" | "wmp" | "wvx" | "xesc" | "y4m") {
+            perceived = PerceivedType::Video;
+        }
+    }
 
     // Only cache successful results (not Other)
     if perceived != PerceivedType::Other {
@@ -158,6 +166,9 @@ mod tests {
         assert_eq!(get_perceived_type("mp4"), PerceivedType::Video);
         assert_eq!(get_perceived_type("mkv"), PerceivedType::Video);
         assert_eq!(get_perceived_type("avi"), PerceivedType::Video);
+        assert_eq!(get_perceived_type("ogm"), PerceivedType::Video);
+        assert_eq!(get_perceived_type("ts"), PerceivedType::Video);
+        assert_eq!(get_perceived_type("vob"), PerceivedType::Video);
     }
 
     #[test]
