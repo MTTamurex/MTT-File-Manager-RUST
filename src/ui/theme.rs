@@ -18,6 +18,10 @@ pub const THUMBNAIL_DEFAULT: f32 = 128.0;
 // === COLORS (Light Mode) ===
 pub const COLOR_SELECTION: Color32 = Color32::from_rgb(200, 220, 240);
 pub const COLOR_SELECTION_TEXT: Color32 = Color32::from_rgb(0, 50, 100);
+
+pub fn color_selection_hover() -> Color32 {
+    Color32::from_rgba_unmultiplied(200, 220, 240, 50)
+}
 pub const COLOR_ACCENT: Color32 = Color32::from_rgb(0, 120, 215);
 
 pub fn color_hover() -> Color32 {

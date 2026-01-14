@@ -41,13 +41,10 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
         // Background
         if is_selected {
             ui.painter()
-                .rect_filled(header_rect_full, 0.0, Color32::from_rgb(200, 220, 240));
+                .rect_filled(header_rect_full, 0.0, crate::ui::theme::COLOR_SELECTION);
         } else if header_response.hovered() {
-            ui.painter().rect_filled(
-                header_rect_full,
-                0.0,
-                Color32::from_rgba_unmultiplied(200, 220, 240, 50),
-            );
+            ui.painter()
+                .rect_filled(header_rect_full, 0.0, crate::ui::theme::color_selection_hover());
         }
 
         let mut cursor_x = header_rect_full.min.x + 8.0;
@@ -74,7 +71,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
             "Este Computador",
             egui::FontId::proportional(12.0),
             if is_selected {
-                Color32::from_rgb(0, 50, 100)
+                crate::ui::theme::COLOR_SELECTION_TEXT
             } else {
                 ui.visuals().text_color()
             },
@@ -113,13 +110,10 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
         if ui.is_rect_visible(rect) {
             if is_selected {
                 ui.painter()
-                    .rect_filled(rect, 0.0, Color32::from_rgb(200, 220, 240));
+                    .rect_filled(rect, 0.0, crate::ui::theme::COLOR_SELECTION);
             } else if response.hovered() {
-                ui.painter().rect_filled(
-                    rect,
-                    0.0,
-                    Color32::from_rgba_unmultiplied(200, 220, 240, 50),
-                );
+                ui.painter()
+                    .rect_filled(rect, 0.0, crate::ui::theme::color_selection_hover());
             }
 
             let mut cursor_x = rect.min.x + 12.0;
@@ -157,7 +151,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
                 "OneDrive",
                 egui::FontId::proportional(11.5),
                 if is_selected {
-                    Color32::from_rgb(0, 50, 100)
+                    crate::ui::theme::COLOR_SELECTION_TEXT
                 } else {
                     ui.visuals().text_color()
                 },
@@ -181,13 +175,10 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
         if ui.is_rect_visible(rect) {
             if is_selected {
                 ui.painter()
-                    .rect_filled(rect, 0.0, Color32::from_rgb(200, 220, 240));
+                    .rect_filled(rect, 0.0, crate::ui::theme::COLOR_SELECTION);
             } else if response.hovered() {
-                ui.painter().rect_filled(
-                    rect,
-                    0.0,
-                    Color32::from_rgba_unmultiplied(200, 220, 240, 50),
-                );
+                ui.painter()
+                    .rect_filled(rect, 0.0, crate::ui::theme::color_selection_hover());
             }
 
             let mut cursor_x = rect.min.x + 12.0;
@@ -227,7 +218,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
                 "Lixeira",
                 egui::FontId::proportional(11.5),
                 if is_selected {
-                    Color32::from_rgb(0, 50, 100)
+                    crate::ui::theme::COLOR_SELECTION_TEXT
                 } else {
                     ui.visuals().text_color()
                 },
@@ -288,12 +279,12 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
             if ui.is_rect_visible(rect) {
                 if is_selected {
                     ui.painter()
-                        .rect_filled(rect, 0.0, Color32::from_rgb(200, 220, 240));
+                        .rect_filled(rect, 0.0, crate::ui::theme::COLOR_SELECTION);
                 } else if response.hovered() {
                     ui.painter().rect_filled(
                         rect,
                         0.0,
-                        Color32::from_rgba_unmultiplied(200, 220, 240, 50),
+                        crate::ui::theme::color_selection_hover(),
                     );
                 }
 
@@ -331,7 +322,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
                     disk_label,
                     egui::FontId::proportional(11.5),
                     if is_selected {
-                        Color32::from_rgb(0, 50, 100)
+                        crate::ui::theme::COLOR_SELECTION_TEXT
                     } else {
                         ui.visuals().text_color()
                     },
