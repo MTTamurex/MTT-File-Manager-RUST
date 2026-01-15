@@ -9,11 +9,13 @@ use super::webview_preview::WebviewPreview;
 // GIF Player (Mantido inalterado)
 // ============================================================================
 
+#[derive(Clone)]
 pub struct GifFrame {
     pub texture: egui::TextureHandle,
     pub delay: Duration,
 }
 
+#[derive(Clone)]
 pub struct GifPlayer {
     pub frames: Vec<GifFrame>,
     pub current_frame: usize,

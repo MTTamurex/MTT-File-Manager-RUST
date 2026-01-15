@@ -44,6 +44,8 @@ pub struct TabState {
     pub selected_thumbnail: Option<eframe::egui::TextureHandle>,
     /// Selected metadata for preview panel
     pub selected_metadata: Option<(PathBuf, crate::infrastructure::windows::MediaMetadata)>,
+    /// Selected animated GIF for local preview (native)
+    pub selected_gif: Option<crate::ui::components::media_preview::GifPlayer>,
 }
 
 impl TabState {
@@ -65,6 +67,7 @@ impl TabState {
             is_recycle_bin_view: false,
             selected_thumbnail: None,
             selected_metadata: None,
+            selected_gif: None,
         }
     }
 
@@ -91,6 +94,7 @@ impl TabState {
             is_recycle_bin_view: path == "Lixeira",
             selected_thumbnail: None,
             selected_metadata: None,
+            selected_gif: None,
         }
     }
 
@@ -236,6 +240,7 @@ impl TabManager {
         new_tab.selected_file = current.selected_file.clone();
         new_tab.selected_thumbnail = current.selected_thumbnail.clone();
         new_tab.selected_metadata = current.selected_metadata.clone();
+        new_tab.selected_gif = current.selected_gif.clone();
         new_tab.search_query = current.search_query.clone();
 
         self.next_id += 1;
@@ -311,6 +316,7 @@ impl TabManager {
             reopened.selected_file = tab.selected_file;
             reopened.selected_thumbnail = tab.selected_thumbnail;
             reopened.selected_metadata = tab.selected_metadata;
+            reopened.selected_gif = tab.selected_gif;
             reopened.search_query = tab.search_query;
 
             self.next_id += 1;

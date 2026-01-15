@@ -19,6 +19,7 @@ pub fn render_preview_panel(
     ui: &mut egui::Ui,
     file: &FileEntry,
     selected_thumbnail: Option<&egui::TextureHandle>,
+    selected_gif: Option<&mut crate::ui::components::media_preview::GifPlayer>,
     media_preview: Option<&mut MediaPreview>,
     metadata: Option<&MediaMetadata>,
     texture_cache_peek: Option<egui::TextureHandle>, // Output of cache.peek
@@ -52,9 +53,16 @@ pub fn render_preview_panel(
             texture_cache_peek
         };
 
-        if let Some(preview) = media_preview {
+        if let Some(gif_player) = selected_gif {
+            // === NATIVE GIF AUTOPLAY (PRIORITY 1) ===
+            gif_player.update(ui.ctx());
+            let texture = gif_player.current_texture();
+            let max_preview_width = ui.available_width() - 16.0;
+            let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
+            ui.add(egui::Image::new(texture).max_size(max_preview_size).shrink_to_fit());
+        } else if let Some(preview) = media_preview {
             if is_video {
-                // VIDEO PLAYER LOGIC
+                // VIDEO PLAYER LOGIC (WEBVIEW2)
                 let is_player_visible = preview.is_player_visible();
                 let video_state = preview.get_video_state();
                 let is_playing = video_state.as_ref().map(|s| s.is_playing).unwrap_or(false);
@@ -70,15 +78,15 @@ pub fn render_preview_panel(
                 let paths_match = preview.path() == Some(&file.path);
                 
                 if is_player_visible && paths_match && is_owner {
-                    // === ACTIVE PLAYER ===
+                    // === ACTIVE PLAYER (OWNER) ===
                     preview.show(ui, frame);
 
-                    // Controls bar BELOW the video (no extra frames/lines)
+                    // Controls bar BELOW the video
                     ui.add_space(8.0);
                     ui.vertical(|ui| {
                         ui.set_width(max_preview_width);
 
-                        // Seek Bar - App Blue
+                        // Seek Bar
                         ui.horizontal(|ui| {
                             ui.spacing_mut().slider_width = max_preview_width;
                             ui.visuals_mut().selection.bg_fill = crate::ui::theme::COLOR_ACCENT;
@@ -137,7 +145,7 @@ pub fn render_preview_panel(
                         });
                     });
                 } else {
-                    // === THUMBNAIL WITH PLAY OVERLAY ===
+                    // === THUMBNAIL WITH PLAY OVERLAY (NON-OWNER) ===
                     if let Some(tex) = &texture {
                         let image_resp = ui.add(
                             egui::Image::new(tex)
@@ -188,10 +196,11 @@ pub fn render_preview_panel(
                     }
                 }
             } else {
-                // GIF/Animated Image
+                // Fallback for any other global media
                 preview.show(ui, frame);
             }
-        } else if is_video {
+        }
+ else if is_video {
             // === NO ACTIVE MEDIA PREVIEW YET (Non-owner tab or first selection) ===
             // Show thumbnail with Play Overlay
             if let Some(tex) = &texture {

@@ -263,6 +263,7 @@ impl ImageViewerApp {
             // Selection & Preview
             selected_file: None,
             selected_thumbnail: None,
+            selected_gif: None,
             media_preview: None,
             media_preview_owner_tab_id: None,
             selected_metadata: None,
