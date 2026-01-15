@@ -284,6 +284,9 @@ impl ImageViewerApp {
             generation: 0,
             current_generation: shared_gen,
             ui_ctx: ctx,
+            last_items_rebuild: Instant::now(),
+            pending_items_rebuild: false,
+            pending_items_count: 0,
             renaming_state: None,
             focus_rename: false,
 
@@ -350,6 +353,8 @@ impl ImageViewerApp {
             metadata_res_receiver: meta_res_rx,
             metadata_cache: LruCache::new(NonZeroUsize::new(theme::METADATA_CACHE_SIZE).unwrap()),
             metadata_loading: HashSet::new(),
+            last_metadata_refresh: Instant::now(),
+            last_metadata_path: None,
 
             // SVG ICON MANAGER
             svg_icon_manager: SvgIconManager::new(PathBuf::from("assets/icons")),

@@ -507,11 +507,13 @@ impl WebviewPreview {
                     },
                     Err(mpsc::TryRecvError::Empty) => {
                         // Still loading
-                        ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::TopDown), |ui| {
-                            ui.spinner();
-                            ui.label("Carregando player...");
+                        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), |ui| {
+                            ui.centered_and_justified(|ui| {
+                                ui.spinner();
+                                ui.label("Carregando player...");
+                            });
                         });
-                        ui.ctx().request_repaint(); // Poll reasonably fast
+                        ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
                         return; // Don't layout webview yet
                     },
                     Err(mpsc::TryRecvError::Disconnected) => {
@@ -536,10 +538,12 @@ impl WebviewPreview {
                      }
                 });
                 
-                ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::TopDown), |ui| {
-                    ui.spinner();
+                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), |ui| {
+                    ui.centered_and_justified(|ui| {
+                        ui.spinner();
+                    });
                 });
-                ui.ctx().request_repaint(); 
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
                 return;
             }
         }
