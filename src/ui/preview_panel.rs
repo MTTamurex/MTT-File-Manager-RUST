@@ -78,16 +78,16 @@ pub fn render_preview_panel(
                 
                 if is_player_visible && paths_match && is_owner {
                     // === ACTIVE PLAYER (OWNER) ===
-                    preview.show(ui, frame);
+                    let is_detached = preview.is_detached();
 
-                    // Controls bar BELOW the video
-                    ui.add_space(8.0);
-                    ui.vertical(|ui| {
-                        ui.set_width(max_preview_width);
-
+                    // Control Builder Closure (Shared between Attached and Detached views)
+                    // NOW TAKES preview AS ARGUMENT TO AVOID BORROW ISSUES
+                    let mut draw_controls = |ui: &mut egui::Ui, preview: &mut MediaPreview, full_width: f32| {
+                         ui.set_width(full_width);
+                        
                         // Seek Bar
                         ui.horizontal(|ui| {
-                            ui.spacing_mut().slider_width = max_preview_width;
+                            ui.spacing_mut().slider_width = full_width;
                             ui.visuals_mut().selection.bg_fill = crate::ui::theme::COLOR_ACCENT;
 
                             let mut seek_value = current_time;
@@ -141,8 +141,79 @@ pub fn render_preview_panel(
                             );
                             let time_color = if ui.visuals().dark_mode { egui::Color32::LIGHT_GRAY } else { egui::Color32::DARK_GRAY };
                             ui.label(egui::RichText::new(time_text).size(13.0).color(time_color));
+                            
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                // Detach Button
+                                let detach_icon_name = if is_detached { "minimize_2" } else { "external-link" }; 
+                                let tooltip = if is_detached { "Anexar ao painel" } else { "Desacoplar vídeo" };
+
+                                if let Some(tex) = svg_manager.get_icon(ui.ctx(), detach_icon_name, 48, icon_color) {
+                                     if ui.add(egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(18.0, 18.0))).frame(false))
+                                        .on_hover_text(tooltip)
+                                        .clicked() {
+                                        preview.toggle_detached();
+                                    }
+                                } else {
+                                    if ui.button(if is_detached { "Anexar" } else { "Desacoplar" }).on_hover_text(tooltip).clicked() {
+                                        preview.toggle_detached();
+                                    }
+                                }
+                            });
                         });
-                    });
+                    };
+
+                    if is_detached {
+                        // === DETACHED MODE ===
+                        // 1. Placeholder in Panel
+                        ui.vertical(|ui| {
+                            ui.add_space(20.0);
+                            ui.label(egui::RichText::new("Vídeo Desacoplado").strong().size(16.0));
+                            ui.add_space(10.0);
+                            
+                            // Reattach button in panel
+                            if ui.button("Reacoplar Vídeo ao Painel").clicked() {
+                                preview.set_detached(false);
+                            }
+                            ui.add_space(20.0);
+                        });
+
+                        // 2. Floating Window
+                        let mut open = true;
+                        egui::Window::new("Reprodutor de Vídeo")
+                            .open(&mut open)
+                            .default_size([640.0, 480.0])
+                            .resizable(true)
+                            .collapsible(false)
+                            .show(ui.ctx(), |ui| {
+                                // Use bottom_up layout to pin controls to the bottom
+                                ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                                    ui.add_space(8.0);
+                                    draw_controls(ui, preview, ui.available_width());
+                                    ui.add_space(8.0);
+                                    
+                                    // Fill remaining space with video
+                                    ui.centered_and_justified(|ui| {
+                                        preview.show(ui, frame);
+                                    });
+                                });
+                            });
+                        
+                        // If window closed by user (X button), reattach
+                        if !open {
+                            preview.set_detached(false);
+                        }
+
+                    } else {
+                        // === ATTACHED MODE (Standard) ===
+                        preview.show(ui, frame);
+
+                        // Controls bar BELOW the video
+                        ui.add_space(8.0);
+                        ui.vertical(|ui| {
+                            draw_controls(ui, preview, max_preview_width);
+                        });
+                    }
+
                 } else {
                     // === THUMBNAIL WITH PLAY OVERLAY (NON-OWNER) ===
                     if let Some(tex) = &texture {

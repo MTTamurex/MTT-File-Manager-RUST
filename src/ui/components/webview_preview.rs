@@ -38,6 +38,7 @@ pub struct WebviewPreview {
     pub play_on_init: bool,    // if true, play as soon as webview is ready
     pub state: Arc<RwLock<VideoState>>,
     pub is_visible: bool,      // Track intended visibility state
+    pub is_detached: bool,     // Track if player is detached into a floating window
     
     #[cfg(target_os = "windows")]
     webview_hwnd: Arc<Mutex<Option<HWND>>>,
@@ -61,7 +62,8 @@ impl WebviewPreview {
                 volume: 1.0,
                 is_muted: false,
             })),
-            is_visible: true, 
+            is_visible: true,
+            is_detached: false,
             #[cfg(target_os = "windows")]
             webview_hwnd: Arc::new(Mutex::new(None)),
         }
@@ -484,9 +486,13 @@ impl WebviewPreview {
         }
         
         // Reserve space for the video
-        let available = ui.available_size();
-        let preview_height = (available.x * 0.6).min(300.0);
-        let size = egui::vec2(available.x, preview_height);
+        let size = if self.is_detached {
+            ui.available_size()
+        } else {
+            let available = ui.available_size();
+            let preview_height = (available.x * 0.6).min(300.0);
+            egui::vec2(available.x, preview_height)
+        };
         let (rect, _response) = ui.allocate_exact_size(size, egui::Sense::hover());
 
         // Async Lazy Init

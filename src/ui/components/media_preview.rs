@@ -198,6 +198,29 @@ impl MediaPreview {
         }
     }
 
+    /// Check if video is detached
+    pub fn is_detached(&self) -> bool {
+        if let MediaPreview::Video(player) = self {
+            player.is_detached
+        } else {
+            false
+        }
+    }
+
+    /// Set detached state
+    pub fn set_detached(&mut self, detached: bool) {
+        if let MediaPreview::Video(player) = self {
+            player.is_detached = detached;
+        }
+    }
+
+    /// Toggle detached state
+    pub fn toggle_detached(&mut self) {
+        if let MediaPreview::Video(player) = self {
+            player.is_detached = !player.is_detached;
+        }
+    }
+
     pub fn path(&self) -> Option<&std::path::Path> {
         match self {
             MediaPreview::StaticImage(_) => None,
