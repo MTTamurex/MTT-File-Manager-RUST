@@ -173,7 +173,7 @@ pub fn render_grid_view(
                                 }
 
                                 if response.hovered() {
-                                    let item_tooltip = item.clone();
+                                    // REMOVED: let item_tooltip = item.clone();
                                     let is_recycle = ctx.is_recycle_bin_view;
                                     let right_bound = available_rect.right();
                                     let mouse_pos =
@@ -196,18 +196,18 @@ pub fn render_grid_view(
                                             ui.set_max_width(300.0);
                                             ui.vertical(|ui| {
                                                 ui.label(
-                                                    egui::RichText::new(&item_tooltip.name).strong(),
+                                                    egui::RichText::new(&item.name).strong(),
                                                 );
                                                 ui.separator();
                                                 ui.label(format!(
                                                     "Tipo: {}",
-                                                    get_file_type_string(&item_tooltip)
+                                                    get_file_type_string(item)
                                                 ));
-                                                if !item_tooltip.is_dir {
+                                                if !item.is_dir {
                                                     ui.label(format!(
                                                         "Tamanho: {}",
                                                         crate::infrastructure::windows::format_size(
-                                                            item_tooltip.size
+                                                            item.size
                                                         )
                                                     ));
                                                 }
@@ -217,13 +217,12 @@ pub fn render_grid_view(
                                                     "Última modificação"
                                                 };
                                                 let date_val = if is_recycle {
-                                                    item_tooltip
-                                                        .deletion_date
+                                                    item.deletion_date
                                                         .clone()
                                                         .unwrap_or_else(|| "-".to_string())
                                                 } else {
                                                     crate::infrastructure::windows::format_date(
-                                                        item_tooltip.modified,
+                                                        item.modified,
                                                     )
                                                 };
                                                 ui.label(format!("{}: {}", date_lbl, date_val));
@@ -236,7 +235,7 @@ pub fn render_grid_view(
                                 ui.allocate_new_ui(
                                     egui::UiBuilder::new().max_rect(inner_rect),
                                     |ui| {
-                                        render_item_slot_for_grid(ui, index, item, ctx, ops);
+                                            render_item_slot_for_grid(ui, index, item, ctx);
                                     },
                                 );
                             }
@@ -314,7 +313,7 @@ pub fn render_grid_view(
                             }
 
                             if response.hovered() {
-                                let item_tooltip = item.clone();
+                                // REMOVED: let item_tooltip = item.clone();
                                 let is_recycle = ctx.is_recycle_bin_view;
                                 let right_bound = available_rect.right();
                                 let mouse_pos =
@@ -336,18 +335,18 @@ pub fn render_grid_view(
                                         ui.set_max_width(300.0);
                                         ui.vertical(|ui| {
                                             ui.label(
-                                                egui::RichText::new(&item_tooltip.name).strong(),
+                                                egui::RichText::new(&item.name).strong(),
                                             );
                                             ui.separator();
                                             ui.label(format!(
                                                 "Tipo: {}",
-                                                get_file_type_string(&item_tooltip)
+                                                get_file_type_string(item)
                                             ));
-                                            if !item_tooltip.is_dir {
+                                            if !item.is_dir {
                                                 ui.label(format!(
                                                     "Tamanho: {}",
                                                     crate::infrastructure::windows::format_size(
-                                                        item_tooltip.size
+                                                        item.size
                                                     )
                                                 ));
                                             }
@@ -357,13 +356,12 @@ pub fn render_grid_view(
                                                 "Última modificação"
                                             };
                                             let date_val = if is_recycle {
-                                                item_tooltip
-                                                    .deletion_date
+                                                item.deletion_date
                                                     .clone()
                                                     .unwrap_or_else(|| "-".to_string())
                                             } else {
                                                 crate::infrastructure::windows::format_date(
-                                                    item_tooltip.modified,
+                                                    item.modified,
                                                 )
                                             };
                                             ui.label(format!("{}: {}", date_lbl, date_val));
@@ -374,7 +372,7 @@ pub fn render_grid_view(
 
                             let inner_rect = rect.shrink(3.0);
                             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
-                                render_item_slot_for_grid(ui, index, item, ctx, ops);
+                                render_item_slot_for_grid(ui, index, item, ctx);
                             });
                         }
                     }
@@ -400,6 +398,21 @@ pub fn render_grid_view(
                 .strong(),
         );
         ui.add_space(4.0);
+    }
+
+    // BATCH PROCESSING: Flush all pending operations collected during render
+    // This avoids context switching and virtual dispatch inside the render loop
+    for path in ctx.pending_ops.thumbnail_loads.drain(..) {
+        ops.request_thumbnail_load(path);
+    }
+    for path in ctx.pending_ops.folder_scans.drain(..) {
+        ops.request_folder_scan(path);
+    }
+    for path in ctx.pending_ops.folder_preview_loads.drain(..) {
+        ops.request_folder_preview_load(path);
+    }
+    for rename_idx in ctx.pending_ops.renames.drain(..) {
+        ops.rename_with_shell(rename_idx);
     }
 
     // Handle actions after rendering - ORDER MATTERS!
@@ -430,8 +443,7 @@ fn render_item_slot_for_grid(
     ui: &mut Ui,
     idx: usize,
     item: &FileEntry,
-    ctx: &mut GridViewContext,
-    ops: &mut dyn GridViewOperations,
+    ctx: &mut GridViewContext
 ) {
     use crate::ui::components::item_slot::{render_item_slot, ItemSlotContext};
 
@@ -446,12 +458,6 @@ fn render_item_slot_for_grid(
     } else {
         None
     };
-
-    // Track operation counts BEFORE render to know what was added
-    let thumb_start = ctx.pending_ops.thumbnail_loads.len();
-    let scan_start = ctx.pending_ops.folder_scans.len();
-    let preview_start = ctx.pending_ops.folder_preview_loads.len();
-    let rename_start = ctx.pending_ops.renames.len();
 
     // Create context with mutable reference to the clone
     {
@@ -509,22 +515,6 @@ fn render_item_slot_for_grid(
                 *text = new_text;
             }
         }
-    }
-
-    // Execute ONLY NEW pending operations (those added by this item)
-    for path in ctx.pending_ops.thumbnail_loads.drain(thumb_start..) {
-        ops.request_thumbnail_load(path);
-    }
-
-    for path in ctx.pending_ops.folder_scans.drain(scan_start..) {
-        ops.request_folder_scan(path);
-    }
-    for path in ctx.pending_ops.folder_preview_loads.drain(preview_start..) {
-        ops.request_folder_preview_load(path);
-    }
-
-    for rename_idx in ctx.pending_ops.renames.drain(rename_start..) {
-        ops.rename_with_shell(rename_idx);
     }
 }
 
