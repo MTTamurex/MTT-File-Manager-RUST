@@ -23,6 +23,20 @@ pub fn render_panels(app: &mut ImageViewerApp, ctx: &egui::Context, _frame: &mut
 
     // 4. Central Panel
     render_central_panel_layout(app, ctx);
+    
+    // 5. Focus release: When user clicks anywhere outside the video player,
+    // release keyboard focus from WebView2 back to the main window
+    #[cfg(target_os = "windows")]
+    {
+        use crate::ui::components::MediaPreview;
+        
+        if ctx.input(|i| i.pointer.any_pressed()) {
+            // User clicked somewhere - release WebView2 focus
+            if let Some(MediaPreview::Video(ref player)) = app.media_preview {
+                player.release_focus_auto();
+            }
+        }
+    }
 }
 
 fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) {

@@ -10,6 +10,8 @@ use wry::{WebView, WebViewBuilder};
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE, SW_SHOW, FindWindowExW};
 #[cfg(target_os = "windows")]
+use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
+#[cfg(target_os = "windows")]
 use windows::Win32::Foundation::HWND;
 
 /// Shared state for video playback (updated via IPC from JavaScript)
@@ -139,6 +141,40 @@ impl WebviewPreview {
                 "var v = document.getElementById('player'); v.muted = !v.muted;"
             );
         }
+    }
+    
+    /// Release keyboard focus from WebView2 back to the main window
+    /// Call this when user clicks outside the video player area
+    #[cfg(target_os = "windows")]
+    pub fn release_focus(&self, main_hwnd: HWND) {
+        unsafe {
+            // Set focus to the main window to release WebView2's keyboard capture
+            let _ = SetFocus(main_hwnd);
+        }
+    }
+    
+    /// Release keyboard focus automatically by getting foreground window
+    /// This is simpler to use - just call it when clicking outside player
+    #[cfg(target_os = "windows")]
+    pub fn release_focus_auto(&self) {
+        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+        unsafe {
+            let hwnd = GetForegroundWindow();
+            if !hwnd.is_invalid() {
+                let _ = SetFocus(hwnd);
+            }
+        }
+    }
+    
+    /// Check if this webview has the given HWND as its child
+    #[cfg(target_os = "windows")]
+    pub fn has_hwnd(&self, hwnd: HWND) -> bool {
+        if let Ok(guard) = self.webview_hwnd.lock() {
+            if let Some(wv_hwnd) = *guard {
+                return wv_hwnd == hwnd;
+            }
+        }
+        false
     }
 
     fn start_video_server(&mut self) -> Option<u16> {
