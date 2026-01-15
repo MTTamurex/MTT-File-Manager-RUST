@@ -144,6 +144,18 @@ fn render_tab_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context, frame: &m
                     app.update_video_visibility();
                 }
                 TabBarAction::CloseTab(idx) => {
+                    // CLEANUP LOGIC: If the tab being closed is the owner of the media player, destroy the player.
+                    if let Some(tab) = app.tab_manager.tabs.get(idx) {
+                        let tab_id = tab.id;
+                        if app.media_preview_owner_tab_id == Some(tab_id) {
+                            if let Some(crate::ui::components::media_preview::MediaPreview::Video(ref mut wv)) = app.media_preview {
+                                wv.pause();
+                            }
+                            app.media_preview = None;
+                            app.media_preview_owner_tab_id = None;
+                        }
+                    }
+
                     if app.tab_manager.close_tab(idx) {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     } else {
