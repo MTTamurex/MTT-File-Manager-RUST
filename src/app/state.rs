@@ -175,4 +175,7 @@ pub struct ImageViewerApp {
 
     // RECYCLE BIN CACHE
     pub deletion_date_cache: LruCache<String, String>,
+    
+    // PERFORMANCE: Reusable buffers for grid view rendering (avoid per-item allocations)
+    pub pending_ops: crate::ui::views::grid_view::PendingOperations,
 }

@@ -365,6 +365,9 @@ impl ImageViewerApp {
 
             // RECYCLE BIN CACHE
             deletion_date_cache: LruCache::new(NonZeroUsize::new(200).unwrap()),
+            
+            // PERFORMANCE: Reusable buffers for grid rendering
+            pending_ops: crate::ui::views::grid_view::PendingOperations::new(),
         };
 
         // Inicia monitoramento inicial

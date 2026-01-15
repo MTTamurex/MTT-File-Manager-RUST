@@ -62,6 +62,7 @@ impl IconLoader {
     }
 
     /// Gets or loads a Windows shell icon for a file path
+    /// PERFORMANCE: Avoids blocking I/O by using extension-based lookup first
     pub fn get_or_load_icon(
         &mut self,
         ctx: &egui::Context,
@@ -74,16 +75,18 @@ impl IconLoader {
             return Some(texture.clone());
         }
 
-        // Try to load icon - first by path, then by extension (for virtual paths like recycle bin)
-        let icon_result = if path.exists() {
-            // Real file - use path-based extraction. Use Jumbo for better quality.
-            windows::extract_file_icon_by_path(path, IconSize::Jumbo)
-        } else if let Some(ext) = path.extension() {
-            // Virtual path (e.g., dummy.rar) - use extension-based extraction (force usefileattributes)
+        // PERFORMANCE FIX: NEVER call path.exists() in render loop!
+        // On OneDrive, this can trigger network calls (28ms+ per file).
+        // 
+        // Strategy: Use extension-based icon lookup first (fast, no I/O).
+        // Only fall back to path-based if no extension exists.
+        let icon_result = if let Some(ext) = path.extension() {
+            // Extension-based lookup is FAST (uses registry, no file access)
             let ext_str = ext.to_string_lossy();
             windows::get_file_type_icon(false, &ext_str, IconSize::Large)
         } else {
-            // No extension - try path anyway
+            // No extension - try path-based as last resort
+            // This is rare (most files have extensions) and acceptable
             windows::extract_file_icon_by_path(path, IconSize::Jumbo)
         };
 
