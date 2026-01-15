@@ -174,8 +174,13 @@ pub fn render_preview_panel(
                     }
                 }
             } else {
-                // Fallback for any other global media
-                preview.show(ui, frame);
+                // === CURRENT FILE IS NOT A VIDEO (but media_preview exists for another file) ===
+                // Show the image thumbnail, NOT the video player
+                if let Some(tex) = &texture {
+                    let max_preview_width = ui.available_width() - 16.0;
+                    let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
+                    ui.add(egui::Image::new(tex).max_size(max_preview_size).shrink_to_fit());
+                }
             }
         }
  else if is_video {
