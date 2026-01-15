@@ -161,6 +161,7 @@ impl ImageViewerApp {
         }
 
         // 1. STREAMING: Recebe lotes incrementais de FileEntry (Filtrado por geração)
+        let mut saw_end_of_load = false;
         while let Ok((gen_id, new_batch)) = self.file_entry_receiver.try_recv() {
             if gen_id != self.generation {
                 continue; // Descarta dados de uma navegação/refresh anterior
@@ -168,17 +169,33 @@ impl ImageViewerApp {
 
             if new_batch.is_empty() {
                 // Lote vazio = Sinal de "Fim do Carregamento" da thread
-                self.is_loading_folder = false;
-                // Ordenação final para garantir tudo correto
-                self.sort_items();
+                saw_end_of_load = true;
             } else {
                 // Chegou dados! Adiciona à lista mestre
+                self.pending_items_count = self.pending_items_count.saturating_add(new_batch.len());
+                self.pending_items_rebuild = true;
                 self.all_items.extend(new_batch);
-
-                // Reaplica filtro (que já chama sort_items internamente)
-                self.filter_items();
             }
+        }
+
+        if saw_end_of_load {
+            self.is_loading_folder = false;
+            self.pending_items_rebuild = false;
+            self.pending_items_count = 0;
+            // Ordenação final (filter_items já chama sort_items internamente)
+            self.filter_items();
+            self.last_items_rebuild = Instant::now();
             ctx.request_repaint();
+        } else if self.pending_items_rebuild {
+            // Throttle rebuild para evitar sort a cada lote
+            let elapsed = self.last_items_rebuild.elapsed();
+            if elapsed > Duration::from_millis(80) || self.pending_items_count >= 1200 {
+                self.filter_items();
+                self.last_items_rebuild = Instant::now();
+                self.pending_items_count = 0;
+                self.pending_items_rebuild = false;
+                ctx.request_repaint();
+            }
         }
 
         // 2. Cover Worker: Recebe resultados de capas de folder
@@ -256,10 +273,11 @@ impl ImageViewerApp {
 
             received_any = true;
 
+            // Sempre libera o slot de loading, mesmo em falhas
+            self.cache_manager.finish_loading(&thumbnail_data.path);
+
             // Só processa thumbnails (image_data não vazio)
             if !thumbnail_data.image_data.is_empty() {
-                self.cache_manager.finish_loading(&thumbnail_data.path);
-
                 let texture = ctx.load_texture(
                     thumbnail_data.path.to_string_lossy().to_string(),
                     egui::ColorImage::from_rgba_unmultiplied(

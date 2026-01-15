@@ -61,6 +61,9 @@ impl ImageViewerApp {
         self.selected_item = None;
         self.is_loading_folder = true;
         self.total_items = 0;
+        self.pending_items_rebuild = false;
+        self.pending_items_count = 0;
+        self.last_items_rebuild = Instant::now();
 
         let my_gen = self.generation;
         let gen_clone = self.current_generation.clone();

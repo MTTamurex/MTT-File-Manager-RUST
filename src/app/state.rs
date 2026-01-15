@@ -87,6 +87,8 @@ pub struct ImageViewerApp {
     pub metadata_res_receiver: Receiver<(PathBuf, u64, windows_infra::MediaMetadata)>,
     pub metadata_cache: LruCache<PathBuf, (u64, windows_infra::MediaMetadata)>,
     pub metadata_loading: HashSet<PathBuf>,
+    pub last_metadata_refresh: Instant,
+    pub last_metadata_path: Option<PathBuf>,
     pub show_preview_panel: bool,
     pub is_computer_view: bool,    // Se estamos na view "Este Computador"
     pub is_recycle_bin_view: bool, // Se estamos na view da Lixeira
@@ -100,6 +102,10 @@ pub struct ImageViewerApp {
     pub generation: usize,                    // Contador local (Main Thread)
     pub current_generation: Arc<AtomicUsize>, // Contador compartilhado (Workers)
     pub ui_ctx: egui::Context, // Referência ao contexto da UI para repaints assíncronos
+    // PERFORMANCE: Throttle rebuild de lista durante streaming
+    pub last_items_rebuild: Instant,
+    pub pending_items_rebuild: bool,
+    pub pending_items_count: usize,
 
     // ESTADO DE RENOMEAÇÃO
     pub renaming_state: Option<(usize, String)>, // (Index, Texto Editável)

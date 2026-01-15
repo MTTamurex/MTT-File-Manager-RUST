@@ -15,6 +15,15 @@ impl ImageViewerApp {
 
         match current_file {
             Some(path) => {
+                // Throttle metadata checks to avoid per-frame IO on large/remote files
+                if self.last_metadata_path.as_ref() == Some(&path)
+                    && self.last_metadata_refresh.elapsed() < std::time::Duration::from_millis(250)
+                {
+                    return;
+                }
+                self.last_metadata_path = Some(path.clone());
+                self.last_metadata_refresh = std::time::Instant::now();
+
                 let mtime = std::fs::metadata(&path)
                     .and_then(|m| m.modified())
                     .ok()
@@ -40,6 +49,7 @@ impl ImageViewerApp {
             }
             None => {
                 self.selected_metadata = None;
+                self.last_metadata_path = None;
             }
         }
     }
