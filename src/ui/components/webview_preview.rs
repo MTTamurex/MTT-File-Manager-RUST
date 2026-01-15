@@ -3,6 +3,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::io::{Read, Write, BufReader, BufRead};
 use std::net::{TcpListener, TcpStream};
+use std::process::{Command, Stdio};
 use eframe::egui;
 use wry::{WebView, WebViewBuilder};
 
@@ -448,9 +449,211 @@ impl WebviewPreview {
     }
 }
 
+/// Check if the file extension requires transcoding (not natively supported by WebView2)
+fn is_transcode_required(path: &PathBuf) -> bool {
+    let path_str = path.to_string_lossy().to_lowercase();
+    // Formats not natively supported by WebView2/Edge
+    path_str.ends_with(".mkv") 
+        || path_str.ends_with(".avi") 
+        || path_str.ends_with(".wmv")
+        || path_str.ends_with(".ogm")
+        || path_str.ends_with(".flv")
+        || path_str.ends_with(".rmvb")
+        || path_str.ends_with(".rm")
+}
+
+/// Handle MKV (and other) files by transcoding to MP4 on-the-fly using FFmpeg
+/// Returns true if transcoding was handled, false if FFmpeg is not available
+fn handle_mkv_transcoding(mut stream: TcpStream, video_path: &PathBuf) -> bool {
+    let file_path = video_path.to_string_lossy().to_string();
+    
+    println!("[Transcoding] Starting FFmpeg for: {}", file_path);
+    
+    // Build FFmpeg command
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args(&[
+        "-i", &file_path,          // Input file
+        "-c:v", "libx264",         // Transcode to H.264
+        "-preset", "ultrafast",    // Prioritize speed over compression
+        "-tune", "zerolatency",    // Optimize for streaming
+        "-c:a", "aac",             // Transcode audio to AAC
+        "-f", "mp4",               // Output format: MP4
+        "-movflags", "frag_keyframe+empty_moov+faststart", // Enable streaming
+        "pipe:1"                   // Output to stdout
+    ]);
+    
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped()); // Capture stderr for debugging
+    
+    // Windows-specific: Hide the console window
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    
+    // Try to spawn FFmpeg
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[Transcoding] Failed to spawn FFmpeg: {}. Is ffmpeg in PATH?", e);
+            let response = "HTTP/1.1 500 Internal Server Error\r\n\
+                Content-Type: text/plain\r\n\
+                Content-Length: 25\r\n\
+                \r\n\
+                FFmpeg not found in PATH";
+            let _ = stream.write_all(response.as_bytes());
+            return false;
+        }
+    };
+    
+    // Spawn a thread to read and log stderr
+    let stderr = child.stderr.take();
+    thread::spawn(move || {
+        if let Some(mut err) = stderr {
+            let mut err_output = String::new();
+            if err.read_to_string(&mut err_output).is_ok() && !err_output.is_empty() {
+                // Only print first 500 chars to avoid spam
+                let truncated: String = err_output.chars().take(500).collect();
+                eprintln!("[FFmpeg stderr] {}", truncated);
+            }
+        }
+    });
+    
+    // Take stdout from the child process
+    let mut ffmpeg_stdout = match child.stdout.take() {
+        Some(s) => s,
+        None => {
+            eprintln!("[Transcoding] Failed to capture FFmpeg stdout");
+            let response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n";
+            let _ = stream.write_all(response.as_bytes());
+            return false;
+        }
+    };
+    
+    // Send HTTP headers - using raw streaming (no chunked, no content-length)
+    // WebView2 should handle this with Connection: close
+    let response_headers = "HTTP/1.1 200 OK\r\n\
+        Content-Type: video/mp4\r\n\
+        Access-Control-Allow-Origin: *\r\n\
+        Cache-Control: no-cache\r\n\
+        Connection: close\r\n\
+        \r\n";
+    
+    if stream.write_all(response_headers.as_bytes()).is_err() {
+        eprintln!("[Transcoding] Failed to write headers");
+        let _ = child.kill();
+        return false;
+    }
+    
+    // Set socket to non-blocking to detect backpressure
+    // We'll handle blocking manually with retries
+    let _ = stream.set_nonblocking(false); // Keep blocking for simplicity but handle errors
+    
+    // Stream FFmpeg output with backpressure handling
+    let mut buffer = [0u8; 64 * 1024]; // 64KB buffer
+    let mut total_bytes: u64 = 0;
+    let mut last_logged_mb: u64 = 0;
+    
+    loop {
+        match ffmpeg_stdout.read(&mut buffer) {
+            Ok(0) => {
+                // EOF - FFmpeg finished producing data
+                // Flush any remaining data
+                let _ = stream.flush();
+                println!("[Transcoding] Stream complete. Total bytes sent: {} ({:.1} MB)", 
+                    total_bytes, total_bytes as f64 / (1024.0 * 1024.0));
+                break;
+            }
+            Ok(n) => {
+                // Write with retry for backpressure
+                let mut written = 0;
+                let data = &buffer[..n];
+                
+                while written < data.len() {
+                    match stream.write(&data[written..]) {
+                        Ok(0) => {
+                            // Write returned 0 - likely backpressure, wait and retry
+                            thread::sleep(std::time::Duration::from_millis(10));
+                        }
+                        Ok(w) => {
+                            written += w;
+                        }
+                        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            // Backpressure - client buffer full, wait and retry
+                            thread::sleep(std::time::Duration::from_millis(10));
+                        }
+                        Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => {
+                            // Interrupted, just retry immediately
+                            continue;
+                        }
+                        Err(ref e) if e.kind() == std::io::ErrorKind::BrokenPipe 
+                            || e.kind() == std::io::ErrorKind::ConnectionReset 
+                            || e.kind() == std::io::ErrorKind::ConnectionAborted => {
+                            // Fatal: Client actually disconnected
+                            eprintln!("[Transcoding] Client disconnected: {} (sent {} bytes)", e, total_bytes);
+                            let _ = child.kill();
+                            return true;
+                        }
+                        Err(e) => {
+                            // Other error - log and try to continue
+                            eprintln!("[Transcoding] Write warning: {} (retrying...)", e);
+                            thread::sleep(std::time::Duration::from_millis(50));
+                        }
+                    }
+                }
+                
+                total_bytes += n as u64;
+                
+                // Log progress every 5MB (avoid spam)
+                let current_mb = total_bytes / (5 * 1024 * 1024);
+                if current_mb > last_logged_mb {
+                    last_logged_mb = current_mb;
+                    println!("[Transcoding] Progress: {:.1} MB sent...", total_bytes as f64 / (1024.0 * 1024.0));
+                }
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => {
+                // Read interrupted, just retry
+                continue;
+            }
+            Err(e) => {
+                eprintln!("[Transcoding] FFmpeg read error: {}", e);
+                break;
+            }
+        }
+    }
+    
+    // Flush final data
+    let _ = stream.flush();
+    
+    // Wait for FFmpeg to finish
+    match child.wait() {
+        Ok(status) => println!("[Transcoding] FFmpeg exited with: {}", status),
+        Err(e) => eprintln!("[Transcoding] Failed to wait for FFmpeg: {}", e),
+    }
+    
+    true
+}
+
 fn handle_video_request(mut stream: TcpStream, video_path: &PathBuf) {
     use std::io::Seek;
     use std::fs::File;
+    
+    // Check if transcoding is required for this file type
+    if is_transcode_required(video_path) {
+        // Read and discard the HTTP request headers first
+        let reader = BufReader::new(&stream);
+        for line in reader.lines().map_while(Result::ok) {
+            if line.is_empty() {
+                break;
+            }
+        }
+        
+        // Handle via FFmpeg transcoding
+        handle_mkv_transcoding(stream, video_path);
+        return;
+    }
     
     let mut reader = BufReader::new(&stream);
     let mut request_line = String::new();
