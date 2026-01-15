@@ -228,6 +228,26 @@ pub fn render_preview_panel(
                         if ui.put(center_rect, egui::Button::new("").frame(false).sense(egui::Sense::click())).clicked() {
                             action = Some(PreviewPanelAction::RequestPlay(file.path.clone()));
                         }
+                    } else {
+                        // Incompatible format overlay (same as media_preview branch)
+                        let bg_rect = egui::Rect::from_center_size(media_rect.center(), egui::vec2(160.0, 90.0));
+                        ui.painter().rect_filled(bg_rect, 8.0, egui::Color32::from_black_alpha(180));
+                        
+                        ui.painter().text(
+                            media_rect.center() - egui::vec2(0.0, 15.0),
+                            egui::Align2::CENTER_CENTER,
+                            "🚫",
+                            egui::FontId::proportional(32.0),
+                            egui::Color32::WHITE,
+                        );
+                        
+                        ui.painter().text(
+                            media_rect.center() + egui::vec2(0.0, 20.0),
+                            egui::Align2::CENTER_CENTER,
+                            "Preview não disponível",
+                            egui::FontId::proportional(13.0),
+                            egui::Color32::WHITE,
+                        );
                     }
                 }
             } else {
