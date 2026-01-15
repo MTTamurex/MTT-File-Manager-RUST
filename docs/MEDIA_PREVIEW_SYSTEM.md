@@ -48,3 +48,19 @@ While the video is rendered by WebView, the **Controls** are rendered in pure **
 
 ## ⚠️ Known Constraints
 - **Native Window Precedence**: Being a native child window, the WebView window always stays on top of any `egui` painting in its area. This is why controls are placed **below** the video instead of as an overlay during active playback.
+
+## 🎬 On-the-Fly Transcoding (Experimental)
+
+For container formats not natively supported by WebView2 (e.g., MKV, AVI, WMV), the server can transcode to MP4 in real-time using FFmpeg:
+
+| Property | Value |
+| :--- | :--- |
+| **Trigger** | Files with `.mkv`, `.avi`, or `.wmv` extensions |
+| **Process** | FFmpeg with `-c:v libx264 -preset ultrafast -tune zerolatency` |
+| **Output** | Fragmented MP4 (`frag_keyframe+empty_moov`) via chunked HTTP |
+| **Limitation** | No seeking during transcoded playback |
+| **Requirement** | `ffmpeg.exe` must be in system PATH |
+
+> [!NOTE]
+> If FFmpeg is not installed, the server returns HTTP 500 and the video will not play.
+
