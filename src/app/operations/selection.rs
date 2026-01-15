@@ -27,6 +27,36 @@ impl ImageViewerApp {
             if let Some(tex) = self.cache_manager.texture_cache.peek(&selected.path) {
                 self.selected_thumbnail = Some(tex.clone());
             }
+
+            // CLEANUP LOGIC: If we are the owner, and focus changed to a DIFFERENT file, stop the player.
+            let active_tab_id = self.tab_manager.active().id;
+            let is_owner = self.media_preview_owner_tab_id == Some(active_tab_id);
+            if is_owner {
+                use crate::ui::components::media_preview::MediaPreview;
+                let should_stop = match &mut self.media_preview {
+                    Some(MediaPreview::Video(webview)) => webview.path != selected.path,
+                    Some(MediaPreview::AnimatedGif(_)) => true, // Gifs are small, but let's be strict
+                    _ => false,
+                };
+
+                if should_stop {
+                    if let Some(MediaPreview::Video(ref mut wv)) = self.media_preview {
+                        wv.pause();
+                    }
+                    self.media_preview = None;
+                    self.media_preview_owner_tab_id = None;
+                }
+            }
+        } else {
+            // No selection -> if owner, clear media
+            let active_tab_id = self.tab_manager.active().id;
+            if self.media_preview_owner_tab_id == Some(active_tab_id) {
+                if let Some(crate::ui::components::media_preview::MediaPreview::Video(ref mut wv)) = self.media_preview {
+                    wv.pause();
+                }
+                self.media_preview = None;
+                self.media_preview_owner_tab_id = None;
+            }
         }
 
         // CRITICAL: Sync visibility whenever selection changes
@@ -47,6 +77,17 @@ impl ImageViewerApp {
         self.search_query.clear();
         self.context_menu.target_path = None;
         self.renaming_state = None;
+
+        // CLEANUP LOGIC: If owner resets selection, clear media
+        let active_tab_id = self.tab_manager.active().id;
+        if self.media_preview_owner_tab_id == Some(active_tab_id) {
+            use crate::ui::components::media_preview::MediaPreview;
+            if let Some(MediaPreview::Video(ref mut wv)) = self.media_preview {
+                wv.pause();
+            }
+            self.media_preview = None;
+            self.media_preview_owner_tab_id = None;
+        }
 
         // CRITICAL: Sync visibility whenever selection is reset
         self.update_video_visibility();
