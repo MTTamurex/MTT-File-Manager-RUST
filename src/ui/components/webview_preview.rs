@@ -99,8 +99,10 @@ impl WebviewPreview {
     /// Seek to specific time in seconds
     pub fn seek(&self, time: f64) {
         if let Some(webview) = &self.webview {
+            // Try smart seek first (for transcoded videos), fallback to native
             let _ = webview.evaluate_script(&format!(
-                "document.getElementById('player').currentTime = {}", time
+                "if (typeof seekToPosition === 'function') {{ seekToPosition({}); }} else {{ document.getElementById('player').currentTime = {}; }}", 
+                time, time
             ));
         }
     }
@@ -203,11 +205,117 @@ impl WebviewPreview {
         let video_url = format!("http://127.0.0.1:{}/video.mp4", port);
         println!("[WebviewPreview] Video URL: {}", video_url);
         
+        // Check if transcoding is required for this file
+        let needs_transcoding = is_transcode_required(&self.path);
+        
+        // Get duration for transcoded files (needed for seek bar)
+        let duration = if needs_transcoding {
+            get_video_duration_ffprobe(&self.path).unwrap_or(0.0)
+        } else {
+            0.0 // Will be detected from file metadata
+        };
+        
         // Clone state for IPC handler
         let state_clone = self.state.clone();
         
-        // HTML without native controls - video will autoplay when loaded
-        let html_content = format!(r#"<!DOCTYPE html>
+        // Build HTML - different behavior for transcoded vs native files
+        let html_content = if needs_transcoding && duration > 0.0 {
+            // Smart player for transcoded videos with seek support
+            format!(r#"<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ 
+            background: #1a1a1a; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden; 
+        }}
+        video {{ 
+            width: 100%; 
+            height: 100%; 
+            object-fit: contain; 
+        }}
+    </style>
+</head>
+<body oncontextmenu="return false;">
+    <video id="player" autoplay oncontextmenu="return false;"></video>
+    <script>
+        const video = document.getElementById('player');
+        const baseUrl = '{}';
+        const knownDuration = {};
+        let currentSeekOffset = 0;
+        let isReloading = false;
+        
+        console.log("Smart transcoding player loaded. Duration:", knownDuration);
+        
+        // Load video at specific offset
+        function loadVideoAt(seekSeconds) {{
+            isReloading = true;
+            currentSeekOffset = seekSeconds;
+            const url = seekSeconds > 0 ? baseUrl + '?seek=' + seekSeconds.toFixed(2) : baseUrl;
+            console.log("Loading:", url);
+            video.src = url;
+            video.load();
+            video.play().catch(e => console.log("Autoplay blocked:", e));
+            isReloading = false;
+        }}
+        
+        // Initial load
+        loadVideoAt(0);
+        
+        // Report state to Rust every 250ms (with offset correction)
+        setInterval(() => {{
+            try {{
+                // Real time = stream time + offset
+                const realTime = video.currentTime + currentSeekOffset;
+                const state = JSON.stringify({{
+                    type: 'state',
+                    playing: !video.paused,
+                    currentTime: realTime,
+                    duration: knownDuration,
+                    volume: video.volume,
+                    muted: video.muted
+                }});
+                window.ipc.postMessage(state);
+            }} catch(e) {{
+                console.error("IPC error:", e);
+            }}
+        }}, 250);
+        
+        // Report events
+        video.addEventListener('play', () => {{
+            console.log("Video playing");
+            window.ipc.postMessage(JSON.stringify({{ type: 'play' }}));
+        }});
+        video.addEventListener('pause', () => {{
+            console.log("Video paused");
+            window.ipc.postMessage(JSON.stringify({{ type: 'pause' }}));
+        }});
+        video.addEventListener('ended', () => {{
+            console.log("Video ended");
+            window.ipc.postMessage(JSON.stringify({{ type: 'ended' }}));
+        }});
+        
+        // Listen for seek commands from Rust
+        window.seekToPosition = function(seconds) {{
+            console.log("Seek requested to:", seconds);
+            if (Math.abs(seconds - (video.currentTime + currentSeekOffset)) > 2) {{
+                // Big seek - reload with new offset
+                loadVideoAt(seconds);
+            }}
+        }};
+    </script>
+</body>
+</html>"#, video_url, duration)
+        } else {
+            // Standard player for native formats (or unknown duration)
+            format!(r#"<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
@@ -270,7 +378,8 @@ impl WebviewPreview {
         }});
     </script>
 </body>
-</html>"#, video_url);
+</html>"#, video_url)
+        };
 
         if let Ok(handle) = window.window_handle() {
             let webview = WebViewBuilder::new_as_child(&handle)
@@ -449,28 +558,67 @@ impl WebviewPreview {
     }
 }
 
-/// Check if the file extension requires transcoding (not natively supported by WebView2)
-fn is_transcode_required(path: &PathBuf) -> bool {
-    let path_str = path.to_string_lossy().to_lowercase();
-    // Formats not natively supported by WebView2/Edge
-    path_str.ends_with(".mkv") 
-        || path_str.ends_with(".avi") 
-        || path_str.ends_with(".wmv")
-        || path_str.ends_with(".ogm")
-        || path_str.ends_with(".flv")
-        || path_str.ends_with(".rmvb")
-        || path_str.ends_with(".rm")
+/// Get video duration in seconds using ffprobe
+fn get_video_duration_ffprobe(video_path: &PathBuf) -> Option<f64> {
+    let file_path = video_path.to_string_lossy().to_string();
+    
+    let mut cmd = Command::new("ffprobe");
+    cmd.args(&[
+        "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        &file_path
+    ]);
+    
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::null());
+    
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    
+    match cmd.output() {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            stdout.trim().parse::<f64>().ok()
+        }
+        Err(e) => {
+            eprintln!("[FFprobe] Failed to get duration: {}", e);
+            None
+        }
+    }
 }
 
 /// Handle MKV (and other) files by transcoding to MP4 on-the-fly using FFmpeg
 /// Returns true if transcoding was handled, false if FFmpeg is not available
-fn handle_mkv_transcoding(mut stream: TcpStream, video_path: &PathBuf) -> bool {
+/// seek_seconds: Optional seek position in seconds (from ?seek=X query param)
+/// duration: Optional pre-fetched video duration (to avoid calling ffprobe again)
+fn handle_mkv_transcoding(
+    mut stream: TcpStream, 
+    video_path: &PathBuf, 
+    seek_seconds: Option<f64>,
+    duration: Option<f64>
+) -> bool {
     let file_path = video_path.to_string_lossy().to_string();
     
-    println!("[Transcoding] Starting FFmpeg for: {}", file_path);
+    let seek_str = seek_seconds.map(|s| format!("{:.2}", s)).unwrap_or_default();
+    if seek_seconds.is_some() {
+        println!("[Transcoding] Starting FFmpeg for: {} (seek: {}s)", file_path, seek_str);
+    } else {
+        println!("[Transcoding] Starting FFmpeg for: {}", file_path);
+    }
     
     // Build FFmpeg command
     let mut cmd = Command::new("ffmpeg");
+    
+    // Add seek BEFORE input for fast seek (input seeking)
+    if let Some(seek) = seek_seconds {
+        cmd.args(&["-ss", &format!("{:.2}", seek)]);
+    }
+    
     cmd.args(&[
         "-i", &file_path,          // Input file
         "-c:v", "libx264",         // Transcode to H.264
@@ -532,24 +680,27 @@ fn handle_mkv_transcoding(mut stream: TcpStream, video_path: &PathBuf) -> bool {
         }
     };
     
-    // Send HTTP headers - using raw streaming (no chunked, no content-length)
-    // WebView2 should handle this with Connection: close
-    let response_headers = "HTTP/1.1 200 OK\r\n\
+    // Send HTTP headers with optional duration header
+    let mut headers = String::from("HTTP/1.1 200 OK\r\n\
         Content-Type: video/mp4\r\n\
         Access-Control-Allow-Origin: *\r\n\
         Cache-Control: no-cache\r\n\
-        Connection: close\r\n\
-        \r\n";
+        Connection: close\r\n");
     
-    if stream.write_all(response_headers.as_bytes()).is_err() {
+    // Add duration header if available
+    if let Some(dur) = duration {
+        headers.push_str(&format!("X-Video-Duration: {:.2}\r\n", dur));
+    }
+    headers.push_str("\r\n");
+    
+    if stream.write_all(headers.as_bytes()).is_err() {
         eprintln!("[Transcoding] Failed to write headers");
         let _ = child.kill();
         return false;
     }
     
     // Set socket to non-blocking to detect backpressure
-    // We'll handle blocking manually with retries
-    let _ = stream.set_nonblocking(false); // Keep blocking for simplicity but handle errors
+    let _ = stream.set_nonblocking(false);
     
     // Stream FFmpeg output with backpressure handling
     let mut buffer = [0u8; 64 * 1024]; // 64KB buffer
@@ -560,7 +711,6 @@ fn handle_mkv_transcoding(mut stream: TcpStream, video_path: &PathBuf) -> bool {
         match ffmpeg_stdout.read(&mut buffer) {
             Ok(0) => {
                 // EOF - FFmpeg finished producing data
-                // Flush any remaining data
                 let _ = stream.flush();
                 println!("[Transcoding] Stream complete. Total bytes sent: {} ({:.1} MB)", 
                     total_bytes, total_bytes as f64 / (1024.0 * 1024.0));
@@ -574,30 +724,25 @@ fn handle_mkv_transcoding(mut stream: TcpStream, video_path: &PathBuf) -> bool {
                 while written < data.len() {
                     match stream.write(&data[written..]) {
                         Ok(0) => {
-                            // Write returned 0 - likely backpressure, wait and retry
                             thread::sleep(std::time::Duration::from_millis(10));
                         }
                         Ok(w) => {
                             written += w;
                         }
                         Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                            // Backpressure - client buffer full, wait and retry
                             thread::sleep(std::time::Duration::from_millis(10));
                         }
                         Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => {
-                            // Interrupted, just retry immediately
                             continue;
                         }
                         Err(ref e) if e.kind() == std::io::ErrorKind::BrokenPipe 
                             || e.kind() == std::io::ErrorKind::ConnectionReset 
                             || e.kind() == std::io::ErrorKind::ConnectionAborted => {
-                            // Fatal: Client actually disconnected
                             eprintln!("[Transcoding] Client disconnected: {} (sent {} bytes)", e, total_bytes);
                             let _ = child.kill();
                             return true;
                         }
                         Err(e) => {
-                            // Other error - log and try to continue
                             eprintln!("[Transcoding] Write warning: {} (retrying...)", e);
                             thread::sleep(std::time::Duration::from_millis(50));
                         }
@@ -606,7 +751,7 @@ fn handle_mkv_transcoding(mut stream: TcpStream, video_path: &PathBuf) -> bool {
                 
                 total_bytes += n as u64;
                 
-                // Log progress every 5MB (avoid spam)
+                // Log progress every 5MB
                 let current_mb = total_bytes / (5 * 1024 * 1024);
                 if current_mb > last_logged_mb {
                     last_logged_mb = current_mb;
@@ -614,7 +759,6 @@ fn handle_mkv_transcoding(mut stream: TcpStream, video_path: &PathBuf) -> bool {
                 }
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => {
-                // Read interrupted, just retry
                 continue;
             }
             Err(e) => {
@@ -624,7 +768,6 @@ fn handle_mkv_transcoding(mut stream: TcpStream, video_path: &PathBuf) -> bool {
         }
     }
     
-    // Flush final data
     let _ = stream.flush();
     
     // Wait for FFmpeg to finish
@@ -636,22 +779,90 @@ fn handle_mkv_transcoding(mut stream: TcpStream, video_path: &PathBuf) -> bool {
     true
 }
 
+/// Check if the file extension requires transcoding (not natively supported by WebView2)
+fn is_transcode_required(path: &PathBuf) -> bool {
+    let path_str = path.to_string_lossy().to_lowercase();
+    path_str.ends_with(".mkv") 
+        || path_str.ends_with(".avi") 
+        || path_str.ends_with(".wmv")
+        || path_str.ends_with(".ogm")
+        || path_str.ends_with(".flv")
+        || path_str.ends_with(".rmvb")
+        || path_str.ends_with(".rm")
+}
+
+/// Parse seek parameter from URL query string (e.g., /video.mp4?seek=120.5)
+fn parse_seek_param(request_line: &str) -> Option<f64> {
+    println!("[DEBUG] Parsing request line: {}", request_line.trim());
+    
+    // Find ?seek= or &seek= in the URL
+    if let Some(query_start) = request_line.find('?') {
+        let query = &request_line[query_start..];
+        println!("[DEBUG] Query string found: {}", query);
+        
+        // Look for seek= parameter
+        for param in query.split('&') {
+            let param = param.trim_start_matches('?');
+            if let Some(value) = param.strip_prefix("seek=") {
+                // Remove any trailing path/protocol parts
+                let value = value.split_whitespace().next().unwrap_or(value);
+                println!("[DEBUG] Found seek value: '{}'", value);
+                if let Ok(parsed) = value.parse::<f64>() {
+                    println!("[DEBUG] Successfully parsed seek to: {} seconds", parsed);
+                    return Some(parsed);
+                } else {
+                    println!("[DEBUG] Failed to parse seek value as f64");
+                }
+            }
+        }
+    } else {
+        println!("[DEBUG] No query string in request");
+    }
+    None
+}
+
 fn handle_video_request(mut stream: TcpStream, video_path: &PathBuf) {
     use std::io::Seek;
     use std::fs::File;
     
+    // Read request line first to get any query parameters
+    let mut reader = BufReader::new(&stream);
+    let mut request_line = String::new();
+    
+    if reader.read_line(&mut request_line).is_err() {
+        return;
+    }
+    
+    println!("[VideoServer] Received request: {}", request_line.trim());
+    
+    // Parse seek parameter if present
+    let seek_seconds = parse_seek_param(&request_line);
+    
+    if let Some(seek) = seek_seconds {
+        println!("[VideoServer] SEEK requested: {} seconds", seek);
+    } else {
+        println!("[VideoServer] No seek parameter in request");
+    }
+    
     // Check if transcoding is required for this file type
     if is_transcode_required(video_path) {
-        // Read and discard the HTTP request headers first
-        let reader = BufReader::new(&stream);
-        for line in reader.lines().map_while(Result::ok) {
-            if line.is_empty() {
+        // Read and discard remaining HTTP headers
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line).is_err() || line == "\r\n" || line.is_empty() {
                 break;
             }
         }
         
-        // Handle via FFmpeg transcoding
-        handle_mkv_transcoding(stream, video_path);
+        // Get video duration via ffprobe (only on first request without seek)
+        let duration = if seek_seconds.is_none() {
+            get_video_duration_ffprobe(video_path)
+        } else {
+            None // Don't re-fetch on seek requests
+        };
+        
+        // Handle via FFmpeg transcoding with seek support
+        handle_mkv_transcoding(stream, video_path, seek_seconds, duration);
         return;
     }
     
