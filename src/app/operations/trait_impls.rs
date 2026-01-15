@@ -7,9 +7,9 @@ use crate::ui::components::item_slot::ItemSlotOperations;
 use crate::ui::context_menu::ContextMenuOperations;
 
 impl ItemSlotOperations for ImageViewerApp {
-    fn request_thumbnail_load(&mut self, path: std::path::PathBuf) {
+    fn request_thumbnail_load(&mut self, path: std::path::PathBuf, size: u32) {
         // Call inherent method - uses &self so we need to reborrow
-        ImageViewerApp::request_thumbnail_load(&*self, path);
+        ImageViewerApp::request_thumbnail_load(&*self, path, size);
     }
 
     fn request_folder_scan(&mut self, path: std::path::PathBuf) {

@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::thread;
 use std::io::{Read, Write, BufReader, BufRead};
 use std::net::{TcpListener, TcpStream};
@@ -30,11 +30,13 @@ pub struct WebviewPreview {
     last_rect: egui::Rect,
     server_port: Option<u16>,
     _server_shutdown: Option<mpsc::Sender<()>>,
+    // Async Init
+    init_rx: Option<mpsc::Receiver<(u16, mpsc::Sender<()>, VideoCodecInfo)>>,
     
     // Player state
     pub show_player: bool,     // false = show thumbnail, true = show video
     pub play_on_init: bool,    // if true, play as soon as webview is ready
-    pub state: Arc<Mutex<VideoState>>,
+    pub state: Arc<RwLock<VideoState>>,
     pub is_visible: bool,      // Track intended visibility state
     
     #[cfg(target_os = "windows")]
@@ -49,9 +51,10 @@ impl WebviewPreview {
             last_rect: egui::Rect::NAN,
             server_port: None,
             _server_shutdown: None,
+            init_rx: None,
             show_player: false,
             play_on_init: false,
-            state: Arc::new(Mutex::new(VideoState {
+            state: Arc::new(RwLock::new(VideoState {
                 is_playing: false,
                 current_time: 0.0,
                 duration: 0.0,
@@ -66,7 +69,7 @@ impl WebviewPreview {
 
     /// Get current playback state
     pub fn get_state(&self) -> VideoState {
-        self.state.lock().unwrap().clone()
+        self.state.read().unwrap().clone()
     }
 
     /// Start video playback
@@ -89,7 +92,7 @@ impl WebviewPreview {
             self.show_player = true;
             self.play_on_init = true;
         } else {
-            let is_playing = self.state.lock().unwrap().is_playing;
+            let is_playing = self.state.read().unwrap().is_playing;
             if is_playing {
                 self.pause();
             } else {
@@ -116,7 +119,7 @@ impl WebviewPreview {
                 "document.getElementById('player').volume = {}; document.getElementById('player').muted = false;", volume.clamp(0.0, 1.0)
             ));
         }
-        if let Ok(mut state) = self.state.lock() {
+        if let Ok(mut state) = self.state.write() {
             state.volume = volume;
             state.is_muted = false;
         }
@@ -129,7 +132,7 @@ impl WebviewPreview {
                 "document.getElementById('player').muted = {}", muted
             ));
         }
-        if let Ok(mut state) = self.state.lock() {
+        if let Ok(mut state) = self.state.write() {
             state.is_muted = muted;
         }
     }
@@ -177,69 +180,10 @@ impl WebviewPreview {
         false
     }
 
-    fn start_video_server(&mut self) -> Option<u16> {
-        let video_path = dunce::canonicalize(&self.path).unwrap_or(self.path.clone());
-        
-        // Try to find an available port
-        let listener = match TcpListener::bind("127.0.0.1:0") {
-            Ok(l) => l,
-            Err(e) => {
-                eprintln!("[VideoServer] Failed to bind: {}", e);
-                return None;
-            }
-        };
-        
-        let port = listener.local_addr().ok()?.port();
-        println!("[VideoServer] Started on port {}", port);
-        
-        let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>();
+    fn finalize_init(&mut self, _ctx: &egui::Context, _ui: &egui::Ui, window: &dyn raw_window_handle::HasWindowHandle, port: u16, shutdown_tx: mpsc::Sender<()>, codec_info: VideoCodecInfo) {
+        self.server_port = Some(port);
         self._server_shutdown = Some(shutdown_tx);
         
-        // Spawn server thread
-        thread::spawn(move || {
-            listener.set_nonblocking(true).ok();
-            
-            loop {
-                // Check for shutdown
-                if shutdown_rx.try_recv().is_ok() {
-                    println!("[VideoServer] Shutting down");
-                    break;
-                }
-                
-                // Accept connections
-                match listener.accept() {
-                    Ok((stream, _)) => {
-                        let path = video_path.clone();
-                        thread::spawn(move || {
-                            handle_video_request(stream, &path);
-                        });
-                    }
-                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        thread::sleep(std::time::Duration::from_millis(10));
-                    }
-                    Err(e) => {
-                        eprintln!("[VideoServer] Accept error: {}", e);
-                    }
-                }
-            }
-        });
-        
-        Some(port)
-    }
-
-    fn init_webview(&mut self, _ctx: &egui::Context, _ui: &egui::Ui, window: &dyn raw_window_handle::HasWindowHandle) {
-        // Start local video server
-        let port = match self.start_video_server() {
-            Some(p) => p,
-            None => {
-                eprintln!("[WebviewPreview] Failed to start video server");
-                return;
-            }
-        };
-        self.server_port = Some(port);
-        
-        // ONE-TIME probe: determine playback strategy at URL construction
-        let codec_info = probe_video_codecs_internal(&self.path);
         let is_compatible = is_codec_webview_compatible(&codec_info);
         let duration = codec_info.duration.unwrap_or(0.0);
         
@@ -325,8 +269,8 @@ impl WebviewPreview {
             }}
         }});
         
-        // Report state to Rust every 250ms (with offset correction)
-        setInterval(() => {{
+        // Report state to Rust (Adaptive Polling)
+        const reportState = () => {{
             try {{
                 // Real time = stream time + offset
                 const realTime = video.currentTime + currentSeekOffset;
@@ -342,7 +286,11 @@ impl WebviewPreview {
             }} catch(e) {{
                 console.error("IPC error:", e);
             }}
-        }}, 250);
+            
+            // Throttle: 100ms when playing, 500ms when paused
+            setTimeout(reportState, video.paused ? 500 : 100);
+        }};
+        reportState();
         
         // Report events
         video.addEventListener('play', () => {{
@@ -402,8 +350,8 @@ impl WebviewPreview {
         
         console.log("Video player script loaded");
 
-        // Report state to Rust every 250ms
-        setInterval(() => {{
+        // Report state to Rust (Adaptive Polling)
+        const reportState = () => {{
             try {{
                 const state = JSON.stringify({{
                     type: 'state',
@@ -417,7 +365,11 @@ impl WebviewPreview {
             }} catch(e) {{
                 console.error("IPC error:", e);
             }}
-        }}, 250);
+            
+            // Throttle: 100ms when playing, 500ms when paused
+            setTimeout(reportState, video.paused ? 500 : 100);
+        }};
+        reportState();
         
         // Report events
         video.addEventListener('play', () => {{
@@ -449,7 +401,7 @@ impl WebviewPreview {
                         if let Some(msg_type) = json.get("type").and_then(|v| v.as_str()) {
                             match msg_type {
                                 "state" => {
-                                    if let Ok(mut state) = state_clone.lock() {
+                                    if let Ok(mut state) = state_clone.write() {
                                         state.is_playing = json.get("playing")
                                             .and_then(|v: &serde_json::Value| v.as_bool()).unwrap_or(false);
                                         state.current_time = json.get("currentTime")
@@ -463,12 +415,12 @@ impl WebviewPreview {
                                     }
                                 }
                                 "play" => {
-                                    if let Ok(mut state) = state_clone.lock() {
+                                    if let Ok(mut state) = state_clone.write() {
                                         state.is_playing = true;
                                     }
                                 }
                                 "pause" => {
-                                    if let Ok(mut state) = state_clone.lock() {
+                                    if let Ok(mut state) = state_clone.write() {
                                         state.is_playing = false;
                                     }
                                 }
@@ -516,7 +468,7 @@ impl WebviewPreview {
                     }
                     
                     // Update state to playing since autoplay is on
-                    if let Ok(mut state) = self.state.lock() {
+                    if let Ok(mut state) = self.state.write() {
                         state.is_playing = true;
                     }
                 },
@@ -537,15 +489,58 @@ impl WebviewPreview {
         let size = egui::vec2(available.x, preview_height);
         let (rect, _response) = ui.allocate_exact_size(size, egui::Sense::hover());
 
-        // Lazy init
+        // Async Lazy Init
         if self.webview.is_none() {
-            if let Some(frame) = frame {
-                use raw_window_handle::HasWindowHandle;
-                if let Ok(handle) = frame.window_handle() {
-                    self.init_webview(ui.ctx(), ui, &handle);
+            // Check if initialization is in progress
+            if let Some(rx) = &self.init_rx {
+                // Poll for completion
+                match rx.try_recv() {
+                    Ok((port, shutdown_tx, codec_info)) => {
+                        // Init complete, create webview
+                        if let Some(frame) = frame {
+                            use raw_window_handle::HasWindowHandle;
+                            if let Ok(handle) = frame.window_handle() {
+                                self.finalize_init(ui.ctx(), ui, &handle, port, shutdown_tx, codec_info);
+                                self.init_rx = None; // Done
+                            }
+                        }
+                    },
+                    Err(mpsc::TryRecvError::Empty) => {
+                        // Still loading
+                        ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::TopDown), |ui| {
+                            ui.spinner();
+                            ui.label("Carregando player...");
+                        });
+                        ui.ctx().request_repaint(); // Poll reasonably fast
+                        return; // Don't layout webview yet
+                    },
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                         // Failed
+                         ui.label("Erro ao iniciar servidor de vídeo.");
+                         self.init_rx = None;
+                         return;
+                    }
                 }
             } else {
-                ui.ctx().request_repaint();
+                // First frame: Start background initialization
+                let path_clone = self.path.clone();
+                let (tx, rx) = mpsc::channel();
+                self.init_rx = Some(rx);
+                
+                thread::spawn(move || {
+                     // 1. Start video server
+                     if let Some((port, shutdown_tx)) = spawn_video_server(path_clone.clone()) {
+                         // 2. Probe codecs
+                         let info = probe_video_codecs_internal(&path_clone);
+                         let _ = tx.send((port, shutdown_tx, info));
+                     }
+                });
+                
+                ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::TopDown), |ui| {
+                    ui.spinner();
+                });
+                ui.ctx().request_repaint(); 
+                return;
             }
         }
 
@@ -573,13 +568,17 @@ impl WebviewPreview {
             }
         }
         
-        // Request repaint to keep state updated
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+        // Request repaint to keep state updated (adaptive throttle)
+        let is_playing = if let Ok(s) = self.state.read() { s.is_playing } else { false };
+        let delay = if is_playing && self.is_visible { 120 } else { 600 };
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(delay));
     }
     
-    pub fn try_init(&mut self, window: &dyn raw_window_handle::HasWindowHandle, ctx: &egui::Context, ui: &egui::Ui) {
+    pub fn try_init(&mut self, _window: &dyn raw_window_handle::HasWindowHandle, _ctx: &egui::Context, _ui: &egui::Ui) {
         if self.webview.is_none() {
-            self.init_webview(ctx, ui, window);
+        // try_init is deprecated for async flow, doing nothing to avoid double-init risks
+        // self.init_webview(ctx, ui, window); 
+        // The update loop will handle it.
         }
     }
     
@@ -612,6 +611,78 @@ impl WebviewPreview {
             }
         }
     }
+}
+
+impl Drop for WebviewPreview {
+    fn drop(&mut self) {
+        // Signal server shutdown
+        if let Some(tx) = &self._server_shutdown {
+            let _ = tx.send(());
+        }
+        
+        // Hide WebView window immediately to prevent ghost windows
+        if let Some(webview) = &self.webview {
+            let _ = webview.set_visible(false);
+            
+            #[cfg(target_os = "windows")]
+            if let Ok(hwnd_opt) = self.webview_hwnd.lock() {
+                if let Some(hwnd) = *hwnd_opt {
+                    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+                    unsafe { let _ = ShowWindow(hwnd, SW_HIDE); }
+                }
+            }
+        }
+    }
+}
+
+/// Spawn video server on a background thread
+fn spawn_video_server(path: PathBuf) -> Option<(u16, mpsc::Sender<()>)> {
+    let video_path = dunce::canonicalize(&path).unwrap_or(path);
+        
+    // Try to find an available port
+    let listener = match TcpListener::bind("127.0.0.1:0") {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("[VideoServer] Failed to bind: {}", e);
+            return None;
+        }
+    };
+    
+    let port = listener.local_addr().ok()?.port();
+    println!("[VideoServer] Started on port {}", port);
+    
+    let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>();
+    
+    // Spawn server thread
+    thread::spawn(move || {
+        listener.set_nonblocking(true).ok();
+        
+        loop {
+            // Check for shutdown
+            if shutdown_rx.try_recv().is_ok() {
+                println!("[VideoServer] Shutting down");
+                break;
+            }
+            
+            // Accept connections
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    let path = video_path.clone();
+                    thread::spawn(move || {
+                        handle_video_request(stream, &path);
+                    });
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Err(e) => {
+                    eprintln!("[VideoServer] Accept error: {}", e);
+                }
+            }
+        }
+    });
+    
+    Some((port, shutdown_tx))
 }
 
 // ========================================

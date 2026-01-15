@@ -26,6 +26,7 @@ use crate::ui::context_menu::ContextMenuState;
 use crate::ui::components::media_preview::MediaPreview;
 use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
+use crate::workers::thumbnail_worker::PriorityThumbnailQueue;
 
 use windows::Win32::Foundation::HWND;
 
@@ -33,7 +34,7 @@ pub struct ImageViewerApp {
     pub current_path: String,
 
     // --- SISTEMA DE THUMBNAILS OTIMIZADO ---
-    pub thumbnail_req_sender: Sender<(PathBuf, usize)>, // UI -> Worker Pool
+    pub thumbnail_queue: Arc<PriorityThumbnailQueue>,   // UI -> Worker Pool (Priority Queue)
     pub image_receiver: Receiver<ThumbnailData>,        // Worker Pool -> UI
 
     // File system

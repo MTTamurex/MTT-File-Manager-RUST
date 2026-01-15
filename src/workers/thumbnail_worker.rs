@@ -5,12 +5,12 @@ use crate::domain::thumbnail::ThumbnailData;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use eframe::egui;
 use image::{DynamicImage, ImageFormat};
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex, Condvar};
+use std::time::{Instant, SystemTime};
 use windows::core::Interface;
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 
@@ -44,20 +44,99 @@ fn mark_as_failed(path: PathBuf) {
     }
 }
 
+/// Priority levels for thumbnail requests
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThumbnailPriority {
+    High, // Visible items (LIFO/FIFO)
+    Low,  // Prefetch (Background)
+}
+
+struct QueueState {
+    high: VecDeque<(PathBuf, usize, u32)>,
+    low: VecDeque<(PathBuf, usize, u32)>,
+    pending: HashSet<PathBuf>,
+    shutdown: bool,
+}
+
+pub struct PriorityThumbnailQueue {
+    state: Mutex<QueueState>,
+    condvar: Condvar,
+}
+
+impl PriorityThumbnailQueue {
+    pub fn new() -> Self {
+        Self {
+            state: Mutex::new(QueueState {
+                high: VecDeque::new(),
+                low: VecDeque::new(),
+                pending: HashSet::new(),
+                shutdown: false,
+            }),
+            condvar: Condvar::new(),
+        }
+    }
+
+    pub fn shutdown(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.shutdown = true;
+        self.condvar.notify_all();
+    }
+
+    pub fn push(&self, path: PathBuf, gen: usize, request_size: u32, priority: ThumbnailPriority) {
+        let mut state = self.state.lock().unwrap();
+        
+        // Deduplication: if already pending, skip
+        if !state.pending.insert(path.clone()) {
+             // Optional: If priority is High and existing was Low, promote?
+             // For simplicity/performance, we skip. Most re-requests are same priority.
+             return;
+        }
+
+        // LIFO for High Priority (latest scroll is most important)
+        // FIFO for Low Priority (finish prefetch in order)
+        match priority {
+            ThumbnailPriority::High => state.high.push_back((path, gen, request_size)),
+            ThumbnailPriority::Low => state.low.push_back((path, gen, request_size)),
+        }
+        self.condvar.notify_one();
+    }
+
+    pub fn pop(&self) -> Option<(PathBuf, usize, u32)> {
+        let mut state = self.state.lock().unwrap();
+        loop {
+            if state.shutdown {
+                return None;
+            }
+            // High priority first (LIFO - pop_back to prioritize newest)
+            if let Some(item) = state.high.pop_back() {
+                state.pending.remove(&item.0);
+                return Some(item);
+            }
+            // Low priority second (FIFO)
+            if let Some(item) = state.low.pop_front() {
+                state.pending.remove(&item.0);
+                return Some(item);
+            }
+            // Wait for new work
+            state = self.condvar.wait(state).unwrap();
+        }
+    }
+}
+
 /// Spawns thumbnail worker threads with concurrency limiting
 pub fn spawn_thumbnail_workers(
-    shared_rx: Arc<Mutex<Receiver<(PathBuf, usize)>>>,
+    queue: Arc<PriorityThumbnailQueue>,
     tx: Sender<ThumbnailData>,
     ctx: egui::Context,
     gen_tracker: Arc<AtomicUsize>,
     disk_cache: Arc<ThumbnailDiskCache>,
 ) {
-    // AtomicUsize counter to limit concurrent decode operations (RAM limiter)
-    let active_decodes = Arc::new(AtomicUsize::new(0));
+    // Condvar for semaphore-like behavior (RAM limiter)
+    let active_decodes = Arc::new((Mutex::new(0), Condvar::new()));
 
     // 4 worker threads (reduced from 8 - counter limits actual concurrent work)
     for _ in 0..4 {
-        let rx = shared_rx.clone();
+        let queue = queue.clone();
         let tx = tx.clone();
         let gen_tracker = gen_tracker.clone();
         let ctx = ctx.clone();
@@ -65,19 +144,20 @@ pub fn spawn_thumbnail_workers(
         let active_counter = active_decodes.clone();
 
         std::thread::spawn(move || {
-            thumbnail_worker_loop(rx, tx, ctx, gen_tracker, disk_cache, active_counter);
+            thumbnail_worker_loop(queue, tx, ctx, gen_tracker, disk_cache, active_counter);
         });
     }
 }
 
 fn thumbnail_worker_loop(
-    rx: Arc<Mutex<Receiver<(PathBuf, usize)>>>,
+    queue: Arc<PriorityThumbnailQueue>,
     tx: Sender<ThumbnailData>,
     ctx: egui::Context,
     gen_tracker: Arc<AtomicUsize>,
     disk_cache: Arc<ThumbnailDiskCache>,
-    active_decodes: Arc<AtomicUsize>,
+    active_decodes: Arc<(Mutex<usize>, Condvar)>,
 ) {
+    let mut last_repaint = Instant::now();
     unsafe {
         // SAFETY: Initializing COM with Multithreaded support for this worker thread.
         // It is paired with `CoUninitialize` at the end of the thread loop.
@@ -85,13 +165,15 @@ fn thumbnail_worker_loop(
     }
 
     loop {
-        let work = match rx.lock() {
-            Ok(lock) => lock.recv(),
-            Err(_) => break,
+        let (path, req_gen, req_size) = match queue.pop() {
+            Some(v) => v,
+            None => break,
         };
+        
+        { // Block to scope the work variable was unused, flattened loop logic instead
 
-        match work {
-            Ok((path, req_gen)) => {
+        if true { // Simplified matching
+             {
                 if req_gen == gen_tracker.load(Ordering::Relaxed) {
                     // EARLY EXIT 1: Skip files that already failed in this session
                     // Prevents repeated slow retries on broken files (e.g., 0x8004B205)
@@ -103,7 +185,7 @@ fn thumbnail_worker_loop(
                             height: 0,
                             generation: req_gen,
                         });
-                        ctx.request_repaint();
+                        throttle_repaint(&ctx, &mut last_repaint);
                         continue;
                     }
 
@@ -117,7 +199,7 @@ fn thumbnail_worker_loop(
                             height: 0,
                             generation: req_gen,
                         });
-                        ctx.request_repaint();
+                        throttle_repaint(&ctx, &mut last_repaint);
                         continue;
                     }
 
@@ -133,7 +215,7 @@ fn thumbnail_worker_loop(
                             height: 0,
                             generation: req_gen,
                         });
-                        ctx.request_repaint();
+                        throttle_repaint(&ctx, &mut last_repaint);
                         continue;
                     }
 
@@ -156,15 +238,19 @@ fn thumbnail_worker_loop(
                     // STEP 1: Se não está em cache, decodifica com limite de concorrência
                     if final_result.is_none() {
                         // Aguarda até ter um slot disponível (max 4 decodes simultâneos)
-                        while active_decodes.load(Ordering::Relaxed) >= MAX_CONCURRENT_DECODES {
-                            std::thread::sleep(std::time::Duration::from_millis(10));
+                        {
+                            let mut count = active_decodes.0.lock().unwrap();
+                            while *count >= MAX_CONCURRENT_DECODES {
+                                count = active_decodes.1.wait(count).unwrap();
+                            }
+                            *count += 1;
                         }
-                        active_decodes.fetch_add(1, Ordering::Relaxed);
 
                         // HYBRID PIPELINE com resize imediato
                         if let Some((raw_data, w, h)) = generate_thumbnail_hybrid(&path) {
-                            // STEP 2: Resize imediato para 1024px (libera RAM do full-res)
-                            let resized = resize_to_max_1024(&raw_data, w, h);
+                            // STEP 2: Resize to bucket (libera RAM e otimiza upload GPU)
+                            let bucket_size = get_bucket_size(req_size);
+                            let resized = resize_to_bucket(&raw_data, w, h, bucket_size);
 
                             // STEP 3: Salva versão otimizada em SQLite
                             let _ =
@@ -179,7 +265,11 @@ fn thumbnail_worker_loop(
                         // raw_data é dropado aqui automaticamente (libera RAM)
 
                         // Libera slot
-                        active_decodes.fetch_sub(1, Ordering::Relaxed);
+                        {
+                            let mut count = active_decodes.0.lock().unwrap();
+                            if *count > 0 { *count -= 1; }
+                            active_decodes.1.notify_one();
+                        }
                     }
 
                     let (data, w, h) = final_result.unwrap_or_else(|| create_error_placeholder());
@@ -191,10 +281,10 @@ fn thumbnail_worker_loop(
                         height: h,
                         generation: req_gen,
                     });
-                    ctx.request_repaint();
+                    throttle_repaint(&ctx, &mut last_repaint);
                 }
             }
-            Err(_) => break,
+            }
         }
     }
     unsafe {
@@ -203,22 +293,34 @@ fn thumbnail_worker_loop(
     }
 }
 
-/// Resize RGBA buffer to max 1024x1024 while preserving aspect ratio
-fn resize_to_max_1024(rgba_data: &[u8], width: u32, height: u32) -> (Vec<u8>, u32, u32) {
+fn get_bucket_size(req_size: u32) -> u32 {
+    match req_size {
+        0..=128 => 128,
+        129..=256 => 256,
+        257..=512 => 512,
+        _ => 1024,
+    }
+}
+
+/// Resize RGBA buffer to bucket size while preserving aspect ratio
+fn resize_to_bucket(rgba_data: &[u8], width: u32, height: u32, max_dim: u32) -> (Vec<u8>, u32, u32) {
     // Se já é pequeno o suficiente, retorna como está
-    if width <= 1024 && height <= 1024 {
+    if width <= max_dim && height <= max_dim {
         return (rgba_data.to_vec(), width, height);
     }
 
     // Calcula novo tamanho mantendo aspect ratio
-    let scale = 1024.0 / (width.max(height) as f32);
+    let scale = (max_dim as f32) / (width.max(height) as f32);
     let new_w = ((width as f32) * scale).round() as u32;
     let new_h = ((height as f32) * scale).round() as u32;
 
     // Usa image crate para resize
     if let Some(img) = image::ImageBuffer::from_raw(width, height, rgba_data.to_vec()) {
         let dynamic = DynamicImage::ImageRgba8(img);
-        let resized = dynamic.resize(new_w, new_h, image::imageops::FilterType::Lanczos3);
+        // Use Triangle (Bilinear) for better quality/speed balance on CPU
+        // Nearest is too blocky for photos, even if plan suggested it.
+        // We optimize upload size (bucket), so performance is already gained.
+        let resized = dynamic.resize(new_w, new_h, image::imageops::FilterType::Triangle);
         let rgba = resized.to_rgba8();
         return (rgba.to_vec(), rgba.width(), rgba.height());
     }
@@ -799,11 +901,21 @@ fn create_error_placeholder() -> (Vec<u8>, u32, u32) {
     for (i, pixel) in buffer.chunks_exact_mut(4).enumerate() {
         let x = i % size;
         let y = i / size;
-        let intensity = ((x + y) as f32 / (size * 2) as f32 * 100.0) as u8 + 100;
-        pixel[0] = intensity;
-        pixel[1] = intensity;
-        pixel[2] = intensity;
-        pixel[3] = 255;
+        if (x + y) % 2 == 0 {
+             pixel[0] = 255; pixel[3] = 255; // Red pattern
+        } else {
+             pixel[0] = 0; pixel[3] = 0; // Transparent
+        }
     }
-    (buffer, 512, 512)
+    (buffer, size as u32, size as u32)
 }
+
+fn throttle_repaint(ctx: &egui::Context, last_repaint: &mut Instant) {
+    if last_repaint.elapsed().as_millis() >= 33 {
+        ctx.request_repaint();
+        *last_repaint = Instant::now();
+    } else {
+        ctx.request_repaint_after(std::time::Duration::from_millis(33));
+    }
+}
+

@@ -195,7 +195,7 @@ impl ImageViewerApp {
                     if !self.cache_manager.has_thumbnail(&cover)
                         && self.cache_manager.start_loading(cover.clone())
                     {
-                        self.request_thumbnail_load(cover);
+                        self.request_thumbnail_load(cover, 256);
                     }
                 }
             }

@@ -4,11 +4,17 @@
 
 use std::path::PathBuf;
 use crate::app::state::ImageViewerApp;
+use crate::workers::thumbnail_worker::ThumbnailPriority;
 
 impl ImageViewerApp {
-    pub fn request_thumbnail_load(&self, path: PathBuf) {
-        // Envia pedido para o Worker Pool com a geração atual
-        let _ = self.thumbnail_req_sender.send((path, self.generation));
+    pub fn request_thumbnail_load(&self, path: PathBuf, size_px: u32) {
+        // Envia pedido PRIORITÁRIO (Visível) com hint de tamanho
+        self.thumbnail_queue.push(path, self.generation, size_px, ThumbnailPriority::High);
+    }
+
+    pub fn request_thumbnail_prefetch(&self, path: PathBuf, size_px: u32) {
+        // Envia pedido BAIXA PRIORIDADE (Prefetch) com hint de tamanho
+        self.thumbnail_queue.push(path, self.generation, size_px, ThumbnailPriority::Low);
     }
 
     pub fn request_folder_preview_load(&mut self, path: PathBuf) {

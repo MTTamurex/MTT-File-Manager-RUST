@@ -9,7 +9,7 @@ use eframe::egui;
 /// Trait para operações necessárias para renderizar um item slot
 pub trait ItemSlotOperations {
     /// Requisita carregamento de thumbnail
-    fn request_thumbnail_load(&mut self, path: std::path::PathBuf);
+    fn request_thumbnail_load(&mut self, path: std::path::PathBuf, size: u32);
     /// Requisita scan de pasta
     fn request_folder_scan(&mut self, path: std::path::PathBuf);
     /// Requisita carregamento de preview nativo da pasta (sandwich effect)
@@ -183,7 +183,7 @@ fn render_directory_slot<O: ItemSlotOperations>(
                 && ctx.loading_set.len() < 50
             {
                 ctx.loading_set.insert(cover_path.clone());
-                ops.request_thumbnail_load(cover_path.clone());
+                ops.request_thumbnail_load(cover_path.clone(), ctx.thumbnail_size as u32);
             }
         }
     }
@@ -383,7 +383,7 @@ fn render_file_slot<O: ItemSlotOperations>(
         if !has_texture && !is_loading && ctx.loading_set.len() < 50 {
             // MAX_CONCURRENT_LOADS (increased for performance)
             ctx.loading_set.insert(path_clone.clone());
-            ops.request_thumbnail_load(path_clone.clone());
+            ops.request_thumbnail_load(path_clone.clone(), ctx.thumbnail_size as u32);
         }
     }
 
