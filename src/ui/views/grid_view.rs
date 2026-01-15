@@ -9,7 +9,7 @@ use crate::domain::file_entry::FileEntry;
 /// Pre-allocated buffers for pending operations (PERFORMANCE: avoids per-item allocations)
 #[derive(Default)]
 pub struct PendingOperations {
-    pub thumbnail_loads: Vec<PathBuf>,
+    pub thumbnail_loads: Vec<(PathBuf, u32)>,
     pub folder_scans: Vec<PathBuf>,
     pub folder_preview_loads: Vec<PathBuf>,
     pub renames: Vec<usize>,
@@ -63,9 +63,10 @@ pub struct GridViewContext<'a> {
 pub trait GridViewOperations {
     fn navigate_to(&mut self, path: &str);
     fn open_with_shell(&mut self, path: &PathBuf);
-    fn request_thumbnail_load(&mut self, path: PathBuf);
+    fn request_thumbnail_load(&mut self, path: PathBuf, size: u32);
     fn request_folder_scan(&mut self, path: PathBuf);
     fn request_folder_preview_load(&mut self, path: PathBuf);
+    fn request_thumbnail_prefetch(&mut self, path: PathBuf, size: u32);
     fn rename_with_shell(&mut self, idx: usize);
 }
 
@@ -100,6 +101,7 @@ pub fn render_grid_view(
     let mut double_clicked_item = None;
     let mut secondary_clicked_item = None;
     let mut empty_area_secondary_click = false;
+    let mut visible_rows_range = None;
 
     let available_rect = ui.available_rect_before_wrap();
 
@@ -271,6 +273,9 @@ pub fn render_grid_view(
                 let visible_min_row = (start_y / (item_h + padding)).floor() as usize;
                 let visible_max_row = ((end_y / (item_h + padding)).ceil() as usize + 1).min(rows);
 
+                // Export range for prefetch logic
+                visible_rows_range = Some((visible_min_row, visible_max_row));
+
                 let loop_min_row = visible_min_row.saturating_sub(2);
                 let loop_max_row = (visible_max_row + 2).min(rows);
 
@@ -402,8 +407,8 @@ pub fn render_grid_view(
 
     // BATCH PROCESSING: Flush all pending operations collected during render
     // This avoids context switching and virtual dispatch inside the render loop
-    for path in ctx.pending_ops.thumbnail_loads.drain(..) {
-        ops.request_thumbnail_load(path);
+    for (path, size) in ctx.pending_ops.thumbnail_loads.drain(..) {
+        ops.request_thumbnail_load(path, size);
     }
     for path in ctx.pending_ops.folder_scans.drain(..) {
         ops.request_folder_scan(path);
@@ -413,6 +418,39 @@ pub fn render_grid_view(
     }
     for rename_idx in ctx.pending_ops.renames.drain(..) {
         ops.rename_with_shell(rename_idx);
+    }
+
+    // PREFETCH LOGIC (Low Priority)
+    if let Some((vis_min, vis_max)) = visible_rows_range {
+        let count = ctx.items.len();
+        let rows = (count as f32 / cols as f32).ceil() as usize;
+        let prefetch_margin = 7; // Approx 1 page of cache
+        
+        let start_prefetch = vis_min.saturating_sub(prefetch_margin);
+        let end_prefetch = (vis_max + prefetch_margin).min(rows);
+        
+        for row in start_prefetch..end_prefetch {
+            // Skip visible rows (already handled by render loop)
+            // Buffer of 2 was used in render loop, so we stick to that to avoid overlap overkill
+            // although overlap is harmless due to loading_set check
+            if row >= vis_min.saturating_sub(2) && row < (vis_max + 2).min(rows) {
+                continue;
+            }
+
+            for col in 0..cols {
+                let index = row * cols + col;
+                if index >= count { break; }
+                
+                let item = &ctx.items[index];
+                if !item.is_dir {
+                    // Check if needs thumbnail
+                    if !ctx.texture_cache.contains(&item.path) && !ctx.loading_set.contains(&item.path) {
+                        ctx.loading_set.insert(item.path.clone());
+                        ops.request_thumbnail_prefetch(item.path.clone(), ctx.thumbnail_size as u32);
+                    }
+                }
+            }
+        }
     }
 
     // Handle actions after rendering - ORDER MATTERS!
@@ -485,8 +523,8 @@ fn render_item_slot_for_grid(
         }
 
         impl<'a> crate::ui::components::item_slot::ItemSlotOperations for SimpleOps<'a> {
-            fn request_thumbnail_load(&mut self, path: std::path::PathBuf) {
-                self.pending_ops.thumbnail_loads.push(path);
+            fn request_thumbnail_load(&mut self, path: std::path::PathBuf, size: u32) {
+                self.pending_ops.thumbnail_loads.push((path, size));
             }
 
             fn request_folder_scan(&mut self, path: std::path::PathBuf) {

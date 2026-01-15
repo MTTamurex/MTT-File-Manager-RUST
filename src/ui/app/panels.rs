@@ -167,7 +167,7 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, fr
                                         app.disk_cache.remove_cache_for_path(&path);
                                         app.cache_manager.texture_cache.pop(&path);
                                         app.cache_manager.loading_set.remove(&path);
-                                        let _ = app.thumbnail_req_sender.send((path, app.generation));
+                                        app.request_thumbnail_load(path, 512);
                                         app.notifications.push(
                                             crate::application::AppNotification::info("Recarregando thumbnail...".to_string()),
                                         );

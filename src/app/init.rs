@@ -62,8 +62,8 @@ impl ImageViewerApp {
 
         // --- SISTEMA DE THUMBNAILS (WORKER POOL OTIMIZADO) ---
         let (img_tx, img_rx) = mpsc::channel();
-        let (req_tx, req_rx) = mpsc::channel::<(PathBuf, usize)>();
-        let shared_req_rx = Arc::new(std::sync::Mutex::new(req_rx));
+        use crate::workers::thumbnail_worker::PriorityThumbnailQueue;
+        let thumbnail_queue = Arc::new(PriorityThumbnailQueue::new());
         let shared_gen = Arc::new(AtomicUsize::new(0));
 
         // Initialize OneDrive path detection
@@ -159,7 +159,7 @@ impl ImageViewerApp {
         // 8 threads: equilíbrio ideal entre SSD e HDD USB
         use crate::workers::thumbnail_worker::spawn_thumbnail_workers;
         spawn_thumbnail_workers(
-            shared_req_rx,
+            thumbnail_queue.clone(),
             img_tx,
             ctx.clone(),
             shared_gen.clone(),
@@ -236,7 +236,7 @@ impl ImageViewerApp {
 
         let mut app = Self {
             current_path: PATH_PADRAO.to_string(),
-            thumbnail_req_sender: req_tx,
+            thumbnail_queue,
             image_receiver: img_rx,
             items: Arc::new(Vec::new()),
             // Async loading

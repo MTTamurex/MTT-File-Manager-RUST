@@ -55,7 +55,7 @@ impl ImageViewerApp {
                         if !self.cache_manager.has_thumbnail(&item_path)
                             && !self.cache_manager.is_loading(&item_path)
                         {
-                            self.request_thumbnail_load(item_path);
+                            self.request_thumbnail_load(item_path, 512);
                         }
                     }
                 }
@@ -123,7 +123,7 @@ impl ImageViewerApp {
         enum ListAction {
             NavigateTo(String),
             OpenWithShell(PathBuf),
-            RequestThumbnailLoad(PathBuf),
+            RequestThumbnailLoad(PathBuf, u32),
             RequestFolderScan(PathBuf),
             RequestFolderPreviewLoad(PathBuf),
             RenameWithShell(usize),
@@ -139,7 +139,8 @@ impl ImageViewerApp {
             }
 
             fn request_thumbnail_load(&mut self, path: PathBuf) {
-                self.actions.push(ListAction::RequestThumbnailLoad(path));
+                // List view always requests small thumbnails (64px)
+                self.actions.push(ListAction::RequestThumbnailLoad(path, 64));
             }
 
             fn request_folder_scan(&mut self, path: PathBuf) {
@@ -186,7 +187,7 @@ impl ImageViewerApp {
                         if !self.cache_manager.has_thumbnail(&item_path)
                             && !self.cache_manager.is_loading(&item_path)
                         {
-                            self.request_thumbnail_load(item_path);
+                            self.request_thumbnail_load(item_path, 512);
                         }
                     }
                 }
@@ -250,7 +251,7 @@ impl ImageViewerApp {
             match action {
                 ListAction::NavigateTo(path) => self.navigate_to(&path),
                 ListAction::OpenWithShell(path) => open_with_shell(&path),
-                ListAction::RequestThumbnailLoad(path) => self.request_thumbnail_load(path),
+                ListAction::RequestThumbnailLoad(path, size) => self.request_thumbnail_load(path, size),
                 ListAction::RequestFolderScan(path) => self.request_folder_scan(path),
                 ListAction::RequestFolderPreviewLoad(path) => {
                     self.request_folder_preview_load(path)
@@ -366,9 +367,10 @@ impl ImageViewerApp {
         enum GridAction {
             NavigateTo(String),
             OpenWithShell(PathBuf),
-            RequestThumbnailLoad(PathBuf),
+            RequestThumbnailLoad(PathBuf, u32),
             RequestFolderScan(PathBuf),
             RequestFolderPreviewLoad(PathBuf),
+            RequestThumbnailPrefetch(PathBuf, u32),
             RenameWithShell(usize),
         }
 
@@ -381,8 +383,8 @@ impl ImageViewerApp {
                 self.actions.push(GridAction::OpenWithShell(path.clone()));
             }
 
-            fn request_thumbnail_load(&mut self, path: PathBuf) {
-                self.actions.push(GridAction::RequestThumbnailLoad(path));
+            fn request_thumbnail_load(&mut self, path: PathBuf, size: u32) {
+                self.actions.push(GridAction::RequestThumbnailLoad(path, size));
             }
 
             fn request_folder_scan(&mut self, path: PathBuf) {
@@ -391,6 +393,10 @@ impl ImageViewerApp {
             fn request_folder_preview_load(&mut self, path: PathBuf) {
                 self.actions
                     .push(GridAction::RequestFolderPreviewLoad(path));
+            }
+
+            fn request_thumbnail_prefetch(&mut self, path: PathBuf, size: u32) {
+                self.actions.push(GridAction::RequestThumbnailPrefetch(path, size));
             }
 
             fn rename_with_shell(&mut self, idx: usize) {
@@ -468,11 +474,12 @@ impl ImageViewerApp {
             match action {
                 GridAction::NavigateTo(path) => self.navigate_to(&path),
                 GridAction::OpenWithShell(path) => open_with_shell(&path),
-                GridAction::RequestThumbnailLoad(path) => self.request_thumbnail_load(path),
+                GridAction::RequestThumbnailLoad(path, size) => self.request_thumbnail_load(path, size),
                 GridAction::RequestFolderScan(path) => self.request_folder_scan(path),
                 GridAction::RequestFolderPreviewLoad(path) => {
                     self.request_folder_preview_load(path)
                 }
+                GridAction::RequestThumbnailPrefetch(path, size) => self.request_thumbnail_prefetch(path, size),
                 GridAction::RenameWithShell(idx) => self.rename_with_shell(idx),
             }
         }
@@ -492,7 +499,7 @@ impl ImageViewerApp {
 
         // Para evitar conflitos de borrow, coletamos as operações pendentes
         // e executamos depois de renderizar
-        let mut pending_thumbnail_loads: Vec<std::path::PathBuf> = Vec::new();
+        let mut pending_thumbnail_loads: Vec<(std::path::PathBuf, u32)> = Vec::new();
         let mut pending_folder_scans: Vec<std::path::PathBuf> = Vec::new();
         let mut pending_folder_preview_loads: Vec<std::path::PathBuf> = Vec::new();
         let mut pending_rename: Option<usize> = None;
@@ -526,15 +533,15 @@ impl ImageViewerApp {
 
             // Create simple ops struct that collects operations
             struct SimpleOps<'a> {
-                thumbnail_loads: &'a mut Vec<std::path::PathBuf>,
+                thumbnail_loads: &'a mut Vec<(std::path::PathBuf, u32)>,
                 folder_scans: &'a mut Vec<std::path::PathBuf>,
                 folder_preview_loads: &'a mut Vec<std::path::PathBuf>,
                 pending_rename: &'a mut Option<usize>,
             }
 
             impl<'a> crate::ui::components::item_slot::ItemSlotOperations for SimpleOps<'a> {
-                fn request_thumbnail_load(&mut self, path: std::path::PathBuf) {
-                    self.thumbnail_loads.push(path);
+                fn request_thumbnail_load(&mut self, path: std::path::PathBuf, size: u32) {
+                    self.thumbnail_loads.push((path, size));
                 }
 
                 fn request_folder_scan(&mut self, path: std::path::PathBuf) {
@@ -570,8 +577,8 @@ impl ImageViewerApp {
         }
 
         // Execute pending operations
-        for path in pending_thumbnail_loads {
-            ImageViewerApp::request_thumbnail_load(&*self, path);
+        for (path, size) in pending_thumbnail_loads {
+            ImageViewerApp::request_thumbnail_load(&*self, path, size);
         }
 
         for path in pending_folder_scans {
