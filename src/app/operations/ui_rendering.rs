@@ -329,6 +329,10 @@ impl ImageViewerApp {
 
         // Criar contexto com referências mutáveis separadas
         let scroll_to_selected = self.scroll_to_selected;
+        
+        // PERFORMANCE: Clear shared buffers before rendering (reuse, don't reallocate)
+        self.pending_ops.clear();
+        
         let mut ctx = GridViewContext {
             items: &items,
             selected_item,
@@ -349,6 +353,7 @@ impl ImageViewerApp {
             item_icon_loader: &mut self.item_icon_loader,
             folder_preview_cache: &mut self.cache_manager.folder_preview_cache,
             folder_preview_loading: &mut self.cache_manager.folder_preview_loading,
+            pending_ops: &mut self.pending_ops,
         };
 
         // Usar uma abordagem diferente: coletar ações em vetores

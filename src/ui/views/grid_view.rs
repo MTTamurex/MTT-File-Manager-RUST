@@ -6,6 +6,34 @@ use std::path::PathBuf;
 
 use crate::domain::file_entry::FileEntry;
 
+/// Pre-allocated buffers for pending operations (PERFORMANCE: avoids per-item allocations)
+#[derive(Default)]
+pub struct PendingOperations {
+    pub thumbnail_loads: Vec<PathBuf>,
+    pub folder_scans: Vec<PathBuf>,
+    pub folder_preview_loads: Vec<PathBuf>,
+    pub renames: Vec<usize>,
+}
+
+impl PendingOperations {
+    pub fn new() -> Self {
+        Self {
+            thumbnail_loads: Vec::with_capacity(16),
+            folder_scans: Vec::with_capacity(16),
+            folder_preview_loads: Vec::with_capacity(16),
+            renames: Vec::with_capacity(2),
+        }
+    }
+    
+    /// Clear all buffers (call before each frame)
+    pub fn clear(&mut self) {
+        self.thumbnail_loads.clear();
+        self.folder_scans.clear();
+        self.folder_preview_loads.clear();
+        self.renames.clear();
+    }
+}
+
 /// Context for grid view rendering
 pub struct GridViewContext<'a> {
     pub items: &'a [FileEntry],
@@ -27,6 +55,8 @@ pub struct GridViewContext<'a> {
     pub item_icon_loader: &'a mut crate::ui::icon_loader::IconLoader,
     pub folder_preview_cache: &'a mut lru::LruCache<PathBuf, egui::TextureHandle>,
     pub folder_preview_loading: &'a mut std::collections::HashSet<PathBuf>,
+    /// PERFORMANCE: Shared buffer for pending operations (reused across items)
+    pub pending_ops: &'a mut PendingOperations,
 }
 
 /// Operations that can be performed from grid view
@@ -395,6 +425,7 @@ pub fn render_grid_view(
 }
 
 /// Renders an individual item slot for grid view
+/// PERFORMANCE: Uses shared buffers from ctx.pending_ops instead of allocating per-item
 fn render_item_slot_for_grid(
     ui: &mut Ui,
     idx: usize,
@@ -409,19 +440,18 @@ fn render_item_slot_for_grid(
         .as_ref()
         .map_or(false, |(i, _)| *i == idx);
 
-    // Para evitar conflitos de borrow, coletamos as operações pendentes
-    // e executamos depois de renderizar
-    let mut pending_thumbnail_loads: Vec<std::path::PathBuf> = Vec::new();
-    let mut pending_folder_scans: Vec<std::path::PathBuf> = Vec::new();
-    let mut pending_folder_preview_loads: Vec<std::path::PathBuf> = Vec::new();
-    let mut pending_rename: Option<usize> = None;
-
     // Texto de renomeação precisa ser tratado separadamente
     let mut renaming_text_clone = if is_renaming {
         ctx.renaming_state.as_ref().map(|(_, s)| s.clone())
     } else {
         None
     };
+
+    // Track operation counts BEFORE render to know what was added
+    let thumb_start = ctx.pending_ops.thumbnail_loads.len();
+    let scan_start = ctx.pending_ops.folder_scans.len();
+    let preview_start = ctx.pending_ops.folder_preview_loads.len();
+    let rename_start = ctx.pending_ops.renames.len();
 
     // Create context with mutable reference to the clone
     {
@@ -443,36 +473,30 @@ fn render_item_slot_for_grid(
             folder_preview_loading: ctx.folder_preview_loading,
         };
 
-        // Create simple ops struct that collects operations
+        // PERFORMANCE: SimpleOps now writes directly to shared buffers
         struct SimpleOps<'a> {
-            thumbnail_loads: &'a mut Vec<std::path::PathBuf>,
-            folder_scans: &'a mut Vec<std::path::PathBuf>,
-            folder_preview_loads: &'a mut Vec<std::path::PathBuf>,
-            pending_rename: &'a mut Option<usize>,
+            pending_ops: &'a mut PendingOperations,
         }
 
         impl<'a> crate::ui::components::item_slot::ItemSlotOperations for SimpleOps<'a> {
             fn request_thumbnail_load(&mut self, path: std::path::PathBuf) {
-                self.thumbnail_loads.push(path);
+                self.pending_ops.thumbnail_loads.push(path);
             }
 
             fn request_folder_scan(&mut self, path: std::path::PathBuf) {
-                self.folder_scans.push(path);
+                self.pending_ops.folder_scans.push(path);
             }
             fn request_folder_preview_load(&mut self, path: std::path::PathBuf) {
-                self.folder_preview_loads.push(path);
+                self.pending_ops.folder_preview_loads.push(path);
             }
 
             fn rename_item(&mut self, idx: usize) {
-                *self.pending_rename = Some(idx);
+                self.pending_ops.renames.push(idx);
             }
         }
 
         let mut simple_ops = SimpleOps {
-            thumbnail_loads: &mut pending_thumbnail_loads,
-            folder_scans: &mut pending_folder_scans,
-            folder_preview_loads: &mut pending_folder_preview_loads,
-            pending_rename: &mut pending_rename,
+            pending_ops: ctx.pending_ops,
         };
 
         render_item_slot(ui, &mut item_slot_ctx, &mut simple_ops);
@@ -487,19 +511,19 @@ fn render_item_slot_for_grid(
         }
     }
 
-    // Execute pending operations
-    for path in pending_thumbnail_loads {
+    // Execute ONLY NEW pending operations (those added by this item)
+    for path in ctx.pending_ops.thumbnail_loads.drain(thumb_start..) {
         ops.request_thumbnail_load(path);
     }
 
-    for path in pending_folder_scans {
+    for path in ctx.pending_ops.folder_scans.drain(scan_start..) {
         ops.request_folder_scan(path);
     }
-    for path in pending_folder_preview_loads {
+    for path in ctx.pending_ops.folder_preview_loads.drain(preview_start..) {
         ops.request_folder_preview_load(path);
     }
 
-    if let Some(rename_idx) = pending_rename {
+    for rename_idx in ctx.pending_ops.renames.drain(rename_start..) {
         ops.rename_with_shell(rename_idx);
     }
 }
