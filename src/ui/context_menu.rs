@@ -329,8 +329,16 @@ fn render_single_item(
     };
 
     // Truncate very long names (like drive paths in "Send to") with ellipsis
-    let display_text = if item.text.len() > 45 {
-        format!("{}…", &item.text[..43])
+    // Use char_indices to find proper UTF-8 boundaries (avoids panic on multi-byte chars)
+    let display_text = if item.text.chars().count() > 45 {
+        let truncate_char_count = 43;
+        let byte_idx = item
+            .text
+            .char_indices()
+            .nth(truncate_char_count)
+            .map(|(idx, _)| idx)
+            .unwrap_or(item.text.len());
+        format!("{}…", &item.text[..byte_idx])
     } else {
         item.text.clone()
     };
