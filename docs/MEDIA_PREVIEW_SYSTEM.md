@@ -20,7 +20,7 @@ The miniplayer uses a **Hybrid Architecture** to overcome the limitations of ren
 
 ### 3. IPC Communication (Bridge)
 - **Rust -> JS**: Commands like `play()`, `pause()`, `seek(time)`, and `setVolume(v)` are sent from Rust to the WebView via string scripts.
-- **JS -> Rust**: A heartbeat and event system (`window.ipc.postMessage`) sends the current playback state (time, duration, playing status) back to Rust every 16ms to synchronize the UI.
+- **JS -> Rust**: A heartbeat and event system (`window.ipc.postMessage`) sends the current playback state (time, duration, playing status) back to Rust every 250ms to synchronize the UI.
 
 ## 🎨 UI & Controls
 
@@ -40,7 +40,7 @@ While the video is rendered by WebView, the **Controls** are rendered in pure **
 | Feature | Implementation |
 | :--- | :--- |
 | **Decoding** | GPU-accelerated via OS (WebView2/Edge) |
-| **Streaming** | `tiny_http` with Byte-Range support |
+| **Streaming** | Custom `std::net::TcpListener` with Byte-Range support |
 | **Controls** | Custom egui Widgets |
 | **Styles** | CSS-injected for background matching (`#FDFDFD` / `#2D2D2D`) |
 | **Performance** | Zero-copy streaming from disk to WebView |

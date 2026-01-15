@@ -1,140 +1,162 @@
 # MTT File Manager
 
-Um gerenciador de arquivos moderno e eficiente para Windows, desenvolvido em Rust com interface gráfica usando egui/eframe.
+Um gerenciador de arquivos moderno e eficiente para Windows, desenvolvido em Rust com interface gráfica usando egui/eframe e **player de vídeo integrado via WebView2**.
+
+> [!IMPORTANT]
+> **Pré-requisito de Sistema**: Este aplicativo requer o **Microsoft Edge WebView2 Runtime** instalado para reprodução de vídeo. O runtime vem pré-instalado no Windows 11 e em versões recentes do Windows 10. Se necessário, baixe em: [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
+
+---
 
 ## 🚀 Características
 
 - **Interface moderna** com suporte a temas claro/escuro
 - **Navegação por abas** para múltiplos diretórios
 - **Visualização em grade e lista** com miniaturas
-- **Preview de arquivos** (imagens, vídeos, áudio)
+- **Player de vídeo integrado** (WebView2) com controles nativos
+- **Preview de arquivos** (imagens, vídeos, GIFs animados)
 - **Integração nativa com Windows** (clipboard, menus de contexto, shell extensions)
 - **Suporte a OneDrive** com indicadores de status
 - **Metadados de mídia** (dimensões, duração, codec, bitrate)
 - **Operações de arquivo** (copiar, mover, renomear, excluir)
 - **Lixeira do Windows** com restauração
-- **Cache de miniaturas** para performance
+- **Cache de miniaturas** SQLite para performance
+
+---
+
+## 🏗️ Arquitetura Híbrida
+
+O MTT File Manager utiliza uma arquitetura híbrida para superar as limitações de renderização de vídeo em ambientes Rust puro:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    MTT File Manager                      │
+├─────────────────────────────────────────────────────────┤
+│  ┌─────────────────────┐    ┌─────────────────────────┐ │
+│  │      egui/eframe    │    │    WebView2 (wry)       │ │
+│  │  ─────────────────  │    │  ─────────────────────  │ │
+│  │  • UI Principal     │    │  • Player de Vídeo      │ │
+│  │  • Navegação        │◄──►│  • HTML5 <video>        │ │
+│  │  • Thumbnails       │IPC │  • Decodificação GPU    │ │
+│  │  • Controles        │    │  • Streaming HTTP local │ │
+│  └─────────────────────┘    └─────────────────────────┘ │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Por que WebView2?
+
+O `egui` não suporta decodificação de vídeo com aceleração de hardware (H.264/HEVC) nativamente. Ao utilizar o WebView2 (Edge), delegamos a renderização de vídeo ao engine do navegador, obtendo:
+
+- **Decodificação GPU** via Media Foundation
+- **Suporte a codecs modernos** (H.264, HEVC, VP9, AV1)
+- **Streaming com Range Requests** para arquivos grandes
+- **Zero overhead de transcodificação**
+
+### Comunicação Rust ↔ WebView2
+
+| Direção | Método | Exemplo |
+|---------|--------|---------|
+| Rust → JS | `evaluate_script()` | `play()`, `pause()`, `seek(time)` |
+| JS → Rust | `window.ipc.postMessage()` | Estado do player a cada 250ms |
+
+---
 
 ## 🛠️ Tecnologias
 
-- **Rust 1.75+** - Linguagem de programação
-- **egui 0.31** - Framework de UI imediata
-- **eframe** - Integração nativa com Windows
-- **windows-rs 0.58** - Bindings para APIs do Windows
-- **Media Foundation** - Extração de metadados de mídia
+| Dependência | Versão | Propósito |
+|-------------|--------|-----------|
+| `eframe` | 0.31 | Framework egui com persistence |
+| `wry` | 0.39 | WebView2 para player de vídeo |
+| `windows` | 0.58 | Bindings para APIs Win32 |
+| `rayon` | 1.10 | Paralelismo para ordenação |
+| `rusqlite` | 0.32 | Cache SQLite persistente |
+| `image` | 0.25 | Decodificação de imagens |
+| `notify` | 6.1.1 | File system watcher |
+| `lru` | 0.12 | Cache LRU para texturas |
+| `resvg/usvg` | 0.44 | Renderização de ícones SVG |
 
-## 📁 Arquitetura do Projeto
+---
+
+## 📁 Estrutura do Projeto
 
 ```
 src/
-├── main.rs                 # Bootstrap (115 linhas)
+├── main.rs                 # Bootstrap (135 linhas)
 ├── lib.rs                  # Biblioteca pública
 │
 ├── app/                    # Lógica de aplicação
 │   ├── mod.rs              # ImageViewerApp struct
+│   ├── init.rs             # Inicialização
+│   ├── state.rs            # Estado da aplicação
 │   └── operations/         # Métodos da aplicação (19 módulos)
-│       ├── clipboard_ops.rs    # Operações de clipboard
-│       ├── context_menu.rs     # Menu de contexto
-│       ├── file_ops.rs         # Operações de arquivo
-│       ├── folder_loading.rs   # Carregamento de pastas
-│       ├── icons.rs            # Gerenciamento de ícones
-│       ├── message_handler.rs  # Processamento de mensagens
-│       ├── metadata.rs         # Metadados de arquivos
-│       ├── navigation.rs       # Navegação de diretórios
-│       ├── preferences.rs      # Preferências do usuário
-│       ├── recycle_bin_ops.rs  # Operações de lixeira
-│       ├── selection.rs        # Seleção de itens
-│       ├── tabs.rs             # Gerenciamento de abas
-│       ├── thumbnails.rs       # Carregamento de miniaturas
-│       ├── trait_impls.rs      # Implementações de traits
-│       ├── ui_rendering.rs     # Renderização de UI
-│       ├── view_setup.rs       # Configuração de views
-│       ├── watcher.rs          # Observador de arquivos
-│       └── window.rs           # Gerenciamento de janela
+│       ├── clipboard_ops.rs
+│       ├── context_menu.rs
+│       ├── file_ops.rs
+│       ├── folder_loading.rs
+│       ├── navigation.rs
+│       ├── tabs.rs
+│       ├── thumbnails.rs
+│       └── ...
 │
 ├── ui/                     # Componentes de interface
 │   ├── app/                # Implementação eframe::App
-│   │   ├── input.rs            # Processamento de entrada
-│   │   ├── lifecycle.rs        # Ciclo de vida da aplicação
-│   │   ├── menu_handler.rs     # Manipulação de menus
-│   │   ├── notifications.rs    # Sistema de notificações
-│   │   └── panels.rs           # Painéis principais
+│   │   ├── input.rs
+│   │   ├── lifecycle.rs
+│   │   ├── panels.rs
+│   │   └── ...
 │   │
 │   ├── components/         # Componentes reutilizáveis
-│   │   └── item_slot.rs        # Slot de item com preview
+│   │   ├── item_slot.rs        # Slot de item com preview
+│   │   ├── media_preview.rs    # Preview de mídia (imagens/GIFs)
+│   │   └── webview_preview.rs  # Player de vídeo WebView2
 │   │
 │   ├── views/              # Views de exibição
-│   │   ├── computer_view.rs    # View "Este Computador"
-│   │   ├── grid_view.rs        # View em grade
-│   │   ├── list_view.rs        # View em lista
-│   │   └── common.rs           # Funções compartilhadas
+│   │   ├── computer_view.rs
+│   │   ├── grid_view.rs
+│   │   └── list_view.rs
 │   │
-│   ├── context_menu.rs     # Menu de contexto UI
-│   ├── grid.rs             # Layout de grade
-│   ├── header.rs           # Cabeçalho da aplicação
-│   ├── icon_loader.rs      # Carregador de ícones
-│   ├── navigation.rs       # Barra de navegação
-│   ├── operations.rs       # Operações de UI
-│   ├── sidebar.rs          # Barra lateral
-│   ├── status_bar.rs       # Barra de status
-│   ├── svg_icons.rs        # Ícones SVG
-│   └── tab_bar.rs          # Barra de abas
+│   └── [outros componentes]
 │
 ├── infrastructure/         # Serviços de infraestrutura
 │   ├── windows/            # Integração Windows
 │   │   ├── metadata/           # Extração de metadados
-│   │   │   ├── image.rs        # Metadados de imagem
-│   │   │   ├── video.rs        # Metadados de vídeo
-│   │   │   ├── property_keys.rs
-│   │   │   └── utils.rs
-│   │   ├── bitmap_conversion.rs
-│   │   ├── codec_registry.rs
-│   │   ├── device_change.rs
-│   │   ├── drives.rs
-│   │   ├── file_system.rs
-│   │   ├── file_type.rs
-│   │   ├── formatting.rs
-│   │   ├── icons.rs
-│   │   ├── media_foundation.rs
-│   │   ├── native_menu.rs
-│   │   ├── recycle_bin.rs
-│   │   └── shell_operations.rs
+│   │   │   ├── image.rs
+│   │   │   └── video.rs
+│   │   ├── codec_registry.rs   # Resolução de nomes de codec
+│   │   ├── icons.rs            # Extração de ícones nativos
+│   │   ├── native_menu.rs      # Menu de contexto nativo
+│   │   ├── recycle_bin.rs      # Operações de lixeira
+│   │   └── shell_operations.rs # Operações de shell
 │   │
 │   ├── cache.rs            # Cache de miniaturas
-│   ├── disk_cache.rs       # Cache em disco
-│   ├── onedrive.rs         # Integração OneDrive
-│   ├── security.rs         # Verificações de segurança
-│   └── watcher.rs          # Observador de arquivos
+│   ├── disk_cache.rs       # Cache em disco (SQLite)
+│   └── onedrive.rs         # Integração OneDrive
 │
 ├── domain/                 # Entidades de domínio
-│   ├── errors.rs           # Tipos de erro
-│   ├── file_entry.rs       # Entrada de arquivo
-│   └── thumbnail.rs        # Miniatura
+│   ├── file_entry.rs
+│   ├── thumbnail.rs
+│   └── errors.rs
 │
 ├── application/            # Serviços de aplicação
-│   ├── clipboard.rs        # Serviço de clipboard
-│   ├── context_menu.rs     # Serviço de menu de contexto
-│   ├── navigation.rs       # Serviço de navegação
-│   ├── notification.rs     # Serviço de notificação
-│   ├── renaming.rs         # Serviço de renomeação
-│   ├── state.rs            # Estado da aplicação
-│   └── watcher.rs          # Serviço de observador
+│   ├── clipboard.rs
+│   ├── navigation.rs
+│   └── state.rs
 │
 └── workers/                # Workers assíncronos
-    ├── batch_thumbnail_loader.rs
-    ├── folder_preview_worker.rs
-    ├── folder_scanner.rs
     ├── thumbnail_loader.rs
-    └── thumbnail_worker.rs
+    ├── folder_scanner.rs
+    └── folder_preview_worker.rs
 ```
+
+---
 
 ## 🏗️ Build
 
 ### Requisitos
 
-- Rust 1.75 ou superior
-- Windows 10/11 (64-bit)
-- Visual Studio Build Tools (para windows-rs)
+- **Rust 1.75** ou superior
+- **Windows 10/11** (64-bit)
+- **Visual Studio Build Tools** (para windows-rs)
+- **WebView2 Runtime** (para player de vídeo)
 
 ### Compilação
 
@@ -142,7 +164,7 @@ src/
 # Debug
 cargo build
 
-# Release (otimizado)
+# Release (otimizado com LTO)
 cargo build --release
 ```
 
@@ -156,26 +178,23 @@ cargo run
 cargo run --release
 ```
 
+---
+
 ## 📝 Documentação
 
 Documentação técnica disponível em `docs/`:
 
-- [AUDIT_REPORT.md](docs/AUDIT_REPORT.md) - Relatório de auditoria do código
-- [CLIPBOARD_INTEGRATION.md](docs/CLIPBOARD_INTEGRATION.md) - Integração com clipboard do Windows
-- [CODEC_RESOLUTION.md](docs/CODEC_RESOLUTION.md) - Resolução de codecs de mídia
-- [EAC3_CODEC_FIX.md](docs/EAC3_CODEC_FIX.md) - Correção de codec EAC3
-- [MEDIA_METADATA_FEATURE.md](docs/MEDIA_METADATA_FEATURE.md) - Feature de metadados de mídia
-- [PADROES_REUTILIZAVEIS.md](docs/PADROES_REUTILIZAVEIS.md) - Padrões de código reutilizáveis
+| Documento | Descrição |
+|-----------|-----------|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Arquitetura detalhada do sistema |
+| [AUDIT_REPORT.md](docs/AUDIT_REPORT.md) | Relatório de auditoria do código |
+| [MEDIA_PREVIEW_SYSTEM.md](docs/MEDIA_PREVIEW_SYSTEM.md) | Sistema de preview de mídia |
+| [MEDIA_METADATA_FEATURE.md](docs/MEDIA_METADATA_FEATURE.md) | Extração de metadados |
+| [CLIPBOARD_INTEGRATION.md](docs/CLIPBOARD_INTEGRATION.md) | Integração com clipboard |
+| [CODEC_RESOLUTION.md](docs/CODEC_RESOLUTION.md) | Resolução de codecs |
+| [PADROES_REUTILIZAVEIS.md](docs/PADROES_REUTILIZAVEIS.md) | Padrões de código |
 
-## 🎯 Métricas do Código
-
-| Módulo | Linhas | Descrição |
-|--------|--------|-----------|
-| main.rs | 115 | Bootstrap apenas |
-| app/operations/ | 19 módulos | Lógica de aplicação |
-| ui/app/ | 6 módulos | Implementação eframe::App |
-| ui/views/ | 4 módulos | Views de exibição |
-| infrastructure/windows/ | 15+ módulos | Integração Windows |
+---
 
 ## 📜 Licença
 
