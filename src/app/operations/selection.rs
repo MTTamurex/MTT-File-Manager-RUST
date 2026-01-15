@@ -14,37 +14,59 @@ impl ImageViewerApp {
         // This allows playback to continue in the background while the user browses.
         
         self.selected_thumbnail = None;
+        self.selected_gif = None;
         
         if let Some(selected) = &self.selected_file {
+            let path = selected.path.clone();
             // Validate path exists before trying to load thumbnail
-            if !selected.path.exists() {
+            if !path.exists() {
                 self.selected_file = None;
                 self.update_video_visibility(); // Sync visibility after clearing selection
                 return;
             }
 
             // Always try to load a thumbnail for the selection
-            if let Some(tex) = self.cache_manager.texture_cache.peek(&selected.path) {
+            if let Some(tex) = self.cache_manager.texture_cache.peek(&path) {
                 self.selected_thumbnail = Some(tex.clone());
             }
 
-            // CLEANUP LOGIC: If we are the owner, and focus changed to a DIFFERENT file, stop the player.
             let active_tab_id = self.tab_manager.active().id;
-            let is_owner = self.media_preview_owner_tab_id == Some(active_tab_id);
-            if is_owner {
-                use crate::ui::components::media_preview::MediaPreview;
-                let should_stop = match &mut self.media_preview {
-                    Some(MediaPreview::Video(webview)) => webview.path != selected.path,
-                    Some(MediaPreview::AnimatedGif(_)) => true, // Gifs are small, but let's be strict
-                    _ => false,
-                };
 
-                if should_stop {
-                    if let Some(MediaPreview::Video(ref mut wv)) = self.media_preview {
-                        wv.pause();
+            // SPECIAL CASE: GIF Autoplay logic
+            let is_gif = path.extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| ext.to_lowercase() == "gif")
+                .unwrap_or(false);
+
+            if is_gif {
+                // Load GIF player locally for this tab
+                use crate::ui::components::media_preview::GifPlayer;
+                
+                match GifPlayer::load(&self.ui_ctx, &path) {
+                    Ok(player) => {
+                        self.selected_gif = Some(player);
                     }
-                    self.media_preview = None;
-                    self.media_preview_owner_tab_id = None;
+                    Err(e) => {
+                        eprintln!("Failed to load GIF: {}", e);
+                    }
+                }
+            } else {
+                // CLEANUP LOGIC: If we are the owner of a VIDEO, and focus changed to a DIFFERENT file, stop the player.
+                let is_owner = self.media_preview_owner_tab_id == Some(active_tab_id);
+                if is_owner {
+                    use crate::ui::components::media_preview::MediaPreview;
+                    let should_stop = match &mut self.media_preview {
+                        Some(MediaPreview::Video(webview)) => webview.path != path,
+                        _ => false, // GIFs/Images don't "own" global media_preview anymore
+                    };
+
+                    if should_stop {
+                        if let Some(MediaPreview::Video(ref mut wv)) = self.media_preview {
+                            wv.pause();
+                        }
+                        self.media_preview = None;
+                        self.media_preview_owner_tab_id = None;
+                    }
                 }
             }
         } else {
@@ -77,6 +99,7 @@ impl ImageViewerApp {
         self.search_query.clear();
         self.context_menu.target_path = None;
         self.renaming_state = None;
+        self.selected_gif = None;
 
         // CLEANUP LOGIC: If owner resets selection, clear media
         let active_tab_id = self.tab_manager.active().id;

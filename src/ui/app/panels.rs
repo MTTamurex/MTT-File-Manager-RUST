@@ -110,6 +110,7 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, fr
                                 ui,
                                 &file,
                                 app.selected_thumbnail.as_ref(),
+                                app.selected_gif.as_mut(),
                                 app.media_preview.as_mut(), // Always pass mut if it exists, visibility is controlled by HWND
                                 selected_metadata,
                                 app.cache_manager.texture_cache.peek(&file.path).cloned(),
