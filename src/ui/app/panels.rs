@@ -144,6 +144,9 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, fr
                                 match act {
                                     PreviewPanelAction::RequestPlay(path) => {
                                         use crate::ui::components::media_preview::MediaPreview;
+                                        #[cfg(feature = "mpv-player")]
+                                        use crate::ui::components::MpvPreview;
+                                        #[cfg(not(feature = "mpv-player"))]
                                         use crate::ui::components::WebviewPreview;
                                         
                                         // TAKE OVER: Stop and drop existing player if any
@@ -154,6 +157,9 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, fr
                                         app.media_preview = None;
 
                                         // Take ownership and start new player
+                                        #[cfg(feature = "mpv-player")]
+                                        let mut player = MpvPreview::new(path);
+                                        #[cfg(not(feature = "mpv-player"))]
                                         let mut player = WebviewPreview::new(path);
                                         player.play_on_init = true; // Start playing as soon as initialized
                                         player.show_player = true;  // Ensure player is visible immediately

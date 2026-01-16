@@ -136,8 +136,8 @@ pub fn render_preview_panel(
                             // Time
                             let time_text = format!(
                                 "{} / {}",
-                                crate::ui::components::webview_preview::format_time(current_time),
-                                crate::ui::components::webview_preview::format_time(duration)
+                                crate::ui::components::media_preview::format_time(current_time),
+                                crate::ui::components::media_preview::format_time(duration)
                             );
                             let time_color = if ui.visuals().dark_mode { egui::Color32::LIGHT_GRAY } else { egui::Color32::DARK_GRAY };
                             ui.label(egui::RichText::new(time_text).size(13.0).color(time_color));
