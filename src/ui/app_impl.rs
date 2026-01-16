@@ -131,7 +131,7 @@ fn render_tab_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context, frame: &m
                     app.sync_to_tab();
                     app.tab_manager.switch_to(idx);
                     app.sync_from_tab();
-                    // Control WebView visibility based on owner
+                    // Control player visibility based on owner
                     app.update_video_visibility();
                 }
                 TabBarAction::NewTab => {
@@ -140,7 +140,7 @@ fn render_tab_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context, frame: &m
                     app.sync_from_tab();
                     app.setup_computer_view();
                     app.sync_to_tab();
-                    // Control WebView visibility based on owner
+                    // Control player visibility based on owner
                     app.update_video_visibility();
                 }
                 TabBarAction::CloseTab(idx) => {
@@ -160,7 +160,7 @@ fn render_tab_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context, frame: &m
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     } else {
                         app.sync_from_tab();
-                        // Control WebView visibility based on (new) owner/active tab
+                        // Control player visibility based on (new) owner/active tab
                         app.update_video_visibility();
                     }
                 }

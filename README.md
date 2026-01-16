@@ -1,9 +1,9 @@
 # MTT File Manager
 
-Um gerenciador de arquivos moderno e eficiente para Windows, desenvolvido em Rust com interface gráfica usando egui/eframe e **player de vídeo integrado via WebView2**.
+Um gerenciador de arquivos moderno e eficiente para Windows, desenvolvido em Rust com interface gráfica usando egui/eframe e **player de vídeo integrado via MPV**.
 
 > [!IMPORTANT]
-> **Pré-requisito de Sistema**: Este aplicativo requer o **Microsoft Edge WebView2 Runtime** instalado para reprodução de vídeo. O runtime vem pré-instalado no Windows 11 e em versões recentes do Windows 10. Se necessário, baixe em: [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
+> **Pré-requisito de Sistema (MPV)**: Forneça `mpv-1.dll` ao lado do executável (ou no PATH).
 
 ---
 
@@ -12,7 +12,7 @@ Um gerenciador de arquivos moderno e eficiente para Windows, desenvolvido em Rus
 - **Interface moderna** com suporte a temas claro/escuro
 - **Navegação por abas** para múltiplos diretórios
 - **Visualização em grade e lista** com miniaturas
-- **Player de vídeo integrado** (WebView2) com controles nativos
+- **Player de vídeo integrado** (MPV) com controles nativos
 - **Preview de arquivos** (imagens, vídeos, GIFs animados)
 - **Integração nativa com Windows** (clipboard, menus de contexto, shell extensions)
 - **Suporte a OneDrive** com indicadores de status
@@ -25,47 +25,35 @@ Um gerenciador de arquivos moderno e eficiente para Windows, desenvolvido em Rus
 
 ## 🏗️ Arquitetura Híbrida
 
-O MTT File Manager utiliza uma arquitetura híbrida para superar as limitações de renderização de vídeo em ambientes Rust puro:
+O MTT File Manager utiliza uma arquitetura híbrida para superar as limitações de renderização de vídeo em ambientes Rust puro usando MPV:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    MTT File Manager                      │
 ├─────────────────────────────────────────────────────────┤
 │  ┌─────────────────────┐    ┌─────────────────────────┐ │
-│  │      egui/eframe    │    │    WebView2 (wry)       │ │
+│  │      egui/eframe    │    │          MPV           │ │
 │  │  ─────────────────  │    │  ─────────────────────  │ │
 │  │  • UI Principal     │    │  • Player de Vídeo      │ │
-│  │  • Navegação        │◄──►│  • HTML5 <video>        │ │
-│  │  • Thumbnails       │IPC │  • Decodificação GPU    │ │
-│  │  • Controles        │    │  • Streaming HTTP local │ │
+│  │  • Navegação        │◄──►│  • Decodificação GPU    │ │
+│  │  • Thumbnails       │    │  • Janela child (wid)   │ │
+│  │  • Controles        │    │                         │ │
 │  └─────────────────────┘    └─────────────────────────┘ │
 └─────────────────────────────────────────────────────────┘
 ```
 
-### Por que WebView2?
+### Por que MPV?
 
-O `egui` não suporta decodificação de vídeo com aceleração de hardware (H.264/HEVC) nativamente. Ao utilizar o WebView2 (Edge), delegamos a renderização de vídeo ao engine do navegador, obtendo:
-
-- **Decodificação GPU** via Media Foundation
-- **Suporte a codecs modernos** (H.264, HEVC, VP9, AV1)
-- **Streaming com Range Requests** para arquivos grandes
-- **Zero overhead de transcodificação**
-
-### Comunicação Rust ↔ WebView2
-
-| Direção | Método | Exemplo |
-|---------|--------|---------|
-| Rust → JS | `evaluate_script()` | `play()`, `pause()`, `seek(time)` |
-| JS → Rust | `window.ipc.postMessage()` | Estado do player a cada 250ms |
-
----
+- **Suporte amplo de formatos/containers**
+- **Dispensa transcoding na maioria dos casos**
+- **Integração via janela filha (wid)**
 
 ## 🛠️ Tecnologias
 
 | Dependência | Versão | Propósito |
 |-------------|--------|-----------|
 | `eframe` | 0.31 | Framework egui com persistence |
-| `wry` | 0.39 | WebView2 para player de vídeo |
+| `libmpv2` | 5.0.3 | MPV para player de vídeo |
 | `windows` | 0.58 | Bindings para APIs Win32 |
 | `rayon` | 1.10 | Paralelismo para ordenação |
 | `rusqlite` | 0.32 | Cache SQLite persistente |
@@ -107,7 +95,7 @@ src/
 │   ├── components/         # Componentes reutilizáveis
 │   │   ├── item_slot.rs        # Slot de item com preview
 │   │   ├── media_preview.rs    # Preview de mídia (imagens/GIFs)
-│   │   └── webview_preview.rs  # Player de vídeo WebView2
+│   │   └── mpv_preview.rs      # Player de vídeo MPV
 │   │
 │   ├── views/              # Views de exibição
 │   │   ├── computer_view.rs
@@ -156,7 +144,7 @@ src/
 - **Rust 1.75** ou superior
 - **Windows 10/11** (64-bit)
 - **Visual Studio Build Tools** (para windows-rs)
-- **WebView2 Runtime** (para player de vídeo)
+- **MPV runtime** (`mpv-1.dll` ao lado do executável ou no PATH)
 
 ### Compilação
 

@@ -4,27 +4,16 @@ The MTT File Manager features a high-performance, theme-consistent media preview
 
 ## 🏗️ Architecture
 
-The miniplayer uses a **Hybrid Architecture** to overcome the limitations of rendering hardware-accelerated video within a pure Rust/egui GUI on Windows.
+The miniplayer uses a **Hybrid Architecture** to embed MPV as a native child window inside the right sidebar.
 
-### 1. Webview Engine (`wry`)
-- **Reasoning**: Native `egui` does not support hardware-accelerated video decoding (H.264/H.265) directly in a texture without significant performance overhead and manual codec implementation.
-- **Implementation**: We use the `wry` crate to embed a native Edge/WebView2 window into the sidebar.
-- **Visibility**: The WebView is only initialized and visible when a compatible video file is selected, replacing the static thumbnail.
-
-### 2. Local HTTP Streaming Server
-- **Protocol**: `http://127.0.0.1:[RANDOM_PORT]`
-- **Streaming**: A lightweight local server provides the video file to the WebView using **Range Requests**. This ensures:
-    - Instant seeking (Fast-Forward/Rewind).
-    - Support for large 4K files without loading the entire file into memory.
-    - Compatibility with standard HTML5 `<video>` tags.
-
-### 3. IPC Communication (Bridge)
-- **Rust -> JS**: Commands like `play()`, `pause()`, `seek(time)`, and `setVolume(v)` are sent from Rust to the WebView via string scripts.
-- **JS -> Rust**: A heartbeat and event system (`window.ipc.postMessage`) sends the current playback state (time, duration, playing status) back to Rust every 250ms to synchronize the UI.
+### 1. MPV Engine (`libmpv2`)
+- **Reasoning**: Native `egui` does not support hardware-accelerated video decoding directly in a texture without significant performance overhead.
+- **Implementation**: We embed an MPV child window via the `wid` property.
+- **Visibility**: The MPV window is only shown when a video is active, replacing the static thumbnail.
 
 ## 🎨 UI & Controls
 
-While the video is rendered by WebView, the **Controls** are rendered in pure **egui** to ensure visual consistency with the rest of the application.
+While the video is rendered by MPV, the **Controls** are rendered in pure **egui** to ensure visual consistency with the rest of the application.
 
 ### State-Aware Components
 - **Thumbnail Mode**: Displays a centered Play button overlay on hover.
@@ -39,28 +28,20 @@ While the video is rendered by WebView, the **Controls** are rendered in pure **
 
 | Feature | Implementation |
 | :--- | :--- |
-| **Decoding** | GPU-accelerated via OS (WebView2/Edge) |
-| **Streaming** | Custom `std::net::TcpListener` with Byte-Range support |
+| **Decoding** | GPU-accelerated via MPV |
+| **Streaming** | Direct file playback via MPV |
 | **Controls** | Custom egui Widgets |
-| **Styles** | CSS-injected for background matching (`#FDFDFD` / `#2D2D2D`) |
-| **Performance** | Zero-copy streaming from disk to WebView |
+| **Styles** | Theme-aligned (egui) |
+| **Performance** | Direct decode/playback by MPV |
 | **Metadata** | 4-Layer Hybrid (Cache -> Registry -> MF -> Sniffing) |
 
 ## ⚠️ Known Constraints
-- **Native Window Precedence**: Being a native child window, the WebView window always stays on top of any `egui` painting in its area. This is why controls are placed **below** the video instead of as an overlay during active playback.
+- **Native Window Precedence**: Being a native child window, the MPV window always stays on top of any `egui` painting in its area. This is why controls are placed **below** the video instead of as an overlay during active playback.
 
-## 🎬 On-the-Fly Transcoding (Experimental)
+## 🧩 MPV Runtime
 
-For container formats not natively supported by WebView2 (e.g., MKV, AVI, WMV), the server can transcode to MP4 in real-time using FFmpeg:
-
-| Property | Value |
-| :--- | :--- |
-| **Trigger** | Files with `.mkv`, `.avi`, or `.wmv` extensions |
-| **Process** | FFmpeg with `-c:v libx264 -preset ultrafast -tune zerolatency` |
-| **Output** | Fragmented MP4 (`frag_keyframe+empty_moov`) via chunked HTTP |
-| **Limitation** | No seeking during transcoded playback |
-| **Requirement** | `ffmpeg.exe` must be in system PATH |
-
-> [!NOTE]
-> If FFmpeg is not installed, the server returns HTTP 500 and the video will not play.
+- **Renderização**: MPV embutido como janela filha (`wid`)
+- **Controles**: permanecem em egui
+- **Formato**: suporte amplo a containers/codecs (geralmente dispensa transcoding)
+- **Runtime**: requer `mpv-1.dll` ao lado do executável (ou no PATH)
 

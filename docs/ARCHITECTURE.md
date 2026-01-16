@@ -9,7 +9,7 @@
 O MTT File Manager é um gerenciador de arquivos nativo para Windows, construído com uma arquitetura híbrida que combina:
 
 - **Rust + egui** para a interface principal
-- **WebView2 (via wry)** para reprodução de vídeo com aceleração de hardware
+- **MPV (libmpv2)** para reprodução de vídeo com aceleração de hardware
 - **Windows APIs** para integração nativa com Shell, COM e Media Foundation
 
 ---
@@ -21,8 +21,8 @@ O MTT File Manager é um gerenciador de arquivos nativo para Windows, construíd
 │                           UI Layer                               │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
 │  │   egui      │  │   views/    │  │   components/           │  │
-│  │   Panels    │  │  grid_view  │  │  webview_preview.rs     │  │
-│  │   Sidebar   │  │  list_view  │  │  (WebView2 Video)       │  │
+│  │   Panels    │  │  grid_view  │  │  mpv_preview.rs         │  │
+│  │   Sidebar   │  │  list_view  │  │  (MPV Video)            │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
 ├─────────────────────────────────────────────────────────────────┤
 │                      Application Layer                           │
@@ -47,7 +47,7 @@ O MTT File Manager é um gerenciador de arquivos nativo para Windows, construíd
 
 ---
 
-## Arquitetura Híbrida: egui + WebView2
+## Arquitetura Híbrida: egui + MPV
 
 ### O Problema
 
@@ -59,7 +59,7 @@ O `egui` é um framework de UI imediata (immediate mode GUI) excelente para inte
 
 ### A Solução
 
-Utilizamos o crate `wry` (v0.39) para embedar uma janela WebView2 (Edge) como child window:
+Utilizamos o crate `libmpv2` para embedar uma janela MPV como child window via handle `wid`:
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -67,8 +67,8 @@ Utilizamos o crate `wry` (v0.39) para embedar uma janela WebView2 (Edge) como ch
 │  ┌───────────────────┬───────────────────┐  │
 │  │                   │   Preview Panel   │  │
 │  │   File List       │  ┌─────────────┐  │  │
-│  │                   │  │  WebView2   │  │  │
-│  │   (egui)          │  │  (wry)      │  │  │
+│  │                   │  │    MPV     │  │  │
+│  │   (egui)          │  │  (child)    │  │  │
 │  │                   │  │             │  │  │
 │  │                   │  └─────────────┘  │  │
 │  │                   │  [Controls egui]  │  │
@@ -78,45 +78,10 @@ Utilizamos o crate `wry` (v0.39) para embedar uma janela WebView2 (Edge) como ch
 
 ### Fluxo de Reprodução de Vídeo
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant Rust as Rust (egui)
-    participant Server as HTTP Server (localhost)
-    participant WV as WebView2
-
-    User->>Rust: Click em vídeo
-    Rust->>Server: start_video_server()
-    Server-->>Rust: porta aleatória (ex: 52431)
-    Rust->>WV: Cria WebView com HTML5 <video>
-    WV->>Server: GET /video.mp4 (Range: bytes=0-)
-    Server-->>WV: 206 Partial Content
-    WV-->>Rust: IPC: {playing: true, time: 0.5}
-    loop A cada 250ms
-        WV-->>Rust: Estado do player via IPC
-    end
-```
-
-### Implementação: `webview_preview.rs`
-
-```rust
-pub struct WebviewPreview {
-    path: PathBuf,
-    webview: Option<WebView>,
-    server_port: Option<u16>,
-    state: Arc<Mutex<VideoState>>,
-    // ...
-}
-```
-
-**Servidor HTTP Local:**
-- Usa `std::net::TcpListener` em porta aleatória
-- Suporta Range Requests para seeking
-- Chunked responses de 2MB para performance
-
-**IPC (Inter-Process Communication):**
-- Rust → JS: `webview.evaluate_script("video.play()")`
-- JS → Rust: `window.ipc.postMessage(JSON.stringify({...}))`
+- MPV é inicializado sob demanda.
+- Um HWND filho é criado e passado via `wid`.
+- O arquivo é carregado diretamente pelo MPV.
+- O estado do player é consultado por propriedades (`time-pos`, `duration`, `pause`, `volume`).
 
 ---
 
@@ -181,7 +146,7 @@ Todas as operações de I/O são executadas fora da thread principal:
 ## Requisitos de Sistema
 
 - Windows 10/11 (64-bit)
-- WebView2 Runtime (Windows 11 inclui por padrão)
+- MPV runtime (`mpv-1.dll` ao lado do executável ou no PATH)
 - ~50MB RAM base + ~2MB por aba
 
 ---

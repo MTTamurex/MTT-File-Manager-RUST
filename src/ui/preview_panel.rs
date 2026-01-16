@@ -61,7 +61,7 @@ pub fn render_preview_panel(
             ui.add(egui::Image::new(texture).max_size(max_preview_size).shrink_to_fit());
         } else if let Some(preview) = media_preview {
             if is_video {
-                // VIDEO PLAYER LOGIC (WEBVIEW2)
+                // VIDEO PLAYER LOGIC (MPV)
                 let is_player_visible = preview.is_player_visible();
                 let video_state = preview.get_video_state();
                 let is_playing = video_state.as_ref().map(|s| s.is_playing).unwrap_or(false);
@@ -344,7 +344,7 @@ pub fn render_preview_panel(
                             let total_size = total_rect.size();
                             
                             // Determine if controls should be visible
-                            // Primary: WebView reports mouse activity via IPC
+                            // Primary: MPV area reports mouse activity
                             let show_controls = preview.controls_active();
                             
                             // Control bar height (only when visible)

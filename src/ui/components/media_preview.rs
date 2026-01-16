@@ -3,10 +3,7 @@ use std::time::{Duration, Instant};
 use image::codecs::gif::GifDecoder;
 use image::AnimationDecoder;
 
-#[cfg(feature = "mpv-player")]
 use super::mpv_preview::{format_time as backend_format_time, MpvPreview as VideoPreview, MpvState as VideoState};
-#[cfg(not(feature = "mpv-player"))]
-use super::webview_preview::{format_time as backend_format_time, VideoState, WebviewPreview as VideoPreview};
 
 // ============================================================================
 // GIF Player (Mantido inalterado)
@@ -118,7 +115,7 @@ impl MediaPreview {
             }
             MediaPreview::Video(player) => {
                 player.update(ui, frame);
-                // Return a minimal response - the WebviewPreview already allocated its space
+                // Return a minimal response - the video preview already allocated its space
                 ui.allocate_response(egui::vec2(0.0, 0.0), egui::Sense::hover()) 
             }
             MediaPreview::Error(msg) => {
@@ -131,7 +128,7 @@ impl MediaPreview {
     }
     
     // ========================================================================
-    // Video control methods (delegate to WebviewPreview)
+    // Video control methods (delegate to MPV preview)
     // ========================================================================
     
     /// Check if this is a video preview
@@ -201,7 +198,7 @@ impl MediaPreview {
         }
     }
 
-    /// Whether video controls should be visible (based on WebView mouse activity)
+    /// Whether video controls should be visible (based on mouse activity)
     pub fn controls_active(&self) -> bool {
         if let MediaPreview::Video(player) = self {
             player.controls_active()

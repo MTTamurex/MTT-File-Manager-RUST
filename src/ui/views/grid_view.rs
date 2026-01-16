@@ -189,7 +189,7 @@ pub fn render_grid_view(
                                         ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
 
                                     // SMART TOOLTIP: Se estiver perto da borda direita do painel central,
-                                    // inverte a posição do tooltip para a esquerda para não ficar atrás do player (WebView)
+                                    // inverte a posição do tooltip para a esquerda para não ficar atrás do player
                                     let tooltip_pos = if mouse_pos.x + 320.0 > right_bound {
                                         mouse_pos - egui::vec2(320.0, 0.0)
                                     } else {
@@ -331,7 +331,7 @@ pub fn render_grid_view(
                                 let mouse_pos =
                                     ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
 
-                                // SMART TOOLTIP: Inverte se estiver perto da borda direita (WebView airspace)
+                                // SMART TOOLTIP: Inverte se estiver perto da borda direita (área do player)
                                 let tooltip_pos = if mouse_pos.x + 320.0 > right_bound {
                                     mouse_pos - egui::vec2(320.0, 0.0)
                                 } else {

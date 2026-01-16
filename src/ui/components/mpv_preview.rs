@@ -1,5 +1,3 @@
-#![cfg(feature = "mpv-player")]
-
 use eframe::egui;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -15,7 +13,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 #[cfg(target_os = "windows")]
 use windows::core::w;
 
-/// Shared state for MPV playback (WIP parity with WebView2 state).
+/// Shared state for MPV playback.
 #[derive(Clone, Default)]
 pub struct MpvState {
     pub is_playing: bool,
@@ -40,6 +38,7 @@ pub struct MpvPreview {
     pub last_window_rect: Option<egui::Rect>,
     pub forced_size: Option<egui::Vec2>,
     pub last_mouse_activity: Option<Instant>,
+    pub last_mouse_pos: Option<egui::Pos2>,
 
     #[cfg(target_os = "windows")]
     mpv_hwnd: Option<HWND>,
@@ -72,6 +71,7 @@ impl MpvPreview {
             last_window_rect: None,
             forced_size: None,
             last_mouse_activity: None,
+            last_mouse_pos: None,
             #[cfg(target_os = "windows")]
             mpv_hwnd: None,
             #[cfg(target_os = "windows")]
@@ -146,7 +146,7 @@ impl MpvPreview {
 
     #[cfg(target_os = "windows")]
     pub fn release_focus(&self, _main_hwnd: HWND) {
-        // MPV does not capture focus like WebView2 by default.
+        // MPV does not capture focus by default.
     }
 
     #[cfg(target_os = "windows")]
@@ -179,10 +179,17 @@ impl MpvPreview {
         };
         let (rect, _response) = ui.allocate_exact_size(size, egui::Sense::hover());
 
-        // Track mouse activity for autohide controls
+        // Track mouse activity for autohide controls (movement-based)
         if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
             if rect.contains(pos) {
-                self.last_mouse_activity = Some(Instant::now());
+                let moved = self
+                    .last_mouse_pos
+                    .map(|prev| prev.distance(pos) > 2.0)
+                    .unwrap_or(true);
+                if moved {
+                    self.last_mouse_activity = Some(Instant::now());
+                    self.last_mouse_pos = Some(pos);
+                }
             }
         }
 
