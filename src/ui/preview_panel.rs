@@ -280,12 +280,13 @@ pub fn render_preview_panel(
                                     egui::vec2(total_size.x, control_height)
                                 );
                                 
-                                // Background
-                                ui.painter().rect_filled(
-                                    control_rect,
-                                    0.0,
-                                    egui::Color32::from_gray(30)
-                                );
+                                // Background - use theme-aware colors
+                                let bg_color = if ui.visuals().dark_mode {
+                                    egui::Color32::from_rgb(35, 35, 38) // Dark mode panel background
+                                } else {
+                                    egui::Color32::from_rgb(245, 245, 248) // Light mode panel background
+                                };
+                                ui.painter().rect_filled(control_rect, 0.0, bg_color);
                                 
                                 let mut control_ui = ui.new_child(egui::UiBuilder::new().max_rect(control_rect));
                                 control_ui.add_space(6.0);
