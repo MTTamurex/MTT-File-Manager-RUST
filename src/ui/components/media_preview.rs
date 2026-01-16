@@ -198,6 +198,15 @@ impl MediaPreview {
         }
     }
 
+    /// Whether video controls should be visible (based on WebView mouse activity)
+    pub fn controls_active(&self) -> bool {
+        if let MediaPreview::Video(player) = self {
+            player.controls_active()
+        } else {
+            false
+        }
+    }
+
     /// Check if video is detached
     pub fn is_detached(&self) -> bool {
         if let MediaPreview::Video(player) = self {
@@ -211,6 +220,10 @@ impl MediaPreview {
     pub fn set_detached(&mut self, detached: bool) {
         if let MediaPreview::Video(player) = self {
             player.is_detached = detached;
+            if !detached {
+                player.is_maximized = false;
+                player.forced_size = None;
+            }
         }
     }
 
@@ -218,6 +231,71 @@ impl MediaPreview {
     pub fn toggle_detached(&mut self) {
         if let MediaPreview::Video(player) = self {
             player.is_detached = !player.is_detached;
+            // Reset maximize state and forced_size when re-attaching
+            if !player.is_detached {
+                player.is_maximized = false;
+                player.forced_size = None;
+            }
+        }
+    }
+
+    /// Check if video is maximized
+    pub fn is_maximized(&self) -> bool {
+        if let MediaPreview::Video(player) = self {
+            player.is_maximized
+        } else {
+            false
+        }
+    }
+
+    /// Toggle maximized state
+    pub fn toggle_maximized(&mut self) {
+        if let MediaPreview::Video(player) = self {
+            if player.is_maximized {
+                // Going from Maximized -> Normal
+                player.is_maximized = false;
+                player.restore_needed = true;
+            } else {
+                // Going from Normal -> Maximized
+                player.is_maximized = true;
+                // No restore needed logic here, resizing handled by fixed_rect
+            }
+        }
+    }
+
+    pub fn should_restore(&self) -> bool {
+        if let MediaPreview::Video(player) = self {
+            player.restore_needed
+        } else {
+            false
+        }
+    }
+
+    pub fn complete_restore(&mut self) {
+        if let MediaPreview::Video(player) = self {
+            player.restore_needed = false;
+        }
+    }
+
+    /// Set last window rect (for restore)
+    pub fn set_last_window_rect(&mut self, rect: egui::Rect) {
+        if let MediaPreview::Video(player) = self {
+            player.last_window_rect = Some(rect);
+        }
+    }
+
+    /// Get last window rect
+    pub fn get_last_window_rect(&self) -> Option<egui::Rect> {
+        if let MediaPreview::Video(player) = self {
+            player.last_window_rect
+        } else {
+            None
+        }
+    }
+
+    pub fn set_forced_size(&mut self, size: Option<egui::Vec2>) {
+        if let MediaPreview::Video(player) = self {
+            player.forced_size = size;
         }
     }
 
