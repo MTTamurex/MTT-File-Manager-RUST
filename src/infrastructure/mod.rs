@@ -7,3 +7,4 @@ pub mod security;
 pub mod watcher;
 pub mod windows;
 pub mod windows_clipboard;
+pub mod media;

@@ -731,6 +731,8 @@ impl Drop for WebviewPreview {
 
 /// Spawn video server on a background thread
 fn spawn_video_server(path: PathBuf) -> Option<(u16, mpsc::Sender<()>)> {
+    use crate::infrastructure::media::ffmpeg_session::FfmpegSession;
+    
     let video_path = dunce::canonicalize(&path).unwrap_or(path);
         
     // Try to find an available port
@@ -747,6 +749,9 @@ fn spawn_video_server(path: PathBuf) -> Option<(u16, mpsc::Sender<()>)> {
     
     let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>();
     
+    // Create SHARED FFmpeg session - only ONE ffmpeg per video server
+    let ffmpeg_session = FfmpegSession::new();
+    
     // Spawn server thread
     thread::spawn(move || {
         listener.set_nonblocking(true).ok();
@@ -755,6 +760,8 @@ fn spawn_video_server(path: PathBuf) -> Option<(u16, mpsc::Sender<()>)> {
             // Check for shutdown
             if shutdown_rx.try_recv().is_ok() {
                 println!("[VideoServer] Shutting down");
+                // Kill any active FFmpeg when server shuts down
+                ffmpeg_session.kill("server shutdown");
                 break;
             }
             
@@ -762,8 +769,9 @@ fn spawn_video_server(path: PathBuf) -> Option<(u16, mpsc::Sender<()>)> {
             match listener.accept() {
                 Ok((stream, _)) => {
                     let path = video_path.clone();
+                    let session = ffmpeg_session.clone(); // Clone Arc, not the session
                     thread::spawn(move || {
-                        handle_video_request(stream, &path);
+                        handle_video_request(stream, &path, session);
                     });
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -898,41 +906,7 @@ fn is_codec_webview_compatible(info: &VideoCodecInfo) -> bool {
     compatible
 }
 
-/// RAII Guard for FFmpeg process - ensures cleanup on drop
-struct FfmpegGuard {
-    child: std::process::Child,
-}
-
-impl FfmpegGuard {
-    fn new(child: std::process::Child) -> Self {
-        FfmpegGuard { child }
-    }
-    
-    fn stdout(&mut self) -> Option<std::process::ChildStdout> {
-        self.child.stdout.take()
-    }
-    
-    fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
-        self.child.wait()
-    }
-}
-
-impl Drop for FfmpegGuard {
-    fn drop(&mut self) {
-        // Kill FFmpeg process if still running
-        match self.child.try_wait() {
-            Ok(Some(_)) => {}, // Already exited
-            Ok(None) => {
-                println!("[FfmpegGuard] Killing FFmpeg process");
-                let _ = self.child.kill();
-                let _ = self.child.wait();
-            }
-            Err(_) => {
-                let _ = self.child.kill();
-            }
-        }
-    }
-}
+// FfmpegGuard removed - replaced by centralized FfmpegSession in infrastructure::media::ffmpeg_session
 
 /// Parse seek parameter from URL query string
 fn parse_seek_param(request_line: &str) -> Option<f64> {
@@ -1043,74 +1017,96 @@ fn handle_direct_play(mut stream: TcpStream, video_path: &PathBuf, range_header:
 }
 
 /// ROUTE B: Transcoding - transcode with FFmpeg and stream
+/// Uses centralized FfmpegSession to ensure only ONE FFmpeg per session.
 fn handle_transcoding(
     mut stream: TcpStream, 
     video_path: &PathBuf, 
     seek_seconds: Option<f64>,
-    duration: Option<f64>
+    duration: Option<f64>,
+    session: crate::infrastructure::media::ffmpeg_session::FfmpegSession
 ) {
     let file_path = video_path.to_string_lossy().to_string();
+    
+    // CRITICAL: Kill existing FFmpeg BEFORE spawning new one
+    // This prevents process accumulation on seek
+    let reason = if seek_seconds.is_some() { "seek request" } else { "new transcode" };
+    session.kill(reason);
     
     if let Some(seek) = seek_seconds {
         println!("[Transcoding] Starting FFmpeg for: {} (seek: {:.2}s)", file_path, seek);
     } else {
         println!("[Transcoding] Starting FFmpeg for: {}", file_path);
     }
+
+    // Try each profile until one works
+    let profiles = crate::infrastructure::media::hardware_acceleration::get_prioritized_profiles();
     
-    // Build FFmpeg command with -ss BEFORE -i for fast input seeking
-    let mut cmd = Command::new("ffmpeg");
+    let mut ffmpeg_stdout: Option<std::process::ChildStdout> = None;
+    let mut first_chunk_data: Vec<u8> = Vec::new();
     
-    // CRITICAL: -ss before -i for fast seek
-    if let Some(seek) = seek_seconds {
-        cmd.args(&["-ss", &format!("{:.2}", seek)]);
-    }
-    
-    cmd.args(&[
-        "-i", &file_path,
-        "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-tune", "zerolatency",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-f", "mp4",
-        "-movflags", "frag_keyframe+empty_moov+faststart",
-        "pipe:1"
-    ]);
-    
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
-    
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    
-    let child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("[Transcoding] Failed to spawn FFmpeg: {}", e);
-            let _ = stream.write_all(b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 25\r\n\r\nFFmpeg not found in PATH");
-            return;
+    for (attempt, profile) in profiles.iter().enumerate() {
+        println!("[Transcoding] Attempt {} with profile: {}", attempt + 1, profile.name);
+        
+        let args = crate::infrastructure::media::hardware_acceleration::build_transcode_args(
+            profile, 
+            &file_path, 
+            seek_seconds
+        );
+        
+        // Spawn via centralized session
+        let stdout = match session.spawn(args) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[Transcoding] Failed to spawn FFmpeg: {}", e);
+                continue;
+            }
+        };
+        
+        // Validate: read first chunk to verify encoder works
+        let mut temp_stdout = stdout;
+        let mut temp_buffer = vec![0u8; 64 * 1024];
+        
+        match temp_stdout.read(&mut temp_buffer) {
+            Ok(n) if n > 0 => {
+                // Success! Encoder is producing data
+                temp_buffer.truncate(n);
+                first_chunk_data = temp_buffer;
+                ffmpeg_stdout = Some(temp_stdout);
+                println!("[Transcoding] Profile {} started successfully (PID: {:?})", profile.name, session.pid());
+                break;
+            }
+            Ok(_) => {
+                // EOF immediately = encoder failed
+                if let Some(stderr) = session.read_stderr() {
+                    if !stderr.is_empty() {
+                        println!("[Transcoding] Profile {} FAILED - FFmpeg stderr:\n{}", profile.name, stderr);
+                    } else {
+                        println!("[Transcoding] Profile {} returned EOF immediately.", profile.name);
+                    }
+                } else {
+                    println!("[Transcoding] Profile {} returned EOF immediately.", profile.name);
+                }
+                session.kill("profile failed");
+                continue;
+            }
+            Err(e) => {
+                println!("[Transcoding] Profile {} read error: {}", profile.name, e);
+                session.kill("read error");
+                continue;
+            }
         }
-    };
+    }
     
-    // RAII guard ensures FFmpeg is killed on drop
-    let mut guard = FfmpegGuard::new(child);
-    
-    // Log stderr in background
-    // (stderr was taken by child, can't access via guard - this is fine)
-    
-    let mut ffmpeg_stdout = match guard.stdout() {
+    // Check if we have a working encoder
+    let mut ffmpeg_stdout = match ffmpeg_stdout {
         Some(s) => s,
         None => {
-            eprintln!("[Transcoding] Failed to capture stdout");
-            let _ = stream.write_all(b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
+            eprintln!("[Transcoding] All profiles failed.");
+            let _ = stream.write_all(b"HTTP/1.1 500 Processing Error\r\n\r\n");
             return;
         }
     };
-    
+
     // HTTP headers
     let mut headers = String::from(
         "HTTP/1.1 200 OK\r\n\
@@ -1126,44 +1122,61 @@ fn handle_transcoding(
     headers.push_str("\r\n");
     
     if stream.write_all(headers.as_bytes()).is_err() {
+        session.kill("client disconnected before headers");
         return;
     }
     
-    // Stream with chunked encoding and ROBUST backpressure handling
-    let mut buffer = [0u8; 64 * 1024]; // 64KB buffer
-    let mut total_bytes: u64 = 0;
+    // Send first chunk (from validation)
+    if !first_chunk_data.is_empty() {
+        let n = first_chunk_data.len();
+        let chunk_header = format!("{:x}\r\n", n);
+        if !write_with_backpressure(&mut stream, chunk_header.as_bytes()) { 
+            session.kill("client disconnected");
+            return; 
+        }
+        if !write_with_backpressure(&mut stream, &first_chunk_data) { 
+            session.kill("client disconnected");
+            return; 
+        }
+        if !write_with_backpressure(&mut stream, b"\r\n") { 
+            session.kill("client disconnected");
+            return; 
+        }
+    }
+    
+    // Stream with chunked encoding
+    let mut buffer = [0u8; 64 * 1024];
+    let mut total_bytes: u64 = first_chunk_data.len() as u64;
     let mut last_logged_mb: u64 = 0;
     
-    'stream_loop: loop {
-        // Read from FFmpeg
+    loop {
         match ffmpeg_stdout.read(&mut buffer) {
             Ok(0) => {
-                // EOF - FFmpeg finished, send final chunk
+                // EOF - FFmpeg finished naturally
                 let _ = stream.write_all(b"0\r\n\r\n");
                 let _ = stream.flush();
                 println!("[Transcoding] Complete: {:.1} MB sent", total_bytes as f64 / (1024.0 * 1024.0));
                 break;
             }
             Ok(n) => {
-                // Prepare chunked encoding: size in hex + CRLF + data + CRLF
                 let chunk_header = format!("{:x}\r\n", n);
                 
-                // Write header with backpressure handling
                 if !write_with_backpressure(&mut stream, chunk_header.as_bytes()) {
-                    eprintln!("[Transcoding] Client disconnected during header ({} bytes sent)", total_bytes);
-                    break 'stream_loop;
+                    println!("[Transcoding] Client disconnected ({:.1} MB sent)", total_bytes as f64 / (1024.0 * 1024.0));
+                    session.kill("client disconnected");
+                    break;
                 }
                 
-                // Write data with backpressure handling
                 if !write_with_backpressure(&mut stream, &buffer[..n]) {
-                    eprintln!("[Transcoding] Client disconnected during data ({} bytes sent)", total_bytes);
-                    break 'stream_loop;
+                    println!("[Transcoding] Client disconnected ({:.1} MB sent)", total_bytes as f64 / (1024.0 * 1024.0));
+                    session.kill("client disconnected");
+                    break;
                 }
                 
-                // Write CRLF
                 if !write_with_backpressure(&mut stream, b"\r\n") {
-                    eprintln!("[Transcoding] Client disconnected during CRLF ({} bytes sent)", total_bytes);
-                    break 'stream_loop;
+                    println!("[Transcoding] Client disconnected ({:.1} MB sent)", total_bytes as f64 / (1024.0 * 1024.0));
+                    session.kill("client disconnected");
+                    break;
                 }
                 
                 total_bytes += n as u64;
@@ -1178,42 +1191,51 @@ fn handle_transcoding(
             Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(e) => {
                 eprintln!("[Transcoding] FFmpeg read error: {}", e);
+                session.kill("read error");
                 break;
             }
         }
     }
     
     let _ = stream.flush();
-    
-    // FfmpegGuard::drop() will clean up the process
-    match guard.wait() {
-        Ok(status) => println!("[Transcoding] FFmpeg exited: {}", status),
-        Err(e) => eprintln!("[Transcoding] Wait error: {}", e),
-    }
+    // Note: We don't kill here if we finished naturally - process already exited
 }
 
-/// Write data to stream with INFINITE PATIENCE for backpressure
-/// Only returns false on fatal disconnect (BrokenPipe, ConnectionReset, ConnectionAborted)
-/// Will wait forever if client pauses video - this is correct behavior
+/// Write data to stream with TIMEOUT for stall detection
+/// Returns false on fatal disconnect OR if stalled for 30 seconds (client likely seeked)
+/// This prevents zombie FFmpeg processes when client abandons connection
 fn write_with_backpressure(stream: &mut TcpStream, data: &[u8]) -> bool {
     use std::io::ErrorKind;
     
+    // Stall detection: if no progress for 30 seconds, assume client is gone
+    const MAX_STALL_ITERATIONS: u32 = 600; // 600 * 50ms = 30 seconds
+    let mut stall_count: u32 = 0;
     let mut written = 0;
     
     while written < data.len() {
         match stream.write(&data[written..]) {
             Ok(0) => {
-                // Zero bytes written - buffer full, wait and retry (NO TIMEOUT)
+                // Zero bytes written - buffer full, wait and retry
+                stall_count += 1;
+                if stall_count >= MAX_STALL_ITERATIONS {
+                    eprintln!("[Transcoding] Write stalled for 30s, aborting (client likely seeked)");
+                    return false;
+                }
                 thread::sleep(std::time::Duration::from_millis(50));
                 continue;
             }
             Ok(n) => {
-                // Progress - advance buffer
+                // Progress - advance buffer and reset stall counter
                 written += n;
+                stall_count = 0;
             }
             Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
-                // Backpressure - client buffer full, wait and retry (NO TIMEOUT)
-                // This is NORMAL when user pauses video - wait forever
+                // Backpressure - client buffer full, wait and retry
+                stall_count += 1;
+                if stall_count >= MAX_STALL_ITERATIONS {
+                    eprintln!("[Transcoding] Write stalled for 30s (WouldBlock), aborting");
+                    return false;
+                }
                 thread::sleep(std::time::Duration::from_millis(50));
                 continue;
             }
@@ -1234,6 +1256,10 @@ fn write_with_backpressure(stream: &mut TcpStream, data: &[u8]) -> bool {
             Err(e) => {
                 // Unknown error - log but keep trying (could be transient)
                 eprintln!("[Transcoding] Write warning: {}", e);
+                stall_count += 1;
+                if stall_count >= MAX_STALL_ITERATIONS {
+                    return false;
+                }
                 thread::sleep(std::time::Duration::from_millis(100));
                 continue;
             }
@@ -1254,7 +1280,11 @@ fn parse_mode_param(request_line: &str) -> Option<&str> {
 }
 
 /// SMART ROUTER: Routes based on mode param - NO PROBE per request
-fn handle_video_request(stream: TcpStream, video_path: &PathBuf) {
+fn handle_video_request(
+    stream: TcpStream, 
+    video_path: &PathBuf,
+    session: crate::infrastructure::media::ffmpeg_session::FfmpegSession
+) {
     // Read request
     let mut reader = BufReader::new(&stream);
     let mut request_line = String::new();
@@ -1285,8 +1315,8 @@ fn handle_video_request(stream: TcpStream, video_path: &PathBuf) {
             handle_direct_play(stream, video_path, range_header);
         }
         Some("transcode") => {
-            // Transcode path
-            handle_transcoding(stream, video_path, seek_seconds, None);
+            // Transcode path - use centralized session
+            handle_transcoding(stream, video_path, seek_seconds, None, session);
         }
         None => {
             // Fallback (shouldn't happen with new URL pattern)
@@ -1296,7 +1326,7 @@ fn handle_video_request(stream: TcpStream, video_path: &PathBuf) {
             if is_codec_webview_compatible(&info) {
                 handle_direct_play(stream, video_path, range_header);
             } else {
-                handle_transcoding(stream, video_path, seek_seconds, info.duration);
+                handle_transcoding(stream, video_path, seek_seconds, info.duration, session);
             }
         }
         _ => {
