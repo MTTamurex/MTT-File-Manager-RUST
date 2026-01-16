@@ -391,19 +391,9 @@ impl ImageViewerApp {
             }
         });
 
-        // SHELL WARMUP WORKER (Background)
-        // Inicializa extensões do Shell (Context Menu) em background para evitar travamento na primeira abertura
-        std::thread::spawn(|| {
-            unsafe {
-                use windows::Win32::System::Com::{CoInitialize, CoUninitialize};
-                // Inicializa COM para esta thread
-                if CoInitialize(None).is_ok() {
-                    // HWND(0) é aceitável para warmup (sem UI)
-                    windows_infra::native_menu::warmup_shell_extensions(windows::Win32::Foundation::HWND(std::ptr::null_mut()));
-                    CoUninitialize();
-                }
-            }
-        });
+        // NOTE: Shell warmup is now done in window.rs after HWND is obtained
+        // Removed duplicate warmup here to avoid race conditions with COM objects
+        // that could cause STATUS_ACCESS_VIOLATION on startup
 
 
         app
