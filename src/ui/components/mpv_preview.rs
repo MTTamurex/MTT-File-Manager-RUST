@@ -2,6 +2,7 @@ use eframe::egui;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
+use serde_json;
 
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::HWND;
@@ -13,6 +14,16 @@ use windows::Win32::UI::WindowsAndMessaging::{
 #[cfg(target_os = "windows")]
 use windows::core::w;
 
+/// Track information for audio/subtitles.
+#[derive(Clone, Debug, Default)]
+pub struct TrackInfo {
+    pub id: i64,
+    pub track_type: String, // "audio", "video", "sub"
+    pub title: Option<String>,
+    pub lang: Option<String>,
+    pub selected: bool,
+}
+
 /// Shared state for MPV playback.
 #[derive(Clone, Default)]
 pub struct MpvState {
@@ -21,6 +32,8 @@ pub struct MpvState {
     pub duration: f64,
     pub volume: f32,
     pub is_muted: bool,
+    pub audio_tracks: Vec<TrackInfo>,
+    pub subtitle_tracks: Vec<TrackInfo>,
 }
 
 /// MPV video preview (WIP). This is a scaffold for the migration.
@@ -61,6 +74,8 @@ impl MpvPreview {
                 duration: 0.0,
                 volume: 1.0,
                 is_muted: false,
+                audio_tracks: Vec::new(),
+                subtitle_tracks: Vec::new(),
             })),
             is_visible: true,
             is_detached: false,
@@ -142,6 +157,18 @@ impl MpvPreview {
         self.last_mouse_activity
             .map(|t| t.elapsed() < Duration::from_secs(3))
             .unwrap_or(false)
+    }
+
+    pub fn set_audio_track(&self, id: i64) {
+        if let Some(m) = &self.mpv {
+            let _ = m.set_property("aid", id);
+        }
+    }
+
+    pub fn set_subtitle_track(&self, id: i64) {
+        if let Some(m) = &self.mpv {
+            let _ = m.set_property("sid", id);
+        }
     }
 
     #[cfg(target_os = "windows")]
@@ -294,6 +321,43 @@ impl MpvPreview {
             if let Ok(muted) = m.get_property::<bool>("mute") {
                 if let Ok(mut state) = self.state.write() {
                     state.is_muted = muted;
+                }
+            }
+
+            // Track list polling - Get as string first then parse JSON
+            if let Ok(tracks_str) = m.get_property::<String>("track-list") {
+                if let Ok(tracks_val) = serde_json::from_str::<serde_json::Value>(&tracks_str) {
+                    if let Some(tracks_arr) = tracks_val.as_array() {
+                        let mut audio_tracks = Vec::new();
+                        let mut sub_tracks = Vec::new();
+
+                        for t in tracks_arr {
+                            let id = t["id"].as_i64().unwrap_or(0);
+                            let t_type = t["type"].as_str().unwrap_or("").to_string();
+                            let selected = t["selected"].as_bool().unwrap_or(false);
+                            let title = t["title"].as_str().map(|s| s.to_string());
+                            let lang = t["lang"].as_str().map(|s| s.to_string());
+
+                            let info = TrackInfo {
+                                id,
+                                track_type: t_type.clone(),
+                                title,
+                                lang,
+                                selected,
+                            };
+
+                            if t_type == "audio" {
+                                audio_tracks.push(info);
+                            } else if t_type == "sub" {
+                                sub_tracks.push(info);
+                            }
+                        }
+
+                        if let Ok(mut state) = self.state.write() {
+                            state.audio_tracks = audio_tracks;
+                            state.subtitle_tracks = sub_tracks;
+                        }
+                    }
                 }
             }
         }
