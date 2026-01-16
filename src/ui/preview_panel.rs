@@ -159,6 +159,53 @@ pub fn render_preview_panel(
                                     }
                                 }
 
+                                // Multi-Audio and Subtitles (Only in detached mode)
+                                if is_detached {
+                                    // Subtitle Tracks
+                                    if let Some(state) = video_state.as_ref() {
+                                        if !state.subtitle_tracks.is_empty() {
+                                            ui.add_space(4.0);
+                                            if let Some(tex) = svg_manager.get_icon(ui.ctx(), "languages", 48, icon_color) {
+                                                egui::ComboBox::new("sub_select", "")
+                                                    .icon(move |ui: &egui::Ui, rect: egui::Rect, _visuals: &egui::style::WidgetVisuals, _is_open: bool, _above_or_below: egui::AboveOrBelow| {
+                                                        ui.painter().image(tex.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                                                    })
+                                                    .show_ui(ui, |ui| {
+                                                        let is_none_selected = state.subtitle_tracks.iter().all(|t| !t.selected);
+                                                        if ui.selectable_label(is_none_selected, "Nenhuma").clicked() {
+                                                            preview.set_subtitle_track(-1);
+                                                        }
+                                                        for t in &state.subtitle_tracks {
+                                                            let label = format!("{} ({})", t.title.as_deref().unwrap_or("Legenda"), t.lang.as_deref().unwrap_or("??"));
+                                                            if ui.selectable_label(t.selected, label).clicked() {
+                                                                preview.set_subtitle_track(t.id);
+                                                            }
+                                                        }
+                                                    });
+                                            }
+                                        }
+
+                                        // Audio Tracks
+                                        if !state.audio_tracks.is_empty() {
+                                            ui.add_space(4.0);
+                                            if let Some(tex) = svg_manager.get_icon(ui.ctx(), "headphones", 48, icon_color) {
+                                                egui::ComboBox::new("audio_select", "")
+                                                    .icon(move |ui: &egui::Ui, rect: egui::Rect, _visuals: &egui::style::WidgetVisuals, _is_open: bool, _above_or_below: egui::AboveOrBelow| {
+                                                        ui.painter().image(tex.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                                                    })
+                                                    .show_ui(ui, |ui| {
+                                                        for t in &state.audio_tracks {
+                                                            let label = format!("{} ({})", t.title.as_deref().unwrap_or("Audio"), t.lang.as_deref().unwrap_or("??"));
+                                                            if ui.selectable_label(t.selected, label).clicked() {
+                                                                preview.set_audio_track(t.id);
+                                                            }
+                                                        }
+                                                    });
+                                            }
+                                        }
+                                    }
+                                }
+
                                 // Fullscreen Button (Only in detached mode)
                                 if is_detached {
                                     ui.add_space(4.0);

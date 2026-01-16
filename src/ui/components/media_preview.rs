@@ -198,6 +198,18 @@ impl MediaPreview {
         }
     }
 
+    pub fn set_audio_track(&self, id: i64) {
+        if let MediaPreview::Video(player) = self {
+            player.set_audio_track(id);
+        }
+    }
+
+    pub fn set_subtitle_track(&self, id: i64) {
+        if let MediaPreview::Video(player) = self {
+            player.set_subtitle_track(id);
+        }
+    }
+
     /// Whether video controls should be visible (based on mouse activity)
     pub fn controls_active(&self) -> bool {
         if let MediaPreview::Video(player) = self {
