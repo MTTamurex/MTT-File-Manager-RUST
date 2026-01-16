@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::thread;
+use std::time::{Duration, Instant};
 use std::io::{Read, Write, BufReader, BufRead};
 use std::net::{TcpListener, TcpStream};
 use std::process::{Command, Stdio};
@@ -39,6 +40,12 @@ pub struct WebviewPreview {
     pub state: Arc<RwLock<VideoState>>,
     pub is_visible: bool,      // Track intended visibility state
     pub is_detached: bool,     // Track if player is detached into a floating window
+    pub is_maximized: bool,    // Track if detached window is maximized
+    pub restore_needed: bool,  // Signal to restore window size on next frame
+    pub last_window_rect: Option<egui::Rect>, // Track window size before maximize
+    pub forced_size: Option<egui::Vec2>, // Explicit size override to prevent resize loops
+    pub last_mouse_activity: Arc<Mutex<Option<Instant>>>, // Last mouse activity from WebView
+    pub mouse_over: Arc<Mutex<bool>>, // Whether mouse is inside WebView
     
     #[cfg(target_os = "windows")]
     webview_hwnd: Arc<Mutex<Option<HWND>>>,
@@ -62,8 +69,14 @@ impl WebviewPreview {
                 volume: 1.0,
                 is_muted: false,
             })),
-            is_visible: true,
+            is_visible: true, 
             is_detached: false,
+            is_maximized: false,
+            restore_needed: false,
+            last_window_rect: None,
+            forced_size: None,
+            last_mouse_activity: Arc::new(Mutex::new(None)),
+            mouse_over: Arc::new(Mutex::new(false)),
             #[cfg(target_os = "windows")]
             webview_hwnd: Arc::new(Mutex::new(None)),
         }
@@ -147,6 +160,25 @@ impl WebviewPreview {
             );
         }
     }
+
+    /// Whether to show controls based on recent mouse activity inside WebView
+    pub fn controls_active(&self) -> bool {
+        let over = self.mouse_over.lock().ok().map(|v| *v).unwrap_or(false);
+        let recent = self.last_mouse_activity
+            .lock()
+            .ok()
+            .and_then(|v| *v)
+            .map(|t| t.elapsed() < Duration::from_secs(3)) // 3 seconds timeout
+            .unwrap_or(false);
+        over || recent
+    }
+    
+    /// Reset mouse activity (call when controls become visible to start hide timer)
+    pub fn touch_mouse_activity(&self) {
+        if let Ok(mut last) = self.last_mouse_activity.lock() {
+            *last = Some(Instant::now());
+        }
+    }
     
     /// Release keyboard focus from WebView2 back to the main window
     /// Call this when user clicks outside the video player area
@@ -198,6 +230,8 @@ impl WebviewPreview {
         
         // Clone state for IPC handler
         let state_clone = self.state.clone();
+        let mouse_activity = self.last_mouse_activity.clone();
+        let mouse_over = self.mouse_over.clone();
         
         // Build HTML - different behavior for transcoded vs native files
         let html_content = if needs_transcoding && duration > 0.0 {
@@ -293,6 +327,21 @@ impl WebviewPreview {
             setTimeout(reportState, video.paused ? 500 : 100);
         }};
         reportState();
+
+        // Mouse activity reporting for autohide controls
+        let lastMouseSent = 0;
+        const sendMouse = () => {{
+            const now = Date.now();
+            if (now - lastMouseSent > 120) {{
+                lastMouseSent = now;
+                window.ipc.postMessage(JSON.stringify({{ type: 'mouse_move' }}));
+            }}
+        }};
+        document.addEventListener('mousemove', sendMouse);
+        document.addEventListener('mouseenter', sendMouse);
+        document.addEventListener('mouseleave', () => {{
+            window.ipc.postMessage(JSON.stringify({{ type: 'mouse_leave' }}));
+        }});
         
         // Report events
         video.addEventListener('play', () => {{
@@ -372,6 +421,21 @@ impl WebviewPreview {
             setTimeout(reportState, video.paused ? 500 : 100);
         }};
         reportState();
+
+        // Mouse activity reporting for autohide controls
+        let lastMouseSent = 0;
+        const sendMouse = () => {{
+            const now = Date.now();
+            if (now - lastMouseSent > 120) {{
+                lastMouseSent = now;
+                window.ipc.postMessage(JSON.stringify({{ type: 'mouse_move' }}));
+            }}
+        }};
+        document.addEventListener('mousemove', sendMouse);
+        document.addEventListener('mouseenter', sendMouse);
+        document.addEventListener('mouseleave', () => {{
+            window.ipc.postMessage(JSON.stringify({{ type: 'mouse_leave' }}));
+        }});
         
         // Report events
         video.addEventListener('play', () => {{
@@ -424,6 +488,19 @@ impl WebviewPreview {
                                 "pause" => {
                                     if let Ok(mut state) = state_clone.write() {
                                         state.is_playing = false;
+                                    }
+                                }
+                                "mouse_move" => {
+                                    if let Ok(mut over) = mouse_over.lock() {
+                                        *over = true;
+                                    }
+                                    if let Ok(mut last) = mouse_activity.lock() {
+                                        *last = Some(Instant::now());
+                                    }
+                                }
+                                "mouse_leave" => {
+                                    if let Ok(mut over) = mouse_over.lock() {
+                                        *over = false;
                                     }
                                 }
                                 _ => {}
@@ -485,10 +562,14 @@ impl WebviewPreview {
             return;
         }
         
-        // Reserve space for the video
-        let size = if self.is_detached {
+        // Reserve space for the video. If forced_size is set (detached mode with control bar), use it.
+        let size = if let Some(forced) = self.forced_size {
+            forced
+        } else if self.is_detached {
+            // Detached window fills available space
             ui.available_size()
         } else {
+            // Attached preview: keep aspect-friendly height
             let available = ui.available_size();
             let preview_height = (available.x * 0.6).min(300.0);
             egui::vec2(available.x, preview_height)
