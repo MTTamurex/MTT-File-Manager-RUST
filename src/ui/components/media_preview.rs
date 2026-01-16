@@ -3,7 +3,10 @@ use std::time::{Duration, Instant};
 use image::codecs::gif::GifDecoder;
 use image::AnimationDecoder;
 
-use super::webview_preview::WebviewPreview;
+#[cfg(feature = "mpv-player")]
+use super::mpv_preview::{format_time as backend_format_time, MpvPreview as VideoPreview, MpvState as VideoState};
+#[cfg(not(feature = "mpv-player"))]
+use super::webview_preview::{format_time as backend_format_time, VideoState, WebviewPreview as VideoPreview};
 
 // ============================================================================
 // GIF Player (Mantido inalterado)
@@ -96,7 +99,7 @@ impl GifPlayer {
 pub enum MediaPreview {
     StaticImage(egui::TextureHandle),
     AnimatedGif(GifPlayer),
-    Video(WebviewPreview),
+    Video(VideoPreview),
     Error(String),
 }
 
@@ -146,7 +149,7 @@ impl MediaPreview {
     }
     
     /// Get video playback state
-    pub fn get_video_state(&self) -> Option<super::webview_preview::VideoState> {
+    pub fn get_video_state(&self) -> Option<VideoState> {
         if let MediaPreview::Video(player) = self {
             Some(player.get_state())
         } else {
@@ -337,4 +340,8 @@ impl MediaPreview {
             MediaPreview::Error(_) => None,
         }
     }
+}
+
+pub fn format_time(seconds: f64) -> String {
+    backend_format_time(seconds)
 }
