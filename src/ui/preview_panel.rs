@@ -170,13 +170,35 @@ pub fn render_preview_panel(
                                          if ui.add(egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(18.0, 18.0))).frame(false))
                                             .on_hover_text(fs_tooltip)
                                             .clicked() {
-                                            preview.toggle_maximized();
+                                                if !is_fullscreen {
+                                                    let was_maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+                                                    preview.set_prev_app_maximized(was_maximized);
+                                                    preview.set_fullscreen_applied(false);
+                                                } else {
+                                                    preview.set_fullscreen_applied(false);
+                                                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                                                    if preview.prev_app_maximized() {
+                                                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                                                    }
+                                                }
+                                                preview.toggle_maximized();
                                         }
                                     } else {
                                         // Fallback text
                                         let text = if is_fullscreen { "⮌" } else { "⛶" };
                                          if ui.add(egui::Button::new(text).frame(false)).on_hover_text(fs_tooltip).clicked() {
-                                            preview.toggle_maximized();
+                                                if !is_fullscreen {
+                                                    let was_maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+                                                    preview.set_prev_app_maximized(was_maximized);
+                                                    preview.set_fullscreen_applied(false);
+                                                } else {
+                                                    preview.set_fullscreen_applied(false);
+                                                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                                                    if preview.prev_app_maximized() {
+                                                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                                                    }
+                                                }
+                                                preview.toggle_maximized();
                                         }
                                     }
                                 }
@@ -207,8 +229,13 @@ pub fn render_preview_panel(
 
                         if is_fullscreen {
                             // === FULLSCREEN MODE ===
-                            // Put the app window in true fullscreen mode
-                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+                            if !preview.fullscreen_applied() {
+                                if preview.prev_app_maximized() {
+                                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(false));
+                                }
+                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+                                preview.set_fullscreen_applied(true);
+                            }
 
                             // Use viewport inner rect (actual drawable area)
                             let screen_rect = ui
@@ -261,7 +288,11 @@ pub fn render_preview_panel(
                                     // ESC to exit fullscreen
                                     if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                                         preview.toggle_maximized();
+                                        preview.set_fullscreen_applied(false);
                                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                                        if preview.prev_app_maximized() {
+                                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                                        }
                                     }
 
                                     ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
@@ -272,7 +303,13 @@ pub fn render_preview_panel(
                         } else {
                             // === WINDOWED MODE ===
                             // Restore from fullscreen if needed
-                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                            if preview.fullscreen_applied() {
+                                preview.set_fullscreen_applied(false);
+                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                                if preview.prev_app_maximized() {
+                                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                                }
+                            }
                             
                             // Condition Window Builder
                             let mut window_builder = egui::Window::new("Reprodutor de Vídeo")

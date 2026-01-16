@@ -41,6 +41,8 @@ pub struct WebviewPreview {
     pub is_visible: bool,      // Track intended visibility state
     pub is_detached: bool,     // Track if player is detached into a floating window
     pub is_maximized: bool,    // Track if detached window is maximized
+    pub fullscreen_applied: bool, // Whether fullscreen command was applied
+    pub prev_app_maximized: bool, // App maximized state before fullscreen
     pub restore_needed: bool,  // Signal to restore window size on next frame
     pub last_window_rect: Option<egui::Rect>, // Track window size before maximize
     pub forced_size: Option<egui::Vec2>, // Explicit size override to prevent resize loops
@@ -72,6 +74,8 @@ impl WebviewPreview {
             is_visible: true, 
             is_detached: false,
             is_maximized: false,
+            fullscreen_applied: false,
+            prev_app_maximized: false,
             restore_needed: false,
             last_window_rect: None,
             forced_size: None,

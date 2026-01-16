@@ -248,6 +248,36 @@ impl MediaPreview {
         }
     }
 
+    /// Track whether app was maximized before fullscreen
+    pub fn set_prev_app_maximized(&mut self, value: bool) {
+        if let MediaPreview::Video(player) = self {
+            player.prev_app_maximized = value;
+        }
+    }
+
+    pub fn prev_app_maximized(&self) -> bool {
+        if let MediaPreview::Video(player) = self {
+            player.prev_app_maximized
+        } else {
+            false
+        }
+    }
+
+    /// Track whether fullscreen command has been applied
+    pub fn set_fullscreen_applied(&mut self, value: bool) {
+        if let MediaPreview::Video(player) = self {
+            player.fullscreen_applied = value;
+        }
+    }
+
+    pub fn fullscreen_applied(&self) -> bool {
+        if let MediaPreview::Video(player) = self {
+            player.fullscreen_applied
+        } else {
+            false
+        }
+    }
+
     /// Toggle maximized state
     pub fn toggle_maximized(&mut self) {
         if let MediaPreview::Video(player) = self {
