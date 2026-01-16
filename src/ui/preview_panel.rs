@@ -207,7 +207,10 @@ pub fn render_preview_panel(
 
                         if is_fullscreen {
                             // === FULLSCREEN MODE ===
-                            // Use Area instead of Window to remove all decorations
+                            // Put the app window in true fullscreen mode
+                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+                            
+                            // Now screen_rect is the full screen
                             let screen_rect = ui.ctx().screen_rect();
                             
                             egui::Area::new(egui::Id::new("video_fullscreen"))
@@ -255,6 +258,7 @@ pub fn render_preview_panel(
                                     // ESC to exit fullscreen
                                     if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                                         preview.toggle_maximized();
+                                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
                                     }
                                     
                                     ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
@@ -264,6 +268,9 @@ pub fn render_preview_panel(
                             
                         } else {
                             // === WINDOWED MODE ===
+                            // Restore from fullscreen if needed
+                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                            
                             // Condition Window Builder
                             let mut window_builder = egui::Window::new("Reprodutor de Vídeo")
                                 .open(&mut open)
