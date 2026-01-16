@@ -159,25 +159,23 @@ pub fn render_preview_panel(
                                     }
                                 }
 
-                                // Maximize Button (Only in detached mode)
+                                // Fullscreen Button (Only in detached mode)
                                 if is_detached {
                                     ui.add_space(4.0);
-                                    let is_max = preview.is_maximized();
-                                    let max_icon_name = if is_max { "minimize" } else { "maximize" }; // 'minimize' icon here acts as 'restore' visual
-                                    let max_tooltip = if is_max { "Restaurar" } else { "Maximizar" };
+                                    let is_fullscreen = preview.is_maximized();
+                                    let fs_icon_name = if is_fullscreen { "minimize" } else { "maximize" };
+                                    let fs_tooltip = if is_fullscreen { "Sair da Tela Cheia (ESC)" } else { "Tela Cheia" };
                                     
-                                    // Use text button for simplicity if icon logic is complex, or reuse svg_manager
-                                    // Assuming "maximize" and "minimize" icons exist or fallback to text
-                                    if let Some(tex) = svg_manager.get_icon(ui.ctx(), max_icon_name, 48, icon_color) {
+                                    if let Some(tex) = svg_manager.get_icon(ui.ctx(), fs_icon_name, 48, icon_color) {
                                          if ui.add(egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(18.0, 18.0))).frame(false))
-                                            .on_hover_text(max_tooltip)
+                                            .on_hover_text(fs_tooltip)
                                             .clicked() {
                                             preview.toggle_maximized();
                                         }
                                     } else {
                                         // Fallback text
-                                        let text = if is_max { "❐" } else { "⬜" };
-                                         if ui.add(egui::Button::new(text).frame(false)).on_hover_text(max_tooltip).clicked() {
+                                        let text = if is_fullscreen { "⮌" } else { "⛶" };
+                                         if ui.add(egui::Button::new(text).frame(false)).on_hover_text(fs_tooltip).clicked() {
                                             preview.toggle_maximized();
                                         }
                                     }
@@ -203,47 +201,95 @@ pub fn render_preview_panel(
 
                         // 2. Floating Window logic
                         let mut open = true;
-                        let is_maximized = preview.is_maximized();
+                        let is_fullscreen = preview.is_maximized(); // Renamed for clarity: this is now fullscreen
                         let should_restore = preview.should_restore();
                         let last_known_rect = preview.get_last_window_rect();
 
-                        // Condition Window Builder
-                        let mut window_builder = egui::Window::new("Reprodutor de Vídeo")
-                            .open(&mut open)
-                            .collapsible(false)
-                            .title_bar(true); // Standard title bar
-
-                        if is_maximized {
-                            // Add a small margin to prevent cutting off edges
-                            window_builder = window_builder.fixed_rect(ui.ctx().screen_rect().shrink(4.0));
-                        } else if should_restore {
-                            // Force restoration to previous size for one frame
-                            if let Some(rect) = last_known_rect {
-                                window_builder = window_builder.fixed_rect(rect);
-                            } else {
-                                window_builder = window_builder.default_size([640.0, 480.0]);
-                                // If default_size is ignored by memory, we might need strict simple rect
-                                // But let's trust default_size works if we haven't maximized yet? 
-                                // No, if we maximized, memory is huge.
-                                // Fallback for safety:
-                                if last_known_rect.is_none() {
-                                     // Center approximate
-                                     let screen = ui.ctx().screen_rect();
-                                     let center = screen.center();
-                                     let w = 640.0;
-                                     let h = 480.0;
-                                     let rect = egui::Rect::from_min_size(egui::pos2(center.x - w/2.0, center.y - h/2.0), egui::vec2(w, h));
-                                     window_builder = window_builder.fixed_rect(rect);
-                                }
-                            }
+                        if is_fullscreen {
+                            // === FULLSCREEN MODE ===
+                            // Use Area instead of Window to remove all decorations
+                            let screen_rect = ui.ctx().screen_rect();
+                            
+                            egui::Area::new(egui::Id::new("video_fullscreen"))
+                                .fixed_pos(screen_rect.min)
+                                .order(egui::Order::Foreground)
+                                .show(ui.ctx(), |ui| {
+                                    // Fill entire screen with dark background
+                                    ui.painter().rect_filled(screen_rect, 0.0, egui::Color32::BLACK);
+                                    
+                                    let total_size = screen_rect.size();
+                                    
+                                    // Autohide logic
+                                    let show_controls = preview.controls_active();
+                                    let control_height = if show_controls { 75.0 } else { 0.0 };
+                                    let video_height = total_size.y - control_height;
+                                    
+                                    let video_rect = egui::Rect::from_min_size(
+                                        screen_rect.min,
+                                        egui::vec2(total_size.x, video_height)
+                                    );
+                                    
+                                    // Allocate full screen
+                                    let _ = ui.allocate_exact_size(total_size, egui::Sense::click());
+                                    
+                                    // Render Video
+                                    let mut video_ui = ui.new_child(egui::UiBuilder::new().max_rect(video_rect));
+                                    preview.set_forced_size(Some(video_rect.size()));
+                                    preview.show(&mut video_ui, frame);
+                                    
+                                    // Render Controls when active
+                                    if show_controls {
+                                        let control_rect = egui::Rect::from_min_size(
+                                            egui::pos2(screen_rect.min.x, screen_rect.min.y + video_height),
+                                            egui::vec2(total_size.x, control_height)
+                                        );
+                                        
+                                        let bg_color = egui::Color32::from_rgba_unmultiplied(30, 30, 32, 230);
+                                        ui.painter().rect_filled(control_rect, 0.0, bg_color);
+                                        
+                                        let mut control_ui = ui.new_child(egui::UiBuilder::new().max_rect(control_rect));
+                                        control_ui.add_space(6.0);
+                                        draw_controls(&mut control_ui, preview, control_rect.width() - 20.0);
+                                    }
+                                    
+                                    // ESC to exit fullscreen
+                                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                                        preview.toggle_maximized();
+                                    }
+                                    
+                                    ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+                                });
+                            
+                            // Handle close via ESC already above
+                            
                         } else {
-                            // Normal Floating State
-                            window_builder = window_builder
-                                .default_size([640.0, 480.0])
-                                .resizable(true);
-                        }
+                            // === WINDOWED MODE ===
+                            // Condition Window Builder
+                            let mut window_builder = egui::Window::new("Reprodutor de Vídeo")
+                                .open(&mut open)
+                                .collapsible(false)
+                                .title_bar(true);
+
+                            if should_restore {
+                                // Force restoration to previous size for one frame
+                                if let Some(rect) = last_known_rect {
+                                    window_builder = window_builder.fixed_rect(rect);
+                                } else {
+                                    let screen = ui.ctx().screen_rect();
+                                    let center = screen.center();
+                                    let w = 640.0;
+                                    let h = 480.0;
+                                    let rect = egui::Rect::from_min_size(egui::pos2(center.x - w/2.0, center.y - h/2.0), egui::vec2(w, h));
+                                    window_builder = window_builder.fixed_rect(rect);
+                                }
+                            } else {
+                                // Normal Floating State
+                                window_builder = window_builder
+                                    .default_size([640.0, 480.0])
+                                    .resizable(true);
+                            }
                         
-                        let window_response = window_builder.show(ui.ctx(), |ui| {
+                            let window_response = window_builder.show(ui.ctx(), |ui| {
                             // === TRUE AUTOHIDE IMPLEMENTATION ===
                             // Video takes 100% when idle, shrinks when controls are shown
                             
@@ -297,25 +343,24 @@ pub fn render_preview_panel(
                             ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
                         });
 
-                        // Post-Show Logic
-                        // 1. If Normal State, update last_known_rect
-                        if !is_maximized && !should_restore {
-                            if let Some(inner) = &window_response {
-                                // inner.response.rect IS the full window rect (including title bar and margins)
-                                // Do NOT add margins again - that causes growth every frame!
-                                preview.set_last_window_rect(inner.response.rect);
+                            // Post-Show Logic (only for windowed mode)
+                            // 1. If Normal State, update last_known_rect
+                            if !should_restore {
+                                if let Some(inner) = &window_response {
+                                    preview.set_last_window_rect(inner.response.rect);
+                                }
                             }
-                        }
 
-                        // 2. Clear Restore Flag
-                        if should_restore {
-                            preview.complete_restore();
-                        }
-                        
-                        // Handle close
-                        if !open {
-                            preview.set_detached(false);
-                        }
+                            // 2. Clear Restore Flag
+                            if should_restore {
+                                preview.complete_restore();
+                            }
+                            
+                            // Handle close
+                            if !open {
+                                preview.set_detached(false);
+                            }
+                        } // end windowed mode
 
                     } else {
                         // === ATTACHED MODE (Standard) ===
