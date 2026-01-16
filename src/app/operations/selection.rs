@@ -56,7 +56,7 @@ impl ImageViewerApp {
                 if is_owner {
                     use crate::ui::components::media_preview::MediaPreview;
                     let should_stop = match &mut self.media_preview {
-                        Some(MediaPreview::Video(webview)) => webview.path != path,
+                        Some(MediaPreview::Video(player)) => player.path != path,
                         _ => false, // GIFs/Images don't "own" global media_preview anymore
                     };
 
@@ -116,12 +116,12 @@ impl ImageViewerApp {
         self.update_video_visibility();
     }
 
-    /// Control WebView visibility based on current tab ownership.
+    /// Control player visibility based on current tab ownership.
     /// Shows video only when current tab is the owner, hides otherwise.
     /// Audio continues playing when hidden (video only hidden visually).
     /// This NEVER pauses, stops, or clears the media - just visual hide/show.
     pub fn update_video_visibility(&mut self) {
-        if let Some(crate::ui::components::media_preview::MediaPreview::Video(webview)) = &mut self.media_preview {
+        if let Some(crate::ui::components::media_preview::MediaPreview::Video(player)) = &mut self.media_preview {
             let active_tab_id = self.tab_manager.active().id;
             let is_owner = self.media_preview_owner_tab_id == Some(active_tab_id);
             
@@ -129,11 +129,11 @@ impl ImageViewerApp {
             // 1. Current tab is the owner
             // 2. Preview panel is showing
             // 3. Selection matches the video path
-            let selected_path_matches = self.selected_file.as_ref().map_or(false, |f| f.path == webview.path);
+            let selected_path_matches = self.selected_file.as_ref().map_or(false, |f| f.path == player.path);
             
             let visible = is_owner && self.show_preview_panel && selected_path_matches;
             
-            webview.set_visibility(visible);
+            player.set_visibility(visible);
         }
     }
 }

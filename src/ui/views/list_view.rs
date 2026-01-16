@@ -277,7 +277,7 @@ pub fn render_list_view(
                         let mouse_pos =
                             ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
 
-                        // SMART TOOLTIP: Inverte se estiver perto da borda direita (WebView airspace)
+                        // SMART TOOLTIP: Inverte se estiver perto da borda direita (área do player)
                         let tooltip_pos = if mouse_pos.x + 320.0 > right_bound {
                             mouse_pos - egui::vec2(320.0, 0.0)
                         } else {
@@ -672,7 +672,7 @@ pub fn render_list_view(
                         let mouse_pos =
                             ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
 
-                        // SMART TOOLTIP: Inverte se estiver perto da borda direita (WebView airspace)
+                        // SMART TOOLTIP: Inverte se estiver perto da borda direita (área do player)
                         let tooltip_pos = if mouse_pos.x + 320.0 > right_bound {
                             mouse_pos - egui::vec2(320.0, 0.0)
                         } else {

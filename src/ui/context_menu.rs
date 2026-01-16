@@ -81,7 +81,7 @@ pub fn render_context_menu(
         .filter(|i| i.show_in_overflow)
         .collect();
 
-    // SMART ALIGNMENT: Se o menu for abrir sobre a área do player (WebView), desloca para a esquerda
+    // SMART ALIGNMENT: Se o menu for abrir sobre a área do player, desloca para a esquerda
     let mut menu_pos = menu_state.position;
     let expected_width = MENU_MAX_WIDTH; // Usamos o máximo para segurança ou detectamos dinamicamente
 
@@ -384,7 +384,7 @@ fn render_single_item(
         let screen_rect = ui.ctx().screen_rect();
         let menu_width = SUBMENU_MIN_WIDTH; // Expected submenu width
 
-        // SMART ALIGNMENT: Usa a borda real (levando em conta o player de vídeo/WebView)
+        // SMART ALIGNMENT: Usa a borda real (levando em conta o player de vídeo)
         let effective_right = screen_rect.right().min(right_bound);
         let space_on_right = effective_right - rect.right();
         let needs_flip = space_on_right < (menu_width + SUBMENU_X_OFFSET + 20.0); // 20px margin

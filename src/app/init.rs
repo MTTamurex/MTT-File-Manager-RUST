@@ -232,7 +232,7 @@ impl ImageViewerApp {
 
         let disks = windows_infra::get_all_drives();
 
-        // Initialize Audio Device (Removed: using WebView2)
+        // Initialize Audio Device (removed)
 
         let mut app = Self {
             current_path: PATH_PADRAO.to_string(),

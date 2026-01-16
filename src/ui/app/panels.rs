@@ -25,13 +25,13 @@ pub fn render_panels(app: &mut ImageViewerApp, ctx: &egui::Context, _frame: &mut
     render_central_panel_layout(app, ctx);
     
     // 5. Focus release: When user clicks anywhere outside the video player,
-    // release keyboard focus from WebView2 back to the main window
+    // release focus back to the main window (MPV no-op, kept for parity)
     #[cfg(target_os = "windows")]
     {
         use crate::ui::components::MediaPreview;
         
         if ctx.input(|i| i.pointer.any_pressed()) {
-            // User clicked somewhere - release WebView2 focus
+            // User clicked somewhere - release player focus
             if let Some(MediaPreview::Video(ref player)) = app.media_preview {
                 player.release_focus_auto();
             }
@@ -144,23 +144,17 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, fr
                                 match act {
                                     PreviewPanelAction::RequestPlay(path) => {
                                         use crate::ui::components::media_preview::MediaPreview;
-                                        #[cfg(feature = "mpv-player")]
                                         use crate::ui::components::MpvPreview;
-                                        #[cfg(not(feature = "mpv-player"))]
-                                        use crate::ui::components::WebviewPreview;
                                         
                                         // TAKE OVER: Stop and drop existing player if any
                                         if let Some(MediaPreview::Video(ref mut old_player)) = app.media_preview {
                                             old_player.pause();
-                                            // Dropping app.media_preview will shutdown the old server and webview
+                                            // Dropping app.media_preview will stop the previous player
                                         }
                                         app.media_preview = None;
 
                                         // Take ownership and start new player
-                                        #[cfg(feature = "mpv-player")]
                                         let mut player = MpvPreview::new(path);
-                                        #[cfg(not(feature = "mpv-player"))]
-                                        let mut player = WebviewPreview::new(path);
                                         player.play_on_init = true; // Start playing as soon as initialized
                                         player.show_player = true;  // Ensure player is visible immediately
                                         app.media_preview = Some(MediaPreview::Video(player));
