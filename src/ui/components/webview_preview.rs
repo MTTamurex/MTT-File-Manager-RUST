@@ -163,14 +163,13 @@ impl WebviewPreview {
 
     /// Whether to show controls based on recent mouse activity inside WebView
     pub fn controls_active(&self) -> bool {
-        let over = self.mouse_over.lock().ok().map(|v| *v).unwrap_or(false);
-        let recent = self.last_mouse_activity
+        // Only check if there was recent mouse MOVEMENT (not just presence)
+        self.last_mouse_activity
             .lock()
             .ok()
             .and_then(|v| *v)
-            .map(|t| t.elapsed() < Duration::from_secs(3)) // 3 seconds timeout
-            .unwrap_or(false);
-        over || recent
+            .map(|t| t.elapsed() < Duration::from_secs(3)) // 3 seconds after last movement
+            .unwrap_or(false)
     }
     
     /// Reset mouse activity (call when controls become visible to start hide timer)
@@ -422,19 +421,19 @@ impl WebviewPreview {
         }};
         reportState();
 
-        // Mouse activity reporting for autohide controls
-        let lastMouseSent = 0;
-        const sendMouse = () => {{
+        // Mouse activity reporting for autohide controls (only on actual movement)
+        let lastX = 0, lastY = 0, lastSent = 0;
+        document.addEventListener('mousemove', (e) => {{
+            const dx = Math.abs(e.clientX - lastX);
+            const dy = Math.abs(e.clientY - lastY);
             const now = Date.now();
-            if (now - lastMouseSent > 120) {{
-                lastMouseSent = now;
+            // Only report if mouse actually moved significantly (>3px) and throttle to 200ms
+            if ((dx > 3 || dy > 3) && (now - lastSent > 200)) {{
+                lastX = e.clientX;
+                lastY = e.clientY;
+                lastSent = now;
                 window.ipc.postMessage(JSON.stringify({{ type: 'mouse_move' }}));
             }}
-        }};
-        document.addEventListener('mousemove', sendMouse);
-        document.addEventListener('mouseenter', sendMouse);
-        document.addEventListener('mouseleave', () => {{
-            window.ipc.postMessage(JSON.stringify({{ type: 'mouse_leave' }}));
         }});
         
         // Report events
