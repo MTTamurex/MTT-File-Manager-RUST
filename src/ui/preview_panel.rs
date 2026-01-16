@@ -277,7 +277,12 @@ pub fn render_preview_panel(
                                             egui::vec2(total_size.x, control_height),
                                         );
 
-                                        let bg_color = egui::Color32::from_rgba_unmultiplied(30, 30, 32, 230);
+                                        // Background - use theme-aware colors (same as windowed mode)
+                                        let bg_color = if ui.visuals().dark_mode {
+                                            egui::Color32::from_rgb(35, 35, 38) // Dark mode panel background
+                                        } else {
+                                            egui::Color32::from_rgb(245, 245, 248) // Light mode panel background
+                                        };
                                         ui.painter().rect_filled(control_rect, 0.0, bg_color);
 
                                         let mut control_ui = ui.new_child(egui::UiBuilder::new().max_rect(control_rect));
