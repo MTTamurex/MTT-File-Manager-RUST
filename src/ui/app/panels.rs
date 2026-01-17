@@ -164,9 +164,12 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, fr
                                         app.update_video_visibility();
                                     }
                                     PreviewPanelAction::RefreshThumbnail(path) => {
+                                        // Clear all caches to allow retry
                                         app.disk_cache.remove_cache_for_path(&path);
                                         app.cache_manager.texture_cache.pop(&path);
                                         app.cache_manager.loading_set.remove(&path);
+                                        // Clear failure cache so it will be retried
+                                        crate::workers::thumbnail_worker::clear_failure_cache(&path);
                                         app.request_thumbnail_load(path, 512);
                                         app.notifications.push(
                                             crate::application::AppNotification::info("Recarregando thumbnail...".to_string()),
