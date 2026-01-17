@@ -40,6 +40,8 @@ pub enum VideoMenuAction {
     SetSubtitleTrack(i64),
     ToggleFullscreen,
     Close,
+    /// Menu was closed by right-click outside - caller should reopen at new position
+    RightClickOutside(egui::Pos2),
 }
 
 /// Helper to create a menu item with arrow aligned to the right
@@ -100,12 +102,35 @@ pub fn render_video_menu(
 ) -> VideoMenuAction {
     let mut action = VideoMenuAction::None;
 
+    let close_viewports = |ctx: &egui::Context| {
+        let viewport_id = egui::ViewportId::from_hash_of("video_context_menu");
+        ctx.show_viewport_immediate(
+            viewport_id,
+            egui::ViewportBuilder::default().with_visible(false),
+            |ctx, _class| {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            },
+        );
+
+        for submenu in ["audio", "subtitle"] {
+            let submenu_id = egui::ViewportId::from_hash_of(format!("video_submenu_{}", submenu));
+            ctx.show_viewport_immediate(
+                submenu_id,
+                egui::ViewportBuilder::default().with_visible(false),
+                |ctx, _class| {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                },
+            );
+        }
+    };
+
     if !state.is_open {
         // Menu is closed - ensure submenu state is cleared
         state.active_submenu = None;
         state.submenu_position = None;
         state.main_menu_rect = None;
         state.submenu_rect = None;
+        close_viewports(ctx);
         return action;
     }
 
@@ -251,17 +276,21 @@ pub fn render_video_menu(
         .map(|t| t.elapsed().as_millis() > 100)
         .unwrap_or(true);
     
-    if action == VideoMenuAction::None && should_check_click {
+    if matches!(action, VideoMenuAction::None) && should_check_click {
         let pointer_pos = ctx.input(|i| i.pointer.latest_pos());
-        // Only check left click for closing - right click should reopen menu at new position
         let left_clicked = ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Primary));
+        let right_clicked = ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Secondary));
         
-        if left_clicked {
-            if let Some(pos) = pointer_pos {
-                let inside_main = state.main_menu_rect.map(|r| r.contains(pos)).unwrap_or(false);
-                let inside_submenu = state.submenu_rect.map(|r| r.contains(pos)).unwrap_or(false);
-                
-                if !inside_main && !inside_submenu {
+        if let Some(pos) = pointer_pos {
+            let inside_main = state.main_menu_rect.map(|r| r.contains(pos)).unwrap_or(false);
+            let inside_submenu = state.submenu_rect.map(|r| r.contains(pos)).unwrap_or(false);
+            
+            if !inside_main && !inside_submenu {
+                if right_clicked {
+                    // Right-click outside - signal to reopen at new position
+                    action = VideoMenuAction::RightClickOutside(pos);
+                } else if left_clicked {
+                    // Left-click outside - just close
                     action = VideoMenuAction::Close;
                 }
             }
@@ -269,13 +298,17 @@ pub fn render_video_menu(
     }
     
     // Handle closing logic
-    if action == VideoMenuAction::Close || action == VideoMenuAction::ToggleFullscreen {
+    if matches!(
+        action,
+        VideoMenuAction::Close | VideoMenuAction::ToggleFullscreen | VideoMenuAction::RightClickOutside(_)
+    ) {
         state.active_submenu = None;
         state.submenu_position = None;
         state.main_menu_rect = None;
         state.submenu_rect = None;
         state.menu_opened_at = None; // Reset the timer
         state.is_open = false;
+        close_viewports(ctx);
     } else if matches!(action, VideoMenuAction::SetAudioTrack(_)) || matches!(action, VideoMenuAction::SetSubtitleTrack(_)) {
         // Close everything when a selection is made
         state.active_submenu = None;
@@ -284,6 +317,7 @@ pub fn render_video_menu(
         state.submenu_rect = None;
         state.menu_opened_at = None; // Reset the timer
         state.is_open = false;
+        close_viewports(ctx);
     }
 
     action
