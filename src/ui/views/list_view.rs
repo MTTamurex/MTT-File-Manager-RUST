@@ -184,6 +184,11 @@ pub fn render_list_view(
 
     let scroll_area = egui::ScrollArea::vertical().auto_shrink([false, false]);
     let available_rect = ui.available_rect_before_wrap();
+    
+    // Background interaction to catch secondary clicks on empty space
+    if ui.interact(available_rect, ui.id().with("list_bg"), Sense::click()).secondary_clicked() {
+        empty_area_secondary_click = true;
+    }
 
     if ctx.is_computer_view {
         // Grouped view for "Este Computador"
@@ -964,13 +969,7 @@ pub fn render_list_view(
             }
         });
 
-        if ui.input(|i| i.pointer.secondary_clicked()) {
-            if let Some(pos) = ui.ctx().pointer_latest_pos() {
-                if available_rect.contains(pos) {
-                    empty_area_secondary_click = true;
-                }
-            }
-        }
+
     }
 
     // Capture secondary click on the scroll area if no item was clicked
