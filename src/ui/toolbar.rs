@@ -179,16 +179,57 @@ pub fn render_toolbar(
             ui.separator();
 
             // Ordenação
+            //Ordenação - Botão de seta
             let sort_symbol = if sort_descending { "↓" } else { "↑" };
-            if ui
-                .button(sort_symbol)
-                .on_hover_text("Inverter Ordem")
-                .clicked()
-            {
-                action = Some(ToolbarAction::ToggleSortDescending);
-            }
+            
+            ui.scope(|ui| {
+                // Make sort button transparent/frameless, only show background on hover
+                ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
+                ui.visuals_mut().widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+                ui.visuals_mut().widgets.inactive.fg_stroke = egui::Stroke::NONE;
+                ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
+                
+                ui.visuals_mut().widgets.hovered.bg_fill = egui::Color32::from_gray(240);
+                ui.visuals_mut().widgets.hovered.fg_stroke = egui::Stroke::NONE;
+                ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
+                
+                if ui
+                    .add(egui::Button::new(egui::RichText::new(sort_symbol).color(egui::Color32::BLACK)))
+                    .on_hover_text("Inverter Ordem")
+                    .clicked()
+                {
+                    action = Some(ToolbarAction::ToggleSortDescending);
+                }
+            });
 
-            egui::ComboBox::from_id_salt("sort_mode")
+            // ComboBox com fundo branco e borda preta permanente
+            ui.scope(|ui| {
+                // Force all visual states to white background with black strokes
+                let black_stroke = egui::Stroke::new(1.0, egui::Color32::BLACK);
+                
+                // noninteractive (used for some default rendering)
+                ui.visuals_mut().widgets.noninteractive.bg_fill = egui::Color32::WHITE;
+                ui.visuals_mut().widgets.noninteractive.fg_stroke = black_stroke; // Arrow
+                ui.visuals_mut().widgets.noninteractive.bg_stroke = egui::Stroke::NONE; // No Border
+                
+                // inactive (normal state)
+                ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::WHITE;
+                ui.visuals_mut().widgets.inactive.fg_stroke = black_stroke; // Arrow
+                ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE; // No Border
+                
+                // hovered
+                ui.visuals_mut().widgets.hovered.bg_fill = egui::Color32::from_gray(245); // Subtle feedback
+                ui.visuals_mut().widgets.hovered.fg_stroke = black_stroke;
+                ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
+                
+                // active
+                ui.visuals_mut().widgets.active.bg_fill = egui::Color32::from_gray(235);
+                ui.visuals_mut().widgets.active.fg_stroke = black_stroke;
+                ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
+                
+                ui.visuals_mut().override_text_color = Some(egui::Color32::BLACK);
+                
+                egui::ComboBox::from_id_salt("sort_mode")
                 .selected_text(match sort_mode {
                     SortMode::Name => "Nome",
                     SortMode::Date => "Data",
@@ -221,6 +262,7 @@ pub fn render_toolbar(
                         action = Some(ToolbarAction::ChangeSortMode(SortMode::Type));
                     }
                 });
+            });
 
             ui.separator();
 
@@ -232,12 +274,12 @@ pub fn render_toolbar(
                 egui::Sense::click_and_drag(),
             );
 
-            // Desenha o fundo (imitando o estilo de input do tema)
+            // Desenha o fundo branco para campo de busca
             let visuals = ui.style().interact(&search_resp);
             ui.painter().rect_filled(
                 search_rect,
                 visuals.corner_radius,
-                ui.visuals().widgets.inactive.bg_fill,
+                egui::Color32::WHITE,
             );
             ui.painter().rect_stroke(
                 search_rect,
@@ -269,7 +311,8 @@ pub fn render_toolbar(
                 egui::vec2(text_available_w, 20.0),
                 egui::TextEdit::singleline(search_query)
                     .frame(false)
-                    .hint_text("Buscar...")
+                    .hint_text(egui::RichText::new("Buscar...").color(egui::Color32::from_gray(120)))
+                    .text_color(egui::Color32::BLACK)
                     .vertical_align(egui::Align::Center),
             );
 
@@ -397,6 +440,7 @@ pub fn render_toolbar(
                                 }
                             }
                         });
+
                     }
                 },
             );
