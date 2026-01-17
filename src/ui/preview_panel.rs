@@ -3,7 +3,6 @@ use crate::infrastructure::windows::MediaMetadata;
 use crate::ui::components::MediaPreview;
 use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
-use crate::ui::widgets;
 use eframe::egui;
 use std::path::PathBuf;
 
@@ -656,9 +655,32 @@ pub fn render_preview_panel(
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 ui.add_space(5.0);
+                
+                // Reserve space for refresh button (if applicable)
+                let button_width = if !file.is_dir && file.drive_info.is_none() { 22.0 } else { 0.0 };
+                let available_width = ui.available_width() - button_width - 10.0;
+                
                 ui.vertical(|ui| {
-                    ui.label(egui::RichText::new(&file.name).strong().size(15.0));
+                    ui.add_sized(
+                        egui::vec2(available_width, 0.0),
+                        egui::Label::new(egui::RichText::new(&file.name).strong().size(15.0))
+                            .wrap()
+                    );
                 });
+                
+                // Small refresh button aligned to the right
+                if !file.is_dir && file.drive_info.is_none() {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let icon_color = if ui.visuals().dark_mode { [220, 220, 220, 255] } else { [60, 60, 60, 255] };
+                        if let Some(tex) = svg_manager.get_icon(ui.ctx(), "refresh", 32, icon_color) {
+                            if ui.add(egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(16.0, 16.0))).frame(false))
+                                .on_hover_text("Recarregar Thumbnail")
+                                .clicked() {
+                                action = Some(PreviewPanelAction::RefreshThumbnail(file.path.clone()));
+                            }
+                        }
+                    });
+                }
             });
             ui.add_space(10.0);
             ui.separator();
@@ -863,18 +885,6 @@ pub fn render_preview_panel(
                 );
             }
 
-            // 6. Technical Actions (Refresh Thumbnail)
-            if !file.is_dir && file.drive_info.is_none() {
-                ui.add_space(15.0);
-                ui.separator();
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    if widgets::icon_button(ui, svg_manager, "refresh", "Recarregar", None).clicked() {
-                        action = Some(PreviewPanelAction::RefreshThumbnail(file.path.clone()));
-                    }
-                    ui.label(egui::RichText::new("Recarregar Thumbnail").size(13.0));
-                });
-            }
         });
     });
 
