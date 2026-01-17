@@ -60,6 +60,7 @@ pub struct MpvPreview {
     last_rect: egui::Rect,
     mpv: Option<Arc<mpv::Mpv>>,
     loaded_path: Option<PathBuf>,
+    pub video_menu: crate::ui::components::video_menu::VideoMenuState,
 }
 
 impl MpvPreview {
@@ -94,6 +95,7 @@ impl MpvPreview {
             last_rect: egui::Rect::NAN,
             mpv: None,
             loaded_path: None,
+            video_menu: Default::default(),
         }
     }
 
@@ -376,6 +378,40 @@ impl MpvPreview {
             let h = (rect.height() * factor) as i32;
             unsafe {
                 let _ = MoveWindow(h_video, x, y, w.max(1), h.max(1), true);
+            }
+        }
+
+        // Check for right-click context menu
+        if rect.contains(ui.input(|i| i.pointer.hover_pos().unwrap_or_default()))
+            && ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Secondary))
+        {
+            if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
+                self.video_menu.is_open = true;
+                self.video_menu.position = pos;
+            }
+        }
+
+        // Render Context Menu
+        let action = {
+            let state = self.state.read().unwrap();
+            crate::ui::components::video_menu::render_video_menu(
+                ui.ctx(),
+                &mut self.video_menu,
+                &state.audio_tracks,
+                &state.subtitle_tracks,
+            )
+        };
+
+        match action {
+            crate::ui::components::video_menu::VideoMenuAction::None => {},
+            crate::ui::components::video_menu::VideoMenuAction::TogglePlay => self.toggle_play(),
+            crate::ui::components::video_menu::VideoMenuAction::ToggleMute => self.toggle_mute(),
+            crate::ui::components::video_menu::VideoMenuAction::SetAudioTrack(id) => self.set_audio_track(id),
+            crate::ui::components::video_menu::VideoMenuAction::SetSubtitleTrack(id) => self.set_subtitle_track(id),
+            crate::ui::components::video_menu::VideoMenuAction::Close => {
+                 self.video_menu.is_open = false;
+                 self.video_menu.active_submenu = None;
+                 self.video_menu.submenu_position = None;
             }
         }
 
