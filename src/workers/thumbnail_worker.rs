@@ -44,6 +44,14 @@ fn mark_as_failed(path: PathBuf) {
     }
 }
 
+/// Clear failed status for a specific path (allows retry)
+/// Used when manually refreshing a thumbnail after file changes
+pub fn clear_failure_cache(path: &PathBuf) {
+    if let Ok(mut set) = get_failed_paths().lock() {
+        set.remove(path);
+    }
+}
+
 /// Priority levels for thumbnail requests
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThumbnailPriority {
