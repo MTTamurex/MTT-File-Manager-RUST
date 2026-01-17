@@ -196,20 +196,22 @@ pub fn render_preview_panel(
                         ui.horizontal(|ui| {
                             let icon_color = if ui.visuals().dark_mode { [240, 240, 240, 255] } else { [60, 60, 60, 255] };
 
-                            // Play/Pause
+                            // Play/Pause - with hover effect
                             let play_icon = if is_playing { "pause" } else { "play" };
                             if let Some(tex) = svg_manager.get_icon(ui.ctx(), play_icon, 48, icon_color) {
-                                if ui.add(egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(22.0, 22.0))).frame(false)).clicked() {
+                                let btn = egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(22.0, 22.0)));
+                                if ui.add(btn).on_hover_text(if is_playing { "Pausar" } else { "Reproduzir" }).clicked() {
                                     preview.toggle_play();
                                 }
                             }
 
                             ui.add_space(10.0);
 
-                            // Volume
+                            // Volume - with hover effect
                             let vol_icon = if is_muted { "vol_mute" } else { "vol_high" };
                             if let Some(tex) = svg_manager.get_icon(ui.ctx(), vol_icon, 48, icon_color) {
-                                if ui.add(egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(22.0, 22.0))).frame(false)).clicked() {
+                                let btn = egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(22.0, 22.0)));
+                                if ui.add(btn).on_hover_text(if is_muted { "Ativar som" } else { "Mudo" }).clicked() {
                                     preview.toggle_mute();
                                 }
                             }
@@ -235,14 +237,13 @@ pub fn render_preview_panel(
                             ui.label(egui::RichText::new(time_text).size(13.0).color(time_color));
                             
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                // Detach Button
+                                // Detach Button - with hover effect
                                 let detach_icon_name = if is_detached { "minimize_2" } else { "external-link" }; 
                                 let tooltip = if is_detached { "Anexar ao painel" } else { "Desacoplar vídeo" };
 
                                 if let Some(tex) = svg_manager.get_icon(ui.ctx(), detach_icon_name, 48, icon_color) {
-                                     if ui.add(egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(18.0, 18.0))).frame(false))
-                                        .on_hover_text(tooltip)
-                                        .clicked() {
+                                    let btn = egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(18.0, 18.0)));
+                                    if ui.add(btn).on_hover_text(tooltip).clicked() {
                                         preview.toggle_detached();
                                     }
                                 } else {
@@ -251,54 +252,7 @@ pub fn render_preview_panel(
                                     }
                                 }
 
-                                // Multi-Audio and Subtitles (Only in detached mode)
-                                if is_detached {
-                                    // Subtitle Tracks
-                                    if let Some(state) = video_state.as_ref() {
-                                        if !state.subtitle_tracks.is_empty() {
-                                            ui.add_space(4.0);
-                                            if let Some(tex) = svg_manager.get_icon(ui.ctx(), "languages", 48, icon_color) {
-                                                egui::ComboBox::new("sub_select", "")
-                                                    .icon(move |ui: &egui::Ui, rect: egui::Rect, _visuals: &egui::style::WidgetVisuals, _is_open: bool, _above_or_below: egui::AboveOrBelow| {
-                                                        ui.painter().image(tex.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
-                                                    })
-                                                    .show_ui(ui, |ui| {
-                                                        let is_none_selected = state.subtitle_tracks.iter().all(|t| !t.selected);
-                                                        if ui.selectable_label(is_none_selected, "Nenhuma").clicked() {
-                                                            preview.set_subtitle_track(-1);
-                                                        }
-                                                        for t in &state.subtitle_tracks {
-                                                            let label = format!("{} ({})", t.title.as_deref().unwrap_or("Legenda"), t.lang.as_deref().unwrap_or("??"));
-                                                            if ui.selectable_label(t.selected, label).clicked() {
-                                                                preview.set_subtitle_track(t.id);
-                                                            }
-                                                        }
-                                                    });
-                                            }
-                                        }
-
-                                        // Audio Tracks
-                                        if !state.audio_tracks.is_empty() {
-                                            ui.add_space(4.0);
-                                            if let Some(tex) = svg_manager.get_icon(ui.ctx(), "headphones", 48, icon_color) {
-                                                egui::ComboBox::new("audio_select", "")
-                                                    .icon(move |ui: &egui::Ui, rect: egui::Rect, _visuals: &egui::style::WidgetVisuals, _is_open: bool, _above_or_below: egui::AboveOrBelow| {
-                                                        ui.painter().image(tex.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
-                                                    })
-                                                    .show_ui(ui, |ui| {
-                                                        for t in &state.audio_tracks {
-                                                            let label = format!("{} ({})", t.title.as_deref().unwrap_or("Audio"), t.lang.as_deref().unwrap_or("??"));
-                                                            if ui.selectable_label(t.selected, label).clicked() {
-                                                                preview.set_audio_track(t.id);
-                                                            }
-                                                        }
-                                                    });
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Fullscreen Button (Only in detached mode)
+                                // Fullscreen Button (Only in detached mode) - with hover effect
                                 if is_detached {
                                     ui.add_space(4.0);
                                     let is_fullscreen = preview.is_maximized();
@@ -306,38 +260,37 @@ pub fn render_preview_panel(
                                     let fs_tooltip = if is_fullscreen { "Sair da Tela Cheia (ESC)" } else { "Tela Cheia" };
                                     
                                     if let Some(tex) = svg_manager.get_icon(ui.ctx(), fs_icon_name, 48, icon_color) {
-                                         if ui.add(egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(18.0, 18.0))).frame(false))
-                                            .on_hover_text(fs_tooltip)
-                                            .clicked() {
-                                                if !is_fullscreen {
-                                                    let was_maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
-                                                    preview.set_prev_app_maximized(was_maximized);
-                                                    preview.set_fullscreen_applied(false);
-                                                } else {
-                                                    preview.set_fullscreen_applied(false);
-                                                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
-                                                    if preview.prev_app_maximized() {
-                                                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
-                                                    }
+                                        let btn = egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(18.0, 18.0)));
+                                        if ui.add(btn).on_hover_text(fs_tooltip).clicked() {
+                                            if !is_fullscreen {
+                                                let was_maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+                                                preview.set_prev_app_maximized(was_maximized);
+                                                preview.set_fullscreen_applied(false);
+                                            } else {
+                                                preview.set_fullscreen_applied(false);
+                                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                                                if preview.prev_app_maximized() {
+                                                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
                                                 }
-                                                preview.toggle_maximized();
+                                            }
+                                            preview.toggle_maximized();
                                         }
                                     } else {
                                         // Fallback text
                                         let text = if is_fullscreen { "⮌" } else { "⛶" };
-                                         if ui.add(egui::Button::new(text).frame(false)).on_hover_text(fs_tooltip).clicked() {
-                                                if !is_fullscreen {
-                                                    let was_maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
-                                                    preview.set_prev_app_maximized(was_maximized);
-                                                    preview.set_fullscreen_applied(false);
-                                                } else {
-                                                    preview.set_fullscreen_applied(false);
-                                                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
-                                                    if preview.prev_app_maximized() {
-                                                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
-                                                    }
+                                        if ui.button(text).on_hover_text(fs_tooltip).clicked() {
+                                            if !is_fullscreen {
+                                                let was_maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+                                                preview.set_prev_app_maximized(was_maximized);
+                                                preview.set_fullscreen_applied(false);
+                                            } else {
+                                                preview.set_fullscreen_applied(false);
+                                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                                                if preview.prev_app_maximized() {
+                                                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
                                                 }
-                                                preview.toggle_maximized();
+                                            }
+                                            preview.toggle_maximized();
                                         }
                                     }
                                 }
@@ -394,8 +347,22 @@ pub fn render_preview_panel(
                         // 2. Floating Window logic
                         let mut open = true;
                         let is_fullscreen = preview.is_maximized(); // Renamed for clarity: this is now fullscreen
-                        let should_restore = preview.should_restore();
+                        let mut should_restore = preview.should_restore();
                         let last_known_rect = preview.get_last_window_rect();
+                        
+                        // Detect minimize/restore cycle to preserve window position
+                        let is_minimized = ui.ctx().input(|i| i.viewport().minimized.unwrap_or(false));
+                        if is_minimized && !preview.was_minimized() {
+                            // Just got minimized - mark it
+                            preview.set_was_minimized(true);
+                        } else if !is_minimized && preview.was_minimized() {
+                            // Just got restored from minimize - force window restore
+                            preview.set_was_minimized(false);
+                            if last_known_rect.is_some() {
+                                should_restore = true;
+                                preview.set_restore_needed(true);
+                            }
+                        }
 
                         if is_fullscreen {
                             // === FULLSCREEN MODE ===
@@ -497,20 +464,31 @@ pub fn render_preview_panel(
                             if should_restore {
                                 // Force restoration to previous size for one frame
                                 if let Some(rect) = last_known_rect {
-                                    window_builder = window_builder.fixed_rect(rect);
+                                    window_builder = window_builder
+                                        .current_pos(rect.min)
+                                        .fixed_size(rect.size());
                                 } else {
                                     let screen = ui.ctx().screen_rect();
                                     let center = screen.center();
                                     let w = 640.0;
                                     let h = 480.0;
                                     let rect = egui::Rect::from_min_size(egui::pos2(center.x - w/2.0, center.y - h/2.0), egui::vec2(w, h));
-                                    window_builder = window_builder.fixed_rect(rect);
+                                    window_builder = window_builder
+                                        .current_pos(rect.min)
+                                        .fixed_size(rect.size());
                                 }
                             } else {
-                                // Normal Floating State
-                                window_builder = window_builder
-                                    .default_size([640.0, 480.0])
-                                    .resizable(true);
+                                // Normal Floating State - use last known position if available
+                                if let Some(rect) = last_known_rect {
+                                    window_builder = window_builder
+                                        .default_pos(rect.min)
+                                        .default_size(rect.size())
+                                        .resizable(true);
+                                } else {
+                                    window_builder = window_builder
+                                        .default_size([640.0, 480.0])
+                                        .resizable(true);
+                                }
                             }
                         
                             let window_response = window_builder.show(ui.ctx(), |ui| {

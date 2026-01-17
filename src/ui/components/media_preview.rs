@@ -318,6 +318,29 @@ impl MediaPreview {
             player.restore_needed = false;
         }
     }
+    
+    /// Set restore needed flag
+    pub fn set_restore_needed(&mut self, needed: bool) {
+        if let MediaPreview::Video(player) = self {
+            player.restore_needed = needed;
+        }
+    }
+    
+    /// Check if was minimized
+    pub fn was_minimized(&self) -> bool {
+        if let MediaPreview::Video(player) = self {
+            player.was_minimized
+        } else {
+            false
+        }
+    }
+    
+    /// Set was minimized flag
+    pub fn set_was_minimized(&mut self, minimized: bool) {
+        if let MediaPreview::Video(player) = self {
+            player.was_minimized = minimized;
+        }
+    }
 
     /// Set last window rect (for restore)
     pub fn set_last_window_rect(&mut self, rect: egui::Rect) {

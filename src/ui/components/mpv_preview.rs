@@ -52,6 +52,8 @@ pub struct MpvPreview {
     pub forced_size: Option<egui::Vec2>,
     pub last_mouse_activity: Option<Instant>,
     pub last_mouse_pos: Option<egui::Pos2>,
+    /// Tracks if app was minimized to force window restoration
+    pub was_minimized: bool,
 
     #[cfg(target_os = "windows")]
     mpv_hwnd: Option<HWND>,
@@ -88,6 +90,7 @@ impl MpvPreview {
             forced_size: None,
             last_mouse_activity: None,
             last_mouse_pos: None,
+            was_minimized: false,
             #[cfg(target_os = "windows")]
             mpv_hwnd: None,
             #[cfg(target_os = "windows")]
@@ -381,14 +384,19 @@ impl MpvPreview {
             }
         }
 
-        // Check for right-click context menu
-        if rect.contains(ui.input(|i| i.pointer.hover_pos().unwrap_or_default()))
-            && ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Secondary))
-        {
-            if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
-                self.video_menu.is_open = true;
-                self.video_menu.position = pos;
-            }
+        // Check for right-click context menu - also clear any existing submenu
+        // Use button_released instead of button_pressed for more reliable detection
+        let hover_pos = ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
+        let right_clicked = ui.input(|i| i.pointer.button_clicked(egui::PointerButton::Secondary));
+        
+        if rect.contains(hover_pos) && right_clicked {
+            // Close any existing submenu before opening new menu
+            self.video_menu.active_submenu = None;
+            self.video_menu.submenu_position = None;
+            self.video_menu.is_open = true;
+            self.video_menu.position = hover_pos;
+            // Record the time to ignore clicks for a short period
+            self.video_menu.menu_opened_at = Some(std::time::Instant::now());
         }
 
         // Render Context Menu
@@ -399,6 +407,7 @@ impl MpvPreview {
                 &mut self.video_menu,
                 &state.audio_tracks,
                 &state.subtitle_tracks,
+                self.is_maximized,
             )
         };
 
@@ -408,6 +417,10 @@ impl MpvPreview {
             crate::ui::components::video_menu::VideoMenuAction::ToggleMute => self.toggle_mute(),
             crate::ui::components::video_menu::VideoMenuAction::SetAudioTrack(id) => self.set_audio_track(id),
             crate::ui::components::video_menu::VideoMenuAction::SetSubtitleTrack(id) => self.set_subtitle_track(id),
+            crate::ui::components::video_menu::VideoMenuAction::ToggleFullscreen => {
+                // Toggle is handled externally - just set the flag
+                self.is_maximized = !self.is_maximized;
+            },
             crate::ui::components::video_menu::VideoMenuAction::Close => {
                  self.video_menu.is_open = false;
                  self.video_menu.active_submenu = None;
