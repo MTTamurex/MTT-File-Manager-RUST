@@ -288,10 +288,26 @@ fn render_directory_slot<O: ItemSlotOperations>(
                     .and_then(|p| ctx.texture_cache.get(p)),
             );
         } else {
-            // NA LIXEIRA: Tenta carregar ícone do sistema em vez de desenhar pasta amarela
-            if let Some(icon) = ctx.icon_loader.get_or_load_icon(ui.ctx(), &item.path) {
-                // Desenha o ícone do sistema
-                let icon_size = folder_w.min(folder_h); // Ícone quadrado
+            // NA LIXEIRA: Forçamos o ícone de pasta do sistema para todos os diretórios
+            // Motivo: Os paths são virtuais (ex: "C:\folder") ou físicos renomeados ($R...)
+            // que o Windows Shell muitas vezes retorna como um ícone genérico de arquivo, não de pasta.
+            // O PreviewPanel já faz isso (usa folder_icon direto).
+            if let Some(sys_icon) = ctx.icon_loader.folder_icon() {
+                let icon_size = folder_w.min(folder_h);
+                let icon_rect = egui::Rect::from_center_size(
+                    folder_rect.center(),
+                    egui::vec2(icon_size, icon_size),
+                );
+
+                ui.painter().image(
+                    sys_icon.id(),
+                    icon_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            } else if let Some(icon) = ctx.icon_loader.get_or_load_icon(ui.ctx(), &item.path) {
+                // Fallback para carregamento específico se o system folder icon falhar (raro)
+                let icon_size = folder_w.min(folder_h);
                 let icon_rect = egui::Rect::from_center_size(
                     folder_rect.center(),
                     egui::vec2(icon_size, icon_size),
@@ -304,7 +320,7 @@ fn render_directory_slot<O: ItemSlotOperations>(
                     egui::Color32::WHITE,
                 );
             } else {
-                // Fallback se falhar o ícone: pasta customizada
+                // Fallback final: pasta customizada (amarela desenhada)
                 crate::ui::components::item_slot::draw_custom_folder(
                     ui.painter(),
                     folder_rect,

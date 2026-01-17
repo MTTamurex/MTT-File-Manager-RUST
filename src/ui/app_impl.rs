@@ -33,6 +33,7 @@ impl eframe::App for ImageViewerApp {
         }
         self.ensure_folder_icon(ctx);
         self.ensure_computer_icon(ctx);
+        self.item_icon_loader.ensure_folder_icon(ctx);
 
         // 4. Input: Keyboard shortcuts (resize borders handled by native subclass)
         if !is_resizing {
