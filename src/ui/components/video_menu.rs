@@ -1,9 +1,11 @@
 use eframe::egui;
 use crate::ui::components::mpv_preview::TrackInfo;
+use std::time::Instant;
 
-const MENU_WIDTH: f32 = 200.0;
+const MENU_WIDTH: f32 = 160.0;
+const SUBMENU_WIDTH: f32 = 200.0;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct VideoMenuState {
     pub is_open: bool,
     pub position: egui::Pos2,
@@ -11,6 +13,22 @@ pub struct VideoMenuState {
     pub submenu_position: Option<egui::Pos2>,
     pub main_menu_rect: Option<egui::Rect>,
     pub submenu_rect: Option<egui::Rect>,
+    /// Time when menu was opened - to ignore the click that opened it
+    pub menu_opened_at: Option<Instant>,
+}
+
+impl Default for VideoMenuState {
+    fn default() -> Self {
+        Self {
+            is_open: false,
+            position: egui::Pos2::ZERO,
+            active_submenu: None,
+            submenu_position: None,
+            main_menu_rect: None,
+            submenu_rect: None,
+            menu_opened_at: None,
+        }
+    }
 }
 
 #[derive(PartialEq)]
@@ -20,7 +38,57 @@ pub enum VideoMenuAction {
     ToggleMute,
     SetAudioTrack(i64),
     SetSubtitleTrack(i64),
+    ToggleFullscreen,
     Close,
+}
+
+/// Helper to create a menu item with arrow aligned to the right
+fn menu_item(ui: &mut egui::Ui, text: &str, has_submenu: bool, menu_width: f32) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(menu_width - 8.0, 22.0),
+        egui::Sense::click()
+    );
+    
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.style().interact_selectable(&response, false);
+        
+        // Draw background on hover
+        if response.hovered() {
+            ui.painter().rect_filled(rect, 2.0, visuals.bg_fill);
+        }
+        
+        // Draw text on the left
+        ui.painter().text(
+            rect.left_center() + egui::vec2(4.0, 0.0),
+            egui::Align2::LEFT_CENTER,
+            text,
+            egui::FontId::default(),
+            visuals.text_color(),
+        );
+        
+        // Draw arrow on the right if has submenu
+        if has_submenu {
+            ui.painter().text(
+                rect.right_center() - egui::vec2(8.0, 0.0),
+                egui::Align2::RIGHT_CENTER,
+                "›",
+                egui::FontId::default(),
+                visuals.text_color(),
+            );
+        }
+    }
+    
+    response
+}
+
+/// Helper to create a submenu item with checkmark for selection
+fn submenu_item(ui: &mut egui::Ui, text: &str, is_selected: bool) -> egui::Response {
+    let display_text = if is_selected {
+        format!("✓ {}", text)
+    } else {
+        format!("   {}", text)
+    };
+    ui.add(egui::SelectableLabel::new(false, display_text))
 }
 
 pub fn render_video_menu(
@@ -28,6 +96,7 @@ pub fn render_video_menu(
     state: &mut VideoMenuState,
     audio_tracks: &[TrackInfo],
     sub_tracks: &[TrackInfo],
+    is_fullscreen: bool,
 ) -> VideoMenuAction {
     let mut action = VideoMenuAction::None;
 
@@ -44,12 +113,11 @@ pub fn render_video_menu(
     let submenu_to_render = state.active_submenu.clone();
     let submenu_pos = state.submenu_position;
 
-    // Custom frame for menus - solid background with rounded corners
+    // Custom frame for menus - solid background
     let menu_frame = egui::Frame::new()
         .fill(ctx.style().visuals.window_fill)
         .stroke(ctx.style().visuals.window_stroke)
-        .corner_radius(egui::CornerRadius::same(6))
-        .inner_margin(egui::Margin::same(8));
+        .inner_margin(egui::Margin::same(4));
 
     // --- MAIN MENU VIEWPORT ---
     let viewport_id = egui::ViewportId::from_hash_of("video_context_menu");
@@ -60,39 +128,39 @@ pub fn render_video_menu(
         egui::ViewportBuilder::default()
             .with_title("Video Menu")
             .with_decorations(false)
-            .with_always_on_top()
             .with_visible(true)
             .with_taskbar(false)
             .with_transparent(true)
             .with_resizable(false)
-            .with_inner_size([MENU_WIDTH, 120.0])
+            .with_inner_size([MENU_WIDTH, 100.0])
             .with_position(state.position),
         |ctx, _class| {
             egui::CentralPanel::default().frame(menu_frame).show(ctx, |ui| {
-                ui.set_min_width(MENU_WIDTH - 20.0);
-                
-                let audio_btn = ui.add(egui::Button::new("🔊 Áudio ›").frame(false));
-                if audio_btn.hovered() {
+                // Audio menu item
+                let audio_resp = menu_item(ui, "🔊 Áudio", true, MENU_WIDTH);
+                if audio_resp.hovered() {
                     state.active_submenu = Some("audio".to_string());
-                    // Position submenu to the right side of main menu with 2px gap
-                    let submenu_y = menu_pos.y + audio_btn.rect.min.y;
+                    let submenu_y = menu_pos.y + audio_resp.rect.min.y;
                     state.submenu_position = Some(egui::pos2(menu_pos.x + MENU_WIDTH + 2.0, submenu_y));
                 }
 
-                let sub_btn = ui.add(egui::Button::new("💬 Legendas ›").frame(false));
-                if sub_btn.hovered() {
+                // Subtitle menu item
+                let sub_resp = menu_item(ui, "💬 Legendas", true, MENU_WIDTH);
+                if sub_resp.hovered() {
                     state.active_submenu = Some("subtitle".to_string());
-                    // Position submenu to the right side of main menu with 2px gap
-                    let submenu_y = menu_pos.y + sub_btn.rect.min.y;
+                    let submenu_y = menu_pos.y + sub_resp.rect.min.y;
                     state.submenu_position = Some(egui::pos2(menu_pos.x + MENU_WIDTH + 2.0, submenu_y));
                 }
 
                 ui.separator();
 
-                if ui.button("Fechar menu").clicked() {
-                    action = VideoMenuAction::Close;
+                // Fullscreen/Restore option
+                let fs_text = if is_fullscreen { "⮌ Restaurar janela" } else { "⛶ Tela cheia" };
+                if menu_item(ui, fs_text, false, MENU_WIDTH).clicked() {
+                    action = VideoMenuAction::ToggleFullscreen;
                 }
 
+                // ESC to close
                 if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                     action = VideoMenuAction::Close;
                 }
@@ -104,7 +172,6 @@ pub fn render_video_menu(
     );
 
     // --- SUBMENU VIEWPORT (rendered separately, not nested) ---
-    // Only render if menu is still open and we have a submenu to show
     let mut submenu_was_rendered = false;
     if action == VideoMenuAction::None {
         if let (Some(submenu), Some(pos)) = (submenu_to_render, submenu_pos) {
@@ -116,21 +183,17 @@ pub fn render_video_menu(
                 egui::ViewportBuilder::default()
                     .with_title("Submenu")
                     .with_decorations(false)
-                    .with_always_on_top()
                     .with_visible(true)
                     .with_taskbar(false)
                     .with_transparent(true)
                     .with_resizable(false)
-                    .with_inner_size([MENU_WIDTH, 350.0])
+                    .with_inner_size([SUBMENU_WIDTH, 350.0])
                     .with_position(pos),
                 |ctx, _class| {
                     egui::CentralPanel::default().frame(menu_frame).show(ctx, |ui| {
-                        ui.set_min_width(MENU_WIDTH - 20.0);
                         egui::ScrollArea::vertical().max_height(330.0).show(ui, |ui| {
                             match submenu.as_str() {
                                 "audio" => {
-                                    ui.label(egui::RichText::new("Faixas de Áudio").strong());
-                                    ui.separator();
                                     if audio_tracks.is_empty() {
                                         ui.label("Nenhuma faixa de áudio");
                                     } else {
@@ -139,31 +202,27 @@ pub fn render_video_menu(
                                             let lang = track.lang.as_deref().unwrap_or("unk");
                                             let text = format!("{} ({})", label, lang);
                                             
-                                            let mut selected = track.selected;
-                                            if ui.checkbox(&mut selected, text).clicked() {
+                                            if submenu_item(ui, &text, track.selected).clicked() {
                                                 action = VideoMenuAction::SetAudioTrack(track.id);
                                             }
                                         }
                                     }
                                 }
                                 "subtitle" => {
-                                    ui.label(egui::RichText::new("Legendas").strong());
-                                    ui.separator();
-                                    
-                                    if ui.button("Desativar legendas").clicked() {
+                                    // "Disable subtitles" option
+                                    let no_sub_selected = sub_tracks.iter().all(|t| !t.selected);
+                                    if submenu_item(ui, "Desativar legendas", no_sub_selected).clicked() {
                                         action = VideoMenuAction::SetSubtitleTrack(0);
                                     }
 
-                                    if sub_tracks.is_empty() {
-                                        ui.label("Nenhuma legenda encontrada");
-                                    } else {
+                                    if !sub_tracks.is_empty() {
+                                        ui.separator();
                                         for track in sub_tracks {
                                             let label = track.title.as_deref().unwrap_or("Legenda");
                                             let lang = track.lang.as_deref().unwrap_or("unk");
                                             let text = format!("{} ({})", label, lang);
                                             
-                                            let mut selected = track.selected;
-                                            if ui.checkbox(&mut selected, text).clicked() {
+                                            if submenu_item(ui, &text, track.selected).clicked() {
                                                 action = VideoMenuAction::SetSubtitleTrack(track.id);
                                             }
                                         }
@@ -187,12 +246,17 @@ pub fn render_video_menu(
     }
     
     // --- CLICK OUTSIDE DETECTION ---
-    // Check if user clicked outside both menus
-    if action == VideoMenuAction::None {
+    // Skip detection for the first 100ms after menu opens (to avoid closing from the right-click that opened it)
+    let should_check_click = state.menu_opened_at
+        .map(|t| t.elapsed().as_millis() > 100)
+        .unwrap_or(true);
+    
+    if action == VideoMenuAction::None && should_check_click {
         let pointer_pos = ctx.input(|i| i.pointer.latest_pos());
-        let clicked = ctx.input(|i| i.pointer.any_click());
+        // Only check left click for closing - right click should reopen menu at new position
+        let left_clicked = ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Primary));
         
-        if clicked {
+        if left_clicked {
             if let Some(pos) = pointer_pos {
                 let inside_main = state.main_menu_rect.map(|r| r.contains(pos)).unwrap_or(false);
                 let inside_submenu = state.submenu_rect.map(|r| r.contains(pos)).unwrap_or(false);
@@ -205,12 +269,12 @@ pub fn render_video_menu(
     }
     
     // Handle closing logic
-    if action == VideoMenuAction::Close {
-        // Close everything at once
+    if action == VideoMenuAction::Close || action == VideoMenuAction::ToggleFullscreen {
         state.active_submenu = None;
         state.submenu_position = None;
         state.main_menu_rect = None;
         state.submenu_rect = None;
+        state.menu_opened_at = None; // Reset the timer
         state.is_open = false;
     } else if matches!(action, VideoMenuAction::SetAudioTrack(_)) || matches!(action, VideoMenuAction::SetSubtitleTrack(_)) {
         // Close everything when a selection is made
@@ -218,6 +282,7 @@ pub fn render_video_menu(
         state.submenu_position = None;
         state.main_menu_rect = None;
         state.submenu_rect = None;
+        state.menu_opened_at = None; // Reset the timer
         state.is_open = false;
     }
 
