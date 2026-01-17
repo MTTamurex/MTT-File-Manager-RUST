@@ -80,8 +80,8 @@ pub fn render_preview_panel(
                     let is_detached = preview.is_detached();
 
                     // Control Builder Closure (Shared between Attached and Detached views)
-                    // NOW TAKES preview AS ARGUMENT TO AVOID BORROW ISSUES
-                    let mut draw_controls = |ui: &mut egui::Ui, preview: &mut MediaPreview, full_width: f32| {
+                    // NOW TAKES preview AND svg_manager AS ARGUMENT TO AVOID BORROW ISSUES
+                    let mut draw_controls = |ui: &mut egui::Ui, preview: &mut MediaPreview, full_width: f32, svg_manager: &mut SvgIconManager| {
                          ui.set_width(full_width);
                         
                         // Seek Bar
@@ -255,17 +255,48 @@ pub fn render_preview_panel(
                     if is_detached {
                         // === DETACHED MODE ===
                         // 1. Placeholder in Panel
-                        ui.vertical(|ui| {
-                            ui.add_space(20.0);
-                            ui.label(egui::RichText::new("Vídeo Desacoplado").strong().size(16.0));
-                            ui.add_space(10.0);
-                            
-                            // Reattach button in panel
-                            if ui.button("Reacoplar Vídeo ao Painel").clicked() {
-                                preview.set_detached(false);
+                        // 1. Placeholder in Panel (Centered and Styled)
+                        // Fix: Constrain height to avoid huge whitespace
+                        let placeholder_height = 200.0;
+                        let available_width = ui.available_width() - 32.0;
+                        
+                        let mut reattach_clicked = false;
+                        
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(available_width, placeholder_height),
+                            egui::Layout::centered_and_justified(egui::Direction::TopDown),
+                            |ui| {
+                                ui.vertical_centered(|ui| {
+                                    ui.label(egui::RichText::new("Vídeo Desacoplado").strong().size(16.0));
+                                    ui.add_space(8.0);
+                                    
+                                    // Reattach Icon Button
+                                    let icon_color = if ui.visuals().dark_mode { [220, 220, 220, 255] } else { [60, 60, 60, 255] };
+                                    let tooltip = "Reacoplar vídeo ao painel";
+    
+                                    if let Some(tex) = svg_manager.get_icon(ui.ctx(), "minimize_2", 48, icon_color) {
+                                        if ui.add(egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(24.0, 24.0))).frame(false))
+                                            .on_hover_text(tooltip)
+                                            .clicked() {
+                                            preview.toggle_detached();
+                                            reattach_clicked = true;
+                                        }
+                                    } else {
+                                        if ui.button("Reacoplar").on_hover_text(tooltip).clicked() {
+                                            preview.toggle_detached();
+                                            reattach_clicked = true;
+                                        }
+                                    }
+                                });
                             }
-                            ui.add_space(20.0);
-                        });
+                        );
+
+                        // If reattach was clicked, return early to let the next frame handle the "Attached" state cleanly.
+                        // Continuing here with mixed state (is_detached=true locally, false in struct) causes rendering glitches.
+                        if reattach_clicked {
+                             ui.ctx().request_repaint(); // Ensure immediate update
+                             return;
+                        }
 
                         // 2. Floating Window logic
                         let mut open = true;
@@ -333,7 +364,7 @@ pub fn render_preview_panel(
 
                                         let mut control_ui = ui.new_child(egui::UiBuilder::new().max_rect(control_rect));
                                         control_ui.add_space(6.0);
-                                        draw_controls(&mut control_ui, preview, control_rect.width() - 20.0);
+                                        draw_controls(&mut control_ui, preview, control_rect.width() - 20.0, svg_manager);
                                     }
 
                                     // ESC to exit fullscreen
@@ -434,7 +465,7 @@ pub fn render_preview_panel(
                                 
                                 let mut control_ui = ui.new_child(egui::UiBuilder::new().max_rect(control_rect));
                                 control_ui.add_space(6.0);
-                                draw_controls(&mut control_ui, preview, control_rect.width() - 20.0);
+                                draw_controls(&mut control_ui, preview, control_rect.width() - 20.0, svg_manager);
                             }
                             
                             // Request repaint to check timeout and hide controls
@@ -467,7 +498,7 @@ pub fn render_preview_panel(
                         // Controls bar BELOW the video
                         ui.add_space(8.0);
                         ui.vertical(|ui| {
-                            draw_controls(ui, preview, max_preview_width);
+                            draw_controls(ui, preview, max_preview_width, svg_manager);
                         });
                     }
 

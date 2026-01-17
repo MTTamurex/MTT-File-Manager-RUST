@@ -107,12 +107,12 @@ pub fn render_grid_view(
 
     let _scroll_res = egui::ScrollArea::vertical()
         .auto_shrink([false, false])
-        .enable_scrolling(false) // SCROLL SPEED HACK: Disable default to handle manually
+        .enable_scrolling(true) // Re-enable to allow SCROLLBAR DRAGGING
         .show(ui, |ui| {
-            // Manual scroll handling for increased speed
+            // Manual scroll handling for increased speed (Native 1x + Hack 7x = ~8x)
             let mut scroll_delta = ui.input(|i| i.smooth_scroll_delta);
             if scroll_delta != egui::Vec2::ZERO {
-                scroll_delta.y *= 8.0; // Multiplier requested by user
+                scroll_delta.y *= 7.0; // Multiplier adjusted because native scroll is now on
                 ui.scroll_with_delta(scroll_delta);
             }
             if ctx.is_computer_view {

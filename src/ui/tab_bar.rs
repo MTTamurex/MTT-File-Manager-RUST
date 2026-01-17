@@ -246,8 +246,8 @@ pub fn render_tab_bar(
             if close_response.hovered() {
                 ui.painter().rect_filled(
                     close_btn_rect,
-                    2.0,
-                    Color32::from_rgba_unmultiplied(255, 255, 255, 30),
+                    CornerRadius::same(4),
+                    hover_bg,
                 );
             }
 
@@ -255,7 +255,7 @@ pub fn render_tab_bar(
             let x_stroke = Stroke::new(
                 1.5,
                 if close_response.hovered() {
-                    Color32::WHITE
+                    text_color
                 } else {
                     inactive_text
                 },
