@@ -1,12 +1,16 @@
 use eframe::egui;
 use crate::ui::components::mpv_preview::TrackInfo;
 
+const MENU_WIDTH: f32 = 200.0;
+
 #[derive(Clone, Default)]
 pub struct VideoMenuState {
     pub is_open: bool,
     pub position: egui::Pos2,
     pub active_submenu: Option<String>, // "audio" or "subtitle"
     pub submenu_position: Option<egui::Pos2>,
+    pub main_menu_rect: Option<egui::Rect>,
+    pub submenu_rect: Option<egui::Rect>,
 }
 
 #[derive(PartialEq)]
@@ -31,6 +35,8 @@ pub fn render_video_menu(
         // Menu is closed - ensure submenu state is cleared
         state.active_submenu = None;
         state.submenu_position = None;
+        state.main_menu_rect = None;
+        state.submenu_rect = None;
         return action;
     }
 
@@ -40,6 +46,7 @@ pub fn render_video_menu(
 
     // --- MAIN MENU VIEWPORT ---
     let viewport_id = egui::ViewportId::from_hash_of("video_context_menu");
+    let menu_pos = state.position;
     
     ctx.show_viewport_immediate(
         viewport_id,
@@ -49,7 +56,8 @@ pub fn render_video_menu(
             .with_always_on_top()
             .with_visible(true)
             .with_taskbar(false)
-            .with_inner_size([200.0, 100.0])
+            .with_transparent(true)
+            .with_inner_size([MENU_WIDTH, 100.0])
             .with_position(state.position),
         |ctx, _class| {
             egui::CentralPanel::default().frame(egui::Frame::popup(&ctx.style())).show(ctx, |ui| {
@@ -58,15 +66,17 @@ pub fn render_video_menu(
                 let audio_btn = ui.add(egui::Button::new("🔊 Áudio ›").frame(false));
                 if audio_btn.hovered() {
                     state.active_submenu = Some("audio".to_string());
-                    let offset = audio_btn.rect.right_top().to_vec2();
-                    state.submenu_position = Some(state.position + offset);
+                    // Position submenu to the right side of main menu with 2px gap
+                    let submenu_y = menu_pos.y + audio_btn.rect.min.y;
+                    state.submenu_position = Some(egui::pos2(menu_pos.x + MENU_WIDTH + 2.0, submenu_y));
                 }
 
                 let sub_btn = ui.add(egui::Button::new("💬 Legendas ›").frame(false));
                 if sub_btn.hovered() {
                     state.active_submenu = Some("subtitle".to_string());
-                    let offset = sub_btn.rect.right_top().to_vec2();
-                    state.submenu_position = Some(state.position + offset);
+                    // Position submenu to the right side of main menu with 2px gap
+                    let submenu_y = menu_pos.y + sub_btn.rect.min.y;
+                    state.submenu_position = Some(egui::pos2(menu_pos.x + MENU_WIDTH + 2.0, submenu_y));
                 }
 
                 ui.separator();
@@ -78,14 +88,19 @@ pub fn render_video_menu(
                 if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                     action = VideoMenuAction::Close;
                 }
+                
+                // Store the menu rect for click-outside detection
+                state.main_menu_rect = Some(egui::Rect::from_min_size(menu_pos, ui.min_size()));
             });
         },
     );
 
     // --- SUBMENU VIEWPORT (rendered separately, not nested) ---
     // Only render if menu is still open and we have a submenu to show
+    let mut submenu_was_rendered = false;
     if action == VideoMenuAction::None {
         if let (Some(submenu), Some(pos)) = (submenu_to_render, submenu_pos) {
+            submenu_was_rendered = true;
             let submenu_id = egui::ViewportId::from_hash_of(format!("video_submenu_{}", submenu));
             
             ctx.show_viewport_immediate(
@@ -96,7 +111,8 @@ pub fn render_video_menu(
                     .with_always_on_top()
                     .with_visible(true)
                     .with_taskbar(false)
-                    .with_inner_size([200.0, 300.0])
+                    .with_transparent(true)
+                    .with_inner_size([MENU_WIDTH, 300.0])
                     .with_position(pos),
                 |ctx, _class| {
                     egui::CentralPanel::default().frame(egui::Frame::popup(&ctx.style())).show(ctx, |ui| {
@@ -146,9 +162,35 @@ pub fn render_video_menu(
                                 _ => {}
                             }
                         });
+                        
+                        // Store submenu rect for click-outside detection
+                        state.submenu_rect = Some(egui::Rect::from_min_size(pos, ui.min_size()));
                     });
                 },
             );
+        }
+    }
+    
+    // Clear submenu rect if no submenu rendered
+    if !submenu_was_rendered {
+        state.submenu_rect = None;
+    }
+    
+    // --- CLICK OUTSIDE DETECTION ---
+    // Check if user clicked outside both menus
+    if action == VideoMenuAction::None {
+        let pointer_pos = ctx.input(|i| i.pointer.latest_pos());
+        let clicked = ctx.input(|i| i.pointer.any_click());
+        
+        if clicked {
+            if let Some(pos) = pointer_pos {
+                let inside_main = state.main_menu_rect.map(|r| r.contains(pos)).unwrap_or(false);
+                let inside_submenu = state.submenu_rect.map(|r| r.contains(pos)).unwrap_or(false);
+                
+                if !inside_main && !inside_submenu {
+                    action = VideoMenuAction::Close;
+                }
+            }
         }
     }
     
@@ -157,11 +199,15 @@ pub fn render_video_menu(
         // Close everything at once
         state.active_submenu = None;
         state.submenu_position = None;
+        state.main_menu_rect = None;
+        state.submenu_rect = None;
         state.is_open = false;
     } else if matches!(action, VideoMenuAction::SetAudioTrack(_)) || matches!(action, VideoMenuAction::SetSubtitleTrack(_)) {
         // Close everything when a selection is made
         state.active_submenu = None;
         state.submenu_position = None;
+        state.main_menu_rect = None;
+        state.submenu_rect = None;
         state.is_open = false;
     }
 
