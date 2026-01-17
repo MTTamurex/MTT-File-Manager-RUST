@@ -1,17 +1,10 @@
 use eframe::egui;
 use mtt_file_manager::app::ImageViewerApp;
 
-/// Load application icon from PNG file
+/// Load application icon from embedded PNG bytes
 fn load_app_icon() -> Option<egui::IconData> {
-    let icon_path = std::path::PathBuf::from("appicon.png");
-
-    if !icon_path.exists() {
-        eprintln!("Warning: appicon.png not found - using default icon");
-        return None;
-    }
-
-    // Load PNG using image crate
-    match image::open(&icon_path) {
+    // Load PNG from embedded bytes using image crate
+    match image::load_from_memory(mtt_file_manager::embedded_assets::APP_ICON_PNG) {
         Ok(img) => {
             // Resize to 256x256 for optimal display (Windows icon standard)
             let resized = img.resize_exact(256, 256, image::imageops::FilterType::Lanczos3);
@@ -25,7 +18,7 @@ fn load_app_icon() -> Option<egui::IconData> {
             })
         }
         Err(e) => {
-            eprintln!("Warning: Failed to load appicon.png: {}", e);
+            eprintln!("Warning: Failed to load embedded app icon: {}", e);
             None
         }
     }
@@ -97,8 +90,9 @@ fn main() -> eframe::Result<()> {
                 loaded_fonts.push("arial_unicode".to_owned());
             }
 
-            // 4. Remix Icon (Fonte de Ícones dedicada)
-            if let Ok(data) = std::fs::read("assets/remixicon.ttf") {
+            // 4. Remix Icon (Fonte de Ícones dedicada) - Embarcada no executável
+            {
+                let data = mtt_file_manager::embedded_assets::REMIXICON_TTF.to_vec();
                 fonts.font_data.insert(
                     "remix_icon".to_owned(),
                     std::sync::Arc::new(egui::FontData::from_owned(data)),

@@ -356,8 +356,8 @@ impl ImageViewerApp {
             last_metadata_refresh: Instant::now(),
             last_metadata_path: None,
 
-            // SVG ICON MANAGER
-            svg_icon_manager: SvgIconManager::new(PathBuf::from("assets/icons")),
+            // SVG ICON MANAGER - usando recursos embarcados
+            svg_icon_manager: SvgIconManager::new(),
 
             // TAB SYSTEM
             tab_manager: crate::tabs::TabManager::new(),
