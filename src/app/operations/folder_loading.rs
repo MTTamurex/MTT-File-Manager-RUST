@@ -249,6 +249,8 @@ impl ImageViewerApp {
             let _ = self.reload_drive_list();
             self.setup_computer_view();
             self.last_drive_refresh = Instant::now();
+        } else if self.is_recycle_bin_view {
+            self.setup_recycle_bin_view();
         } else {
             self.load_folder(true);
         }
