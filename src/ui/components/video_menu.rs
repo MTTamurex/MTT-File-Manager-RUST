@@ -44,6 +44,13 @@ pub fn render_video_menu(
     let submenu_to_render = state.active_submenu.clone();
     let submenu_pos = state.submenu_position;
 
+    // Custom frame for menus - solid background with rounded corners
+    let menu_frame = egui::Frame::new()
+        .fill(ctx.style().visuals.window_fill)
+        .stroke(ctx.style().visuals.window_stroke)
+        .corner_radius(egui::CornerRadius::same(6))
+        .inner_margin(egui::Margin::same(8));
+
     // --- MAIN MENU VIEWPORT ---
     let viewport_id = egui::ViewportId::from_hash_of("video_context_menu");
     let menu_pos = state.position;
@@ -57,11 +64,12 @@ pub fn render_video_menu(
             .with_visible(true)
             .with_taskbar(false)
             .with_transparent(true)
-            .with_inner_size([MENU_WIDTH, 100.0])
+            .with_resizable(false)
+            .with_inner_size([MENU_WIDTH, 120.0])
             .with_position(state.position),
         |ctx, _class| {
-            egui::CentralPanel::default().frame(egui::Frame::popup(&ctx.style())).show(ctx, |ui| {
-                ui.set_max_width(250.0);
+            egui::CentralPanel::default().frame(menu_frame).show(ctx, |ui| {
+                ui.set_min_width(MENU_WIDTH - 20.0);
                 
                 let audio_btn = ui.add(egui::Button::new("🔊 Áudio ›").frame(false));
                 if audio_btn.hovered() {
@@ -112,11 +120,13 @@ pub fn render_video_menu(
                     .with_visible(true)
                     .with_taskbar(false)
                     .with_transparent(true)
-                    .with_inner_size([MENU_WIDTH, 300.0])
+                    .with_resizable(false)
+                    .with_inner_size([MENU_WIDTH, 350.0])
                     .with_position(pos),
                 |ctx, _class| {
-                    egui::CentralPanel::default().frame(egui::Frame::popup(&ctx.style())).show(ctx, |ui| {
-                        egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                    egui::CentralPanel::default().frame(menu_frame).show(ctx, |ui| {
+                        ui.set_min_width(MENU_WIDTH - 20.0);
+                        egui::ScrollArea::vertical().max_height(330.0).show(ui, |ui| {
                             match submenu.as_str() {
                                 "audio" => {
                                     ui.label(egui::RichText::new("Faixas de Áudio").strong());
