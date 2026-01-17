@@ -384,7 +384,7 @@ impl MpvPreview {
             }
         }
 
-        // Render Context Menu FIRST
+        // Render Context Menu (native viewport, appears above MPV HWND)
         let action = {
             let state = self.state.read().unwrap();
             crate::ui::components::video_menu::render_video_menu(

@@ -1,5 +1,5 @@
-use eframe::egui;
 use crate::ui::components::mpv_preview::TrackInfo;
+use eframe::egui;
 use std::time::Instant;
 
 const MENU_WIDTH: f32 = 160.0;
@@ -46,19 +46,17 @@ pub enum VideoMenuAction {
 
 /// Helper to create a menu item with arrow aligned to the right
 fn menu_item(ui: &mut egui::Ui, text: &str, has_submenu: bool, menu_width: f32) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(menu_width - 8.0, 22.0),
-        egui::Sense::click()
-    );
-    
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(menu_width - 8.0, 22.0), egui::Sense::click());
+
     if ui.is_rect_visible(rect) {
         let visuals = ui.style().interact_selectable(&response, false);
-        
+
         // Draw background on hover
         if response.hovered() {
             ui.painter().rect_filled(rect, 2.0, visuals.bg_fill);
         }
-        
+
         // Draw text on the left
         ui.painter().text(
             rect.left_center() + egui::vec2(4.0, 0.0),
@@ -67,7 +65,7 @@ fn menu_item(ui: &mut egui::Ui, text: &str, has_submenu: bool, menu_width: f32) 
             egui::FontId::default(),
             visuals.text_color(),
         );
-        
+
         // Draw arrow on the right if has submenu
         if has_submenu {
             ui.painter().text(
@@ -79,7 +77,7 @@ fn menu_item(ui: &mut egui::Ui, text: &str, has_submenu: bool, menu_width: f32) 
             );
         }
     }
-    
+
     response
 }
 
@@ -102,51 +100,26 @@ pub fn render_video_menu(
 ) -> VideoMenuAction {
     let mut action = VideoMenuAction::None;
 
-    let close_viewports = |ctx: &egui::Context| {
-        let viewport_id = egui::ViewportId::from_hash_of("video_context_menu");
-        ctx.show_viewport_immediate(
-            viewport_id,
-            egui::ViewportBuilder::default().with_visible(false),
-            |ctx, _class| {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            },
-        );
-
-        for submenu in ["audio", "subtitle"] {
-            let submenu_id = egui::ViewportId::from_hash_of(format!("video_submenu_{}", submenu));
-            ctx.show_viewport_immediate(
-                submenu_id,
-                egui::ViewportBuilder::default().with_visible(false),
-                |ctx, _class| {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                },
-            );
-        }
-    };
-
     if !state.is_open {
-        // Menu is closed - ensure submenu state is cleared
+        // Menu is closed - just clear state, NO rendering needed
         state.active_submenu = None;
         state.submenu_position = None;
         state.main_menu_rect = None;
         state.submenu_rect = None;
-        close_viewports(ctx);
         return action;
     }
 
-    // Capture submenu info before main menu rendering
-    let submenu_to_render = state.active_submenu.clone();
-    let submenu_pos = state.submenu_position;
-
-    // Custom frame for menus - solid background
+    // Custom frame for menus - solid background (no shadow for performance)
     let menu_frame = egui::Frame::new()
         .fill(ctx.style().visuals.window_fill)
         .stroke(ctx.style().visuals.window_stroke)
-        .inner_margin(egui::Margin::same(4));
+        .inner_margin(egui::Margin::same(4))
+        .corner_radius(4.0);
 
-    // --- MAIN MENU VIEWPORT ---
-    let viewport_id = egui::ViewportId::from_hash_of("video_context_menu");
     let menu_pos = state.position;
+
+    // --- MAIN MENU using native viewport (appears above MPV HWND) ---
+    let viewport_id = egui::ViewportId::from_hash_of("video_context_menu");
     
     ctx.show_viewport_immediate(
         viewport_id,
@@ -158,7 +131,7 @@ pub fn render_video_menu(
             .with_transparent(true)
             .with_resizable(false)
             .with_inner_size([MENU_WIDTH, 100.0])
-            .with_position(state.position),
+            .with_position(menu_pos),
         |ctx, _class| {
             egui::CentralPanel::default().frame(menu_frame).show(ctx, |ui| {
                 // Audio menu item
@@ -196,8 +169,11 @@ pub fn render_video_menu(
         },
     );
 
-    // --- SUBMENU VIEWPORT (rendered separately, not nested) ---
+    // --- SUBMENU using native viewport ---
     let mut submenu_was_rendered = false;
+    let submenu_to_render = state.active_submenu.clone();
+    let submenu_pos = state.submenu_position;
+    
     if action == VideoMenuAction::None {
         if let (Some(submenu), Some(pos)) = (submenu_to_render, submenu_pos) {
             submenu_was_rendered = true;
@@ -264,27 +240,34 @@ pub fn render_video_menu(
             );
         }
     }
-    
+
     // Clear submenu rect if no submenu rendered
     if !submenu_was_rendered {
         state.submenu_rect = None;
     }
-    
+
     // --- CLICK OUTSIDE DETECTION ---
     // Skip detection for the first 100ms after menu opens (to avoid closing from the right-click that opened it)
-    let should_check_click = state.menu_opened_at
+    let should_check_click = state
+        .menu_opened_at
         .map(|t| t.elapsed().as_millis() > 100)
         .unwrap_or(true);
-    
+
     if matches!(action, VideoMenuAction::None) && should_check_click {
         let pointer_pos = ctx.input(|i| i.pointer.latest_pos());
         let left_clicked = ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Primary));
         let right_clicked = ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Secondary));
-        
+
         if let Some(pos) = pointer_pos {
-            let inside_main = state.main_menu_rect.map(|r| r.contains(pos)).unwrap_or(false);
-            let inside_submenu = state.submenu_rect.map(|r| r.contains(pos)).unwrap_or(false);
-            
+            let inside_main = state
+                .main_menu_rect
+                .map(|r| r.contains(pos))
+                .unwrap_or(false);
+            let inside_submenu = state
+                .submenu_rect
+                .map(|r| r.contains(pos))
+                .unwrap_or(false);
+
             if !inside_main && !inside_submenu {
                 if right_clicked {
                     // Right-click outside - signal to reopen at new position
@@ -296,28 +279,30 @@ pub fn render_video_menu(
             }
         }
     }
-    
+
     // Handle closing logic
     if matches!(
         action,
-        VideoMenuAction::Close | VideoMenuAction::ToggleFullscreen | VideoMenuAction::RightClickOutside(_)
+        VideoMenuAction::Close
+            | VideoMenuAction::ToggleFullscreen
+            | VideoMenuAction::RightClickOutside(_)
     ) {
         state.active_submenu = None;
         state.submenu_position = None;
         state.main_menu_rect = None;
         state.submenu_rect = None;
-        state.menu_opened_at = None; // Reset the timer
+        state.menu_opened_at = None;
         state.is_open = false;
-        close_viewports(ctx);
-    } else if matches!(action, VideoMenuAction::SetAudioTrack(_)) || matches!(action, VideoMenuAction::SetSubtitleTrack(_)) {
+    } else if matches!(action, VideoMenuAction::SetAudioTrack(_))
+        || matches!(action, VideoMenuAction::SetSubtitleTrack(_))
+    {
         // Close everything when a selection is made
         state.active_submenu = None;
         state.submenu_position = None;
         state.main_menu_rect = None;
         state.submenu_rect = None;
-        state.menu_opened_at = None; // Reset the timer
+        state.menu_opened_at = None;
         state.is_open = false;
-        close_viewports(ctx);
     }
 
     action
