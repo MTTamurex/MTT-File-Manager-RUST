@@ -1,21 +1,17 @@
 use eframe::egui::{self, ColorImage, TextureHandle, TextureOptions};
 use std::collections::HashMap;
-use std::path::Path;
 
 /// Manages SVG icon loading and caching
 pub struct SvgIconManager {
     /// Cache of rendered textures keyed by (icon_name, size, color)
     cache: HashMap<(String, u32, [u8; 4]), TextureHandle>,
-    /// Base path for icon assets
-    icons_dir: std::path::PathBuf,
 }
 
 impl SvgIconManager {
-    /// Create a new SvgIconManager with the given icons directory
-    pub fn new(icons_dir: impl AsRef<Path>) -> Self {
+    /// Create a new SvgIconManager
+    pub fn new() -> Self {
         Self {
             cache: HashMap::new(),
-            icons_dir: icons_dir.as_ref().to_path_buf(),
         }
     }
 
@@ -36,9 +32,9 @@ impl SvgIconManager {
             return Some(texture.clone());
         }
 
-        // Load and render the SVG
-        let svg_path = self.icons_dir.join(format!("{}.svg", icon_name));
-        let image = render_svg_to_image(&svg_path, size, color)?;
+        // Load SVG from embedded assets
+        let svg_data = crate::embedded_assets::get_icon(icon_name)?;
+        let image = render_svg_to_image(svg_data, size, color)?;
 
         // Create texture with unique name including color
         let texture = ctx.load_texture(
@@ -62,13 +58,13 @@ impl SvgIconManager {
 }
 
 /// Render an SVG file to a ColorImage at the specified size
-fn render_svg_to_image(svg_path: &Path, size: u32, color: [u8; 4]) -> Option<ColorImage> {
-    // Read SVG file
-    let svg_data = std::fs::read_to_string(svg_path).ok()?;
+fn render_svg_to_image(svg_data: &[u8], size: u32, color: [u8; 4]) -> Option<ColorImage> {
+    // Parse SVG from embedded bytes
+    let svg_str = std::str::from_utf8(svg_data).ok()?;
 
     // Parse SVG
     let opt = usvg::Options::default();
-    let tree = usvg::Tree::from_str(&svg_data, &opt).ok()?;
+    let tree = usvg::Tree::from_str(&svg_str, &opt).ok()?;
 
     // Calculate scale to fit desired size
     let svg_size = tree.size();
