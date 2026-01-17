@@ -656,21 +656,31 @@ pub fn render_preview_panel(
             ui.horizontal(|ui| {
                 ui.add_space(5.0);
                 
-                // Reserve space for refresh button (if applicable)
-                let button_width = if !file.is_dir && file.drive_info.is_none() { 22.0 } else { 0.0 };
-                let available_width = ui.available_width() - button_width - 10.0;
-                
-                ui.vertical(|ui| {
-                    ui.add_sized(
-                        egui::vec2(available_width, 0.0),
-                        egui::Label::new(egui::RichText::new(&file.name).strong().size(15.0))
-                            .wrap()
-                    );
-                });
-                
-                // Small refresh button aligned to the right
-                if !file.is_dir && file.drive_info.is_none() {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let has_button = !file.is_dir && file.drive_info.is_none();
+                // Reserve space for button if needed
+                let button_width = if has_button { 22.0 } else { 0.0 };
+                // Calculate available width for text
+                let available_width = ui.available_width() - button_width - 5.0; // -5.0 for spacing/padding
+
+                // 1. Text Region (Centered)
+                // We allocate a specific width for the text and use a top-down layout with Center alignment
+                // to center the text horizontally within this region.
+                ui.allocate_ui_with_layout(
+                    egui::vec2(available_width, 0.0), // width=available, height=auto
+                    egui::Layout::top_down(egui::Align::Center), 
+                    |ui| {
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(&file.name).strong().size(15.0)
+                            ).wrap()
+                        );
+                    }
+                );
+
+                // 2. Refresh Button (Right aligned)
+                if has_button {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                        ui.add_space(5.0); // Spacing between text and button
                         let icon_color = if ui.visuals().dark_mode { [220, 220, 220, 255] } else { [60, 60, 60, 255] };
                         if let Some(tex) = svg_manager.get_icon(ui.ctx(), "refresh", 32, icon_color) {
                             if ui.add(egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(16.0, 16.0))).frame(false))
