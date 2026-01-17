@@ -12,14 +12,14 @@ const RIGHT_SIDEBAR_MAX: f32 = 500.0;
 const RESIZE_HANDLE_WIDTH: f32 = 6.0;
 
 pub fn render_panels(app: &mut ImageViewerApp, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-    // 1. Left Sidebar (forced width from app state)
+    // 1. Manual resize handles (rendered FIRST so Foreground Windows appearing later stack ON TOP)
+    render_resize_handles(app, ctx);
+
+    // 2. Left Sidebar (forced width from app state)
     render_sidebar_panel(app, ctx);
 
-    // 2. Right Preview Panel (forced width from app state)
+    // 3. Right Preview Panel (forced width from app state)
     render_preview_panel_layout(app, ctx, _frame);
-
-    // 3. Manual resize handles (rendered AFTER panels so they appear on top)
-    render_resize_handles(app, ctx);
 
     // 4. Central Panel
     render_central_panel_layout(app, ctx);

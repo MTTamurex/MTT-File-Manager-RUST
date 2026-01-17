@@ -394,10 +394,12 @@ pub fn render_preview_panel(
                             }
                             
                             // Condition Window Builder
-                            let mut window_builder = egui::Window::new("Reprodutor de Vídeo")
+                            let mut window_builder = egui::Window::new(&file.name)
                                 .open(&mut open)
                                 .collapsible(false)
-                                .title_bar(true);
+                                .title_bar(true)
+                                // Fix Z-Order overlap with Resize Handles (which are Foreground)
+                                .order(egui::Order::Foreground);
 
                             if should_restore {
                                 // Force restoration to previous size for one frame
