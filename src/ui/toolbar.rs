@@ -225,15 +225,79 @@ pub fn render_toolbar(
             ui.separator();
 
             // Busca
-            let search_width = 120.0;
-            let search_response = ui.add_sized(
+            let search_width = 250.0;
+            // Cria um container visualmente similar a um input, mas manual para conter o botão
+            let (search_rect, search_resp) = ui.allocate_exact_size(
                 egui::vec2(search_width, 22.0),
-                egui::TextEdit::singleline(search_query).hint_text("Buscar..."),
+                egui::Sense::click_and_drag(),
             );
-            if search_response.changed() {
+
+            // Desenha o fundo (imitando o estilo de input do tema)
+            let visuals = ui.style().interact(&search_resp);
+            ui.painter().rect_filled(
+                search_rect,
+                visuals.corner_radius,
+                ui.visuals().widgets.inactive.bg_fill,
+            );
+            ui.painter().rect_stroke(
+                search_rect,
+                visuals.corner_radius,
+                ui.visuals().widgets.inactive.bg_stroke,
+                egui::StrokeKind::Inside, 
+            );
+
+            let mut search_ui = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(search_rect)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            );
+
+            // Padding esquerdo
+            search_ui.add_space(6.0);
+
+            // Ícone de busca (agora dentro da barra, à esquerda, estilo premium)
+            crate::ui::svg_icons::icon_image(&mut search_ui, svg_manager, "search", 14.0);
+            search_ui.add_space(4.0);
+
+            let has_text = !search_query.is_empty();
+            // Lógica para largura do texto: Total - Ícones - Paddings
+            // Total (250) - Icon(14) - Pad(6+4) - ClearBtn(18 se houver) - Pad(4) - RightPad(4)
+            // Antes faltava o RightPad no cálculo e na adição.
+            let text_available_w = search_ui.available_width() - if has_text { 22.0 + 4.0 } else { 4.0 };
+
+            let text_resp = search_ui.add_sized(
+                egui::vec2(text_available_w, 20.0),
+                egui::TextEdit::singleline(search_query)
+                    .frame(false)
+                    .hint_text("Buscar...")
+                    .vertical_align(egui::Align::Center),
+            );
+
+            if text_resp.changed() {
                 action = Some(ToolbarAction::Search(search_query.clone()));
             }
-            crate::ui::svg_icons::icon_image(ui, svg_manager, "search", 16.0);
+
+            // Botão Limpar (X)
+            if has_text {
+                if search_ui
+                    .add(
+                        egui::Button::new("✕")
+                            .frame(false)
+                            .min_size(egui::vec2(18.0, 18.0)),
+                    )
+                    .on_hover_text("Limpar busca")
+                    .clicked()
+                {
+                    search_query.clear();
+                    action = Some(ToolbarAction::Search(String::new()));
+                }
+                search_ui.add_space(4.0);
+            }
+
+            // Foca no input se clicar no container vazio
+            if search_resp.clicked() {
+                text_resp.request_focus();
+            }
 
             ui.separator();
 
