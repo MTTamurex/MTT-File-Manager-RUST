@@ -41,6 +41,99 @@ pub fn render_preview_panel(
         .map(|ext| crate::infrastructure::windows::is_video_extension(ext))
         .unwrap_or(false);
 
+    // Reuseable fallback logic for rendering icons when no preview is available
+    let mut render_fallback = |ui: &mut egui::Ui| -> Option<PreviewPanelAction> {
+            let mut val_action = None;
+            // Pasta ou Drive ou Arquivo sem Thumbnail
+            let max_w: f32 = ui.available_width() - 40.0;
+            let icon_size: f32 = (120.0f32).min(max_w);
+
+            if let Some(_) = &file.drive_info {
+                if let Some(icon) =
+                    item_icon_loader.get_or_load_drive_icon(ui.ctx(), &file.path.to_string_lossy())
+                {
+                    ui.add(egui::Image::new(&icon).max_size(egui::vec2(icon_size, icon_size)));
+                } else {
+                    ui.label(egui::RichText::new("??").size(icon_size * 0.8));
+                }
+            } else if is_recycle_bin_view && file.name == "Lixeira" {
+                // LIXEIRA
+                if let Some(icon) = item_icon_loader.ensure_recycle_bin_icon(ui.ctx()) {
+                    ui.add(egui::Image::new(&icon).max_size(egui::vec2(icon_size, icon_size)));
+                } else {
+                    ui.label(egui::RichText::new("🗑").size(icon_size * 0.6));
+                }
+            } else if file.is_dir {
+                // PASTA
+                if is_recycle_bin_view {
+                    item_icon_loader.ensure_folder_icon(ui.ctx());
+                    if let Some(icon) = item_icon_loader.folder_icon() {
+                        ui.add(egui::Image::new(icon).max_size(egui::vec2(icon_size, icon_size)));
+                    } else {
+                        ui.label(egui::RichText::new("📁").size(icon_size * 0.6));
+                    }
+                } else {
+                    let folder_rect = ui
+                        .allocate_exact_size(egui::vec2(icon_size, icon_size), egui::Sense::hover())
+                        .0;
+
+                    if let Some(tex) = folder_preview_peek.as_ref() {
+                        let tex_size = tex.size_vec2();
+                        let aspect = tex_size.x / tex_size.y;
+
+                        let (draw_w, draw_h) = if aspect > 1.0 {
+                            (folder_rect.width(), folder_rect.width() / aspect)
+                        } else {
+                            (folder_rect.height() * aspect, folder_rect.height())
+                        };
+
+                        let offset_x = (folder_rect.width() - draw_w) / 2.0;
+                        let offset_y = (folder_rect.height() - draw_h) / 2.0;
+                        let draw_rect = egui::Rect::from_min_size(
+                            folder_rect.min + egui::vec2(offset_x, offset_y),
+                            egui::vec2(draw_w, draw_h),
+                        );
+
+                        ui.painter().image(
+                            tex.id(),
+                            draw_rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    } else if is_folder_preview_loading {
+                        // Spinner
+                        ui.painter()
+                            .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
+                        ui.add(egui::Spinner::new());
+                    } else {
+                        // Dispara carregamento
+                        val_action = Some(PreviewPanelAction::LoadFolderPreview(file.path.clone()));
+
+                        // Placeholder
+                        ui.painter()
+                            .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(240));
+                        ui.painter().text(
+                            folder_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            "📁",
+                            egui::FontId::proportional(icon_size * 0.4),
+                            egui::Color32::from_gray(180),
+                        );
+                    }
+                }
+            } else {
+                if let Some(icon) = item_icon_loader.get_or_load_icon(ui.ctx(), &file.path) {
+                    ui.add(
+                        egui::Image::new(&icon)
+                            .max_size(egui::vec2(icon_size * 0.6, icon_size * 0.6)),
+                    );
+                } else {
+                    ui.label(egui::RichText::new("??").size(icon_size * 0.6));
+                }
+            }
+            val_action
+    };
+
     ui.vertical_centered(|ui| {
         ui.add_space(20.0);
 
@@ -541,10 +634,14 @@ pub fn render_preview_panel(
                     let max_preview_width = ui.available_width() - 16.0;
                     let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
                     ui.add(egui::Image::new(tex).max_size(max_preview_size).shrink_to_fit());
+                } else {
+                    // Fallback for non-video items when video is present elsewhere
+                    if let Some(act) = render_fallback(ui) {
+                        action = Some(act);
+                    }
                 }
             }
-        }
- else if is_video {
+    } else if is_video {
             // === NO ACTIVE MEDIA PREVIEW YET (Non-owner tab or first selection) ===
             // Show thumbnail with Play Overlay
             if let Some(tex) = &texture {
@@ -587,95 +684,11 @@ pub fn render_preview_panel(
                     .shrink_to_fit(),
             );
         } else {
-            // Pasta ou Drive ou Arquivo sem Thumbnail
-            let max_w: f32 = ui.available_width() - 40.0;
-            let icon_size: f32 = (120.0f32).min(max_w);
-
-            if let Some(_) = &file.drive_info {
-                if let Some(icon) =
-                    item_icon_loader.get_or_load_drive_icon(ui.ctx(), &file.path.to_string_lossy())
-                {
-                    ui.add(egui::Image::new(&icon).max_size(egui::vec2(icon_size, icon_size)));
-                } else {
-                    ui.label(egui::RichText::new("??").size(icon_size * 0.8));
-                }
-            } else if is_recycle_bin_view && file.name == "Lixeira" {
-                // LIXEIRA
-                if let Some(icon) = item_icon_loader.ensure_recycle_bin_icon(ui.ctx()) {
-                    ui.add(egui::Image::new(&icon).max_size(egui::vec2(icon_size, icon_size)));
-                } else {
-                    ui.label(egui::RichText::new("🗑").size(icon_size * 0.6));
-                }
-            } else if file.is_dir {
-                // PASTA
-                if is_recycle_bin_view {
-                    item_icon_loader.ensure_folder_icon(ui.ctx());
-                    if let Some(icon) = item_icon_loader.folder_icon() {
-                        ui.add(egui::Image::new(icon).max_size(egui::vec2(icon_size, icon_size)));
-                    } else {
-                        ui.label(egui::RichText::new("📁").size(icon_size * 0.6));
-                    }
-                } else {
-                    let folder_rect = ui
-                        .allocate_exact_size(egui::vec2(icon_size, icon_size), egui::Sense::hover())
-                        .0;
-
-                    if let Some(tex) = folder_preview_peek {
-                        let tex_size = tex.size_vec2();
-                        let aspect = tex_size.x / tex_size.y;
-
-                        let (draw_w, draw_h) = if aspect > 1.0 {
-                            (folder_rect.width(), folder_rect.width() / aspect)
-                        } else {
-                            (folder_rect.height() * aspect, folder_rect.height())
-                        };
-
-                        let offset_x = (folder_rect.width() - draw_w) / 2.0;
-                        let offset_y = (folder_rect.height() - draw_h) / 2.0;
-                        let draw_rect = egui::Rect::from_min_size(
-                            folder_rect.min + egui::vec2(offset_x, offset_y),
-                            egui::vec2(draw_w, draw_h),
-                        );
-
-                        ui.painter().image(
-                            tex.id(),
-                            draw_rect,
-                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            egui::Color32::WHITE,
-                        );
-                    } else if is_folder_preview_loading {
-                        // Spinner
-                        ui.painter()
-                            .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
-                        ui.add(egui::Spinner::new());
-                    } else {
-                        // Dispara carregamento
-                        action = Some(PreviewPanelAction::LoadFolderPreview(file.path.clone()));
-
-                        // Placeholder
-                        ui.painter()
-                            .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(240));
-                        ui.painter().text(
-                            folder_rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            "📁",
-                            egui::FontId::proportional(icon_size * 0.4),
-                            egui::Color32::from_gray(180),
-                        );
-                    }
-                }
-            } else {
-                if let Some(icon) = item_icon_loader.get_or_load_icon(ui.ctx(), &file.path) {
-                    ui.add(
-                        egui::Image::new(&icon)
-                            .max_size(egui::vec2(icon_size * 0.6, icon_size * 0.6)),
-                    );
-                } else {
-                    ui.label(egui::RichText::new("??").size(icon_size * 0.6));
-                }
-            }
-            ui.add_space(20.0);
+           if let Some(act) = render_fallback(ui) {
+                action = Some(act);
+           }
         }
+        ui.add_space(20.0);
 
     });
 
