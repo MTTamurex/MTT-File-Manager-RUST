@@ -384,22 +384,7 @@ impl MpvPreview {
             }
         }
 
-        // Check for right-click context menu - also clear any existing submenu
-        // Use button_released instead of button_pressed for more reliable detection
-        let hover_pos = ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
-        let right_clicked = ui.input(|i| i.pointer.button_clicked(egui::PointerButton::Secondary));
-        
-        if rect.contains(hover_pos) && right_clicked {
-            // Close any existing submenu before opening new menu
-            self.video_menu.active_submenu = None;
-            self.video_menu.submenu_position = None;
-            self.video_menu.is_open = true;
-            self.video_menu.position = hover_pos;
-            // Record the time to ignore clicks for a short period
-            self.video_menu.menu_opened_at = Some(std::time::Instant::now());
-        }
-
-        // Render Context Menu
+        // Render Context Menu FIRST
         let action = {
             let state = self.state.read().unwrap();
             crate::ui::components::video_menu::render_video_menu(
@@ -410,6 +395,28 @@ impl MpvPreview {
                 self.is_maximized,
             )
         };
+
+        // Check for right-click context menu AFTER rendering
+        // Always allow right-click to open/reposition the menu
+        let right_click_pos = ui.ctx().input(|i| {
+            if i.pointer.button_clicked(egui::PointerButton::Secondary) {
+                i.pointer.latest_pos().or_else(|| i.pointer.hover_pos())
+            } else {
+                None
+            }
+        });
+
+        if let Some(pos) = right_click_pos {
+            if rect.contains(pos) {
+                self.video_menu.active_submenu = None;
+                self.video_menu.submenu_position = None;
+                self.video_menu.main_menu_rect = None;
+                self.video_menu.submenu_rect = None;
+                self.video_menu.is_open = true;
+                self.video_menu.position = pos;
+                self.video_menu.menu_opened_at = Some(std::time::Instant::now());
+            }
+        }
 
         match action {
             crate::ui::components::video_menu::VideoMenuAction::None => {},
@@ -425,6 +432,12 @@ impl MpvPreview {
                  self.video_menu.is_open = false;
                  self.video_menu.active_submenu = None;
                  self.video_menu.submenu_position = None;
+            },
+            crate::ui::components::video_menu::VideoMenuAction::RightClickOutside(pos) => {
+                // Menu was closed, now reopen at the provided position
+                self.video_menu.is_open = true;
+                self.video_menu.position = pos;
+                self.video_menu.menu_opened_at = Some(std::time::Instant::now());
             }
         }
 
