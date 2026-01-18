@@ -364,6 +364,28 @@ impl MediaPreview {
         }
     }
 
+    /// Check if VSR is enabled
+    pub fn is_vsr_enabled(&self) -> bool {
+        if let MediaPreview::Video(player) = self {
+            player.is_vsr_enabled
+        } else {
+            false
+        }
+    }
+
+    /// Toggle NVIDIA VSR
+    pub fn toggle_vsr(&mut self) -> Result<(), String> {
+        if let MediaPreview::Video(player) = self {
+            if player.is_vsr_enabled {
+                player.disable_vsr()
+            } else {
+                player.enable_nvidia_vsr()
+            }
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn path(&self) -> Option<&std::path::Path> {
         match self {
             MediaPreview::StaticImage(_) => None,
