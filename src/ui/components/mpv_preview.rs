@@ -54,6 +54,8 @@ pub struct MpvPreview {
     pub last_mouse_pos: Option<egui::Pos2>,
     /// Tracks if app was minimized to force window restoration
     pub was_minimized: bool,
+    /// Tracks if NVIDIA VSR is currently enabled
+    pub is_vsr_enabled: bool,
 
     #[cfg(target_os = "windows")]
     mpv_hwnd: Option<HWND>,
@@ -91,6 +93,7 @@ impl MpvPreview {
             last_mouse_activity: None,
             last_mouse_pos: None,
             was_minimized: false,
+            is_vsr_enabled: false,
             #[cfg(target_os = "windows")]
             mpv_hwnd: None,
             #[cfg(target_os = "windows")]
@@ -231,7 +234,22 @@ impl MpvPreview {
                 Ok(m) => {
                     let m = Arc::new(m);
                     let _ = m.set_property("keep-open", "yes");
-                    let _ = m.set_property("hwdec", "auto");
+                    
+                    // Mandatory configuration for NVIDIA RTX VSR
+                    // We must use D3D11 backend and D3D11 VA hardware decoding
+                    if let Err(e) = m.set_property("vo", "gpu") {
+                        eprintln!("[MpvPreview] Failed to set vo=gpu: {:?}", e);
+                    }
+                    if let Err(e) = m.set_property("gpu-api", "d3d11") {
+                        eprintln!("[MpvPreview] Failed to set gpu-api=d3d11: {:?}", e);
+                    }
+                    if let Err(e) = m.set_property("gpu-context", "d3d11") {
+                        eprintln!("[MpvPreview] Failed to set gpu-context=d3d11: {:?}", e);
+                    }
+                    if let Err(e) = m.set_property("hwdec", "d3d11va") {
+                        eprintln!("[MpvPreview] Failed to set hwdec=d3d11va: {:?}", e);
+                    }
+
                     let _ = m.set_property("pause", true);
                     self.mpv = Some(m);
                 }
@@ -464,6 +482,40 @@ impl MpvPreview {
             unsafe {
                 let _ = ShowWindow(hwnd, if visible { SW_SHOW } else { SW_HIDE });
             }
+        }
+    }
+
+    /// Enables NVIDIA RTX Video Super Resolution (VSR).
+    /// 
+    /// Requires MPV to be initialized with:
+    /// - vo=gpu
+    /// - gpu-api=d3d11
+    /// - hwdec=d3d11va
+    pub fn enable_nvidia_vsr(&mut self) -> Result<(), String> {
+        if let Some(m) = &self.mpv {
+            // Apply the D3D11 Video Processing Post-processing filter
+            // scale=2: Forces scaling to engage the driver
+            // scaling-mode=nvidia: Explicitly requests NVIDIA algorithm
+            m.set_property("vf", "d3d11vpp=scale=2:scaling-mode=nvidia")
+                .map_err(|e| format!("Failed to enable VSR: {:?}", e))?;
+            self.is_vsr_enabled = true;
+            eprintln!("[MpvPreview] NVIDIA VSR Enabled");
+            Ok(())
+        } else {
+            Err("MPV instance not initialized".to_string())
+        }
+    }
+
+    /// Disables VSR by clearing the video filter chain.
+    pub fn disable_vsr(&mut self) -> Result<(), String> {
+        if let Some(m) = &self.mpv {
+            m.set_property("vf", "")
+                .map_err(|e| format!("Failed to disable VSR: {:?}", e))?;
+            self.is_vsr_enabled = false;
+            eprintln!("[MpvPreview] VSR Disabled");
+            Ok(())
+        } else {
+            Err("MPV instance not initialized".to_string())
         }
     }
 }
