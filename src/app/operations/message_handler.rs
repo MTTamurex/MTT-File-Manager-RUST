@@ -172,10 +172,13 @@ impl ImageViewerApp {
         if self.pending_auto_reload {
             let elapsed = self.last_auto_reload.elapsed();
             if elapsed > Duration::from_millis(theme::AUTO_RELOAD_MS) {
+                eprintln!("[DEBUG] Checking auto-reload for path: '{}'", self.current_path);
                 // VALIDA SE O PATH ATUAL AINDA EXISTE (pode ter sido renomeado/deletado)
                 if Path::new(&self.current_path).exists() {
+                    eprintln!("[DEBUG] Path exists. Reloading.");
                     self.load_folder(false); // false = don't clear entire cache, already cleared specific changed items
                 } else {
+                    eprintln!("[DEBUG] Path DOES NOT EXIST! Triggering go_up_one_level");
                     self.go_up_one_level();
                 }
                 self.last_auto_reload = Instant::now();
