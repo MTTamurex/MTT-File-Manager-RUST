@@ -270,7 +270,10 @@ fn render_resize_handles(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
 fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
     if let Some(file) = app.selected_file.clone() {
-        if app.is_recycle_bin_view || file.path.exists() {
+        // For virtual paths (Recycle Bin or inside ZIP), don't check path.exists()
+        let is_virtual_path = app.is_recycle_bin_view 
+            || crate::infrastructure::windows::shell_folder::is_shell_navigation_path(&file.path);
+        if is_virtual_path || file.path.exists() {
             Some(file)
         } else {
             None
