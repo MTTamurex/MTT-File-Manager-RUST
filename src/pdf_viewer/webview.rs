@@ -305,3 +305,102 @@ static CONTROLLER_HANDLER_VTBL: ControllerCompletedHandler_Vtbl = ControllerComp
     },
     Invoke: ControllerCompletedHandler::Invoke,
 };
+
+// --- WARMUP HANDLER ---
+// This handler is used solely to initialize the WebView2 runtime process.
+// It does NOT create a Controller or Window. It just ensures the DLL is loaded and the
+// browser process is started/ready.
+
+#[repr(C)]
+struct WarmupCompletedHandler {
+    vtbl: *const EnvironmentCompletedHandler_Vtbl, // Reusing the same VTable type as it's the same interface
+    ref_count: AtomicUsize,
+}
+
+impl WarmupCompletedHandler {
+    fn create() -> *mut c_void {
+        let handler = Box::new(Self {
+            vtbl: &WARMUP_HANDLER_VTBL,
+            ref_count: AtomicUsize::new(1),
+        });
+        Box::into_raw(handler) as *mut c_void
+    }
+
+    unsafe extern "system" fn QueryInterface(this: *mut c_void, iid: *const GUID, obj: *mut *mut c_void) -> HRESULT {
+        if *iid == IID_IUnknown || *iid == IID_ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler {
+            *obj = this;
+            Self::AddRef(this);
+            return HRESULT(0);
+        }
+        *obj = null_mut();
+        HRESULT(0x80004002u32 as i32)
+    }
+
+    unsafe extern "system" fn AddRef(this: *mut c_void) -> u32 {
+        let handler = &*(this as *mut Self);
+        handler.ref_count.fetch_add(1, Ordering::Relaxed) as u32 + 1
+    }
+
+    unsafe extern "system" fn Release(this: *mut c_void) -> u32 {
+        let handler = &*(this as *mut Self);
+        let count = handler.ref_count.fetch_sub(1, Ordering::Relaxed) - 1;
+        if count == 0 {
+            let _ = Box::from_raw(this as *mut Self);
+        }
+        count as u32
+    }
+
+    unsafe extern "system" fn Invoke(this: *mut c_void, result: HRESULT, env: *mut c_void) -> HRESULT {
+        // This is where the magic happens (or doesn't).
+        // We successfully created the environment, which means the runtime is loaded.
+        // We simply release the environment and return.
+        // This keeps the "msedgewebview2.exe" process warm for a short period or in cache.
+        
+        if result.is_err() || env.is_null() {
+            // Silently fail in warmup
+            return HRESULT(0);
+        }
+
+        // Just release the environment immediately.
+        // The act of creating it was enough to warm up the DLL and likely spawn the child process.
+        let vtbl = *(env as *mut *mut ICoreWebView2Environment_Vtbl);
+        ((*vtbl).base.Release)(env);
+
+        HRESULT(0)
+    }
+}
+
+static WARMUP_HANDLER_VTBL: EnvironmentCompletedHandler_Vtbl = EnvironmentCompletedHandler_Vtbl {
+    base: IUnknown_Vtbl {
+        QueryInterface: WarmupCompletedHandler::QueryInterface,
+        AddRef: WarmupCompletedHandler::AddRef,
+        Release: WarmupCompletedHandler::Release,
+    },
+    Invoke: WarmupCompletedHandler::Invoke,
+};
+
+pub fn warmup_env() -> Result<()> {
+    unsafe {
+        // Load DLL silently
+         let dll_name = w!("WebView2Loader.dll");
+        // We use LoadLibraryW directly. If it's already loaded, it just increments ref count.
+        let hmodule = LoadLibraryW(dll_name).ok().ok_or(Error::from_win32())?;
+        
+        let func_name = s!("CreateCoreWebView2EnvironmentWithOptions");
+        let create_env_ptr = GetProcAddress(hmodule, func_name)
+            .ok_or(Error::from_win32())?;
+            
+        let create_env: unsafe extern "system" fn(
+            PCWSTR, PCWSTR, *mut c_void, *mut c_void
+        ) -> HRESULT = std::mem::transmute(create_env_ptr);
+
+        let handler = WarmupCompletedHandler::create();
+        
+        // Pass NULL for user_data_folder to use default (standard for app),
+        // OR use the same logic as real viewer if we set specific path.
+        // Real viewer uses nullptr (default), so we use nullptr here too.
+        create_env(PCWSTR::null(), PCWSTR::null(), std::ptr::null_mut(), handler);
+        
+        Ok(())
+    }
+}
