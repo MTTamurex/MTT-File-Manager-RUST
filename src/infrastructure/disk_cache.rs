@@ -76,6 +76,16 @@ impl ThumbnailDiskCache {
         // Migration: Add path column if missing (for existing DBs)
         let _ = conn.execute("ALTER TABLE thumbnails ADD COLUMN path TEXT", []);
 
+        // OPTIMIZATION: Index on path to speed up directory clearing (DELETE ... WHERE path LIKE ...)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_thumbnails_path ON thumbnails(path)",
+            [],
+        )
+        .unwrap_or_else(|e| {
+            eprintln!("[Cache] Warning: Failed to create index on path: {:?}", e);
+            0
+        });
+
         // Create preferences table
         conn.execute(
             "CREATE TABLE IF NOT EXISTS user_preferences (
@@ -383,36 +393,47 @@ impl ThumbnailDiskCache {
             orphan_folders.len()
         );
 
-        // FASE 3: Remove órfãos usando BATCH TRANSACTION (1 commit ao invés de N)
+        // FASE 3: Remove órfãos usando BATCH DELETE
+        // Otimização: Usa DELETE WHERE id IN (...) em lotes para evitar N+1 queries
         if !orphan_thumbs.is_empty() || !orphan_folders.is_empty() {
             if let Ok(db) = self.db.lock() {
-                // Inicia transação única - todas as deleções acontecem na memória
+                // Inicia transação
                 let _ = db.execute("BEGIN TRANSACTION", []);
 
-                // Remove thumbnails órfãos
-                for id in &orphan_thumbs {
-                    if db
-                        .execute("DELETE FROM thumbnails WHERE id = ?", [id])
-                        .is_ok()
-                    {
-                        removed += 1;
+                // Helper local para deletar em lotes
+                let execute_batch_delete = |table: &str, key_col: &str, items: &[String]| -> usize {
+                    let mut count = 0;
+                    const BATCH_SIZE: usize = 500; // Limite seguro para variáveis SQLite
+
+                    for chunk in items.chunks(BATCH_SIZE) {
+                        let placeholders = std::iter::repeat("?")
+                            .take(chunk.len())
+                            .collect::<Vec<_>>()
+                            .join(",");
+
+                        let sql = format!("DELETE FROM {} WHERE {} IN ({})", table, key_col, placeholders);
+
+                        match db.execute(&sql, rusqlite::params_from_iter(chunk.iter())) {
+                            Ok(c) => count += c,
+                            Err(e) => eprintln!("[GC] Failed to delete batch from {}: {:?}", table, e),
+                        }
                     }
+                    count
+                };
+
+                // Remove thumbnails
+                if !orphan_thumbs.is_empty() {
+                    removed += execute_batch_delete("thumbnails", "id", &orphan_thumbs);
                 }
 
-                // Remove folder_covers órfãos
-                for folder in &orphan_folders {
-                    if db
-                        .execute("DELETE FROM folder_covers WHERE folder_path = ?", [folder])
-                        .is_ok()
-                    {
-                        removed += 1;
-                    }
+                // Remove folder_covers
+                if !orphan_folders.is_empty() {
+                    removed += execute_batch_delete("folder_covers", "folder_path", &orphan_folders);
                 }
 
-                // Commit único - grava tudo no disco de uma vez
+                // Commit e VACUUM
                 let _ = db.execute("COMMIT", []);
 
-                // VACUUM apenas se removeu algo
                 if removed > 0 {
                     eprintln!("[GC] Removed {} entries, running VACUUM...", removed);
                     let _ = db.execute("VACUUM", []);
