@@ -232,7 +232,8 @@ impl ImageViewerApp {
 
         // --- FILE OPERATION WORKER (Background Shell ops) ---
         let (file_op_tx, file_op_rx) = mpsc::channel();
-        crate::workers::file_operation_worker::start_file_operation_worker(file_op_rx);
+        let (file_op_res_tx, file_op_res_rx) = mpsc::channel();
+        crate::workers::file_operation_worker::start_file_operation_worker(file_op_rx, file_op_res_tx);
 
         let disks = windows_infra::get_all_drives();
 
@@ -380,6 +381,7 @@ impl ImageViewerApp {
 
             // FILE OPERATION WORKER
             file_op_sender: file_op_tx,
+            file_op_res_receiver: file_op_res_rx,
         };
 
         // Inicia monitoramento inicial

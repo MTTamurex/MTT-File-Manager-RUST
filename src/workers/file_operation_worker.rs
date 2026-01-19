@@ -9,6 +9,14 @@ use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTME
 use crate::infrastructure::windows::shell_operations;
 use crate::infrastructure::windows::recycle_bin;
 
+/// Results sent back from the worker to the UI.
+pub enum FileOperationResult {
+    /// Generic notification that a file operation finished
+    Finished,
+    /// Specifically for Recycle Bin operations to trigger targeted refresh
+    RecycleBinChanged,
+}
+
 /// Transparent wrapper for HWND to make it Send.
 /// SAFETY: HWNDs are globally valid in Windows and can be used from any thread.
 #[derive(Clone, Copy)]
@@ -63,7 +71,10 @@ impl FileOperationRequest {
 }
 
 /// Starts the file operation worker thread.
-pub fn start_file_operation_worker(receiver: Receiver<FileOperationRequest>) {
+pub fn start_file_operation_worker(
+    receiver: Receiver<FileOperationRequest>,
+    result_sender: std::sync::mpsc::Sender<FileOperationResult>,
+) {
     std::thread::spawn(move || {
         // Initialize COM as Single-Threaded Apartment (STA)
         // This is critical for shell progress dialogs and proper COM behavior.
@@ -75,6 +86,7 @@ pub fn start_file_operation_worker(receiver: Receiver<FileOperationRequest>) {
             match request {
                 FileOperationRequest::Delete { path, hwnd } => {
                     let _ = shell_operations::delete_item_with_shell(&path, hwnd.0);
+                    let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
                 }
                 FileOperationRequest::Rename { path, new_name, hwnd } => {
                     let _ = shell_operations::rename_item_with_shell(&path, &new_name, hwnd.0);
@@ -87,14 +99,20 @@ pub fn start_file_operation_worker(receiver: Receiver<FileOperationRequest>) {
                 }
                 FileOperationRequest::RestoreFromRecycleBin { physical_path, original_path } => {
                     let _ = recycle_bin::restore_from_recycle_bin(&physical_path, &original_path);
+                    let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
                 }
                 FileOperationRequest::DeletePermanently { physical_path } => {
                     let _ = recycle_bin::delete_permanently(&physical_path);
+                    let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
                 }
                 FileOperationRequest::EmptyRecycleBin => {
                     let _ = recycle_bin::empty_recycle_bin();
+                    let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
                 }
             }
+            
+            // Notify general completion for other operations
+            let _ = result_sender.send(FileOperationResult::Finished);
         }
 
         unsafe {

@@ -188,4 +188,5 @@ pub struct ImageViewerApp {
 
     // FILE OPERATION WORKER
     pub file_op_sender: Sender<crate::workers::file_operation_worker::FileOperationRequest>,
+    pub file_op_res_receiver: Receiver<crate::workers::file_operation_worker::FileOperationResult>,
 }
