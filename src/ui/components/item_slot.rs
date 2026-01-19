@@ -46,6 +46,8 @@ pub struct ItemSlotContext<'a> {
     pub folder_preview_cache: &'a mut lru::LruCache<std::path::PathBuf, egui::TextureHandle>,
     /// Conjunto de pastas carregando preview nativo
     pub folder_preview_loading: &'a mut std::collections::HashSet<std::path::PathBuf>,
+    /// Caminhos que falharam no thumbnail
+    pub failed_thumbnails: &'a std::collections::HashSet<std::path::PathBuf>,
 }
 
 /// Renderiza um item slot para grid view
@@ -395,8 +397,9 @@ fn render_file_slot<O: ItemSlotOperations>(
     if is_media_file && !ctx.is_recycle_bin_view {
         let has_texture = ctx.texture_cache.contains(&path_clone);
         let is_loading = ctx.loading_set.contains(&path_clone);
+        let is_failed = ctx.failed_thumbnails.contains(&path_clone);
 
-        if !has_texture && !is_loading && ctx.loading_set.len() < 50 {
+        if !has_texture && !is_loading && !is_failed && ctx.loading_set.len() < 50 {
             // MAX_CONCURRENT_LOADS (increased for performance)
             ctx.loading_set.insert(path_clone.clone());
             ops.request_thumbnail_load(path_clone.clone(), ctx.thumbnail_size as u32);

@@ -138,6 +138,7 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, fr
                                 &mut app.svg_icon_manager,
                                 Some(frame),
                                 is_owner,
+                                app.cache_manager.is_failed(&file.path),
                             );
 
                             if let Some(act) = action {

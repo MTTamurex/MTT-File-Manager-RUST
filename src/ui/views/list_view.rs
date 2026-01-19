@@ -28,6 +28,8 @@ pub struct ListViewContext<'a> {
     pub drive_icon_cache: &'a mut lru::LruCache<String, egui::TextureHandle>,
     pub item_icon_loader: &'a mut crate::ui::icon_loader::IconLoader,
     pub deletion_date_cache: Option<&'a mut lru::LruCache<String, String>>, // Cache para datas de exclusão (Path string -> Data)
+    /// Caminhos que falharam no thumbnail
+    pub failed_thumbnails: &'a std::collections::HashSet<PathBuf>,
 }
 
 /// Action returned by list view
@@ -234,6 +236,7 @@ pub fn render_list_view(
                     if is_media_file
                         && !ctx.texture_cache.contains(&item.path)
                         && !ctx.loading_set.contains(&item.path)
+                        && !ctx.failed_thumbnails.contains(&item.path)
                         && ctx.loading_set.len() < 50
                     {
                         ctx.loading_set.insert(item.path.clone());
@@ -629,6 +632,7 @@ pub fn render_list_view(
                     if is_media_file
                         && !ctx.texture_cache.contains(&item.path)
                         && !ctx.loading_set.contains(&item.path)
+                        && !ctx.failed_thumbnails.contains(&item.path)
                         && ctx.loading_set.len() < 50
                     {
                         ctx.loading_set.insert(item.path.clone());

@@ -31,6 +31,7 @@ pub fn render_preview_panel(
     svg_manager: &mut SvgIconManager,
     frame: Option<&eframe::Frame>,
     is_owner: bool,
+    is_failed: bool,
 ) -> Option<PreviewPanelAction> {
     // Metadados são processados de forma assíncrona; se chegarem, o metadata será Some(...)
     let mut action = None;
@@ -122,10 +123,11 @@ pub fn render_preview_panel(
                     }
                 }
             } else {
-                if let Some(icon) = item_icon_loader.get_or_load_icon(ui.ctx(), &file.path) {
+                use crate::domain::file_entry::IconSize;
+                if let Some(icon) = item_icon_loader.get_or_load_icon_sized(ui.ctx(), &file.path, IconSize::Jumbo) {
                     ui.add(
                         egui::Image::new(&icon)
-                            .max_size(egui::vec2(icon_size * 0.6, icon_size * 0.6)),
+                            .max_size(egui::vec2(icon_size * 0.8, icon_size * 0.8)),
                     );
                 } else {
                     ui.label(egui::RichText::new("??").size(icon_size * 0.6));
@@ -137,8 +139,14 @@ pub fn render_preview_panel(
     ui.vertical_centered(|ui| {
         ui.add_space(20.0);
 
-        // Preview de imagem/video (se houver thumbnail)
-        let texture = if let Some(tex) = selected_thumbnail {
+        // Only show thumbnails for images, videos or audio files.
+        // Other files (.rar, .7z, .pdf, etc.) will use high-quality Jumbo icons in the fallback.
+        let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let is_media = crate::infrastructure::windows::is_media_extension(extension);
+
+        let texture = if is_failed || !is_media {
+            None
+        } else if let Some(tex) = selected_thumbnail {
             Some(tex.clone())
         } else {
             texture_cache_peek
@@ -174,7 +182,7 @@ pub fn render_preview_panel(
 
                     // Control Builder Closure (Shared between Attached and Detached views)
                     // NOW TAKES preview AND svg_manager AS ARGUMENT TO AVOID BORROW ISSUES
-                    let mut draw_controls = |ui: &mut egui::Ui, preview: &mut MediaPreview, full_width: f32, svg_manager: &mut SvgIconManager| {
+                    let draw_controls = |ui: &mut egui::Ui, preview: &mut MediaPreview, full_width: f32, svg_manager: &mut SvgIconManager| {
                          ui.set_width(full_width);
                         
                         // Seek Bar
@@ -732,17 +740,22 @@ pub fn render_preview_panel(
 
                 // 2. Refresh Button (Right aligned)
                 if has_button {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                        ui.add_space(5.0); // Spacing between text and button
-                        let icon_color = if ui.visuals().dark_mode { [220, 220, 220, 255] } else { [60, 60, 60, 255] };
-                        if let Some(tex) = svg_manager.get_icon(ui.ctx(), "refresh", 32, icon_color) {
-                            if ui.add(egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(16.0, 16.0))).frame(false))
-                                .on_hover_text("Recarregar Thumbnail")
-                                .clicked() {
-                                action = Some(PreviewPanelAction::RefreshThumbnail(file.path.clone()));
+                    let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                    let is_media = crate::infrastructure::windows::is_media_extension(extension);
+                    
+                    if is_media {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                            ui.add_space(5.0); // Spacing between text and button
+                            let icon_color = if ui.visuals().dark_mode { [220, 220, 220, 255] } else { [60, 60, 60, 255] };
+                            if let Some(tex) = svg_manager.get_icon(ui.ctx(), "refresh", 32, icon_color) {
+                                if ui.add(egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(16.0, 16.0))).frame(false))
+                                    .on_hover_text("Recarregar Thumbnail")
+                                    .clicked() {
+                                    action = Some(PreviewPanelAction::RefreshThumbnail(file.path.clone()));
+                                }
                             }
-                        }
-                    });
+                        });
+                    }
                 }
             });
             ui.add_space(10.0);

@@ -57,6 +57,8 @@ pub struct GridViewContext<'a> {
     pub folder_preview_loading: &'a mut std::collections::HashSet<PathBuf>,
     /// PERFORMANCE: Shared buffer for pending operations (reused across items)
     pub pending_ops: &'a mut PendingOperations,
+    /// Caminhos que falharam no thumbnail
+    pub failed_thumbnails: &'a std::collections::HashSet<PathBuf>,
 }
 
 /// Operations that can be performed from grid view
@@ -522,6 +524,7 @@ fn render_item_slot_for_grid(
             loading_set: ctx.loading_set,
             folder_preview_cache: ctx.folder_preview_cache,
             folder_preview_loading: ctx.folder_preview_loading,
+            failed_thumbnails: ctx.failed_thumbnails,
         };
 
         // PERFORMANCE: SimpleOps now writes directly to shared buffers
