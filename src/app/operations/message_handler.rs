@@ -27,6 +27,21 @@ impl ImageViewerApp {
             }
         }
 
+        while let Ok(res) = self.file_op_res_receiver.try_recv() {
+            use crate::workers::file_operation_worker::FileOperationResult;
+            match res {
+                FileOperationResult::RecycleBinChanged => {
+                    if self.is_recycle_bin_view {
+                        eprintln!("[RECYCLE] Operation finished, refreshing view.");
+                        self.setup_recycle_bin_view();
+                    }
+                }
+                FileOperationResult::Finished => {
+                    // General operation finished, maybe refresh some cache if needed
+                }
+            }
+        }
+
         // 2. CHECK DE AUTO-REFRESH (WATCHER)
         fn normalize_for_match(p: &Path) -> String {
             let s = p.to_string_lossy().to_string().to_lowercase();
