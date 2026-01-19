@@ -162,10 +162,13 @@ fn render_tab_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context, frame: &m
                     app.update_video_visibility();
                 }
                 TabBarAction::CloseTab(idx) => {
+                    eprintln!("[DEBUG] Closing Tab index: {}. Active was: {}", idx, app.tab_manager.active_tab);
+                    
                     // CLEANUP LOGIC: If the tab being closed is the owner of the media player, destroy the player.
                     if let Some(tab) = app.tab_manager.tabs.get(idx) {
                         let tab_id = tab.id;
                         if app.media_preview_owner_tab_id == Some(tab_id) {
+                            eprintln!("[DEBUG] Closing tab owns media player. Destroying player.");
                             if let Some(crate::ui::components::media_preview::MediaPreview::Video(ref mut wv)) = app.media_preview {
                                 wv.pause();
                             }
@@ -174,11 +177,25 @@ fn render_tab_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context, frame: &m
                         }
                     }
 
+                    // Check if we are closing the currently active tab
+                    let closing_active_tab = idx == app.tab_manager.active_tab;
+
                     if app.tab_manager.close_tab(idx) {
+                        eprintln!("[DEBUG] Last tab closed. Closing app.");
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     } else {
-                        app.sync_from_tab();
-                        // Control player visibility based on (new) owner/active tab
+                        if closing_active_tab {
+                            // We closed the active tab, so we MUST switch context to the new active tab
+                            eprintln!("[DEBUG] Active tab closed. Switching to new active tab index: {}", app.tab_manager.active_tab);
+                            app.sync_from_tab();
+                        } else {
+                            // We closed a background tab. The user is still looking at the same logical tab.
+                            // We should NOT reload state (sync_from_tab) because the Saved State might be stale (e.g., pending items).
+                            // Instead, we should SAVE the current fresh Live State to the new slot of the active tab.
+                            eprintln!("[DEBUG] Background tab closed. current active index adjusted to: {}. Saving live state to it.", app.tab_manager.active_tab);
+                            app.sync_to_tab();
+                        }
+
                         app.update_video_visibility();
                     }
                 }
