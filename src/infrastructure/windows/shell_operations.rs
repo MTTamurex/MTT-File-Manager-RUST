@@ -4,7 +4,7 @@
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use windows::{
-    core::*, Win32::Foundation::*, Win32::System::Com::*, Win32::UI::Input::KeyboardAndMouse::*,
+    core::*, Win32::Foundation::*, Win32::System::Com::*,
     Win32::UI::Shell::Common::*, Win32::UI::Shell::*, Win32::UI::WindowsAndMessaging::*,
 };
 
@@ -16,10 +16,10 @@ pub fn open_with_shell(path: &Path) {
 
         let _ = ShellExecuteW(
             None,
-            PCWSTR(std::ptr::null()),
+            PCWSTR::default(),
             PCWSTR(path_wide.as_ptr()),
-            PCWSTR(std::ptr::null()),
-            PCWSTR(std::ptr::null()),
+            PCWSTR::default(),
+            PCWSTR::default(),
             SW_SHOW,
         );
     }
@@ -113,7 +113,7 @@ pub fn show_shell_context_menu(
         }
 
         // SAFETY: hmenu is a valid menu handle; command ids start at 1.
-        context_menu.QueryContextMenu(hmenu, 0, 1, 0x7FFF, CMF_NORMAL)?;
+        context_menu.QueryContextMenu(hmenu, 0, 1, 0x7FFF, windows::Win32::UI::Shell::CMF_NORMAL).ok()?;
 
         let command_id = TrackPopupMenuEx(
             hmenu,
@@ -130,7 +130,7 @@ pub fn show_shell_context_menu(
         let _ = GetCursorPos(&mut cursor);
 
         // Check if any mouse button is pressed
-        let right_down = GetAsyncKeyState(0x02) < 0; // VK_RBUTTON = 0x02
+        let right_down = windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x02) < 0; // VK_RBUTTON = 0x02
 
         let was_cancelled = command_id == 0;
 
@@ -181,7 +181,7 @@ pub fn delete_item_with_shell(path: &Path, hwnd: HWND) -> bool {
         hwnd,
         wFunc: FO_DELETE,
         pFrom: PCWSTR(from_vec.as_ptr()),
-        pTo: PCWSTR(std::ptr::null()),
+        pTo: PCWSTR::default(),
         fFlags: (FOF_ALLOWUNDO | FOF_WANTNUKEWARNING).0 as u16,
         ..Default::default()
     };

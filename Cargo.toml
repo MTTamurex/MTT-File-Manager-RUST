@@ -33,7 +33,7 @@ serde_json = "1.0"
 
 
 [dependencies.windows]
-version = "0.58"
+version = "0.61.0"
 features = [
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",
@@ -55,6 +55,9 @@ features = [
     "Win32_Devices_DeviceAndDriverInstallation",
     "Win32_System_LibraryLoader",
     "Win32_System_Ioctl",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_Variant",
+    "Win32_System_Search_Common",
 ]
 
 [build-dependencies]

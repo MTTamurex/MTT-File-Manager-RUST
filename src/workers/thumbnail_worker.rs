@@ -854,7 +854,7 @@ fn extract_windows_thumbnail_shell(
         let hbitmap: HBITMAP = image_factory.GetImage(size, flags)?;
 
         let (rgba_data, width, height) = hbitmap_to_rgba(hbitmap)?;
-        let _ = DeleteObject(hbitmap);
+        let _ = DeleteObject(hbitmap.into());
 
         Ok((rgba_data, width, height))
     }
@@ -869,7 +869,7 @@ fn hbitmap_to_rgba(
         // `buffer` is pre-allocated with correct size. `hbitmap` is a valid handle.
         let mut bm = BITMAP::default();
         GetObjectW(
-            hbitmap,
+            hbitmap.into(),
             std::mem::size_of::<BITMAP>() as i32,
             Some(&mut bm as *mut _ as *mut _),
         );
@@ -894,7 +894,7 @@ fn hbitmap_to_rgba(
         let hdc = GetDC(None);
         GetDIBits(
             hdc,
-            hbitmap,
+            hbitmap.into(),
             0,
             height as u32,
             Some(buffer.as_mut_ptr() as *mut _),

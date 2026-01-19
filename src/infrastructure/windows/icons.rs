@@ -19,7 +19,7 @@ pub fn extract_computer_icon(
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     unsafe {
         // 1. Get PIDL for "My Computer" (CSIDL_DRIVES)
-        let pidl = match SHGetSpecialFolderLocation(HWND(std::ptr::null_mut()), CSIDL_DRIVES as i32)
+        let pidl = match SHGetSpecialFolderLocation(Some(HWND::default()), CSIDL_DRIVES as i32)
         {
             Ok(p) => p,
             Err(_) => {
@@ -84,7 +84,7 @@ pub fn extract_thumbnail(
 
         let (rgba_data, width, height) = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
 
-        let _ = DeleteObject(hbitmap);
+        let _ = DeleteObject(hbitmap.into());
 
         Ok((rgba_data, width, height))
     }
@@ -119,14 +119,14 @@ pub fn get_folder_preview(
             Ok(hbitmap) => {
                 // SAFETY: hbitmap is valid, DeleteObject called after conversion
                 let result = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
-                let _ = DeleteObject(hbitmap);
+                let _ = DeleteObject(hbitmap.into());
                 Ok(result)
             }
             Err(_) => {
                 // Fallback: Get standard folder icon without preview content
                 let hbitmap = image_factory.GetImage(size, SIIGBF_ICONONLY)?;
                 let result = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
-                let _ = DeleteObject(hbitmap);
+                let _ = DeleteObject(hbitmap.into());
                 Ok(result)
             }
         }
@@ -271,7 +271,7 @@ pub fn extract_folder_icon(
                     let size_factory = SIZE { cx: 256, cy: 256 };
                     if let Ok(hbitmap) = image_factory.GetImage(size_factory, SIIGBF_ICONONLY) {
                         let res = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
-                        let _ = DeleteObject(hbitmap);
+                        let _ = DeleteObject(hbitmap.into());
                         return Ok(res);
                     }
                 }
@@ -335,7 +335,7 @@ pub fn extract_file_icon_by_path(
                     // SIIGBF_ICONONLY to ensure we get the icon and not a thumbnail if it were a file
                     if let Ok(hbitmap) = image_factory.GetImage(size_factory, SIIGBF_ICONONLY) {
                         let res = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
-                        let _ = DeleteObject(hbitmap);
+                        let _ = DeleteObject(hbitmap.into());
                         return Ok(res);
                     }
                 }
@@ -399,7 +399,7 @@ pub fn extract_drive_icon(
             let hbitmap: HBITMAP = image_factory.GetImage(size_factory, SIIGBF_ICONONLY)?;
 
             let (rgba_data, width, height) = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
-            let _ = DeleteObject(hbitmap);
+            let _ = DeleteObject(hbitmap.into());
             return Ok((rgba_data, width, height));
         }
 

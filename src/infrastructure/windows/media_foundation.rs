@@ -149,14 +149,14 @@ fn read_duration(reader: &IMFSourceReader) -> Option<u64> {
 
         // PROPVARIANT for duration contains VT_UI8 (u64)
         // Access the raw value directly from the anonymous union
-        let raw = propvar.as_raw();
-        let vt = raw.Anonymous.Anonymous.vt;
+        let raw = &*(&propvar.Anonymous.Anonymous as *const _ as *const windows::Win32::System::Com::StructuredStorage::PROPVARIANT_0_0);
+        let vt = raw.vt;
 
         // VT_UI8 = 21, VT_I8 = 20
-        match vt {
-            21 => Some(raw.Anonymous.Anonymous.Anonymous.uhVal as u64), // VT_UI8
+        match vt.0 {
+            21 => Some(raw.Anonymous.uhVal), // VT_UI8
             20 => {
-                let val = raw.Anonymous.Anonymous.Anonymous.hVal;
+                let val = raw.Anonymous.hVal;
                 if val >= 0 {
                     Some(val as u64)
                 } else {

@@ -67,16 +67,16 @@ fn run_device_listener(sender: Sender<()>, ctx: egui::Context) -> Result<()> {
             0,
             0,
             0,
-            HWND_MESSAGE,
+            Some(HWND_MESSAGE),
             None,
-            hinstance,
+            Some(hinstance),
             None,
         )?;
 
         register_volume_notifications(hwnd)?;
 
         let mut msg = MSG::default();
-        while GetMessageW(&mut msg, HWND::default(), 0, 0).into() {
+        while GetMessageW(&mut msg, Some(HWND::default()), 0, 0).into() {
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }

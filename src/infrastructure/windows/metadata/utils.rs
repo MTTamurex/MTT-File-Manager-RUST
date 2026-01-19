@@ -58,20 +58,20 @@ pub unsafe fn open_property_store(path: &Path) -> Result<IPropertyStore, windows
 // Helper to read property value as u32
 pub unsafe fn read_u32(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<u32> {
     let pv = store
-        .GetValue(&windows::Win32::UI::Shell::PropertiesSystem::PROPERTYKEY {
+        .GetValue(&PROPERTYKEY {
             fmtid: key.fmtid,
             pid: key.pid,
-        })
+        } as *const _ as *const _)
         .ok()?;
 
-    let raw = pv.as_raw();
-    let vt = raw.Anonymous.Anonymous.vt;
+    let raw = unsafe { &*(&pv.Anonymous.Anonymous as *const _ as *const windows::Win32::System::Com::StructuredStorage::PROPVARIANT_0_0) };
+    let vt = raw.vt;
 
-    match vt {
-        VT_UI4 => Some(raw.Anonymous.Anonymous.Anonymous.ulVal),
-        VT_I4 => Some(raw.Anonymous.Anonymous.Anonymous.lVal as u32),
-        VT_UI2 => Some(raw.Anonymous.Anonymous.Anonymous.uiVal as u32),
-        VT_I2 => Some(raw.Anonymous.Anonymous.Anonymous.iVal as u32),
+    match vt.0 {
+        VT_UI4 => Some(unsafe { raw.Anonymous.ulVal }),
+        VT_I4 => Some(unsafe { raw.Anonymous.lVal as u32 }),
+        VT_UI2 => Some(unsafe { raw.Anonymous.uiVal as u32 }),
+        VT_I2 => Some(unsafe { raw.Anonymous.iVal as u32 }),
         VT_LPWSTR | VT_BSTR => {
             // Fallback: Try parsing string as number
             let s = read_string(store, key)?;
@@ -85,20 +85,20 @@ pub unsafe fn read_u32(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<u32>
 // Helper to read property value as u64
 pub unsafe fn read_u64(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<u64> {
     let pv = store
-        .GetValue(&windows::Win32::UI::Shell::PropertiesSystem::PROPERTYKEY {
+        .GetValue(&PROPERTYKEY {
             fmtid: key.fmtid,
             pid: key.pid,
-        })
+        } as *const _ as *const _)
         .ok()?;
 
-    let raw = pv.as_raw();
-    let vt = raw.Anonymous.Anonymous.vt;
+    let raw = unsafe { &*(&pv.Anonymous.Anonymous as *const _ as *const windows::Win32::System::Com::StructuredStorage::PROPVARIANT_0_0) };
+    let vt = raw.vt;
 
-    match vt {
-        VT_UI8 => Some(raw.Anonymous.Anonymous.Anonymous.uhVal as u64),
-        VT_I8 => Some(raw.Anonymous.Anonymous.Anonymous.hVal as u64),
-        VT_UI4 => Some(raw.Anonymous.Anonymous.Anonymous.ulVal as u64),
-        VT_I4 => Some(raw.Anonymous.Anonymous.Anonymous.lVal as u64),
+    match vt.0 {
+        VT_UI8 => Some(unsafe { raw.Anonymous.uhVal }),
+        VT_I8 => Some(unsafe { raw.Anonymous.hVal as u64 }),
+        VT_UI4 => Some(unsafe { raw.Anonymous.ulVal as u64 }),
+        VT_I4 => Some(unsafe { raw.Anonymous.lVal as u64 }),
         VT_LPWSTR | VT_BSTR => {
             let s = read_string(store, key)?;
             s.chars().filter(|c| c.is_ascii_digit()).collect::<String>().parse::<u64>().ok()
@@ -110,70 +110,68 @@ pub unsafe fn read_u64(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<u64>
 // Helper to read property value as f64 (double)
 pub unsafe fn read_f64(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<f64> {
     let pv = store
-        .GetValue(&windows::Win32::UI::Shell::PropertiesSystem::PROPERTYKEY {
+        .GetValue(&PROPERTYKEY {
             fmtid: key.fmtid,
             pid: key.pid,
-        })
+        } as *const _ as *const _)
         .ok()?;
 
-    let raw = pv.as_raw();
-    let vt = raw.Anonymous.Anonymous.vt;
+    let raw = unsafe { &*(&pv.Anonymous.Anonymous as *const _ as *const windows::Win32::System::Com::StructuredStorage::PROPVARIANT_0_0) };
+    let vt = raw.vt;
 
-    match vt {
-        VT_R8 => Some(raw.Anonymous.Anonymous.Anonymous.dblVal),
-        VT_UI4 => Some(raw.Anonymous.Anonymous.Anonymous.ulVal as f64),
-        VT_I4 => Some(raw.Anonymous.Anonymous.Anonymous.lVal as f64),
+    match vt.0 {
+        VT_R8 => Some(unsafe { raw.Anonymous.dblVal }),
+        VT_UI4 => Some(unsafe { raw.Anonymous.ulVal as f64 }),
+        VT_I4 => Some(unsafe { raw.Anonymous.lVal as f64 }),
         _ => {
-            eprintln!("    [DEBUG] Unexpected VT type for f64: {}", vt);
+            eprintln!("    [DEBUG] Unexpected VT type for f64: {:?}", vt);
             None
         }
     }
 }
 
 pub unsafe fn read_string(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<String> {
-    let pv = match store.GetValue(&windows::Win32::UI::Shell::PropertiesSystem::PROPERTYKEY {
+    let pv = match store.GetValue(&PROPERTYKEY {
         fmtid: key.fmtid,
         pid: key.pid,
-    }) {
+    } as *const _ as *const _) {
         Ok(v) => v,
         Err(_) => return None,
     };
 
-    let raw = pv.as_raw();
-    let vt = raw.Anonymous.Anonymous.vt;
+    let raw = unsafe { &*(&pv.Anonymous.Anonymous as *const _ as *const windows::Win32::System::Com::StructuredStorage::PROPVARIANT_0_0) };
+    let vt = raw.vt;
 
-    match vt {
+    match vt.0 {
         VT_EMPTY => None,
         VT_LPWSTR => {
-            let ptr = raw.Anonymous.Anonymous.Anonymous.pwszVal;
+            let ptr = unsafe { raw.Anonymous.pwszVal };
             if !ptr.is_null() {
-                let len = (0..).take_while(|&i| *ptr.add(i) != 0).count();
-                let slice = std::slice::from_raw_parts(ptr, len);
+                let len = (0..).take_while(|&i| unsafe { *ptr.0.add(i) != 0 }).count();
+                let slice = unsafe { std::slice::from_raw_parts(ptr.0, len) };
                 Some(String::from_utf16_lossy(slice))
             } else {
                 None
             }
         }
         VT_BSTR => {
-            let ptr = raw.Anonymous.Anonymous.Anonymous.bstrVal;
-            if !ptr.is_null() {
-                let len = (0..).take_while(|&i| *ptr.add(i) != 0).count();
-                let slice = std::slice::from_raw_parts(ptr, len);
-                Some(String::from_utf16_lossy(slice))
+            let ptr = unsafe { &raw.Anonymous.bstrVal };
+            if !ptr.is_empty() {
+                Some(ptr.to_string())
             } else {
                 None
             }
         }
         VT_VECTOR_LPWSTR => {
-            let c_elems = raw.Anonymous.Anonymous.Anonymous.calpwstr.cElems;
-            let p_elems = raw.Anonymous.Anonymous.Anonymous.calpwstr.pElems;
+            let c_elems = unsafe { raw.Anonymous.calpwstr.cElems };
+            let p_elems = unsafe { raw.Anonymous.calpwstr.pElems };
             if c_elems > 0 && !p_elems.is_null() {
                 let mut result = String::new();
                 for i in 0..c_elems {
-                    let ptr = *p_elems.add(i as usize);
+                    let ptr = unsafe { *p_elems.add(i as usize) };
                     if !ptr.is_null() {
-                        let len = (0..).take_while(|&j| *ptr.add(j) != 0).count();
-                        let slice = std::slice::from_raw_parts(ptr, len);
+                        let len = (0..).take_while(|&j| unsafe { *ptr.0.add(j) != 0 }).count();
+                        let slice = unsafe { std::slice::from_raw_parts(ptr.0, len) };
                         let s = String::from_utf16_lossy(slice);
                         if !result.is_empty() {
                             result.push_str(", ");
@@ -205,18 +203,18 @@ pub unsafe fn read_string(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<S
 // Helper to read FourCC (can be u32 or string)
 pub unsafe fn read_fourcc(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<String> {
     let pv = store
-        .GetValue(&windows::Win32::UI::Shell::PropertiesSystem::PROPERTYKEY {
+        .GetValue(&PROPERTYKEY {
             fmtid: key.fmtid,
             pid: key.pid,
-        })
+        } as *const _ as *const _)
         .ok()?;
 
-    let raw = pv.as_raw();
-    let vt = raw.Anonymous.Anonymous.vt;
+    let raw = unsafe { &*(&pv.Anonymous.Anonymous as *const _ as *const windows::Win32::System::Com::StructuredStorage::PROPVARIANT_0_0) };
+    let vt = raw.vt;
 
-    match vt {
+    match vt.0 {
         VT_UI4 => {
-            let fourcc = raw.Anonymous.Anonymous.Anonymous.ulVal;
+            let fourcc = unsafe { raw.Anonymous.ulVal };
             let bytes = [
                 (fourcc & 0xFF) as u8,
                 ((fourcc >> 8) & 0xFF) as u8,
@@ -231,10 +229,10 @@ pub unsafe fn read_fourcc(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<S
             }
         }
         VT_LPWSTR => {
-            let ptr = raw.Anonymous.Anonymous.Anonymous.pwszVal;
+            let ptr = unsafe { raw.Anonymous.pwszVal };
             if !ptr.is_null() {
-                let len = (0..).take_while(|&i| *ptr.add(i) != 0).count();
-                let slice = std::slice::from_raw_parts(ptr, len);
+                let len = (0..).take_while(|&i| unsafe { *ptr.0.add(i) != 0 }).count();
+                let slice = unsafe { std::slice::from_raw_parts(ptr.0, len) };
                 Some(String::from_utf16_lossy(slice))
             } else {
                 None
