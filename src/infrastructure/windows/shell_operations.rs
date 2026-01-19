@@ -276,3 +276,37 @@ pub fn move_item_with_shell(path: &Path, dest_folder: &Path, hwnd: HWND) -> bool
     let result = unsafe { SHFileOperationW(&mut op) };
     result == 0 && op.fAnyOperationsAborted.0 == 0
 }
+
+/// Robust Copy using IFileOperation (supports virtual paths like ZIP items)
+pub fn copy_item_with_file_op(path: &Path, dest_folder: &Path, hwnd: HWND) -> bool {
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        
+        // Use IFileOperation for modern Shell features (like ZIP extraction)
+        let file_op: IFileOperation = match CoCreateInstance(&FileOperation, None, CLSCTX_ALL) {
+            Ok(op) => op,
+            Err(_) => return copy_item_with_shell(path, dest_folder, hwnd), 
+        };
+        
+        let _ = file_op.SetOwnerWindow(hwnd);
+        let _ = file_op.SetOperationFlags(FOF_ALLOWUNDO | FOF_WANTNUKEWARNING);
+        
+        let src_wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let src_item: IShellItem = match SHCreateItemFromParsingName(PCWSTR(src_wide.as_ptr()), None) {
+            Ok(i) => i,
+            Err(_) => return copy_item_with_shell(path, dest_folder, hwnd),
+        };
+        
+        let dest_wide: Vec<u16> = dest_folder.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let dest_item: IShellItem = match SHCreateItemFromParsingName(PCWSTR(dest_wide.as_ptr()), None) {
+            Ok(i) => i,
+            Err(_) => return copy_item_with_shell(path, dest_folder, hwnd),
+        };
+        
+        if file_op.CopyItem(&src_item, &dest_item, None, None).is_err() {
+            return copy_item_with_shell(path, dest_folder, hwnd);
+        }
+        
+        file_op.PerformOperations().is_ok()
+    }
+}
