@@ -22,6 +22,7 @@ pub enum TabBarAction {
     CloseApp,
     ToggleMaximize,
     Minimize,
+    ToggleMute(usize), // Tab index
 }
 
 /// Render the tab bar with custom title bar (Windows 11 style)
@@ -32,6 +33,9 @@ pub fn render_tab_bar(
     _frame: &mut eframe::Frame,
     computer_icon: Option<&egui::TextureHandle>,
     icon_loader: &mut IconLoader,
+    media_owner_id: Option<usize>,
+    is_playing: bool,
+    is_muted: bool,
 ) -> TabBarAction {
     let ctx = ui.ctx().clone();
     let mut action = TabBarAction::None;
@@ -173,8 +177,14 @@ pub fn render_tab_bar(
 
             // Tab title (truncated dynamically based on available width)
             let title_x = icon_pos.x + icon_size + 6.0;
+            
+            // Audio Indicator (Speaker) - only for media owner tab if playing
+            let speaker_btn_size = 14.0;
+            let has_speaker = media_owner_id == Some(tab.id) && is_playing;
+            let speaker_width = if has_speaker { speaker_btn_size + 8.0 } else { 0.0 };
+
             let title_max_width =
-                ideal_tab_width - icon_size - close_btn_size - tab_padding * 2.0 - 12.0;
+                ideal_tab_width - icon_size - close_btn_size - speaker_width - tab_padding * 2.0 - 12.0;
 
             // Use egui's galley to measure text and truncate properly
             let font_id = egui::FontId::proportional(13.0);
@@ -223,6 +233,45 @@ pub fn render_tab_bar(
                 font_id,
                 title_color,
             );
+
+            // Audio Indicator (Mute button)
+            if has_speaker {
+                let speaker_x = rect.max.x - close_btn_size - tab_padding - speaker_btn_size - 4.0;
+                let speaker_y = content_rect.center().y - speaker_btn_size / 2.0;
+                let speaker_rect = egui::Rect::from_min_size(
+                    egui::pos2(speaker_x, speaker_y),
+                    Vec2::splat(speaker_btn_size),
+                );
+
+                let speaker_response = ui.interact(
+                    speaker_rect,
+                    egui::Id::new(format!("speaker_{}", idx)),
+                    egui::Sense::click(),
+                );
+
+                if speaker_response.clicked() {
+                    action = TabBarAction::ToggleMute(idx);
+                }
+
+                // Render icon
+                let icon_name = if is_muted { "vol_mute" } else { "vol_high" };
+                let icon_color = if speaker_response.hovered() {
+                    if is_dark { [255, 255, 255, 255] } else { [0, 0, 0, 255] }
+                } else {
+                    if is_dark { [200, 200, 200, 255] } else { [80, 80, 80, 255] }
+                };
+
+                if let Some(tex) = svg_icons.get_icon(ui.ctx(), icon_name, 32, icon_color) {
+                    ui.painter().image(
+                        tex.id(),
+                        speaker_rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                }
+                
+                speaker_response.on_hover_text(if is_muted { "Ativar Áudio" } else { "Mutar Áudio" });
+            }
 
             // Close button
             let close_btn_x = rect.max.x - close_btn_size - tab_padding;

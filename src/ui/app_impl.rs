@@ -118,6 +118,15 @@ fn render_tab_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context, frame: &m
         })
         .show(ctx, |ui| {
             use crate::ui::tab_bar::{render_tab_bar, TabBarAction};
+            use crate::ui::components::media_preview::MediaPreview;
+
+            let (playing, muted) = if let Some(MediaPreview::Video(player)) = &app.media_preview {
+                let state = player.get_state();
+                (state.is_playing, state.is_muted)
+            } else {
+                (false, false)
+            };
+
             let action = render_tab_bar(
                 ui,
                 &app.tab_manager,
@@ -125,9 +134,17 @@ fn render_tab_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context, frame: &m
                 frame,
                 app.cache_manager.computer_icon.as_ref(),
                 &mut app.item_icon_loader,
+                app.media_preview_owner_tab_id,
+                playing,
+                muted,
             );
 
             match action {
+                TabBarAction::ToggleMute(_idx) => {
+                    if let Some(MediaPreview::Video(player)) = &mut app.media_preview {
+                        player.toggle_mute();
+                    }
+                }
                 TabBarAction::SwitchTab(idx) => {
                     app.sync_to_tab();
                     app.tab_manager.switch_to(idx);
