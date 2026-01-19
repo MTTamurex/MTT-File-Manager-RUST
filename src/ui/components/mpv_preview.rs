@@ -288,7 +288,7 @@ impl MpvPreview {
                             0,
                             CW_USEDEFAULT,
                             CW_USEDEFAULT,
-                            parent,
+                            Some(parent),
                             None,
                             None,
                             None,

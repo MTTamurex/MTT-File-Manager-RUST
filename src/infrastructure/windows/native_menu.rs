@@ -5,13 +5,12 @@ use crate::infrastructure::windows::bitmap_conversion::hbitmap_to_rgba;
 use std::ffi::CStr;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
-use windows::{
-    core::*,
-    Win32::Foundation::*,
-    Win32::System::Com::*,
-    Win32::UI::Shell::{Common::ITEMIDLIST, *},
-    Win32::UI::WindowsAndMessaging::*,
-};
+use windows::core::*;
+use windows::Win32::Foundation::*;
+use windows::Win32::System::Com::*;
+use windows::Win32::UI::Shell::*;
+use windows::Win32::UI::Shell::Common::*;
+use windows::Win32::UI::WindowsAndMessaging::*;
 
 /// Represents a single item in the shell context menu
 pub struct ShellMenuItem {
@@ -107,9 +106,9 @@ pub fn extract_shell_menu(hwnd: HWND, path: &Path) -> Result<ShellMenuContext> {
 
         // Create popup menu to extract items
         let hmenu = CreatePopupMenu()?;
-        context_menu.QueryContextMenu(hmenu, 0, 1, 0x7FFF, CMF_NORMAL)?;
+        context_menu.QueryContextMenu(hmenu, 0, 1, 0x7FFF, CMF_NORMAL).ok()?;
 
-        let count = GetMenuItemCount(hmenu);
+        let count = GetMenuItemCount(Some(hmenu));
         eprintln!("[ShellMenu] Total menu items: {}", count);
 
         // Extract items
@@ -190,7 +189,7 @@ unsafe fn get_command_string(context_menu: &IContextMenu, cmd_id: u32) -> Option
         (cmd_id - 1) as usize, // Offset by -1 as per QueryContextMenu
         GCS_VERBA,
         None,
-        PSTR::from_raw(buffer.as_mut_ptr()),
+        PSTR(buffer.as_mut_ptr()),
         buffer.len() as u32,
     );
 
@@ -215,7 +214,7 @@ unsafe fn extract_item_info(
     let mut info = MENUITEMINFOW {
         cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
         fMask: MIIM_FTYPE | MIIM_ID | MIIM_STATE | MIIM_BITMAP | MIIM_SUBMENU | MIIM_STRING,
-        dwTypeData: PWSTR::null(),
+        dwTypeData: PWSTR::default(),
         cch: 0,
         ..Default::default()
     };
@@ -264,10 +263,10 @@ unsafe fn extract_item_info(
                     WM_INITMENUPOPUP,
                     WPARAM(info.hSubMenu.0 as usize),
                     LPARAM(index as isize),
-                );
+                ).ok();
             }
 
-            let sub_count = GetMenuItemCount(info.hSubMenu);
+            let sub_count = GetMenuItemCount(Some(info.hSubMenu));
             if sub_count > 0 {
                 // Submenu has items - extract them recursively (only if permitted)
                 for i in 0..sub_count {
@@ -313,11 +312,11 @@ impl ShellMenuContext {
                         WM_INITMENUPOPUP,
                         WPARAM(hmenu_ptr as usize),
                         LPARAM(item.parent_index as isize),
-                    );
+                    ).ok();
                 }
 
                 // Now extract the items
-                let sub_count = GetMenuItemCount(hsubmenu);
+                let sub_count = GetMenuItemCount(Some(hsubmenu));
                 for i in 0..sub_count {
                     if let Some(sub_item) =
                         extract_item_info(&self.context_menu, hsubmenu, i as u32, false)
@@ -359,7 +358,7 @@ pub fn invoke_menu_command(
             ..Default::default()
         };
 
-        context_menu.InvokeCommand(std::mem::transmute(&invoke))
+        context_menu.InvokeCommand(std::ptr::addr_of!(invoke) as *const _)
     }
 }
 
@@ -371,6 +370,6 @@ pub fn show_properties_dialog(hwnd: HWND, path: &std::path::Path) -> Result<()> 
 
     unsafe {
         // SAFETY: wide_path is null-terminated, SHOP_FILEPATH specifies we are passing a path string
-        SHObjectProperties(hwnd, SHOP_FILEPATH, PCWSTR(wide_path.as_ptr()), None).ok()
+        SHObjectProperties(Some(hwnd), SHOP_FILEPATH, PCWSTR(wide_path.as_ptr()), None).ok()
     }
 }

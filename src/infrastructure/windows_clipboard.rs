@@ -153,7 +153,7 @@ fn set_preferred_drop_effect(effect: u32) -> Result<(), String> {
         let _ = GlobalUnlock(hmem);
 
         // Set the clipboard data
-        SetClipboardData(format, windows::Win32::Foundation::HANDLE(hmem.0))
+        SetClipboardData(format, Some(windows::Win32::Foundation::HANDLE(hmem.0)))
             .map_err(|e| format!("SetClipboardData failed: {:?}", e))?;
     }
 

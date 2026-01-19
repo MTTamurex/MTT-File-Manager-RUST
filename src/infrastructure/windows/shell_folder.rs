@@ -6,7 +6,6 @@ use windows::core::*;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::Shell::Common::*;
 use windows::Win32::System::Com::*;
-use windows::Win32::UI::Shell::PropertiesSystem::*;
 use windows::Win32::Foundation::*;
 use std::os::windows::ffi::OsStrExt;
 
@@ -63,7 +62,7 @@ pub fn list_shell_folder(path: &Path) -> Result<Vec<FileEntry>> {
         // 3. Enumerate children
         let mut enum_id_list: Option<IEnumIDList> = None;
         let flags = SHCONTF_FOLDERS.0 | SHCONTF_NONFOLDERS.0 | SHCONTF_INCLUDEHIDDEN.0;
-        folder.EnumObjects(None, flags as u32, &mut enum_id_list).ok()?;
+        folder.EnumObjects(HWND::default(), flags as u32, &mut enum_id_list).ok()?;
         
         if let Some(enumerator) = enum_id_list {
             let mut item_pidl: *mut ITEMIDLIST = std::ptr::null_mut();

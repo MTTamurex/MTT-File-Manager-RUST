@@ -5,18 +5,12 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
-use windows::core::{Interface, GUID, PCWSTR};
-use windows::Win32::UI::Shell::{
-    FileOperation, IEnumIDList, IFileOperation, IShellFolder, IShellFolder2,
-    SHCreateItemFromParsingName, SHCreateShellItem, SHEmptyRecycleBinW, SHGetDesktopFolder,
-    SHGetKnownFolderItem, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT,
-    KF_FLAG_DEFAULT, SHCONTF_FOLDERS, SHCONTF_INCLUDEHIDDEN, SHCONTF_NONFOLDERS,
-    SHERB_NOCONFIRMATION, SHERB_NOPROGRESSUI,
-};
-use windows::{
-    core::*, Win32::System::Com::StructuredStorage::*, Win32::System::Com::*,
-    Win32::UI::Shell::Common::*, Win32::UI::Shell::PropertiesSystem::*, Win32::UI::Shell::*,
-};
+use windows::core::*;
+use windows::core::Interface;
+use windows::Win32::UI::Shell::*;
+use windows::Win32::Foundation::*;
+use windows::Win32::System::Com::*;
+use windows::Win32::UI::Shell::Common::*;
 
 // Property keys for Recycle Bin items
 pub const PKEY_SIZE: PROPERTYKEY = PROPERTYKEY {
@@ -68,7 +62,7 @@ pub fn get_recycle_bin_info() -> Result<(u64, u64)> {
             ..Default::default()
         };
 
-        SHQueryRecycleBinW(PCWSTR::null(), &mut info)?;
+        SHQueryRecycleBinW(PCWSTR::default(), &mut info)?;
         Ok((info.i64NumItems as u64, info.i64Size as u64))
     }
 }
@@ -122,7 +116,7 @@ pub fn enumerate_recycle_bin_streaming(
         let mut enum_list_opt: Option<IEnumIDList> = None;
 
         if recycle_bin_folder
-            .EnumObjects(None, flags, &mut enum_list_opt)
+            .EnumObjects(windows::Win32::Foundation::HWND::default(), flags, &mut enum_list_opt)
             .is_err()
         {
             eprintln!("[Lixeira] Failed to get enumerator");
@@ -303,23 +297,15 @@ unsafe fn get_item_display_name(item: &IShellItem2) -> String {
 
 /// Get string property from IShellItem2
 unsafe fn get_shell_item_string_property(item: &IShellItem2, pkey: &PROPERTYKEY) -> Result<String> {
-    let prop_var = item.GetProperty(pkey)?;
-    let pv_ptr: *const PROPVARIANT = &prop_var as *const _ as *const _;
-
-    let str_ptr = PropVariantToStringAlloc(pv_ptr)?;
+    let str_ptr = item.GetString(pkey)?;
     let result = str_ptr.to_string().map_err(|_| Error::from_win32())?;
-    CoTaskMemFree(Some(str_ptr.as_ptr() as *mut _));
-
+    CoTaskMemFree(Some(str_ptr.0 as *mut _));
     Ok(result)
 }
 
 /// Get u64 property from IShellItem2
 unsafe fn get_shell_item_u64_property(item: &IShellItem2, pkey: &PROPERTYKEY) -> Result<u64> {
-    let prop_var = item.GetProperty(pkey)?;
-    let pv_ptr: *const PROPVARIANT = &prop_var as *const _ as *const _;
-
-    let val = PropVariantToUInt64(pv_ptr)?;
-    Ok(val)
+    item.GetUInt64(pkey)
 }
 
 /// Get FILETIME property from IShellItem2 and format as date string
@@ -327,18 +313,9 @@ unsafe fn get_shell_item_filetime_property(
     item: &IShellItem2,
     pkey: &PROPERTYKEY,
 ) -> Result<String> {
-    let prop_var = match item.GetProperty(pkey) {
-        Ok(p) => p,
-        Err(e) => {
-            return Err(e);
-        }
-    };
-    let pv_ptr: *const PROPVARIANT = &prop_var as *const _ as *const _;
-
-    // First try PropVariantToStringAlloc - this works for FILETIME properties
-    if let Ok(str_ptr) = PropVariantToStringAlloc(pv_ptr) {
+    if let Ok(str_ptr) = item.GetString(pkey) {
         let result = str_ptr.to_string().unwrap_or_default();
-        CoTaskMemFree(Some(str_ptr.as_ptr() as *mut _));
+        CoTaskMemFree(Some(str_ptr.0 as *mut _));
         if !result.is_empty() {
             // Format: '2026/01/12:19:21:00.000' -> '12/01/2026 19:21'
             let formatted = format_recycle_date(&result);
@@ -347,7 +324,9 @@ unsafe fn get_shell_item_filetime_property(
     }
 
     // Fallback: Try PropVariantToUInt64 for raw FILETIME
-    if let Ok(ft_val) = PropVariantToUInt64(pv_ptr) {
+    if let Ok(ft) = item.GetFileTime(pkey) {
+        // Fallback: raw FILETIME
+        let ft_val = ((ft.dwHighDateTime as u64) << 32) | (ft.dwLowDateTime as u64);
         if ft_val > 0 {
             const FILETIME_TO_UNIX: u64 = 116444736000000000;
             if ft_val > FILETIME_TO_UNIX {
@@ -462,7 +441,7 @@ unsafe fn get_date_deleted_from_pidl(folder: &IShellFolder, pidl: *const ITEMIDL
                     // Remove caracteres de controle invisíveis LTR/RTL que o Windows às vezes insere
                     let cleaned = date_str
                         .chars()
-                        .filter(|c| !c.is_control())
+                        .filter(|c: &char| !c.is_control())
                         .collect::<String>()
                         .trim()
                         .to_string();
@@ -576,8 +555,8 @@ pub fn empty_recycle_bin() -> Result<()> {
     unsafe {
         // SHEmptyRecycleBinW with NULL path empties all drives
         SHEmptyRecycleBinW(
-            None,
-            PCWSTR::null(),
+            Some(HWND::default()),
+            PCWSTR::default(),
             SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI,
         )?;
         Ok(())

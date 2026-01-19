@@ -418,7 +418,7 @@ fn _query_subkey_friendly_name(parent_key: HKEY, subkey_name: &str) -> Option<St
         if RegOpenKeyExW(
             parent_key,
             windows::core::PCWSTR(subkey_wide.as_ptr()),
-            0,
+            Some(0),
             KEY_READ,
             &mut hkey,
         )
@@ -469,7 +469,7 @@ unsafe fn query_registry_string(key_path: &str, value_name: &str) -> Option<Stri
     let result = RegOpenKeyExW(
         HKEY_LOCAL_MACHINE,
         PCWSTR(key_wide.as_ptr()),
-        0,
+        Some(0),
         KEY_READ,
         &mut hkey,
     );
