@@ -44,11 +44,19 @@ fn mark_as_failed(path: PathBuf) {
     }
 }
 
-/// Clear failed status for a specific path (allows retry)
+/// Clear failure status for a specific path (allows retry)
 /// Used when manually refreshing a thumbnail after file changes
 pub fn clear_failure_cache(path: &PathBuf) {
     if let Ok(mut set) = get_failed_paths().lock() {
         set.remove(path);
+    }
+}
+
+/// Clear all failure status (allows retry for everything)
+/// Used when manually refreshing the entire folder (F5)
+pub fn clear_all_failures() {
+    if let Ok(mut set) = get_failed_paths().lock() {
+        set.clear();
     }
 }
 

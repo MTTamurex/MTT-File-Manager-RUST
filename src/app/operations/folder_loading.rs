@@ -52,6 +52,8 @@ impl ImageViewerApp {
         if force_refresh {
             self.cache_manager.texture_cache.clear();
             self.cache_manager.folder_preview_cache.clear();
+            self.cache_manager.failed_thumbnails.clear();
+            crate::workers::thumbnail_worker::clear_all_failures();
         }
 
         self.items = Arc::new(Vec::new()); // Novo Arc vazio (antigo é dropped automaticamente)
