@@ -143,13 +143,10 @@ pub fn render_grid_view(
                         let section_height = rows as f32 * (item_h + padding) + padding;
 
                         let content_min = ui.cursor().min;
-                        let (_rect, response) = ui.allocate_exact_size(
+                        ui.allocate_exact_size(
                             egui::vec2(available_w, section_height),
-                            Sense::click(),
+                            Sense::hover(),
                         );
-                        if response.secondary_clicked() {
-                            empty_area_secondary_click = true;
-                        }
 
                         for (i, (index, item)) in items_to_render.into_iter().enumerate() {
                             let row = i / cols;
@@ -273,13 +270,10 @@ pub fn render_grid_view(
                 let total_height = rows as f32 * (item_h + padding) + padding;
                 let content_min = ui.min_rect().min;
 
-                let response = ui.allocate_rect(
+                ui.allocate_rect(
                     Rect::from_min_size(content_min, egui::vec2(available_w, total_height)),
-                    Sense::click(),
+                    Sense::hover(),
                 );
-                if response.secondary_clicked() {
-                    empty_area_secondary_click = true;
-                }
 
                 let clip_rect = ui.clip_rect();
                 let start_y = (clip_rect.top() - content_min.y).max(0.0);
@@ -473,7 +467,16 @@ pub fn render_grid_view(
         return Some(GridViewAction::SecondaryClick(idx));
     }
 
-    if empty_area_secondary_click && secondary_clicked_item.is_none() {
+    // Fallback global: detect secondary click on empty area if no item was clicked
+    if secondary_clicked_item.is_none() && ui.input(|i| i.pointer.secondary_clicked()) {
+        if let Some(pos) = ui.ctx().pointer_latest_pos() {
+            if available_rect.contains(pos) {
+                empty_area_secondary_click = true;
+            }
+        }
+    }
+
+    if empty_area_secondary_click {
         return Some(GridViewAction::EmptyAreaSecondaryClick);
     }
 

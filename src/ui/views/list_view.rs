@@ -186,11 +186,6 @@ pub fn render_list_view(
 
     let scroll_area = egui::ScrollArea::vertical().auto_shrink([false, false]);
     let available_rect = ui.available_rect_before_wrap();
-    
-    // Background interaction to catch secondary clicks on empty space
-    if ui.interact(available_rect, ui.id().with("list_bg"), Sense::click()).secondary_clicked() {
-        empty_area_secondary_click = true;
-    }
 
     if ctx.is_computer_view {
         // Grouped view for "Este Computador"
@@ -595,14 +590,6 @@ pub fn render_list_view(
                 ui.add_space(10.0);
             }
         });
-
-        if ui.input(|i| i.pointer.secondary_clicked()) {
-            if let Some(pos) = ui.ctx().pointer_latest_pos() {
-                if available_rect.contains(pos) {
-                    empty_area_secondary_click = true;
-                }
-            }
-        }
     } else {
         // Regular virtualized list
         let _scroll_res = scroll_area.show_rows(ui, row_height + 2.0, total_rows, |ui, row_range| {
@@ -976,8 +963,16 @@ pub fn render_list_view(
 
     }
 
-    // Capture secondary click on the scroll area if no item was clicked
-    if empty_area_secondary_click && secondary_clicked_item.is_none() {
+    // Fallback global: detect secondary click on empty area if no item was clicked
+    if secondary_clicked_item.is_none() && ui.input(|i| i.pointer.secondary_clicked()) {
+        if let Some(pos) = ui.ctx().pointer_latest_pos() {
+            if available_rect.contains(pos) {
+                empty_area_secondary_click = true;
+            }
+        }
+    }
+
+    if empty_area_secondary_click {
         return Some(ListViewAction::EmptyAreaSecondaryClick);
     }
 
