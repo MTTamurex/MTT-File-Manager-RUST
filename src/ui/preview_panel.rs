@@ -176,6 +176,66 @@ pub fn render_preview_panel(
             val_action
     };
 
+    // Shared logic for rendering thumbnails with overlays (PDF, Image Magnifier)
+    let render_texture_with_overlay = |ui: &mut egui::Ui, tex: &egui::TextureHandle, svg_manager: &mut SvgIconManager| -> Option<PreviewPanelAction> {
+        let max_preview_width = ui.available_width() - 16.0;
+        let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
+
+        let image_resp = ui.add(
+            egui::Image::new(tex)
+                .max_size(max_preview_size)
+                .shrink_to_fit(),
+        );
+
+        let mut local_action = None;
+        let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        
+        let media_rect = image_resp.rect;
+        let hover_pos = ui.input(|i| i.pointer.hover_pos());
+        let is_hovered = hover_pos.map_or(false, |pos| media_rect.contains(pos));
+
+        if is_hovered {
+             if extension.eq_ignore_ascii_case("pdf") {
+                let center_size = 48.0;
+                let center_rect = egui::Rect::from_center_size(media_rect.center(), egui::vec2(center_size, center_size));
+                
+                // Draw background for contrast
+                ui.painter().rect_filled(center_rect, center_size / 2.0, egui::Color32::from_black_alpha(100));
+                
+                // Draw Lupa (Search) Icon
+                if let Some(tex_lupa) = svg_manager.get_icon(ui.ctx(), "search", 96, [255, 255, 255, 255]) {
+                        ui.painter().image(tex_lupa.id(), center_rect.shrink(10.0), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                } else {
+                        ui.painter().text(center_rect.center(), egui::Align2::CENTER_CENTER, "🔍", egui::FontId::proportional(24.0), egui::Color32::WHITE);
+                }
+
+                // Handle Click
+                if ui.put(center_rect, egui::Button::new("").frame(false).sense(egui::Sense::click())).clicked() {
+                    crate::pdf_viewer::open_pdf_viewer(file.path.clone());
+                }
+            } else if crate::infrastructure::windows::is_image_extension(extension) {
+                let center_size = 48.0;
+                let center_rect = egui::Rect::from_center_size(media_rect.center(), egui::vec2(center_size, center_size));
+
+                // Draw background for contrast
+                ui.painter().rect_filled(center_rect, center_size / 2.0, egui::Color32::from_black_alpha(100));
+
+                // Draw Lupa (Search) Icon
+                if let Some(tex_lupa) = svg_manager.get_icon(ui.ctx(), "search", 96, [255, 255, 255, 255]) {
+                        ui.painter().image(tex_lupa.id(), center_rect.shrink(10.0), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                } else {
+                        ui.painter().text(center_rect.center(), egui::Align2::CENTER_CENTER, "🔍", egui::FontId::proportional(24.0), egui::Color32::WHITE);
+                }
+
+                // Handle Click
+                if ui.put(center_rect, egui::Button::new("").frame(false).sense(egui::Sense::click())).clicked() {
+                    crate::pdf_viewer::open_image_viewer(file.path.clone());
+                }
+            }
+        }
+        local_action
+    };
+
     ui.vertical_centered(|ui| {
         ui.add_space(20.0);
 
@@ -686,9 +746,9 @@ pub fn render_preview_panel(
                 // === CURRENT FILE IS NOT A VIDEO (but media_preview exists for another file) ===
                 // Show the image thumbnail, NOT the video player
                 if let Some(tex) = &texture {
-                    let max_preview_width = ui.available_width() - 16.0;
-                    let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
-                    ui.add(egui::Image::new(tex).max_size(max_preview_size).shrink_to_fit());
+                    if let Some(act) = render_texture_with_overlay(ui, tex, svg_manager) {
+                        action = Some(act);
+                    }
                 } else {
                     // Fallback for non-video items when video is present elsewhere
                     if let Some(act) = render_fallback(ui, svg_manager) {
@@ -731,65 +791,8 @@ pub fn render_preview_panel(
 
         } else if let Some(tex) = &texture {
             // Fallback: Static Thumbnail (No MediaPreview state)
-            let max_preview_width = ui.available_width() - 16.0;
-            let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
-
-            let image_resp = ui.add(
-                egui::Image::new(tex)
-                    .max_size(max_preview_size)
-                    .shrink_to_fit(),
-            );
-            
-            // PDF Overlay Logic
-            let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if extension.eq_ignore_ascii_case("pdf") {
-                let media_rect = image_resp.rect;
-                let hover_pos = ui.input(|i| i.pointer.hover_pos());
-                let is_hovered = hover_pos.map_or(false, |pos| media_rect.contains(pos));
-
-                if is_hovered {
-                    let center_size = 48.0;
-                    let center_rect = egui::Rect::from_center_size(media_rect.center(), egui::vec2(center_size, center_size));
-                    
-                    // Draw background for contrast
-                    ui.painter().rect_filled(center_rect, center_size / 2.0, egui::Color32::from_black_alpha(100));
-                    
-                    // Draw Lupa (Search) Icon
-                    if let Some(tex_lupa) = svg_manager.get_icon(ui.ctx(), "search", 96, [255, 255, 255, 255]) {
-                         ui.painter().image(tex_lupa.id(), center_rect.shrink(10.0), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
-                    } else {
-                         ui.painter().text(center_rect.center(), egui::Align2::CENTER_CENTER, "🔍", egui::FontId::proportional(24.0), egui::Color32::WHITE);
-                    }
-
-                    // Handle Click
-                    if ui.put(center_rect, egui::Button::new("").frame(false).sense(egui::Sense::click())).clicked() {
-                        crate::pdf_viewer::open_pdf_viewer(file.path.clone());
-                    }
-                }
-            } else if crate::infrastructure::windows::is_image_extension(extension) {
-                let media_rect = image_resp.rect;
-                let hover_pos = ui.input(|i| i.pointer.hover_pos());
-                let is_hovered = hover_pos.map_or(false, |pos| media_rect.contains(pos));
-
-                if is_hovered {
-                    let center_size = 48.0;
-                    let center_rect = egui::Rect::from_center_size(media_rect.center(), egui::vec2(center_size, center_size));
-
-                    // Draw background for contrast
-                    ui.painter().rect_filled(center_rect, center_size / 2.0, egui::Color32::from_black_alpha(100));
-
-                    // Draw Lupa (Search) Icon
-                    if let Some(tex_lupa) = svg_manager.get_icon(ui.ctx(), "search", 96, [255, 255, 255, 255]) {
-                         ui.painter().image(tex_lupa.id(), center_rect.shrink(10.0), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
-                    } else {
-                         ui.painter().text(center_rect.center(), egui::Align2::CENTER_CENTER, "🔍", egui::FontId::proportional(24.0), egui::Color32::WHITE);
-                    }
-
-                    // Handle Click
-                    if ui.put(center_rect, egui::Button::new("").frame(false).sense(egui::Sense::click())).clicked() {
-                        crate::pdf_viewer::open_image_viewer(file.path.clone());
-                    }
-                }
+            if let Some(act) = render_texture_with_overlay(ui, tex, svg_manager) {
+                action = Some(act);
             }
         } else {
            if let Some(act) = render_fallback(ui, svg_manager) {
