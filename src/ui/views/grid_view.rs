@@ -571,6 +571,10 @@ fn render_item_slot_for_grid(
 
 /// Helper function to get file type string
 fn get_file_type_string(item: &FileEntry) -> String {
+    // Check for ZIP manually because is_dir might be true
+    if item.name.to_lowercase().ends_with(".zip") {
+        return "Arquivo ZIP".to_string();
+    }
     if item.is_dir {
         return "Pasta".to_string();
     }
