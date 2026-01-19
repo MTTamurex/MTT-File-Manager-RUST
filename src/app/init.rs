@@ -230,6 +230,10 @@ impl ImageViewerApp {
             }
         });
 
+        // --- FILE OPERATION WORKER (Background Shell ops) ---
+        let (file_op_tx, file_op_rx) = mpsc::channel();
+        crate::workers::file_operation_worker::start_file_operation_worker(file_op_rx);
+
         let disks = windows_infra::get_all_drives();
 
         // Initialize Audio Device (removed)
@@ -373,6 +377,9 @@ impl ImageViewerApp {
             
             // PERFORMANCE: Reusable buffers for grid rendering
             pending_ops: crate::ui::views::grid_view::PendingOperations::new(),
+
+            // FILE OPERATION WORKER
+            file_op_sender: file_op_tx,
         };
 
         // Inicia monitoramento inicial
