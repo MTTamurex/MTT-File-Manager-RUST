@@ -6,6 +6,8 @@ use lru::LruCache;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 
+use std::collections::HashSet;
+
 /// Texture cache configuration
 pub struct TextureCacheConfig {
     pub max_size: usize,
@@ -32,7 +34,9 @@ pub struct CacheManager {
     /// Cache for folder preview thumbnails (sandwich effect)
     pub folder_preview_cache: LruCache<PathBuf, egui::TextureHandle>,
     /// Set of folder paths currently being loaded
-    pub folder_preview_loading: std::collections::HashSet<PathBuf>,
+    pub folder_preview_loading: HashSet<PathBuf>,
+    /// Set of paths that failed thumbnail extraction
+    pub failed_thumbnails: HashSet<PathBuf>,
 
     config: TextureCacheConfig,
 }
@@ -48,7 +52,8 @@ impl CacheManager {
             computer_icon: None,
             drive_icon_cache: LruCache::new(NonZeroUsize::new(10).unwrap()),
             folder_preview_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
-            folder_preview_loading: std::collections::HashSet::new(),
+            folder_preview_loading: HashSet::new(),
+            failed_thumbnails: HashSet::new(),
 
             config: TextureCacheConfig::default(),
         }
@@ -64,7 +69,8 @@ impl CacheManager {
             computer_icon: None,
             drive_icon_cache: LruCache::new(NonZeroUsize::new(10).unwrap()),
             folder_preview_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
-            folder_preview_loading: std::collections::HashSet::new(),
+            folder_preview_loading: HashSet::new(),
+            failed_thumbnails: HashSet::new(),
 
             config,
         }
@@ -113,7 +119,23 @@ impl CacheManager {
         self.drive_icon_cache.clear();
         self.folder_preview_cache.clear();
         self.folder_preview_loading.clear();
+        self.failed_thumbnails.clear();
         // Note: folder_icon_texture and computer_icon are kept as they're singletons
+    }
+
+    /// Marks a path as having failed thumbnail extraction
+    pub fn mark_as_failed(&mut self, path: PathBuf) {
+        self.failed_thumbnails.insert(path);
+    }
+
+    /// Checks if a path has previously failed thumbnail extraction
+    pub fn is_failed(&self, path: &PathBuf) -> bool {
+        self.failed_thumbnails.contains(path)
+    }
+
+    /// Clears the failure status for all paths
+    pub fn clear_failed(&mut self) {
+        self.failed_thumbnails.clear();
     }
 
     // ========== Folder Preview Methods (Native Windows Shell) ==========

@@ -275,6 +275,12 @@ impl ImageViewerApp {
 
             // Sempre libera o slot de loading, mesmo em falhas
             self.cache_manager.finish_loading(&thumbnail_data.path);
+            
+            // Se a imagem veio vazia, marca como falha para evitar retry infinito
+            if thumbnail_data.image_data.is_empty() {
+                self.cache_manager.mark_as_failed(thumbnail_data.path.clone());
+                continue;
+            }
 
             // Só processa thumbnails (image_data não vazio)
             if !thumbnail_data.image_data.is_empty() {

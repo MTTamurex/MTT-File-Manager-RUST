@@ -280,7 +280,7 @@ fn thumbnail_worker_loop(
                         }
                     }
 
-                    let (data, w, h) = final_result.unwrap_or_else(|| create_error_placeholder());
+                    let (data, w, h) = final_result.unwrap_or_else(|| (Vec::new(), 0, 0));
 
                     let _ = tx.send(ThumbnailData {
                         path,
@@ -903,20 +903,7 @@ fn hbitmap_to_rgba(
     }
 }
 
-fn create_error_placeholder() -> (Vec<u8>, u32, u32) {
-    let size = 512; // Match HiDPI generation size
-    let mut buffer = vec![0u8; size * size * 4];
-    for (i, pixel) in buffer.chunks_exact_mut(4).enumerate() {
-        let x = i % size;
-        let y = i / size;
-        if (x + y) % 2 == 0 {
-             pixel[0] = 255; pixel[3] = 255; // Red pattern
-        } else {
-             pixel[0] = 0; pixel[3] = 0; // Transparent
-        }
-    }
-    (buffer, size as u32, size as u32)
-}
+
 
 fn throttle_repaint(ctx: &egui::Context, last_repaint: &mut Instant) {
     if last_repaint.elapsed().as_millis() >= 33 {

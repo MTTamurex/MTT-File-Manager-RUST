@@ -61,14 +61,24 @@ impl IconLoader {
         }
     }
 
-    /// Gets or loads a Windows shell icon for a file path
-    /// PERFORMANCE: Avoids blocking I/O by using extension-based lookup first
+    /// Gets or loads a Windows shell icon for a file path with default size (Large)
     pub fn get_or_load_icon(
         &mut self,
         ctx: &egui::Context,
         path: &Path,
     ) -> Option<egui::TextureHandle> {
-        let cache_key = path.to_string_lossy().to_string();
+        self.get_or_load_icon_sized(ctx, path, IconSize::Large)
+    }
+
+    /// Gets or loads a Windows shell icon for a file path with a specific size
+    /// PERFORMANCE: Avoids blocking I/O by using extension-based lookup first
+    pub fn get_or_load_icon_sized(
+        &mut self,
+        ctx: &egui::Context,
+        path: &Path,
+        size: IconSize,
+    ) -> Option<egui::TextureHandle> {
+        let cache_key = format!("{}_{:?}", path.to_string_lossy(), size);
 
         // Check cache first
         if let Some(texture) = self.icon_cache.get(&cache_key) {
@@ -79,11 +89,18 @@ impl IconLoader {
         // On OneDrive, this can trigger network calls (28ms+ per file).
         // 
         // Strategy: Use extension-based icon lookup first (fast, no I/O).
-        // Only fall back to path-based if no extension exists.
+        // Only fall back to path-based if no extension exists OR if it is an executable/shortcut.
         let icon_result = if let Some(ext) = path.extension() {
-            // Extension-based lookup is FAST (uses registry, no file access)
-            let ext_str = ext.to_string_lossy();
-            windows::get_file_type_icon(false, &ext_str, IconSize::Large)
+            let ext_str = ext.to_string_lossy().to_lowercase();
+            
+            // EXCEPTION: Executables and shortcuts (.exe, .lnk, .ico, etc.) 
+            // ALWAYS use path-based extraction to show their unique embedded icons.
+            if matches!(ext_str.as_str(), "exe" | "lnk" | "ico" | "cur" | "ani") {
+                windows::extract_file_icon_by_path(path, IconSize::Jumbo)
+            } else {
+                // Extension-based lookup is FAST (uses registry, no file access)
+                windows::get_file_type_icon(false, &ext_str, size)
+            }
         } else {
             // No extension - try path-based as last resort
             // This is rare (most files have extensions) and acceptable
@@ -120,7 +137,7 @@ impl IconLoader {
             return;
         }
 
-        if let Ok((data, width, height)) = windows::extract_computer_icon(IconSize::Large) {
+        if let Ok((data, width, height)) = windows::extract_computer_icon(IconSize::Jumbo) {
             let image =
                 egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &data);
 
@@ -140,7 +157,7 @@ impl IconLoader {
             return Some(tex.clone());
         }
 
-        if let Ok((data, width, height)) = windows::extract_recycle_bin_icon(IconSize::Large) {
+        if let Ok((data, width, height)) = windows::extract_recycle_bin_icon(IconSize::Jumbo) {
             let image =
                 egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &data);
 

@@ -111,6 +111,7 @@ impl ImageViewerApp {
             drive_icon_cache: &mut self.cache_manager.drive_icon_cache,
             item_icon_loader: &mut self.item_icon_loader,
             deletion_date_cache: Some(&mut self.deletion_date_cache),
+            failed_thumbnails: &self.cache_manager.failed_thumbnails,
         };
 
         // Usar uma abordagem diferente: coletar ações em vetores
@@ -355,6 +356,7 @@ impl ImageViewerApp {
             folder_preview_cache: &mut self.cache_manager.folder_preview_cache,
             folder_preview_loading: &mut self.cache_manager.folder_preview_loading,
             pending_ops: &mut self.pending_ops,
+            failed_thumbnails: &self.cache_manager.failed_thumbnails,
         };
 
         // Usar uma abordagem diferente: coletar ações em vetores
@@ -529,6 +531,7 @@ impl ImageViewerApp {
                 loading_set: &mut self.cache_manager.loading_set,
                 folder_preview_cache: &mut self.cache_manager.folder_preview_cache,
                 folder_preview_loading: &mut self.cache_manager.folder_preview_loading,
+                failed_thumbnails: &self.cache_manager.failed_thumbnails,
             };
 
             // Create simple ops struct that collects operations
