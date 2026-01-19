@@ -8,7 +8,7 @@ where
     std::thread::spawn(f);
 }
 
-pub fn run(path: PathBuf) {
+pub fn run(path: PathBuf, title_prefix: &str) {
     unsafe {
         // 1. Initialize COM as STA (Single Threaded Apartment) - Critical for UI/WebView2
         let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
@@ -18,7 +18,7 @@ pub fn run(path: PathBuf) {
         }
 
         // 2. Run the window message loop
-        if let Err(e) = crate::pdf_viewer::window::create_and_run(path) {
+        if let Err(e) = crate::pdf_viewer::window::create_and_run(path, title_prefix) {
             eprintln!("PDF Viewer: Window error: {}", e);
         }
 
