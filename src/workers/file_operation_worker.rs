@@ -92,7 +92,11 @@ pub fn start_file_operation_worker(
                     let _ = shell_operations::rename_item_with_shell(&path, &new_name, hwnd.0);
                 }
                 FileOperationRequest::Copy { path, dest_folder, hwnd } => {
-                    let _ = shell_operations::copy_item_with_shell(&path, &dest_folder, hwnd.0);
+                    if crate::infrastructure::windows::is_shell_navigation_path(&path) {
+                        let _ = shell_operations::copy_item_with_file_op(&path, &dest_folder, hwnd.0);
+                    } else {
+                        let _ = shell_operations::copy_item_with_shell(&path, &dest_folder, hwnd.0);
+                    }
                 }
                 FileOperationRequest::Move { path, dest_folder, hwnd } => {
                     let _ = shell_operations::move_item_with_shell(&path, &dest_folder, hwnd.0);

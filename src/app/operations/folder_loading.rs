@@ -15,6 +15,7 @@ use crate::app::state::ImageViewerApp;
 use crate::application::sorting;
 use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::onedrive;
+use crate::infrastructure::windows::{is_shell_navigation_path, list_shell_folder};
 
 impl ImageViewerApp {
     pub fn filter_items(&mut self) {
@@ -88,6 +89,18 @@ impl ImageViewerApp {
             } else {
                 current_path.clone()
             };
+            
+            // Check if we are navigating a virtual Shell folder (like a ZIP)
+            if is_shell_navigation_path(&PathBuf::from(&base_path)) {
+                if let Ok(shell_items) = list_shell_folder(&PathBuf::from(&base_path)) {
+                    if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+                        let _ = file_entry_sender.send((my_gen, shell_items));
+                        let _ = file_entry_sender.send((my_gen, Vec::new()));
+                        ctx.request_repaint();
+                        return;
+                    }
+                }
+            }
 
             // Prepara busca Win32
             let search_path = if base_path.ends_with('\\') {
@@ -155,7 +168,12 @@ impl ImageViewerApp {
 
                             if !is_hidden && !is_system && !is_special && !filename.starts_with('.')
                             {
-                                let is_dir = (extended_attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
+                                let mut is_dir = (extended_attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
+                                
+                                // Treat ZIP files as navigable folders
+                                if !is_dir && filename.to_lowercase().ends_with(".zip") {
+                                    is_dir = true;
+                                }
 
                                 let size = if is_dir {
                                     0
