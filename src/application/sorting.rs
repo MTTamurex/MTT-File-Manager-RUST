@@ -10,11 +10,18 @@ pub fn sort_items(
     descending: bool,
     folders_position: FoldersPosition,
 ) {
+    // Helper to check if an item is a "true" directory (not a ZIP file)
+    let is_true_dir = |item: &FileEntry| -> bool {
+        item.is_dir && !item.name.to_lowercase().ends_with(".zip")
+    };
+
     let compare = |a: &FileEntry, b: &FileEntry| -> Ordering {
-        // 1. Folders Position logic
-        if folders_position != FoldersPosition::Mixed && a.is_dir != b.is_dir {
+        // 1. Folders Position logic (ZIP files should be treated as files, not folders)
+        let a_is_dir = is_true_dir(a);
+        let b_is_dir = is_true_dir(b);
+        if folders_position != FoldersPosition::Mixed && a_is_dir != b_is_dir {
             let folders_come_first = folders_position == FoldersPosition::First;
-            return if a.is_dir {
+            return if a_is_dir {
                 if folders_come_first {
                     Ordering::Less
                 } else {
