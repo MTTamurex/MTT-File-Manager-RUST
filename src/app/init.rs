@@ -401,8 +401,12 @@ impl ImageViewerApp {
         });
 
         // NOTE: Shell warmup is now done in window.rs after HWND is obtained
-        // Removed duplicate warmup here to avoid race conditions with COM objects
-        // that could cause STATUS_ACCESS_VIOLATION on startup
+        // Removed duplicate warmup here to avoid protection issues
+        
+        // --- PDF WEBVIEW2 WARMUP ---
+        // Initializes the runtime in a background thread to reduce latency on first PDF open.
+        // Completely invisible and non-blocking.
+        crate::pdf_viewer::warmup();
 
 
         app
