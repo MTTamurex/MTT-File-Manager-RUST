@@ -43,7 +43,7 @@ pub fn render_preview_panel(
         .unwrap_or(false);
 
     // Reuseable fallback logic for rendering icons when no preview is available
-    let mut render_fallback = |ui: &mut egui::Ui| -> Option<PreviewPanelAction> {
+    let mut render_fallback = |ui: &mut egui::Ui, svg_manager: &mut SvgIconManager| -> Option<PreviewPanelAction> {
             let mut val_action = None;
             // Pasta ou Drive ou Arquivo sem Thumbnail
             let max_w: f32 = ui.available_width() - 40.0;
@@ -140,10 +140,30 @@ pub fn render_preview_panel(
                 let treat_as_folder = file.is_dir && !is_zip_archive;
                 
                 if let Some(icon) = item_icon_loader.get_or_load_icon_sized(ui.ctx(), &file.path, IconSize::Jumbo, treat_as_folder) {
-                    ui.add(
+                    let image_resp = ui.add(
                         egui::Image::new(&icon)
                             .max_size(egui::vec2(icon_size * 0.8, icon_size * 0.8)),
                     );
+
+                    // PDF Overlay for Fallback Icons
+                    let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                    if extension.eq_ignore_ascii_case("pdf") {
+                        let media_rect = image_resp.rect;
+                        let center_size = 64.0;
+                        let center_rect = egui::Rect::from_center_size(media_rect.center(), egui::vec2(center_size, center_size));
+                        
+                        ui.painter().rect_filled(center_rect, center_size / 2.0, egui::Color32::from_black_alpha(100));
+                        
+                        if let Some(tex_lupa) = svg_manager.get_icon(ui.ctx(), "search", 96, [255, 255, 255, 255]) {
+                             ui.painter().image(tex_lupa.id(), center_rect.shrink(14.0), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                        } else {
+                             ui.painter().text(center_rect.center(), egui::Align2::CENTER_CENTER, "🔍", egui::FontId::proportional(32.0), egui::Color32::WHITE);
+                        }
+        
+                        if ui.put(center_rect, egui::Button::new("").frame(false).sense(egui::Sense::click())).clicked() {
+                            crate::pdf_viewer::open_pdf_viewer(file.path.clone());
+                        }
+                    }
                 } else {
                     ui.label(egui::RichText::new("??").size(icon_size * 0.6));
                 }
@@ -666,7 +686,7 @@ pub fn render_preview_panel(
                     ui.add(egui::Image::new(tex).max_size(max_preview_size).shrink_to_fit());
                 } else {
                     // Fallback for non-video items when video is present elsewhere
-                    if let Some(act) = render_fallback(ui) {
+                    if let Some(act) = render_fallback(ui, svg_manager) {
                         action = Some(act);
                     }
                 }
@@ -703,18 +723,50 @@ pub fn render_preview_panel(
             } else {
                 ui.allocate_space(egui::vec2(ui.available_width() - 16.0, 200.0));
             }
+
         } else if let Some(tex) = &texture {
             // Fallback: Static Thumbnail (No MediaPreview state)
             let max_preview_width = ui.available_width() - 16.0;
             let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
 
-            ui.add(
+            let image_resp = ui.add(
                 egui::Image::new(tex)
                     .max_size(max_preview_size)
                     .shrink_to_fit(),
             );
+            
+            // PDF Overlay Logic
+            let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if extension.eq_ignore_ascii_case("pdf") {
+                let media_rect = image_resp.rect;
+                // Always show a small indicator
+
+                // User said: "Sobre esse ícone de PDF, deve existir um ícone overlay de lupa"
+                // "visualmente sobreposto (overlay) ... clicável ... não substitui o ícone original"
+                
+                // Let's show a semi-transparent overlay always, or on hover?
+                // "Ao clicar na lupa" -> implies it's a button.
+                
+                let center_size = 64.0;
+                let center_rect = egui::Rect::from_center_size(media_rect.center(), egui::vec2(center_size, center_size));
+                
+                // Draw background for contrast
+                ui.painter().rect_filled(center_rect, center_size / 2.0, egui::Color32::from_black_alpha(100));
+                
+                // Draw Lupa (Search) Icon
+                if let Some(tex_lupa) = svg_manager.get_icon(ui.ctx(), "search", 96, [255, 255, 255, 255]) {
+                     ui.painter().image(tex_lupa.id(), center_rect.shrink(14.0), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                } else {
+                     ui.painter().text(center_rect.center(), egui::Align2::CENTER_CENTER, "🔍", egui::FontId::proportional(32.0), egui::Color32::WHITE);
+                }
+
+                // Handle Click
+                if ui.put(center_rect, egui::Button::new("").frame(false).sense(egui::Sense::click())).clicked() {
+                    crate::pdf_viewer::open_pdf_viewer(file.path.clone());
+                }
+            }
         } else {
-           if let Some(act) = render_fallback(ui) {
+           if let Some(act) = render_fallback(ui, svg_manager) {
                 action = Some(act);
            }
         }

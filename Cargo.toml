@@ -18,6 +18,7 @@ thiserror = "2.0"
 tempfile = "3.10"
 rusqlite = { version = "0.32", features = ["bundled"] }
 webp = "0.3"  # For lossy WebP compression with quality control
+
 kamadak-exif = "0.5"  # For direct EXIF reading from JPEG files
 clipboard-win = "5.4"  # For Windows clipboard integration (CF_HDROP format)
 resvg = "0.44"          # For SVG icon rendering
@@ -59,6 +60,10 @@ features = [
     "Win32_System_Variant",
     "Win32_System_Search_Common",
 ]
+
+
+
+
 
 [build-dependencies]
 winresource = "0.1"
