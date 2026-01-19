@@ -7,9 +7,7 @@ use crate::app::state::ImageViewerApp;
 
 impl ImageViewerApp {
     pub fn restore_from_recycle_bin(&mut self, physical_path: &Path) {
-        use crate::infrastructure::windows::recycle_bin::{
-            enumerate_recycle_bin, restore_from_recycle_bin,
-        };
+        use crate::infrastructure::windows::recycle_bin::enumerate_recycle_bin;
 
         // Get the original path from RecycleBinItem by re-enumerating
         // This ensures we get the correct original_path stored in the $I file
@@ -28,73 +26,46 @@ impl ImageViewerApp {
                 PathBuf::from("C:\\Users\\Public\\Desktop").join(item.name.clone())
             });
 
-            match restore_from_recycle_bin(physical_path, &original_path) {
-                Ok(_) => {
-                    self.notifications
-                        .push(crate::application::AppNotification::success(format!(
-                            "'{}' restaurado com sucesso",
-                            item.name
-                        )));
-                    // Refresh recycle bin view
-                    self.setup_recycle_bin_view();
-                }
-                Err(e) => {
-                    self.notifications
-                        .push(crate::application::AppNotification::error(format!(
-                            "Erro ao restaurar: {}",
-                            e
-                        )));
-                }
-            }
+            // Send request to background worker
+            let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::RestoreFromRecycleBin {
+                physical_path: physical_path.to_path_buf(),
+                original_path,
+            });
+
+            self.notifications
+                .push(crate::application::AppNotification::info(format!(
+                    "Restaurando '{}' em background...",
+                    item.name
+                )));
         }
     }
 
     pub fn delete_permanently(&mut self, physical_path: &Path) {
-        use crate::infrastructure::windows::recycle_bin::delete_permanently;
 
         if let Some(item) = self.items.iter().find(|i| i.path == physical_path) {
             let item_name = item.name.clone();
 
-            match delete_permanently(physical_path) {
-                Ok(_) => {
-                    self.notifications
-                        .push(crate::application::AppNotification::success(format!(
-                            "'{}' excluído permanentemente",
-                            item_name
-                        )));
-                    // Refresh recycle bin view
-                    self.setup_recycle_bin_view();
-                }
-                Err(e) => {
-                    self.notifications
-                        .push(crate::application::AppNotification::error(format!(
-                            "Erro ao excluir: {}",
-                            e
-                        )));
-                }
-            }
+            // Send request to background worker
+            let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::DeletePermanently {
+                physical_path: physical_path.to_path_buf(),
+            });
+
+            self.notifications
+                .push(crate::application::AppNotification::info(format!(
+                    "Excluindo '{}' permanentemente...",
+                    item_name
+                )));
         }
     }
 
     pub fn empty_recycle_bin(&mut self) {
-        use crate::infrastructure::windows::recycle_bin::empty_recycle_bin;
 
-        match empty_recycle_bin() {
-            Ok(_) => {
-                self.notifications
-                    .push(crate::application::AppNotification::success(
-                        "Lixeira esvaziada com sucesso".to_string(),
-                    ));
-                // Refresh recycle bin view
-                self.setup_recycle_bin_view();
-            }
-            Err(e) => {
-                self.notifications
-                    .push(crate::application::AppNotification::error(format!(
-                        "Erro ao esvaziar lixeira: {}",
-                        e
-                    )));
-            }
-        }
+        // Send request to background worker
+        let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::EmptyRecycleBin);
+
+        self.notifications
+            .push(crate::application::AppNotification::info(
+                "Esvaziando lixeira em background...".to_string(),
+            ));
     }
 }

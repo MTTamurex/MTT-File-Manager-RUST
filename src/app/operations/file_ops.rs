@@ -12,16 +12,17 @@ impl ImageViewerApp {
         let target_idx = idx.or(self.selected_item);
         if let Some(idx) = target_idx {
             if let Some(item) = self.items.get(idx) {
-                // Delegate to application layer
-                if let Ok(true) = file_operations::delete_with_shell(&item.path, self.native_hwnd) {
-                    // Limpa cache do item deletado
-                    self.disk_cache.remove_cache_for_path(&item.path);
+                // Send request to background worker
+                let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::delete(
+                    item.path.clone(),
+                    self.native_hwnd.unwrap_or_default(),
+                ));
 
-                    // O watcher vai cuidar do refresh, mas podemos limpar a seleção
-                    if self.selected_item == Some(idx) {
-                        self.selected_item = None;
-                        self.selected_file = None;
-                    }
+                // Clear cache and selection proactively (the worker will do the actual delete)
+                self.disk_cache.remove_cache_for_path(&item.path);
+                if self.selected_item == Some(idx) {
+                    self.selected_item = None;
+                    self.selected_file = None;
                 }
             }
         }
@@ -76,41 +77,16 @@ impl ImageViewerApp {
         }
     }
 
-    /// Renomeia arquivo usando Shell API (suporta Undo/Ctrl+Z)
+    /// Renomeia arquivo usando Shell API via Background Worker
     pub fn rename_with_shell(&mut self, idx: usize) {
         if let Some((_, new_name)) = self.renaming_state.take() {
             if let Some(item) = self.items.get(idx) {
-                let old_path = item.path.to_string_lossy().to_string();
-                if let Some(parent) = item.path.parent() {
-                    let new_path = parent.join(&new_name).to_string_lossy().to_string();
-
-                    // Regra da API: Strings devem terminar com DOIS nulls (\0\0)
-                    let mut from_vec: Vec<u16> = old_path.encode_utf16().collect();
-                    from_vec.push(0);
-                    from_vec.push(0);
-
-                    let mut to_vec: Vec<u16> = new_path.encode_utf16().collect();
-                    to_vec.push(0);
-                    to_vec.push(0);
-
-                    use windows::Win32::UI::Shell::{SHFileOperationW, SHFILEOPSTRUCTW, FO_RENAME, FOF_ALLOWUNDO};
-                    use windows::core::PCWSTR;
-
-                    let mut sh_file_op = SHFILEOPSTRUCTW {
-                        wFunc: FO_RENAME,
-                        pFrom: PCWSTR(from_vec.as_ptr()),
-                        pTo: PCWSTR(to_vec.as_ptr()),
-                        fFlags: FOF_ALLOWUNDO.0 as u16,
-                        ..Default::default()
-                    };
-
-                    unsafe {
-                        let _ = SHFileOperationW(&mut sh_file_op);
-                    }
-                    
-                    // Atualiza UI
-                    self.load_folder(false);
-                }
+                // Send request to background worker
+                let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::rename(
+                    item.path.clone(),
+                    new_name,
+                    self.native_hwnd.unwrap_or_default(),
+                ));
             }
         }
     }
