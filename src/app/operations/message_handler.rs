@@ -135,6 +135,14 @@ impl ImageViewerApp {
                                 }
                             }
                         }
+
+                        // 3. Clear thumbnail caches for THIS specific file (including failure caches)
+                        // This fixes the bug where videos copied/downloaded fail extraction initially (busy)
+                        // and are never retried until app restart.
+                        let cleaned = clean_path(path);
+                        self.cache_manager.texture_cache.pop(&cleaned);
+                        self.cache_manager.failed_thumbnails.remove(&cleaned);
+                        crate::workers::thumbnail_worker::clear_failure_cache(&cleaned);
                     }
 
                     if meaningful_change {
@@ -151,7 +159,7 @@ impl ImageViewerApp {
             if elapsed > Duration::from_millis(theme::AUTO_RELOAD_MS) {
                 // VALIDA SE O PATH ATUAL AINDA EXISTE (pode ter sido renomeado/deletado)
                 if Path::new(&self.current_path).exists() {
-                    self.load_folder(true); // force_refresh para atualizar thumbnails modificados
+                    self.load_folder(false); // false = don't clear entire cache, already cleared specific changed items
                 } else {
                     self.go_up_one_level();
                 }
