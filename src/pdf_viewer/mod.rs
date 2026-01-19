@@ -8,7 +8,15 @@ pub fn open_pdf_viewer(path: PathBuf) {
     // Fire-and-forget: spawn and return immediately
     thread::spawn(move || {
         // This closure runs in its own dedicated STA thread
-        thread::run(path);
+        thread::run(path, "PDF Viewer");
+    });
+}
+
+pub fn open_image_viewer(path: PathBuf) {
+    // Fire-and-forget: spawn and return immediately
+    thread::spawn(move || {
+        // This closure runs in its own dedicated STA thread
+        thread::run(path, "Image Viewer");
     });
 }
 

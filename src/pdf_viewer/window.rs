@@ -6,7 +6,7 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW};
 use crate::pdf_viewer::webview;
 
-pub fn create_and_run(path: PathBuf) -> Result<()> {
+pub fn create_and_run(path: PathBuf, title_prefix: &str) -> Result<()> {
     unsafe {
         let instance = GetModuleHandleW(None)?;
         let class_name_str = "MttPdfViewerClass";
@@ -26,7 +26,7 @@ pub fn create_and_run(path: PathBuf) -> Result<()> {
 
         RegisterClassW(&wnd_class);
 
-        let title = format!("PDF Viewer - {}", path.file_name().unwrap_or_default().to_string_lossy());
+        let title = format!("{} - {}", title_prefix, path.file_name().unwrap_or_default().to_string_lossy());
         let mut title_u16: Vec<u16> = title.encode_utf16().collect();
         title_u16.push(0);
 
