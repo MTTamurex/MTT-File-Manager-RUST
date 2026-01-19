@@ -358,7 +358,7 @@ pub fn render_list_view(
                                 Color32::GRAY,
                             );
                         }
-                    } else if item.is_dir {
+                    } else if item.is_dir && !item.name.to_lowercase().ends_with(".zip") {
                         // folder: Windows native icon
                         if let Some(folder_icon) = ctx.folder_icon_texture {
                             ui.painter().image(
@@ -387,7 +387,7 @@ pub fn render_list_view(
                                 Color32::GRAY,
                             );
                         } else if let Some(file_icon) =
-                            ctx.item_icon_loader.get_or_load_icon(ui.ctx(), &item.path)
+                            ctx.item_icon_loader.get_or_load_icon(ui.ctx(), &item.path, false)
                         {
                             ui.painter().image(
                                 file_icon.id(),
@@ -746,8 +746,8 @@ pub fn render_list_view(
                                 Color32::GRAY,
                             );
                         }
-                    } else if item.is_dir {
-                        // folder: Windows native icon
+                    } else if item.is_dir && !item.name.to_lowercase().ends_with(".zip") {
+                        // folder: Windows native icon (exclude ZIP files which have is_dir=true)
                         if let Some(folder_icon) = ctx.folder_icon_texture {
                             ui.painter().image(
                                 folder_icon.id(),
@@ -765,9 +765,9 @@ pub fn render_list_view(
                             );
                         }
                     } else {
-                        // File: load native Windows icon using IconLoader (same as grid view)
+                        // File (or ZIP archive): load native Windows icon using IconLoader
                         if let Some(file_icon) =
-                            ctx.item_icon_loader.get_or_load_icon(ui.ctx(), &item.path)
+                            ctx.item_icon_loader.get_or_load_icon(ui.ctx(), &item.path, false)
                         {
                             ui.painter().image(
                                 file_icon.id(),
@@ -1013,6 +1013,10 @@ pub fn render_list_view(
 
 /// Helper function to get file type string
 fn get_file_type_string(item: &FileEntry) -> String {
+    // Check for Zip manually because is_dir might be true
+    if item.name.to_lowercase().ends_with(".zip") {
+        return "Arquivo ZIP".to_string();
+    }
     if item.is_dir {
         return "Pasta".to_string();
     }

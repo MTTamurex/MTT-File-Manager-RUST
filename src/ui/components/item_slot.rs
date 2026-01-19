@@ -58,7 +58,7 @@ pub fn render_item_slot<O: ItemSlotOperations>(
 ) {
     if let Some(drive_info) = &ctx.item.drive_info {
         render_drive_slot(ui, ctx, drive_info);
-    } else if ctx.item.is_dir {
+    } else if ctx.item.is_dir && !ctx.item.name.to_lowercase().ends_with(".zip") {
         render_directory_slot(ui, ctx, ops);
     } else {
         render_file_slot(ui, ctx, ops);
@@ -277,8 +277,49 @@ fn render_directory_slot<O: ItemSlotOperations>(
         // Força repaint para animação contínua
         ui.ctx().request_repaint();
     } else {
-        // Se não tem preview e não está carregando, dispara o carregamento (exceto na Lixeira)
-        if !ctx.is_recycle_bin_view {
+        // Se não tem preview e não está carregando
+        let is_virtual_path = ctx.is_recycle_bin_view || crate::infrastructure::windows::shell_folder::is_shell_navigation_path(&item.path);
+        
+        if is_virtual_path {
+            // NA LIXEIRA ou ZIP (Paths Virtuais)
+            // Use System Folder Icon for these virtual folders
+            ctx.icon_loader.ensure_folder_icon(ui.ctx());
+            if let Some(sys_icon) = ctx.icon_loader.folder_icon() {
+                let icon_size = folder_w.min(folder_h);
+                let icon_rect = egui::Rect::from_center_size(
+                    folder_rect.center(),
+                    egui::vec2(icon_size, icon_size),
+                );
+                
+                ui.put(
+                    icon_rect,
+                    egui::Image::new(sys_icon)
+                        .fit_to_original_size(1.0)
+                        .max_size(egui::vec2(icon_size, icon_size))
+                );
+            } else if let Some(icon) = ctx.icon_loader.get_or_load_icon(ui.ctx(), &item.path, true) {
+                // Fallback
+                let icon_size = folder_w.min(folder_h);
+                let icon_rect = egui::Rect::from_center_size(
+                    folder_rect.center(),
+                    egui::vec2(icon_size, icon_size),
+                );
+                
+                ui.put(
+                    icon_rect,
+                    egui::Image::new(&icon)
+                        .max_size(egui::vec2(icon_size, icon_size))
+                );
+            } else {
+                // Final Fallback
+                crate::ui::components::item_slot::draw_custom_folder(
+                    ui.painter(),
+                    folder_rect,
+                    None,
+                );
+            }
+        } else {
+            // Pasta normal: dispara carregamento de preview
             ops.request_folder_preview_load(item.path.clone());
 
             // Fallback temporário: mostra pasta customizada enquanto não iniciou loading
@@ -289,46 +330,6 @@ fn render_directory_slot<O: ItemSlotOperations>(
                     .as_ref()
                     .and_then(|p| ctx.texture_cache.get(p)),
             );
-        } else {
-            // NA LIXEIRA: Forçamos o ícone de pasta do sistema para todos os diretórios
-            // Motivo: Os paths são virtuais (ex: "C:\folder") ou físicos renomeados ($R...)
-            // que o Windows Shell muitas vezes retorna como um ícone genérico de arquivo, não de pasta.
-            // O PreviewPanel já faz isso (usa folder_icon direto).
-            if let Some(sys_icon) = ctx.icon_loader.folder_icon() {
-                let icon_size = folder_w.min(folder_h);
-                let icon_rect = egui::Rect::from_center_size(
-                    folder_rect.center(),
-                    egui::vec2(icon_size, icon_size),
-                );
-
-                ui.painter().image(
-                    sys_icon.id(),
-                    icon_rect,
-                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
-                );
-            } else if let Some(icon) = ctx.icon_loader.get_or_load_icon(ui.ctx(), &item.path) {
-                // Fallback para carregamento específico se o system folder icon falhar (raro)
-                let icon_size = folder_w.min(folder_h);
-                let icon_rect = egui::Rect::from_center_size(
-                    folder_rect.center(),
-                    egui::vec2(icon_size, icon_size),
-                );
-
-                ui.painter().image(
-                    icon.id(),
-                    icon_rect,
-                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
-                );
-            } else {
-                // Fallback final: pasta customizada (amarela desenhada)
-                crate::ui::components::item_slot::draw_custom_folder(
-                    ui.painter(),
-                    folder_rect,
-                    None,
-                );
-            }
         }
     }
 
@@ -408,7 +409,7 @@ fn render_file_slot<O: ItemSlotOperations>(
 
     // Carrega ícone (sempre, servirá como fallback)
     // Na Lixeira, usa get_or_load_icon que agora suporta paths virtuais com extensão
-    let file_icon = ctx.icon_loader.get_or_load_icon(ui.ctx(), &path_clone);
+    let file_icon = ctx.icon_loader.get_or_load_icon(ui.ctx(), &path_clone, false);
 
     // GEOMETRIA - reduz tamanho para caber na area com margem
     let available_h = ui.available_height();

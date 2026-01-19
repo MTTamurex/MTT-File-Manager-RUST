@@ -64,9 +64,18 @@ pub fn render_preview_panel(
                 } else {
                     ui.label(egui::RichText::new("🗑").size(icon_size * 0.6));
                 }
-            } else if file.is_dir {
-                // PASTA
+
+            } else if file.is_dir && !file.name.to_lowercase().ends_with(".zip") {
+                // PASTA (Exceto Zip)
                 if is_recycle_bin_view {
+                    item_icon_loader.ensure_folder_icon(ui.ctx());
+                    if let Some(icon) = item_icon_loader.folder_icon() {
+                        ui.add(egui::Image::new(icon).max_size(egui::vec2(icon_size, icon_size)));
+                    } else {
+                        ui.label(egui::RichText::new("📁").size(icon_size * 0.6));
+                    }
+                } else if crate::infrastructure::windows::shell_folder::is_shell_navigation_path(&file.path) {
+                    // ZIP / SHELL PATH: Use System Folder Icon (No Preview)
                     item_icon_loader.ensure_folder_icon(ui.ctx());
                     if let Some(icon) = item_icon_loader.folder_icon() {
                         ui.add(egui::Image::new(icon).max_size(egui::vec2(icon_size, icon_size)));
@@ -79,6 +88,7 @@ pub fn render_preview_panel(
                         .0;
 
                     if let Some(tex) = folder_preview_peek.as_ref() {
+                        // ... (Render Preview as before)
                         let tex_size = tex.size_vec2();
                         let aspect = tex_size.x / tex_size.y;
 
@@ -123,8 +133,13 @@ pub fn render_preview_panel(
                     }
                 }
             } else {
+                // IS FILE (or Zip Archive)
                 use crate::domain::file_entry::IconSize;
-                if let Some(icon) = item_icon_loader.get_or_load_icon_sized(ui.ctx(), &file.path, IconSize::Jumbo) {
+                // Force is_folder=false for Zip archives to get the Zip Icon
+                let is_zip_archive = file.name.to_lowercase().ends_with(".zip");
+                let treat_as_folder = file.is_dir && !is_zip_archive;
+                
+                if let Some(icon) = item_icon_loader.get_or_load_icon_sized(ui.ctx(), &file.path, IconSize::Jumbo, treat_as_folder) {
                     ui.add(
                         egui::Image::new(&icon)
                             .max_size(egui::vec2(icon_size * 0.8, icon_size * 0.8)),
@@ -784,7 +799,11 @@ pub fn render_preview_panel(
             if let Some(drive) = &file.drive_info {
                 add_detail(ui, "Tipo:", format!("{:?}", drive.drive_type));
             } else if file.is_dir {
-                add_detail(ui, "Tipo:", "Pasta de Arquivos".to_string());
+                if file.name.to_lowercase().ends_with(".zip") {
+                     add_detail(ui, "Tipo:", "Arquivo ZIP".to_string());
+                } else {
+                     add_detail(ui, "Tipo:", "Pasta de Arquivos".to_string());
+                }
             } else {
                 let ext = file
                     .path

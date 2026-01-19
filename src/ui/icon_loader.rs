@@ -66,8 +66,9 @@ impl IconLoader {
         &mut self,
         ctx: &egui::Context,
         path: &Path,
+        is_folder: bool,
     ) -> Option<egui::TextureHandle> {
-        self.get_or_load_icon_sized(ctx, path, IconSize::Large)
+        self.get_or_load_icon_sized(ctx, path, IconSize::Large, is_folder)
     }
 
     /// Gets or loads a Windows shell icon for a file path with a specific size
@@ -77,6 +78,7 @@ impl IconLoader {
         ctx: &egui::Context,
         path: &Path,
         size: IconSize,
+        is_folder: bool,
     ) -> Option<egui::TextureHandle> {
         let cache_key = format!("{}_{:?}", path.to_string_lossy(), size);
 
@@ -90,21 +92,55 @@ impl IconLoader {
         // 
         // Strategy: Use extension-based icon lookup first (fast, no I/O).
         // Only fall back to path-based if no extension exists OR if it is an executable/shortcut.
-        let icon_result = if let Some(ext) = path.extension() {
+        
+        let icon_result = if is_folder {
+            // Folders (including virtual ones in Zips) can use the generic folder icon logic
+            // passing checks for "folder" extension or type
+            windows::get_file_type_icon(true, "", size)
+        } else if let Some(ext) = path.extension() {
             let ext_str = ext.to_string_lossy().to_lowercase();
             
             // EXCEPTION: Executables and shortcuts (.exe, .lnk, .ico, etc.) 
             // ALWAYS use path-based extraction to show their unique embedded icons.
             if matches!(ext_str.as_str(), "exe" | "lnk" | "ico" | "cur" | "ani") {
-                windows::extract_file_icon_by_path(path, IconSize::Jumbo)
+                // Check if path exists before trying to extract from file.
+                // If it's a virtual path (e.g. inside Zip), this would fail/crash/freeze.
+                if path.exists() {
+                    windows::extract_file_icon_by_path(path, IconSize::Jumbo)
+                } else {
+                    // Fallback for virtual exe/lnk: use generic icon
+                     windows::get_file_type_icon(false, &ext_str, size)
+                }
             } else {
                 // Extension-based lookup is FAST (uses registry, no file access)
                 windows::get_file_type_icon(false, &ext_str, size)
             }
         } else {
-            // No extension - try path-based as last resort
-            // This is rare (most files have extensions) and acceptable
-            windows::extract_file_icon_by_path(path, IconSize::Jumbo)
+            // No extension - try path-based if exists
+             // MANUAL EXTENSION PARSING FALLBACK
+             // If Path::extension() failed (e.g. trailing slash on directory-like path),
+             // try to find extension manually from string if we expect a file.
+             let path_str = path.to_string_lossy();
+             let manual_ext = if let Some(idx) = path_str.rfind('.') {
+                 let candidate = &path_str[idx+1..];
+                 // Basic sanity check: extension shouldn't contain separators
+                 if !candidate.contains('/') && !candidate.contains('\\') {
+                     Some(candidate.to_lowercase())
+                 } else {
+                     None
+                 }
+             } else {
+                 None
+             };
+
+             if let Some(ext) = manual_ext {
+                 windows::get_file_type_icon(false, &ext, size)
+             } else if path.exists() {
+                windows::extract_file_icon_by_path(path, IconSize::Jumbo)
+             } else {
+                 // Virtual file with no extension -> Generic File Icon
+                 windows::get_file_type_icon(false, "", size)
+             }
         };
 
         if let Ok((pixels, width, height)) = icon_result {
