@@ -19,7 +19,9 @@ impl ImageViewerApp {
         if let Some(selected) = &self.selected_file {
             let path = selected.path.clone();
             // Validate path exists before trying to load thumbnail
-            if !path.exists() {
+            // Skip this check for virtual paths (files inside ZIP archives)
+            let is_virtual_path = crate::infrastructure::windows::shell_folder::is_shell_navigation_path(&path);
+            if !is_virtual_path && !path.exists() {
                 self.selected_file = None;
                 self.update_video_visibility(); // Sync visibility after clearing selection
                 return;

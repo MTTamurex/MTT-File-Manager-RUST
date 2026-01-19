@@ -6,6 +6,10 @@ use crate::infrastructure::windows;
 
 /// Gets file type string for display
 pub fn get_file_type_string(item: &FileEntry) -> String {
+    // Check for ZIP manually because is_dir might be true
+    if item.name.to_lowercase().ends_with(".zip") {
+        return "Arquivo ZIP".to_string();
+    }
     if item.is_dir {
         "Pasta".to_string()
     } else if let Some(ext) = item.path.extension() {
