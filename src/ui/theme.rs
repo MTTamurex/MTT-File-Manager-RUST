@@ -20,7 +20,11 @@ pub const COLOR_SELECTION: Color32 = Color32::from_rgb(200, 220, 240);
 pub const COLOR_SELECTION_TEXT: Color32 = Color32::from_rgb(0, 50, 100);
 
 pub fn color_selection_hover() -> Color32 {
-    Color32::from_rgba_unmultiplied(200, 220, 240, 50)
+    // Feedback: "Ainda está branco" (com transparência).
+    // Solução Definitiva: Cor SÓLIDA (Sem transparência) para garantir o tom.
+    // Windows 10/11 Standard List View Hover: R=229, G=243, B=255.
+    // É um azul muito claro, mas por ser sólido, não se mistura com o fundo.
+    Color32::from_rgb(229, 243, 255)
 }
 pub const COLOR_ACCENT: Color32 = Color32::from_rgb(0, 120, 215);
 
