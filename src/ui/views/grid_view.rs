@@ -134,36 +134,30 @@ pub fn render_grid_view(
             *secondary_clicked_item = Some(index);
         }
 
-        // --- VISUAL FEEDBACK: SELECTION vs FOCUS ---
+        // --- VISUAL FEEDBACK: BORDER-ONLY (MODERN DESIGN) ---
         let is_selected = ctx.multi_selection.contains(&item.path);
+        let is_hovered = response.hovered();
         let is_focused = ctx.selected_item == Some(index);
 
-        // 1. Selection Highlight (Background)
-        if is_selected {
-            ui.painter().rect_filled(
-                rect,
-                0.0,
-                crate::ui::theme::COLOR_SELECTION,
-            );
-        } else if response.hovered() {
-             ui.painter().rect_filled(
-                rect,
-                0.0,
-                crate::ui::theme::color_selection_hover(),
-            );
-        }
+        let rounding = 4.0;
+        let accent_color = crate::ui::theme::COLOR_ACCENT;
 
-        // 2. Focus Highlight (Subtle Border)
-        if is_focused {
-            let focus_color = if is_selected {
-                Color32::WHITE.gamma_multiply(0.5)
-            } else {
-                crate::ui::theme::COLOR_SELECTION
-            };
+        if is_selected {
+            // Selected: Bold primary border
+            let stroke_width = if is_hovered { 2.5 } else { 2.0 };
             ui.painter().rect_stroke(
                 rect,
-                0.0,
-                egui::Stroke::new(1.0, focus_color),
+                rounding,
+                egui::Stroke::new(stroke_width, accent_color),
+                egui::StrokeKind::Inside,
+            );
+        } else if is_hovered || is_focused {
+            // Hovered or Focused: Thin subtle border
+            let hover_color = accent_color.gamma_multiply(0.35); // ~35% alpha
+            ui.painter().rect_stroke(
+                rect,
+                rounding,
+                egui::Stroke::new(1.0, hover_color),
                 egui::StrokeKind::Inside,
             );
         }
