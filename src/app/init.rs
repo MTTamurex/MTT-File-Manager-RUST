@@ -380,6 +380,9 @@ impl ImageViewerApp {
             // PERFORMANCE: Reusable buffers for grid rendering
             pending_ops: crate::ui::views::grid_view::PendingOperations::new(),
 
+            // Scroll offset for manual grid virtualization
+            scroll_offset_y: 0.0,
+
             // FILE OPERATION WORKER
             file_op_sender: file_op_tx,
             file_op_res_receiver: file_op_res_rx,

@@ -46,6 +46,8 @@ pub struct TabState {
     pub selected_metadata: Option<(PathBuf, crate::infrastructure::windows::MediaMetadata)>,
     /// Selected animated GIF for local preview (native)
     pub selected_gif: Option<crate::ui::components::media_preview::GifPlayer>,
+    /// Scroll offset for grid view (manual virtualization)
+    pub scroll_offset_y: f32,
 }
 
 impl TabState {
@@ -68,6 +70,7 @@ impl TabState {
             selected_thumbnail: None,
             selected_metadata: None,
             selected_gif: None,
+            scroll_offset_y: 0.0,
         }
     }
 
@@ -95,6 +98,7 @@ impl TabState {
             selected_thumbnail: None,
             selected_metadata: None,
             selected_gif: None,
+            scroll_offset_y: 0.0,
         }
     }
 
@@ -112,6 +116,7 @@ impl TabState {
         self.path_input = new_path.to_string();
         self.is_computer_view = new_path == "Este Computador";
         self.is_recycle_bin_view = new_path == "Lixeira";
+        self.scroll_offset_y = 0.0;
 
         // Update title
         if self.is_computer_view {
@@ -151,6 +156,7 @@ impl TabState {
             self.path_input = path.clone();
             self.is_computer_view = path == "Este Computador";
             self.is_recycle_bin_view = path == "Lixeira";
+            self.scroll_offset_y = 0.0;
 
             if self.is_computer_view {
                 self.title = "Este Computador".to_string();
