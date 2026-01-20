@@ -191,103 +191,170 @@ pub fn render_list_view(
     let mut secondary_clicked_item = None;
     let mut empty_area_secondary_click = false;
 
-    // --- VIRTUALIZATION WITH EGUI SCROLLAREA ---
+    // --- MANUAL VIRTUALIZATION START ---
     let total_content_height = total_rows as f32 * row_height;
-    
-    // ScrollArea setup
-    let mut scroll_area = egui::ScrollArea::vertical()
-        .id_salt("list_view_scroll")
-        .max_height(ui.available_height())
-        .auto_shrink([false, false]);
+    let viewport_rect = ui.available_rect_before_wrap();
+    let viewport_h = viewport_rect.height();
 
-    // CONDITIONAL SCROLL UPDATE
-    if ctx.scroll_to_selected {
-        scroll_area = scroll_area.vertical_scroll_offset(ctx.scroll_offset_y);
+    // 1. Handle mouse wheel scroll (Manual Source of Truth)
+    let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
+    if scroll_delta != 0.0 {
+        *ctx.mut_scroll_offset_y -= scroll_delta * 5.0; 
     }
 
-    let output = scroll_area.show(ui, |ui| {
-        // Force the content size so the scrollbar appears correctly
-        ui.set_min_height(total_content_height);
-
-        // Use the CURRENT known offset for virtualization
-        let current_scroll = ctx.scroll_offset_y;
-        
-        let viewport_rect = ui.clip_rect();
-        let viewport_h = viewport_rect.height();
-
-        if ctx.is_computer_view {
-             // Computer view logic (Grouped + Virtualized within ScrollArea)
-             let mut current_y = 0.0;
-             let mut local = Vec::new();
-             let mut network = Vec::new();
-     
-             for (i, item) in ctx.items.iter().enumerate() {
-                 let is_remote = item.drive_info.as_ref().map_or(false, |di| {
-                     di.drive_type == crate::infrastructure::windows::DriveType::Remote
-                 });
-                 if is_remote { network.push((i, item)); } else { local.push((i, item)); }
-             }
-     
-             let mut render_section = |ui: &mut Ui, title: &str, items: Vec<(usize, &FileEntry)>| {
-                 if items.is_empty() { return; }
-     
-                 let header_h = 30.0;
-                 let header_rect = Rect::from_min_size(
-                     ui.min_rect().min + egui::vec2(0.0, current_y), 
-                     egui::vec2(available_w, header_h)
-                 );
-                 
-                 // Render header if visible
-                 if header_rect.intersects(viewport_rect.translate(egui::vec2(0.0, current_scroll))) {
-                    let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
-                    render_section_header(&mut header_ui, title);
-                 }
-                 current_y += header_h;
-     
-                 for (i, item) in items {
-                     let item_rect = Rect::from_min_size(
-                         ui.min_rect().min + egui::vec2(0.0, current_y), 
-                         egui::vec2(available_w, row_height)
-                     );
-                     
-                     // Quick Culling
-                     let is_visible = current_y + row_height >= current_scroll && current_y <= current_scroll + viewport_h;
-                     if is_visible {
-                        render_list_item(ui, i, item, item_rect, ctx, ops, available_rect, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item, w_name, w_date, w_type, w_size, w_status, row_height);
-                     }
-                     current_y += row_height;
-                 }
-                 current_y += 10.0; // Spacing
-             };
-     
-             if !local.is_empty() { render_section(ui, "Discos locais", local); }
-             if !network.is_empty() { render_section(ui, "Unidades de rede", network); }
-
-        } else {
-            // Standard List Virtualization
-            let overscan = 3;
-            let vis_min_row = (current_scroll / row_height).floor() as usize;
-            let vis_max_row = ((current_scroll + viewport_h) / row_height).ceil() as usize;
-            
-            let start_row = vis_min_row.saturating_sub(overscan);
-            let end_row = (vis_max_row + overscan).min(total_rows);
+    // 2. Clamp scroll offset
+    let max_scroll = (total_content_height - viewport_h).max(0.0);
+    *ctx.mut_scroll_offset_y = ctx.mut_scroll_offset_y.clamp(0.0, max_scroll);
     
-            for i in start_row..end_row {
-                let item = &ctx.items[i];
-                let item_y = i as f32 * row_height;
+    // 2.5 KEYBOARD SCROLL SYNC: Ensure selected item is visible
+    if ctx.scroll_to_selected {
+        if let Some(selected_idx) = ctx.selected_item {
+            if selected_idx < total_rows {
+                let item_top = selected_idx as f32 * row_height;
+                let item_bottom = item_top + row_height;
                 
-                let item_rect = Rect::from_min_size(
-                    ui.min_rect().min + egui::vec2(0.0, item_y),
-                    egui::vec2(available_w, row_height)
-                );
+                let current_scroll_check = *ctx.mut_scroll_offset_y;
                 
-                render_list_item(ui, i, item, item_rect, ctx, ops, available_rect, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item, w_name, w_date, w_type, w_size, w_status, row_height);
+                // Scroll up if item is above viewport
+                if item_top < current_scroll_check {
+                    *ctx.mut_scroll_offset_y = item_top.max(0.0);
+                }
+                // Scroll down if item is below viewport
+                else if item_bottom > current_scroll_check + viewport_h {
+                    *ctx.mut_scroll_offset_y = (item_bottom - viewport_h).clamp(0.0, max_scroll);
+                }
             }
         }
-    });
+    }
+    
+    let current_scroll = *ctx.mut_scroll_offset_y;
 
-    // Update state from ScrollArea output
-    *ctx.mut_scroll_offset_y = output.state.offset.y;
+    // 3. Render Virtual List
+    ui.allocate_rect(viewport_rect, Sense::hover());
+    let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(viewport_rect));
+    child_ui.set_clip_rect(viewport_rect);
+
+    let content_min = viewport_rect.min;
+
+    if ctx.is_computer_view {
+        // Grouped view for "Este Computador" (Manual Scroll)
+        let mut local = Vec::new();
+        let mut network = Vec::new();
+
+        for (i, item) in ctx.items.iter().enumerate() {
+            let is_remote = item.drive_info.as_ref().map_or(false, |di| {
+                di.drive_type == crate::infrastructure::windows::DriveType::Remote
+            });
+            if is_remote {
+                network.push((i, item));
+            } else {
+                local.push((i, item));
+            }
+        }
+
+        let mut current_y = content_min.y - current_scroll;
+
+        if !local.is_empty() {
+            let header_h = 30.0;
+            let header_rect = Rect::from_min_size(egui::pos2(content_min.x, current_y), egui::vec2(available_w, header_h));
+            if child_ui.is_rect_visible(header_rect) {
+                let mut header_ui = child_ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
+                render_section_header(&mut header_ui, "Discos locais");
+            }
+            current_y += header_h;
+
+            for (i, item) in local {
+                let item_rect = Rect::from_min_size(egui::pos2(content_min.x, current_y), egui::vec2(available_w, row_height));
+                if child_ui.is_rect_visible(item_rect) {
+                    render_list_item(&mut child_ui, i, item, item_rect, ctx, ops, available_rect, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item, w_name, w_date, w_type, w_size, w_status, row_height);
+                }
+                current_y += row_height;
+            }
+            current_y += 10.0;
+        }
+
+        if !network.is_empty() {
+            let header_h = 30.0;
+            let header_rect = Rect::from_min_size(egui::pos2(content_min.x, current_y), egui::vec2(available_w, header_h));
+            if child_ui.is_rect_visible(header_rect) {
+                let mut header_ui = child_ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
+                render_section_header(&mut header_ui, "Unidades de rede");
+            }
+            current_y += header_h;
+
+            for (i, item) in network {
+                let item_rect = Rect::from_min_size(egui::pos2(content_min.x, current_y), egui::vec2(available_w, row_height));
+                if child_ui.is_rect_visible(item_rect) {
+                    render_list_item(&mut child_ui, i, item, item_rect, ctx, ops, available_rect, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item, w_name, w_date, w_type, w_size, w_status, row_height);
+                }
+                current_y += row_height;
+            }
+        }
+    } else {
+        // Regular virtualized list
+        let overscan = 3;
+        let vis_min_row = ((current_scroll / row_height).floor() as usize).saturating_sub(overscan);
+        let vis_max_row = (((current_scroll + viewport_h) / row_height).ceil() as usize) + overscan;
+        let vis_max_row = vis_max_row.min(total_rows);
+
+        for i in vis_min_row..vis_max_row {
+            let item = &ctx.items[i];
+            let item_rect = Rect::from_min_size(
+                egui::pos2(content_min.x, content_min.y + (i as f32 * row_height) - current_scroll),
+                egui::vec2(available_w, row_height)
+            );
+            
+            render_list_item(&mut child_ui, i, item, item_rect, ctx, ops, available_rect, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item, w_name, w_date, w_type, w_size, w_status, row_height);
+        }
+    }
+
+    // 4. Custom Scrollbar with Track-Click
+    if total_content_height > viewport_h {
+        let scroll_bar_w = 4.0;
+        let scroll_bar_rect = Rect::from_min_max(
+            egui::pos2(viewport_rect.right() - scroll_bar_w - 2.0, viewport_rect.top()),
+            egui::pos2(viewport_rect.right() - 2.0, viewport_rect.bottom())
+        );
+
+        let handle_h = (viewport_h / total_content_height * viewport_h).max(30.0);
+        let handle_top = current_scroll / max_scroll * (viewport_h - handle_h);
+        let handle_rect = Rect::from_min_size(
+            egui::pos2(scroll_bar_rect.left(), viewport_rect.top() + handle_top),
+            egui::vec2(scroll_bar_w, handle_h)
+        );
+
+        // Interaction: click_and_drag for both track-click and handle drag
+        let scroll_id = ui.id().with("list_scrollbar");
+        let response = ui.interact(scroll_bar_rect, scroll_id, Sense::click_and_drag());
+        
+        if response.clicked() {
+            // TRACK-CLICK: Jump to clicked position
+            if let Some(click_pos) = ui.input(|i| i.pointer.interact_pos()) {
+                let relative_y = click_pos.y - scroll_bar_rect.top();
+                let target_handle_top = relative_y - (handle_h / 2.0);
+                let scroll_ratio = target_handle_top / (viewport_h - handle_h);
+                *ctx.mut_scroll_offset_y = (scroll_ratio * max_scroll).clamp(0.0, max_scroll);
+            }
+        } else if response.dragged() {
+            let delta = response.drag_delta().y;
+            let scroll_per_pixel = max_scroll / (viewport_h - handle_h);
+            *ctx.mut_scroll_offset_y += delta * scroll_per_pixel;
+            *ctx.mut_scroll_offset_y = ctx.mut_scroll_offset_y.clamp(0.0, max_scroll);
+        }
+
+        // Draw track
+        ui.painter().rect_filled(scroll_bar_rect, 0.0, Color32::from_black_alpha(10));
+        // Draw handle
+        let handle_color = if response.dragged() {
+            Color32::from_gray(100)
+        } else if response.hovered() {
+            Color32::from_gray(150)
+        } else {
+            Color32::from_gray(200)
+        };
+        ui.painter().rect_filled(handle_rect, 2.0, handle_color);
+    }
+    // --- MANUAL VIRTUALIZATION END ---
 
     // Fallback global: detect secondary click on empty area if no item was clicked
     if secondary_clicked_item.is_none() && ui.input(|i| i.pointer.secondary_clicked()) {
