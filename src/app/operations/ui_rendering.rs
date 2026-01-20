@@ -21,29 +21,37 @@ impl ImageViewerApp {
     // --- DETALHES (LIST VIEW) ---
     pub fn render_list_view(&mut self, ui: &mut egui::Ui) {
         // Keyboard navigation for list view (ONLY when not renaming)
-        // Throttle: 50ms between navigations to prevent scroll desync when holding keys
-        if self.renaming_state.is_none()
-            && self.last_keyboard_nav.elapsed() >= Duration::from_millis(50)
-        {
+        if self.renaming_state.is_none() {
             let current_index = self.items.iter().position(|x| {
                 self.selected_file
                     .as_ref()
                     .map_or(false, |f| f.path == x.path)
             });
 
+            let mut pending_delta: i32 = 0;
+            let mut page_action: Option<bool> = None; // true = PageDown, false = PageUp
+
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) { pending_delta += 1; }
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) { pending_delta -= 1; }
+            if ui.input(|i| i.key_pressed(egui::Key::PageDown)) { page_action = Some(true); }
+            if ui.input(|i| i.key_pressed(egui::Key::PageUp)) { page_action = Some(false); }
+
+            let row_height = 24.0;
+            let header_h = 24.0; // Header + Separator
+            let viewport_h = (ui.available_height() - header_h).max(0.0);
+            let visible_count = (viewport_h / row_height).floor() as usize;
+
             let mut new_index = None;
-            if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
-                new_index = current_index.map(|idx| idx + 1).or(Some(0));
-            } else if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
-                new_index = current_index.map(|idx| idx.saturating_sub(1));
-            } else if ui.input(|i| i.key_pressed(egui::Key::PageDown)) {
-                let viewport_h = ui.available_height();
-                let visible_count = (viewport_h / 24.0).floor() as usize;
-                new_index = current_index.map(|idx| idx + visible_count).or(Some(visible_count));
-            } else if ui.input(|i| i.key_pressed(egui::Key::PageUp)) {
-                let viewport_h = ui.available_height();
-                let visible_count = (viewport_h / 24.0).floor() as usize;
-                new_index = current_index.map(|idx| idx.saturating_sub(visible_count));
+            if let Some(is_down) = page_action {
+                if is_down {
+                    new_index = Some(current_index.map(|idx| (idx + visible_count).min(self.items.len().saturating_sub(1))).unwrap_or(visible_count));
+                } else {
+                    // PageUp based on viewport, not selected_index
+                    let first_visible_index = (self.scroll_offset_y / row_height).floor() as usize;
+                    new_index = Some(first_visible_index.saturating_sub(visible_count));
+                }
+            } else if pending_delta != 0 {
+                new_index = Some(current_index.map(|idx| (idx as i32 + pending_delta).clamp(0, self.items.len().saturating_sub(1) as i32) as usize).unwrap_or(0));
             }
 
             if let Some(idx) = new_index {
@@ -55,22 +63,35 @@ impl ImageViewerApp {
                     self.selected_file = Some(item.clone());
                     self.selected_item = Some(clamped);
                     self.update_selected_thumbnail();
-                    self.last_keyboard_nav = Instant::now(); // Reset throttle timer
+                    self.last_keyboard_nav = Instant::now();
                     
                     // --- SCROLL-AWARE LOGIC (LIST) ---
-                    let row_height = 24.0;
-                    let viewport_h = ui.available_height();
                     let selected_top = clamped as f32 * row_height;
                     let selected_bottom = selected_top + row_height;
 
-                    if selected_top < self.scroll_offset_y {
-                        self.scroll_offset_y = selected_top;
-                    } else if selected_bottom > self.scroll_offset_y + viewport_h {
-                        self.scroll_offset_y = selected_bottom - viewport_h;
+                    if let Some(is_down) = page_action {
+                        // PageUp/PageDown ALWAYS reposition viewport
+                        if is_down {
+                            // PageDown: Anchor to TOP
+                            self.scroll_offset_y = selected_top;
+                        } else {
+                            // PageUp: Anchor to TOP
+                            self.scroll_offset_y = selected_top;
+                        }
+                    } else {
+                        // Arrows: ONLY adjust scroll if outside viewport bounds
+                        // USANDO LIMITES ABSOLUTOS DO ITEM NO MESMO FRAME
+                        let viewport_top = self.scroll_offset_y;
+                        let viewport_bottom = self.scroll_offset_y + viewport_h;
+
+                        if selected_bottom > viewport_bottom {
+                            self.scroll_offset_y = selected_bottom - viewport_h;
+                        } else if selected_top < viewport_top {
+                            self.scroll_offset_y = selected_top;
+                        }
                     }
                     ui.ctx().request_repaint();
 
-                    // Trigger thumbnail load for sidebar preview
                     if !is_dir {
                         if !self.cache_manager.has_thumbnail(&item_path)
                             && !self.cache_manager.is_loading(&item_path)
@@ -343,33 +364,36 @@ impl ImageViewerApp {
             .max(1.0) as usize;
 
         // Keyboard navigation (ONLY when not renaming)
-        // Throttle: 50ms between navigations to prevent scroll desync when holding keys
-        if self.renaming_state.is_none()
-            && self.last_keyboard_nav.elapsed() >= Duration::from_millis(50)
-        {
+        if self.renaming_state.is_none() {
             let current_index = self.items.iter().position(|x| {
                 self.selected_file
                     .as_ref()
                     .map_or(false, |f| f.path == x.path)
             });
 
+            let mut pending_delta: i32 = 0;
+            let mut page_action: Option<bool> = None;
+
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowRight)) { pending_delta += 1; }
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowLeft)) { pending_delta -= 1; }
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) { pending_delta += cols as i32; }
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) { pending_delta -= cols as i32; }
+            if ui.input(|i| i.key_pressed(egui::Key::PageDown)) { page_action = Some(true); }
+            if ui.input(|i| i.key_pressed(egui::Key::PageUp)) { page_action = Some(false); }
+
+            let viewport_h = ui.available_height();
+            let visible_rows = (viewport_h / cell_h).floor() as usize;
+            let jump = visible_rows * cols;
+
             let mut new_index = None;
-            if ui.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
-                new_index = current_index.map(|idx| idx + 1).or(Some(0));
-            } else if ui.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
-                new_index = current_index.map(|idx| idx.saturating_sub(1));
-            } else if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
-                new_index = current_index.map(|idx| idx + cols).or(Some(0));
-            } else if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
-                new_index = current_index.map(|idx| idx.saturating_sub(cols));
-            } else if ui.input(|i| i.key_pressed(egui::Key::PageDown)) {
-                let viewport_h = ui.available_height();
-                let visible_rows = (viewport_h / cell_h).floor() as usize;
-                new_index = current_index.map(|idx| idx + (visible_rows * cols)).or(Some(visible_rows * cols));
-            } else if ui.input(|i| i.key_pressed(egui::Key::PageUp)) {
-                let viewport_h = ui.available_height();
-                let visible_rows = (viewport_h / cell_h).floor() as usize;
-                new_index = current_index.map(|idx| idx.saturating_sub(visible_rows * cols));
+            if let Some(is_down) = page_action {
+                if is_down {
+                    new_index = Some(current_index.map(|idx| (idx + jump).min(self.items.len().saturating_sub(1))).unwrap_or(jump));
+                } else {
+                    new_index = Some(current_index.map(|idx| idx.saturating_sub(jump)).unwrap_or(0));
+                }
+            } else if pending_delta != 0 {
+                new_index = Some(current_index.map(|idx| (idx as i32 + pending_delta).clamp(0, self.items.len().saturating_sub(1) as i32) as usize).unwrap_or(0));
             }
 
             if let Some(idx) = new_index {
@@ -378,18 +402,32 @@ impl ImageViewerApp {
                     self.selected_file = Some(item.clone());
                     self.selected_item = Some(clamped);
                     self.update_selected_thumbnail();
-                    self.last_keyboard_nav = Instant::now(); // Reset throttle timer
+                    self.last_keyboard_nav = Instant::now();
 
                     // --- SCROLL-AWARE LOGIC (GRID) ---
                     let row = clamped / cols;
                     let selected_top = row as f32 * cell_h + padding;
-                    let selected_bottom = selected_top + cell_h; // Use cell_h to include bottom padding/spacing
+                    let selected_bottom = selected_top + cell_h;
                     
-                    let viewport_h = ui.available_height();
-                    if selected_top < self.scroll_offset_y {
-                        self.scroll_offset_y = selected_top;
-                    } else if selected_bottom > self.scroll_offset_y + viewport_h {
-                        self.scroll_offset_y = selected_bottom - viewport_h;
+                    if let Some(is_down) = page_action {
+                        // PageUp/PageDown ALWAYS reposition viewport
+                        if is_down {
+                            // PageDown: Anchor to TOP
+                            self.scroll_offset_y = selected_top;
+                        } else {
+                            // PageUp: Anchor to BOTTOM
+                            self.scroll_offset_y = (selected_bottom - viewport_h).max(0.0);
+                        }
+                    } else {
+                        // Arrows: ONLY adjust scroll if outside viewport
+                        let visible_row_start = self.scroll_offset_y;
+                        let visible_row_end = self.scroll_offset_y + viewport_h;
+
+                        if selected_top < visible_row_start {
+                            self.scroll_offset_y = selected_top;
+                        } else if selected_bottom > visible_row_end {
+                            self.scroll_offset_y = selected_bottom - viewport_h;
+                        }
                     }
                     ui.ctx().request_repaint();
                 }
