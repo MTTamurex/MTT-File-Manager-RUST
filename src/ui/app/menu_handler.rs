@@ -51,7 +51,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 }
                 -6 | -34 => app.delete_with_shell_for_idx(item_idx),
                 -20 => {
-                    if let Some(path) = app.context_target_path(item_idx) {
+                    if let Some(path) = app.context_target_paths(item_idx).first().cloned() {
                         if path.is_dir() {
                             app.navigate_to(&path.to_string_lossy());
                         } else {
@@ -60,7 +60,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     }
                 }
                 -21 => {
-                    if let Some(path) = app.context_target_path(item_idx) {
+                    if let Some(path) = app.context_target_paths(item_idx).first().cloned() {
                         let target = if path.is_dir() {
                             path
                         } else {
@@ -82,12 +82,12 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     }
                 }
                 -24 => {
-                    if let Some(path) = app.context_target_path(item_idx) {
+                    if let Some(path) = app.context_target_paths(item_idx).first().cloned() {
                         app.copy_path_to_clipboard(&path);
                     }
                 }
                 -26 => {
-                    if let Some(path) = app.context_target_path(item_idx) {
+                    if let Some(path) = app.context_target_paths(item_idx).first().cloned() {
                         match app.create_shell_shortcut(&path) {
                             Ok(created) => {
                                 app.load_folder(false);

@@ -99,7 +99,7 @@ impl ImageViewerApp {
         self.selected_thumbnail = None;
         self.selected_metadata = None;
         self.search_query.clear();
-        self.context_menu.target_path = None;
+        self.context_menu.target_paths.clear();
         self.renaming_state = None;
         self.selected_gif = None;
 

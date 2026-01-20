@@ -26,7 +26,7 @@ unsafe impl Send for SendHwnd {}
 /// Requests that can be sent to the file operation worker.
 pub enum FileOperationRequest {
     Delete {
-        path: PathBuf,
+        paths: Vec<PathBuf>,
         hwnd: SendHwnd,
     },
     Rename {
@@ -56,8 +56,8 @@ pub enum FileOperationRequest {
 
 impl FileOperationRequest {
     // Helper to wrap HWND
-    pub fn delete(path: PathBuf, hwnd: HWND) -> Self {
-        Self::Delete { path, hwnd: SendHwnd(hwnd) }
+    pub fn delete(paths: Vec<PathBuf>, hwnd: HWND) -> Self {
+        Self::Delete { paths, hwnd: SendHwnd(hwnd) }
     }
     pub fn rename(path: PathBuf, new_name: String, hwnd: HWND) -> Self {
         Self::Rename { path, new_name, hwnd: SendHwnd(hwnd) }
@@ -84,8 +84,8 @@ pub fn start_file_operation_worker(
 
         while let Ok(request) = receiver.recv() {
             match request {
-                FileOperationRequest::Delete { path, hwnd } => {
-                    let _ = shell_operations::delete_item_with_shell(&path, hwnd.0);
+                FileOperationRequest::Delete { paths, hwnd } => {
+                    let _ = shell_operations::delete_items_with_shell(&paths, hwnd.0);
                     let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
                 }
                 FileOperationRequest::Rename { path, new_name, hwnd } => {

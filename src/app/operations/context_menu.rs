@@ -2,7 +2,7 @@
 //!
 //! This module handles population of the right-click context menu, merging native Shell items.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use eframe::egui;
 use crate::app::state::ImageViewerApp;
 
