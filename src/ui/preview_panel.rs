@@ -208,7 +208,7 @@ pub fn render_preview_panel(
                 .shrink_to_fit(),
         );
 
-        let mut local_action = None;
+        let local_action = None;
         let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
         
         let media_rect = image_resp.rect;
@@ -276,10 +276,13 @@ pub fn render_preview_panel(
         if let Some(gif_player) = selected_gif {
             // === NATIVE GIF AUTOPLAY (PRIORITY 1) ===
             gif_player.update(ui.ctx());
-            let texture = gif_player.current_texture();
-            let max_preview_width = ui.available_width() - 16.0;
-            let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
-            ui.add(egui::Image::new(texture).max_size(max_preview_size).shrink_to_fit());
+            if let Some(texture) = gif_player.texture() {
+                let max_preview_width = ui.available_width() - 16.0;
+                let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
+                ui.add(egui::Image::new(texture).max_size(max_preview_size).shrink_to_fit());
+            } else {
+                ui.add(egui::Spinner::new());
+            }
         } else if let Some(preview) = media_preview {
             if is_video {
                 // VIDEO PLAYER LOGIC (MPV)
