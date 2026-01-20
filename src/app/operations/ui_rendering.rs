@@ -114,6 +114,8 @@ impl ImageViewerApp {
             item_icon_loader: &mut self.item_icon_loader,
             deletion_date_cache: Some(&mut self.deletion_date_cache),
             failed_thumbnails: &self.cache_manager.failed_thumbnails,
+            scroll_offset_y: self.scroll_offset_y,
+            mut_scroll_offset_y: &mut self.scroll_offset_y,
         };
 
         // Usar uma abordagem diferente: coletar ações em vetores
