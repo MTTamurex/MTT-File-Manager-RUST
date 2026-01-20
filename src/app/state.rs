@@ -98,6 +98,8 @@ pub struct ImageViewerApp {
     pub last_metadata_path: Option<PathBuf>,
     pub show_preview_panel: bool,
     pub is_computer_view: bool,    // Se estamos na view "Este Computador"
+    pub computer_view_local_indices: Vec<usize>,  // Pre-computed indices for local drives (virtualization)
+    pub computer_view_network_indices: Vec<usize>, // Pre-computed indices for network drives (virtualization)
     pub is_recycle_bin_view: bool, // Se estamos na view da Lixeira
 
     pub total_items: usize,
@@ -199,8 +201,17 @@ pub struct ImageViewerApp {
 
     // Scroll offset for manual grid virtualization
     pub scroll_offset_y: f32,
+    
+    // Explicit scroll request for keyboard navigation
+    pub scroll_request: ScrollRequest,
 
     // FILE OPERATION WORKER
     pub file_op_sender: Sender<crate::workers::file_operation_worker::FileOperationRequest>,
     pub file_op_res_receiver: Receiver<crate::workers::file_operation_worker::FileOperationResult>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollRequest {
+    None,
+    EnsureVisible(usize),
 }

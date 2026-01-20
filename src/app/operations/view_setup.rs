@@ -142,6 +142,23 @@ impl ImageViewerApp {
 
         self.all_items = computer_items.clone();
         self.items = Arc::new(computer_items);
+        
+        // PRE-COMPUTE SECTION INDICES (O(n) once, not per frame)
+        // This enables O(visible_items) virtualization in Computer View
+        self.computer_view_local_indices.clear();
+        self.computer_view_network_indices.clear();
+        
+        for (i, item) in self.items.iter().enumerate() {
+            let is_remote = item.drive_info.as_ref().map_or(false, |di| {
+                di.drive_type == crate::infrastructure::windows::DriveType::Remote
+            });
+            if is_remote {
+                self.computer_view_network_indices.push(i);
+            } else {
+                self.computer_view_local_indices.push(i);
+            }
+        }
+        
         self.reset_selection_and_search();
         self.total_items = self.disks.len();
         self.is_loading_folder = false; // CRITICAL: Clear loading state for computer view
