@@ -39,6 +39,7 @@ pub struct GridViewContext<'a> {
     pub items: &'a [FileEntry],
     pub selected_item: Option<usize>,
     pub selected_file: Option<&'a FileEntry>,
+    pub multi_selection: &'a std::collections::HashSet<PathBuf>,
     pub thumbnail_size: f32,
     pub last_grid_cols: usize,
     pub renaming_state: Option<(usize, String)>,
@@ -172,8 +173,8 @@ pub fn render_grid_view(
                                     secondary_clicked_item = Some(index);
                                 }
 
-                                if ctx.selected_item == Some(index) {
-                                    if ctx.scroll_to_selected {
+                            if ctx.multi_selection.contains(&item.path) {
+                                if ctx.selected_item == Some(index) && ctx.scroll_to_selected {
                                         ui.scroll_to_rect(item_rect, Some(egui::Align::Center));
                                     }
                                     ui.painter().rect_filled(
@@ -315,8 +316,8 @@ pub fn render_grid_view(
                                 secondary_clicked_item = Some(index);
                             }
 
-                            if ctx.selected_item == Some(index) {
-                                if ctx.scroll_to_selected {
+                            if ctx.multi_selection.contains(&item.path) {
+                                if ctx.selected_item == Some(index) && ctx.scroll_to_selected {
                                     ui.scroll_to_rect(rect, Some(egui::Align::Center));
                                 }
                                 ui.painter().rect_filled(

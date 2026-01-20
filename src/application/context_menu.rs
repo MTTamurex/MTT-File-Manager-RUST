@@ -137,7 +137,7 @@ pub struct ContextMenuState {
     pub position: egui::Pos2,
     pub right_bound: f32,
     pub item_index: Option<usize>,
-    pub target_path: Option<PathBuf>,
+    pub target_paths: Vec<PathBuf>,
     pub is_empty_area: bool,
 
     /// Dynamic items extracted from Shell or built for empty area
@@ -162,7 +162,7 @@ impl Default for ContextMenuState {
             position: egui::Pos2::ZERO,
             right_bound: f32::MAX, // Default to no restriction
             item_index: None,
-            target_path: None,
+            target_paths: Vec::new(),
             is_empty_area: false,
             items: Vec::new(),
             selected_command_id: None,
@@ -184,14 +184,14 @@ impl ContextMenuState {
         position: egui::Pos2,
         right_bound: f32,
         item_index: Option<usize>,
-        target_path: Option<PathBuf>,
+        target_paths: Vec<PathBuf>,
         is_empty_area: bool,
     ) {
         self.is_open = true;
         self.position = position;
         self.right_bound = right_bound;
         self.item_index = item_index;
-        self.target_path = target_path;
+        self.target_paths = target_paths;
         self.is_empty_area = is_empty_area;
     }
 
@@ -199,7 +199,7 @@ impl ContextMenuState {
     pub fn close(&mut self) {
         self.is_open = false;
         self.item_index = None;
-        self.target_path = None;
+        self.target_paths.clear();
         self.is_empty_area = false;
         self.items.clear();
         self.selected_command_id = None;
@@ -225,7 +225,7 @@ impl std::fmt::Debug for ContextMenuState {
             .field("position", &self.position)
             .field("right_bound", &self.right_bound)
             .field("item_index", &self.item_index)
-            .field("target_path", &self.target_path)
+            .field("target_paths", &self.target_paths)
             .field("is_empty_area", &self.is_empty_area)
             .field("items_count", &self.items.len())
             .field("selected_command_id", &self.selected_command_id)

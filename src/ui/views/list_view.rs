@@ -12,6 +12,7 @@ pub struct ListViewContext<'a> {
     pub items: &'a [FileEntry],
     pub selected_item: Option<usize>,
     pub selected_file: Option<&'a FileEntry>,
+    pub multi_selection: &'a std::collections::HashSet<PathBuf>,
     pub sort_mode: SortMode,
     pub sort_descending: bool,
     pub renaming_state: Option<(usize, String)>,
@@ -239,7 +240,7 @@ pub fn render_list_view(
                     }
                 }
 
-                let is_selected = ctx.selected_item == Some(i);
+                let is_selected = ctx.multi_selection.contains(&item.path);
                 let is_recycle_bin = ctx.is_recycle_bin_view;
 
                 ui.push_id(i, |ui| {
@@ -264,7 +265,7 @@ pub fn render_list_view(
                     // Background Selection
                     if is_selected {
                         // Scroll to selected item if requested (keyboard navigation)
-                        if ctx.scroll_to_selected {
+                        if ctx.scroll_to_selected && ctx.selected_item == Some(i) {
                             ui.scroll_to_rect(rect, Some(egui::Align::Center));
                         }
                         ui.painter()
@@ -627,7 +628,7 @@ pub fn render_list_view(
                     }
                 }
 
-                let is_selected = ctx.selected_item == Some(i);
+                let is_selected = ctx.multi_selection.contains(&item.path);
                 let is_recycle_bin_virt = ctx.is_recycle_bin_view;
 
                 ui.push_id(i, |ui| {
@@ -652,7 +653,7 @@ pub fn render_list_view(
                     // Background Selection
                     if is_selected {
                         // Scroll to selected item if requested (keyboard navigation)
-                        if ctx.scroll_to_selected {
+                        if ctx.scroll_to_selected && ctx.selected_item == Some(i) {
                             ui.scroll_to_rect(rect, Some(egui::Align::Center));
                         }
                         ui.painter()

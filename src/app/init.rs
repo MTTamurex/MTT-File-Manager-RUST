@@ -281,6 +281,7 @@ impl ImageViewerApp {
             last_drive_refresh: Instant::now(),
             thumbnail_size, // Loaded from SQLite
             selected_item: None,
+            multi_selection: HashSet::new(),
             total_items: 0,
             // Search & Navigation (NEW)
             all_items: Vec::new(),

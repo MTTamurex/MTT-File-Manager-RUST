@@ -9,34 +9,66 @@ use crate::domain::file_entry::FileEntry;
 
 impl ImageViewerApp {
     pub fn delete_with_shell_for_idx(&mut self, idx: Option<usize>) {
-        let target_idx = idx.or(self.selected_item);
-        if let Some(idx) = target_idx {
-            if let Some(item) = self.items.get(idx) {
-                // Send request to background worker
-                let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::delete(
-                    item.path.clone(),
-                    self.native_hwnd.unwrap_or_default(),
-                ));
+        let paths = self.context_target_paths(idx);
+        if paths.is_empty() { return; }
 
-                // Clear cache and selection proactively (the worker will do the actual delete)
-                self.disk_cache.remove_cache_for_path(&item.path);
-                if self.selected_item == Some(idx) {
-                    self.selected_item = None;
-                    self.selected_file = None;
-                }
-            }
+        for path in &paths {
+            // Send request to background worker
+            let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::delete(
+                path.clone(),
+                self.native_hwnd.unwrap_or_default(),
+            ));
+
+            // Clear cache and selection proactively
+            self.disk_cache.remove_cache_for_path(path);
+            self.multi_selection.remove(path);
+        }
+
+        // Reset primary selection if it was deleted
+        if let Some(selected) = &self.selected_file {
+             if paths.contains(&selected.path) {
+                 self.selected_item = None;
+                 self.selected_file = None;
+             }
         }
     }
 
     pub fn show_properties_for_idx(&mut self, idx: Option<usize>) {
-        let target_idx = idx.or(self.selected_item);
-        if let Some(idx) = target_idx {
-            if let Some(item) = self.items.get(idx) {
-                let path = item.path.clone();
-                // We'll use the shell properties dialog
+        let paths = self.context_target_paths(idx);
+        if paths.is_empty() { return; }
+
+        if let Some(hwnd) = self.native_hwnd {
+            // Use shell context menu to invoke properties (handles single and multiple files)
+            if let Ok(shell_ctx) = crate::infrastructure::windows::native_menu::extract_shell_menu(hwnd, &paths) {
+                 let items = shell_ctx.items.borrow();
+
+                 // Look for properties verb
+                 let mut prop_id = None;
+                 for item in items.iter() {
+                     if let Some(verb) = &item.command_string {
+                         if verb.eq_ignore_ascii_case("properties") {
+                             prop_id = Some(item.id);
+                             break;
+                         }
+                     }
+                 }
+
+                 if let Some(id) = prop_id {
+                     let _ = crate::infrastructure::windows::native_menu::invoke_menu_command(
+                        hwnd,
+                        &shell_ctx.context_menu,
+                        id,
+                        0, 0
+                     );
+                     return;
+                 }
+            }
+
+            // Fallback for single file if menu extraction failed or no property item found
+            if paths.len() == 1 {
                 let _ = crate::infrastructure::windows::native_menu::show_properties_dialog(
-                    self.native_hwnd.unwrap_or_default(),
-                    &path,
+                    hwnd,
+                    &paths[0],
                 );
             }
         }
