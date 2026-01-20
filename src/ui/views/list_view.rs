@@ -431,14 +431,32 @@ fn render_list_item(
             *secondary_clicked_item = Some(i);
         }
 
-        // Background Selection (Index-based for keyboard synchronization)
-        let is_selected = ctx.selected_item == Some(i);
+        // --- VISUAL FEEDBACK: SELECTION vs FOCUS ---
+        let is_selected = ctx.multi_selection.contains(&item.path);
+        let is_focused = ctx.selected_item == Some(i);
+
+        // 1. Selection Highlight (Background)
         if is_selected {
             ui.painter()
                 .rect_filled(rect, 0.0, crate::ui::theme::COLOR_SELECTION);
         } else if response.hovered() {
             ui.painter()
                 .rect_filled(rect, 0.0, crate::ui::theme::color_selection_hover());
+        }
+
+        // 2. Focus Highlight (Subtle Border)
+        if is_focused {
+            let focus_color = if is_selected {
+                Color32::WHITE.gamma_multiply(0.5)
+            } else {
+                crate::ui::theme::COLOR_SELECTION
+            };
+            ui.painter().rect_stroke(
+                rect,
+                0.0,
+                egui::Stroke::new(1.0, focus_color),
+                egui::StrokeKind::Inside,
+            );
         }
 
         // Tooltip at cursor

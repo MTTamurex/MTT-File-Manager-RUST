@@ -36,6 +36,7 @@ impl ImageViewerApp {
             if ui.input(|i| i.key_pressed(egui::Key::PageDown)) { page_action = Some(true); }
             if ui.input(|i| i.key_pressed(egui::Key::PageUp)) { page_action = Some(false); }
 
+            let shift = ui.input(|i| i.modifiers.shift);
             let row_height = 24.0;
             let header_h = 32.0; // Header + Separator precise height for visibility
             let viewport_h = (ui.available_height() - header_h).max(0.0);
@@ -60,12 +61,34 @@ impl ImageViewerApp {
                     let item_path = item.path.clone();
                     let is_dir = item.is_dir;
 
-                    self.selected_file = Some(item.clone());
+                    // UPDATED: Decoupled Focus (selected_item) from Selection (multi_selection)
+                    let old_focus = self.selected_item;
                     self.selected_item = Some(clamped);
+                    self.selected_file = Some(item.clone());
                     self.update_selected_thumbnail();
                     self.last_keyboard_nav = Instant::now();
+
+                    if shift {
+                        // Shift + Arrow/Page: Range selection
+                        if self.selection_anchor.is_none() {
+                            self.selection_anchor = old_focus;
+                        }
+                        if let Some(anchor) = self.selection_anchor {
+                            let (start, end) = if anchor < clamped { (anchor, clamped) } else { (clamped, anchor) };
+                            // Range between anchor and focus (Add-only as per "NÃO limpar seleção fora do range")
+                            for i in start..=end {
+                                if let Some(it) = self.items.get(i) {
+                                    self.multi_selection.insert(it.path.clone());
+                                }
+                            }
+                        }
+                    } else {
+                        // Navigation without shift: Update anchor, do NOT clear selection (as requested)
+                        self.selection_anchor = Some(clamped);
+                    }
                     
                     // --- SCROLL-AWARE LOGIC (LIST: 100% VISIBILITY) ---
+                    // Reagindo apenas ao focused_index (clamped)
                     let selected_top = clamped as f32 * row_height;
                     let selected_bottom = selected_top + row_height;
 
@@ -224,17 +247,20 @@ impl ImageViewerApp {
                     let shift = ui.input(|i| i.modifiers.shift);
 
                     if ctrl {
+                        // Ctrl + Click: Toggle item and set focus/anchor
                         if self.multi_selection.contains(&item.path) {
                             self.multi_selection.remove(&item.path);
                         } else {
                             self.multi_selection.insert(item.path.clone());
                         }
                         self.selected_item = Some(idx);
+                        self.selection_anchor = Some(idx);
                         self.selected_file = Some(item.clone());
                     } else if shift {
-                         if let Some(last_idx) = self.selected_item {
-                             let (start, end) = if last_idx < idx { (last_idx, idx) } else { (idx, last_idx) };
-                             self.multi_selection.clear();
+                         // Shift + Click: Range between anchor and click
+                         if let Some(anchor) = self.selection_anchor {
+                             let (start, end) = if anchor < idx { (anchor, idx) } else { (idx, anchor) };
+                             // Add range to selection (Do NOT clear outside selection as requested)
                              for i in start..=end {
                                  if let Some(it) = self.items.get(i) {
                                      self.multi_selection.insert(it.path.clone());
@@ -243,16 +269,18 @@ impl ImageViewerApp {
                              self.selected_item = Some(idx);
                              self.selected_file = Some(item.clone());
                          } else {
-                             // Fallback if no previous selection
-                             self.multi_selection.clear();
+                             // Fallback: simple insert
                              self.multi_selection.insert(item.path.clone());
                              self.selected_item = Some(idx);
+                             self.selection_anchor = Some(idx);
                              self.selected_file = Some(item.clone());
                          }
                     } else {
+                        // Simple Click: Reset selection to target and set focus/anchor
                         self.multi_selection.clear();
                         self.multi_selection.insert(item.path.clone());
                         self.selected_item = Some(idx);
+                        self.selection_anchor = Some(idx);
                         self.selected_file = Some(item.clone());
                     }
 
@@ -381,6 +409,7 @@ impl ImageViewerApp {
             if ui.input(|i| i.key_pressed(egui::Key::PageDown)) { page_action = Some(true); }
             if ui.input(|i| i.key_pressed(egui::Key::PageUp)) { page_action = Some(false); }
 
+            let shift = ui.input(|i| i.modifiers.shift);
             let viewport_h = ui.available_height();
             let visible_rows = (viewport_h / cell_h).floor() as usize;
             let jump = visible_rows * cols;
@@ -399,12 +428,34 @@ impl ImageViewerApp {
             if let Some(idx) = new_index {
                 let clamped = idx.min(self.items.len().saturating_sub(1));
                 if let Some(item) = self.items.get(clamped) {
-                    self.selected_file = Some(item.clone());
+                    // UPDATED: Decoupled Focus (selected_item) from Selection (multi_selection)
+                    let old_focus = self.selected_item;
                     self.selected_item = Some(clamped);
+                    self.selected_file = Some(item.clone());
                     self.update_selected_thumbnail();
                     self.last_keyboard_nav = Instant::now();
 
+                    if shift {
+                        // Shift + Arrow/Page: Range selection
+                        if self.selection_anchor.is_none() {
+                            self.selection_anchor = old_focus;
+                        }
+                        if let Some(anchor) = self.selection_anchor {
+                            let (start, end) = if anchor < clamped { (anchor, clamped) } else { (clamped, anchor) };
+                            // Add range between anchor and focus (NÃO limpar seleção fora do range)
+                            for i in start..=end {
+                                if let Some(it) = self.items.get(i) {
+                                    self.multi_selection.insert(it.path.clone());
+                                }
+                            }
+                        }
+                    } else {
+                        // Navigation without shift: Update anchor, do NOT clear selection
+                        self.selection_anchor = Some(clamped);
+                    }
+
                     // --- SCROLL-AWARE LOGIC (GRID) ---
+                    // Reagindo apenas ao focused_index (clamped)
                     let row = clamped / cols;
                     let selected_top = row as f32 * cell_h + padding;
                     let selected_bottom = selected_top + cell_h;
@@ -558,17 +609,19 @@ impl ImageViewerApp {
                     let shift = ui.input(|i| i.modifiers.shift);
 
                     if ctrl {
+                        // Ctrl + Click: Toggle and set focus/anchor
                         if self.multi_selection.contains(&item.path) {
                             self.multi_selection.remove(&item.path);
                         } else {
                             self.multi_selection.insert(item.path.clone());
                         }
                         self.selected_item = Some(idx);
+                        self.selection_anchor = Some(idx);
                         self.selected_file = Some(item.clone());
                     } else if shift {
-                         if let Some(last_idx) = self.selected_item {
-                             let (start, end) = if last_idx < idx { (last_idx, idx) } else { (idx, last_idx) };
-                             self.multi_selection.clear();
+                         // Shift + Click: Range between anchor and click
+                         if let Some(anchor) = self.selection_anchor {
+                             let (start, end) = if anchor < idx { (anchor, idx) } else { (idx, anchor) };
                              for i in start..=end {
                                  if let Some(it) = self.items.get(i) {
                                      self.multi_selection.insert(it.path.clone());
@@ -578,15 +631,17 @@ impl ImageViewerApp {
                              self.selected_file = Some(item.clone());
                          } else {
                              // Fallback
-                             self.multi_selection.clear();
                              self.multi_selection.insert(item.path.clone());
                              self.selected_item = Some(idx);
+                             self.selection_anchor = Some(idx);
                              self.selected_file = Some(item.clone());
                          }
                     } else {
+                        // Simple Click: Reset selection and set focus/anchor
                         self.multi_selection.clear();
                         self.multi_selection.insert(item.path.clone());
                         self.selected_item = Some(idx);
+                        self.selection_anchor = Some(idx);
                         self.selected_file = Some(item.clone());
                     }
 
