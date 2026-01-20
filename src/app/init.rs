@@ -291,7 +291,7 @@ impl ImageViewerApp {
             last_grid_cols: 1,
             generation: 0,
             current_generation: shared_gen,
-            ui_ctx: ctx,
+            ui_ctx: ctx.clone(),
             last_items_rebuild: Instant::now(),
             pending_items_rebuild: false,
             pending_items_count: 0,
@@ -321,6 +321,9 @@ impl ImageViewerApp {
 
             // NOTIFICATION SYSTEM
             notifications: crate::application::NotificationManager::new(),
+
+            // GIF MANAGER OTIMIZADO
+            gif_manager: crate::ui::components::gif_manager::GifManager::new(ctx.clone()),
 
             // ONEDRIVE SIDEBAR SHORTCUT
             onedrive_path: std::env::var("OneDrive")

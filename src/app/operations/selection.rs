@@ -41,17 +41,10 @@ impl ImageViewerApp {
                 .unwrap_or(false);
 
             if is_gif {
-                // Load GIF player locally for this tab
+                // Initialize async GIF player
                 use crate::ui::components::media_preview::GifPlayer;
-                
-                match GifPlayer::load(&self.ui_ctx, &path) {
-                    Ok(player) => {
-                        self.selected_gif = Some(player);
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to load GIF: {}", e);
-                    }
-                }
+                let data = self.gif_manager.request_load(&path);
+                self.selected_gif = Some(GifPlayer::new(path.clone(), data));
             } else {
                 // CLEANUP LOGIC: If we are the owner of a VIDEO, and focus changed to a DIFFERENT file, stop the player.
                 let is_owner = self.media_preview_owner_tab_id == Some(active_tab_id);

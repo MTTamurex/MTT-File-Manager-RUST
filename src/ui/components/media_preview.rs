@@ -1,7 +1,8 @@
 use eframe::egui;
 use std::time::{Duration, Instant};
-use image::codecs::gif::GifDecoder;
-use image::AnimationDecoder;
+use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+use crate::ui::components::gif_manager::GifData;
 
 use super::mpv_preview::{format_time as backend_format_time, MpvPreview as VideoPreview, MpvState as VideoState};
 
@@ -10,82 +11,88 @@ use super::mpv_preview::{format_time as backend_format_time, MpvPreview as Video
 // ============================================================================
 
 #[derive(Clone)]
-pub struct GifFrame {
-    pub texture: egui::TextureHandle,
-    pub delay: Duration,
-}
-
-#[derive(Clone)]
 pub struct GifPlayer {
-    pub frames: Vec<GifFrame>,
+    pub path: PathBuf,
+    pub data: Arc<Mutex<GifData>>,
+    pub texture: Option<egui::TextureHandle>,
     pub current_frame: usize,
     pub last_update: Instant,
-    pub total_duration: Duration,
 }
 
 impl GifPlayer {
-    pub fn load(ctx: &egui::Context, path: &std::path::Path) -> Result<Self, Box<dyn std::error::Error>> {
-        let file = std::fs::File::open(path)?;
-        let reader = std::io::BufReader::new(file);
-        let decoder = GifDecoder::new(reader)?;
-        let frames_result = decoder.into_frames().collect_frames()?;
-
-        let mut gif_frames = Vec::new();
-        let mut total_duration = Duration::ZERO;
-
-        for (i, frame) in frames_result.into_iter().enumerate() {
-            let (numerator, denominator): (u32, u32) = frame.delay().numer_denom_ms();
-            let delay = if denominator == 0 {
-                Duration::from_millis(100)
-            } else {
-                Duration::from_millis((numerator as u64) / (denominator as u64))
-            };
-
-            let buffer = frame.into_buffer();
-            let (width, height) = buffer.dimensions();
-            let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                [width as usize, height as usize],
-                buffer.as_flat_samples().as_slice(),
-            );
-
-            let texture = ctx.load_texture(
-                format!("gif_frame_{}_{}", path.display(), i),
-                color_image,
-                Default::default(),
-            );
-
-            total_duration += delay;
-            gif_frames.push(GifFrame { texture, delay });
-        }
-
-        if gif_frames.is_empty() {
-            return Err("GIF has no frames".into());
-        }
-
-        Ok(Self {
-            frames: gif_frames,
+    pub fn new(path: PathBuf, data: Arc<Mutex<GifData>>) -> Self {
+        Self {
+            path,
+            data,
+            texture: None,
             current_frame: 0,
             last_update: Instant::now(),
-            total_duration,
-        })
+        }
     }
 
     pub fn update(&mut self, ctx: &egui::Context) {
-        let now = Instant::now();
-        let elapsed = now.duration_since(self.last_update);
-        let current_delay = self.frames[self.current_frame].delay;
+        let (frame_to_show, delay_ms, is_complete) = {
+            let d = self.data.lock().unwrap();
+            if d.frames.is_empty() {
+                return;
+            }
+            
+            let frame_idx = self.current_frame % d.frames.len();
+            let frame = &d.frames[frame_idx];
+            (Some(frame.clone()), frame.delay_ms, d.is_complete)
+        };
 
-        if elapsed >= current_delay {
-            self.current_frame = (self.current_frame + 1) % self.frames.len();
-            self.last_update = now;
-            ctx.request_repaint_after(self.frames[self.current_frame].delay);
-        } else {
-            ctx.request_repaint_after(current_delay - elapsed);
+        if let Some(frame) = frame_to_show {
+            // Initial texture creation or update
+            if self.texture.is_none() {
+                let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                    [frame.width as usize, frame.height as usize],
+                    &frame.rgba,
+                );
+                self.texture = Some(ctx.load_texture(
+                    format!("gif_player_{}", self.path.display()),
+                    color_image,
+                    Default::default(),
+                ));
+            } else if self.last_update.elapsed() >= Duration::from_millis(delay_ms) {
+                // Update existing texture content
+                self.current_frame += 1;
+                let next_idx = {
+                    let d = self.data.lock().unwrap();
+                    self.current_frame % d.frames.len()
+                };
+                
+                let next_frame = {
+                    let d = self.data.lock().unwrap();
+                    d.frames[next_idx].clone()
+                };
+
+                let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                    [next_frame.width as usize, next_frame.height as usize],
+                    &next_frame.rgba,
+                );
+                
+                if let Some(tex) = &mut self.texture {
+                    tex.set(color_image, Default::default());
+                }
+                
+                self.last_update = Instant::now();
+                ctx.request_repaint_after(Duration::from_millis(next_frame.delay_ms));
+            } else {
+                // Not yet time for next frame
+                let remaining = Duration::from_millis(delay_ms).saturating_sub(self.last_update.elapsed());
+                ctx.request_repaint_after(remaining);
+            }
+        }
+        
+        // If not complete, keep checking for new frames
+        if !is_complete {
+            ctx.request_repaint_after(Duration::from_millis(100));
         }
     }
 
-    pub fn current_texture(&self) -> &egui::TextureHandle {
-        &self.frames[self.current_frame].texture
+    pub fn texture(&self) -> Option<&egui::TextureHandle> {
+        self.texture.as_ref()
     }
 }
 
@@ -109,9 +116,12 @@ impl MediaPreview {
             }
             MediaPreview::AnimatedGif(player) => {
                 player.update(ui.ctx());
-                let texture = player.current_texture();
-                let max_size = egui::vec2(ui.available_width(), ui.available_height());
-                ui.add(egui::Image::new(texture).max_size(max_size).shrink_to_fit())
+                if let Some(texture) = player.texture() {
+                    let max_size = egui::vec2(ui.available_width(), ui.available_height());
+                    ui.add(egui::Image::new(texture).max_size(max_size).shrink_to_fit())
+                } else {
+                    ui.spinner()
+                }
             }
             MediaPreview::Video(player) => {
                 player.update(ui, frame);

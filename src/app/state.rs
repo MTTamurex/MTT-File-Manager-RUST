@@ -138,6 +138,9 @@ pub struct ImageViewerApp {
     // ICON LOADER PERSISTENTE (evita criar novo a cada frame)
     pub item_icon_loader: IconLoader,
 
+    // GIF MANAGER OTIMIZADO
+    pub gif_manager: crate::ui::components::gif_manager::GifManager,
+
     // ASYNC ICON WORKER (evita I/O bloqueante no render loop)
     pub icon_req_sender: Sender<PathBuf>, // UI → Worker
     pub icon_res_receiver: Receiver<(PathBuf, Vec<u8>, u32, u32)>, // Worker → UI
