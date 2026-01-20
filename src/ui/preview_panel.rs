@@ -16,6 +16,7 @@ pub enum PreviewPanelAction {
 pub fn render_preview_panel(
     ui: &mut egui::Ui,
     file: &FileEntry,
+    multi_selection_count: usize,
     selected_thumbnail: Option<&egui::TextureHandle>,
     selected_gif: Option<&mut crate::ui::components::media_preview::GifPlayer>,
     media_preview: Option<&mut MediaPreview>,
@@ -41,6 +42,26 @@ pub fn render_preview_panel(
         .and_then(|ext| ext.to_str())
         .map(|ext| crate::infrastructure::windows::is_video_extension(ext))
         .unwrap_or(false);
+    
+    // === MULTI-SELECTION VIEW ===
+    if multi_selection_count > 1 {
+        ui.vertical_centered(|ui| {
+            ui.add_space(40.0);
+            
+            // Multiple Items Icon (Stack)
+            if let Some(tex) = svg_manager.get_icon(ui.ctx(), "copy", 128, [180, 180, 180, 255]) {
+                 ui.add(egui::Image::new(&tex).max_size(egui::vec2(128.0, 128.0)));
+            } else {
+                 ui.label(egui::RichText::new("📚").size(64.0));
+            }
+            
+            ui.add_space(20.0);
+            ui.label(egui::RichText::new(format!("{} itens selecionados", multi_selection_count)).strong().size(18.0));
+            ui.add_space(10.0);
+            ui.label(egui::RichText::new("Selecione um único item para ver detalhes").color(egui::Color32::GRAY));
+        });
+        return None;
+    }
 
     // Reuseable fallback logic for rendering icons when no preview is available
     let mut render_fallback = |ui: &mut egui::Ui, svg_manager: &mut SvgIconManager| -> Option<PreviewPanelAction> {

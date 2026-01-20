@@ -22,6 +22,7 @@ pub struct FileEntry {
     pub drive_info: Option<DriveInfo>, // Metadados de drive (opcional)
     pub sync_status: SyncStatus,       // Status de sincronização OneDrive
     pub deletion_date: Option<String>, // Data de exclusão (apenas Lixeira)
+    pub recycle_original_path: Option<PathBuf>, // Caminho original para restauração (apenas Lixeira)
 }
 
 impl FileEntry {
@@ -62,6 +63,7 @@ impl FileEntry {
             drive_info,
             sync_status: SyncStatus::None,
             deletion_date: None,
+            recycle_original_path: None,
         }
     }
 

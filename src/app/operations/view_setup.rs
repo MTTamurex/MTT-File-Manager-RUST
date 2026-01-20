@@ -74,6 +74,7 @@ impl ImageViewerApp {
                             drive_info: None,
                             sync_status: crate::domain::file_entry::SyncStatus::None,
                             deletion_date: Some(item.date_deleted),
+                            recycle_original_path: Some(item.original_path),
                         };
                         batch.push(entry);
 
