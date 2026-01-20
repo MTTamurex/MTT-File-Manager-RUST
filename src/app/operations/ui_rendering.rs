@@ -92,30 +92,13 @@ impl ImageViewerApp {
                     
                     // --- SCROLL-AWARE LOGIC (LIST: 100% VISIBILITY) ---
                     // Reagindo apenas ao focused_index (clamped)
-                    let selected_top = clamped as f32 * row_height;
-                    let selected_bottom = selected_top + row_height;
+                    // --- LEGACY LOGIC REMOVED ---
 
-                    if let Some(is_down) = page_action {
-                        if is_down {
-                            // PageDown: Anchor to TOP
-                            self.scroll_offset_y = selected_top;
-                        } else {
-                            // PageUp: Anchor to BOTTOM to ensure full visibility of the target
-                            self.scroll_offset_y = (selected_bottom - viewport_h).max(0.0);
-                        }
-                    } else {
-                        // Arrows: DUAL-BOUNDARY CHECK
-                        let viewport_top = self.scroll_offset_y;
-                        let viewport_bottom = self.scroll_offset_y + viewport_h;
 
-                        if selected_bottom > viewport_bottom {
-                            // Too far down: scroll down to show bottom edge
-                            self.scroll_offset_y = selected_bottom - viewport_h;
-                        } else if selected_top < viewport_top {
-                            // Too far up: scroll up to show top edge
-                            self.scroll_offset_y = selected_top;
-                        }
-                    }
+                    // --- SCROLL-AWARE LOGIC (LIST) ---
+                    // Request visibility for the new selected index
+                    self.scroll_request = crate::app::state::ScrollRequest::EnsureVisible(clamped);
+
                     ui.ctx().request_repaint();
 
                     if !is_dir {
@@ -465,31 +448,9 @@ impl ImageViewerApp {
                     }
 
                     // --- SCROLL-AWARE LOGIC (GRID) ---
-                    // Reagindo apenas ao focused_index (clamped)
-                    let row = clamped / cols;
-                    let selected_top = row as f32 * cell_h + padding;
-                    let selected_bottom = selected_top + cell_h;
-                    
-                    if let Some(is_down) = page_action {
-                        // PageUp/PageDown ALWAYS reposition viewport
-                        if is_down {
-                            // PageDown: Anchor to TOP
-                            self.scroll_offset_y = selected_top;
-                        } else {
-                            // PageUp: Anchor to BOTTOM
-                            self.scroll_offset_y = (selected_bottom - viewport_h).max(0.0);
-                        }
-                    } else {
-                        // Arrows: ONLY adjust scroll if outside viewport
-                        let visible_row_start = self.scroll_offset_y;
-                        let visible_row_end = self.scroll_offset_y + viewport_h;
+                    // Request visibility for the new selected index
+                    self.scroll_request = crate::app::state::ScrollRequest::EnsureVisible(clamped);
 
-                        if selected_top < visible_row_start {
-                            self.scroll_offset_y = selected_top;
-                        } else if selected_bottom > visible_row_end {
-                            self.scroll_offset_y = selected_bottom - viewport_h;
-                        }
-                    }
                     ui.ctx().request_repaint();
                 }
             }

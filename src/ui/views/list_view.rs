@@ -35,6 +35,8 @@ pub struct ListViewContext<'a> {
     pub scroll_offset_y: f32,
     /// Mutable reference to update scroll offset
     pub mut_scroll_offset_y: &'a mut f32,
+    /// Last input type for hover control
+    pub last_input: crate::app::state::LastInput,
 }
 
 /// Action returned by list view

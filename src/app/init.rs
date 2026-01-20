@@ -274,6 +274,8 @@ impl ImageViewerApp {
             selected_metadata: None,
             show_preview_panel, // Loaded from SQLite
             is_computer_view: false,
+            computer_view_local_indices: Vec::new(),
+            computer_view_network_indices: Vec::new(),
             is_recycle_bin_view: false,
             navigation: NavigationHistory::new(PATH_PADRAO.to_string()),
             path_input: PATH_PADRAO.to_string(),
@@ -386,6 +388,8 @@ impl ImageViewerApp {
 
             // Scroll offset for manual grid virtualization
             scroll_offset_y: 0.0,
+            
+            scroll_request: crate::app::state::ScrollRequest::None,
 
             // FILE OPERATION WORKER
             file_op_sender: file_op_tx,

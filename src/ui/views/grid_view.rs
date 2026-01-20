@@ -64,6 +64,8 @@ pub struct GridViewContext<'a> {
     pub scroll_offset_y: f32,
     /// Mutable reference to update scroll offset
     pub mut_scroll_offset_y: &'a mut f32,
+    /// Last input type for hover control
+    pub last_input: crate::app::state::LastInput,
 }
 
 /// Operations that can be performed from grid view
@@ -134,11 +136,35 @@ pub fn render_grid_view(
             *secondary_clicked_item = Some(index);
         }
 
-        if ctx.multi_selection.contains(&item.path) {
-            ui.painter().rect_filled(
+        // --- VISUAL FEEDBACK: BORDER-ONLY (MODERN DESIGN) ---
+        let is_selected = ctx.multi_selection.contains(&item.path);
+        
+        // STRICT HOVER LOGIC: Only allow hover if LastInput was Mouse
+        let allow_hover = matches!(ctx.last_input, crate::app::state::LastInput::Mouse);
+        let is_hovered_visual = allow_hover && response.hovered() && !is_selected;
+        
+        let is_focused = ctx.selected_item == Some(index);
+
+        let rounding = 4.0;
+        let accent_color = crate::ui::theme::COLOR_ACCENT;
+
+        if is_selected {
+            // Selected: Bold primary border
+            let stroke_width = if is_hovered_visual { 2.5 } else { 2.0 };
+            ui.painter().rect_stroke(
                 rect,
-                0.0,
-                crate::ui::theme::COLOR_SELECTION,
+                rounding,
+                egui::Stroke::new(stroke_width, accent_color),
+                egui::StrokeKind::Inside,
+            );
+        } else if is_hovered_visual || is_focused {
+            // Hovered or Focused: Thin subtle border
+            let hover_color = accent_color.gamma_multiply(0.35); // ~35% alpha
+            ui.painter().rect_stroke(
+                rect,
+                rounding,
+                egui::Stroke::new(1.0, hover_color),
+                egui::StrokeKind::Inside,
             );
         }
 
