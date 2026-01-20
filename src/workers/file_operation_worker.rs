@@ -48,7 +48,7 @@ pub enum FileOperationRequest {
         items: Vec<(PathBuf, PathBuf)>,
     },
     DeletePermanently {
-        physical_path: PathBuf,
+        physical_paths: Vec<PathBuf>,
     },
     EmptyRecycleBin,
 }
@@ -106,8 +106,10 @@ pub fn start_file_operation_worker(
                     }
                     let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
                 }
-                FileOperationRequest::DeletePermanently { physical_path } => {
-                    let _ = recycle_bin::delete_permanently(&physical_path);
+                FileOperationRequest::DeletePermanently { physical_paths } => {
+                    for path in physical_paths {
+                        let _ = recycle_bin::delete_permanently(&path);
+                    }
                     let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
                 }
                 FileOperationRequest::EmptyRecycleBin => {

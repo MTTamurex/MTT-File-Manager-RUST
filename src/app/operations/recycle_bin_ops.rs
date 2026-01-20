@@ -33,11 +33,6 @@ impl ImageViewerApp {
                 });
                 
                 restore_items.push((physical_path.clone(), original));
-                
-                self.notifications.push(crate::application::AppNotification::info(format!(
-                    "Restaurando '{}'...",
-                    item.name
-                )));
             } else {
                 // Handle case where item is not in self.items (should be rare)
                 let name = physical_path.file_name()
@@ -46,45 +41,47 @@ impl ImageViewerApp {
                     
                 let original = PathBuf::from("C:\\Users\\Public\\Desktop").join(&name);
                 restore_items.push((physical_path.clone(), original));
-                
-                self.notifications.push(crate::application::AppNotification::info(format!(
-                    "Restaurando '{}' (fallback)...",
-                    name
-                )));
             }
         }
 
         // Send SINGLE batch request to worker
         if !restore_items.is_empty() {
+            self.notifications.push(crate::application::AppNotification::info(format!(
+                "Restaurando {} itens...",
+                restore_items.len()
+            )));
             let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::RestoreFromRecycleBin {
                 items: restore_items,
             });
         }
     }
 
-    pub fn delete_permanently(&mut self, physical_path: &Path) {
-        let item_name = self.items.iter()
-            .find(|i| i.path == physical_path)
-            .map(|i| i.name.clone());
+    pub fn delete_permanently(&mut self, paths: &[PathBuf]) {
+        if paths.is_empty() { return; }
 
-        if let Some(name) = item_name {
+        for physical_path in paths {
+            let item_name = self.items.iter()
+                .find(|i| i.path == *physical_path)
+                .map(|i| i.name.clone())
+                .unwrap_or_else(|| physical_path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
+
             // If we are deleting the currently selected file, reset selection
             if let Some(selected) = &self.selected_file {
-                if selected.path == physical_path {
+                if selected.path == *physical_path {
                     self.reset_selection_and_search();
                 }
             }
+        }
 
-            // Send request to background worker
+        // Send request to background worker (BATCH)
+        if !paths.is_empty() {
+             self.notifications.push(crate::application::AppNotification::info(format!(
+                "Excluindo {} itens permanentemente...",
+                paths.len()
+            )));
             let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::DeletePermanently {
-                physical_path: physical_path.to_path_buf(),
+                physical_paths: paths.to_vec(),
             });
-
-            self.notifications
-                .push(crate::application::AppNotification::info(format!(
-                    "Excluindo '{}' permanentemente...",
-                    name
-                )));
         }
     }
 

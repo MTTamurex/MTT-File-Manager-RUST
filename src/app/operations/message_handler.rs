@@ -34,6 +34,8 @@ impl ImageViewerApp {
                     if self.is_recycle_bin_view {
                         eprintln!("[RECYCLE] Operation finished, refreshing view.");
                         self.setup_recycle_bin_view();
+                        // CRITICAL: Sync back to tab so tab_manager knows we are still in Lixeira
+                        self.sync_to_tab();
                     }
                 }
                 FileOperationResult::Finished => {
@@ -174,7 +176,10 @@ impl ImageViewerApp {
             if elapsed > Duration::from_millis(theme::AUTO_RELOAD_MS) {
                 eprintln!("[DEBUG] Checking auto-reload for path: '{}'", self.current_path);
                 // VALIDA SE O PATH ATUAL AINDA EXISTE (pode ter sido renomeado/deletado)
-                if Path::new(&self.current_path).exists() {
+                // SKIP for special views (Recycle Bin/Computer) which are managed manually via events
+                if self.is_recycle_bin_view || self.is_computer_view {
+                    self.pending_auto_reload = false;
+                } else if Path::new(&self.current_path).exists() {
                     eprintln!("[DEBUG] Path exists. Reloading.");
                     self.load_folder(false); // false = don't clear entire cache, already cleared specific changed items
                 } else {
