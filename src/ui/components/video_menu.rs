@@ -54,7 +54,7 @@ fn menu_item(ui: &mut egui::Ui, text: &str, has_submenu: bool, menu_width: f32) 
 
         // Draw background on hover
         if response.hovered() {
-            ui.painter().rect_filled(rect, 2.0, visuals.bg_fill);
+            ui.painter().rect_filled(rect, 0.0, visuals.bg_fill);
         }
 
         // Draw text on the left
@@ -114,7 +114,7 @@ pub fn render_video_menu(
         .fill(ctx.style().visuals.window_fill)
         .stroke(ctx.style().visuals.window_stroke)
         .inner_margin(egui::Margin::same(4))
-        .corner_radius(4.0);
+        .corner_radius(0.0);
 
     let menu_pos = state.position;
 
