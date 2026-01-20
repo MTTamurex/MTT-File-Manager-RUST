@@ -287,7 +287,7 @@ pub fn render_list_view(
         }
     }
 
-    // 4. Custom Scrollbar (Mirrors Grid Logic)
+    // 4. Custom Scrollbar with Track-Click (Mirrors Grid Logic)
     if total_content_height > viewport_h {
         let scroll_bar_w = 4.0;
         let scroll_bar_rect = Rect::from_min_max(
@@ -302,10 +302,24 @@ pub fn render_list_view(
             egui::vec2(scroll_bar_w, handle_h)
         );
 
-        // Interaction
+        // Interaction: click_and_drag for both track-click and handle drag
         let scroll_id = ui.id().with("list_scrollbar");
-        let response = ui.interact(scroll_bar_rect, scroll_id, Sense::drag());
-        if response.dragged() {
+        let response = ui.interact(scroll_bar_rect, scroll_id, Sense::click_and_drag());
+        
+        if response.clicked() {
+            // TRACK-CLICK: Jump to clicked position
+            if let Some(click_pos) = ui.input(|i| i.pointer.interact_pos()) {
+                // Calculate relative position in the track
+                let relative_y = click_pos.y - scroll_bar_rect.top();
+                // Center the handle on the click position
+                let target_handle_center = relative_y;
+                let target_handle_top = target_handle_center - (handle_h / 2.0);
+                // Convert to scroll offset
+                let scroll_ratio = target_handle_top / (viewport_h - handle_h);
+                *ctx.mut_scroll_offset_y = (scroll_ratio * max_scroll).clamp(0.0, max_scroll);
+            }
+        } else if response.dragged() {
+            // DRAG: Existing drag logic
             let delta = response.drag_delta().y;
             let scroll_per_pixel = max_scroll / (viewport_h - handle_h);
             *ctx.mut_scroll_offset_y += delta * scroll_per_pixel;
