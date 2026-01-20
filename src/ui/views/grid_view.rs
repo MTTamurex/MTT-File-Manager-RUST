@@ -255,9 +255,11 @@ pub fn render_grid_view(
     }
     
     let current_scroll = *ctx.mut_scroll_offset_y;
-
+    
     // 3. Render Virtual Grid
-    ui.allocate_rect(viewport_rect, Sense::hover());
+    // DETECT BACKGROUND INTERACTION (Sense::click() captures secondary_clicked without global leakage)
+    let bg_response = ui.interact(viewport_rect, ui.id().with("grid_bg"), Sense::click());
+    
     let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(viewport_rect));
     child_ui.set_clip_rect(viewport_rect);
 
@@ -460,12 +462,8 @@ pub fn render_grid_view(
     }
 
     // Fallback global: detect secondary click on empty area if no item was clicked
-    if secondary_clicked_item.is_none() && ui.input(|i| i.pointer.secondary_clicked()) {
-        if let Some(pos) = ui.ctx().pointer_latest_pos() {
-            if available_rect.contains(pos) {
-                empty_area_secondary_click = true;
-            }
-        }
+    if secondary_clicked_item.is_none() && bg_response.secondary_clicked() {
+        empty_area_secondary_click = true;
     }
 
     if empty_area_secondary_click {
