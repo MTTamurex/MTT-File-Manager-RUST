@@ -212,139 +212,179 @@ pub fn render_grid_view(
         });
     }
 
-    // --- VIRTUALIZATION WITH EGUI SCROLLAREA ---
+    // --- MANUAL VIRTUALIZATION START ---
     let cell_h = item_h + padding;
     let total_rows = (count as f32 / cols as f32).ceil() as usize;
     let total_content_height = total_rows as f32 * cell_h + padding;
 
-    // ScrollArea setup
-    let mut scroll_area = egui::ScrollArea::vertical()
-        .id_salt("grid_view_scroll")
-        .max_height(ui.available_height())
-        .auto_shrink([false, false]);
+    // Viewport area
+    let viewport_rect = ui.available_rect_before_wrap();
+    let viewport_h = viewport_rect.height();
 
-    // CONDITIONAL SCROLL UPDATE: Only force the scroll offset if explicitly requested (e.g. keyboard nav)
-    // The user's rule "Só sobrescrever scroll_offset_y quando: navegação por teclado"
-    // translates to: Only set .vertical_scroll_offset() when necessary.
-    // Otherwise, we let ScrollArea keep its internal state, and we just sync our cache to it.
-    if ctx.scroll_to_selected {
-        scroll_area = scroll_area.vertical_scroll_offset(ctx.scroll_offset_y);
+    // 1. Handle mouse wheel scroll (Manual Source of Truth)
+    let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
+    if scroll_delta != 0.0 {
+        // 5x Multiplier for responsive scrolling
+        *ctx.mut_scroll_offset_y -= scroll_delta * 5.0; 
     }
 
-    let output = scroll_area.show(ui, |ui| {
-        // Force the content size so the scrollbar appears correctly
-        ui.set_min_height(total_content_height);
-        
-        // Use the CURRENT known offset for virtualization (from state or previous frame)
-        // Note: During a track click, this might be one frame behind the jump, but that's standard for immediate mode virtualization without layout pre-pass.
-        let current_scroll = ctx.scroll_offset_y;
-        
-        // Virtualization Math
-        let viewport_rect = ui.clip_rect(); // Visible area provided by ScrollArea
-        let viewport_min_y = viewport_rect.top() - ui.min_rect().top() + current_scroll; // Relative Y in content
-        let viewport_h = viewport_rect.height();
-        
-        let vis_min_row = (current_scroll / cell_h).floor() as usize;
-        let vis_max_row = ((current_scroll + viewport_h) / cell_h).ceil() as usize;
-        
-        // Export range for prefetch
-        visible_rows_range = Some((vis_min_row, vis_max_row));
-
-        // Overscan
-        let loop_min_row = vis_min_row.saturating_sub(1);
-        let loop_max_row = (vis_max_row + 1).min(total_rows);
-
-        // Render visible items
-        if ctx.is_computer_view {
-             // Computer view logic inside ScrollArea
-             let mut current_y = 0.0; // Relative to start of content
-             
-             let mut local = Vec::new();
-             let mut network = Vec::new();
-             for (i, item) in ctx.items.iter().enumerate() {
-                 let is_remote = item.drive_info.as_ref().map_or(false, |di| {
-                     di.drive_type == crate::infrastructure::windows::DriveType::Remote
-                 });
-                 if is_remote { network.push((i, item)); } else { local.push((i, item)); }
-             }
-     
-             let mut render_section = |ui: &mut Ui, title: &str, items: Vec<(usize, &FileEntry)>, start_y: &mut f32| {
-                 if items.is_empty() { return; }
-                 
-                 // Header
-                 let header_h = 25.0;
-                 let header_rect = Rect::from_min_size(
-                     ui.min_rect().min + egui::vec2(0.0, *start_y), 
-                     egui::vec2(available_w, header_h)
-                 );
-                 
-                 // Render header if visible
-                 if header_rect.intersects(viewport_rect.translate(egui::vec2(0.0, current_scroll))) {
-                     let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
-                     render_section_header(&mut header_ui, title);
-                 }
-                 *start_y += header_h;
-     
-                 let count = items.len();
-                 let rows = (count as f32 / cols as f32).ceil() as usize;
-                 let section_h = rows as f32 * cell_h + padding;
-     
-                 // Optimization: Calculate row range for this section
-                 // Section spans from [*start_y] to [*start_y + section_h]
-                 // Viewport spans [current_scroll] to [current_scroll + viewport_h]
-                 
-                 let section_start = *start_y;
-                 
-                 for (i, (index, item)) in items.into_iter().enumerate() {
-                     let row = i / cols;
-                     let col = i % cols;
-                     
-                     let item_y = section_start + row as f32 * cell_h + padding;
-                     
-                     // Quick Culling
-                     if item_y + item_h < current_scroll || item_y > current_scroll + viewport_h {
-                        continue;
-                     }
-
-                     let x_pos = col as f32 * (item_w + padding) + padding;
-                     let item_rect = Rect::from_min_size(
-                         ui.min_rect().min + egui::vec2(x_pos, item_y),
-                         egui::vec2(item_w, item_h),
-                     );
-     
-                     render_grid_item(ui, index, item, item_rect, ctx, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item);
-                 }
-                 *start_y += section_h;
-             };
-     
-             render_section(ui, "Discos locais", local, &mut current_y);
-             render_section(ui, "Unidades de rede", network, &mut current_y);
-        } else {
-            // Standard Grid Virtualization
-            for row in loop_min_row..loop_max_row {
-                for col in 0..cols {
-                    let index = row * cols + col;
-                    if index >= count { break; }
+    // 2. Clamp scroll offset
+    let max_scroll = (total_content_height - viewport_h).max(0.0);
+    *ctx.mut_scroll_offset_y = ctx.mut_scroll_offset_y.clamp(0.0, max_scroll);
     
-                    let x_pos = col as f32 * (item_w + padding) + padding;
-                    let y_pos = row as f32 * cell_h + padding; // Absolute Y within content
-                    
-                    let item_rect = Rect::from_min_size(
-                        ui.min_rect().min + egui::vec2(x_pos, y_pos),
-                        egui::vec2(item_w, item_h),
-                    );
-    
-                    render_grid_item(ui, index, &ctx.items[index], item_rect, ctx, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item);
+    // 2.5 KEYBOARD SCROLL SYNC: Ensure selected item is visible
+    if ctx.scroll_to_selected {
+        if let Some(selected_idx) = ctx.selected_item {
+            if selected_idx < count {
+                let selected_row = selected_idx / cols;
+                let item_top = selected_row as f32 * cell_h + padding;
+                let item_bottom = item_top + item_h;
+                
+                let current_scroll_check = *ctx.mut_scroll_offset_y;
+                
+                // Scroll up if item is above viewport
+                if item_top < current_scroll_check {
+                    *ctx.mut_scroll_offset_y = item_top.max(0.0);
+                }
+                // Scroll down if item is below viewport
+                else if item_bottom > current_scroll_check + viewport_h {
+                    *ctx.mut_scroll_offset_y = (item_bottom - viewport_h).clamp(0.0, max_scroll);
                 }
             }
         }
-    });
+    }
+    
+    let current_scroll = *ctx.mut_scroll_offset_y;
 
-    // CRITICAL: Update source of truth from ScrollArea state
-    // This enables the "track click" and "drag" to work, as ScrollArea handles the input
-    // and we just record where it ended up.
-    *ctx.mut_scroll_offset_y = output.state.offset.y;
+    // 3. Render Virtual Grid
+    ui.allocate_rect(viewport_rect, Sense::hover());
+    let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(viewport_rect));
+    child_ui.set_clip_rect(viewport_rect);
 
+    let content_min = viewport_rect.min;
+
+    // Virtualization Math
+    let vis_min_row = (current_scroll / cell_h).floor() as usize;
+    let vis_max_row = ((current_scroll + viewport_h) / cell_h).ceil() as usize;
+    
+    // Export range for prefetch
+    visible_rows_range = Some((vis_min_row, vis_max_row));
+
+    // Overscan
+    let loop_min_row = vis_min_row.saturating_sub(1);
+    let loop_max_row = (vis_max_row + 1).min(total_rows);
+
+    if ctx.is_computer_view {
+        // Computer view with sections (Manual Scroll)
+        let mut current_y = content_min.y - current_scroll;
+        
+        let mut local = Vec::new();
+        let mut network = Vec::new();
+        for (i, item) in ctx.items.iter().enumerate() {
+            let is_remote = item.drive_info.as_ref().map_or(false, |di| {
+                di.drive_type == crate::infrastructure::windows::DriveType::Remote
+            });
+            if is_remote { network.push((i, item)); } else { local.push((i, item)); }
+        }
+
+        let mut render_section = |ui: &mut Ui, title: &str, items: Vec<(usize, &FileEntry)>, start_y: &mut f32| {
+            if items.is_empty() { return; }
+            
+            // Header
+            let header_h = 25.0;
+            let header_rect = Rect::from_min_size(egui::pos2(content_min.x, *start_y), egui::vec2(available_w, header_h));
+            if ui.is_rect_visible(header_rect) {
+                let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
+                render_section_header(&mut header_ui, title);
+            }
+            *start_y += header_h;
+
+            let section_item_count = items.len();
+            let rows = (section_item_count as f32 / cols as f32).ceil() as usize;
+            let section_h = rows as f32 * cell_h + padding;
+
+            for (i, (index, item)) in items.into_iter().enumerate() {
+                let row = i / cols;
+                let col_idx = i % cols;
+                
+                let x_pos = col_idx as f32 * (item_w + padding) + padding;
+                let item_y = *start_y + row as f32 * cell_h + padding;
+                
+                let item_rect = Rect::from_min_size(
+                    egui::pos2(content_min.x + x_pos, item_y),
+                    egui::vec2(item_w, item_h),
+                );
+
+                if ui.is_rect_visible(item_rect) {
+                    render_grid_item(ui, index, item, item_rect, ctx, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item);
+                }
+            }
+            *start_y += section_h;
+        };
+
+        render_section(&mut child_ui, "Discos locais", local, &mut current_y);
+        render_section(&mut child_ui, "Unidades de rede", network, &mut current_y);
+    } else {
+        // Standard Grid Virtualization
+        for row in loop_min_row..loop_max_row {
+            for col in 0..cols {
+                let index = row * cols + col;
+                if index >= count { break; }
+
+                let x_pos = col as f32 * (item_w + padding) + padding;
+                let y_pos = content_min.y + row as f32 * cell_h + padding - current_scroll;
+                
+                let item_rect = Rect::from_min_size(
+                    egui::pos2(content_min.x + x_pos, y_pos),
+                    egui::vec2(item_w, item_h),
+                );
+
+                render_grid_item(&mut child_ui, index, &ctx.items[index], item_rect, ctx, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item);
+            }
+        }
+    }
+
+    // 4. Custom Scrollbar with Track-Click
+    if total_content_height > viewport_h {
+        let scrollbar_w = 12.0;
+        let scrollbar_rect = Rect::from_min_max(
+            viewport_rect.right_top() - egui::vec2(scrollbar_w, 0.0),
+            viewport_rect.right_bottom()
+        );
+        
+        // Background
+        ui.painter().rect_filled(scrollbar_rect, 0.0, Color32::from_gray(245));
+
+        // Handle
+        let handle_h = (viewport_h / total_content_height * viewport_h).max(30.0);
+        let handle_y = (current_scroll / max_scroll) * (viewport_h - handle_h);
+        let handle_rect = Rect::from_min_size(
+            scrollbar_rect.min + egui::vec2(2.0, handle_y),
+            egui::vec2(scrollbar_w - 4.0, handle_h)
+        );
+
+        // Interaction: click_and_drag for both track-click and handle drag
+        let interact = ui.interact(scrollbar_rect, ui.id().with("scrollbar"), Sense::click_and_drag());
+        
+        if interact.clicked() {
+            // TRACK-CLICK: Jump to clicked position
+            if let Some(click_pos) = ui.input(|i| i.pointer.interact_pos()) {
+                let relative_y = click_pos.y - scrollbar_rect.top();
+                let target_handle_top = relative_y - (handle_h / 2.0);
+                let scroll_ratio = target_handle_top / (viewport_h - handle_h);
+                *ctx.mut_scroll_offset_y = (scroll_ratio * max_scroll).clamp(0.0, max_scroll);
+            }
+        } else if interact.dragged() {
+            let delta_y = interact.drag_delta().y;
+            let scroll_pct_delta = delta_y / (viewport_h - handle_h);
+            *ctx.mut_scroll_offset_y += scroll_pct_delta * max_scroll;
+            *ctx.mut_scroll_offset_y = ctx.mut_scroll_offset_y.clamp(0.0, max_scroll);
+        }
+
+        let color = if interact.dragged() { Color32::from_gray(150) } else if interact.hovered() { Color32::from_gray(180) } else { Color32::from_gray(200) };
+        ui.painter().rect_filled(handle_rect, 4.0, color);
+    }
+    // --- MANUAL VIRTUALIZATION END ---
 
 
 
