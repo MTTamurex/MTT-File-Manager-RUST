@@ -64,6 +64,7 @@ impl ImageViewerApp {
                         }
                         self.media_preview = None;
                         self.media_preview_owner_tab_id = None;
+                        self.ui_ctx.request_repaint();
                     }
                 }
             }
@@ -79,6 +80,7 @@ impl ImageViewerApp {
                 }
                 self.media_preview = None;
                 self.media_preview_owner_tab_id = None;
+                self.ui_ctx.request_repaint();
             }
         }
 
@@ -115,6 +117,7 @@ impl ImageViewerApp {
             }
             self.media_preview = None;
             self.media_preview_owner_tab_id = None;
+            self.ui_ctx.request_repaint();
         }
 
         // CRITICAL: Sync visibility whenever selection is reset
