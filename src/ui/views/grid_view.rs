@@ -134,7 +134,8 @@ pub fn render_grid_view(
             *secondary_clicked_item = Some(index);
         }
 
-        if ctx.multi_selection.contains(&item.path) {
+        // Background Selection (Index-based for keyboard synchronization)
+        if ctx.selected_item == Some(index) {
             ui.painter().rect_filled(
                 rect,
                 0.0,

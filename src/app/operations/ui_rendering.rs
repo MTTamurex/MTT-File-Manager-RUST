@@ -36,6 +36,14 @@ impl ImageViewerApp {
                 new_index = current_index.map(|idx| idx + 1).or(Some(0));
             } else if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
                 new_index = current_index.map(|idx| idx.saturating_sub(1));
+            } else if ui.input(|i| i.key_pressed(egui::Key::PageDown)) {
+                let viewport_h = ui.available_height();
+                let visible_count = (viewport_h / 24.0).floor() as usize;
+                new_index = current_index.map(|idx| idx + visible_count).or(Some(visible_count));
+            } else if ui.input(|i| i.key_pressed(egui::Key::PageUp)) {
+                let viewport_h = ui.available_height();
+                let visible_count = (viewport_h / 24.0).floor() as usize;
+                new_index = current_index.map(|idx| idx.saturating_sub(visible_count));
             }
 
             if let Some(idx) = new_index {
@@ -47,8 +55,20 @@ impl ImageViewerApp {
                     self.selected_file = Some(item.clone());
                     self.selected_item = Some(clamped);
                     self.update_selected_thumbnail();
-                    self.scroll_to_selected = true; // Trigger scroll to selected item
                     self.last_keyboard_nav = Instant::now(); // Reset throttle timer
+                    
+                    // --- SCROLL-AWARE LOGIC (LIST) ---
+                    let row_height = 24.0;
+                    let viewport_h = ui.available_height();
+                    let selected_top = clamped as f32 * row_height;
+                    let selected_bottom = selected_top + row_height;
+
+                    if selected_top < self.scroll_offset_y {
+                        self.scroll_offset_y = selected_top;
+                    } else if selected_bottom > self.scroll_offset_y + viewport_h {
+                        self.scroll_offset_y = selected_bottom - viewport_h;
+                    }
+                    ui.ctx().request_repaint();
 
                     // Trigger thumbnail load for sidebar preview
                     if !is_dir {
@@ -173,7 +193,6 @@ impl ImageViewerApp {
         self.sort_descending = ctx.sort_descending;
         self.renaming_state = ctx.renaming_state;
         self.focus_rename = ctx.focus_rename;
-        self.scroll_to_selected = false; // Reset after scrolling
 
         // Processar ações (bloqueadas durante renomeação)
         let is_renaming = self.renaming_state.is_some();
@@ -316,6 +335,8 @@ impl ImageViewerApp {
         // Calculate cols for keyboard navigation
         let padding = 8.0;
         let item_w = self.thumbnail_size;
+        let item_h = self.thumbnail_size + 20.0;
+        let cell_h = item_h + padding;
         let available_w = ui.available_width();
         let cols = ((available_w - padding) / (item_w + padding))
             .floor()
@@ -341,6 +362,14 @@ impl ImageViewerApp {
                 new_index = current_index.map(|idx| idx + cols).or(Some(0));
             } else if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
                 new_index = current_index.map(|idx| idx.saturating_sub(cols));
+            } else if ui.input(|i| i.key_pressed(egui::Key::PageDown)) {
+                let viewport_h = ui.available_height();
+                let visible_rows = (viewport_h / cell_h).floor() as usize;
+                new_index = current_index.map(|idx| idx + (visible_rows * cols)).or(Some(visible_rows * cols));
+            } else if ui.input(|i| i.key_pressed(egui::Key::PageUp)) {
+                let viewport_h = ui.available_height();
+                let visible_rows = (viewport_h / cell_h).floor() as usize;
+                new_index = current_index.map(|idx| idx.saturating_sub(visible_rows * cols));
             }
 
             if let Some(idx) = new_index {
@@ -349,8 +378,20 @@ impl ImageViewerApp {
                     self.selected_file = Some(item.clone());
                     self.selected_item = Some(clamped);
                     self.update_selected_thumbnail();
-                    self.scroll_to_selected = true; // Trigger scroll to selected item
                     self.last_keyboard_nav = Instant::now(); // Reset throttle timer
+
+                    // --- SCROLL-AWARE LOGIC (GRID) ---
+                    let row = clamped / cols;
+                    let selected_top = row as f32 * cell_h + padding;
+                    let selected_bottom = selected_top + cell_h; // Use cell_h to include bottom padding/spacing
+                    
+                    let viewport_h = ui.available_height();
+                    if selected_top < self.scroll_offset_y {
+                        self.scroll_offset_y = selected_top;
+                    } else if selected_bottom > self.scroll_offset_y + viewport_h {
+                        self.scroll_offset_y = selected_bottom - viewport_h;
+                    }
+                    ui.ctx().request_repaint();
                 }
             }
 
@@ -469,7 +510,6 @@ impl ImageViewerApp {
         self.last_grid_cols = ctx.last_grid_cols;
         self.renaming_state = ctx.renaming_state;
         self.focus_rename = ctx.focus_rename;
-        self.scroll_to_selected = false; // Reset after scrolling
 
         // Processar ações (bloqueadas durante renomeação, exceto clique no próprio item)
         let is_renaming = self.renaming_state.is_some();

@@ -413,7 +413,6 @@ fn render_list_item(
         }
     }
 
-    let is_selected = ctx.multi_selection.contains(&item.path);
     let is_recycle_bin = ctx.is_recycle_bin_view;
 
     ui.push_id(i, |ui| {
@@ -432,7 +431,8 @@ fn render_list_item(
             *secondary_clicked_item = Some(i);
         }
 
-        // Background Selection
+        // Background Selection (Index-based for keyboard synchronization)
+        let is_selected = ctx.selected_item == Some(i);
         if is_selected {
             ui.painter()
                 .rect_filled(rect, 0.0, crate::ui::theme::COLOR_SELECTION);
