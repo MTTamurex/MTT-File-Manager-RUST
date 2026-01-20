@@ -5,12 +5,15 @@ use crate::app::ImageViewerApp;
 pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
     // 1. Render the menu (ui construction)
     let mut context_menu = std::mem::take(&mut app.context_menu);
+    let target_paths = context_menu.target_paths.clone(); // PRESERVE PATHS
+
     let _ = crate::ui::context_menu::render_context_menu(
         ctx,
         &mut context_menu,
         &mut app.svg_icon_manager,
     );
-
+    
+    
     // 2. Handle lazy load request
     if let Some(id) = context_menu.pending_load_item.take() {
         app.context_menu = context_menu;
@@ -49,7 +52,11 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         }
                     }
                 }
-                -6 | -34 => app.delete_with_shell_for_idx(item_idx),
+                -6 | -34 => {
+                    if !target_paths.is_empty() {
+                        app.delete_with_shell_for_paths(&target_paths);
+                    }
+                }
                 -20 => {
                     if let Some(path) = app.context_target_paths(item_idx).first().cloned() {
                         if path.is_dir() {
@@ -110,17 +117,13 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 }
                 -28 => app.show_properties_for_idx(item_idx),
                 -50 | -52 => {
-                    let paths = app.context_target_paths(item_idx);
-                    if !paths.is_empty() {
-                         app.restore_from_recycle_bin(&paths);
+                    if !target_paths.is_empty() {
+                         app.restore_from_recycle_bin(&target_paths);
                     }
                 }
                 -51 | -53 => {
-                    if let Some(idx) = item_idx.or(app.selected_item) {
-                        if let Some(item) = app.items.get(idx) {
-                            let path = item.path.clone();
-                            app.delete_permanently(&path);
-                        }
+                    if !target_paths.is_empty() {
+                         app.delete_permanently(&target_paths);
                     }
                 }
                 -54 => app.empty_recycle_bin(),

@@ -10,15 +10,19 @@ use crate::domain::file_entry::FileEntry;
 impl ImageViewerApp {
     pub fn delete_with_shell_for_idx(&mut self, idx: Option<usize>) {
         let paths = self.context_target_paths(idx);
+        self.delete_with_shell_for_paths(&paths);
+    }
+
+    pub fn delete_with_shell_for_paths(&mut self, paths: &[PathBuf]) {
         if paths.is_empty() { return; }
 
         // Send request to background worker (BATCH)
         let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::delete(
-            paths.clone(),
+            paths.to_vec(),
             self.native_hwnd.unwrap_or_default(),
         ));
 
-        for path in &paths {
+        for path in paths {
             // Clear cache and selection proactively
             self.disk_cache.remove_cache_for_path(path);
             self.multi_selection.remove(path);
