@@ -174,6 +174,7 @@ fn render_tab_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context, frame: &m
                             }
                             app.media_preview = None;
                             app.media_preview_owner_tab_id = None;
+                            app.ui_ctx.request_repaint();
                         }
                     }
 
