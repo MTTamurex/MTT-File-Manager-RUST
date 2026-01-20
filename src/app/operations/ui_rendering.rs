@@ -86,16 +86,13 @@ impl ImageViewerApp {
                         // Navigation without shift: Single-item selection (clear + add focused item)
                         // This ensures the focused item shows the dark blue selection border
                         self.multi_selection.clear();
-                        self.multi_selection.insert(item_path.clone());
+                    self.multi_selection.insert(item_path.clone());
                         self.selection_anchor = Some(clamped);
                     }
                     
-                    // --- SCROLL-AWARE LOGIC (LIST: 100% VISIBILITY) ---
-                    // Reagindo apenas ao focused_index (clamped)
-                    // --- LEGACY LOGIC REMOVED ---
+                    // Trigger scroll normalization in the view
+                    self.scroll_to_selected = true;
 
-
-                    // --- SCROLL-AWARE LOGIC (LIST) ---
                     // Request visibility for the new selected index
                     self.scroll_request = crate::app::state::ScrollRequest::EnsureVisible(clamped);
 
@@ -364,6 +361,9 @@ impl ImageViewerApp {
                 ListAction::RenameWithShell(idx) => self.rename_with_shell(idx),
             }
         }
+
+        // Reset scroll trigger after view has consumed it
+        self.scroll_to_selected = false;
     }
 
     // --- GRANDE (GRID VIEW) ---
@@ -447,7 +447,9 @@ impl ImageViewerApp {
                         self.selection_anchor = Some(clamped);
                     }
 
-                    // --- SCROLL-AWARE LOGIC (GRID) ---
+                    // Trigger scroll normalization in the view
+                    self.scroll_to_selected = true;
+
                     // Request visibility for the new selected index
                     self.scroll_request = crate::app::state::ScrollRequest::EnsureVisible(clamped);
 
@@ -687,6 +689,9 @@ impl ImageViewerApp {
                 GridAction::RenameWithShell(idx) => self.rename_with_shell(idx),
             }
         }
+
+        // Reset scroll trigger after view has consumed it
+        self.scroll_to_selected = false;
     }
 
     pub fn render_item_slot(&mut self, ui: &mut egui::Ui, idx: usize) {
