@@ -135,5 +135,6 @@ unsafe fn process_shell_child(parent: &IShellFolder, child_pidl: *mut ITEMIDLIST
         drive_info: None,
         sync_status: SyncStatus::None,
         deletion_date: None,
+        recycle_original_path: None,
     })
 }

@@ -110,11 +110,9 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 }
                 -28 => app.show_properties_for_idx(item_idx),
                 -50 | -52 => {
-                    if let Some(idx) = item_idx.or(app.selected_item) {
-                        if let Some(item) = app.items.get(idx) {
-                            let path = item.path.clone();
-                            app.restore_from_recycle_bin(&path);
-                        }
+                    let paths = app.context_target_paths(item_idx);
+                    if !paths.is_empty() {
+                         app.restore_from_recycle_bin(&paths);
                     }
                 }
                 -51 | -53 => {

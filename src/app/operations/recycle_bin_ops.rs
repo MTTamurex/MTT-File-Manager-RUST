@@ -6,48 +6,59 @@ use std::path::{Path, PathBuf};
 use crate::app::state::ImageViewerApp;
 
 impl ImageViewerApp {
-    pub fn restore_from_recycle_bin(&mut self, physical_path: &Path) {
-        use crate::infrastructure::windows::recycle_bin::enumerate_recycle_bin;
+    pub fn restore_from_recycle_bin(&mut self, paths: &[PathBuf]) {
+        if paths.is_empty() { return; }
 
-        // Get the original path from RecycleBinItem by re-enumerating
-        // This ensures we get the correct original_path stored in the $I file
-        let original_path = if let Ok(recycle_items) = enumerate_recycle_bin() {
-            recycle_items
-                .iter()
-                .find(|item| item.physical_path == physical_path)
-                .map(|item| item.original_path.clone())
-        } else {
-            None
-        };
-
-        let item_name = self.items.iter()
-            .find(|i| i.path == physical_path)
-            .map(|i| i.name.clone());
-
-        if let Some(name) = item_name {
-            let original_path = original_path.unwrap_or_else(|| {
-                // Fallback: use Desktop if we can't find original path
-                PathBuf::from("C:\\Users\\Public\\Desktop").join(name.clone())
+        let mut restore_items = Vec::with_capacity(paths.len());
+        
+        for physical_path in paths {
+            // Check if we have the original path cached in our items list
+            // Normalize path for lookup to be safe
+            let entry = self.items.iter().find(|i| {
+                // Precise match first
+                if i.path == *physical_path { return true; }
+                
+                // Fallback to normalized comparison if needed
+                let p1 = i.path.to_string_lossy().to_lowercase();
+                let p1 = p1.strip_prefix("\\\\?\\").unwrap_or(&p1);
+                let p2 = physical_path.to_string_lossy().to_lowercase();
+                let p2 = p2.strip_prefix("\\\\?\\").unwrap_or(&p2);
+                p1 == p2
             });
 
-            // If we are restoring the currently selected file, reset selection
-            if let Some(selected) = &self.selected_file {
-                if selected.path == physical_path {
-                    self.reset_selection_and_search();
-                }
-            }
-
-            // Send request to background worker
-            let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::RestoreFromRecycleBin {
-                physical_path: physical_path.to_path_buf(),
-                original_path,
-            });
-
-            self.notifications
-                .push(crate::application::AppNotification::info(format!(
-                    "Restaurando '{}' em background...",
+            if let Some(item) = entry {
+                let original = item.recycle_original_path.clone().unwrap_or_else(|| {
+                    // Critical fallback: if missing original path, try to guess from physical filename
+                    PathBuf::from("C:\\Users\\Public\\Desktop").join(&item.name)
+                });
+                
+                restore_items.push((physical_path.clone(), original));
+                
+                self.notifications.push(crate::application::AppNotification::info(format!(
+                    "Restaurando '{}'...",
+                    item.name
+                )));
+            } else {
+                // Handle case where item is not in self.items (should be rare)
+                let name = physical_path.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "Item".to_string());
+                    
+                let original = PathBuf::from("C:\\Users\\Public\\Desktop").join(&name);
+                restore_items.push((physical_path.clone(), original));
+                
+                self.notifications.push(crate::application::AppNotification::info(format!(
+                    "Restaurando '{}' (fallback)...",
                     name
                 )));
+            }
+        }
+
+        // Send SINGLE batch request to worker
+        if !restore_items.is_empty() {
+            let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::RestoreFromRecycleBin {
+                items: restore_items,
+            });
         }
     }
 

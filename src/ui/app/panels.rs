@@ -123,6 +123,7 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, fr
                             let action = render_preview_panel(
                                 ui,
                                 &file,
+                                app.multi_selection.len(),
                                 app.selected_thumbnail.as_ref(),
                                 app.selected_gif.as_mut(),
                                 app.media_preview.as_mut(), // Always pass mut if it exists, visibility is controlled by HWND
@@ -289,6 +290,7 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             drive_info: None,
             sync_status: SyncStatus::None,
             deletion_date: None,
+            recycle_original_path: None,
         })
     } else if !app.is_computer_view {
         let path = std::path::PathBuf::from(&app.current_path);
@@ -327,10 +329,13 @@ fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
         } else if app.items.is_empty() {
             let response = ui.centered_and_justified(|ui| {
                 ui.label("Pasta vazia");
-            }).response;
+            }).response.on_hover_cursor(egui::CursorIcon::Default);
 
             // Handle context menu on empty area
-            if ui.interact(response.rect, ui.id().with("empty_bg"), egui::Sense::click()).secondary_clicked() {
+            let interact_response = ui.interact(response.rect, ui.id().with("empty_bg"), egui::Sense::click())
+                .on_hover_cursor(egui::CursorIcon::Default); // Force cursor on the interaction rect
+            
+            if interact_response.secondary_clicked() {
                 app.context_menu.target_paths.clear(); 
                 
                 // Use current path for shell menu

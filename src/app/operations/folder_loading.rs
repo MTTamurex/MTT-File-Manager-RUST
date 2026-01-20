@@ -222,6 +222,7 @@ impl ImageViewerApp {
                                     drive_info: None,
                                     sync_status,
                                     deletion_date: None,
+                                    recycle_original_path: None,
                                 };
 
                                 // Adiciona ao lote

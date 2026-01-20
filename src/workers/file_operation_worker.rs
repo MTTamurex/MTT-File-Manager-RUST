@@ -45,8 +45,7 @@ pub enum FileOperationRequest {
         hwnd: SendHwnd,
     },
     RestoreFromRecycleBin {
-        physical_path: PathBuf,
-        original_path: PathBuf,
+        items: Vec<(PathBuf, PathBuf)>,
     },
     DeletePermanently {
         physical_path: PathBuf,
@@ -101,8 +100,10 @@ pub fn start_file_operation_worker(
                 FileOperationRequest::Move { path, dest_folder, hwnd } => {
                     let _ = shell_operations::move_item_with_shell(&path, &dest_folder, hwnd.0);
                 }
-                FileOperationRequest::RestoreFromRecycleBin { physical_path, original_path } => {
-                    let _ = recycle_bin::restore_from_recycle_bin(&physical_path, &original_path);
+                FileOperationRequest::RestoreFromRecycleBin { items } => {
+                    for (physical_path, original_path) in items {
+                        let _ = recycle_bin::restore_from_recycle_bin(&physical_path, &original_path);
+                    }
                     let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
                 }
                 FileOperationRequest::DeletePermanently { physical_path } => {
