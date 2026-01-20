@@ -10,6 +10,13 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         let mut do_paste = false;
 
         ctx.input(|i| {
+            // INTERACTION MODE DETECTION
+            // 1. Mouse detection (ONLY intentional actions: Click or Press)
+            // CRITICAL: Do NOT detect passive mouse movement (delta) to avoid interfering with keyboard navigation
+            if i.pointer.any_pressed() || i.pointer.any_click() {
+                app.last_input = crate::app::state::LastInput::Mouse;
+            }
+
             for event in &i.events {
                 match event {
                     egui::Event::Key {
@@ -18,6 +25,19 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         modifiers,
                         ..
                     } => {
+                        // 2. Keyboard detection (Navigation keys)
+                        if *pressed {
+                            match key {
+                                egui::Key::ArrowDown | egui::Key::ArrowUp | 
+                                egui::Key::ArrowLeft | egui::Key::ArrowRight |
+                                egui::Key::PageDown | egui::Key::PageUp |
+                                egui::Key::Home | egui::Key::End => {
+                                    app.last_input = crate::app::state::LastInput::Keyboard;
+                                }
+                                _ => {}
+                            }
+                        }
+
                         if *pressed && modifiers.ctrl {
                             match key {
                                 egui::Key::C => do_copy = true,

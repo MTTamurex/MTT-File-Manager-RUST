@@ -25,7 +25,7 @@ use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::theme;
 
-use super::state::ImageViewerApp;
+use super::state::{ImageViewerApp, LastInput};
 
 // These are referenced from main.rs and need to be accessible
 const PATH_PADRAO: &str = "C:\\";
@@ -365,6 +365,9 @@ impl ImageViewerApp {
 
             // SVG ICON MANAGER - usando recursos embarcados
             svg_icon_manager: SvgIconManager::new(),
+
+            // LAST INPUT STATE
+            last_input: LastInput::Mouse,
 
             // TAB SYSTEM
             tab_manager: crate::tabs::TabManager::new(),
