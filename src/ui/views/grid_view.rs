@@ -325,7 +325,7 @@ pub fn render_grid_view(
         }
     }
 
-    // 4. Custom Scrollbar
+    // 4. Custom Scrollbar with Track-Click
     if total_content_height > viewport_h {
         let scrollbar_w = 12.0;
         let scrollbar_rect = Rect::from_min_max(
@@ -344,8 +344,23 @@ pub fn render_grid_view(
             egui::vec2(scrollbar_w - 4.0, handle_h)
         );
 
-        let interact = ui.interact(scrollbar_rect, ui.id().with("scrollbar"), Sense::drag());
-        if interact.dragged() {
+        // Interaction: click_and_drag for both track-click and handle drag
+        let interact = ui.interact(scrollbar_rect, ui.id().with("scrollbar"), Sense::click_and_drag());
+        
+        if interact.clicked() {
+            // TRACK-CLICK: Jump to clicked position
+            if let Some(click_pos) = ui.input(|i| i.pointer.interact_pos()) {
+                // Calculate relative position in the track
+                let relative_y = click_pos.y - scrollbar_rect.top();
+                // Center the handle on the click position
+                let target_handle_center = relative_y;
+                let target_handle_top = target_handle_center - (handle_h / 2.0);
+                // Convert to scroll offset
+                let scroll_ratio = target_handle_top / (viewport_h - handle_h);
+                *ctx.mut_scroll_offset_y = (scroll_ratio * max_scroll).clamp(0.0, max_scroll);
+            }
+        } else if interact.dragged() {
+            // DRAG: Existing drag logic
             let delta_y = interact.drag_delta().y;
             let scroll_pct_delta = delta_y / (viewport_h - handle_h);
             *ctx.mut_scroll_offset_y += scroll_pct_delta * max_scroll;
