@@ -46,6 +46,9 @@ impl ImageViewerApp {
                 let data = self.gif_manager.request_load(&path);
                 self.selected_gif = Some(GifPlayer::new(path.clone(), data));
             } else {
+                // Not a GIF -> Cleanup non-active GIFs (subject to memory/TTL)
+                self.gif_manager.cleanup(false);
+
                 // CLEANUP LOGIC: If we are the owner of a VIDEO, and focus changed to a DIFFERENT file, stop the player.
                 let is_owner = self.media_preview_owner_tab_id == Some(active_tab_id);
                 if is_owner {
@@ -66,6 +69,9 @@ impl ImageViewerApp {
             }
         } else {
             // No selection -> if owner, clear media
+            // Also cleanup ALL GIFs immediately as there's no active preview
+            self.gif_manager.cleanup(true);
+
             let active_tab_id = self.tab_manager.active().id;
             if self.media_preview_owner_tab_id == Some(active_tab_id) {
                 if let Some(crate::ui::components::media_preview::MediaPreview::Video(ref mut wv)) = self.media_preview {
@@ -96,6 +102,9 @@ impl ImageViewerApp {
         self.context_menu.target_paths.clear();
         self.renaming_state = None;
         self.selected_gif = None;
+
+        // Reset also drops all active GIF previews
+        self.gif_manager.cleanup(true);
 
         // CLEANUP LOGIC: If owner resets selection, clear media
         let active_tab_id = self.tab_manager.active().id;
