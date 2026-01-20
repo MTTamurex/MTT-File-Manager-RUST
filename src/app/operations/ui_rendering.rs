@@ -37,7 +37,7 @@ impl ImageViewerApp {
             if ui.input(|i| i.key_pressed(egui::Key::PageUp)) { page_action = Some(false); }
 
             let row_height = 24.0;
-            let header_h = 24.0; // Header + Separator
+            let header_h = 32.0; // Header + Separator precise height for visibility
             let viewport_h = (ui.available_height() - header_h).max(0.0);
             let visible_count = (viewport_h / row_height).floor() as usize;
 
@@ -65,28 +65,28 @@ impl ImageViewerApp {
                     self.update_selected_thumbnail();
                     self.last_keyboard_nav = Instant::now();
                     
-                    // --- SCROLL-AWARE LOGIC (LIST) ---
+                    // --- SCROLL-AWARE LOGIC (LIST: 100% VISIBILITY) ---
                     let selected_top = clamped as f32 * row_height;
                     let selected_bottom = selected_top + row_height;
 
                     if let Some(is_down) = page_action {
-                        // PageUp/PageDown ALWAYS reposition viewport
                         if is_down {
                             // PageDown: Anchor to TOP
                             self.scroll_offset_y = selected_top;
                         } else {
-                            // PageUp: Anchor to TOP
-                            self.scroll_offset_y = selected_top;
+                            // PageUp: Anchor to BOTTOM to ensure full visibility of the target
+                            self.scroll_offset_y = (selected_bottom - viewport_h).max(0.0);
                         }
                     } else {
-                        // Arrows: ONLY adjust scroll if outside viewport bounds
-                        // USANDO LIMITES ABSOLUTOS DO ITEM NO MESMO FRAME
+                        // Arrows: DUAL-BOUNDARY CHECK
                         let viewport_top = self.scroll_offset_y;
                         let viewport_bottom = self.scroll_offset_y + viewport_h;
 
                         if selected_bottom > viewport_bottom {
+                            // Too far down: scroll down to show bottom edge
                             self.scroll_offset_y = selected_bottom - viewport_h;
                         } else if selected_top < viewport_top {
+                            // Too far up: scroll up to show top edge
                             self.scroll_offset_y = selected_top;
                         }
                     }
