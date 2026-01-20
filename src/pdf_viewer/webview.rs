@@ -350,7 +350,7 @@ impl WarmupCompletedHandler {
         count as u32
     }
 
-    unsafe extern "system" fn Invoke(this: *mut c_void, result: HRESULT, env: *mut c_void) -> HRESULT {
+    unsafe extern "system" fn Invoke(_this: *mut c_void, result: HRESULT, env: *mut c_void) -> HRESULT {
         // This is where the magic happens (or doesn't).
         // We successfully created the environment, which means the runtime is loaded.
         // We simply release the environment and return.
@@ -399,7 +399,7 @@ pub fn warmup_env() -> Result<()> {
         // Pass NULL for user_data_folder to use default (standard for app),
         // OR use the same logic as real viewer if we set specific path.
         // Real viewer uses nullptr (default), so we use nullptr here too.
-        create_env(PCWSTR::null(), PCWSTR::null(), std::ptr::null_mut(), handler);
+        let _ = create_env(PCWSTR::null(), PCWSTR::null(), std::ptr::null_mut(), handler);
         
         Ok(())
     }

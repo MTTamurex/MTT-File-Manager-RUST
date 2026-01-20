@@ -406,7 +406,7 @@ fn render_list_item(
     w_date: f32,
     w_type: f32,
     w_size: f32,
-    w_status: f32,
+    _w_status: f32,
     row_height: f32,
 ) {
     // GATILHO LAZY LOAD PARA PASTAS: Descobre capa se ainda não tem

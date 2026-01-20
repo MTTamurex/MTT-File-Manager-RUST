@@ -45,9 +45,9 @@ pub enum VideoMenuAction {
 }
 
 /// Helper to create a menu item with arrow aligned to the right
-fn menu_item(ui: &mut egui::Ui, text: &str, has_submenu: bool, menu_width: f32) -> egui::Response {
+fn menu_item(ui: &mut egui::Ui, text: &str, has_submenu: bool) -> egui::Response {
     let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(menu_width - 8.0, 22.0), egui::Sense::click());
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 22.0), egui::Sense::click());
 
     if ui.is_rect_visible(rect) {
         let visuals = ui.style().interact_selectable(&response, false);
@@ -113,7 +113,7 @@ pub fn render_video_menu(
     let menu_frame = egui::Frame::new()
         .fill(ctx.style().visuals.window_fill)
         .stroke(ctx.style().visuals.window_stroke)
-        .inner_margin(egui::Margin::same(4))
+        .inner_margin(egui::Margin::ZERO) // No margin to ensure background fills the viewport edge
         .corner_radius(0.0);
 
     let menu_pos = state.position;
@@ -128,33 +128,33 @@ pub fn render_video_menu(
             .with_decorations(false)
             .with_visible(true)
             .with_taskbar(false)
-            .with_transparent(true)
+            .with_always_on_top()
             .with_resizable(false)
-            .with_inner_size([MENU_WIDTH, 100.0])
+            .with_inner_size([MENU_WIDTH, 110.0]) // Slightly larger to avoid rounding/clipping issues
             .with_position(menu_pos),
         |ctx, _class| {
             egui::CentralPanel::default().frame(menu_frame).show(ctx, |ui| {
                 // Audio menu item
-                let audio_resp = menu_item(ui, "🔊 Áudio", true, MENU_WIDTH);
+                let audio_resp = menu_item(ui, "🔊 Áudio", true);
                 if audio_resp.hovered() {
                     state.active_submenu = Some("audio".to_string());
                     let submenu_y = menu_pos.y + audio_resp.rect.min.y;
-                    state.submenu_position = Some(egui::pos2(menu_pos.x + MENU_WIDTH + 2.0, submenu_y));
+                    state.submenu_position = Some(egui::pos2(menu_pos.x + MENU_WIDTH, submenu_y));
                 }
 
                 // Subtitle menu item
-                let sub_resp = menu_item(ui, "💬 Legendas", true, MENU_WIDTH);
+                let sub_resp = menu_item(ui, "💬 Legendas", true);
                 if sub_resp.hovered() {
                     state.active_submenu = Some("subtitle".to_string());
                     let submenu_y = menu_pos.y + sub_resp.rect.min.y;
-                    state.submenu_position = Some(egui::pos2(menu_pos.x + MENU_WIDTH + 2.0, submenu_y));
+                    state.submenu_position = Some(egui::pos2(menu_pos.x + MENU_WIDTH, submenu_y));
                 }
 
                 ui.separator();
 
                 // Fullscreen/Restore option
                 let fs_text = if is_fullscreen { "⮌ Restaurar janela" } else { "⛶ Tela cheia" };
-                if menu_item(ui, fs_text, false, MENU_WIDTH).clicked() {
+                if menu_item(ui, fs_text, false).clicked() {
                     action = VideoMenuAction::ToggleFullscreen;
                 }
 
@@ -186,7 +186,7 @@ pub fn render_video_menu(
                     .with_decorations(false)
                     .with_visible(true)
                     .with_taskbar(false)
-                    .with_transparent(true)
+                    .with_always_on_top()
                     .with_resizable(false)
                     .with_inner_size([SUBMENU_WIDTH, 350.0])
                     .with_position(pos),
