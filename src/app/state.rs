@@ -7,6 +7,12 @@ use eframe::egui;
 use lru::LruCache;
 use notify::RecommendedWatcher;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LastInput {
+    Mouse,
+    Keyboard,
+}
+
 use std::collections::HashSet;
 // use std::num::NonZeroUsize;
 use std::path::PathBuf;
@@ -154,6 +160,9 @@ pub struct ImageViewerApp {
 
     // SVG ICON MANAGER
     pub svg_icon_manager: SvgIconManager,
+
+    // LAST INPUT STATE (Strict Hover Control)
+    pub last_input: LastInput,
 
     // Debounce for paste key (keys_down can fire multiple times)
     pub paste_key_debounce: bool,

@@ -83,7 +83,10 @@ impl ImageViewerApp {
                             }
                         }
                     } else {
-                        // Navigation without shift: Update anchor, do NOT clear selection (as requested)
+                        // Navigation without shift: Single-item selection (clear + add focused item)
+                        // This ensures the focused item shows the dark blue selection border
+                        self.multi_selection.clear();
+                        self.multi_selection.insert(item_path.clone());
                         self.selection_anchor = Some(clamped);
                     }
                     
@@ -180,6 +183,7 @@ impl ImageViewerApp {
             failed_thumbnails: &self.cache_manager.failed_thumbnails,
             scroll_offset_y: self.scroll_offset_y,
             mut_scroll_offset_y: &mut self.scroll_offset_y,
+            last_input: self.last_input,
         };
 
         // Usar uma abordagem diferente: coletar ações em vetores
@@ -428,6 +432,9 @@ impl ImageViewerApp {
             if let Some(idx) = new_index {
                 let clamped = idx.min(self.items.len().saturating_sub(1));
                 if let Some(item) = self.items.get(clamped) {
+                    // Clone path before any mutable borrows
+                    let item_path = item.path.clone();
+                    
                     // UPDATED: Decoupled Focus (selected_item) from Selection (multi_selection)
                     let old_focus = self.selected_item;
                     self.selected_item = Some(clamped);
@@ -450,7 +457,10 @@ impl ImageViewerApp {
                             }
                         }
                     } else {
-                        // Navigation without shift: Update anchor, do NOT clear selection
+                        // Navigation without shift: Single-item selection (clear + add focused item)
+                        // This ensures the focused item shows the dark blue selection border
+                        self.multi_selection.clear();
+                        self.multi_selection.insert(item_path);
                         self.selection_anchor = Some(clamped);
                     }
 
@@ -540,6 +550,7 @@ impl ImageViewerApp {
             failed_thumbnails: &self.cache_manager.failed_thumbnails,
             scroll_offset_y: self.scroll_offset_y,
             mut_scroll_offset_y: &mut self.scroll_offset_y,
+            last_input: self.last_input,
         };
 
         // Usar uma abordagem diferente: coletar ações em vetores
