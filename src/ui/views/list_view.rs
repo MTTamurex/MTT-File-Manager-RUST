@@ -439,11 +439,16 @@ fn render_list_item(
         let rounding = 4.0;
         let accent_color = crate::ui::theme::COLOR_ACCENT;
 
+        // ADJUST RECT TO AVOID SCROLLBAR OVERLAP
+        // Scrollbar is 4px + 2px margin. Using 8px to ensure a clean gap.
+        let mut visual_rect = rect;
+        visual_rect.max.x -= 8.0;
+
         if is_selected {
             // Selected: Bold primary border
             let stroke_width = if is_hovered { 2.5 } else { 2.0 };
             ui.painter().rect_stroke(
-                rect,
+                visual_rect,
                 rounding,
                 egui::Stroke::new(stroke_width, accent_color),
                 egui::StrokeKind::Inside,
@@ -452,7 +457,7 @@ fn render_list_item(
             // Hovered or Focused: Thin subtle border
             let hover_color = accent_color.gamma_multiply(0.35); // ~35% alpha as requested
             ui.painter().rect_stroke(
-                rect,
+                visual_rect,
                 rounding,
                 egui::Stroke::new(1.0, hover_color),
                 egui::StrokeKind::Inside,
