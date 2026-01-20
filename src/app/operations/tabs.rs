@@ -22,6 +22,7 @@ impl ImageViewerApp {
         active.selected_metadata = self.selected_metadata.clone();
         active.search_query = self.search_query.clone();
         active.scroll_to_selected = self.scroll_to_selected;
+        active.scroll_offset_y = self.scroll_offset_y;
 
         // No Windows, Path::new("Este Computador").file_name() é None
         if active.is_computer_view {
@@ -52,6 +53,7 @@ impl ImageViewerApp {
         self.selected_metadata = active.selected_metadata;
         self.search_query = active.search_query;
         self.scroll_to_selected = active.scroll_to_selected;
+        self.scroll_offset_y = active.scroll_offset_y;
 
         self.watch_current_folder();
     }

@@ -187,6 +187,9 @@ pub struct ImageViewerApp {
     // PERFORMANCE: Reusable buffers for grid view rendering (avoid per-item allocations)
     pub pending_ops: crate::ui::views::grid_view::PendingOperations,
 
+    // Scroll offset for manual grid virtualization
+    pub scroll_offset_y: f32,
+
     // FILE OPERATION WORKER
     pub file_op_sender: Sender<crate::workers::file_operation_worker::FileOperationRequest>,
     pub file_op_res_receiver: Receiver<crate::workers::file_operation_worker::FileOperationResult>,

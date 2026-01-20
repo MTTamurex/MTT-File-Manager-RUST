@@ -60,6 +60,10 @@ pub struct GridViewContext<'a> {
     pub pending_ops: &'a mut PendingOperations,
     /// Caminhos que falharam no thumbnail
     pub failed_thumbnails: &'a std::collections::HashSet<PathBuf>,
+    /// Scroll offset for manual virtualization
+    pub scroll_offset_y: f32,
+    /// Mutable reference to update scroll offset
+    pub mut_scroll_offset_y: &'a mut f32,
 }
 
 /// Operations that can be performed from grid view
@@ -108,292 +112,224 @@ pub fn render_grid_view(
 
     let available_rect = ui.available_rect_before_wrap();
 
-    let _scroll_res = egui::ScrollArea::vertical()
-        .auto_shrink([false, false])
-        .enable_scrolling(true) // Re-enable to allow SCROLLBAR DRAGGING
-        .show(ui, |ui| {
-            // Manual scroll handling for increased speed (Native 1x + Hack 7x = ~8x)
-            let mut scroll_delta = ui.input(|i| i.smooth_scroll_delta);
-            if scroll_delta != egui::Vec2::ZERO {
-                scroll_delta.y *= 7.0; // Multiplier adjusted because native scroll is now on
-                ui.scroll_with_delta(scroll_delta);
-            }
-            if ctx.is_computer_view {
-                let mut local = Vec::new();
-                let mut network = Vec::new();
+    /// Helper to render a single grid item with full interaction
+    fn render_grid_item(
+        ui: &mut Ui,
+        index: usize,
+        item: &FileEntry,
+        rect: Rect,
+        ctx: &mut GridViewContext,
+        clicked_item: &mut Option<usize>,
+        double_clicked_item: &mut Option<usize>,
+        secondary_clicked_item: &mut Option<usize>,
+    ) {
+        let response = ui.interact(rect, ui.id().with(index), Sense::click());
+        if response.clicked() {
+            *clicked_item = Some(index);
+        }
+        if response.double_clicked() {
+            *double_clicked_item = Some(index);
+        }
+        if response.secondary_clicked() {
+            *secondary_clicked_item = Some(index);
+        }
 
-                for (i, item) in ctx.items.iter().enumerate() {
-                    let is_remote = item.drive_info.as_ref().map_or(false, |di| {
-                        di.drive_type == crate::infrastructure::windows::DriveType::Remote
-                    });
-                    if is_remote {
-                        network.push((i, item));
-                    } else {
-                        local.push((i, item));
-                    }
-                }
+        if ctx.multi_selection.contains(&item.path) {
+            ui.painter().rect_filled(
+                rect,
+                0.0,
+                crate::ui::theme::COLOR_SELECTION,
+            );
+        }
 
-                let mut render_grid_section =
-                    |ui: &mut Ui, items_to_render: Vec<(usize, &FileEntry)>| {
-                        if items_to_render.is_empty() {
-                            return;
-                        }
-
-                        let count = items_to_render.len();
-                        let rows = (count as f32 / cols as f32).ceil() as usize;
-                        let section_height = rows as f32 * (item_h + padding) + padding;
-
-                        let content_min = ui.cursor().min;
-                        ui.allocate_exact_size(
-                            egui::vec2(available_w, section_height),
-                            Sense::hover(),
-                        );
-
-                        for (i, (index, item)) in items_to_render.into_iter().enumerate() {
-                            let row = i / cols;
-                            let col = i % cols;
-
-                            let x_pos = col as f32 * (item_w + padding) + padding;
-                            let y_pos = row as f32 * (item_h + padding) + padding;
-                            let item_rect = Rect::from_min_size(
-                                content_min + egui::vec2(x_pos, y_pos),
-                                egui::vec2(item_w, item_h),
-                            );
-
-                            if ui.is_rect_visible(item_rect) {
-                                let response =
-                                    ui.interact(item_rect, ui.id().with(index), Sense::click());
-                                if response.clicked() {
-                                    clicked_item = Some(index);
-                                }
-                                if response.double_clicked() {
-                                    double_clicked_item = Some(index);
-                                }
-                                if response.secondary_clicked() {
-                                    secondary_clicked_item = Some(index);
-                                }
-
-                            if ctx.multi_selection.contains(&item.path) {
-                                if ctx.selected_item == Some(index) && ctx.scroll_to_selected {
-                                        ui.scroll_to_rect(item_rect, Some(egui::Align::Center));
-                                    }
-                                    ui.painter().rect_filled(
-                                        item_rect,
-                                        0.0,
-                                        crate::ui::theme::COLOR_SELECTION,
-                                    );
-                                }
-
-                                if response.hovered() {
-                                    // REMOVED: let item_tooltip = item.clone();
-                                    let is_recycle = ctx.is_recycle_bin_view;
-                                    let right_bound = available_rect.right();
-                                    let mouse_pos =
-                                        ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
-
-                                    // SMART TOOLTIP: Se estiver perto da borda direita do painel central,
-                                    // inverte a posição do tooltip para a esquerda para não ficar atrás do player
-                                    let tooltip_pos = if mouse_pos.x + 320.0 > right_bound {
-                                        mouse_pos - egui::vec2(320.0, 0.0)
-                                    } else {
-                                        mouse_pos
-                                    };
-
-                                    egui::show_tooltip_at(
-                                        ui.ctx(),
-                                        ui.layer_id(),
-                                        response.id,
-                                        tooltip_pos,
-                                        |ui: &mut Ui| {
-                                            ui.set_max_width(300.0);
-                                            ui.vertical(|ui| {
-                                                ui.label(
-                                                    egui::RichText::new(&item.name).strong(),
-                                                );
-                                                ui.separator();
-                                                ui.label(format!(
-                                                    "Tipo: {}",
-                                                    get_file_type_string(item)
-                                                ));
-                                                if !item.is_dir {
-                                                    ui.label(format!(
-                                                        "Tamanho: {}",
-                                                        crate::infrastructure::windows::format_size(
-                                                            item.size
-                                                        )
-                                                    ));
-                                                }
-                                                let date_lbl = if is_recycle {
-                                                    "Data de Exclusão"
-                                                } else {
-                                                    "Última modificação"
-                                                };
-                                                let date_val = if is_recycle {
-                                                    item.deletion_date
-                                                        .clone()
-                                                        .unwrap_or_else(|| "-".to_string())
-                                                } else {
-                                                    crate::infrastructure::windows::format_date(
-                                                        item.modified,
-                                                    )
-                                                };
-                                                ui.label(format!("{}: {}", date_lbl, date_val));
-                                            });
-                                        },
-                                    );
-                                }
-
-                                let inner_rect = item_rect.shrink(3.0);
-                                ui.allocate_new_ui(
-                                    egui::UiBuilder::new().max_rect(inner_rect),
-                                    |ui| {
-                                            render_item_slot_for_grid(ui, index, item, ctx);
-                                    },
-                                );
-                            }
-                        }
-                    };
-
-                if !local.is_empty() {
-                    render_section_header(ui, "Discos locais");
-                    render_grid_section(ui, local);
-                    ui.add_space(10.0);
-                }
-
-                if !network.is_empty() {
-                    render_section_header(ui, "Unidades de rede");
-                    render_grid_section(ui, network);
-                    ui.add_space(10.0);
-                }
+        if response.hovered() {
+            let is_recycle = ctx.is_recycle_bin_view;
+            let mouse_pos = ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
+            // SMART TOOLTIP: Inverte se estiver perto da borda direita
+            let right_bound = ui.ctx().screen_rect().right();
+            let tooltip_pos = if mouse_pos.x + 320.0 > right_bound {
+                mouse_pos - egui::vec2(320.0, 0.0)
             } else {
-                // Regular virtualized grid
-                let rows = (count as f32 / cols as f32).ceil() as usize;
-                let total_height = rows as f32 * (item_h + padding) + padding;
-                let content_min = ui.min_rect().min;
+                mouse_pos
+            };
 
-                ui.allocate_rect(
-                    Rect::from_min_size(content_min, egui::vec2(available_w, total_height)),
-                    Sense::hover(),
+            egui::show_tooltip_at(
+                ui.ctx(),
+                ui.layer_id(),
+                response.id,
+                tooltip_pos,
+                |ui: &mut Ui| {
+                    ui.set_max_width(300.0);
+                    ui.vertical(|ui| {
+                        ui.label(egui::RichText::new(&item.name).strong());
+                        ui.separator();
+                        ui.label(format!("Tipo: {}", get_file_type_string(item)));
+                        if !item.is_dir {
+                            ui.label(format!(
+                                "Tamanho: {}",
+                                crate::infrastructure::windows::format_size(item.size)
+                            ));
+                        }
+                        let (date_lbl, date_val) = if is_recycle {
+                            ("Data de Exclusão", item.deletion_date.clone().unwrap_or_else(|| "-".to_string()))
+                        } else {
+                            ("Última modificação", crate::infrastructure::windows::format_date(item.modified))
+                        };
+                        ui.label(format!("{}: {}", date_lbl, date_val));
+                    });
+                },
+            );
+        }
+
+        let inner_rect = rect.shrink(3.0);
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
+            render_item_slot_for_grid(ui, index, item, ctx);
+        });
+    }
+
+    // --- MANUAL VIRTUALIZATION START ---
+    let cell_h = item_h + padding;
+    let total_rows = (count as f32 / cols as f32).ceil() as usize;
+    let total_content_height = total_rows as f32 * cell_h + padding;
+
+    // Viewport area
+    let viewport_rect = ui.available_rect_before_wrap();
+    let viewport_h = viewport_rect.height();
+
+    // 1. Handle mouse wheel scroll (Manual Source of Truth)
+    let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
+    if scroll_delta != 0.0 {
+        // Multiplier for speed as requested
+        *ctx.mut_scroll_offset_y -= scroll_delta * 5.0; 
+    }
+
+    // 2. Clamp scroll offset
+    let max_scroll = (total_content_height - viewport_h).max(0.0);
+    *ctx.mut_scroll_offset_y = ctx.mut_scroll_offset_y.clamp(0.0, max_scroll);
+    let current_scroll = *ctx.mut_scroll_offset_y;
+
+    // 3. Render Virtual Grid
+    ui.allocate_rect(viewport_rect, Sense::hover());
+    let mut child_ui = ui.child_ui(viewport_rect, *ui.layout(), None);
+    child_ui.set_clip_rect(viewport_rect);
+
+    let content_min = viewport_rect.min;
+
+    if ctx.is_computer_view {
+        // Computer view still uses sections, but we can simplify or keep it linear for now
+        // Given the requirement "manual scroll manual + viewport + render seletivo"
+        // Let's implement Computer View as a special case within the scrollable area
+        
+        let mut current_y = content_min.y - current_scroll;
+        
+        let mut local = Vec::new();
+        let mut network = Vec::new();
+        for (i, item) in ctx.items.iter().enumerate() {
+            let is_remote = item.drive_info.as_ref().map_or(false, |di| {
+                di.drive_type == crate::infrastructure::windows::DriveType::Remote
+            });
+            if is_remote { network.push((i, item)); } else { local.push((i, item)); }
+        }
+
+        let mut render_section = |ui: &mut Ui, title: &str, items: Vec<(usize, &FileEntry)>, start_y: &mut f32| {
+            if items.is_empty() { return; }
+            
+            // Header
+            let header_h = 25.0;
+            let header_rect = Rect::from_min_size(egui::pos2(content_min.x, *start_y), egui::vec2(available_w, header_h));
+            if ui.is_rect_visible(header_rect) {
+                let mut header_ui = ui.child_ui(header_rect, *ui.layout(), None);
+                render_section_header(&mut header_ui, title);
+            }
+            *start_y += header_h;
+
+            let count = items.len();
+            let rows = (count as f32 / cols as f32).ceil() as usize;
+            let section_h = rows as f32 * cell_h + padding;
+
+            for (i, (index, item)) in items.into_iter().enumerate() {
+                let row = i / cols;
+                let col = i % cols;
+                let x_pos = col as f32 * (item_w + padding) + padding;
+                let y_pos = row as f32 * cell_h + padding;
+                
+                let item_rect = Rect::from_min_size(
+                    egui::pos2(content_min.x + x_pos, *start_y + y_pos),
+                    egui::vec2(item_w, item_h),
                 );
 
-                let clip_rect = ui.clip_rect();
-                let start_y = (clip_rect.top() - content_min.y).max(0.0);
-                let end_y = start_y + clip_rect.height();
-
-                let visible_min_row = (start_y / (item_h + padding)).floor() as usize;
-                let visible_max_row = ((end_y / (item_h + padding)).ceil() as usize + 1).min(rows);
-
-                // Export range for prefetch logic
-                visible_rows_range = Some((visible_min_row, visible_max_row));
-
-                let loop_min_row = visible_min_row.saturating_sub(2);
-                let loop_max_row = (visible_max_row + 2).min(rows);
-
-                for row in loop_min_row..loop_max_row {
-                    for col in 0..cols {
-                        let index = row * cols + col;
-                        if index >= ctx.items.len() {
-                            break;
-                        }
-
-                        let x_pos = col as f32 * (item_w + padding) + padding;
-                        let y_pos = row as f32 * (item_h + padding) + padding;
-                        let rect = Rect::from_min_size(
-                            content_min + egui::vec2(x_pos, y_pos),
-                            egui::vec2(item_w, item_h),
-                        );
-
-                        if ui.is_rect_visible(rect) {
-                            let item = &ctx.items[index];
-                            let response = ui.interact(rect, ui.id().with(index), Sense::click());
-                            if response.clicked() {
-                                clicked_item = Some(index);
-                            }
-                            if response.double_clicked() {
-                                double_clicked_item = Some(index);
-                            }
-                            if response.secondary_clicked() {
-                                secondary_clicked_item = Some(index);
-                            }
-
-                            if ctx.multi_selection.contains(&item.path) {
-                                if ctx.selected_item == Some(index) && ctx.scroll_to_selected {
-                                    ui.scroll_to_rect(rect, Some(egui::Align::Center));
-                                }
-                                ui.painter().rect_filled(
-                                    rect,
-                                    0.0,
-                                    crate::ui::theme::COLOR_SELECTION,
-                                );
-                            }
-
-                            if response.hovered() {
-                                // REMOVED: let item_tooltip = item.clone();
-                                let is_recycle = ctx.is_recycle_bin_view;
-                                let right_bound = available_rect.right();
-                                let mouse_pos =
-                                    ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
-
-                                // SMART TOOLTIP: Inverte se estiver perto da borda direita (área do player)
-                                let tooltip_pos = if mouse_pos.x + 320.0 > right_bound {
-                                    mouse_pos - egui::vec2(320.0, 0.0)
-                                } else {
-                                    mouse_pos
-                                };
-
-                                egui::show_tooltip_at(
-                                    ui.ctx(),
-                                    ui.layer_id(),
-                                    response.id,
-                                    tooltip_pos,
-                                    |ui: &mut Ui| {
-                                        ui.set_max_width(300.0);
-                                        ui.vertical(|ui| {
-                                            ui.label(
-                                                egui::RichText::new(&item.name).strong(),
-                                            );
-                                            ui.separator();
-                                            ui.label(format!(
-                                                "Tipo: {}",
-                                                get_file_type_string(item)
-                                            ));
-                                            if !item.is_dir {
-                                                ui.label(format!(
-                                                    "Tamanho: {}",
-                                                    crate::infrastructure::windows::format_size(
-                                                        item.size
-                                                    )
-                                                ));
-                                            }
-                                            let date_lbl = if is_recycle {
-                                                "Data de Exclusão"
-                                            } else {
-                                                "Última modificação"
-                                            };
-                                            let date_val = if is_recycle {
-                                                item.deletion_date
-                                                    .clone()
-                                                    .unwrap_or_else(|| "-".to_string())
-                                            } else {
-                                                crate::infrastructure::windows::format_date(
-                                                    item.modified,
-                                                )
-                                            };
-                                            ui.label(format!("{}: {}", date_lbl, date_val));
-                                        });
-                                    },
-                                );
-                            }
-
-                            let inner_rect = rect.shrink(3.0);
-                            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
-                                render_item_slot_for_grid(ui, index, item, ctx);
-                            });
-                        }
-                    }
+                if ui.is_rect_visible(item_rect) {
+                    render_grid_item(ui, index, item, item_rect, ctx, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item);
                 }
             }
-        });
+            *start_y += section_h;
+        };
+
+        render_section(&mut child_ui, "Discos locais", local, &mut current_y);
+        render_section(&mut child_ui, "Unidades de rede", network, &mut current_y);
+
+    } else {
+        // Regular Grid Virtualization
+        let vis_min_row = (current_scroll / cell_h).floor() as usize;
+        let vis_max_row = ((current_scroll + viewport_h) / cell_h).ceil() as usize;
+        
+        // Export range for prefetch
+        visible_rows_range = Some((vis_min_row, vis_max_row));
+
+        // Overscan
+        let loop_min_row = vis_min_row.saturating_sub(1);
+        let loop_max_row = (vis_max_row + 1).min(total_rows);
+
+        for row in loop_min_row..loop_max_row {
+            for col in 0..cols {
+                let index = row * cols + col;
+                if index >= count { break; }
+
+                let x_pos = col as f32 * (item_w + padding) + padding;
+                let y_pos = row as f32 * cell_h + padding - current_scroll;
+                let item_rect = Rect::from_min_size(
+                    content_min + egui::vec2(x_pos, y_pos),
+                    egui::vec2(item_w, item_h),
+                );
+
+                if child_ui.is_rect_visible(item_rect) {
+                    render_grid_item(&mut child_ui, index, &ctx.items[index], item_rect, ctx, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item);
+                }
+            }
+        }
+    }
+
+    // 4. Custom Scrollbar
+    if total_content_height > viewport_h {
+        let scrollbar_w = 12.0;
+        let scrollbar_rect = Rect::from_min_max(
+            viewport_rect.right_top() - egui::vec2(scrollbar_w, 0.0),
+            viewport_rect.right_bottom()
+        );
+        
+        // Background
+        ui.painter().rect_filled(scrollbar_rect, 0.0, Color32::from_gray(245));
+
+        // Handle
+        let handle_h = (viewport_h / total_content_height * viewport_h).max(30.0);
+        let handle_y = (current_scroll / max_scroll) * (viewport_h - handle_h);
+        let handle_rect = Rect::from_min_size(
+            scrollbar_rect.min + egui::vec2(2.0, handle_y),
+            egui::vec2(scrollbar_w - 4.0, handle_h)
+        );
+
+        let interact = ui.interact(scrollbar_rect, ui.id().with("scrollbar"), Sense::drag());
+        if interact.dragged() {
+            let delta_y = interact.drag_delta().y;
+            let scroll_pct_delta = delta_y / (viewport_h - handle_h);
+            *ctx.mut_scroll_offset_y += scroll_pct_delta * max_scroll;
+            *ctx.mut_scroll_offset_y = ctx.mut_scroll_offset_y.clamp(0.0, max_scroll);
+        }
+
+        let color = if interact.dragged() { Color32::from_gray(150) } else if interact.hovered() { Color32::from_gray(180) } else { Color32::from_gray(200) };
+        ui.painter().rect_filled(handle_rect, 4.0, color);
+    }
+    // --- MANUAL VIRTUALIZATION END ---
 
 
 

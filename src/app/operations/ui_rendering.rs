@@ -406,6 +406,8 @@ impl ImageViewerApp {
             folder_preview_loading: &mut self.cache_manager.folder_preview_loading,
             pending_ops: &mut self.pending_ops,
             failed_thumbnails: &self.cache_manager.failed_thumbnails,
+            scroll_offset_y: self.scroll_offset_y,
+            mut_scroll_offset_y: &mut self.scroll_offset_y,
         };
 
         // Usar uma abordagem diferente: coletar ações em vetores
