@@ -53,6 +53,9 @@ impl ImageViewerApp {
             let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::RestoreFromRecycleBin {
                 items: restore_items,
             });
+
+            // Clear selection after restore batch is sent
+            self.reset_selection_and_search();
         }
     }
 
@@ -82,6 +85,9 @@ impl ImageViewerApp {
             let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::DeletePermanently {
                 physical_paths: paths.to_vec(),
             });
+
+            // Clear selection after delete batch is sent
+            self.reset_selection_and_search();
         }
     }
 
