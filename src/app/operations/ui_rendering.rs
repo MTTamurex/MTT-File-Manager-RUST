@@ -91,10 +91,12 @@ impl ImageViewerApp {
 
         // Criar contexto com referências mutáveis separadas
         let scroll_to_selected = self.scroll_to_selected;
+        let multi_selection = &self.multi_selection;
         let mut ctx = ListViewContext {
             items: &items,
             selected_item,
             selected_file: selected_file.as_ref(),
+            multi_selection,
             sort_mode,
             sort_descending,
             renaming_state: renaming_state.clone(),
@@ -175,12 +177,46 @@ impl ImageViewerApp {
         let is_renaming = self.renaming_state.is_some();
         match action {
             Some(list_view::ListViewAction::Click(idx)) if !is_renaming => {
-                self.selected_item = Some(idx);
                 if let Some(item) = self.items.get(idx) {
+                    let ctrl = ui.input(|i| i.modifiers.ctrl);
+                    let shift = ui.input(|i| i.modifiers.shift);
+
+                    if ctrl {
+                        if self.multi_selection.contains(&item.path) {
+                            self.multi_selection.remove(&item.path);
+                        } else {
+                            self.multi_selection.insert(item.path.clone());
+                        }
+                        self.selected_item = Some(idx);
+                        self.selected_file = Some(item.clone());
+                    } else if shift {
+                         if let Some(last_idx) = self.selected_item {
+                             let (start, end) = if last_idx < idx { (last_idx, idx) } else { (idx, last_idx) };
+                             self.multi_selection.clear();
+                             for i in start..=end {
+                                 if let Some(it) = self.items.get(i) {
+                                     self.multi_selection.insert(it.path.clone());
+                                 }
+                             }
+                             self.selected_item = Some(idx);
+                             self.selected_file = Some(item.clone());
+                         } else {
+                             // Fallback if no previous selection
+                             self.multi_selection.clear();
+                             self.multi_selection.insert(item.path.clone());
+                             self.selected_item = Some(idx);
+                             self.selected_file = Some(item.clone());
+                         }
+                    } else {
+                        self.multi_selection.clear();
+                        self.multi_selection.insert(item.path.clone());
+                        self.selected_item = Some(idx);
+                        self.selected_file = Some(item.clone());
+                    }
+
+                    // Common updates
                     let item_path = item.path.clone();
                     let is_dir = item.is_dir;
-
-                    self.selected_file = Some(item.clone());
                     self.update_selected_thumbnail();
 
                     // Trigger thumbnail load for sidebar preview
@@ -211,19 +247,30 @@ impl ImageViewerApp {
                 }
             }
             Some(list_view::ListViewAction::SecondaryClick(idx)) if !is_renaming => {
-                // Step 1: Update selection immediately (this will cause a repaint)
-                self.selected_item = Some(idx);
                 if let Some(item) = self.items.get(idx) {
-                    let item_path = item.path.clone();
-                    self.selected_file = Some(item.clone());
-                    self.context_menu.target_path = Some(item_path.clone());
+                    // Update selection logic for right-click
+                    if !self.multi_selection.contains(&item.path) {
+                         self.multi_selection.clear();
+                         self.multi_selection.insert(item.path.clone());
+                         self.selected_item = Some(idx);
+                         self.selected_file = Some(item.clone());
+                    } else {
+                         self.selected_item = Some(idx);
+                         self.selected_file = Some(item.clone());
+                    }
+
+                    // Coletar todos os paths selecionados
+                    let selected_paths: Vec<PathBuf> = self.multi_selection.iter().cloned().collect();
+                    self.context_menu.target_paths = selected_paths.clone();
 
                     // Usar o novo sistema de menu estilizado
                     let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
                     let right_bound = ui.available_rect_before_wrap().right();
-                    self.populate_context_menu(ui.ctx(), &item_path, false, Some(idx));
+
+                    // Populate with multiple paths
+                    self.populate_context_menu(ui.ctx(), &selected_paths, false, Some(idx));
                     self.context_menu
-                        .open(pointer_pos, right_bound, Some(idx), Some(item_path), false);
+                        .open(pointer_pos, right_bound, Some(idx), selected_paths, false);
                 }
             }
             Some(list_view::ListViewAction::SortChange(mode)) => {
@@ -241,8 +288,8 @@ impl ImageViewerApp {
                 let path = PathBuf::from(&self.current_path);
                 let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
                 let right_bound = ui.available_rect_before_wrap().right();
-                self.populate_context_menu(ui.ctx(), &path, true, None);
-                self.context_menu.open(pointer_pos, right_bound, None, Some(path), true);
+                self.populate_context_menu(ui.ctx(), &[path.clone()], true, None);
+                self.context_menu.open(pointer_pos, right_bound, None, vec![path], true);
             }
             _ => {}
         }
@@ -331,6 +378,7 @@ impl ImageViewerApp {
 
         // Criar contexto com referências mutáveis separadas
         let scroll_to_selected = self.scroll_to_selected;
+        let multi_selection = &self.multi_selection;
         
         // PERFORMANCE: Clear shared buffers before rendering (reuse, don't reallocate)
         self.pending_ops.clear();
@@ -339,6 +387,7 @@ impl ImageViewerApp {
             items: &items,
             selected_item,
             selected_file: selected_file.as_ref(),
+            multi_selection,
             thumbnail_size,
             last_grid_cols,
             renaming_state: renaming_state.clone(),
@@ -422,9 +471,43 @@ impl ImageViewerApp {
         let is_renaming = self.renaming_state.is_some();
         match action {
             Some(grid_view::GridViewAction::Click(idx)) if !is_renaming => {
-                self.selected_item = Some(idx);
                 if let Some(item) = self.items.get(idx) {
-                    self.selected_file = Some(item.clone());
+                    let ctrl = ui.input(|i| i.modifiers.ctrl);
+                    let shift = ui.input(|i| i.modifiers.shift);
+
+                    if ctrl {
+                        if self.multi_selection.contains(&item.path) {
+                            self.multi_selection.remove(&item.path);
+                        } else {
+                            self.multi_selection.insert(item.path.clone());
+                        }
+                        self.selected_item = Some(idx);
+                        self.selected_file = Some(item.clone());
+                    } else if shift {
+                         if let Some(last_idx) = self.selected_item {
+                             let (start, end) = if last_idx < idx { (last_idx, idx) } else { (idx, last_idx) };
+                             self.multi_selection.clear();
+                             for i in start..=end {
+                                 if let Some(it) = self.items.get(i) {
+                                     self.multi_selection.insert(it.path.clone());
+                                 }
+                             }
+                             self.selected_item = Some(idx);
+                             self.selected_file = Some(item.clone());
+                         } else {
+                             // Fallback
+                             self.multi_selection.clear();
+                             self.multi_selection.insert(item.path.clone());
+                             self.selected_item = Some(idx);
+                             self.selected_file = Some(item.clone());
+                         }
+                    } else {
+                        self.multi_selection.clear();
+                        self.multi_selection.insert(item.path.clone());
+                        self.selected_item = Some(idx);
+                        self.selected_file = Some(item.clone());
+                    }
+
                     self.update_selected_thumbnail();
                 }
             }
@@ -446,27 +529,37 @@ impl ImageViewerApp {
                 }
             }
             Some(grid_view::GridViewAction::SecondaryClick(idx)) if !is_renaming => {
-                // Step 1: Update selection immediately (this will cause a repaint)
-                self.selected_item = Some(idx);
                 if let Some(item) = self.items.get(idx) {
-                    let item_path = item.path.clone();
-                    self.selected_file = Some(item.clone());
-                    self.context_menu.target_path = Some(item_path.clone());
+                    // Update selection logic for right-click
+                    if !self.multi_selection.contains(&item.path) {
+                         self.multi_selection.clear();
+                         self.multi_selection.insert(item.path.clone());
+                         self.selected_item = Some(idx);
+                         self.selected_file = Some(item.clone());
+                    } else {
+                         self.selected_item = Some(idx);
+                         self.selected_file = Some(item.clone());
+                    }
+
+                    // Coletar todos os paths selecionados
+                    let selected_paths: Vec<PathBuf> = self.multi_selection.iter().cloned().collect();
+                    self.context_menu.target_paths = selected_paths.clone();
 
                     // Usar o novo sistema de menu estilizado
                     let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
                     let right_bound = ui.available_rect_before_wrap().right();
-                    self.populate_context_menu(ui.ctx(), &item_path, false, Some(idx));
+
+                    self.populate_context_menu(ui.ctx(), &selected_paths, false, Some(idx));
                     self.context_menu
-                        .open(pointer_pos, right_bound, Some(idx), Some(item_path), false);
+                        .open(pointer_pos, right_bound, Some(idx), selected_paths, false);
                 }
             }
             Some(grid_view::GridViewAction::EmptyAreaSecondaryClick) if !is_renaming => {
                 let path = PathBuf::from(&self.current_path);
                 let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
                 let right_bound = ui.available_rect_before_wrap().right();
-                self.populate_context_menu(ui.ctx(), &path, true, None);
-                self.context_menu.open(pointer_pos, right_bound, None, Some(path), true);
+                self.populate_context_menu(ui.ctx(), &[path.clone()], true, None);
+                self.context_menu.open(pointer_pos, right_bound, None, vec![path], true);
             }
             _ => {}
         }

@@ -8,20 +8,55 @@ use crate::application::file_operations;
 
 impl ImageViewerApp {
     pub fn command_copy(&mut self, idx: Option<usize>) {
-        if let Some(idx) = idx.or(self.selected_item) {
-            if let Some(item) = self.items.get(idx) {
-                self.clipboard.copy(&item.path);
+        let mut files = Vec::new();
+
+        let use_multi_selection = if let Some(i) = idx {
+            if let Some(item) = self.items.get(i) {
+                self.multi_selection.contains(&item.path)
+            } else {
+                false
             }
+        } else {
+            !self.multi_selection.is_empty()
+        };
+
+        if use_multi_selection {
+             files.extend(self.multi_selection.iter().cloned());
+        } else if let Some(i) = idx.or(self.selected_item) {
+             if let Some(item) = self.items.get(i) {
+                 files.push(item.path.clone());
+             }
+        }
+
+        if !files.is_empty() {
+            self.clipboard.copy(&files);
         }
     }
 
     /// Recortar: Coloca o arquivo no clipboard do Windows com flag de MOVE
     pub fn command_cut(&mut self, idx: Option<usize>) {
-        let target_idx = idx.or(self.selected_item);
-        if let Some(idx) = target_idx {
-            if let Some(item) = self.items.get(idx) {
-                self.clipboard.cut(&item.path);
+        let mut files = Vec::new();
+
+        let use_multi_selection = if let Some(i) = idx {
+            if let Some(item) = self.items.get(i) {
+                self.multi_selection.contains(&item.path)
+            } else {
+                false
             }
+        } else {
+            !self.multi_selection.is_empty()
+        };
+
+        if use_multi_selection {
+             files.extend(self.multi_selection.iter().cloned());
+        } else if let Some(i) = idx.or(self.selected_item) {
+             if let Some(item) = self.items.get(i) {
+                 files.push(item.path.clone());
+             }
+        }
+
+        if !files.is_empty() {
+            self.clipboard.cut(&files);
         }
     }
 
@@ -52,9 +87,12 @@ impl ImageViewerApp {
             let op = crate::infrastructure::windows_clipboard::get_clipboard_operation();
             is_move = matches!(op, Some(crate::infrastructure::windows_clipboard::ClipboardFileOp::Move));
             files_to_op = files;
-        } else if let Some(path) = self.clipboard.internal_state().0 {
-            is_move = matches!(self.clipboard.internal_state().1, Some(crate::application::clipboard::ClipboardOp::Move));
-            files_to_op = vec![path.clone()];
+        } else {
+            let (paths, op) = self.clipboard.internal_state();
+            if !paths.is_empty() {
+                is_move = matches!(op, Some(crate::application::clipboard::ClipboardOp::Move));
+                files_to_op = paths.to_vec();
+            }
         }
 
         // 2. Dispatch to worker for EACH file
@@ -80,7 +118,7 @@ impl ImageViewerApp {
             self.clipboard.clear();
         }
 
-        self.context_menu.target_path = None;
+        self.context_menu.target_paths.clear();
     }
 
     pub fn copy_path_to_clipboard(&self, path: &Path) {

@@ -78,6 +78,7 @@ pub struct ImageViewerApp {
     pub thumbnail_size: f32, // Zoom: 64-512
     pub selected_item: Option<usize>,
     pub selected_file: Option<FileEntry>,
+    pub multi_selection: HashSet<PathBuf>,
     pub selected_thumbnail: Option<egui::TextureHandle>, // Persistent thumbnail for preview panel
     pub selected_gif: Option<crate::ui::components::media_preview::GifPlayer>, // Local GIF for preview panel
     pub media_preview: Option<MediaPreview>,              // Global media preview (video/image)

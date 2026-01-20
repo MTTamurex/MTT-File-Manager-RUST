@@ -7,26 +7,37 @@ use eframe::egui;
 use crate::app::state::ImageViewerApp;
 
 impl ImageViewerApp {
-    pub fn context_target_path(&self, item_idx: Option<usize>) -> Option<PathBuf> {
+    pub fn context_target_paths(&self, item_idx: Option<usize>) -> Vec<PathBuf> {
+        // 1. Prioritize context menu state (populated by right-click)
+        if !self.context_menu.target_paths.is_empty() {
+            return self.context_menu.target_paths.clone();
+        }
+
+        // 2. Explicit item index
         if let Some(idx) = item_idx {
-            return self.items.get(idx).map(|i| i.path.clone());
+            if let Some(i) = self.items.get(idx) {
+                return vec![i.path.clone()];
+            }
         }
 
-        if let Some(p) = self.context_menu.target_path.clone() {
-            return Some(p);
+        // 3. Multi-selection
+        if !self.multi_selection.is_empty() {
+            return self.multi_selection.iter().cloned().collect();
         }
 
+        // 4. Single selection
         if let Some(sel) = &self.selected_file {
-            return Some(sel.path.clone());
+            return vec![sel.path.clone()];
         }
 
-        Some(PathBuf::from(&self.current_path))
+        // 5. Current folder
+        vec![PathBuf::from(&self.current_path)]
     }
 
     pub fn populate_context_menu(
         &mut self,
         ctx: &egui::Context,
-        path: &Path,
+        paths: &[PathBuf],
         is_empty_area: bool,
         _item_index: Option<usize>,
     ) {
@@ -155,7 +166,7 @@ impl ImageViewerApp {
 
         // ========== SHELL ITEMS (Third-party extensions) ==========
         if let Some(hwnd) = self.native_hwnd {
-            if let Ok(shell_ctx) = extract_shell_menu(hwnd, path) {
+            if let Ok(shell_ctx) = extract_shell_menu(hwnd, paths) {
                 // Convert Shell items to UI items, filtering known verbs
                 fn convert(
                     ui_ctx: &egui::Context,

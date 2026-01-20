@@ -71,38 +71,59 @@ pub fn is_known_verb(verb: &str) -> bool {
 /// Extracts native shell menu items for a path
 /// Shell extensions may show fewer items on first call due to Windows lazy loading.
 /// Call warmup_shell_extensions() on app startup to pre-initialize.
-pub fn extract_shell_menu(hwnd: HWND, path: &Path) -> Result<ShellMenuContext> {
+pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<ShellMenuContext> {
     use std::sync::atomic::{AtomicU32, Ordering};
     static CALL_COUNT: AtomicU32 = AtomicU32::new(0);
     let call_num = CALL_COUNT.fetch_add(1, Ordering::SeqCst) + 1;
 
+    if paths.is_empty() {
+        return Err(Error::from_win32());
+    }
+
     unsafe {
         eprintln!(
-            "[ShellMenu] ===== EXTRACTION #{} for: {:?} =====",
-            call_num, path
+            "[ShellMenu] ===== EXTRACTION #{} for: {:?} items =====",
+            call_num, paths.len()
         );
 
-        // Parse the path to a PIDL
-        let wide_path: Vec<u16> = path
-            .as_os_str()
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-        let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
-        SHParseDisplayName(PCWSTR(wide_path.as_ptr()), None, &mut pidl, 0, None)?;
+        // Parse all paths to PIDLs and collect children
+        let mut pidls_to_free = Vec::with_capacity(paths.len());
+        let mut child_pidls = Vec::with_capacity(paths.len());
+        let mut parent_folder_opt: Option<IShellFolder> = None;
 
-        if pidl.is_null() {
-            eprintln!("[ShellMenu] PIDL is null!");
-            return Err(Error::from_win32());
+        for path in paths {
+             let wide_path: Vec<u16> = path
+                .as_os_str()
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect();
+            let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
+            if let Ok(_) = SHParseDisplayName(PCWSTR(wide_path.as_ptr()), None, &mut pidl, 0, None) {
+                if !pidl.is_null() {
+                    pidls_to_free.push(pidl);
+
+                    let mut child: *mut ITEMIDLIST = std::ptr::null_mut();
+                    if let Ok(folder) = SHBindToParent(pidl, Some(&mut child)) {
+                         if parent_folder_opt.is_none() {
+                             parent_folder_opt = Some(folder);
+                         }
+                         child_pidls.push(child as *const ITEMIDLIST);
+                    }
+                }
+            }
         }
 
-        // Get parent folder and child PIDL
-        let mut child: *mut ITEMIDLIST = std::ptr::null_mut();
-        let parent_folder: IShellFolder = SHBindToParent(pidl, Some(&mut child))?;
-        let items_ptr: [*const ITEMIDLIST; 1] = [child as *const ITEMIDLIST];
+        if parent_folder_opt.is_none() || child_pidls.is_empty() {
+             for pidl in pidls_to_free {
+                 CoTaskMemFree(Some(pidl as _));
+             }
+             return Err(Error::from_win32());
+        }
+
+        let parent_folder = parent_folder_opt.unwrap();
 
         // Get IContextMenu
-        let context_menu: IContextMenu = parent_folder.GetUIObjectOf(hwnd, &items_ptr, None)?;
+        let context_menu: IContextMenu = parent_folder.GetUIObjectOf(hwnd, &child_pidls, None)?;
 
         // Create popup menu to extract items
         let hmenu = CreatePopupMenu()?;
@@ -135,7 +156,9 @@ pub fn extract_shell_menu(hwnd: HWND, path: &Path) -> Result<ShellMenuContext> {
             pending_count
         );
 
-        CoTaskMemFree(Some(pidl as _));
+        for pidl in pidls_to_free {
+             CoTaskMemFree(Some(pidl as _));
+        }
 
         Ok(ShellMenuContext {
             items: std::cell::RefCell::new(items),
@@ -158,7 +181,7 @@ pub fn warmup_shell_extensions(hwnd: HWND) {
         warmup_path
     );
 
-    if let Ok(_ctx) = extract_shell_menu(hwnd, &warmup_path) {
+    if let Ok(_ctx) = extract_shell_menu(hwnd, &[warmup_path]) {
         eprintln!("[ShellMenu] Folder warmup complete");
     } else {
         eprintln!("[ShellMenu] Folder warmup failed");
@@ -167,7 +190,7 @@ pub fn warmup_shell_extensions(hwnd: HWND) {
     // Use a temporary file to trigger file-level shell extensions (e.g., 7-Zip, WinRAR)
     let temp_file = std::env::temp_dir().join("mtt_warmup_dummy.txt");
     let _ = std::fs::File::create(&temp_file);
-    if let Ok(_ctx) = extract_shell_menu(hwnd, &temp_file) {
+    if let Ok(_ctx) = extract_shell_menu(hwnd, &[temp_file.clone()]) {
         eprintln!("[ShellMenu] File warmup complete");
     } else {
         eprintln!("[ShellMenu] File warmup failed");
