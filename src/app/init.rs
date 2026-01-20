@@ -332,6 +332,7 @@ impl ImageViewerApp {
 
             // SCROLL TO SELECTED (para navegação por teclado)
             scroll_to_selected: false,
+            selection_anchor: None,
 
             // Throttle for keyboard navigation (prevents scroll desync when holding arrow keys)
             last_keyboard_nav: Instant::now(),

@@ -147,6 +147,7 @@ pub struct ImageViewerApp {
 
     // SCROLL TO SELECTED (para navegação por teclado)
     pub scroll_to_selected: bool,
+    pub selection_anchor: Option<usize>,
 
     // Throttle for keyboard navigation (prevents scroll desync when holding arrow keys)
     pub last_keyboard_nav: Instant,
