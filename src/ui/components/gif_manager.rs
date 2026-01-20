@@ -5,9 +5,9 @@ use lru::LruCache;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// A single decoded frame of a GIF
 #[derive(Clone)]
@@ -23,6 +23,9 @@ pub struct GifData {
     pub frames: Vec<DecodedFrame>,
     pub is_complete: bool,
     pub generation: usize,
+    pub cancelled: Arc<AtomicBool>,
+    pub total_bytes: usize,
+    pub last_used: Instant,
 }
 
 impl GifData {
@@ -31,6 +34,9 @@ impl GifData {
             frames: Vec::new(),
             is_complete: false,
             generation,
+            cancelled: Arc::new(AtomicBool::new(false)),
+            total_bytes: 0,
+            last_used: Instant::now(),
         }
     }
 }
@@ -39,22 +45,33 @@ pub struct GifManager {
     cache: LruCache<PathBuf, Arc<Mutex<GifData>>>,
     current_generation: Arc<AtomicUsize>,
     ui_ctx: egui::Context,
+    max_memory_bytes: usize,
 }
 
 impl GifManager {
     pub fn new(ui_ctx: egui::Context) -> Self {
         Self {
-            cache: LruCache::new(NonZeroUsize::new(10).unwrap()),
+            // Increase cache slots but use memory-based eviction logic
+            cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
             current_generation: Arc::new(AtomicUsize::new(0)),
             ui_ctx,
+            max_memory_bytes: 150 * 1024 * 1024, // 150 MB
         }
     }
 
     /// Requests a GIF to be loaded. Returns the Arc<Mutex<GifData>> for the GIF.
     pub fn request_load(&mut self, path: &Path) -> Arc<Mutex<GifData>> {
         if let Some(data) = self.cache.get(path) {
-            return data.clone();
+            let d_clone = data.clone();
+            {
+                let mut d = data.lock().unwrap();
+                d.last_used = Instant::now();
+            }
+            return d_clone;
         }
+
+        // Cleanup before adding new
+        self.cleanup(false);
 
         let generation = self.current_generation.fetch_add(1, Ordering::SeqCst);
         let data = Arc::new(Mutex::new(GifData::new(generation)));
@@ -74,6 +91,52 @@ impl GifManager {
         data
     }
 
+    /// Periodic or manual cleanup of the GIF cache
+    pub fn cleanup(&mut self, force_all: bool) {
+        if force_all {
+            for (_, data) in self.cache.iter() {
+                let d = data.lock().unwrap();
+                d.cancelled.store(true, Ordering::SeqCst);
+            }
+            self.cache.clear();
+            return;
+        }
+
+        let now = Instant::now();
+        let ttl = Duration::from_secs(30);
+
+        // 1. TTL Cleanup
+        let mut to_remove = Vec::new();
+        for (path, data) in self.cache.iter() {
+            let d = data.lock().unwrap();
+            if now.duration_since(d.last_used) > ttl {
+                d.cancelled.store(true, Ordering::SeqCst);
+                to_remove.push(path.clone());
+            }
+        }
+        for path in to_remove {
+            self.cache.pop(&path);
+        }
+
+        // 2. Memory-based LRU Cleanup
+        loop {
+            let total_mem: usize = self.cache.iter().map(|(_, data)| {
+                let d = data.lock().unwrap();
+                d.total_bytes
+            }).sum();
+
+            if total_mem <= self.max_memory_bytes || self.cache.is_empty() {
+                break;
+            }
+
+            // Pop least recently used
+            if let Some((_, data)) = self.cache.pop_lru() {
+                let d = data.lock().unwrap();
+                d.cancelled.store(true, Ordering::SeqCst);
+            }
+        }
+    }
+
     fn decode_worker(
         path: PathBuf,
         data: Arc<Mutex<GifData>>,
@@ -86,15 +149,22 @@ impl GifManager {
         let decoder = GifDecoder::new(reader)?;
         let frames = decoder.into_frames();
 
+        let cancelled = {
+            let d = data.lock().unwrap();
+            d.cancelled.clone()
+        };
+
         for (i, frame_res) in frames.enumerate() {
-            // Check if this task is still relevant
-            // We use a simple generation check: if we started a newer load globally, 
-            // and this one isn't the one being tracked, we might want to stop.
-            // Actually, we only care if THIS path was re-requested or cleared.
-            // For simplicity, we just check if the generation has moved too far 
-            // or if we should just keep going? 
-            // Better: use a weak ref or just let the cache handle it.
-            // If the user selects a new GIF, this one might still be in cache.
+            // Check for cancellation
+            if cancelled.load(Ordering::SeqCst) {
+                return Ok(());
+            }
+
+            // Automatic cancellation if nobody is watching
+            // Strong count 1 means only this thread's Arc (the `data` argument) is left
+            if Arc::strong_count(&data) <= 1 {
+                return Ok(());
+            }
             
             let frame = frame_res?;
             let (numerator, denominator) = frame.delay().numer_denom_ms();
@@ -117,13 +187,16 @@ impl GifManager {
                 (orig_w, orig_h, buffer.into_raw())
             };
 
+            let frame_bytes = rgba.len();
+
             {
                 let mut d = data.lock().unwrap();
-                // Check generation again inside lock to be safe
-                if d.generation != generation {
+                // Check generation and cancellation inside lock
+                if d.generation != generation || d.cancelled.load(Ordering::SeqCst) {
                     return Ok(());
                 }
                 
+                d.total_bytes += frame_bytes;
                 d.frames.push(DecodedFrame {
                     rgba,
                     width: w,
@@ -149,7 +222,7 @@ impl GifManager {
         }
 
         let mut d = data.lock().unwrap();
-        if d.generation == generation {
+        if d.generation == generation && !d.cancelled.load(Ordering::SeqCst) {
             d.is_complete = true;
             ui_ctx.request_repaint();
         }
