@@ -12,13 +12,13 @@ impl ImageViewerApp {
         let paths = self.context_target_paths(idx);
         if paths.is_empty() { return; }
 
-        for path in &paths {
-            // Send request to background worker
-            let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::delete(
-                path.clone(),
-                self.native_hwnd.unwrap_or_default(),
-            ));
+        // Send request to background worker (BATCH)
+        let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::delete(
+            paths.clone(),
+            self.native_hwnd.unwrap_or_default(),
+        ));
 
+        for path in &paths {
             // Clear cache and selection proactively
             self.disk_cache.remove_cache_for_path(path);
             self.multi_selection.remove(path);

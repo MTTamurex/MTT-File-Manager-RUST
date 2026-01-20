@@ -115,7 +115,7 @@ impl AppState {
         self.current_path = path.to_string();
         self.path_input = path.to_string();
         self.is_computer_view = false;
-        self.context_menu.target_path = None;
+        self.context_menu.target_paths.clear();
     }
 
     /// Goes back in navigation history
@@ -258,7 +258,7 @@ impl AppState {
     pub fn copy_to_clipboard(&mut self) {
         if let Some(index) = self.selected_item_index {
             if let Some(item) = self.items.get(index) {
-                self.clipboard.copy(&item.path);
+                self.clipboard.copy(&[item.path.clone()]);
             }
         }
     }
@@ -267,7 +267,7 @@ impl AppState {
     pub fn cut_to_clipboard(&mut self) {
         if let Some(index) = self.selected_item_index {
             if let Some(item) = self.items.get(index) {
-                self.clipboard.cut(&item.path);
+                self.clipboard.cut(&[item.path.clone()]);
             }
         }
     }
@@ -280,7 +280,14 @@ impl AppState {
     /// Gets clipboard state for paste operation
     pub fn get_clipboard_for_paste(&self) -> Option<(&PathBuf, ClipboardOp)> {
         let (file, op) = self.clipboard.internal_state();
-        file.zip(op)
+        // Since internal_state returns a slice of paths, we just take the first one if we want single-file behavior
+        // Or we should update get_clipboard_for_paste logic. But for now matching original attempt to zip:
+        // We probably want to return the first file and the op if available.
+        if let Some(first_file) = file.first() {
+            op.map(|op| (first_file, op))
+        } else {
+            None
+        }
     }
 
     /// Increments generation for async operations

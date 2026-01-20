@@ -4,7 +4,7 @@
 use crate::infrastructure::windows::bitmap_conversion::hbitmap_to_rgba;
 use std::ffi::CStr;
 use std::os::windows::ffi::OsStrExt;
-use std::path::Path;
+
 use windows::core::*;
 use windows::Win32::Foundation::*;
 use windows::Win32::System::Com::*;

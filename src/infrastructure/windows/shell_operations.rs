@@ -193,6 +193,41 @@ pub fn delete_item_with_shell(path: &Path, hwnd: HWND) -> bool {
     result == 0 && op.fAnyOperationsAborted.0 == 0
 }
 
+/// Helper to create a double-null-terminated wide string buffer from multiple paths
+fn paths_to_double_null_terminated(paths: &[std::path::PathBuf]) -> Vec<u16> {
+    let mut buffer = Vec::new();
+    for path in paths {
+        let path_str = path.to_string_lossy();
+        buffer.extend(path_str.encode_utf16());
+        buffer.push(0); // Null separator
+    }
+    buffer.push(0); // Double null terminator
+    buffer
+}
+
+/// Deletes multiple files or directories using Windows Shell (moves to Recycle Bin by default).
+/// Returns true if operation was successful (not cancelled).
+pub fn delete_items_with_shell(paths: &[std::path::PathBuf], hwnd: HWND) -> bool {
+    if paths.is_empty() { return false; }
+    
+    let from_vec = paths_to_double_null_terminated(paths);
+
+    let mut op = SHFILEOPSTRUCTW {
+        hwnd,
+        wFunc: FO_DELETE,
+        pFrom: PCWSTR(from_vec.as_ptr()),
+        pTo: PCWSTR::default(),
+        fFlags: (FOF_ALLOWUNDO | FOF_WANTNUKEWARNING).0 as u16,
+        ..Default::default()
+    };
+
+    // SAFETY: op is initialized with valid double-null terminated string buffer
+    let result = unsafe { SHFileOperationW(&mut op) };
+
+    // Result 0 means success. fAnyOperationsAborted is set if user cancelled.
+    result == 0 && op.fAnyOperationsAborted.0 == 0
+}
+
 /// Renames a file or directory using Windows Shell.
 /// Returns true if operation was successful.
 pub fn rename_item_with_shell(path: &Path, new_name: &str, hwnd: HWND) -> bool {

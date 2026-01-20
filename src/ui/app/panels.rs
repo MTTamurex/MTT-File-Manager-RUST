@@ -325,9 +325,31 @@ fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 ui.label("Carregando...");
             });
         } else if app.items.is_empty() {
-            ui.centered_and_justified(|ui| {
+            let response = ui.centered_and_justified(|ui| {
                 ui.label("Pasta vazia");
-            });
+            }).response;
+
+            // Handle context menu on empty area
+            if ui.interact(response.rect, ui.id().with("empty_bg"), egui::Sense::click()).secondary_clicked() {
+                app.context_menu.target_paths.clear(); 
+                
+                // Use current path for shell menu
+                let paths = if app.is_recycle_bin_view {
+                    vec![]
+                } else {
+                    vec![std::path::PathBuf::from(&app.current_path)] 
+                };
+                
+                // Prepare state
+                let pos = ui.input(|i| i.pointer.hover_pos().unwrap_or_default());
+                let right_bound = ui.available_rect_before_wrap().right();
+                
+                // Set state first
+                app.context_menu.open(pos, right_bound, None, paths.clone(), true);
+                
+                // Then populate items
+                app.populate_context_menu(ui.ctx(), &paths, true, None);
+            }
         } else {
             match app.view_mode {
                 ViewMode::Grid => app.render_grid_view(ui),
