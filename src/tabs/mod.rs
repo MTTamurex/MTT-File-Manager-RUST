@@ -48,6 +48,8 @@ pub struct TabState {
     pub selected_gif: Option<crate::ui::components::media_preview::GifPlayer>,
     /// Scroll offset for grid view (manual virtualization)
     pub scroll_offset_y: f32,
+    /// Total items in the folder (status bar)
+    pub total_items: usize,
 }
 
 impl TabState {
@@ -71,6 +73,7 @@ impl TabState {
             selected_metadata: None,
             selected_gif: None,
             scroll_offset_y: 0.0,
+            total_items: 0,
         }
     }
 
@@ -99,6 +102,7 @@ impl TabState {
             selected_metadata: None,
             selected_gif: None,
             scroll_offset_y: 0.0,
+            total_items: 0,
         }
     }
 
@@ -248,6 +252,7 @@ impl TabManager {
         new_tab.selected_metadata = current.selected_metadata.clone();
         new_tab.selected_gif = current.selected_gif.clone();
         new_tab.search_query = current.search_query.clone();
+        new_tab.total_items = current.total_items;
 
         self.next_id += 1;
 
@@ -324,6 +329,7 @@ impl TabManager {
             reopened.selected_metadata = tab.selected_metadata;
             reopened.selected_gif = tab.selected_gif;
             reopened.search_query = tab.search_query;
+            reopened.total_items = tab.total_items;
 
             self.next_id += 1;
 
