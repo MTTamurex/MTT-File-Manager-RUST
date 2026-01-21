@@ -241,14 +241,22 @@ fn thumbnail_worker_loop(
 
                     let mut final_result = None;
 
-                    // STEP 0: Check Disk Cache (já otimizado, vai direto para UI)
-                    if let Some(cached_bytes) = disk_cache.get(&path, modified) {
-                        if let Ok(img) =
-                            image::load_from_memory_with_format(&cached_bytes, ImageFormat::WebP)
-                        {
-                            let rgba = img.to_rgba8();
-                            final_result = Some((rgba.to_vec(), rgba.width(), rgba.height()));
+                    // STEP 0: Check Disk Cache with SIZE VALIDATION
+                    if let Some((cached_bytes, cached_w, cached_h)) = disk_cache.get(&path, modified) {
+                        let cached_max_dim = cached_w.max(cached_h);
+                        
+                        // Only use cache if it meets or exceeds the requested size
+                        // OR if dimensions are unknown (0) from old cache entries - regenerate those
+                        if cached_max_dim >= req_size && cached_max_dim > 0 {
+                            // Cache is good enough (or better), use it
+                            if let Ok(img) =
+                                image::load_from_memory_with_format(&cached_bytes, ImageFormat::WebP)
+                            {
+                                let rgba = img.to_rgba8();
+                                final_result = Some((rgba.to_vec(), rgba.width(), rgba.height()));
+                            }
                         }
+                        // If cached_max_dim < req_size or == 0, fall through to regeneration
                     }
 
                     // STEP 1: Se não está em cache, decodifica com limite de concorrência
@@ -333,10 +341,8 @@ fn resize_to_bucket(rgba_data: &[u8], width: u32, height: u32, max_dim: u32) -> 
     // Usa image crate para resize
     if let Some(img) = image::ImageBuffer::from_raw(width, height, rgba_data.to_vec()) {
         let dynamic = DynamicImage::ImageRgba8(img);
-        // Use Triangle (Bilinear) for better quality/speed balance on CPU
-        // Nearest is too blocky for photos, even if plan suggested it.
-        // We optimize upload size (bucket), so performance is already gained.
-        let resized = dynamic.resize(new_w, new_h, image::imageops::FilterType::Triangle);
+        // Use CatmullRom for high-quality sharpening with good performance.
+        let resized = dynamic.resize(new_w, new_h, image::imageops::FilterType::CatmullRom);
         let rgba = resized.to_rgba8();
         return (rgba.to_vec(), rgba.width(), rgba.height());
     }

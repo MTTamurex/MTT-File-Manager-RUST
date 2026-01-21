@@ -61,7 +61,9 @@ impl ThumbnailDiskCache {
                 path TEXT,
                 data BLOB,
                 modified_at INTEGER,
-                created_at INTEGER
+                created_at INTEGER,
+                width INTEGER DEFAULT 0,
+                height INTEGER DEFAULT 0
             )",
             [],
         )
@@ -75,6 +77,10 @@ impl ThumbnailDiskCache {
 
         // Migration: Add path column if missing (for existing DBs)
         let _ = conn.execute("ALTER TABLE thumbnails ADD COLUMN path TEXT", []);
+        
+        // Migration: Add width and height columns if missing (for size-aware cache)
+        let _ = conn.execute("ALTER TABLE thumbnails ADD COLUMN width INTEGER DEFAULT 0", []);
+        let _ = conn.execute("ALTER TABLE thumbnails ADD COLUMN height INTEGER DEFAULT 0", []);
 
         // OPTIMIZATION: Index on path to speed up directory clearing (DELETE ... WHERE path LIKE ...)
         conn.execute(
@@ -147,8 +153,9 @@ impl ThumbnailDiskCache {
         format!("{:016x}", hasher.finish())
     }
 
-    /// Tries to retrieve a thumbnail from SQLite
-    pub fn get(&self, path: &Path, modified: SystemTime) -> Option<Vec<u8>> {
+    /// Tries to retrieve a thumbnail from SQLite with dimensions
+    /// Returns: Option<(data_bytes, width, height)>
+    pub fn get(&self, path: &Path, modified: SystemTime) -> Option<(Vec<u8>, u32, u32)> {
         let id = Self::hash_path(path);
         let mod_time = modified
             .duration_since(UNIX_EPOCH)
@@ -157,10 +164,15 @@ impl ThumbnailDiskCache {
 
         let db = self.db.lock().ok()?;
         let mut stmt = db
-            .prepare_cached("SELECT data FROM thumbnails WHERE id = ? AND modified_at = ?")
+            .prepare_cached("SELECT data, width, height FROM thumbnails WHERE id = ? AND modified_at = ?")
             .ok()?;
 
-        stmt.query_row(params![id, mod_time], |row| row.get(0)).ok()
+        stmt.query_row(params![id, mod_time], |row| {
+            let data: Vec<u8> = row.get(0)?;
+            let width_i64: i64 = row.get(1)?;
+            let height_i64: i64 = row.get(2)?;
+            Ok((data, width_i64 as u32, height_i64 as u32))
+        }).ok()
     }
 
     /// Saves a thumbnail to SQLite with optimized compression
@@ -208,7 +220,7 @@ impl ThumbnailDiskCache {
 
         // Use webp crate for lossy compression with quality control
         let encoder = webp::Encoder::from_rgb(&rgb_img, final_width, final_height);
-        let webp_data = encoder.encode(60.0); // Quality 60 (0-100 scale)
+        let webp_data = encoder.encode(85.0); // Quality 85 (High quality for local file manager)
 
         // STEP 3: Save to SQLite (with path for GC)
         let db = self.db.lock().map_err(|_| "Database lock failed")?;
@@ -222,8 +234,8 @@ impl ThumbnailDiskCache {
         }
 
         db.execute(
-            "INSERT OR REPLACE INTO thumbnails (id, path, data, modified_at, created_at) VALUES (?, ?, ?, ?, ?)",
-            params![id, path_str, webp_data.to_vec(), mod_time, now],
+            "INSERT OR REPLACE INTO thumbnails (id, path, data, modified_at, created_at, width, height) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            params![id, path_str, webp_data.to_vec(), mod_time, now, final_width as i64, final_height as i64],
         )?;
 
         Ok(())
