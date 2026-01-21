@@ -1,193 +1,125 @@
 # MTT File Manager
 
-Um gerenciador de arquivos moderno e eficiente para Windows, desenvolvido em Rust com interface gráfica usando egui/eframe e **player de vídeo integrado via MPV**.
+**Gerenciador de arquivos nativo para Windows** desenvolvido em Rust com interface moderna e recursos avançados de visualização de mídia.
 
-> [!IMPORTANT]
-> **Pré-requisito de Sistema (MPV)**: Forneça `mpv-1.dll` ao lado do executável (ou no PATH).
+## O que é
 
----
+Um gerenciador de arquivos desktop para Windows que oferece:
 
-## 🚀 Características
+- **Interface moderna** com janela borderless customizada
+- **Navegação em abas** com histórico independente por aba
+- **Preview de mídia** integrado (imagens, vídeos, GIFs, PDFs)
+- **Thumbnails inteligentes** com cache em disco e múltiplos backends
+- **Menus de contexto nativos** do Windows Shell
+- **Integração com Lixeira** do Windows
+- **Suporte a OneDrive** (detecção de status de sincronização)
 
-- **Interface moderna** com suporte a temas claro/escuro
-- **Navegação por abas** para múltiplos diretórios
-- **Visualização em grade e lista** com miniaturas
-- **Player de vídeo integrado** (MPV) com controles nativos
-- **Preview de arquivos** (imagens, vídeos, GIFs animados)
-- **Integração nativa com Windows** (clipboard, menus de contexto, shell extensions)
-- **Suporte a OneDrive** com indicadores de status
-- **Metadados de mídia** (dimensões, duração, codec, bitrate)
-- **Operações de arquivo** (copiar, mover, renomear, excluir)
-- **Lixeira do Windows** com restauração
-- **Cache de miniaturas** SQLite para performance
+## Tecnologias
 
----
+| Categoria | Tecnologia |
+|-----------|------------|
+| Linguagem | Rust (Edition 2021) |
+| GUI Framework | eframe/egui 0.31 |
+| Windows API | windows crate 0.61 |
+| Vídeo | libmpv2 (mpv) |
+| PDF | WebView2 (Edge) |
+| Cache | SQLite (rusqlite), LRU |
+| Imagens | image crate, WIC, Media Foundation |
+| Paralelismo | rayon |
 
-## 🏗️ Arquitetura Híbrida
+## Como Compilar
 
-O MTT File Manager utiliza uma arquitetura híbrida para superar as limitações de renderização de vídeo em ambientes Rust puro usando MPV:
+### Pré-requisitos
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    MTT File Manager                      │
-├─────────────────────────────────────────────────────────┤
-│  ┌─────────────────────┐    ┌─────────────────────────┐ │
-│  │      egui/eframe    │    │          MPV           │ │
-│  │  ─────────────────  │    │  ─────────────────────  │ │
-│  │  • UI Principal     │    │  • Player de Vídeo      │ │
-│  │  • Navegação        │◄──►│  • Decodificação GPU    │ │
-│  │  • Thumbnails       │    │  • Janela child (wid)   │ │
-│  │  • Controles        │    │                         │ │
-│  └─────────────────────┘    └─────────────────────────┘ │
-└─────────────────────────────────────────────────────────┘
-```
+- Rust toolchain (via rustup)
+- MSVC Build Tools
+- Windows 10/11 SDK
 
-### Por que MPV?
+### Build
 
-- **Suporte amplo de formatos/containers**
-- **Dispensa transcoding na maioria dos casos**
-- **Integração via janela filha (wid)**
+```powershell
+# Clone o repositório
+git clone <url>
+cd MTT-File-Manager-RUST
 
-## 🛠️ Tecnologias
-
-| Dependência | Versão | Propósito |
-|-------------|--------|-----------|
-| `eframe` | 0.31 | Framework egui com persistence |
-| `libmpv2` | 5.0.3 | MPV para player de vídeo |
-| `windows` | 0.58 | Bindings para APIs Win32 |
-| `rayon` | 1.10 | Paralelismo para ordenação |
-| `rusqlite` | 0.32 | Cache SQLite persistente |
-| `image` | 0.25 | Decodificação de imagens |
-| `notify` | 6.1.1 | File system watcher |
-| `lru` | 0.12 | Cache LRU para texturas |
-| `resvg/usvg` | 0.44 | Renderização de ícones SVG |
-
----
-
-## 📁 Estrutura do Projeto
-
-```
-src/
-├── main.rs                 # Bootstrap (135 linhas)
-├── lib.rs                  # Biblioteca pública
-│
-├── app/                    # Lógica de aplicação
-│   ├── mod.rs              # ImageViewerApp struct
-│   ├── init.rs             # Inicialização
-│   ├── state.rs            # Estado da aplicação
-│   └── operations/         # Métodos da aplicação (19 módulos)
-│       ├── clipboard_ops.rs
-│       ├── context_menu.rs
-│       ├── file_ops.rs
-│       ├── folder_loading.rs
-│       ├── navigation.rs
-│       ├── tabs.rs
-│       ├── thumbnails.rs
-│       └── ...
-│
-├── ui/                     # Componentes de interface
-│   ├── app/                # Implementação eframe::App
-│   │   ├── input.rs
-│   │   ├── lifecycle.rs
-│   │   ├── panels.rs
-│   │   └── ...
-│   │
-│   ├── components/         # Componentes reutilizáveis
-│   │   ├── item_slot.rs        # Slot de item com preview
-│   │   ├── media_preview.rs    # Preview de mídia (imagens/GIFs)
-│   │   └── mpv_preview.rs      # Player de vídeo MPV
-│   │
-│   ├── views/              # Views de exibição
-│   │   ├── computer_view.rs
-│   │   ├── grid_view.rs
-│   │   └── list_view.rs
-│   │
-│   └── [outros componentes]
-│
-├── infrastructure/         # Serviços de infraestrutura
-│   ├── windows/            # Integração Windows
-│   │   ├── metadata/           # Extração de metadados
-│   │   │   ├── image.rs
-│   │   │   └── video.rs
-│   │   ├── codec_registry.rs   # Resolução de nomes de codec
-│   │   ├── icons.rs            # Extração de ícones nativos
-│   │   ├── native_menu.rs      # Menu de contexto nativo
-│   │   ├── recycle_bin.rs      # Operações de lixeira
-│   │   └── shell_operations.rs # Operações de shell
-│   │
-│   ├── cache.rs            # Cache de miniaturas
-│   ├── disk_cache.rs       # Cache em disco (SQLite)
-│   └── onedrive.rs         # Integração OneDrive
-│
-├── domain/                 # Entidades de domínio
-│   ├── file_entry.rs
-│   ├── thumbnail.rs
-│   └── errors.rs
-│
-├── application/            # Serviços de aplicação
-│   ├── clipboard.rs
-│   ├── navigation.rs
-│   └── state.rs
-│
-└── workers/                # Workers assíncronos
-    ├── thumbnail_loader.rs
-    ├── folder_scanner.rs
-    └── folder_preview_worker.rs
-```
-
----
-
-## 🏗️ Build
-
-### Requisitos
-
-- **Rust 1.75** ou superior
-- **Windows 10/11** (64-bit)
-- **Visual Studio Build Tools** (para windows-rs)
-- **MPV runtime** (`mpv-1.dll` ao lado do executável ou no PATH)
-
-### Compilação
-
-```bash
-# Debug
+# Build de desenvolvimento
 cargo build
 
-# Release (otimizado com LTO)
+# Build otimizado para produção
 cargo build --release
 ```
 
-### Execução
+### Executar
 
-```bash
-# Debug
+```powershell
+# Desenvolvimento
 cargo run
 
-# Release
+# Produção
 cargo run --release
+
+# Ou diretamente
+.\target\release\mtt-file-manager.exe
 ```
 
----
+## Estrutura do Projeto
 
-## 📝 Documentação
+```
+src/
+├── app/           # Estado e operações da aplicação
+├── application/   # Serviços de lógica de negócio
+├── domain/        # Modelos de dados
+├── infrastructure/# Windows API, cache, mídia
+├── ui/            # Componentes de interface
+├── workers/       # Threads de background
+├── tabs/          # Sistema de abas
+└── pdf_viewer/    # Visualizador externo de PDF
+```
 
-Documentação técnica disponível em `docs/`:
+Para detalhes completos, veja `/docs/project-structure.md`.
+
+## Documentação Técnica
 
 | Documento | Descrição |
 |-----------|-----------|
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Arquitetura detalhada do sistema |
-| [AUDIT_REPORT.md](docs/AUDIT_REPORT.md) | Relatório de auditoria do código |
-| [MEDIA_PREVIEW_SYSTEM.md](docs/MEDIA_PREVIEW_SYSTEM.md) | Sistema de preview de mídia |
-| [MEDIA_METADATA_FEATURE.md](docs/MEDIA_METADATA_FEATURE.md) | Extração de metadados |
-| [CLIPBOARD_INTEGRATION.md](docs/CLIPBOARD_INTEGRATION.md) | Integração com clipboard |
-| [CODEC_RESOLUTION.md](docs/CODEC_RESOLUTION.md) | Resolução de codecs |
-| [PADROES_REUTILIZAVEIS.md](docs/PADROES_REUTILIZAVEIS.md) | Padrões de código |
+| [technologies.md](docs/technologies.md) | Catálogo completo de tecnologias |
+| [architecture.md](docs/architecture.md) | Arquitetura e fluxos de dados |
+| [project-structure.md](docs/project-structure.md) | Estrutura de arquivos e pastas |
+| [modules-and-functions.md](docs/modules-and-functions.md) | Módulos e funções principais |
+| [configuration.md](docs/configuration.md) | Configuração e ambiente |
+| [build-and-run.md](docs/build-and-run.md) | Build, execução e deploy |
+| [risks-and-unknowns.md](docs/risks-and-unknowns.md) | Riscos e pontos de atenção |
 
----
+## Status do Projeto
 
-## 📜 Licença
+**Em desenvolvimento ativo**
 
-Este projeto está licenciado sob a [MIT License](LICENSE).
+O projeto está funcional mas em evolução. Principais funcionalidades implementadas:
 
-## 👨‍💻 Autor
+- ✅ Navegação de arquivos (Grid e Lista)
+- ✅ Preview de imagens e GIFs
+- ✅ Reprodução de vídeo com mpv
+- ✅ Visualização de PDF
+- ✅ Operações de arquivo (copiar, colar, deletar, renomear)
+- ✅ Menu de contexto nativo do Windows
+- ✅ Lixeira do Windows
+- ✅ Multi-abas
+- ✅ Thumbnails com cache persistente
 
-Desenvolvido por MTT (Marcio T. Tamura).
+## Limitações Conhecidas
+
+1. **Windows only** - Não há suporte para Linux/macOS
+2. **Dependência de mpv** - Requer `libmpv-2.dll` para vídeo
+3. **Dependência de WebView2** - Requer Edge WebView2 Runtime para PDF
+4. **Idioma** - Interface em Português (BR) hardcoded
+5. **Testes** - Cobertura mínima de testes automatizados
+
+## Dependências Externas
+
+- **libmpv**: Biblioteca do mpv player (incluso `mpv.lib`, runtime DLL necessária)
+- **WebView2**: Microsoft Edge WebView2 Runtime
+- **Fontes**: Segoe UI (Windows system font)
+
+## Licença
+
+⚠️ **Não documentada no código atual**
