@@ -27,9 +27,14 @@ impl ImageViewerApp {
                 return;
             }
 
-            // Always try to load a thumbnail for the selection
             if let Some(tex) = self.cache_manager.texture_cache.peek(&path) {
                 self.selected_thumbnail = Some(tex.clone());
+            }
+
+            // AUTO-RELOAD HIGH RES: If selected and it's a media file, request 512px for detail panel
+            let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if crate::infrastructure::windows::is_media_extension(extension) {
+                self.request_thumbnail_load(path.clone(), 512);
             }
 
             let active_tab_id = self.tab_manager.active().id;
