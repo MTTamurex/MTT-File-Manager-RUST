@@ -69,11 +69,35 @@ impl ImageViewerApp {
                         self.sync_to_tab();
                     }
                 }
+                FileOperationResult::MoveCompleted { source_folder } => {
+                    // Cross-tab sync: refresh any tab pointing to the source folder
+                    let source_str = source_folder.to_string_lossy().to_lowercase();
+                    let current_str = self.current_path.to_lowercase();
+                    
+                    // If active tab is viewing the source folder, reload immediately
+                    if current_str == source_str {
+                        eprintln!("[MOVE] Source folder matches current view, reloading: {}", self.current_path);
+                        self.load_folder(false);
+                    }
+                    
+                    // Also update cached items in other tabs pointing to this folder
+                    for tab in self.tab_manager.tabs.iter_mut() {
+                        let tab_path = tab.path.to_lowercase();
+                        if tab_path == source_str {
+                            // Clear the tab's cached items so next switch triggers reload
+                            // Note: items is Arc<Vec<_>>, so we replace with a new empty Arc
+                            tab.items = std::sync::Arc::new(Vec::new());
+                            tab.all_items.clear();
+                            eprintln!("[MOVE] Cleared cached items for tab: {}", tab.path);
+                        }
+                    }
+                }
                 FileOperationResult::Finished => {
                     // General operation finished, maybe refresh some cache if needed
                 }
             }
         }
+
 
         // 2. CHECK DE AUTO-REFRESH (WATCHER)
         fn normalize_for_match(p: &Path) -> String {

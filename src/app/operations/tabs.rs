@@ -58,5 +58,18 @@ impl ImageViewerApp {
         self.total_items = active.total_items;
 
         self.watch_current_folder();
+        
+        // If items were cleared (by MoveCompleted event) and this is a regular folder view,
+        // trigger a reload to fetch fresh content
+        let needs_reload = self.items.is_empty() 
+            && !self.is_computer_view 
+            && !self.is_recycle_bin_view
+            && !self.current_path.is_empty();
+        
+        if needs_reload {
+            eprintln!("[TAB] Detected cleared items cache, reloading folder: {}", self.current_path);
+            self.load_folder(false);
+        }
     }
+
 }
