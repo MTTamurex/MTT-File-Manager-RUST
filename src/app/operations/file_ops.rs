@@ -131,4 +131,27 @@ impl ImageViewerApp {
     pub fn create_shell_shortcut(&self, target: &Path) -> Result<PathBuf, String> {
         file_operations::create_shortcut(target, &self.current_path)
     }
+
+    /// Monta uma ISO programaticamente e marca para auto-navegação
+    pub fn mount_and_navigate_iso(&mut self, path: PathBuf) {
+        use crate::infrastructure::windows::mount_iso;
+        
+        self.pending_iso_mount = Some(path.clone());
+        
+        match mount_iso(&path) {
+            Ok(_) => {
+                // Notifica o início da montagem
+                self.notifications.push(crate::application::AppNotification::info(format!(
+                    "Montando ISO: {}", 
+                    path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()
+                )));
+            }
+            Err(e) => {
+                self.pending_iso_mount = None;
+                self.notifications.push(crate::application::AppNotification::error(format!(
+                    "Falha ao montar ISO: {}", e
+                )));
+            }
+        }
+    }
 }

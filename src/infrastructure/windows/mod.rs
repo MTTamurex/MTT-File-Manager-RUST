@@ -9,6 +9,7 @@ pub mod file_system;
 pub mod file_type;
 pub mod formatting;
 pub mod icons;
+pub mod iso_mount;
 pub mod media_foundation;
 pub mod metadata;
 pub mod native_menu;
@@ -31,6 +32,7 @@ pub use file_type::{
 };
 pub use formatting::*;
 pub use icons::*;
+pub use iso_mount::*;
 pub use media_foundation::*;
 pub use metadata::*;
 pub use native_menu::*;
