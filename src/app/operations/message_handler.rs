@@ -16,9 +16,40 @@ impl ImageViewerApp {
             self.trigger_manual_refresh();
         }
 
+        let mut saw_device_event = false;
         while self.device_event_receiver.try_recv().is_ok() {
+            saw_device_event = true;
+        }
+
+        if saw_device_event {
+            let old_disks = self.disks.clone();
             if self.reload_drive_list() {
                 self.last_drive_refresh = Instant::now();
+                
+                // AUTO-FOCUS PARA ISO RECÉM-MONTADA
+                if let Some(_iso_path) = self.pending_iso_mount.take() {
+                    let mut target_drive = None;
+                    // Encontra qual drive é novo
+                    for (new_path, _label) in &self.disks {
+                        if !old_disks.iter().any(|(old_path, _)| old_path == new_path) {
+                            // VERIFICAÇÃO: O drive realmente está pronto/acessível?
+                            if std::path::Path::new(new_path).exists() {
+                                target_drive = Some(new_path.clone());
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if let Some(drive) = target_drive {
+                        // Navega para ele!
+                        self.navigate_to(&drive);
+                    } else {
+                        // Se não encontrou drive válido, devolve para o estado pendente 
+                        // para tentar no próximo evento (pode ser que o Windows mande vários)
+                        self.pending_iso_mount = Some(_iso_path);
+                    }
+                }
+
                 if self.is_computer_view {
                     self.setup_computer_view();
                 }

@@ -397,6 +397,9 @@ impl ImageViewerApp {
             // FILE OPERATION WORKER
             file_op_sender: file_op_tx,
             file_op_res_receiver: file_op_res_rx,
+
+            // ISO MOUNTING
+            pending_iso_mount: None,
         };
 
         // Inicia monitoramento inicial

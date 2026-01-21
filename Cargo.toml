@@ -59,6 +59,9 @@ features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_System_Variant",
     "Win32_System_Search_Common",
+    "Win32_Storage_Vhd",
+    "Win32_Security",
+    "Win32_System_IO",
 ]
 
 

@@ -284,19 +284,24 @@ impl ImageViewerApp {
                 }
             }
             Some(list_view::ListViewAction::DoubleClick(idx)) if !is_renaming => {
-                let path_to_navigate = self.items.get(idx).map(|item| {
+                let mut path_to_navigate = None;
+                if let Some(item) = self.items.get(idx) {
                     if item.is_dir {
-                        if self.is_recycle_bin_view {
-                            return None;
+                        if !self.is_recycle_bin_view {
+                            path_to_navigate = Some(item.path.clone());
                         }
-                        Some(item.path.clone())
                     } else {
-                        open_with_shell(&item.path);
-                        None
+                        let path = item.path.clone();
+                        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                        if extension == "iso" {
+                            self.mount_and_navigate_iso(path);
+                        } else {
+                            open_with_shell(&path);
+                        }
                     }
-                });
+                }
 
-                if let Some(Some(path)) = path_to_navigate {
+                if let Some(path) = path_to_navigate {
                     self.navigate_to(&path.to_string_lossy());
                 }
             }
@@ -623,19 +628,24 @@ impl ImageViewerApp {
                 }
             }
             Some(grid_view::GridViewAction::DoubleClick(idx)) if !is_renaming => {
-                let path_to_navigate = self.items.get(idx).map(|item| {
+                let mut path_to_navigate = None;
+                if let Some(item) = self.items.get(idx) {
                     if item.is_dir {
-                        if self.is_recycle_bin_view {
-                            return None;
+                        if !self.is_recycle_bin_view {
+                            path_to_navigate = Some(item.path.clone());
                         }
-                        Some(item.path.clone())
                     } else {
-                        open_with_shell(&item.path);
-                        None
+                        let path = item.path.clone();
+                        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                        if extension == "iso" {
+                            self.mount_and_navigate_iso(path);
+                        } else {
+                            open_with_shell(&path);
+                        }
                     }
-                });
+                }
 
-                if let Some(Some(path)) = path_to_navigate {
+                if let Some(path) = path_to_navigate {
                     self.navigate_to(&path.to_string_lossy());
                 }
             }
