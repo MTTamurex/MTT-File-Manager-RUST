@@ -175,7 +175,8 @@ impl ImageViewerApp {
                                     is_dir = true;
                                 }
 
-                                let size = if is_dir {
+                                let is_zip = filename.to_lowercase().ends_with(".zip");
+                                let size = if is_dir && !is_zip {
                                     0
                                 } else {
                                     ((find_data.nFileSizeHigh as u64) << 32)
