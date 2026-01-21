@@ -15,6 +15,8 @@ pub enum FileOperationResult {
     Finished,
     /// Specifically for Recycle Bin operations to trigger targeted refresh
     RecycleBinChanged,
+    /// Move operation completed - source folder needs refresh in all tabs
+    MoveCompleted { source_folder: PathBuf },
 }
 
 /// Transparent wrapper for HWND to make it Send.
@@ -98,7 +100,15 @@ pub fn start_file_operation_worker(
                     }
                 }
                 FileOperationRequest::Move { path, dest_folder, hwnd } => {
-                    let _ = shell_operations::move_item_with_shell(&path, &dest_folder, hwnd.0);
+                    // Capture source folder before move
+                    let source_folder = path.parent().map(|p| p.to_path_buf());
+                    let success = shell_operations::move_item_with_shell(&path, &dest_folder, hwnd.0);
+                    // Notify source folder for cross-tab refresh
+                    if success {
+                        if let Some(src) = source_folder {
+                            let _ = result_sender.send(FileOperationResult::MoveCompleted { source_folder: src });
+                        }
+                    }
                 }
                 FileOperationRequest::RestoreFromRecycleBin { items } => {
                     for (physical_path, original_path) in items {
