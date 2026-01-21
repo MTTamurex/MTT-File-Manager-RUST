@@ -109,6 +109,7 @@ impl ImageViewerApp {
         self.context_menu.target_paths.clear();
         self.renaming_state = None;
         self.selected_gif = None;
+        self.scroll_offset_y = 0.0;
 
         // Reset also drops all active GIF previews
         self.gif_manager.cleanup(true);
