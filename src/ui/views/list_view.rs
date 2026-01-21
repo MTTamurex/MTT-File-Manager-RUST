@@ -522,7 +522,8 @@ fn render_list_item(
                         ui.label(RichText::new(&item.name).strong());
                         ui.separator();
                         ui.label(format!("Tipo: {}", get_file_type_string(item)));
-                        if !item.is_dir {
+                        let is_zip = item.name.to_lowercase().ends_with(".zip");
+                        if !item.is_dir || is_zip {
                             ui.label(format!("Tamanho: {}", format_size(item.size)));
                         }
                         let date_lbl = if is_recycle_bin {
@@ -765,7 +766,8 @@ fn render_list_item(
             );
 
             // 4. Size
-            let size_str = if item.is_dir {
+            let is_zip = item.name.to_lowercase().ends_with(".zip");
+            let size_str = if item.is_dir && !is_zip {
                 "".to_string()
             } else {
                 format_size(item.size)

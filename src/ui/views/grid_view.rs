@@ -189,7 +189,8 @@ pub fn render_grid_view(
                         ui.label(egui::RichText::new(&item.name).strong());
                         ui.separator();
                         ui.label(format!("Tipo: {}", get_file_type_string(item)));
-                        if !item.is_dir {
+                        let is_zip = item.name.to_lowercase().ends_with(".zip");
+                        if !item.is_dir || is_zip {
                             ui.label(format!(
                                 "Tamanho: {}",
                                 crate::infrastructure::windows::format_size(item.size)
