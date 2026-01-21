@@ -23,6 +23,7 @@ impl ImageViewerApp {
         active.search_query = self.search_query.clone();
         active.scroll_to_selected = self.scroll_to_selected;
         active.scroll_offset_y = self.scroll_offset_y;
+        active.total_items = self.total_items;
 
         // No Windows, Path::new("Este Computador").file_name() é None
         if active.is_computer_view {
@@ -54,6 +55,7 @@ impl ImageViewerApp {
         self.search_query = active.search_query;
         self.scroll_to_selected = active.scroll_to_selected;
         self.scroll_offset_y = active.scroll_offset_y;
+        self.total_items = active.total_items;
 
         self.watch_current_folder();
     }
