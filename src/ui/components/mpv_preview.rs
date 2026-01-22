@@ -57,6 +57,12 @@ pub struct MpvPreview {
     /// Tracks if NVIDIA VSR is currently enabled
     pub is_vsr_enabled: bool,
 
+    // Performance: Throttling and caching
+    last_state_poll: Option<Instant>,
+    last_track_poll: Option<Instant>,
+    cached_duration: Option<f64>,
+    cached_tracks: Option<(Vec<TrackInfo>, Vec<TrackInfo>)>,
+
     #[cfg(target_os = "windows")]
     mpv_hwnd: Option<HWND>,
     #[cfg(target_os = "windows")]
@@ -94,6 +100,10 @@ impl MpvPreview {
             last_mouse_pos: None,
             was_minimized: false,
             is_vsr_enabled: false,
+            last_state_poll: None,
+            last_track_poll: None,
+            cached_duration: None,
+            cached_tracks: None,
             #[cfg(target_os = "windows")]
             mpv_hwnd: None,
             #[cfg(target_os = "windows")]
@@ -333,70 +343,112 @@ impl MpvPreview {
                 }
             }
             self.loaded_path = Some(self.path.clone());
+            
+            // Clear cached values for new file
+            self.cached_duration = None;
+            self.cached_tracks = None;
         }
 
-        // Update playback state
+        // Update playback state with throttling
         if let Some(m) = &self.mpv {
-            if let Ok(pos) = m.get_property::<f64>("time-pos") {
-                if let Ok(mut state) = self.state.write() {
-                    state.current_time = pos;
+            // THROTTLE: Poll playback state max every 100ms (10 FPS is enough for UI smoothness)
+            let should_poll_state = self.last_state_poll
+                .map(|t| t.elapsed() >= Duration::from_millis(100))
+                .unwrap_or(true);
+
+            if should_poll_state {
+                // Poll time position
+                if let Ok(pos) = m.get_property::<f64>("time-pos") {
+                    if let Ok(mut state) = self.state.write() {
+                        state.current_time = pos;
+                    }
                 }
+                
+                // Poll pause state
+                if let Ok(paused) = m.get_property::<bool>("pause") {
+                    if let Ok(mut state) = self.state.write() {
+                        state.is_playing = !paused;
+                    }
+                }
+                
+                // Poll volume
+                if let Ok(vol) = m.get_property::<f64>("volume") {
+                    if let Ok(mut state) = self.state.write() {
+                        state.volume = (vol / 100.0).clamp(0.0, 1.0) as f32;
+                    }
+                }
+                
+                // Poll mute state
+                if let Ok(muted) = m.get_property::<bool>("mute") {
+                    if let Ok(mut state) = self.state.write() {
+                        state.is_muted = muted;
+                    }
+                }
+                
+                self.last_state_poll = Some(Instant::now());
             }
-            if let Ok(dur) = m.get_property::<f64>("duration") {
+
+            // CACHE: Duration (read once on file load, then cache)
+            if self.cached_duration.is_none() {
+                if let Ok(dur) = m.get_property::<f64>("duration") {
+                    self.cached_duration = Some(dur);
+                    if let Ok(mut state) = self.state.write() {
+                        state.duration = dur;
+                    }
+                }
+            } else if let Some(dur) = self.cached_duration {
+                // Use cached value
                 if let Ok(mut state) = self.state.write() {
                     state.duration = dur;
                 }
             }
-            if let Ok(paused) = m.get_property::<bool>("pause") {
-                if let Ok(mut state) = self.state.write() {
-                    state.is_playing = !paused;
-                }
-            }
-            if let Ok(vol) = m.get_property::<f64>("volume") {
-                if let Ok(mut state) = self.state.write() {
-                    state.volume = (vol / 100.0).clamp(0.0, 1.0) as f32;
-                }
-            }
-            if let Ok(muted) = m.get_property::<bool>("mute") {
-                if let Ok(mut state) = self.state.write() {
-                    state.is_muted = muted;
-                }
-            }
 
-            // Track list polling - Get as string first then parse JSON
-            if let Ok(tracks_str) = m.get_property::<String>("track-list") {
-                if let Ok(tracks_val) = serde_json::from_str::<serde_json::Value>(&tracks_str) {
-                    if let Some(tracks_arr) = tracks_val.as_array() {
-                        let mut audio_tracks = Vec::new();
-                        let mut sub_tracks = Vec::new();
+            // CACHE: Track list (read once, then cache until file change or manual refresh)
+            if self.cached_tracks.is_none() {
+                // Only parse JSON once on initial load
+                if let Ok(tracks_str) = m.get_property::<String>("track-list") {
+                    if let Ok(tracks_val) = serde_json::from_str::<serde_json::Value>(&tracks_str) {
+                        if let Some(tracks_arr) = tracks_val.as_array() {
+                            let mut audio_tracks = Vec::new();
+                            let mut sub_tracks = Vec::new();
 
-                        for t in tracks_arr {
-                            let id = t["id"].as_i64().unwrap_or(0);
-                            let t_type = t["type"].as_str().unwrap_or("").to_string();
-                            let selected = t["selected"].as_bool().unwrap_or(false);
-                            let title = t["title"].as_str().map(|s| s.to_string());
-                            let lang = t["lang"].as_str().map(|s| s.to_string());
+                            for t in tracks_arr {
+                                let id = t["id"].as_i64().unwrap_or(0);
+                                let t_type = t["type"].as_str().unwrap_or("").to_string();
+                                let selected = t["selected"].as_bool().unwrap_or(false);
+                                let title = t["title"].as_str().map(|s| s.to_string());
+                                let lang = t["lang"].as_str().map(|s| s.to_string());
 
-                            let info = TrackInfo {
-                                id,
-                                track_type: t_type.clone(),
-                                title,
-                                lang,
-                                selected,
-                            };
+                                let info = TrackInfo {
+                                    id,
+                                    track_type: t_type.clone(),
+                                    title,
+                                    lang,
+                                    selected,
+                                };
 
-                            if t_type == "audio" {
-                                audio_tracks.push(info);
-                            } else if t_type == "sub" {
-                                sub_tracks.push(info);
+                                if t_type == "audio" {
+                                    audio_tracks.push(info);
+                                } else if t_type == "sub" {
+                                    sub_tracks.push(info);
+                                }
+                            }
+
+                            // Cache the tracks
+                            self.cached_tracks = Some((audio_tracks.clone(), sub_tracks.clone()));
+                            
+                            if let Ok(mut state) = self.state.write() {
+                                state.audio_tracks = audio_tracks;
+                                state.subtitle_tracks = sub_tracks;
                             }
                         }
-
-                        if let Ok(mut state) = self.state.write() {
-                            state.audio_tracks = audio_tracks;
-                            state.subtitle_tracks = sub_tracks;
-                        }
                     }
+                }
+            } else if let Some((ref audio, ref subs)) = self.cached_tracks {
+                // Use cached tracks
+                if let Ok(mut state) = self.state.write() {
+                    state.audio_tracks = audio.clone();
+                    state.subtitle_tracks = subs.clone();
                 }
             }
         }

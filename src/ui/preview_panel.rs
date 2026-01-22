@@ -628,7 +628,11 @@ pub fn render_preview_panel(
                                         }
                                     }
 
-                                    ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+                                    // Only repaint when video is playing or controls visible (perf optimization)
+                                    if preview.get_video_state().map(|s| s.is_playing).unwrap_or(false) 
+                                       || preview.controls_active() {
+                                        ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+                                    }
                                 });
                             
                             // Handle close via ESC already above
@@ -733,7 +737,11 @@ pub fn render_preview_panel(
                             }
                             
                                 // Request repaint to check timeout and hide controls
-                                ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+                                // Only repaint when video is playing or controls visible (perf optimization)
+                                if preview.get_video_state().map(|s| s.is_playing).unwrap_or(false) 
+                                   || preview.controls_active() {
+                                    ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+                                }
                         });
 
                             // Post-Show Logic (only for windowed mode)
