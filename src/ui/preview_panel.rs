@@ -702,8 +702,8 @@ pub fn render_preview_panel(
                                 draw_controls(&mut control_ui, preview, control_rect.width() - 20.0, svg_manager);
                             }
                             
-                            // Request repaint to check timeout and hide controls
-                            ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+                                // Request repaint to check timeout and hide controls
+                                ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
                         });
 
                             // Post-Show Logic (only for windowed mode)

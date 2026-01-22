@@ -20,8 +20,8 @@ fn open_with_shell(path: &Path) {
 impl ImageViewerApp {
     // --- DETALHES (LIST VIEW) ---
     pub fn render_list_view(&mut self, ui: &mut egui::Ui) {
-        // Keyboard navigation for list view (ONLY when not renaming)
-        if self.renaming_state.is_none() {
+        // Keyboard navigation for list view (ONLY when not renaming and media is NOT focused)
+        if self.renaming_state.is_none() && !self.is_media_keyboard_focused() {
             let current_index = self.items.iter().position(|x| {
                 self.selected_file
                     .as_ref()
@@ -383,8 +383,8 @@ impl ImageViewerApp {
             .floor()
             .max(1.0) as usize;
 
-        // Keyboard navigation (ONLY when not renaming)
-        if self.renaming_state.is_none() {
+        // Keyboard navigation (ONLY when not renaming and media is NOT focused)
+        if self.renaming_state.is_none() && !self.is_media_keyboard_focused() {
             let current_index = self.items.iter().position(|x| {
                 self.selected_file
                     .as_ref()

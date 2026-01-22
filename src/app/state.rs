@@ -214,6 +214,42 @@ pub struct ImageViewerApp {
 
     // ISO MOUNTING
     pub pending_iso_mount: Option<PathBuf>,
+
+    // Media keyboard debounce
+    pub last_media_key_press: Instant,
+}
+
+impl ImageViewerApp {
+    /// Check if the media player should currently capture all keyboard arrow/space input.
+    /// Returns true if player is detached/fullscreen AND has focus.
+    pub fn is_media_keyboard_focused(&self) -> bool {
+        let preview = if let Some(p) = &self.media_preview { p } else { return false; };
+        
+        // Condition 1: Must be detached or fullscreen
+        if !preview.is_detached() && !preview.is_maximized() {
+            return false;
+        }
+
+        // Condition 2: Current tab must be the owner
+        let active_tab_id = self.tab_manager.active().id;
+        if self.media_preview_owner_tab_id != Some(active_tab_id) {
+            return false;
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+            let foreground = unsafe { GetForegroundWindow() };
+            if foreground.is_invalid() { return false; }
+
+            // Focused if either the main app or the MPV child window is in foreground
+            self.native_hwnd == Some(foreground) || preview.get_hwnd() == Some(foreground)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            false
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
