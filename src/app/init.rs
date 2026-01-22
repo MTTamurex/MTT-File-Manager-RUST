@@ -400,6 +400,9 @@ impl ImageViewerApp {
 
             // ISO MOUNTING
             pending_iso_mount: None,
+
+            // Media keyboard debounce
+            last_media_key_press: std::time::Instant::now(),
         };
 
         // Inicia monitoramento inicial

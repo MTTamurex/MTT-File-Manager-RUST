@@ -4,6 +4,11 @@ use crate::app::ImageViewerApp;
 
 pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
     if app.renaming_state.is_none() && !app.is_address_editing {
+        // Handle media hardware input first (overrides normal navigation when player focused)
+        if handle_media_hardware_input(app, ctx) {
+            return;
+        }
+
         // Detectar teclas através dos eventos (Key events)
         let mut do_copy = false;
         let mut do_cut = false;
@@ -132,4 +137,49 @@ pub fn handle_resize_borders(_app: &mut ImageViewerApp, _ctx: &egui::Context) {
     // 1. Has zero per-frame cost (no egui widgets)
     // 2. Provides proper Windows resize cursors automatically
     // 3. Integrates with Windows DWM for smooth resize
+}
+
+fn handle_media_hardware_input(app: &mut ImageViewerApp, ctx: &egui::Context) -> bool {
+    // Check focus and mode first
+    if !app.is_media_keyboard_focused() {
+        return false;
+    }
+
+    let preview = if let Some(p) = &mut app.media_preview { p } else { return false; };
+    
+    // Condition 3: Debounce (200ms)
+    if app.last_media_key_press.elapsed() < std::time::Duration::from_millis(200) {
+        return false;
+    }
+
+    // Detect keys via hardware-level check (AsyncKeyState)
+    // We check bits to ensure the key WAS pressed since last check
+    let mut consumed = false;
+    unsafe {
+        // VK_SPACE = 0x20, VK_UP = 0x26, VK_DOWN = 0x28, VK_RIGHT = 0x27, VK_LEFT = 0x25
+        if (GetAsyncKeyState(0x20) as u16 & 0x8000) != 0 { 
+            preview.toggle_play();
+            consumed = true;
+        } else if (GetAsyncKeyState(0x26) as u16 & 0x8000) != 0 { 
+            let vol = preview.get_video_state().map(|s| s.volume).unwrap_or(1.0);
+            preview.set_volume((vol + 0.05).min(1.0));
+            consumed = true;
+        } else if (GetAsyncKeyState(0x28) as u16 & 0x8000) != 0 { 
+            let vol = preview.get_video_state().map(|s| s.volume).unwrap_or(1.0);
+            preview.set_volume((vol - 0.05).max(0.0));
+            consumed = true;
+        } else if (GetAsyncKeyState(0x27) as u16 & 0x8000) != 0 { 
+            preview.seek_relative(5.0);
+            consumed = true;
+        } else if (GetAsyncKeyState(0x25) as u16 & 0x8000) != 0 { 
+            preview.seek_relative(-5.0);
+            consumed = true;
+        }
+    }
+
+    if consumed {
+        app.last_media_key_press = std::time::Instant::now();
+        ctx.request_repaint();
+    }
+    consumed
 }

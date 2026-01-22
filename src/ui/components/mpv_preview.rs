@@ -136,6 +136,17 @@ impl MpvPreview {
         }
     }
 
+    pub fn seek_relative(&self, delta_seconds: f64) {
+        if let Some(m) = &self.mpv {
+            if let Ok(current) = m.get_property::<f64>("time-pos") {
+                if let Ok(duration) = m.get_property::<f64>("duration") {
+                    let new_time = (current + delta_seconds).clamp(0.0, duration);
+                    let _ = m.set_property("time-pos", new_time);
+                }
+            }
+        }
+    }
+
     pub fn set_volume(&self, volume: f32) {
         if let Some(m) = &self.mpv {
             let _ = m.set_property("volume", (volume.clamp(0.0, 1.0) * 100.0) as f64);
@@ -192,6 +203,11 @@ impl MpvPreview {
     #[cfg(target_os = "windows")]
     pub fn has_hwnd(&self, hwnd: HWND) -> bool {
         self.mpv_hwnd.map_or(false, |h| h == hwnd)
+    }
+
+    #[cfg(target_os = "windows")]
+    pub fn get_hwnd(&self) -> Option<HWND> {
+        self.mpv_hwnd
     }
 
     pub fn update(&mut self, _ui: &mut egui::Ui, _frame: Option<&eframe::Frame>) {

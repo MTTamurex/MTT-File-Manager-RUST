@@ -193,6 +193,13 @@ impl MediaPreview {
             player.seek(time);
         }
     }
+
+    /// Seek relative to current position
+    pub fn seek_relative(&self, delta_seconds: f64) {
+        if let MediaPreview::Video(player) = self {
+            player.seek_relative(delta_seconds);
+        }
+    }
     
     /// Set volume (0.0 to 1.0)
     pub fn set_volume(&self, volume: f32) {
@@ -235,6 +242,16 @@ impl MediaPreview {
             player.is_detached
         } else {
             false
+        }
+    }
+
+    /// Get native handle for video window
+    #[cfg(target_os = "windows")]
+    pub fn get_hwnd(&self) -> Option<windows::Win32::Foundation::HWND> {
+        if let MediaPreview::Video(player) = self {
+            player.get_hwnd()
+        } else {
+            None
         }
     }
 
