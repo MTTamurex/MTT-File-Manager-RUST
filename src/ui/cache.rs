@@ -35,8 +35,8 @@ pub struct CacheManager {
     pub folder_preview_cache: LruCache<PathBuf, egui::TextureHandle>,
     /// Set of folder paths currently being loaded
     pub folder_preview_loading: HashSet<PathBuf>,
-    /// Set of paths that failed thumbnail extraction
-    pub failed_thumbnails: HashSet<PathBuf>,
+    /// Set of paths that failed thumbnail extraction (LRU bounded to 1000)
+    pub failed_thumbnails: LruCache<PathBuf, ()>,
 
     config: TextureCacheConfig,
 }
@@ -53,7 +53,7 @@ impl CacheManager {
             drive_icon_cache: LruCache::new(NonZeroUsize::new(10).unwrap()),
             folder_preview_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
             folder_preview_loading: HashSet::new(),
-            failed_thumbnails: HashSet::new(),
+            failed_thumbnails: LruCache::new(NonZeroUsize::new(1000).unwrap()),
 
             config: TextureCacheConfig::default(),
         }
@@ -70,7 +70,7 @@ impl CacheManager {
             drive_icon_cache: LruCache::new(NonZeroUsize::new(10).unwrap()),
             folder_preview_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
             folder_preview_loading: HashSet::new(),
-            failed_thumbnails: HashSet::new(),
+            failed_thumbnails: LruCache::new(NonZeroUsize::new(1000).unwrap()),
 
             config,
         }
@@ -125,7 +125,7 @@ impl CacheManager {
 
     /// Marks a path as having failed thumbnail extraction
     pub fn mark_as_failed(&mut self, path: PathBuf) {
-        self.failed_thumbnails.insert(path);
+        self.failed_thumbnails.put(path, ());
     }
 
     /// Checks if a path has previously failed thumbnail extraction

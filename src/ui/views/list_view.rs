@@ -29,8 +29,8 @@ pub struct ListViewContext<'a> {
     pub drive_icon_cache: &'a mut lru::LruCache<String, egui::TextureHandle>,
     pub item_icon_loader: &'a mut crate::ui::icon_loader::IconLoader,
     pub deletion_date_cache: Option<&'a mut lru::LruCache<String, String>>, // Cache para datas de exclusão (Path string -> Data)
-    /// Caminhos que falharam no thumbnail
-    pub failed_thumbnails: &'a std::collections::HashSet<PathBuf>,
+    /// Caminhos que falharam no thumbnail (LRU bounded)
+    pub failed_thumbnails: &'a lru::LruCache<PathBuf, ()>,
     /// Scroll offset for manual virtualization
     pub scroll_offset_y: f32,
     /// Mutable reference to update scroll offset

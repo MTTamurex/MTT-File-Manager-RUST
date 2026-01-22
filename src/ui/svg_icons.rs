@@ -1,17 +1,18 @@
 use eframe::egui::{self, ColorImage, TextureHandle, TextureOptions};
-use std::collections::HashMap;
+use lru::LruCache;
+use std::num::NonZeroUsize;
 
 /// Manages SVG icon loading and caching
 pub struct SvgIconManager {
-    /// Cache of rendered textures keyed by (icon_name, size, color)
-    cache: HashMap<(String, u32, [u8; 4]), TextureHandle>,
+    /// Cache of rendered textures keyed by (icon_name, size, color) - LRU bounded to 200 entries
+    cache: LruCache<(String, u32, [u8; 4]), TextureHandle>,
 }
 
 impl SvgIconManager {
     /// Create a new SvgIconManager
     pub fn new() -> Self {
         Self {
-            cache: HashMap::new(),
+            cache: LruCache::new(NonZeroUsize::new(200).unwrap()),
         }
     }
 
@@ -47,7 +48,7 @@ impl SvgIconManager {
         );
 
         // Cache and return
-        self.cache.insert(cache_key, texture.clone());
+        self.cache.put(cache_key, texture.clone());
         Some(texture)
     }
 

@@ -58,8 +58,8 @@ pub struct GridViewContext<'a> {
     pub folder_preview_loading: &'a mut std::collections::HashSet<PathBuf>,
     /// PERFORMANCE: Shared buffer for pending operations (reused across items)
     pub pending_ops: &'a mut PendingOperations,
-    /// Caminhos que falharam no thumbnail
-    pub failed_thumbnails: &'a std::collections::HashSet<PathBuf>,
+    /// Caminhos que falharam no thumbnail (LRU bounded)
+    pub failed_thumbnails: &'a lru::LruCache<PathBuf, ()>,
     /// Scroll offset for manual virtualization
     pub scroll_offset_y: f32,
     /// Mutable reference to update scroll offset

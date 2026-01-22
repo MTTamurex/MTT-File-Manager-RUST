@@ -14,9 +14,11 @@ impl ImageViewerApp {
         active.is_recycle_bin_view = self.is_recycle_bin_view;
         active.navigation = self.navigation.clone();
         active.items = self.items.clone();
-        active.all_items = self.all_items.clone();
+        // PERF: Move instead of clone to reduce memory duplication
+        active.all_items = std::mem::take(&mut self.all_items);
         active.selected_item = self.selected_item;
         active.selected_file = self.selected_file.clone();
+        // PERF: Keep thumbnail when syncing (user might return to this tab)
         active.selected_thumbnail = self.selected_thumbnail.clone();
         active.selected_gif = self.selected_gif.clone();
         active.selected_metadata = self.selected_metadata.clone();

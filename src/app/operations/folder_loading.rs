@@ -60,6 +60,8 @@ impl ImageViewerApp {
         self.items = Arc::new(Vec::new()); // Novo Arc vazio (antigo é dropped automaticamente)
         self.all_items.clear(); // Limpa backup mestre também
         self.cache_manager.loading_set.clear(); // Limpa apenas requisições pendentes, mantém cache de texturas
+        self.cache_manager.folder_preview_loading.clear(); // Limpa folder preview loading
+        self.loading_icons.clear(); // Limpa icon loading requests
         self.scanned_folders.clear();
         self.selected_item = None;
         self.is_loading_folder = true;
