@@ -376,10 +376,25 @@ pub fn render_preview_panel(
                                 if let Some(tex) = svg_manager.get_icon(ui.ctx(), detach_icon_name, 48, icon_color) {
                                     let btn = egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(18.0, 18.0)));
                                     if ui.add(btn).on_hover_text(tooltip).clicked() {
+                                        if is_detached && preview.is_maximized() {
+                                            // Handle cleanup if re-attaching from fullscreen
+                                            preview.set_fullscreen_applied(false);
+                                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                                            if preview.prev_app_maximized() {
+                                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                                            }
+                                        }
                                         preview.toggle_detached();
                                     }
                                 } else {
                                     if ui.button(if is_detached { "Anexar" } else { "Desacoplar" }).on_hover_text(tooltip).clicked() {
+                                        if is_detached && preview.is_maximized() {
+                                            preview.set_fullscreen_applied(false);
+                                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                                            if preview.prev_app_maximized() {
+                                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                                            }
+                                        }
                                         preview.toggle_detached();
                                     }
                                 }
@@ -485,11 +500,26 @@ pub fn render_preview_panel(
                                         if ui.add(egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(24.0, 24.0))).frame(false))
                                             .on_hover_text(tooltip)
                                             .clicked() {
+                                            if preview.is_maximized() {
+                                                // Handle cleanup if re-attaching from fullscreen
+                                                preview.set_fullscreen_applied(false);
+                                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                                                if preview.prev_app_maximized() {
+                                                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                                                }
+                                            }
                                             preview.toggle_detached();
                                             reattach_clicked = true;
                                         }
                                     } else {
                                         if ui.button("Reacoplar").on_hover_text(tooltip).clicked() {
+                                            if preview.is_maximized() {
+                                                preview.set_fullscreen_applied(false);
+                                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                                                if preview.prev_app_maximized() {
+                                                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                                                }
+                                            }
                                             preview.toggle_detached();
                                             reattach_clicked = true;
                                         }
@@ -721,6 +751,13 @@ pub fn render_preview_panel(
                             
                             // Handle close
                             if !open {
+                                if preview.is_maximized() {
+                                    preview.set_fullscreen_applied(false);
+                                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                                    if preview.prev_app_maximized() {
+                                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                                    }
+                                }
                                 preview.set_detached(false);
                             }
                         } // end windowed mode
