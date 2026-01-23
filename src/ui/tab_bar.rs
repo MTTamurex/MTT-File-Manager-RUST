@@ -411,10 +411,17 @@ fn render_window_controls(
     } else {
         Color32::from_rgb(30, 30, 30)
     };
+    // Fundo normal (mesmo das abas inativas)
+    let normal_bg = if is_dark {
+        Color32::from_rgb(30, 30, 30)
+    } else {
+        Color32::from_rgb(230, 230, 230)
+    };
+    // Hover um pouco mais claro
     let hover_bg = if is_dark {
         Color32::from_rgb(60, 60, 60)
     } else {
-        Color32::from_rgb(230, 230, 230)
+        Color32::from_rgb(218, 218, 218)
     };
     let close_hover_bg = Color32::from_rgb(232, 17, 35); // Windows red
 
@@ -431,9 +438,9 @@ fn render_window_controls(
         *action = TabBarAction::Minimize;
     }
 
-    if min_response.hovered() {
-        ui.painter().rect_filled(min_rect, 0.0, hover_bg);
-    }
+    // Fundo sempre visível, muda no hover
+    let min_bg = if min_response.hovered() { hover_bg } else { normal_bg };
+    ui.painter().rect_filled(min_rect, 0.0, min_bg);
 
     // Minimize icon (horizontal line)
     let min_center = min_rect.center();
@@ -453,9 +460,9 @@ fn render_window_controls(
         *action = TabBarAction::ToggleMaximize;
     }
 
-    if max_response.hovered() {
-        ui.painter().rect_filled(max_rect, 0.0, hover_bg);
-    }
+    // Fundo sempre visível, muda no hover
+    let max_bg = if max_response.hovered() { hover_bg } else { normal_bg };
+    ui.painter().rect_filled(max_rect, 0.0, max_bg);
 
     // Maximize/Restore icon
     let max_center = max_rect.center();
@@ -502,9 +509,9 @@ fn render_window_controls(
         *action = TabBarAction::CloseApp;
     }
 
-    if close_response.hovered() {
-        ui.painter().rect_filled(close_rect, 0.0, close_hover_bg);
-    }
+    // Fundo cinza normal, vermelho no hover
+    let close_bg = if close_response.hovered() { close_hover_bg } else { normal_bg };
+    ui.painter().rect_filled(close_rect, 0.0, close_bg);
 
     // Close icon (X)
     let close_center = close_rect.center();
