@@ -65,9 +65,7 @@ pub fn icon_button(
         [60, 60, 60, 255]
     };
 
-    let render_size = theme::ICON_SIZE_LG; // 24.0 for high quality
-
-    if let Some(texture) = svg_manager.get_icon(ui.ctx(), icon_name, render_size as u32, color) {
+    if let Some(texture) = svg_manager.get_icon(ui.ctx(), icon_name, theme::ICON_SIZE_MD as u32, color) {
         let icon_rect = egui::Rect::from_center_size(
             rect.center(),
             egui::vec2(theme::ICON_SIZE_MD, theme::ICON_SIZE_MD),
@@ -144,9 +142,7 @@ pub fn toggle_icon_button(
         [60, 60, 60, 255]
     };
 
-    let render_size = (size * 2.0) as u32;
-
-    if let Some(texture) = svg_manager.get_icon(ui.ctx(), icon_name, render_size, color) {
+    if let Some(texture) = svg_manager.get_icon(ui.ctx(), icon_name, size as u32, color) {
         let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(size, size));
         ui.painter().image(
             texture.id(),
