@@ -268,8 +268,29 @@ pub fn render_grid_view(
     // 1. Handle Input (Target Scroll)
     let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
     if scroll_delta != 0.0 {
-        // SCROLL SENSITIVITY: 1:1 mapping for native feel (removed arbitrary multiplier)
-        *ctx.mut_scroll_offset_y -= scroll_delta;
+        // SCROLL CONFIGURATION
+        const ITEMS_PER_WHEEL: f32 = 3.0;
+        const BASE_SCROLL_NOTCH: f32 = 50.0; // Standard reference for 1 notch
+        const MIN_SCROLL_PX: f32 = 30.0;     // Minimum visual movement per event
+
+        // Normalize input to "notches" (intensity)
+        let notches = scroll_delta / BASE_SCROLL_NOTCH;
+        
+        // Calculate item-based distance: Notches * Items * ItemHeight
+        // This ensures consistent traversal speed regardless of zoom level
+        let mut target_px = notches * ITEMS_PER_WHEEL * cell_h;
+
+        // Apply Minimum Speed (prevent becoming stuck at low zoom)
+        // We preserve direction using signum
+        if target_px.abs() < MIN_SCROLL_PX {
+             target_px = target_px.signum() * MIN_SCROLL_PX;
+        }
+
+        // Apply acceleration for fast scrolls (Optional enhancement)
+        // We allow the natural "notches" from OS acceleration to pass through,
+        // effectively providing the acceleration requested.
+
+        *ctx.mut_scroll_offset_y -= target_px;
     }
 
     // 1.5 Clamp Target
