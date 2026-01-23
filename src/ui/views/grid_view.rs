@@ -6,6 +6,18 @@ use std::path::PathBuf;
 
 use crate::domain::file_entry::FileEntry;
 
+// PERFORMANCE: Tooltip debounce to avoid creation/destruction during scroll
+const TOOLTIP_DELAY_SECS: f32 = 0.3; // Only show tooltip after 300ms hover
+const SCROLL_ACTIVE_THRESHOLD: f32 = 0.5; // Consider scrolling if velocity > 0.5
+
+/// Scroll state tracking for adaptive virtualization
+#[derive(Clone, Copy, Debug)]
+struct ScrollState {
+    last_scroll_y: f32,
+    last_scroll_time: f64,
+    scroll_velocity: f32,
+}
+
 /// Pre-allocated buffers for pending operations (PERFORMANCE: avoids per-item allocations)
 #[derive(Default)]
 pub struct PendingOperations {
@@ -167,44 +179,71 @@ pub fn render_grid_view(
             );
         }
 
+        // PERFORMANCE: Tooltip with debounce to avoid spam during scroll
         if response.hovered() {
-            let is_recycle = ctx.is_recycle_bin_view;
-            let mouse_pos = ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
-            // SMART TOOLTIP: Inverte se estiver perto da borda direita
-            let right_bound = ui.ctx().screen_rect().right();
-            let tooltip_pos = if mouse_pos.x + 320.0 > right_bound {
-                mouse_pos - egui::vec2(320.0, 0.0)
-            } else {
-                mouse_pos
-            };
+            let current_time = ui.input(|i| i.time);
+            let hover_id = response.id.with("hover_start");
 
-            egui::show_tooltip_at(
-                ui.ctx(),
-                ui.layer_id(),
-                response.id,
-                tooltip_pos,
-                |ui: &mut Ui| {
-                    ui.set_max_width(300.0);
-                    ui.vertical(|ui| {
-                        ui.label(egui::RichText::new(&item.name).strong());
-                        ui.separator();
-                        ui.label(format!("Tipo: {}", get_file_type_string(item)));
-                        let is_zip = item.name.to_lowercase().ends_with(".zip");
-                        if !item.is_dir || is_zip {
-                            ui.label(format!(
-                                "Tamanho: {}",
-                                crate::infrastructure::windows::format_size(item.size)
-                            ));
-                        }
-                        let (date_lbl, date_val) = if is_recycle {
-                            ("Data de Exclusão", item.deletion_date.clone().unwrap_or_else(|| "-".to_string()))
-                        } else {
-                            ("Última modificação", crate::infrastructure::windows::format_date(item.modified))
-                        };
-                        ui.label(format!("{}: {}", date_lbl, date_val));
-                    });
-                },
-            );
+            // Track hover start time using egui's memory
+            let hover_start_time = ui.ctx().data_mut(|d| {
+                *d.get_temp_mut_or_insert_with(hover_id, || current_time)
+            });
+
+            let hover_duration = (current_time - hover_start_time) as f32;
+
+            // Request repaint when approaching tooltip delay to ensure it appears
+            if hover_duration < TOOLTIP_DELAY_SECS {
+                ui.ctx().request_repaint_after(std::time::Duration::from_secs_f32(
+                    TOOLTIP_DELAY_SECS - hover_duration + 0.01
+                ));
+            }
+
+            // Only show tooltip if hover duration exceeds threshold
+            // This prevents tooltip spam during scroll
+            if hover_duration >= TOOLTIP_DELAY_SECS {
+                let is_recycle = ctx.is_recycle_bin_view;
+                let mouse_pos = ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
+
+                // SMART TOOLTIP: Inverte se estiver perto da borda direita
+                let right_bound = ui.ctx().screen_rect().right();
+                let tooltip_pos = if mouse_pos.x + 320.0 > right_bound {
+                    mouse_pos - egui::vec2(320.0, 0.0)
+                } else {
+                    mouse_pos
+                };
+
+                egui::show_tooltip_at(
+                    ui.ctx(),
+                    ui.layer_id(),
+                    response.id,
+                    tooltip_pos,
+                    |ui: &mut Ui| {
+                        ui.set_max_width(300.0);
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new(&item.name).strong());
+                            ui.separator();
+                            ui.label(format!("Tipo: {}", get_file_type_string(item)));
+                            let is_zip = item.name.to_lowercase().ends_with(".zip");
+                            if !item.is_dir || is_zip {
+                                ui.label(format!(
+                                    "Tamanho: {}",
+                                    crate::infrastructure::windows::format_size(item.size)
+                                ));
+                            }
+                            let (date_lbl, date_val) = if is_recycle {
+                                ("Data de Exclusão", item.deletion_date.clone().unwrap_or_else(|| "-".to_string()))
+                            } else {
+                                ("Última modificação", crate::infrastructure::windows::format_date(item.modified))
+                            };
+                            ui.label(format!("{}: {}", date_lbl, date_val));
+                        });
+                    },
+                );
+            }
+        } else {
+            // Clear hover time when not hovering
+            let hover_id = response.id.with("hover_start");
+            ui.ctx().data_mut(|d| d.remove::<f64>(hover_id));
         }
 
         let inner_rect = rect.shrink(3.0);
@@ -226,13 +265,38 @@ pub fn render_grid_view(
     let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
     if scroll_delta != 0.0 {
         // 5x Multiplier for responsive scrolling
-        *ctx.mut_scroll_offset_y -= scroll_delta * 5.0; 
+        *ctx.mut_scroll_offset_y -= scroll_delta * 5.0;
     }
 
     // 2. Clamp scroll offset
     let max_scroll = (total_content_height - viewport_h).max(0.0);
     *ctx.mut_scroll_offset_y = ctx.mut_scroll_offset_y.clamp(0.0, max_scroll);
-    
+
+    // PERFORMANCE: Track scroll velocity for adaptive virtualization
+    let current_time = ui.input(|i| i.time);
+    let current_scroll = *ctx.mut_scroll_offset_y;
+    let scroll_state_id = ui.id().with("scroll_state");
+
+    let (_scroll_velocity, is_scrolling_fast) = ui.ctx().data_mut(|d| {
+        let state = d.get_temp_mut_or_insert_with::<ScrollState>(scroll_state_id, || ScrollState {
+            last_scroll_y: current_scroll,
+            last_scroll_time: current_time,
+            scroll_velocity: 0.0,
+        });
+
+        let dt = (current_time - state.last_scroll_time).max(0.001) as f32;
+        let dy = (current_scroll - state.last_scroll_y).abs();
+        let velocity = dy / dt;
+
+        // Exponential moving average for smooth velocity tracking
+        state.scroll_velocity = state.scroll_velocity * 0.7 + velocity * 0.3;
+        state.last_scroll_y = current_scroll;
+        state.last_scroll_time = current_time;
+
+        let is_fast = state.scroll_velocity > SCROLL_ACTIVE_THRESHOLD;
+        (state.scroll_velocity, is_fast)
+    });
+
     // 2.5 KEYBOARD SCROLL SYNC: Ensure selected item is visible
     if ctx.scroll_to_selected {
         if let Some(selected_idx) = ctx.selected_item {
@@ -269,13 +333,21 @@ pub fn render_grid_view(
     // Virtualization Math
     let vis_min_row = (current_scroll / cell_h).floor() as usize;
     let vis_max_row = ((current_scroll + viewport_h) / cell_h).ceil() as usize;
-    
+
     // Export range for prefetch
     visible_rows_range = Some((vis_min_row, vis_max_row));
 
-    // Overscan
-    let loop_min_row = vis_min_row.saturating_sub(1);
-    let loop_max_row = (vis_max_row + 1).min(total_rows);
+    // PERFORMANCE: Adaptive overscan based on scroll velocity
+    // Fast scroll: Larger overscan to prevent visual gaps
+    // Slow/static: Minimal overscan to save CPU/GPU
+    let overscan = if is_scrolling_fast {
+        3 // 3 rows overscan during fast scroll (prevents gaps)
+    } else {
+        1 // 1 row overscan when static/slow
+    };
+
+    let loop_min_row = vis_min_row.saturating_sub(overscan);
+    let loop_max_row = (vis_max_row + overscan).min(total_rows);
 
     if ctx.is_computer_view {
         // Computer view with sections (Manual Scroll)
@@ -418,27 +490,33 @@ pub fn render_grid_view(
         ops.rename_with_shell(rename_idx);
     }
 
-    // PREFETCH LOGIC (Low Priority)
+    // PERFORMANCE: Adaptive prefetch based on scroll state
+    // Fast scroll: Narrow prefetch margin (focus on visible + overscan)
+    // Idle: Wider prefetch margin (prepare more ahead)
     if let Some((vis_min, vis_max)) = visible_rows_range {
         let count = ctx.items.len();
         let rows = (count as f32 / cols as f32).ceil() as usize;
-        let prefetch_margin = 7; // Approx 1 page of cache
-        
+
+        // Adaptive prefetch margin: narrow during fast scroll, wide when idle
+        let prefetch_margin = if is_scrolling_fast {
+            2 // Tight prefetch during scroll - focus CPU on visible items
+        } else {
+            5 // Generous prefetch when idle - prepare ahead
+        };
+
         let start_prefetch = vis_min.saturating_sub(prefetch_margin);
         let end_prefetch = (vis_max + prefetch_margin).min(rows);
-        
+
         for row in start_prefetch..end_prefetch {
-            // Skip visible rows (already handled by render loop)
-            // Buffer of 2 was used in render loop, so we stick to that to avoid overlap overkill
-            // although overlap is harmless due to loading_set check
-            if row >= vis_min.saturating_sub(2) && row < (vis_max + 2).min(rows) {
+            // Skip visible + overscan rows (already handled by render loop)
+            if row >= vis_min.saturating_sub(overscan) && row < (vis_max + overscan).min(rows) {
                 continue;
             }
 
             for col in 0..cols {
                 let index = row * cols + col;
                 if index >= count { break; }
-                
+
                 let item = &ctx.items[index];
                 if !item.is_dir {
                     // Check if needs thumbnail
