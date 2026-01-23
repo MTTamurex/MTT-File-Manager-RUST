@@ -222,7 +222,7 @@ fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context) {
             fill: if ctx.style().visuals.dark_mode {
                 egui::Color32::from_rgb(45, 45, 45)
             } else {
-                egui::Color32::from_rgb(255, 255, 255)
+                egui::Color32::from_rgb(243, 243, 243) // Same as active tab (Windows Explorer style)
             },
             ..Default::default()
         })
