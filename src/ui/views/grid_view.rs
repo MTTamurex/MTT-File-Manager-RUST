@@ -138,6 +138,7 @@ pub fn render_grid_view(
         clicked_item: &mut Option<usize>,
         double_clicked_item: &mut Option<usize>,
         secondary_clicked_item: &mut Option<usize>,
+        is_dense_mode: bool,
     ) {
         let response = ui.interact(rect, ui.id().with(index), Sense::click());
         if response.clicked() {
@@ -183,76 +184,153 @@ pub fn render_grid_view(
         }
 
         // PERFORMANCE: Tooltip with debounce to avoid spam during scroll
-        if response.hovered() {
-            let current_time = ui.input(|i| i.time);
-            let hover_id = response.id.with("hover_start");
+        // Skip tooltip entirely in dense mode
+        if !is_dense_mode {
+            if response.hovered() {
+                let current_time = ui.input(|i| i.time);
+                let hover_id = response.id.with("hover_start");
 
-            // Track hover start time using egui's memory
-            let hover_start_time = ui.ctx().data_mut(|d| {
-                *d.get_temp_mut_or_insert_with(hover_id, || current_time)
-            });
+                // Track hover start time using egui's memory
+                let hover_start_time = ui.ctx().data_mut(|d| {
+                    *d.get_temp_mut_or_insert_with(hover_id, || current_time)
+                });
 
-            let hover_duration = (current_time - hover_start_time) as f32;
+                let hover_duration = (current_time - hover_start_time) as f32;
 
-            // Request repaint when approaching tooltip delay to ensure it appears
-            if hover_duration < TOOLTIP_DELAY_SECS {
-                ui.ctx().request_repaint_after(std::time::Duration::from_secs_f32(
-                    TOOLTIP_DELAY_SECS - hover_duration + 0.01
-                ));
+                // Request repaint when approaching tooltip delay to ensure it appears
+                if hover_duration < TOOLTIP_DELAY_SECS {
+                    ui.ctx().request_repaint_after(std::time::Duration::from_secs_f32(
+                        TOOLTIP_DELAY_SECS - hover_duration + 0.01
+                    ));
+                }
+
+                // Only show tooltip if hover duration exceeds threshold
+                // This prevents tooltip spam during scroll
+                if hover_duration >= TOOLTIP_DELAY_SECS {
+                    let is_recycle = ctx.is_recycle_bin_view;
+                    let mouse_pos = ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
+
+                    // SMART TOOLTIP: Inverte se estiver perto da borda direita
+                    let right_bound = ui.ctx().screen_rect().right();
+                    let tooltip_pos = if mouse_pos.x + 320.0 > right_bound {
+                        mouse_pos - egui::vec2(320.0, 0.0)
+                    } else {
+                        mouse_pos
+                    };
+
+                    egui::show_tooltip_at(
+                        ui.ctx(),
+                        ui.layer_id(),
+                        response.id,
+                        tooltip_pos,
+                        |ui: &mut Ui| {
+                            ui.set_max_width(300.0);
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new(&item.name).strong());
+                                ui.separator();
+                                ui.label(format!("Tipo: {}", get_file_type_string(item)));
+                                let is_zip = item.name.to_lowercase().ends_with(".zip");
+                                if !item.is_dir || is_zip {
+                                    ui.label(format!(
+                                        "Tamanho: {}",
+                                        crate::infrastructure::windows::format_size(item.size)
+                                    ));
+                                }
+                                let (date_lbl, date_val) = if is_recycle {
+                                    ("Data de Exclusão", item.deletion_date.clone().unwrap_or_else(|| "-".to_string()))
+                                } else {
+                                    ("Última modificação", crate::infrastructure::windows::format_date(item.modified))
+                                };
+                                ui.label(format!("{}: {}", date_lbl, date_val));
+                            });
+                        },
+                    );
+                }
+            } else {
+                // Clear hover time when not hovering
+                let hover_id = response.id.with("hover_start");
+                ui.ctx().data_mut(|d| d.remove::<f64>(hover_id));
             }
-
-            // Only show tooltip if hover duration exceeds threshold
-            // This prevents tooltip spam during scroll
-            if hover_duration >= TOOLTIP_DELAY_SECS {
-                let is_recycle = ctx.is_recycle_bin_view;
-                let mouse_pos = ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
-
-                // SMART TOOLTIP: Inverte se estiver perto da borda direita
-                let right_bound = ui.ctx().screen_rect().right();
-                let tooltip_pos = if mouse_pos.x + 320.0 > right_bound {
-                    mouse_pos - egui::vec2(320.0, 0.0)
-                } else {
-                    mouse_pos
-                };
-
-                egui::show_tooltip_at(
-                    ui.ctx(),
-                    ui.layer_id(),
-                    response.id,
-                    tooltip_pos,
-                    |ui: &mut Ui| {
-                        ui.set_max_width(300.0);
-                        ui.vertical(|ui| {
-                            ui.label(egui::RichText::new(&item.name).strong());
-                            ui.separator();
-                            ui.label(format!("Tipo: {}", get_file_type_string(item)));
-                            let is_zip = item.name.to_lowercase().ends_with(".zip");
-                            if !item.is_dir || is_zip {
-                                ui.label(format!(
-                                    "Tamanho: {}",
-                                    crate::infrastructure::windows::format_size(item.size)
-                                ));
-                            }
-                            let (date_lbl, date_val) = if is_recycle {
-                                ("Data de Exclusão", item.deletion_date.clone().unwrap_or_else(|| "-".to_string()))
-                            } else {
-                                ("Última modificação", crate::infrastructure::windows::format_date(item.modified))
-                            };
-                            ui.label(format!("{}: {}", date_lbl, date_val));
-                        });
-                    },
-                );
-            }
-        } else {
-            // Clear hover time when not hovering
-            let hover_id = response.id.with("hover_start");
-            ui.ctx().data_mut(|d| d.remove::<f64>(hover_id));
         }
 
-        let inner_rect = rect.shrink(3.0);
-        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
-            render_item_slot_for_grid(ui, index, item, ctx);
-        });
+        if is_dense_mode {
+            // --- DENSE MODE (ZERO WIDGETS) ---
+            // Render directly using painter for maximum performance
+            let painter = ui.painter();
+            let rect_shrink = rect.shrink(4.0);
+            
+            // Draw thumbnail/icon
+            let mut drawn = false;
+            
+            // Try texture cache first
+            if !item.is_dir || !ctx.is_recycle_bin_view {
+                 if let Some(texture) = ctx.texture_cache.get(&item.path) {
+                    let tex_size = texture.size_vec2();
+                    let aspect = tex_size.x / tex_size.y;
+                    
+                    // Maintain aspect ratio within cell
+                    let (w, h) = if aspect > 1.0 {
+                        (rect_shrink.width(), rect_shrink.width() / aspect)
+                    } else {
+                        (rect_shrink.height() * aspect, rect_shrink.height())
+                    };
+                    
+                    let draw_rect = Rect::from_center_size(rect_shrink.center(), egui::vec2(w, h));
+                    
+                    painter.image(
+                        texture.id(),
+                        draw_rect,
+                        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                    drawn = true;
+                 }
+            }
+            
+            if !drawn {
+                // Check for Folder icon
+                 if item.is_dir {
+                     // Simple colored rect for folder placeholder if no icon
+                     // Try to get system icon from loader if available
+                     if let Some(icon) = ctx.folder_icon_texture {
+                         let size = rect_shrink.width().min(rect_shrink.height());
+                         let draw_rect = Rect::from_center_size(rect_shrink.center(), egui::vec2(size, size));
+                          painter.image(
+                            icon.id(),
+                            draw_rect,
+                            Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            Color32::WHITE,
+                        );
+                     } else {
+                         // Fallback rectangle
+                         painter.rect_filled(rect_shrink.shrink(2.0), 3.0, Color32::from_rgb(230, 200, 100));
+                     }
+                 } else {
+                     // File placeholder
+                     // Try system icon
+                     if let Some(icon) = ctx.item_icon_loader.get_or_load_icon(ui.ctx(), &item.path, false) {
+                         let size = rect_shrink.width().min(rect_shrink.height()) * 0.7;
+                         let draw_rect = Rect::from_center_size(rect_shrink.center(), egui::vec2(size, size));
+                         painter.image(
+                            icon.id(),
+                            draw_rect,
+                            Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            Color32::WHITE,
+                        );
+                     } else {
+                         // Simple gray rect
+                         painter.rect_filled(rect_shrink.shrink(6.0), 2.0, Color32::from_gray(200));
+                     }
+                 }
+            }
+
+        } else {
+            // STANDARD RENDERING
+            let inner_rect = rect.shrink(3.0);
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
+                render_item_slot_for_grid(ui, index, item, ctx);
+            });
+        }
     }
 
     // --- MANUAL VIRTUALIZATION START ---
@@ -276,41 +354,13 @@ pub fn render_grid_view(
     // 1. Handle Input (Target Scroll)
     let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
     if scroll_delta != 0.0 {
-        // SCROLL CONFIGURATION - DYNAMIC SPEED
-        const BASE_ITEMS_PER_WHEEL: f32 = 3.0; // Base speed at reference zoom
-        const REFERENCE_THUMBNAIL_SIZE: f32 = 96.0;
-        const BASE_SCROLL_NOTCH: f32 = 50.0; // Standard reference for 1 notch
-        const MIN_SCROLL_PX: f32 = 30.0;     // Minimum visual movement per event
-
-        // Calculate dynamic items per wheel based on zoom
-        // - Small thumbs (Zoom out) -> Higher speed (move more items)
-        // - Large thumbs (Zoom in)  -> Control speed (move fewer items, clamped to min 3.0)
-        let zoom_factor = ctx.thumbnail_size / REFERENCE_THUMBNAIL_SIZE;
-        let items_per_wheel = BASE_ITEMS_PER_WHEEL / zoom_factor;
+        // SCROLL CONFIGURATION - PIXEL BASED
+        let notches = scroll_delta / 50.0;
+        let px_per_notch = ctx.thumbnail_size + padding; // Height + Padding (Simplificado conforme regra)
         
-        // Clamp for UX stability:
-        // - Min 3.0: Ensure we never scroll painfully slow, even at max zoom
-        // - Max 12.0: Prevent uncontrollable flying at min zoom
-        let items_per_wheel = items_per_wheel.clamp(3.0, 12.0);
-
-        // Normalize input to "notches" (intensity)
-        let notches = scroll_delta / BASE_SCROLL_NOTCH;
+        let move_px = notches * px_per_notch;
         
-        // Calculate item-based distance: Notches * Items * ItemHeight
-        // Using virtual_cell_h ensures we move logically through the grid structure
-        let mut target_px = notches * items_per_wheel * virtual_cell_h;
-
-        // Apply Minimum Speed (prevent becoming stuck at low zoom)
-        // We preserve direction using signum
-        if target_px.abs() < MIN_SCROLL_PX {
-             target_px = target_px.signum() * MIN_SCROLL_PX;
-        }
-
-        // Apply acceleration for fast scrolls (Optional enhancement)
-        // We allow the natural "notches" from OS acceleration to pass through,
-        // effectively providing the acceleration requested.
-
-        *ctx.mut_scroll_offset_y -= target_px;
+        *ctx.mut_scroll_offset_y -= move_px;
     }
 
     // 1.5 Clamp Target
@@ -402,28 +452,9 @@ pub fn render_grid_view(
     let pre_clamp_min_row = vis_min_row.saturating_sub(overscan);
     let pre_clamp_max_row = (vis_max_row + overscan).min(total_rows);
 
-    // PERFORMANCE: Hard-Cap de itens renderizados (120 max)
-    // Garante que nunca renderizamos um buffer massivo (ex: 2000 itens se o zoom for minúsculo)
-    // Mantendo a viewport sempre preenchida (sem buracos)
-    let start_vis_idx = vis_min_row * cols;
-    let end_vis_idx = vis_max_row * cols; // exclusive-ish approximation
-    let center_idx = (start_vis_idx + end_vis_idx) / 2;
-    
-    let half_cap = MAX_RENDERED_ITEMS / 2;
-    let target_start_idx = center_idx.saturating_sub(half_cap);
-    let target_end_idx = center_idx.saturating_add(half_cap);
-
-    // Expande para garantir visibilidade (min/max logic)
-    let final_start_idx = target_start_idx.min(start_vis_idx);
-    let final_end_idx = target_end_idx.max(end_vis_idx);
-
-    // Converte de volta para linhas para o loop
-    let loop_min_row = (final_start_idx / cols).max(pre_clamp_min_row);
-    // Para o max, garantimos que cubra o final_end_idx mas respeite total_rows
-    let loop_max_row = ((final_end_idx as f32 / cols as f32).ceil() as usize).min(pre_clamp_max_row);
-
-    // Safety check: ensure min <= max
-    let loop_min_row = loop_min_row.min(loop_max_row);
+    // Standard Virtualization Limits (with overscan)
+    let loop_min_row = pre_clamp_min_row;
+    let loop_max_row = pre_clamp_max_row;
 
     if ctx.is_computer_view {
         // Computer view with sections (Manual Scroll & Layout)
@@ -483,7 +514,7 @@ pub fn render_grid_view(
                                 egui::pos2(content_min.x + x_pos, item_y),
                                 egui::vec2(item_w, item_h),
                             );
-                            render_grid_item(ui, real_idx, item, item_rect, ctx, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item);
+                            render_grid_item(ui, real_idx, item, item_rect, ctx, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item, is_dense_mode);
                         }
                         
                         current_idx += 1;
@@ -512,7 +543,7 @@ pub fn render_grid_view(
                     egui::vec2(item_w, item_h),
                 );
 
-                render_grid_item(&mut child_ui, index, &ctx.items[index], item_rect, ctx, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item);
+                render_grid_item(&mut child_ui, index, &ctx.items[index], item_rect, ctx, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item, is_dense_mode);
             }
         }
     }
