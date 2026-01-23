@@ -218,12 +218,14 @@ fn render_tab_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context, frame: &m
 fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context) {
     egui::TopBottomPanel::top("nav_bar")
         .show_separator_line(true)
+        .exact_height(46.0) // Increased height like Windows Explorer
         .frame(egui::Frame {
             fill: if ctx.style().visuals.dark_mode {
                 egui::Color32::from_rgb(45, 45, 45)
             } else {
                 egui::Color32::from_rgb(243, 243, 243) // Same as active tab (Windows Explorer style)
             },
+            inner_margin: egui::Margin { left: 8, right: 8, top: 7, bottom: 7 }, // Padding to center content in taller bar
             ..Default::default()
         })
         .show(ctx, |ui| {
