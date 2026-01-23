@@ -7,6 +7,9 @@ use std::path::PathBuf;
 use crate::domain::file_entry::{FileEntry, SortMode, SyncStatus};
 use crate::infrastructure::windows::{format_date, format_size};
 
+// PERFORMANCE: Tooltip debounce to avoid creation/destruction during scroll
+const TOOLTIP_DELAY_SECS: f32 = 0.3; // Only show tooltip after 300ms hover
+
 /// Context for list view rendering
 pub struct ListViewContext<'a> {
     pub items: &'a [FileEntry],
@@ -498,50 +501,73 @@ fn render_list_item(
             );
         }
 
-        // Tooltip at cursor
+        // PERFORMANCE: Tooltip with debounce to avoid spam during scroll
         if response.hovered() {
-            let right_bound = available_rect.right();
-            let mouse_pos =
-                ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
+            let current_time = ui.input(|i| i.time);
+            let hover_id = response.id.with("hover_start");
 
-            // SMART TOOLTIP: Inverte se estiver perto da borda direita (área do player)
-            let tooltip_pos = if mouse_pos.x + 320.0 > right_bound {
-                mouse_pos - egui::vec2(320.0, 0.0)
-            } else {
-                mouse_pos
-            };
+            // Track hover start time using egui's memory
+            let hover_start_time = ui.ctx().data_mut(|d| {
+                *d.get_temp_mut_or_insert_with(hover_id, || current_time)
+            });
 
-            egui::show_tooltip_at(
-                ui.ctx(),
-                ui.layer_id(),
-                response.id,
-                tooltip_pos,
-                |ui: &mut Ui| {
-                    ui.set_max_width(300.0);
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new(&item.name).strong());
-                        ui.separator();
-                        ui.label(format!("Tipo: {}", get_file_type_string(item)));
-                        let is_zip = item.name.to_lowercase().ends_with(".zip");
-                        if !item.is_dir || is_zip {
-                            ui.label(format!("Tamanho: {}", format_size(item.size)));
-                        }
-                        let date_lbl = if is_recycle_bin {
-                            "Data de Exclusão"
-                        } else {
-                            "Última modificação"
-                        };
-                        let date_val = if is_recycle_bin {
-                            item.deletion_date
-                                .clone()
-                                .unwrap_or_else(|| "-".to_string())
-                        } else {
-                            format_date(item.modified)
-                        };
-                        ui.label(format!("{}: {}", date_lbl, date_val));
-                    });
-                },
-            );
+            let hover_duration = (current_time - hover_start_time) as f32;
+
+            // Request repaint when approaching tooltip delay to ensure it appears
+            if hover_duration < TOOLTIP_DELAY_SECS {
+                ui.ctx().request_repaint_after(std::time::Duration::from_secs_f32(
+                    TOOLTIP_DELAY_SECS - hover_duration + 0.01
+                ));
+            }
+
+            // Only show tooltip if hover duration exceeds threshold
+            if hover_duration >= TOOLTIP_DELAY_SECS {
+                let right_bound = available_rect.right();
+                let mouse_pos = ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
+
+                // SMART TOOLTIP: Inverte se estiver perto da borda direita (área do player)
+                let tooltip_pos = if mouse_pos.x + 320.0 > right_bound {
+                    mouse_pos - egui::vec2(320.0, 0.0)
+                } else {
+                    mouse_pos
+                };
+
+                egui::show_tooltip_at(
+                    ui.ctx(),
+                    ui.layer_id(),
+                    response.id,
+                    tooltip_pos,
+                    |ui: &mut Ui| {
+                        ui.set_max_width(300.0);
+                        ui.vertical(|ui| {
+                            ui.label(RichText::new(&item.name).strong());
+                            ui.separator();
+                            ui.label(format!("Tipo: {}", get_file_type_string(item)));
+                            let is_zip = item.name.to_lowercase().ends_with(".zip");
+                            if !item.is_dir || is_zip {
+                                ui.label(format!("Tamanho: {}", format_size(item.size)));
+                            }
+                            let date_lbl = if is_recycle_bin {
+                                "Data de Exclusão"
+                            } else {
+                                "Última modificação"
+                            };
+                            let date_val = if is_recycle_bin {
+                                item.deletion_date
+                                    .clone()
+                                    .unwrap_or_else(|| "-".to_string())
+                            } else {
+                                format_date(item.modified)
+                            };
+                            ui.label(format!("{}: {}", date_lbl, date_val));
+                        });
+                    },
+                );
+            }
+        } else {
+            // Clear hover time when not hovering
+            let hover_id = response.id.with("hover_start");
+            ui.ctx().data_mut(|d| d.remove::<f64>(hover_id));
         }
 
         let text_color = if is_selected {
