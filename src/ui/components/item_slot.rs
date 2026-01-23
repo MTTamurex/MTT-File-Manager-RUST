@@ -246,44 +246,10 @@ fn render_directory_slot<O: ItemSlotOperations>(
             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
             egui::Color32::WHITE,
         );
-    } else if is_loading {
-        // LOADING SPINNER: Mostra spinner animado enquanto carrega
-        let spinner_size = folder_rect.width().min(folder_rect.height()) * 0.3;
-        let spinner_rect = egui::Rect::from_center_size(
-            folder_rect.center(),
-            egui::vec2(spinner_size, spinner_size),
-        );
-
-        // Desenha fundo leve
-        ui.painter()
-            .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
-
-        // Spinner animado usando tempo do UI
-        let time = ui.input(|i| i.time);
-        let angle = (time * 3.0) as f32; // 3 rotações por segundo
-
-        // Desenha arco do spinner
-        let center = spinner_rect.center();
-        let radius = spinner_size / 2.0 - 2.0;
-        let stroke = egui::Stroke::new(3.0, egui::Color32::from_rgb(100, 150, 220));
-
-        // Desenha um arco (semi-círculo rotativo)
-        let points: Vec<egui::Pos2> = (0..20)
-            .map(|i| {
-                let t = i as f32 / 19.0 * std::f32::consts::PI * 1.5; // 270 graus
-                let a = angle + t;
-                egui::pos2(center.x + radius * a.cos(), center.y + radius * a.sin())
-            })
-            .collect();
-
-        ui.painter().add(egui::Shape::line(points, stroke));
-
-        // Força repaint para animação contínua
-        ui.ctx().request_repaint();
     } else {
-        // Se não tem preview e não está carregando
+        // Se não tem preview nativo
         let is_virtual_path = ctx.is_recycle_bin_view || crate::infrastructure::windows::shell_folder::is_shell_navigation_path(&item.path);
-        
+
         if is_virtual_path {
             // NA LIXEIRA ou ZIP (Paths Virtuais)
             // Use System Folder Icon for these virtual folders
@@ -294,7 +260,7 @@ fn render_directory_slot<O: ItemSlotOperations>(
                     folder_rect.center(),
                     egui::vec2(icon_size, icon_size),
                 );
-                
+
                 ui.put(
                     icon_rect,
                     egui::Image::new(sys_icon)
@@ -302,38 +268,63 @@ fn render_directory_slot<O: ItemSlotOperations>(
                         .max_size(egui::vec2(icon_size, icon_size))
                 );
             } else if let Some(icon) = ctx.icon_loader.get_or_load_icon(ui.ctx(), &item.path, true) {
-                // Fallback
+                // Fallback para ícone específico do item
                 let icon_size = folder_w.min(folder_h);
                 let icon_rect = egui::Rect::from_center_size(
                     folder_rect.center(),
                     egui::vec2(icon_size, icon_size),
                 );
-                
+
                 ui.put(
                     icon_rect,
                     egui::Image::new(&icon)
                         .max_size(egui::vec2(icon_size, icon_size))
                 );
             } else {
-                // Final Fallback
-                crate::ui::components::item_slot::draw_custom_folder(
-                    ui.painter(),
-                    folder_rect,
-                    None,
-                );
+                // Final Fallback para virtual paths: área vazia estilizada
+                ui.painter()
+                    .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
             }
         } else {
-            // Pasta normal: dispara carregamento de preview
-            ops.request_folder_preview_load(item.path.clone());
+            // PASTA NORMAL: Dispara carregamento se ainda não iniciou
+            if !is_loading {
+                ops.request_folder_preview_load(item.path.clone());
+            }
 
-            // Fallback temporário: mostra pasta customizada enquanto não iniciou loading
-            crate::ui::components::item_slot::draw_custom_folder(
-                ui.painter(),
-                folder_rect,
-                item.folder_cover
-                    .as_ref()
-                    .and_then(|p| ctx.texture_cache.get(p)),
+            // SEMPRE mostra loading spinner para pastas normais sem preview
+            // (NUNCA mostra ícone de pasta genérico/customizado como placeholder)
+            let spinner_size = folder_rect.width().min(folder_rect.height()) * 0.3;
+            let spinner_rect = egui::Rect::from_center_size(
+                folder_rect.center(),
+                egui::vec2(spinner_size, spinner_size),
             );
+
+            // Desenha fundo leve
+            ui.painter()
+                .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
+
+            // Spinner animado usando tempo do UI
+            let time = ui.input(|i| i.time);
+            let angle = (time * 3.0) as f32; // 3 rotações por segundo
+
+            // Desenha arco do spinner
+            let center = spinner_rect.center();
+            let radius = spinner_size / 2.0 - 2.0;
+            let stroke = egui::Stroke::new(3.0, egui::Color32::from_rgb(100, 150, 220));
+
+            // Desenha um arco (semi-círculo rotativo)
+            let points: Vec<egui::Pos2> = (0..20)
+                .map(|i| {
+                    let t = i as f32 / 19.0 * std::f32::consts::PI * 1.5; // 270 graus
+                    let a = angle + t;
+                    egui::pos2(center.x + radius * a.cos(), center.y + radius * a.sin())
+                })
+                .collect();
+
+            ui.painter().add(egui::Shape::line(points, stroke));
+
+            // Força repaint para animação contínua
+            ui.ctx().request_repaint();
         }
     }
 
@@ -543,111 +534,6 @@ fn render_file_slot<O: ItemSlotOperations>(
             });
         }
     }
-}
-/// Função utilitária para desenhar o ícone de pasta customizado (pode ser usada fora do ItemSlot)
-pub fn draw_custom_folder(
-    painter: &egui::Painter,
-    folder_rect: egui::Rect,
-    preview_texture: Option<&egui::TextureHandle>,
-) {
-    // CORES
-    let color_back = egui::Color32::from_rgb(200, 160, 50);
-    let color_front = egui::Color32::from_rgb(255, 210, 70);
-
-    // Dimensões
-    let folder_w = folder_rect.width();
-    let folder_h = folder_rect.height();
-    let tab_h = folder_h * 0.15;
-    let tab_w = folder_w * 0.40;
-    let front_h = folder_h * 0.50;
-
-    // === DESENHO 1: BASE SÓLIDA ===
-    painter.rect_filled(
-        egui::Rect::from_min_size(folder_rect.min, egui::vec2(tab_w, tab_h)),
-        egui::CornerRadius {
-            nw: 3,
-            ne: 3,
-            sw: 0,
-            se: 0,
-        },
-        color_back,
-    );
-    painter.rect_filled(
-        egui::Rect::from_min_max(
-            egui::pos2(folder_rect.min.x, folder_rect.min.y + tab_h),
-            folder_rect.max,
-        ),
-        egui::CornerRadius {
-            nw: 0,
-            ne: 3,
-            sw: 4,
-            se: 4,
-        },
-        color_back,
-    );
-
-    // === DESENHO 2: PREVIEW ===
-    if let Some(tex) = preview_texture {
-        let margin_x = folder_w * 0.08;
-        let margin_top = folder_h * 0.05;
-        let preview_area = egui::Rect::from_min_max(
-            egui::pos2(
-                folder_rect.min.x + margin_x,
-                folder_rect.min.y + tab_h + margin_top,
-            ),
-            egui::pos2(folder_rect.max.x - margin_x, folder_rect.max.y - front_h),
-        );
-
-        let size = tex.size();
-        let tex_size = egui::vec2(size[0] as f32, size[1] as f32);
-        let aspect_img = tex_size.x / tex_size.y;
-        let aspect_view = preview_area.width() / preview_area.height();
-
-        let uv_rect = if aspect_img > aspect_view {
-            let scale = aspect_view / aspect_img;
-            let offset = (1.0 - scale) / 2.0;
-            egui::Rect::from_min_max(egui::pos2(offset, 0.0), egui::pos2(1.0 - offset, 1.0))
-        } else {
-            let scale = aspect_img / aspect_view;
-            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, scale))
-        };
-
-        painter.with_clip_rect(preview_area).image(
-            tex.id(),
-            preview_area,
-            uv_rect,
-            egui::Color32::WHITE,
-        );
-    }
-
-    // === DESENHO 3: BOLSO FRONTAL ===
-    let front_rect = egui::Rect::from_min_max(
-        egui::pos2(folder_rect.min.x, folder_rect.max.y - front_h),
-        folder_rect.max,
-    );
-    painter.rect_filled(
-        front_rect,
-        egui::CornerRadius {
-            nw: 0,
-            ne: 0,
-            sw: 4,
-            se: 4,
-        },
-        color_front,
-    );
-
-    // Borda sutil
-    painter.rect_stroke(
-        front_rect,
-        egui::CornerRadius {
-            nw: 0,
-            ne: 0,
-            sw: 4,
-            se: 4,
-        },
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 150, 30)),
-        egui::StrokeKind::Inside,
-    );
 }
 
 /// Renders a sync status badge (OneDrive) on the bottom-right corner of the thumbnail
