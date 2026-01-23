@@ -4,8 +4,8 @@ use std::num::NonZeroUsize;
 
 /// Manages SVG icon loading and caching
 pub struct SvgIconManager {
-    /// Cache of rendered textures keyed by (icon_name, size, color) - LRU bounded to 200 entries
-    cache: LruCache<(String, u32, [u8; 4]), TextureHandle>,
+    /// Cache of rendered textures keyed by (icon_name, size, color, pixels_per_point)
+    cache: LruCache<(String, u32, [u8; 4], u32), TextureHandle>,
 }
 
 impl SvgIconManager {
@@ -17,7 +17,6 @@ impl SvgIconManager {
     }
 
     /// Get or create a texture for the specified icon
-    /// Color is now part of the cache key to support toggle states
     pub fn get_icon(
         &mut self,
         ctx: &egui::Context,
@@ -25,8 +24,9 @@ impl SvgIconManager {
         size: u32,
         color: [u8; 4],
     ) -> Option<TextureHandle> {
-        // Include color in cache key for proper toggle state rendering
-        let cache_key = (icon_name.to_string(), size, color);
+        let ppp = ctx.pixels_per_point();
+        // Include pixels_per_point in cache key to handle scaling changes
+        let cache_key = (icon_name.to_string(), size, color, (ppp * 100.0) as u32);
 
         // Return cached texture if available
         if let Some(texture) = self.cache.get(&cache_key) {
@@ -35,13 +35,13 @@ impl SvgIconManager {
 
         // Load SVG from embedded assets
         let svg_data = crate::embedded_assets::get_icon(icon_name)?;
-        let image = render_svg_to_image(svg_data, size, color)?;
+        let image = render_svg_to_image(svg_data, size, color, ppp)?;
 
-        // Create texture with unique name including color
+        // Create texture with unique name
         let texture = ctx.load_texture(
             format!(
-                "icon_{}_{}_{:02x}{:02x}{:02x}",
-                icon_name, size, color[0], color[1], color[2]
+                "icon_{}_{}_{}_{:02x}{:02x}{:02x}",
+                icon_name, size, (ppp * 100.0) as u32, color[0], color[1], color[2]
             ),
             image,
             TextureOptions::LINEAR,
@@ -58,8 +58,8 @@ impl SvgIconManager {
     }
 }
 
-/// Render an SVG file to a ColorImage at the specified size
-fn render_svg_to_image(svg_data: &[u8], size: u32, color: [u8; 4]) -> Option<ColorImage> {
+/// Render an SVG file to a ColorImage at the specified size, respecting pixels_per_point
+fn render_svg_to_image(svg_data: &[u8], size: u32, color: [u8; 4], ppp: f32) -> Option<ColorImage> {
     // Parse SVG from embedded bytes
     let svg_str = std::str::from_utf8(svg_data).ok()?;
 
@@ -67,23 +67,27 @@ fn render_svg_to_image(svg_data: &[u8], size: u32, color: [u8; 4]) -> Option<Col
     let opt = usvg::Options::default();
     let tree = usvg::Tree::from_str(&svg_str, &opt).ok()?;
 
-    // Calculate scale to fit desired size
+    // Physical size for rendering
+    let physical_size = (size as f32 * ppp).round() as u32;
+    if physical_size == 0 { return None; }
+
+    // Calculate scale to fit desired physical size
     let svg_size = tree.size();
-    let scale_x = size as f32 / svg_size.width();
-    let scale_y = size as f32 / svg_size.height();
+    let scale_x = physical_size as f32 / svg_size.width();
+    let scale_y = physical_size as f32 / svg_size.height();
     let scale = scale_x.min(scale_y);
 
-    // Create pixmap for rendering
-    let mut pixmap = tiny_skia::Pixmap::new(size, size)?;
+    // Create pixmap for rendering at physical resolution
+    let mut pixmap = tiny_skia::Pixmap::new(physical_size, physical_size)?;
 
     // Clear with transparent background
     pixmap.fill(tiny_skia::Color::TRANSPARENT);
 
-    // Calculate offset to center the icon
+    // Calculate offset to center the icon in the physical pixmap
     let scaled_w = svg_size.width() * scale;
     let scaled_h = svg_size.height() * scale;
-    let offset_x = (size as f32 - scaled_w) / 2.0;
-    let offset_y = (size as f32 - scaled_h) / 2.0;
+    let offset_x = (physical_size as f32 - scaled_w) / 2.0;
+    let offset_y = (physical_size as f32 - scaled_h) / 2.0;
 
     // Create transform with scale and offset
     let transform =
@@ -105,7 +109,7 @@ fn render_svg_to_image(svg_data: &[u8], size: u32, color: [u8; 4]) -> Option<Col
     }
 
     // Convert to egui ColorImage
-    let size_usize = [size as usize, size as usize];
+    let size_usize = [physical_size as usize, physical_size as usize];
     Some(ColorImage::from_rgba_unmultiplied(
         size_usize,
         pixmap.data(),
