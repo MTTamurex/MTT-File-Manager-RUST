@@ -46,22 +46,22 @@ pub fn render_tab_bar(
     let window_btn_width = 46.0; // Standard Windows button width
     let window_controls_width = window_btn_width * 3.0; // Min, Max, Close
 
-    // Colors based on theme
+    // Colors based on theme (Windows Explorer style - gray tones)
     let is_dark = ui.visuals().dark_mode;
     let active_bg = if is_dark {
         Color32::from_rgb(45, 45, 45)
     } else {
-        Color32::from_rgb(255, 255, 255)
+        Color32::from_rgb(243, 243, 243) // Light gray for active tab (Windows Explorer style)
     };
     let inactive_bg = if is_dark {
         Color32::from_rgb(30, 30, 30)
     } else {
-        Color32::from_rgb(240, 240, 240)
+        Color32::from_rgb(230, 230, 230) // Darker gray for inactive tabs
     };
     let hover_bg = if is_dark {
         Color32::from_rgb(55, 55, 55)
     } else {
-        Color32::from_rgb(230, 230, 230)
+        Color32::from_rgb(238, 238, 238) // Medium gray for hover
     };
     let text_color = if is_dark {
         Color32::from_rgb(220, 220, 220)
