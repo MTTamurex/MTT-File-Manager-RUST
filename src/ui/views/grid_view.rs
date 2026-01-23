@@ -276,17 +276,29 @@ pub fn render_grid_view(
     // 1. Handle Input (Target Scroll)
     let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
     if scroll_delta != 0.0 {
-        // SCROLL CONFIGURATION
-        const ITEMS_PER_WHEEL: f32 = 3.0;
+        // SCROLL CONFIGURATION - DYNAMIC SPEED
+        const BASE_ITEMS_PER_WHEEL: f32 = 3.0; // Base speed at reference zoom
+        const REFERENCE_THUMBNAIL_SIZE: f32 = 96.0;
         const BASE_SCROLL_NOTCH: f32 = 50.0; // Standard reference for 1 notch
         const MIN_SCROLL_PX: f32 = 30.0;     // Minimum visual movement per event
+
+        // Calculate dynamic items per wheel based on zoom
+        // - Small thumbs (Zoom out) -> Higher speed (move more items)
+        // - Large thumbs (Zoom in)  -> Control speed (move fewer items, clamped to min 3.0)
+        let zoom_factor = ctx.thumbnail_size / REFERENCE_THUMBNAIL_SIZE;
+        let items_per_wheel = BASE_ITEMS_PER_WHEEL / zoom_factor;
+        
+        // Clamp for UX stability:
+        // - Min 3.0: Ensure we never scroll painfully slow, even at max zoom
+        // - Max 12.0: Prevent uncontrollable flying at min zoom
+        let items_per_wheel = items_per_wheel.clamp(3.0, 12.0);
 
         // Normalize input to "notches" (intensity)
         let notches = scroll_delta / BASE_SCROLL_NOTCH;
         
         // Calculate item-based distance: Notches * Items * ItemHeight
         // Using virtual_cell_h ensures we move logically through the grid structure
-        let mut target_px = notches * ITEMS_PER_WHEEL * virtual_cell_h;
+        let mut target_px = notches * items_per_wheel * virtual_cell_h;
 
         // Apply Minimum Speed (prevent becoming stuck at low zoom)
         // We preserve direction using signum
