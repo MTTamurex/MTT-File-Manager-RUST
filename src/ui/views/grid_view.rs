@@ -144,7 +144,6 @@ pub fn render_grid_view(
         clicked_item: &mut Option<usize>,
         double_clicked_item: &mut Option<usize>,
         secondary_clicked_item: &mut Option<usize>,
-        is_dense_mode: bool,
     ) {
         let response = ui.interact(rect, ui.id().with(index), Sense::click());
         if response.clicked() {
@@ -190,9 +189,7 @@ pub fn render_grid_view(
         }
 
         // PERFORMANCE: Tooltip with debounce to avoid spam during scroll
-        // Skip tooltip entirely in dense mode
-        if !is_dense_mode {
-            if response.hovered() {
+        if response.hovered() {
                 let current_time = ui.input(|i| i.time);
                 let hover_id = response.id.with("hover_start");
 
@@ -257,86 +254,12 @@ pub fn render_grid_view(
                 let hover_id = response.id.with("hover_start");
                 ui.ctx().data_mut(|d| d.remove::<f64>(hover_id));
             }
-        }
 
-        if is_dense_mode {
-            // --- DENSE MODE (ZERO WIDGETS) ---
-            // Render directly using painter for maximum performance
-            let painter = ui.painter();
-            let rect_shrink = rect.shrink(4.0);
-            
-            // Draw thumbnail/icon
-            let mut drawn = false;
-            
-            // Try texture cache first
-            if !item.is_dir || !ctx.is_recycle_bin_view {
-                 if let Some(texture) = ctx.texture_cache.get(&item.path) {
-                    let tex_size = texture.size_vec2();
-                    let aspect = tex_size.x / tex_size.y;
-                    
-                    // Maintain aspect ratio within cell
-                    let (w, h) = if aspect > 1.0 {
-                        (rect_shrink.width(), rect_shrink.width() / aspect)
-                    } else {
-                        (rect_shrink.height() * aspect, rect_shrink.height())
-                    };
-                    
-                    let draw_rect = Rect::from_center_size(rect_shrink.center(), egui::vec2(w, h));
-                    
-                    painter.image(
-                        texture.id(),
-                        draw_rect,
-                        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                        Color32::WHITE,
-                    );
-                    drawn = true;
-                 }
-            }
-            
-            if !drawn {
-                // Check for Folder icon
-                 if item.is_dir {
-                     // Simple colored rect for folder placeholder if no icon
-                     // Try to get system icon from loader if available
-                     if let Some(icon) = ctx.folder_icon_texture {
-                         let size = rect_shrink.width().min(rect_shrink.height());
-                         let draw_rect = Rect::from_center_size(rect_shrink.center(), egui::vec2(size, size));
-                          painter.image(
-                            icon.id(),
-                            draw_rect,
-                            Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            Color32::WHITE,
-                        );
-                     } else {
-                         // Fallback rectangle
-                         painter.rect_filled(rect_shrink.shrink(2.0), 3.0, Color32::from_rgb(230, 200, 100));
-                     }
-                 } else {
-                     // File placeholder
-                     // Try system icon
-                     if let Some(icon) = ctx.item_icon_loader.get_or_load_icon(ui.ctx(), &item.path, false) {
-                         let size = rect_shrink.width().min(rect_shrink.height()) * 0.7;
-                         let draw_rect = Rect::from_center_size(rect_shrink.center(), egui::vec2(size, size));
-                         painter.image(
-                            icon.id(),
-                            draw_rect,
-                            Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            Color32::WHITE,
-                        );
-                     } else {
-                         // Simple gray rect
-                         painter.rect_filled(rect_shrink.shrink(6.0), 2.0, Color32::from_gray(200));
-                     }
-                 }
-            }
-
-        } else {
-            // STANDARD RENDERING
-            let inner_rect = rect.shrink(3.0);
-            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
-                render_item_slot_for_grid(ui, index, item, ctx);
-            });
-        }
+        // STANDARD RENDERING
+        let inner_rect = rect.shrink(3.0);
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
+            render_item_slot_for_grid(ui, index, item, ctx);
+        });
     }
 
     // --- MANUAL VIRTUALIZATION START ---
@@ -346,8 +269,6 @@ pub fn render_grid_view(
     
     // Configurações de Performance (Min-Zoom)
     const MAX_RENDERED_ITEMS: usize = 120;
-    const MIN_ZOOM_THRESHOLD: f32 = 48.01;
-    let is_dense_mode = ctx.thumbnail_size <= MIN_ZOOM_THRESHOLD;
 
     let total_rows = (count as f32 / cols as f32).ceil() as usize;
     let total_content_height = total_rows as f32 * virtual_cell_h + padding;
@@ -520,7 +441,7 @@ pub fn render_grid_view(
                                 egui::pos2(content_min.x + x_pos, item_y),
                                 egui::vec2(item_w, item_h),
                             );
-                            render_grid_item(ui, real_idx, item, item_rect, ctx, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item, is_dense_mode);
+                            render_grid_item(ui, real_idx, item, item_rect, ctx, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item);
                         }
                         
                         current_idx += 1;
@@ -549,7 +470,7 @@ pub fn render_grid_view(
                     egui::vec2(item_w, item_h),
                 );
 
-                render_grid_item(&mut child_ui, index, &ctx.items[index], item_rect, ctx, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item, is_dense_mode);
+                render_grid_item(&mut child_ui, index, &ctx.items[index], item_rect, ctx, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item);
             }
         }
     }
@@ -735,7 +656,7 @@ fn render_item_slot_for_grid(
             folder_preview_loading: ctx.folder_preview_loading,
             failed_thumbnails: ctx.failed_thumbnails,
             pending_upload_set: ctx.pending_upload_set,
-            is_dense_mode: ctx.thumbnail_size <= 48.01,
+            is_dense_mode: false, // Legacy: dense mode logic removed from grid view
         };
 
         // PERFORMANCE: SimpleOps now writes directly to shared buffers
