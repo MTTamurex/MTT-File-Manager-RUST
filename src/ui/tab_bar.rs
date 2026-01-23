@@ -340,10 +340,13 @@ pub fn render_tab_bar(
         // Drag area (space between new tab button and window controls)
         let remaining_width = ui.available_width() - window_controls_width;
         if remaining_width > 0.0 {
-            let (_drag_rect, drag_response) = ui.allocate_exact_size(
+            let (drag_rect, drag_response) = ui.allocate_exact_size(
                 Vec2::new(remaining_width, tab_height),
-                egui::Sense::click_and_drag(), // Mudado para click_and_drag
+                egui::Sense::click_and_drag(),
             );
+
+            // Fundo da topbar (mesma cor das abas inativas)
+            ui.painter().rect_filled(drag_rect, 0.0, inactive_bg);
 
             // Drag to move window
             if drag_response.drag_started() || drag_response.dragged() {
@@ -370,7 +373,7 @@ pub fn render_tab_bar(
         // + icon
         let plus_center = new_tab_rect.center();
         let plus_size = 10.0;
-        let plus_stroke = Stroke::new(2.0, text_color);
+        let plus_stroke = Stroke::new(1.0, text_color);
         ui.painter().line_segment(
             [
                 plus_center + Vec2::new(-plus_size / 2.0, 0.0),
