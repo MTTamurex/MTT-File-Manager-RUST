@@ -77,6 +77,11 @@ pub struct GridViewContext<'a> {
     /// Mutable reference to update scroll offset
     pub mut_scroll_offset_y: &'a mut f32,
     pub last_input: crate::app::state::LastInput,
+    /// PERFORMANCE: Scroll state tracking for GPU upload throttling
+    pub last_scroll_time: &'a mut std::time::Instant,
+    pub last_scroll_offset: &'a mut f32,
+    /// Conjunto de itens aguardando upload GPU
+    pub pending_upload_set: &'a mut std::collections::HashSet<PathBuf>,
 }
 
 /// Operations that can be performed from grid view
@@ -265,12 +270,19 @@ pub fn render_grid_view(
     let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
     if scroll_delta != 0.0 {
         // 5x Multiplier for responsive scrolling
-        *ctx.mut_scroll_offset_y -= scroll_delta * 5.0;
+        *ctx.mut_scroll_offset_y -= scroll_delta * 4.0;
     }
 
     // 2. Clamp scroll offset
     let max_scroll = (total_content_height - viewport_h).max(0.0);
     *ctx.mut_scroll_offset_y = ctx.mut_scroll_offset_y.clamp(0.0, max_scroll);
+
+    // PERFORMANCE: Track scroll changes for GPU upload throttling
+    let current_scroll = *ctx.mut_scroll_offset_y;
+    if (current_scroll - *ctx.last_scroll_offset).abs() > 0.1 {
+        *ctx.last_scroll_time = std::time::Instant::now();
+        *ctx.last_scroll_offset = current_scroll;
+    }
 
     // PERFORMANCE: Track scroll velocity for adaptive virtualization
     let current_time = ui.input(|i| i.time);
@@ -519,8 +531,11 @@ pub fn render_grid_view(
 
                 let item = &ctx.items[index];
                 if !item.is_dir {
-                    // Check if needs thumbnail
-                    if !ctx.texture_cache.contains(&item.path) && !ctx.loading_set.contains(&item.path) {
+                    // Check if needs thumbnail - skip if already in cache, loading, or pending upload
+                    if !ctx.texture_cache.contains(&item.path) 
+                        && !ctx.loading_set.contains(&item.path)
+                        && !ctx.pending_upload_set.contains(&item.path)
+                    {
                         ctx.loading_set.insert(item.path.clone());
                         ops.request_thumbnail_prefetch(item.path.clone(), ctx.thumbnail_size as u32);
                     }
@@ -597,6 +612,7 @@ fn render_item_slot_for_grid(
             folder_preview_cache: ctx.folder_preview_cache,
             folder_preview_loading: ctx.folder_preview_loading,
             failed_thumbnails: ctx.failed_thumbnails,
+            pending_upload_set: ctx.pending_upload_set,
         };
 
         // PERFORMANCE: SimpleOps now writes directly to shared buffers

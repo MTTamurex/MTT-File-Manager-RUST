@@ -39,6 +39,11 @@ pub struct ListViewContext<'a> {
     /// Mutable reference to update scroll offset
     pub mut_scroll_offset_y: &'a mut f32,
     pub last_input: crate::app::state::LastInput,
+    /// PERFORMANCE: Scroll state tracking for GPU upload throttling
+    pub last_scroll_time: &'a mut std::time::Instant,
+    pub last_scroll_offset: &'a mut f32,
+    /// Conjunto de itens aguardando upload GPU
+    pub pending_upload_set: &'a mut std::collections::HashSet<PathBuf>,
 }
 
 /// Action returned by list view
@@ -229,9 +234,15 @@ pub fn render_list_view(
             }
         }
     }
-    
+
     let current_scroll = *ctx.mut_scroll_offset_y;
-    
+
+    // PERFORMANCE: Track scroll changes for GPU upload throttling
+    if (current_scroll - *ctx.last_scroll_offset).abs() > 0.1 {
+        *ctx.last_scroll_time = std::time::Instant::now();
+        *ctx.last_scroll_offset = current_scroll;
+    }
+
     // 3. Render Virtual List
     // DETECT BACKGROUND INTERACTION (Sense::click() captures secondary_clicked without global leakage)
     let bg_response = ui.interact(viewport_rect, ui.id().with("list_bg"), Sense::click());
@@ -439,6 +450,7 @@ fn render_list_item(
             && !ctx.texture_cache.contains(&item.path)
             && !ctx.loading_set.contains(&item.path)
             && !ctx.failed_thumbnails.contains(&item.path)
+            && !ctx.pending_upload_set.contains(&item.path)
             && ctx.loading_set.len() < 50
         {
             ctx.loading_set.insert(item.path.clone());

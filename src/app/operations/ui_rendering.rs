@@ -164,6 +164,9 @@ impl ImageViewerApp {
             scroll_offset_y: self.scroll_offset_y,
             mut_scroll_offset_y: &mut self.scroll_offset_y,
             last_input: self.last_input,
+            last_scroll_time: &mut self.last_scroll_time,
+            last_scroll_offset: &mut self.last_scroll_offset,
+            pending_upload_set: &mut self.cache_manager.pending_upload_set,
         };
 
         // Usar uma abordagem diferente: coletar ações em vetores
@@ -519,6 +522,9 @@ impl ImageViewerApp {
             scroll_offset_y: self.scroll_offset_y,
             mut_scroll_offset_y: &mut self.scroll_offset_y,
             last_input: self.last_input,
+            last_scroll_time: &mut self.last_scroll_time,
+            last_scroll_offset: &mut self.last_scroll_offset,
+            pending_upload_set: &mut self.cache_manager.pending_upload_set,
         };
 
         // Usar uma abordagem diferente: coletar ações em vetores
@@ -749,6 +755,7 @@ impl ImageViewerApp {
                 folder_preview_cache: &mut self.cache_manager.folder_preview_cache,
                 folder_preview_loading: &mut self.cache_manager.folder_preview_loading,
                 failed_thumbnails: &self.cache_manager.failed_thumbnails,
+                pending_upload_set: &mut self.cache_manager.pending_upload_set,
             };
 
             // Create simple ops struct that collects operations

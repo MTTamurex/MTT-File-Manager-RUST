@@ -48,6 +48,8 @@ pub struct ItemSlotContext<'a> {
     pub folder_preview_loading: &'a mut std::collections::HashSet<std::path::PathBuf>,
     /// Caminhos que falharam no thumbnail (LRU bounded)
     pub failed_thumbnails: &'a lru::LruCache<std::path::PathBuf, ()>,
+    /// Conjunto de itens aguardando upload GPU
+    pub pending_upload_set: &'a mut std::collections::HashSet<std::path::PathBuf>,
 }
 
 /// Renderiza um item slot para grid view
@@ -399,8 +401,9 @@ fn render_file_slot<O: ItemSlotOperations>(
         let has_texture = ctx.texture_cache.contains(&path_clone);
         let is_loading = ctx.loading_set.contains(&path_clone);
         let is_failed = ctx.failed_thumbnails.contains(&path_clone);
+        let is_pending_upload = ctx.pending_upload_set.contains(&path_clone);
 
-        if !has_texture && !is_loading && !is_failed && ctx.loading_set.len() < 50 {
+        if !has_texture && !is_loading && !is_failed && !is_pending_upload && ctx.loading_set.len() < 50 {
             // MAX_CONCURRENT_LOADS (increased for performance)
             ctx.loading_set.insert(path_clone.clone());
             ops.request_thumbnail_load(path_clone.clone(), ctx.thumbnail_size as u32);
