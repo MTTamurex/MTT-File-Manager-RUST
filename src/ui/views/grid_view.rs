@@ -9,6 +9,8 @@ use crate::domain::file_entry::FileEntry;
 // PERFORMANCE: Tooltip debounce to avoid creation/destruction during scroll
 const TOOLTIP_DELAY_SECS: f32 = 0.3; // Only show tooltip after 300ms hover
 const SCROLL_ACTIVE_THRESHOLD: f32 = 0.5; // Consider scrolling if velocity > 0.5
+// STRICT LIMIT: Mínimo zoom permitido para evitar degradação de performance
+const MIN_THUMBNAIL_SIZE: f32 = 96.0;
 
 /// Scroll state tracking for visual smoothing
 #[derive(Clone, Copy, Debug)]
@@ -107,6 +109,10 @@ pub fn render_grid_view(
     ctx: &mut GridViewContext,
     ops: &mut dyn GridViewOperations,
 ) -> Option<GridViewAction> {
+    // ENFORCE MINIMUM ZOOM (Hard Floor)
+    // Impede qualquer cálculo ou render com tamanho menor que 96px
+    ctx.thumbnail_size = ctx.thumbnail_size.max(MIN_THUMBNAIL_SIZE);
+
     let padding = 8.0;
     let item_w = ctx.thumbnail_size;
     let item_h = ctx.thumbnail_size + 20.0; // Height: thumb + text
