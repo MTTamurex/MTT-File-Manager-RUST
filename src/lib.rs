@@ -10,5 +10,3 @@ pub mod pdf_viewer;
 
 // Re-export main app struct for easy access
 pub use app::state::ImageViewerApp;
-
-pub use ui::components::item_slot::draw_custom_folder;
