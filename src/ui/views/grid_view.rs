@@ -256,9 +256,17 @@ pub fn render_grid_view(
     }
 
     // --- MANUAL VIRTUALIZATION START ---
-    let cell_h = item_h + padding;
+    let visual_cell_h = item_h + padding;
+    const MIN_VIRTUAL_CELL_HEIGHT: f32 = 24.0;
+    let virtual_cell_h = visual_cell_h.max(MIN_VIRTUAL_CELL_HEIGHT);
+    
+    // Configurações de Performance (Min-Zoom)
+    const MAX_RENDERED_ITEMS: usize = 120;
+    const MIN_ZOOM_THRESHOLD: f32 = 48.01;
+    let is_dense_mode = ctx.thumbnail_size <= MIN_ZOOM_THRESHOLD;
+
     let total_rows = (count as f32 / cols as f32).ceil() as usize;
-    let total_content_height = total_rows as f32 * cell_h + padding;
+    let total_content_height = total_rows as f32 * virtual_cell_h + padding;
 
     // Viewport area
     let viewport_rect = ui.available_rect_before_wrap();
@@ -277,8 +285,8 @@ pub fn render_grid_view(
         let notches = scroll_delta / BASE_SCROLL_NOTCH;
         
         // Calculate item-based distance: Notches * Items * ItemHeight
-        // This ensures consistent traversal speed regardless of zoom level
-        let mut target_px = notches * ITEMS_PER_WHEEL * cell_h;
+        // Using virtual_cell_h ensures we move logically through the grid structure
+        let mut target_px = notches * ITEMS_PER_WHEEL * virtual_cell_h;
 
         // Apply Minimum Speed (prevent becoming stuck at low zoom)
         // We preserve direction using signum
@@ -343,8 +351,8 @@ pub fn render_grid_view(
         if let Some(selected_idx) = ctx.selected_item {
             if selected_idx < count {
                 let selected_row = selected_idx / cols;
-                let item_top = selected_row as f32 * cell_h + padding;
-                let item_bottom = item_top + item_h;
+                let item_top = selected_row as f32 * virtual_cell_h + padding;
+                let item_bottom = item_top + item_h; // Keep item_h for visual bottom check
                 
                 // We check against TARGET scroll to ensure we snap to the final correct position
                 // but we might want to check visual if we want to smooth scroll TO the item.
@@ -370,8 +378,8 @@ pub fn render_grid_view(
     let content_min = viewport_rect.min;
 
     // Virtualization Math (using Interpolated Visual Scroll)
-    let vis_min_row = (current_scroll / cell_h).floor() as usize;
-    let vis_max_row = ((current_scroll + viewport_h) / cell_h).ceil() as usize;
+    let vis_min_row = (current_scroll / virtual_cell_h).floor() as usize;
+    let vis_max_row = ((current_scroll + viewport_h) / virtual_cell_h).ceil() as usize;
 
     // Export range for prefetch relative to visual position
     visible_rows_range = Some((vis_min_row, vis_max_row));
@@ -379,8 +387,31 @@ pub fn render_grid_view(
     // STABLE OVERSCAN: Fixed value, no velocity dependency
     let overscan = 2;
 
-    let loop_min_row = vis_min_row.saturating_sub(overscan);
-    let loop_max_row = (vis_max_row + overscan).min(total_rows);
+    let pre_clamp_min_row = vis_min_row.saturating_sub(overscan);
+    let pre_clamp_max_row = (vis_max_row + overscan).min(total_rows);
+
+    // PERFORMANCE: Hard-Cap de itens renderizados (120 max)
+    // Garante que nunca renderizamos um buffer massivo (ex: 2000 itens se o zoom for minúsculo)
+    // Mantendo a viewport sempre preenchida (sem buracos)
+    let start_vis_idx = vis_min_row * cols;
+    let end_vis_idx = vis_max_row * cols; // exclusive-ish approximation
+    let center_idx = (start_vis_idx + end_vis_idx) / 2;
+    
+    let half_cap = MAX_RENDERED_ITEMS / 2;
+    let target_start_idx = center_idx.saturating_sub(half_cap);
+    let target_end_idx = center_idx.saturating_add(half_cap);
+
+    // Expande para garantir visibilidade (min/max logic)
+    let final_start_idx = target_start_idx.min(start_vis_idx);
+    let final_end_idx = target_end_idx.max(end_vis_idx);
+
+    // Converte de volta para linhas para o loop
+    let loop_min_row = (final_start_idx / cols).max(pre_clamp_min_row);
+    // Para o max, garantimos que cubra o final_end_idx mas respeite total_rows
+    let loop_max_row = ((final_end_idx as f32 / cols as f32).ceil() as usize).min(pre_clamp_max_row);
+
+    // Safety check: ensure min <= max
+    let loop_min_row = loop_min_row.min(loop_max_row);
 
     if ctx.is_computer_view {
         // Computer view with sections (Manual Scroll & Layout)
@@ -415,7 +446,7 @@ pub fn render_grid_view(
             *start_y += header_h;
 
             let rows = (section_count as f32 / cols as f32).ceil() as usize;
-            let section_h = rows as f32 * cell_h + padding;
+            let section_h = rows as f32 * virtual_cell_h + padding;
 
             // Render items in this section
             // Optimization: Only iterate if section is visible
@@ -431,7 +462,7 @@ pub fn render_grid_view(
                         let row = current_idx / cols;
                         let col_idx = current_idx % cols;
                         
-                        let item_y = *start_y + row as f32 * cell_h + padding;
+                        let item_y = *start_y + row as f32 * virtual_cell_h + padding;
                         
                         // Culling check
                         if item_y + item_h > content_min.y && item_y < content_min.y + viewport_h {
@@ -462,7 +493,7 @@ pub fn render_grid_view(
                 if index >= count { break; }
 
                 let x_pos = col as f32 * (item_w + padding) + padding;
-                let y_pos = content_min.y + row as f32 * cell_h + padding - current_scroll;
+                let y_pos = content_min.y + row as f32 * virtual_cell_h + padding - current_scroll;
                 
                 let item_rect = Rect::from_min_size(
                     egui::pos2(content_min.x + x_pos, y_pos),
@@ -655,6 +686,7 @@ fn render_item_slot_for_grid(
             folder_preview_loading: ctx.folder_preview_loading,
             failed_thumbnails: ctx.failed_thumbnails,
             pending_upload_set: ctx.pending_upload_set,
+            is_dense_mode: ctx.thumbnail_size <= 48.01,
         };
 
         // PERFORMANCE: SimpleOps now writes directly to shared buffers
