@@ -10,12 +10,10 @@ use crate::domain::file_entry::FileEntry;
 const TOOLTIP_DELAY_SECS: f32 = 0.3; // Only show tooltip after 300ms hover
 const SCROLL_ACTIVE_THRESHOLD: f32 = 0.5; // Consider scrolling if velocity > 0.5
 
-/// Scroll state tracking for adaptive virtualization
+/// Scroll state tracking for visual smoothing
 #[derive(Clone, Copy, Debug)]
 struct ScrollState {
-    last_scroll_y: f32,
-    last_scroll_time: f64,
-    scroll_velocity: f32,
+    visual_scroll_y: f32,
 }
 
 /// Pre-allocated buffers for pending operations (PERFORMANCE: avoids per-item allocations)
@@ -265,49 +263,59 @@ pub fn render_grid_view(
     // Viewport area
     let viewport_rect = ui.available_rect_before_wrap();
     let viewport_h = viewport_rect.height();
+    let max_scroll = (total_content_height - viewport_h).max(0.0);
 
-    // 1. Handle mouse wheel scroll (Manual Source of Truth)
+    // 1. Handle Input (Target Scroll)
     let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
     if scroll_delta != 0.0 {
-        // 5x Multiplier for responsive scrolling
-        *ctx.mut_scroll_offset_y -= scroll_delta * 4.0;
+        // SCROLL SENSITIVITY: 1:1 mapping for native feel (removed arbitrary multiplier)
+        *ctx.mut_scroll_offset_y -= scroll_delta;
     }
 
-    // 2. Clamp scroll offset
-    let max_scroll = (total_content_height - viewport_h).max(0.0);
+    // 1.5 Clamp Target
     *ctx.mut_scroll_offset_y = ctx.mut_scroll_offset_y.clamp(0.0, max_scroll);
-
-    // PERFORMANCE: Track scroll changes for GPU upload throttling
-    let current_scroll = *ctx.mut_scroll_offset_y;
-    if (current_scroll - *ctx.last_scroll_offset).abs() > 0.1 {
-        *ctx.last_scroll_time = std::time::Instant::now();
-        *ctx.last_scroll_offset = current_scroll;
-    }
-
-    // PERFORMANCE: Track scroll velocity for adaptive virtualization
-    let current_time = ui.input(|i| i.time);
-    let current_scroll = *ctx.mut_scroll_offset_y;
+    
+    // 2. Interpolate Visual Scroll (Frame-based smoothing)
+    let scroll_target = *ctx.mut_scroll_offset_y;
     let scroll_state_id = ui.id().with("scroll_state");
-
-    let (_scroll_velocity, is_scrolling_fast) = ui.ctx().data_mut(|d| {
+    // Limit dt to avoid massive jumps on lag spikes (e.g., 30ms max)
+    let dt = ui.input(|i| i.stable_dt).min(0.03); 
+    
+    let visual_scroll = ui.ctx().data_mut(|d| {
         let state = d.get_temp_mut_or_insert_with::<ScrollState>(scroll_state_id, || ScrollState {
-            last_scroll_y: current_scroll,
-            last_scroll_time: current_time,
-            scroll_velocity: 0.0,
+            visual_scroll_y: scroll_target,
         });
 
-        let dt = (current_time - state.last_scroll_time).max(0.001) as f32;
-        let dy = (current_scroll - state.last_scroll_y).abs();
-        let velocity = dy / dt;
+        // LERP: Move 25% of the way to target per 16ms frame (approx)
+        // Adjust '15.0' to tune stiffness/smoothness
+        let t = (dt * 15.0).min(1.0);
+        state.visual_scroll_y = state.visual_scroll_y + (scroll_target - state.visual_scroll_y) * t;
 
-        // Exponential moving average for smooth velocity tracking
-        state.scroll_velocity = state.scroll_velocity * 0.7 + velocity * 0.3;
-        state.last_scroll_y = current_scroll;
-        state.last_scroll_time = current_time;
+        // Snap to target if very close to stop micro-adjustments
+        if (state.visual_scroll_y - scroll_target).abs() < 0.5 {
+            state.visual_scroll_y = scroll_target;
+        }
 
-        let is_fast = state.scroll_velocity > SCROLL_ACTIVE_THRESHOLD;
-        (state.scroll_velocity, is_fast)
+        state.visual_scroll_y
     });
+
+    // Request repaint if we are still animating towards target
+    if visual_scroll != scroll_target {
+        ui.ctx().request_repaint();
+    }
+
+    // Use visual_scroll for rendering from here on
+    let current_scroll = visual_scroll;
+
+    // PERFORMANCE: Track scroll changes for GPU upload throttling (using visual scroll to capture checking)
+    // Note: We update last_scroll_offset matching target to keep logic consistent with state, 
+    // but we use visual change to trigger "is moving" logic.
+    if (*ctx.mut_scroll_offset_y - *ctx.last_scroll_offset).abs() > 0.1 {
+        *ctx.last_scroll_time = std::time::Instant::now();
+        *ctx.last_scroll_offset = *ctx.mut_scroll_offset_y;
+    }
+    // Simple "is scrolling" check for optimization (if visual is changing, we are scrolling)
+    let is_scrolling = visual_scroll != scroll_target;
 
     // 2.5 KEYBOARD SCROLL SYNC: Ensure selected item is visible
     if ctx.scroll_to_selected {
@@ -317,24 +325,22 @@ pub fn render_grid_view(
                 let item_top = selected_row as f32 * cell_h + padding;
                 let item_bottom = item_top + item_h;
                 
-                let current_scroll_check = *ctx.mut_scroll_offset_y;
+                // We check against TARGET scroll to ensure we snap to the final correct position
+                // but we might want to check visual if we want to smooth scroll TO the item.
+                // For now, snap target instantly as per requirement (keyboard nav usually snaps)
+                let current_target = *ctx.mut_scroll_offset_y;
                 
-                // Scroll up if item is above viewport
-                if item_top < current_scroll_check {
+                if item_top < current_target {
                     *ctx.mut_scroll_offset_y = item_top.max(0.0);
-                }
-                // Scroll down if item is below viewport
-                else if item_bottom > current_scroll_check + viewport_h {
+                } else if item_bottom > current_target + viewport_h {
                     *ctx.mut_scroll_offset_y = (item_bottom - viewport_h).clamp(0.0, max_scroll);
                 }
             }
         }
     }
     
-    let current_scroll = *ctx.mut_scroll_offset_y;
-    
     // 3. Render Virtual Grid
-    // DETECT BACKGROUND INTERACTION (Sense::click() captures secondary_clicked without global leakage)
+    // DETECT BACKGROUND INTERACTION
     let bg_response = ui.interact(viewport_rect, ui.id().with("grid_bg"), Sense::click());
     
     let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(viewport_rect));
@@ -342,75 +348,91 @@ pub fn render_grid_view(
 
     let content_min = viewport_rect.min;
 
-    // Virtualization Math
+    // Virtualization Math (using Interpolated Visual Scroll)
     let vis_min_row = (current_scroll / cell_h).floor() as usize;
     let vis_max_row = ((current_scroll + viewport_h) / cell_h).ceil() as usize;
 
-    // Export range for prefetch
+    // Export range for prefetch relative to visual position
     visible_rows_range = Some((vis_min_row, vis_max_row));
 
-    // PERFORMANCE: Adaptive overscan based on scroll velocity
-    // Fast scroll: Larger overscan to prevent visual gaps
-    // Slow/static: Minimal overscan to save CPU/GPU
-    let overscan = if is_scrolling_fast {
-        3 // 3 rows overscan during fast scroll (prevents gaps)
-    } else {
-        1 // 1 row overscan when static/slow
-    };
+    // STABLE OVERSCAN: Fixed value, no velocity dependency
+    let overscan = 2;
 
     let loop_min_row = vis_min_row.saturating_sub(overscan);
     let loop_max_row = (vis_max_row + overscan).min(total_rows);
 
     if ctx.is_computer_view {
-        // Computer view with sections (Manual Scroll)
+        // Computer view with sections (Manual Scroll & Layout)
         let mut current_y = content_min.y - current_scroll;
         
-        let mut local = Vec::new();
-        let mut network = Vec::new();
-        for (i, item) in ctx.items.iter().enumerate() {
-            let is_remote = item.drive_info.as_ref().map_or(false, |di| {
-                di.drive_type == crate::infrastructure::windows::DriveType::Remote
-            });
-            if is_remote { network.push((i, item)); } else { local.push((i, item)); }
-        }
+        // ZERO-ALLOCATION RENDERING: Iterate directly instead of creating vectors
+        
+        // Helper to render a section by filtering items on the fly
+        // We pass a closure to filter: is_network_drive -> bool
+        let mut render_section_direct = |ui: &mut Ui, title: &str, is_network: bool, start_y: &mut f32| {
+            // first count items to calculate height (cheap iteration)
+            let mut section_count = 0;
+            for item in ctx.items.iter() {
+                let is_remote = item.drive_info.as_ref().map_or(false, |di| {
+                    di.drive_type == crate::infrastructure::windows::DriveType::Remote
+                });
+                if is_remote == is_network {
+                    section_count += 1;
+                }
+            }
 
-        let mut render_section = |ui: &mut Ui, title: &str, items: Vec<(usize, &FileEntry)>, start_y: &mut f32| {
-            if items.is_empty() { return; }
-            
+            if section_count == 0 { return; }
+
             // Header
             let header_h = 25.0;
-            let header_rect = Rect::from_min_size(egui::pos2(content_min.x, *start_y), egui::vec2(available_w, header_h));
-            if ui.is_rect_visible(header_rect) {
+            // Check visibility of header
+            if *start_y + header_h > content_min.y && *start_y < content_min.y + viewport_h {
+                let header_rect = Rect::from_min_size(egui::pos2(content_min.x, *start_y), egui::vec2(available_w, header_h));
                 let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
                 render_section_header(&mut header_ui, title);
             }
             *start_y += header_h;
 
-            let section_item_count = items.len();
-            let rows = (section_item_count as f32 / cols as f32).ceil() as usize;
+            let rows = (section_count as f32 / cols as f32).ceil() as usize;
             let section_h = rows as f32 * cell_h + padding;
 
-            for (i, (index, item)) in items.into_iter().enumerate() {
-                let row = i / cols;
-                let col_idx = i % cols;
-                
-                let x_pos = col_idx as f32 * (item_w + padding) + padding;
-                let item_y = *start_y + row as f32 * cell_h + padding;
-                
-                let item_rect = Rect::from_min_size(
-                    egui::pos2(content_min.x + x_pos, item_y),
-                    egui::vec2(item_w, item_h),
-                );
-
-                if ui.is_rect_visible(item_rect) {
-                    render_grid_item(ui, index, item, item_rect, ctx, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item);
+            // Render items in this section
+            // Optimization: Only iterate if section is visible
+            if *start_y + section_h > content_min.y && *start_y < content_min.y + viewport_h {
+                let mut current_idx = 0;
+                for (real_idx, item) in ctx.items.iter().enumerate() {
+                    let is_remote = item.drive_info.as_ref().map_or(false, |di| {
+                        di.drive_type == crate::infrastructure::windows::DriveType::Remote
+                    });
+                    
+                    if is_remote == is_network {
+                        // Calculate position
+                        let row = current_idx / cols;
+                        let col_idx = current_idx % cols;
+                        
+                        let item_y = *start_y + row as f32 * cell_h + padding;
+                        
+                        // Culling check
+                        if item_y + item_h > content_min.y && item_y < content_min.y + viewport_h {
+                             let x_pos = col_idx as f32 * (item_w + padding) + padding;
+                             let item_rect = Rect::from_min_size(
+                                egui::pos2(content_min.x + x_pos, item_y),
+                                egui::vec2(item_w, item_h),
+                            );
+                            render_grid_item(ui, real_idx, item, item_rect, ctx, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item);
+                        }
+                        
+                        current_idx += 1;
+                    }
                 }
             }
+
             *start_y += section_h;
         };
 
-        render_section(&mut child_ui, "Discos locais", local, &mut current_y);
-        render_section(&mut child_ui, "Unidades de rede", network, &mut current_y);
+        render_section_direct(&mut child_ui, "Discos locais", false, &mut current_y);
+        render_section_direct(&mut child_ui, "Unidades de rede", true, &mut current_y);
+
     } else {
         // Standard Grid Virtualization
         for row in loop_min_row..loop_max_row {
@@ -431,7 +453,7 @@ pub fn render_grid_view(
         }
     }
 
-    // 4. Custom Scrollbar with Track-Click
+    // 4. Custom Scrollbar
     if total_content_height > viewport_h {
         let scrollbar_w = 12.0;
         let scrollbar_rect = Rect::from_min_max(
@@ -439,31 +461,30 @@ pub fn render_grid_view(
             viewport_rect.right_bottom()
         );
         
-        // Background
         ui.painter().rect_filled(scrollbar_rect, 0.0, Color32::from_gray(245));
 
-        // Handle
         let handle_h = (viewport_h / total_content_height * viewport_h).max(30.0);
+        // Use VISUAL scroll for handle position to match rendering
         let handle_y = (current_scroll / max_scroll) * (viewport_h - handle_h);
         let handle_rect = Rect::from_min_size(
             scrollbar_rect.min + egui::vec2(2.0, handle_y),
             egui::vec2(scrollbar_w - 4.0, handle_h)
         );
 
-        // Interaction: click_and_drag for both track-click and handle drag
         let interact = ui.interact(scrollbar_rect, ui.id().with("scrollbar"), Sense::click_and_drag());
         
         if interact.clicked() {
-            // TRACK-CLICK: Jump to clicked position
             if let Some(click_pos) = ui.input(|i| i.pointer.interact_pos()) {
                 let relative_y = click_pos.y - scrollbar_rect.top();
                 let target_handle_top = relative_y - (handle_h / 2.0);
                 let scroll_ratio = target_handle_top / (viewport_h - handle_h);
+                // Update TARGET
                 *ctx.mut_scroll_offset_y = (scroll_ratio * max_scroll).clamp(0.0, max_scroll);
             }
         } else if interact.dragged() {
             let delta_y = interact.drag_delta().y;
             let scroll_pct_delta = delta_y / (viewport_h - handle_h);
+            // Update TARGET
             *ctx.mut_scroll_offset_y += scroll_pct_delta * max_scroll;
             *ctx.mut_scroll_offset_y = ctx.mut_scroll_offset_y.clamp(0.0, max_scroll);
         }
@@ -509,11 +530,11 @@ pub fn render_grid_view(
         let count = ctx.items.len();
         let rows = (count as f32 / cols as f32).ceil() as usize;
 
-        // Adaptive prefetch margin: narrow during fast scroll, wide when idle
-        let prefetch_margin = if is_scrolling_fast {
-            2 // Tight prefetch during scroll - focus CPU on visible items
+        // Adaptive prefetch margin based on scroll status (optimization)
+        let prefetch_margin = if is_scrolling {
+             2 
         } else {
-            5 // Generous prefetch when idle - prepare ahead
+             5 
         };
 
         let start_prefetch = vis_min.saturating_sub(prefetch_margin);
