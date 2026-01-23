@@ -425,8 +425,23 @@ pub fn render_toolbar(
                             display_name.to_string()
                         };
 
-                        // Breadcrumb clicável
-                        if addr_ui.button(&display).clicked() {
+                        // Breadcrumb clicável - transparente, cinza claro no hover
+                        let btn_resp = addr_ui.scope(|ui| {
+                            ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
+                            ui.visuals_mut().widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+                            ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
+
+                            ui.visuals_mut().widgets.hovered.bg_fill = egui::Color32::from_gray(230);
+                            ui.visuals_mut().widgets.hovered.weak_bg_fill = egui::Color32::from_gray(230);
+                            ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
+
+                            ui.visuals_mut().widgets.active.bg_fill = egui::Color32::from_gray(210);
+                            ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
+
+                            ui.button(egui::RichText::new(&display).color(egui::Color32::BLACK))
+                        }).inner;
+
+                        if btn_resp.clicked() {
                             action = Some(ToolbarAction::Navigate(target_path));
                         }
 
