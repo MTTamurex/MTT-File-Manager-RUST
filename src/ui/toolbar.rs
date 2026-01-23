@@ -50,17 +50,14 @@ pub fn render_toolbar(
         ui.style_mut().spacing.item_spacing.x = 8.0;
 
         // 1. NAVEGAÇÃO (ESQUERDA) - Bloqueados durante renomeação
-        let is_renaming = false; // TODO: Pass is_renaming as param? For now assume false or add to signature if critical. Plan didn't have it but main.rs uses it.
-                                 // Adding is_renaming to signature is better.
-
-        let can_back = navigation.can_go_back() && !is_renaming;
+        let can_back = navigation.can_go_back() && !_is_renaming;
         if widgets::icon_button(ui, svg_manager, theme::ICON_ARROW_LEFT, "Voltar", None).clicked()
             && can_back
         {
             action = Some(ToolbarAction::GoBack);
         }
 
-        let can_forward = navigation.can_go_forward() && !is_renaming;
+        let can_forward = navigation.can_go_forward() && !_is_renaming;
         if widgets::icon_button(ui, svg_manager, theme::ICON_ARROW_RIGHT, "Avançar", None).clicked()
             && can_forward
         {
@@ -75,13 +72,13 @@ pub fn render_toolbar(
             None,
         )
         .clicked()
-            && !is_renaming
+            && !_is_renaming
         {
             action = Some(ToolbarAction::GoUp);
         }
 
         if widgets::icon_button(ui, svg_manager, theme::ICON_REFRESH, "Recarregar", None).clicked()
-            && !is_renaming
+            && !_is_renaming
         {
             action = Some(ToolbarAction::Refresh);
         }
@@ -97,7 +94,7 @@ pub fn render_toolbar(
             None,
         )
         .clicked()
-            && !is_renaming
+            && !_is_renaming
         {
             action = Some(ToolbarAction::CreateFolder);
         }
@@ -105,8 +102,6 @@ pub fn render_toolbar(
         ui.separator();
 
         // Home / Computer
-        // Note: We need the computer icon texture. Passing it as an Option<&TextureHandle> in signature would be good.
-        // For now finding "home" icon usage.
         if widgets::icon_button(
             ui,
             svg_manager,
@@ -115,7 +110,7 @@ pub fn render_toolbar(
             computer_icon,
         )
         .clicked()
-            && !is_renaming
+            && !_is_renaming
         {
             action = Some(ToolbarAction::NavigateToComputer);
         }
@@ -345,114 +340,111 @@ pub fn render_toolbar(
             ui.separator();
 
             // 3. BARRA DE ENDEREÇO (Breadcrumbs ou Edição)
+            // Mesma técnica da barra de busca: allocate + new_child
             let addr_width = (ui.available_width() - 4.0).max(100.0);
-            let (addr_rect, addr_response) =
-                ui.allocate_exact_size(egui::vec2(addr_width, 24.0), egui::Sense::click());
+            let (addr_rect, addr_resp) = ui.allocate_exact_size(
+                egui::vec2(addr_width, 22.0),
+                egui::Sense::click(),
+            );
 
-            // Desenha o fundo branco para a barra de endereço (similar à busca)
-            let visuals = ui.style().interact(&addr_response);
+            // Desenha fundo branco
             ui.painter().rect_filled(
                 addr_rect,
-                visuals.corner_radius,
+                4.0,
                 egui::Color32::WHITE,
             );
             ui.painter().rect_stroke(
                 addr_rect,
-                visuals.corner_radius,
+                4.0,
                 ui.visuals().widgets.inactive.bg_stroke,
-                egui::StrokeKind::Inside, 
+                egui::StrokeKind::Inside,
             );
 
-            // Inicia edição se clicar na barra (especialmente em áreas vazias)
-            if addr_response.clicked() {
-                action = Some(ToolbarAction::StartAddressEdit);
-            }
-
-            // IMPORTANTE: Usar allocate_new_ui com closure para ter o novo Ui com layout correto
-            ui.allocate_new_ui(
+            // Cria UI filha dentro do retângulo (igual à busca)
+            let mut addr_ui = ui.new_child(
                 egui::UiBuilder::new()
-                    .max_rect(addr_rect.shrink(4.0)) // Padding interno
+                    .max_rect(addr_rect.shrink(4.0))
                     .layout(egui::Layout::left_to_right(egui::Align::Center)),
-                |ui| {
-                    if *is_editing_path {
-                        let edit_response = ui.add_sized(
-                            ui.available_size(),
-                            egui::TextEdit::singleline(path_input)
-                                .hint_text("Caminho...")
-                                .id_source("address_edit")
-                                .frame(false), // Sem frame interno
-                        );
-
-                        if edit_response.clicked_elsewhere()
-                            || (edit_response.lost_focus()
-                                && !ui.input(|i| i.key_pressed(egui::Key::Enter)))
-                        {
-                            action = Some(ToolbarAction::CancelPathInput);
-                        }
-
-                        if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            action = Some(ToolbarAction::CommitPathInput(path_input.clone()));
-                        }
-
-                        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                            action = Some(ToolbarAction::CancelPathInput);
-                        }
-                    } else {
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 2.0;
-
-                            if current_path == "Este Computador" {
-                                ui.label(egui::RichText::new("Este Computador").size(13.0).color(egui::Color32::BLACK));
-                            } else {
-                                let path = std::path::Path::new(current_path);
-                                let mut full_accumulated = std::path::PathBuf::new();
-                                let components: Vec<_> = path.components().collect();
-
-                                for (i, comp) in components.iter().enumerate() {
-                                    let comp_str = comp.as_os_str().to_string_lossy();
-                                    let display_name = comp_str.trim_end_matches('\\');
-
-                                    if display_name.is_empty() && i > 0 {
-                                        continue;
-                                    }
-
-                                    full_accumulated.push(comp);
-                                    // Normaliza drive roots: "Z:" -> "Z:\" para navegação correta
-                                    let target_path = {
-                                        let p = full_accumulated.to_string_lossy().to_string();
-                                        if p.len() == 2 && p.ends_with(':') {
-                                            format!("{}\\", p)
-                                        } else {
-                                            p
-                                        }
-                                    };
-
-                                    // Nome do drive ou pasta
-                                    let display = if display_name.is_empty() {
-                                        comp_str.into_owned() // Root / ou C:\
-                                    } else {
-                                        display_name.to_string()
-                                    };
-
-                                    // Botão de breadcrumb - estilizado para o fundo branco
-                                    let btn = egui::Button::new(egui::RichText::new(display).color(egui::Color32::BLACK)).frame(false);
-                                    if ui.add(btn).clicked() {
-                                        action = Some(ToolbarAction::Navigate(target_path));
-                                    }
-
-                                    if i < components.len() - 1 {
-                                        ui.label(
-                                            egui::RichText::new("›")
-                                                .size(14.0)
-                                                .color(egui::Color32::from_gray(120)),
-                                        );
-                                    }
-                                }
-                            }
-                        });
-                    }
-                },
             );
+
+            if *is_editing_path {
+                let edit_response = addr_ui.add_sized(
+                    addr_ui.available_size(),
+                    egui::TextEdit::singleline(path_input)
+                        .hint_text("Caminho...")
+                        .id_source("address_edit")
+                        .frame(false)
+                        .text_color(egui::Color32::BLACK),
+                );
+
+                if edit_response.clicked_elsewhere()
+                    || (edit_response.lost_focus()
+                        && !addr_ui.input(|i| i.key_pressed(egui::Key::Enter)))
+                {
+                    action = Some(ToolbarAction::CancelPathInput);
+                }
+
+                if addr_ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    action = Some(ToolbarAction::CommitPathInput(path_input.clone()));
+                }
+
+                if addr_ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    action = Some(ToolbarAction::CancelPathInput);
+                }
+            } else {
+                addr_ui.spacing_mut().item_spacing.x = 2.0;
+
+                if current_path == "Este Computador" {
+                    addr_ui.label(egui::RichText::new("Este Computador").size(13.0).color(egui::Color32::BLACK));
+                } else {
+                    let path = std::path::Path::new(current_path);
+                    let mut full_accumulated = std::path::PathBuf::new();
+                    let components: Vec<_> = path.components().collect();
+
+                    for (i, comp) in components.iter().enumerate() {
+                        let comp_str = comp.as_os_str().to_string_lossy();
+                        let display_name = comp_str.trim_end_matches('\\');
+
+                        if display_name.is_empty() && i > 0 {
+                            continue;
+                        }
+
+                        full_accumulated.push(comp);
+                        let target_path = {
+                            let p = full_accumulated.to_string_lossy().to_string();
+                            if p.len() == 2 && p.ends_with(':') {
+                                format!("{}\\", p)
+                            } else {
+                                p
+                            }
+                        };
+
+                        let display = if display_name.is_empty() {
+                            comp_str.into_owned()
+                        } else {
+                            display_name.to_string()
+                        };
+
+                        // Breadcrumb clicável
+                        if addr_ui.button(&display).clicked() {
+                            action = Some(ToolbarAction::Navigate(target_path));
+                        }
+
+                        if i < components.len() - 1 {
+                            addr_ui.label(
+                                egui::RichText::new("›")
+                                    .size(14.0)
+                                    .color(egui::Color32::from_gray(120)),
+                            );
+                        }
+                    }
+                }
+
+                // Clique na área vazia abre edição
+                if addr_resp.clicked() && action.is_none() {
+                    action = Some(ToolbarAction::StartAddressEdit);
+                }
+            }
 
             if matches!(action, Some(ToolbarAction::StartAddressEdit)) {
                 ui.ctx().memory_mut(|m| {

@@ -58,8 +58,12 @@ impl SvgIconManager {
     }
 }
 
-/// Render an SVG file to a ColorImage at the specified size, respecting pixels_per_point
-fn render_svg_to_image(svg_data: &[u8], size: u32, color: [u8; 4], ppp: f32) -> Option<ColorImage> {
+/// Render an SVG file to a ColorImage at the specified logical size, respecting pixels_per_point
+fn render_svg_to_image(svg_data: &[u8], logical_size: u32, color: [u8; 4], ppp: f32) -> Option<ColorImage> {
+    // Physical size for rendering - ensuring 1:1 pixel mapping
+    let physical_size = (logical_size as f32 * ppp).round() as u32;
+    if physical_size == 0 { return None; }
+
     // Parse SVG from embedded bytes
     let svg_str = std::str::from_utf8(svg_data).ok()?;
 
@@ -67,17 +71,13 @@ fn render_svg_to_image(svg_data: &[u8], size: u32, color: [u8; 4], ppp: f32) -> 
     let opt = usvg::Options::default();
     let tree = usvg::Tree::from_str(&svg_str, &opt).ok()?;
 
-    // Physical size for rendering
-    let physical_size = (size as f32 * ppp).round() as u32;
-    if physical_size == 0 { return None; }
-
-    // Calculate scale to fit desired physical size
+    // Calculate scale to fit exactly into physical pixels
     let svg_size = tree.size();
     let scale_x = physical_size as f32 / svg_size.width();
     let scale_y = physical_size as f32 / svg_size.height();
     let scale = scale_x.min(scale_y);
 
-    // Create pixmap for rendering at physical resolution
+    // Create pixmap for rendering at exact physical resolution
     let mut pixmap = tiny_skia::Pixmap::new(physical_size, physical_size)?;
 
     // Clear with transparent background
@@ -96,11 +96,12 @@ fn render_svg_to_image(svg_data: &[u8], size: u32, color: [u8; 4], ppp: f32) -> 
     // Render SVG to pixmap
     resvg::render(&tree, transform, &mut pixmap.as_mut());
 
-    // Apply color tint - replace all non-transparent pixels with the given color
+    // Apply color tint while preserving anti-aliasing
     let pixels = pixmap.data_mut();
     for chunk in pixels.chunks_exact_mut(4) {
         let alpha = chunk[3];
         if alpha > 0 {
+            // Replace RGB with target color, scale alpha by target alpha
             chunk[0] = color[0];
             chunk[1] = color[1];
             chunk[2] = color[2];
@@ -131,8 +132,8 @@ pub fn icon_button(
         [60, 60, 60, 255]
     };
 
-    // Render at 2x resolution for HiDPI quality
-    let render_size = (size * 2.0) as u32;
+    // Use 1:1 physical rendering (logical_size * ppp)
+    let render_size = size as u32;
 
     // Aloca espaço para o botão (tamanho do ícone + padding implícito se desejar,
     // mas aqui mantemos 'size' para consistência layout)
@@ -193,8 +194,8 @@ pub fn icon_image(
         [60, 60, 60, 255]
     };
 
-    // Render at 2x resolution for HiDPI quality
-    let render_size = (size * 2.0) as u32;
+    // Use 1:1 physical rendering (logical_size * ppp)
+    let render_size = size as u32;
 
     if let Some(texture) = icon_manager.get_icon(ui.ctx(), icon_name, render_size, color) {
         ui.image(egui::load::SizedTexture::new(
