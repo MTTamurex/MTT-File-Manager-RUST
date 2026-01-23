@@ -2,7 +2,7 @@
 //!
 //! This module handles operations specific to the Windows Recycle Bin.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use crate::app::state::ImageViewerApp;
 
 impl ImageViewerApp {
@@ -63,11 +63,6 @@ impl ImageViewerApp {
         if paths.is_empty() { return; }
 
         for physical_path in paths {
-            let item_name = self.items.iter()
-                .find(|i| i.path == *physical_path)
-                .map(|i| i.name.clone())
-                .unwrap_or_else(|| physical_path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
-
             // If we are deleting the currently selected file, reset selection
             if let Some(selected) = &self.selected_file {
                 if selected.path == *physical_path {

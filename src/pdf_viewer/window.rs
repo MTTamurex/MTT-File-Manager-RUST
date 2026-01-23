@@ -58,8 +58,8 @@ pub fn create_and_run(path: PathBuf, title_prefix: &str) -> Result<()> {
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
+            let _ = TranslateMessage(&msg);
+            let _ = DispatchMessageW(&msg);
         }
     }
     Ok(())

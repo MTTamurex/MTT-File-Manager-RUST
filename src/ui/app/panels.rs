@@ -272,7 +272,7 @@ fn render_resize_handles(app: &mut ImageViewerApp, ctx: &egui::Context) {
 fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
     if let Some(file) = app.selected_file.clone() {
         // For virtual paths (Recycle Bin or inside ZIP), don't check path.exists()
-        let is_virtual_path = app.is_recycle_bin_view 
+        let is_virtual_path = app.is_recycle_bin_view
             || crate::infrastructure::windows::shell_folder::is_shell_navigation_path(&file.path);
         if is_virtual_path || file.path.exists() {
             Some(file)
@@ -292,7 +292,21 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             deletion_date: None,
             recycle_original_path: None,
         })
-    } else if !app.is_computer_view {
+    } else if app.is_computer_view {
+        // "Este Computador" - show drive count info
+        Some(FileEntry {
+            path: PathBuf::from("Este Computador"),
+            name: "Este Computador".to_string(),
+            is_dir: true,
+            size: app.disks.len() as u64, // Store drive count in size field
+            modified: 0,
+            folder_cover: None,
+            drive_info: None,
+            sync_status: SyncStatus::None,
+            deletion_date: None,
+            recycle_original_path: None,
+        })
+    } else {
         let path = std::path::PathBuf::from(&app.current_path);
         let mut entry = FileEntry::from_path(path.clone(), true);
         if path.to_string_lossy().len() <= 3 && path.to_string_lossy().contains(':') {
@@ -314,8 +328,6 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
                 .unwrap_or_else(|| app.current_path.clone());
         }
         Some(entry)
-    } else {
-        None
     }
 }
 
