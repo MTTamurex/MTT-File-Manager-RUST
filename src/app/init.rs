@@ -243,6 +243,7 @@ impl ImageViewerApp {
             current_path: PATH_PADRAO.to_string(),
             thumbnail_queue,
             image_receiver: img_rx,
+            pending_thumbnails: std::collections::VecDeque::new(),
             items: Arc::new(Vec::new()),
             // Async loading
             file_entry_receiver,
@@ -391,7 +392,11 @@ impl ImageViewerApp {
 
             // Scroll offset for manual grid virtualization
             scroll_offset_y: 0.0,
-            
+
+            // PERFORMANCE: Scroll state tracking for adaptive GPU upload throttling
+            last_scroll_time: Instant::now(),
+            last_scroll_offset: 0.0,
+
             scroll_request: crate::app::state::ScrollRequest::None,
 
             // FILE OPERATION WORKER

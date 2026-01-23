@@ -13,7 +13,7 @@ pub enum LastInput {
     Keyboard,
 }
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 // use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
@@ -42,6 +42,7 @@ pub struct ImageViewerApp {
     // --- SISTEMA DE THUMBNAILS OTIMIZADO ---
     pub thumbnail_queue: Arc<PriorityThumbnailQueue>,   // UI -> Worker Pool (Priority Queue)
     pub image_receiver: Receiver<ThumbnailData>,        // Worker Pool -> UI
+    pub pending_thumbnails: VecDeque<ThumbnailData>,    // PERFORMANCE: Buffer for throttled uploads
 
     // File system
     pub items: Arc<Vec<FileEntry>>, // Arc para clone barato em render loops (60 FPS)
@@ -204,7 +205,11 @@ pub struct ImageViewerApp {
 
     // Scroll offset for manual grid virtualization
     pub scroll_offset_y: f32,
-    
+
+    // PERFORMANCE: Scroll state tracking for adaptive GPU upload throttling
+    pub last_scroll_time: Instant,
+    pub last_scroll_offset: f32,
+
     // Explicit scroll request for keyboard navigation
     pub scroll_request: ScrollRequest,
 

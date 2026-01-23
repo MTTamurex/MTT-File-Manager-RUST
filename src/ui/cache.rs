@@ -37,6 +37,8 @@ pub struct CacheManager {
     pub folder_preview_loading: HashSet<PathBuf>,
     /// Set of paths that failed thumbnail extraction (LRU bounded to 1000)
     pub failed_thumbnails: LruCache<PathBuf, ()>,
+    /// Set of paths received from worker but waiting for GPU upload
+    pub pending_upload_set: HashSet<PathBuf>,
 
     config: TextureCacheConfig,
 }
@@ -45,7 +47,9 @@ impl CacheManager {
     /// Creates a new cache manager with default configuration
     pub fn new() -> Self {
         Self {
-            texture_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
+            // PERFORMANCE: Increased from 100 to 300 to reduce cache thrashing
+            // in folders with many images during scroll
+            texture_cache: LruCache::new(NonZeroUsize::new(300).unwrap()),
             icon_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
             loading_set: std::collections::HashSet::new(),
             folder_icon_texture: None,
@@ -54,6 +58,7 @@ impl CacheManager {
             folder_preview_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
             folder_preview_loading: HashSet::new(),
             failed_thumbnails: LruCache::new(NonZeroUsize::new(1000).unwrap()),
+            pending_upload_set: HashSet::new(),
 
             config: TextureCacheConfig::default(),
         }
@@ -71,6 +76,7 @@ impl CacheManager {
             folder_preview_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
             folder_preview_loading: HashSet::new(),
             failed_thumbnails: LruCache::new(NonZeroUsize::new(1000).unwrap()),
+            pending_upload_set: HashSet::new(),
 
             config,
         }
@@ -111,6 +117,21 @@ impl CacheManager {
         self.loading_set.remove(path);
     }
 
+    /// Checks if a thumbnail is waiting for upload
+    pub fn is_pending_upload(&self, path: &PathBuf) -> bool {
+        self.pending_upload_set.contains(path)
+    }
+
+    /// Marks a thumbnail as waiting for upload
+    pub fn start_pending_upload(&mut self, path: PathBuf) {
+        self.pending_upload_set.insert(path);
+    }
+
+    /// Removes a thumbnail from pending upload status
+    pub fn finish_pending_upload(&mut self, path: &PathBuf) {
+        self.pending_upload_set.remove(path);
+    }
+
     /// Clears all caches
     pub fn clear_all(&mut self) {
         self.texture_cache.clear();
@@ -120,6 +141,7 @@ impl CacheManager {
         self.folder_preview_cache.clear();
         self.folder_preview_loading.clear();
         self.failed_thumbnails.clear();
+        self.pending_upload_set.clear();
         // Note: folder_icon_texture and computer_icon are kept as they're singletons
     }
 

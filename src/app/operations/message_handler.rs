@@ -347,29 +347,51 @@ impl ImageViewerApp {
 
         // 5. Individual thumbnails
         let mut received_any = false;
-        let mut _new_items_added = false;
 
+        // PERFORMANCE: Drain ALL pending thumbnails from worker into a persistent buffer
+        // This ensures no data is lost when throttling GPU uploads.
         while let Ok(thumbnail_data) = self.image_receiver.try_recv() {
-            // --- VALIDAÇÃO DE MEMÓRIA ---
             // Se a imagem pertence a uma geração anterior (outra folder), descarta.
             if thumbnail_data.generation != self.generation {
                 continue;
             }
-            // ----------------------------
-
-            received_any = true;
 
             // Sempre libera o slot de loading, mesmo em falhas
             self.cache_manager.finish_loading(&thumbnail_data.path);
-            
+
             // Se a imagem veio vazia, marca como falha para evitar retry infinito
             if thumbnail_data.image_data.is_empty() {
                 self.cache_manager.mark_as_failed(thumbnail_data.path.clone());
                 continue;
             }
 
-            // Só processa thumbnails (image_data não vazio)
-            if !thumbnail_data.image_data.is_empty() {
+            // Adiciona ao buffer persistente para upload posterior
+            self.cache_manager.start_pending_upload(thumbnail_data.path.clone());
+            self.pending_thumbnails.push_back(thumbnail_data);
+            received_any = true;
+        }
+
+        // PERFORMANCE: Adaptive GPU upload throttling based on scroll state
+        // Prevents GPU stalls during scroll while maintaining fast loading when idle
+        let is_scrolling = self.last_scroll_time.elapsed() < std::time::Duration::from_millis(100);
+        let max_uploads_per_frame = if is_scrolling {
+            3 // Tight throttle during scroll - maintain 60 FPS
+        } else {
+            15 // Generous when idle - load quickly when user stops scrolling
+        };
+
+        let mut uploads_this_frame = 0;
+
+        // Process thumbnails from the buffer up to the per-frame limit
+        while uploads_this_frame < max_uploads_per_frame {
+            if let Some(thumbnail_data) = self.pending_thumbnails.pop_front() {
+                // Ensure thumbnail is still relevant (generation check again just in case)
+                if thumbnail_data.generation != self.generation {
+                    self.cache_manager.finish_pending_upload(&thumbnail_data.path);
+                    continue;
+                }
+
+                // Carrega textura no GPU
                 let texture = ctx.load_texture(
                     thumbnail_data.path.to_string_lossy().to_string(),
                     egui::ColorImage::from_rgba_unmultiplied(
@@ -384,6 +406,9 @@ impl ImageViewerApp {
 
                 self.cache_manager
                     .put_thumbnail(thumbnail_data.path.clone(), texture.clone());
+                
+                // Limpa status de pending upload
+                self.cache_manager.finish_pending_upload(&thumbnail_data.path);
 
                 // Update selected_thumbnail if it matches the selected_file
                 if let Some(selected_file) = &self.selected_file {
@@ -391,6 +416,16 @@ impl ImageViewerApp {
                         self.selected_thumbnail = Some(texture);
                     }
                 }
+
+                uploads_this_frame += 1;
+                received_any = true;
+
+                // If we still have more thumbnails in buffer, request another frame to keep processing
+                if !self.pending_thumbnails.is_empty() {
+                    ctx.request_repaint();
+                }
+            } else {
+                break; // Buffer is empty
             }
         }
 
