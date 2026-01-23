@@ -1,17 +1,31 @@
+//! WebView2 COM interface bindings for PDF viewer.
+//!
+//! Note: COM interfaces require specific naming conventions that don't follow Rust standards.
+//! The #[allow] attributes suppress warnings for these required COM naming patterns.
+
+#![allow(non_snake_case)]
+#![allow(non_upper_case_globals)]
+#![allow(dead_code)]
+#![allow(unused_must_use)]
+
 use std::ffi::c_void;
 use std::ptr::null_mut;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use windows::core::*;
 use windows::Win32::Foundation::*;
-use windows::Win32::System::LibraryLoader::{LoadLibraryW, GetProcAddress};
+use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-// GUIDs
-const IID_ICoreWebView2Environment: GUID = GUID::from_u128(0x33D17ECE_82FA_47D9_83E6_131350E3ED79);
-const IID_ICoreWebView2Controller: GUID = GUID::from_u128(0x4D00C0D1_9455_4428_9463_47C941B300C9);
+// GUIDs - COM interface identifiers (must match Windows SDK definitions)
+const IID_ICoreWebView2Environment: GUID =
+    GUID::from_u128(0x33D17ECE_82FA_47D9_83E6_131350E3ED79);
+const IID_ICoreWebView2Controller: GUID =
+    GUID::from_u128(0x4D00C0D1_9455_4428_9463_47C941B300C9);
 const IID_ICoreWebView2: GUID = GUID::from_u128(0x76ECEACB_0462_4D94_AC83_420A6DDA05D2);
-const IID_ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler: GUID = GUID::from_u128(0x4E8A3389_C9D8_4BD2_B6B5_124FEE6CC14D);
-const IID_ICoreWebView2CreateCoreWebView2ControllerCompletedHandler: GUID = GUID::from_u128(0x6C4819F3_C9B7_4260_8127_C9F5BDE7F68C);
+const IID_ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler: GUID =
+    GUID::from_u128(0x4E8A3389_C9D8_4BD2_B6B5_124FEE6CC14D);
+const IID_ICoreWebView2CreateCoreWebView2ControllerCompletedHandler: GUID =
+    GUID::from_u128(0x6C4819F3_C9B7_4260_8127_C9F5BDE7F68C);
 const IID_IUnknown: GUID = GUID::from_u128(0x00000000_0000_0000_C000_000000000046);
 
 // VTable Definitions

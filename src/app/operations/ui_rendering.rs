@@ -4,7 +4,7 @@
 //! It bridges the App state with the UI components.
 
 use eframe::egui;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use std::path::{Path, PathBuf};
 
 use crate::app::state::ImageViewerApp;

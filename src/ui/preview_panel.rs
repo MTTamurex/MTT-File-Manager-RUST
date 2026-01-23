@@ -70,7 +70,15 @@ pub fn render_preview_panel(
             let max_w: f32 = ui.available_width() - 40.0;
             let icon_size: f32 = (120.0f32).min(max_w);
 
-            if let Some(_) = &file.drive_info {
+            if file.name == "Este Computador" {
+                // ESTE COMPUTADOR - usa o ícone de computador
+                item_icon_loader.ensure_computer_icon(ui.ctx());
+                if let Some(icon) = item_icon_loader.computer_icon() {
+                    ui.add(egui::Image::new(icon).max_size(egui::vec2(icon_size, icon_size)));
+                } else {
+                    ui.label(egui::RichText::new("💻").size(icon_size * 0.6));
+                }
+            } else if let Some(_) = &file.drive_info {
                 if let Some(icon) =
                     item_icon_loader.get_or_load_drive_icon(ui.ctx(), &file.path.to_string_lossy())
                 {
@@ -950,7 +958,18 @@ pub fn render_preview_panel(
             // add_detail(ui, "Nome:", file.name.clone());
 
             // 2. Tipo (General)
-            if let Some(drive) = &file.drive_info {
+            if file.name == "Este Computador" {
+                // Caso especial: Este Computador - mostra apenas quantidade de drives
+                add_detail(ui, "Tipo:", "Visão do Sistema".to_string());
+                let drive_count = file.size as usize; // drive count stored in size field
+                let drive_text = if drive_count == 1 {
+                    "1 unidade disponível".to_string()
+                } else {
+                    format!("{} unidades disponíveis", drive_count)
+                };
+                add_detail(ui, "Unidades:", drive_text);
+                // Não mostra mais detalhes para Este Computador
+            } else if let Some(drive) = &file.drive_info {
                 add_detail(ui, "Tipo:", format!("{:?}", drive.drive_type));
             } else if file.is_dir {
                 if file.name.to_lowercase().ends_with(".zip") {
@@ -968,7 +987,8 @@ pub fn render_preview_panel(
             }
 
             // 3. Metadados do Arquivo (Data/Tamanho)
-            if file.drive_info.is_none() {
+            // Não aplicável para "Este Computador"
+            if file.drive_info.is_none() && file.name != "Este Computador" {
                 add_detail(
                     ui,
                     "Data modificada:",

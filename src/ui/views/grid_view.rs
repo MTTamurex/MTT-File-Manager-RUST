@@ -8,7 +8,6 @@ use crate::domain::file_entry::FileEntry;
 
 // PERFORMANCE: Tooltip debounce to avoid creation/destruction during scroll
 const TOOLTIP_DELAY_SECS: f32 = 0.3; // Only show tooltip after 300ms hover
-const SCROLL_ACTIVE_THRESHOLD: f32 = 0.5; // Consider scrolling if velocity > 0.5
 // STRICT LIMIT: Mínimo zoom permitido para evitar degradação de performance
 const MIN_THUMBNAIL_SIZE: f32 = 96.0;
 
@@ -130,9 +129,8 @@ pub fn render_grid_view(
     let mut double_clicked_item = None;
     let mut secondary_clicked_item = None;
     let mut empty_area_secondary_click = false;
-    let mut visible_rows_range = None;
-
-    let available_rect = ui.available_rect_before_wrap();
+    #[allow(unused_assignments)]
+    let mut visible_rows_range: Option<(usize, usize)> = None;
 
     /// Helper to render a single grid item with full interaction
     fn render_grid_item(
@@ -266,9 +264,6 @@ pub fn render_grid_view(
     let visual_cell_h = item_h + padding;
     const MIN_VIRTUAL_CELL_HEIGHT: f32 = 24.0;
     let virtual_cell_h = visual_cell_h.max(MIN_VIRTUAL_CELL_HEIGHT);
-    
-    // Configurações de Performance (Min-Zoom)
-    const MAX_RENDERED_ITEMS: usize = 120;
 
     let total_rows = (count as f32 / cols as f32).ceil() as usize;
     let total_content_height = total_rows as f32 * virtual_cell_h + padding;

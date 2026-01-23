@@ -109,6 +109,7 @@ mod tests {
             drive_info: None,
             sync_status: crate::domain::file_entry::SyncStatus::None,
             deletion_date: None,
+            recycle_original_path: None,
         }
     }
 
@@ -123,6 +124,7 @@ mod tests {
             drive_info: None,
             sync_status: crate::domain::file_entry::SyncStatus::None,
             deletion_date: None,
+            recycle_original_path: None,
         }
     }
 
