@@ -346,13 +346,32 @@ pub fn render_toolbar(
 
             // 3. BARRA DE ENDEREÇO (Breadcrumbs ou Edição)
             let addr_width = (ui.available_width() - 4.0).max(100.0);
-            let (addr_rect, _addr_response) =
-                ui.allocate_exact_size(egui::vec2(addr_width, 24.0), egui::Sense::hover());
+            let (addr_rect, addr_response) =
+                ui.allocate_exact_size(egui::vec2(addr_width, 24.0), egui::Sense::click());
+
+            // Desenha o fundo branco para a barra de endereço (similar à busca)
+            let visuals = ui.style().interact(&addr_response);
+            ui.painter().rect_filled(
+                addr_rect,
+                visuals.corner_radius,
+                egui::Color32::WHITE,
+            );
+            ui.painter().rect_stroke(
+                addr_rect,
+                visuals.corner_radius,
+                ui.visuals().widgets.inactive.bg_stroke,
+                egui::StrokeKind::Inside, 
+            );
+
+            // Inicia edição se clicar na barra (especialmente em áreas vazias)
+            if addr_response.clicked() {
+                action = Some(ToolbarAction::StartAddressEdit);
+            }
 
             // IMPORTANTE: Usar allocate_new_ui com closure para ter o novo Ui com layout correto
             ui.allocate_new_ui(
                 egui::UiBuilder::new()
-                    .max_rect(addr_rect)
+                    .max_rect(addr_rect.shrink(4.0)) // Padding interno
                     .layout(egui::Layout::left_to_right(egui::Align::Center)),
                 |ui| {
                     if *is_editing_path {
@@ -360,7 +379,8 @@ pub fn render_toolbar(
                             ui.available_size(),
                             egui::TextEdit::singleline(path_input)
                                 .hint_text("Caminho...")
-                                .id_source("address_edit"),
+                                .id_source("address_edit")
+                                .frame(false), // Sem frame interno
                         );
 
                         if edit_response.clicked_elsewhere()
@@ -382,7 +402,7 @@ pub fn render_toolbar(
                             ui.spacing_mut().item_spacing.x = 2.0;
 
                             if current_path == "Este Computador" {
-                                ui.label(egui::RichText::new("Este Computador").size(13.0));
+                                ui.label(egui::RichText::new("Este Computador").size(13.0).color(egui::Color32::BLACK));
                             } else {
                                 let path = std::path::Path::new(current_path);
                                 let mut full_accumulated = std::path::PathBuf::new();
@@ -414,7 +434,9 @@ pub fn render_toolbar(
                                         display_name.to_string()
                                     };
 
-                                    if ui.button(display).clicked() {
+                                    // Botão de breadcrumb - estilizado para o fundo branco
+                                    let btn = egui::Button::new(egui::RichText::new(display).color(egui::Color32::BLACK)).frame(false);
+                                    if ui.add(btn).clicked() {
                                         action = Some(ToolbarAction::Navigate(target_path));
                                     }
 
@@ -427,20 +449,7 @@ pub fn render_toolbar(
                                     }
                                 }
                             }
-
-                            // Espaço clicável à direita para entrar no modo edição
-                            let remaining = ui.available_width();
-                            if remaining > 0.0 {
-                                let (_rect, resp) = ui.allocate_exact_size(
-                                    egui::vec2(remaining, ui.available_height()),
-                                    egui::Sense::click(),
-                                );
-                                if resp.clicked() {
-                                    action = Some(ToolbarAction::StartAddressEdit);
-                                }
-                            }
                         });
-
                     }
                 },
             );
