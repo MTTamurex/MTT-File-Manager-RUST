@@ -176,18 +176,18 @@ pub fn render_preview_panel(
                         if is_hovered {
                             let center_size = 48.0;
                             let center_rect = egui::Rect::from_center_size(media_rect.center(), egui::vec2(center_size, center_size));
-                            
+
                             ui.painter().rect_filled(center_rect, center_size / 2.0, egui::Color32::from_black_alpha(100));
-                            
+
                             if let Some(tex_lupa) = svg_manager.get_icon(ui.ctx(), "search", 96, [255, 255, 255, 255]) {
                                  ui.painter().image(tex_lupa.id(), center_rect.shrink(10.0), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
                             } else {
                                  ui.painter().text(center_rect.center(), egui::Align2::CENTER_CENTER, "🔍", egui::FontId::proportional(24.0), egui::Color32::WHITE);
                             }
-            
-                            if ui.put(center_rect, egui::Button::new("").frame(false).sense(egui::Sense::click())).clicked() {
-                                crate::pdf_viewer::open_pdf_viewer(file.path.clone());
-                            }
+                        }
+                        // Área de clique = todo o thumbnail
+                        if ui.interact(media_rect, egui::Id::new("pdf_fallback_overlay"), egui::Sense::click()).clicked() {
+                            crate::pdf_viewer::open_pdf_viewer(file.path.clone());
                         }
                     }
                 } else {
@@ -210,7 +210,7 @@ pub fn render_preview_panel(
 
         let local_action = None;
         let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        
+
         let media_rect = image_resp.rect;
         let hover_pos = ui.input(|i| i.pointer.hover_pos());
         let is_hovered = hover_pos.map_or(false, |pos| media_rect.contains(pos));
@@ -219,20 +219,15 @@ pub fn render_preview_panel(
              if extension.eq_ignore_ascii_case("pdf") {
                 let center_size = 48.0;
                 let center_rect = egui::Rect::from_center_size(media_rect.center(), egui::vec2(center_size, center_size));
-                
+
                 // Draw background for contrast
                 ui.painter().rect_filled(center_rect, center_size / 2.0, egui::Color32::from_black_alpha(100));
-                
+
                 // Draw Lupa (Search) Icon
                 if let Some(tex_lupa) = svg_manager.get_icon(ui.ctx(), "search", 96, [255, 255, 255, 255]) {
                         ui.painter().image(tex_lupa.id(), center_rect.shrink(10.0), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
                 } else {
                         ui.painter().text(center_rect.center(), egui::Align2::CENTER_CENTER, "🔍", egui::FontId::proportional(24.0), egui::Color32::WHITE);
-                }
-
-                // Handle Click
-                if ui.put(center_rect, egui::Button::new("").frame(false).sense(egui::Sense::click())).clicked() {
-                    crate::pdf_viewer::open_pdf_viewer(file.path.clone());
                 }
             } else if crate::infrastructure::windows::is_image_extension(extension) {
                 let center_size = 48.0;
@@ -247,13 +242,20 @@ pub fn render_preview_panel(
                 } else {
                         ui.painter().text(center_rect.center(), egui::Align2::CENTER_CENTER, "🔍", egui::FontId::proportional(24.0), egui::Color32::WHITE);
                 }
-
-                // Handle Click
-                if ui.put(center_rect, egui::Button::new("").frame(false).sense(egui::Sense::click())).clicked() {
-                    crate::pdf_viewer::open_image_viewer(file.path.clone());
-                }
             }
         }
+
+        // Área de clique = todo o thumbnail (PDF ou imagem)
+        if extension.eq_ignore_ascii_case("pdf") {
+            if ui.interact(media_rect, egui::Id::new("pdf_thumb_overlay"), egui::Sense::click()).clicked() {
+                crate::pdf_viewer::open_pdf_viewer(file.path.clone());
+            }
+        } else if crate::infrastructure::windows::is_image_extension(extension) {
+            if ui.interact(media_rect, egui::Id::new("image_thumb_overlay"), egui::Sense::click()).clicked() {
+                crate::pdf_viewer::open_image_viewer(file.path.clone());
+            }
+        }
+
         local_action
     };
 
@@ -803,9 +805,10 @@ pub fn render_preview_panel(
                     if let Some(tex_play) = svg_manager.get_icon(ui.ctx(), "play", 96, [255, 255, 255, 255]) {
                         ui.painter().image(tex_play.id(), center_rect.shrink(14.0), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
                     }
-                    if ui.put(center_rect, egui::Button::new("").frame(false).sense(egui::Sense::click())).clicked() {
-                        action = Some(PreviewPanelAction::RequestPlay(file.path.clone()));
-                    }
+                }
+                // Área de clique = todo o thumbnail
+                if ui.interact(media_rect, egui::Id::new("video_play_overlay_1"), egui::Sense::click()).clicked() {
+                    action = Some(PreviewPanelAction::RequestPlay(file.path.clone()));
                 }
                     } else {
                         ui.allocate_space(egui::vec2(max_preview_width, 200.0));
@@ -850,9 +853,10 @@ pub fn render_preview_panel(
                     if let Some(tex_play) = svg_manager.get_icon(ui.ctx(), "play", 96, [255, 255, 255, 255]) {
                         ui.painter().image(tex_play.id(), center_rect.shrink(14.0), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
                     }
-                    if ui.put(center_rect, egui::Button::new("").frame(false).sense(egui::Sense::click())).clicked() {
-                        action = Some(PreviewPanelAction::RequestPlay(file.path.clone()));
-                    }
+                }
+                // Área de clique = todo o thumbnail
+                if ui.interact(media_rect, egui::Id::new("video_play_overlay_2"), egui::Sense::click()).clicked() {
+                    action = Some(PreviewPanelAction::RequestPlay(file.path.clone()));
                 }
             } else {
                 ui.allocate_space(egui::vec2(ui.available_width() - 16.0, 200.0));
