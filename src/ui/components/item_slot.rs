@@ -50,6 +50,8 @@ pub struct ItemSlotContext<'a> {
     pub failed_thumbnails: &'a lru::LruCache<std::path::PathBuf, ()>,
     /// Conjunto de itens aguardando upload GPU
     pub pending_upload_set: &'a mut std::collections::HashSet<std::path::PathBuf>,
+    /// MODO DENSO (Zoom Mínimo): Se true, renderiza APENAS ícone (sem texto/badges)
+    pub is_dense_mode: bool,
 }
 
 /// Renderiza um item slot para grid view
@@ -336,7 +338,9 @@ fn render_directory_slot<O: ItemSlotOperations>(
     }
 
     // Render sync status badge (OneDrive) for folders
-    render_sync_badge(ui, folder_rect, item.sync_status);
+    if !ctx.is_dense_mode {
+        render_sync_badge(ui, folder_rect, item.sync_status);
+    }
 
     // Aloca espaço da pasta
     ui.allocate_rect(folder_rect, egui::Sense::hover());
@@ -344,39 +348,41 @@ fn render_directory_slot<O: ItemSlotOperations>(
     // TEXTO: Usa Label com truncate (igual aos arquivos) para respeitar limites
     ui.add_space(6.0); // Gap entre pasta e texto
 
-    if ctx.is_renaming {
-        if let Some(text) = &mut ctx.renaming_text {
-            let response = ui.add(
-                egui::TextEdit::singleline(&mut **text)
-                    .frame(true)
-                    .horizontal_align(egui::Align::Center)
-                    .id_source("rename_input_dir"),
-            );
+    if !ctx.is_dense_mode {
+        if ctx.is_renaming {
+            if let Some(text) = &mut ctx.renaming_text {
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut **text)
+                        .frame(true)
+                        .horizontal_align(egui::Align::Center)
+                        .id_source("rename_input_dir"),
+                );
 
-            if ctx.focus_rename {
-                response.request_focus();
-            }
+                if ctx.focus_rename {
+                    response.request_focus();
+                }
 
-            // Confirma renomeação com Enter (enquanto tem foco)
-            if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                ops.rename_item(ctx.idx);
-            } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                // Cancel rename - handled by caller
-            } else if response.clicked_elsewhere() {
-                // Cancel rename - handled by caller
+                // Confirma renomeação com Enter (enquanto tem foco)
+                if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    ops.rename_item(ctx.idx);
+                } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    // Cancel rename - handled by caller
+                } else if response.clicked_elsewhere() {
+                    // Cancel rename - handled by caller
+                }
             }
+        } else {
+            ui.vertical_centered(|ui| {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(&item.name)
+                            .size(11.0)
+                            .color(egui::Color32::BLACK),
+                    )
+                    .truncate(),
+                );
+            });
         }
-    } else {
-        ui.vertical_centered(|ui| {
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(&item.name)
-                        .size(11.0)
-                        .color(egui::Color32::BLACK),
-                )
-                .truncate(),
-            );
-        });
     }
 }
 
@@ -491,7 +497,9 @@ fn render_file_slot<O: ItemSlotOperations>(
     }
 
     // Render sync status badge (OneDrive)
-    render_sync_badge(ui, thumb_rect, item.sync_status);
+    if !ctx.is_dense_mode {
+        render_sync_badge(ui, thumb_rect, item.sync_status);
+    }
 
     // Aloca espaço do thumbnail
     ui.allocate_rect(thumb_rect, egui::Sense::hover());
@@ -499,39 +507,41 @@ fn render_file_slot<O: ItemSlotOperations>(
     // Texto do nome - igual as pastas
     ui.add_space(4.0);
 
-    if ctx.is_renaming {
-        if let Some(text) = &mut ctx.renaming_text {
-            let response = ui.add(
-                egui::TextEdit::singleline(&mut **text)
-                    .frame(true)
-                    .horizontal_align(egui::Align::Center)
-                    .id_source("rename_input_file"),
-            );
+    if !ctx.is_dense_mode {
+        if ctx.is_renaming {
+            if let Some(text) = &mut ctx.renaming_text {
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut **text)
+                        .frame(true)
+                        .horizontal_align(egui::Align::Center)
+                        .id_source("rename_input_file"),
+                );
 
-            if ctx.focus_rename {
-                response.request_focus();
-            }
+                if ctx.focus_rename {
+                    response.request_focus();
+                }
 
-            // Confirma renomeação com Enter (enquanto tem foco)
-            if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                ops.rename_item(ctx.idx);
-            } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                // Cancel rename - handled by caller
-            } else if response.clicked_elsewhere() {
-                // Cancel rename - handled by caller
+                // Confirma renomeação com Enter (enquanto tem foco)
+                if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    ops.rename_item(ctx.idx);
+                } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    // Cancel rename - handled by caller
+                } else if response.clicked_elsewhere() {
+                    // Cancel rename - handled by caller
+                }
             }
+        } else {
+            ui.vertical_centered(|ui| {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(&item.name)
+                            .size(11.0)
+                            .color(egui::Color32::BLACK),
+                    )
+                    .truncate(),
+                );
+            });
         }
-    } else {
-        ui.vertical_centered(|ui| {
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(&item.name)
-                        .size(11.0)
-                        .color(egui::Color32::BLACK),
-                )
-                .truncate(),
-            );
-        });
     }
 }
 /// Função utilitária para desenhar o ícone de pasta customizado (pode ser usada fora do ItemSlot)
