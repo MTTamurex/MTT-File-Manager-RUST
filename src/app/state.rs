@@ -225,6 +225,20 @@ pub struct ImageViewerApp {
 }
 
 impl ImageViewerApp {
+    /// Check if a video is actively playing in docked mode (preview panel)
+    /// Used to throttle disk I/O from thumbnails to prevent stutter during video playback
+    pub fn is_video_playing_docked(&self) -> bool {
+        if let Some(preview) = &self.media_preview {
+            // Must be: (1) docked (not detached), (2) visible/initialized, and (3) playing
+            if !preview.is_detached() && preview.is_player_visible() {
+                if let Some(state) = preview.get_video_state() {
+                    return state.is_playing;
+                }
+            }
+        }
+        false
+    }
+
     /// Check if the media player should currently capture all keyboard arrow/space input.
     /// Returns true if player is detached/fullscreen AND has focus.
     pub fn is_media_keyboard_focused(&self) -> bool {

@@ -495,7 +495,10 @@ impl ImageViewerApp {
         
         // PERFORMANCE: Clear shared buffers before rendering (reuse, don't reallocate)
         self.pending_ops.clear();
-        
+
+        // Check if video is playing in docked mode to reduce disk I/O
+        let is_video_playing_docked = self.is_video_playing_docked();
+
         let mut ctx = GridViewContext {
             items: &items,
             selected_item,
@@ -525,6 +528,7 @@ impl ImageViewerApp {
             last_scroll_time: &mut self.last_scroll_time,
             last_scroll_offset: &mut self.last_scroll_offset,
             pending_upload_set: &mut self.cache_manager.pending_upload_set,
+            is_video_playing_docked,
         };
 
         // Usar uma abordagem diferente: coletar ações em vetores
@@ -806,15 +810,14 @@ impl ImageViewerApp {
 
         // Execute pending operations
         for (path, size) in pending_thumbnail_loads {
-            ImageViewerApp::request_thumbnail_load(&*self, path, size);
+            self.request_thumbnail_load(path, size);
         }
 
         for path in pending_folder_scans {
-            ImageViewerApp::request_folder_scan(&*self, path);
+            self.request_folder_scan(path);
         }
 
         for path in pending_folder_preview_loads {
-            // Need to implement this in self or import it
             self.request_folder_preview_load(path);
         }
 

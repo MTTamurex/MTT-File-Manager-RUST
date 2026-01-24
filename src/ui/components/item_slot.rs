@@ -186,7 +186,7 @@ fn render_directory_slot<O: ItemSlotOperations>(
         if let Some(ref cover_path) = item.folder_cover {
             if !ctx.texture_cache.contains(cover_path)
                 && !ctx.loading_set.contains(cover_path)
-                && ctx.loading_set.len() < 50
+                && ctx.loading_set.len() < 200
             {
                 ctx.loading_set.insert(cover_path.clone());
                 ops.request_thumbnail_load(cover_path.clone(), ctx.thumbnail_size as u32);
@@ -400,8 +400,8 @@ fn render_file_slot<O: ItemSlotOperations>(
         let is_failed = ctx.failed_thumbnails.contains(&path_clone);
         let is_pending_upload = ctx.pending_upload_set.contains(&path_clone);
 
-        if !has_texture && !is_loading && !is_failed && !is_pending_upload && ctx.loading_set.len() < 50 {
-            // MAX_CONCURRENT_LOADS (increased for performance)
+        if !has_texture && !is_loading && !is_failed && !is_pending_upload && ctx.loading_set.len() < 200 {
+            // MAX_CONCURRENT_LOADS (increased for performance - stale entries are cleaned by grid_view)
             ctx.loading_set.insert(path_clone.clone());
             ops.request_thumbnail_load(path_clone.clone(), ctx.thumbnail_size as u32);
         }
