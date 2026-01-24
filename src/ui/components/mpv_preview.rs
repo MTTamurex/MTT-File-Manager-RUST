@@ -17,8 +17,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::w;
 
 // Downscale filter applied only in docked mode (preview in sidebar)
-const DOCKED_DOWNSCALE_FILTER: &str = "scale=w='min(iw,1280)':h='min(ih,720)':force_original_aspect_ratio=decrease";
-const DOCKED_DOWNSCALE_MARKER: &str = "min(iw,1280)";
+const DOCKED_DOWNSCALE_FILTER: &str = "scale=w='min(iw,854)':h='min(ih,480)':force_original_aspect_ratio=decrease";
+const DOCKED_DOWNSCALE_MARKER: &str = "min(ih,480)";
 // FPS limit filter applied only in docked mode (preview in sidebar)
 const DOCKED_FPS_FILTER: &str = "fps=fps=30";
 const DOCKED_FPS_MARKER: &str = "fps=fps=30";
@@ -77,6 +77,16 @@ pub struct MpvPreview {
     docked_prev_interpolation: Option<bool>,
     /// Stores previous tscale to restore on undock
     docked_prev_tscale: Option<String>,
+    /// Stores previous cache setting to restore on undock
+    docked_prev_cache: Option<String>,
+    /// Stores previous cache-secs to restore on undock
+    docked_prev_cache_secs: Option<f64>,
+    /// Stores previous demuxer readahead to restore on undock
+    docked_prev_readahead_secs: Option<f64>,
+    /// Stores previous demuxer cache bytes to restore on undock
+    docked_prev_demuxer_max_bytes: Option<i64>,
+    /// Stores previous demuxer back cache bytes to restore on undock
+    docked_prev_demuxer_max_back_bytes: Option<i64>,
 
     // Performance: Async event handling (Fase 2 optimization)
     event_thread_running: Arc<AtomicBool>,
@@ -129,6 +139,11 @@ impl MpvPreview {
             docked_prev_video_sync: None,
             docked_prev_interpolation: None,
             docked_prev_tscale: None,
+            docked_prev_cache: None,
+            docked_prev_cache_secs: None,
+            docked_prev_readahead_secs: None,
+            docked_prev_demuxer_max_bytes: None,
+            docked_prev_demuxer_max_back_bytes: None,
             event_thread_running: Arc::new(AtomicBool::new(false)),
             event_thread_handle: None,
             cached_duration: None,
@@ -398,6 +413,7 @@ impl MpvPreview {
             self.update_docked_downscale(false);
         }
 
+
         // PERF FASE 2: State updates now handled by async event loop (zero polling overhead!)
         // Only tracks still need manual fetching (heavy JSON parse, done once per file)
         if let Some(m) = &self.mpv {
@@ -617,6 +633,29 @@ impl MpvPreview {
             let _ = m.set_property("interpolation", false);
             let _ = m.set_property("tscale", "linear");
 
+            // Mitigation for slow HDD I/O: increase cache/readahead only in docked preview mode
+            if self.docked_prev_cache.is_none() {
+                self.docked_prev_cache = m.get_property::<String>("cache").ok();
+            }
+            if self.docked_prev_cache_secs.is_none() {
+                self.docked_prev_cache_secs = m.get_property::<f64>("cache-secs").ok();
+            }
+            if self.docked_prev_readahead_secs.is_none() {
+                self.docked_prev_readahead_secs = m.get_property::<f64>("demuxer-readahead-secs").ok();
+            }
+            if self.docked_prev_demuxer_max_bytes.is_none() {
+                self.docked_prev_demuxer_max_bytes = m.get_property::<i64>("demuxer-max-bytes").ok();
+            }
+            if self.docked_prev_demuxer_max_back_bytes.is_none() {
+                self.docked_prev_demuxer_max_back_bytes = m.get_property::<i64>("demuxer-max-back-bytes").ok();
+            }
+
+            let _ = m.set_property("cache", "yes");
+            let _ = m.set_property("cache-secs", 20.0f64);
+            let _ = m.set_property("demuxer-readahead-secs", 10.0f64);
+            let _ = m.set_property("demuxer-max-bytes", 64_i64 * 1024 * 1024);
+            let _ = m.set_property("demuxer-max-back-bytes", 16_i64 * 1024 * 1024);
+
             self.docked_downscale_applied = true;
             self.docked_fps_limit_applied = true;
         } else if self.docked_downscale_applied || self.docked_fps_limit_applied {
@@ -635,10 +674,29 @@ impl MpvPreview {
                 let _ = m.set_property("tscale", prev);
             }
 
+            // Restore cache settings to avoid penalizing SSD and undocked playback
+            if let Some(prev) = self.docked_prev_cache.take() {
+                let _ = m.set_property("cache", prev);
+            }
+            if let Some(prev) = self.docked_prev_cache_secs.take() {
+                let _ = m.set_property("cache-secs", prev);
+            }
+            if let Some(prev) = self.docked_prev_readahead_secs.take() {
+                let _ = m.set_property("demuxer-readahead-secs", prev);
+            }
+            if let Some(prev) = self.docked_prev_demuxer_max_bytes.take() {
+                let _ = m.set_property("demuxer-max-bytes", prev);
+            }
+            if let Some(prev) = self.docked_prev_demuxer_max_back_bytes.take() {
+                let _ = m.set_property("demuxer-max-back-bytes", prev);
+            }
+
+
             self.docked_downscale_applied = false;
             self.docked_fps_limit_applied = false;
         }
     }
+
 
     /// PERF FASE 2: Starts async polling thread for offloading FFI calls from main thread
     ///
