@@ -255,8 +255,10 @@ fn thumbnail_worker_loop(
                                 let rgba = img.to_rgba8();
                                 final_result = Some((rgba.to_vec(), rgba.width(), rgba.height()));
                             }
+                        } else {
                         }
                         // If cached_max_dim < req_size or == 0, fall through to regeneration
+                    } else {
                     }
 
                     // STEP 1: Se não está em cache, decodifica com limite de concorrência
