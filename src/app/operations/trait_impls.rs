@@ -8,17 +8,17 @@ use crate::ui::context_menu::ContextMenuOperations;
 
 impl ItemSlotOperations for ImageViewerApp {
     fn request_thumbnail_load(&mut self, path: std::path::PathBuf, size: u32) {
-        // Call inherent method - uses &self so we need to reborrow
-        ImageViewerApp::request_thumbnail_load(&*self, path, size);
+        // Call inherent method directly
+        ImageViewerApp::request_thumbnail_load(self, path, size);
     }
 
     fn request_folder_scan(&mut self, path: std::path::PathBuf) {
-        // Call inherent method - uses &self so we need to reborrow
-        ImageViewerApp::request_folder_scan(&*self, path);
+        // Call inherent method directly
+        ImageViewerApp::request_folder_scan(self, path);
     }
 
     fn request_folder_preview_load(&mut self, path: std::path::PathBuf) {
-        self.request_folder_preview_load(path);
+        ImageViewerApp::request_folder_preview_load(self, path);
     }
 
     fn rename_item(&mut self, idx: usize) {

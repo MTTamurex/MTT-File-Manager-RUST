@@ -372,12 +372,14 @@ impl ImageViewerApp {
         }
 
         // PERFORMANCE: Adaptive GPU upload throttling based on scroll state
-        // Prevents GPU stalls during scroll while maintaining fast loading when idle
+        // Note: Thumbnail cache is on SSD, so we can be more generous with uploads
         let is_scrolling = self.last_scroll_time.elapsed() < std::time::Duration::from_millis(100);
+
+        // Generous upload limits since cache reads from SSD are fast
         let max_uploads_per_frame = if is_scrolling {
-            3 // Tight throttle during scroll - maintain 60 FPS
+            10 // Good throughput during scroll - SSD cache is fast
         } else {
-            15 // Generous when idle - load quickly when user stops scrolling
+            30 // Very generous when idle - quickly load all visible thumbnails
         };
 
         let mut uploads_this_frame = 0;
@@ -390,6 +392,15 @@ impl ImageViewerApp {
                     self.cache_manager.finish_pending_upload(&thumbnail_data.path);
                     continue;
                 }
+
+                // PERFORMANCE: Store RGBA data in RAM cache before GPU upload
+                // This allows fast re-upload if texture is evicted from VRAM without disk I/O
+                self.cache_manager.put_rgba_data(
+                    thumbnail_data.path.clone(),
+                    thumbnail_data.image_data.clone(),
+                    thumbnail_data.width,
+                    thumbnail_data.height,
+                );
 
                 // Carrega textura no GPU
                 let texture = ctx.load_texture(
@@ -406,7 +417,7 @@ impl ImageViewerApp {
 
                 self.cache_manager
                     .put_thumbnail(thumbnail_data.path.clone(), texture.clone());
-                
+
                 // Limpa status de pending upload
                 self.cache_manager.finish_pending_upload(&thumbnail_data.path);
 

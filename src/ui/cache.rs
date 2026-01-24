@@ -17,8 +17,8 @@ pub struct TextureCacheConfig {
 impl Default for TextureCacheConfig {
     fn default() -> Self {
         Self {
-            max_size: 200, // ~50-100MB VRAM
-            max_concurrent_loads: 30,
+            max_size: 500, // ~125-250MB VRAM - balanced between performance and memory
+            max_concurrent_loads: 200, // High limit - stale entries cleaned by grid_view during scroll
         }
     }
 }
@@ -39,6 +39,10 @@ pub struct CacheManager {
     pub failed_thumbnails: LruCache<PathBuf, ()>,
     /// Set of paths received from worker but waiting for GPU upload
     pub pending_upload_set: HashSet<PathBuf>,
+    /// PERFORMANCE: RAM cache for decoded RGBA data (Layer 2 - larger than VRAM cache)
+    /// When a texture is evicted from VRAM, the RGBA data remains here for fast re-upload
+    /// without needing disk I/O. This is critical for HDD performance during video playback.
+    pub rgba_data_cache: LruCache<PathBuf, (Vec<u8>, u32, u32)>,
 
     config: TextureCacheConfig,
 }
@@ -47,18 +51,20 @@ impl CacheManager {
     /// Creates a new cache manager with default configuration
     pub fn new() -> Self {
         Self {
-            // PERFORMANCE: Increased from 100 to 300 to reduce cache thrashing
-            // in folders with many images during scroll
-            texture_cache: LruCache::new(NonZeroUsize::new(300).unwrap()),
+            // PERFORMANCE: 500 items - balanced between memory usage and cache hits
+            texture_cache: LruCache::new(NonZeroUsize::new(500).unwrap()),
             icon_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
             loading_set: std::collections::HashSet::new(),
             folder_icon_texture: None,
             computer_icon: None,
             drive_icon_cache: LruCache::new(NonZeroUsize::new(10).unwrap()),
-            folder_preview_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
+            folder_preview_cache: LruCache::new(NonZeroUsize::new(150).unwrap()),
             folder_preview_loading: HashSet::new(),
             failed_thumbnails: LruCache::new(NonZeroUsize::new(1000).unwrap()),
             pending_upload_set: HashSet::new(),
+            // PERFORMANCE: RAM cache for RGBA data - helps avoid disk I/O on re-scroll
+            // 800 items ≈ 200-400MB RAM for 512x512 thumbnails
+            rgba_data_cache: LruCache::new(NonZeroUsize::new(800).unwrap()),
 
             config: TextureCacheConfig::default(),
         }
@@ -73,10 +79,12 @@ impl CacheManager {
             folder_icon_texture: None,
             computer_icon: None,
             drive_icon_cache: LruCache::new(NonZeroUsize::new(10).unwrap()),
-            folder_preview_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
+            folder_preview_cache: LruCache::new(NonZeroUsize::new(150).unwrap()),
             folder_preview_loading: HashSet::new(),
             failed_thumbnails: LruCache::new(NonZeroUsize::new(1000).unwrap()),
             pending_upload_set: HashSet::new(),
+            // PERFORMANCE: RAM cache - 1.6x the VRAM cache size, minimum 800
+            rgba_data_cache: LruCache::new(NonZeroUsize::new((config.max_size * 8 / 5).max(800)).unwrap()),
 
             config,
         }
@@ -142,7 +150,25 @@ impl CacheManager {
         self.folder_preview_loading.clear();
         self.failed_thumbnails.clear();
         self.pending_upload_set.clear();
+        self.rgba_data_cache.clear();
         // Note: folder_icon_texture and computer_icon are kept as they're singletons
+    }
+
+    // ========== RAM Cache Methods (Layer 2 - RGBA Data) ==========
+
+    /// Checks if RGBA data is in the RAM cache
+    pub fn has_rgba_data(&self, path: &PathBuf) -> bool {
+        self.rgba_data_cache.contains(path)
+    }
+
+    /// Gets RGBA data from the RAM cache
+    pub fn get_rgba_data(&mut self, path: &PathBuf) -> Option<&(Vec<u8>, u32, u32)> {
+        self.rgba_data_cache.get(path)
+    }
+
+    /// Stores RGBA data in the RAM cache
+    pub fn put_rgba_data(&mut self, path: PathBuf, data: Vec<u8>, width: u32, height: u32) {
+        self.rgba_data_cache.put(path, (data, width, height));
     }
 
     /// Marks a path as having failed thumbnail extraction
@@ -233,6 +259,14 @@ impl CacheManager {
             .sum();
 
         texture_usage + icon_usage + drive_icon_usage
+    }
+
+    /// Estimates RAM usage by the RGBA data cache in bytes
+    pub fn estimate_ram_cache_usage(&self) -> usize {
+        self.rgba_data_cache
+            .iter()
+            .map(|(_, (data, _, _))| data.len())
+            .sum()
     }
 
     /// Gets or creates a drive icon

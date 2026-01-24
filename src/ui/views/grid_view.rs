@@ -81,6 +81,8 @@ pub struct GridViewContext<'a> {
     pub last_scroll_offset: &'a mut f32,
     /// Conjunto de itens aguardando upload GPU
     pub pending_upload_set: &'a mut std::collections::HashSet<PathBuf>,
+    /// PERFORMANCE: True if video is playing in docked mode (reduces prefetch to minimize HDD I/O)
+    pub is_video_playing_docked: bool,
 }
 
 /// Operations that can be performed from grid view
@@ -368,6 +370,36 @@ pub fn render_grid_view(
     // Export range for prefetch relative to visual position
     visible_rows_range = Some((vis_min_row, vis_max_row));
 
+    // PERFORMANCE: Clear stale loading_set entries when scrolling
+    // This ensures that slots are freed for currently visible items.
+    // Without this, the loading_set fills with items from previous scroll positions
+    // and new visible items can't load (blocked by the loading limit).
+    // Only clean if loading_set has significant entries to avoid overhead on every frame.
+    if ctx.loading_set.len() > 30 {
+        // Build set of paths that SHOULD remain (visible range + generous margin)
+        let cleanup_margin = 8; // Keep items within 8 rows of visible area
+        let keep_min_row = vis_min_row.saturating_sub(cleanup_margin);
+        let keep_max_row = (vis_max_row + cleanup_margin).min(total_rows);
+
+        // Collect paths to keep based on row index
+        let mut paths_to_keep = std::collections::HashSet::with_capacity((keep_max_row - keep_min_row) * cols);
+        for row in keep_min_row..keep_max_row {
+            for col in 0..cols {
+                let index = row * cols + col;
+                if index < count {
+                    paths_to_keep.insert(ctx.items[index].path.clone());
+                    // Also keep folder covers
+                    if let Some(ref cover) = ctx.items[index].folder_cover {
+                        paths_to_keep.insert(cover.clone());
+                    }
+                }
+            }
+        }
+
+        // Remove stale entries (paths not in visible range + margin)
+        ctx.loading_set.retain(|path| paths_to_keep.contains(path));
+    }
+
     // STABLE OVERSCAN: Fixed value, no velocity dependency
     let overscan = 2;
 
@@ -527,6 +559,7 @@ pub fn render_grid_view(
 
     // BATCH PROCESSING: Flush all pending operations collected during render
     // This avoids context switching and virtual dispatch inside the render loop
+    // Note: Thumbnail cache is on SSD, so we don't skip I/O even during video playback
     for (path, size) in ctx.pending_ops.thumbnail_loads.drain(..) {
         ops.request_thumbnail_load(path, size);
     }
@@ -541,17 +574,16 @@ pub fn render_grid_view(
     }
 
     // PERFORMANCE: Adaptive prefetch based on scroll state
-    // Fast scroll: Narrow prefetch margin (focus on visible + overscan)
-    // Idle: Wider prefetch margin (prepare more ahead)
+    // Note: Thumbnail cache is on SSD, so prefetch is always beneficial
     if let Some((vis_min, vis_max)) = visible_rows_range {
         let count = ctx.items.len();
         let rows = (count as f32 / cols as f32).ceil() as usize;
 
-        // Adaptive prefetch margin based on scroll status (optimization)
+        // Adaptive prefetch margin based on scroll status
         let prefetch_margin = if is_scrolling {
-             2 
+            2 // During scroll, moderate prefetch
         } else {
-             5 
+            5 // When idle, prefetch more ahead
         };
 
         let start_prefetch = vis_min.saturating_sub(prefetch_margin);
@@ -570,7 +602,7 @@ pub fn render_grid_view(
                 let item = &ctx.items[index];
                 if !item.is_dir {
                     // Check if needs thumbnail - skip if already in cache, loading, or pending upload
-                    if !ctx.texture_cache.contains(&item.path) 
+                    if !ctx.texture_cache.contains(&item.path)
                         && !ctx.loading_set.contains(&item.path)
                         && !ctx.pending_upload_set.contains(&item.path)
                     {
