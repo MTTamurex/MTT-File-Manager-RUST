@@ -16,6 +16,13 @@ use windows::Win32::UI::WindowsAndMessaging::{
 #[cfg(target_os = "windows")]
 use windows::core::w;
 
+// Downscale filter applied only in docked mode (preview in sidebar)
+const DOCKED_DOWNSCALE_FILTER: &str = "scale=w='min(iw,1280)':h='min(ih,720)':force_original_aspect_ratio=decrease";
+const DOCKED_DOWNSCALE_MARKER: &str = "min(iw,1280)";
+// FPS limit filter applied only in docked mode (preview in sidebar)
+const DOCKED_FPS_FILTER: &str = "fps=fps=30";
+const DOCKED_FPS_MARKER: &str = "fps=fps=30";
+
 /// Track information for audio/subtitles.
 #[derive(Clone, Debug, Default)]
 pub struct TrackInfo {
@@ -58,6 +65,18 @@ pub struct MpvPreview {
     pub was_minimized: bool,
     /// Tracks if NVIDIA VSR is currently enabled
     pub is_vsr_enabled: bool,
+    /// Tracks whether docked downscale is currently applied
+    docked_downscale_applied: bool,
+    /// Stores previous vf chain to restore on undock
+    docked_prev_vf: Option<String>,
+    /// Tracks whether docked FPS limiting is currently applied
+    docked_fps_limit_applied: bool,
+    /// Stores previous video-sync to restore on undock
+    docked_prev_video_sync: Option<String>,
+    /// Stores previous interpolation to restore on undock
+    docked_prev_interpolation: Option<bool>,
+    /// Stores previous tscale to restore on undock
+    docked_prev_tscale: Option<String>,
 
     // Performance: Async event handling (Fase 2 optimization)
     event_thread_running: Arc<AtomicBool>,
@@ -104,6 +123,12 @@ impl MpvPreview {
             last_mouse_pos: None,
             was_minimized: false,
             is_vsr_enabled: false,
+            docked_downscale_applied: false,
+            docked_prev_vf: None,
+            docked_fps_limit_applied: false,
+            docked_prev_video_sync: None,
+            docked_prev_interpolation: None,
+            docked_prev_tscale: None,
             event_thread_running: Arc::new(AtomicBool::new(false)),
             event_thread_handle: None,
             cached_duration: None,
@@ -366,6 +391,13 @@ impl MpvPreview {
             self.cached_tracks = None;
         }
 
+        // Apply docked-mode downscale + FPS limit (dynamic, reversible, no player restart)
+        if (!self.is_detached) != self.docked_downscale_applied
+            || (!self.is_detached) != self.docked_fps_limit_applied
+        {
+            self.update_docked_downscale(false);
+        }
+
         // PERF FASE 2: State updates now handled by async event loop (zero polling overhead!)
         // Only tracks still need manual fetching (heavy JSON parse, done once per file)
         if let Some(m) = &self.mpv {
@@ -534,6 +566,80 @@ impl MpvPreview {
         }
     }
 
+    /// Applies or removes docked-mode downscale and FPS limiting without restarting playback.
+    /// `force_reapply` is used when external changes (e.g., VSR) replace the filter chain.
+    fn update_docked_downscale(&mut self, force_reapply: bool) {
+        let should_limit = !self.is_detached;
+        let Some(m) = &self.mpv else {
+            return;
+        };
+
+        let current_vf = m.get_property::<String>("vf").unwrap_or_default();
+        let has_downscale = current_vf.contains(DOCKED_DOWNSCALE_MARKER);
+        let has_fps_limit = current_vf.contains(DOCKED_FPS_MARKER);
+
+        if should_limit {
+            if force_reapply || !has_downscale || !has_fps_limit {
+                // Store current chain to restore on undock (or VSR toggles)
+                if self.docked_prev_vf.is_none() {
+                    self.docked_prev_vf = Some(current_vf.clone());
+                }
+
+                let mut new_vf = current_vf.clone();
+                if !has_downscale {
+                    new_vf = if new_vf.trim().is_empty() {
+                        DOCKED_DOWNSCALE_FILTER.to_string()
+                    } else {
+                        format!("{},{}", new_vf, DOCKED_DOWNSCALE_FILTER)
+                    };
+                }
+                if !has_fps_limit {
+                    new_vf = if new_vf.trim().is_empty() {
+                        DOCKED_FPS_FILTER.to_string()
+                    } else {
+                        format!("{},{}", new_vf, DOCKED_FPS_FILTER)
+                    };
+                }
+                let _ = m.set_property("vf", new_vf);
+            }
+
+            if self.docked_prev_video_sync.is_none() {
+                self.docked_prev_video_sync = m.get_property::<String>("video-sync").ok();
+            }
+            if self.docked_prev_interpolation.is_none() {
+                self.docked_prev_interpolation = m.get_property::<bool>("interpolation").ok();
+            }
+            if self.docked_prev_tscale.is_none() {
+                self.docked_prev_tscale = m.get_property::<String>("tscale").ok();
+            }
+
+            let _ = m.set_property("video-sync", "audio");
+            let _ = m.set_property("interpolation", false);
+            let _ = m.set_property("tscale", "linear");
+
+            self.docked_downscale_applied = true;
+            self.docked_fps_limit_applied = true;
+        } else if self.docked_downscale_applied || self.docked_fps_limit_applied {
+            // Restore previous chain and sync behavior (native resolution + normal FPS)
+            let restore_vf = self.docked_prev_vf.clone().unwrap_or_default();
+            let _ = m.set_property("vf", restore_vf);
+            self.docked_prev_vf = None;
+
+            if let Some(prev) = self.docked_prev_video_sync.take() {
+                let _ = m.set_property("video-sync", prev);
+            }
+            if let Some(prev) = self.docked_prev_interpolation.take() {
+                let _ = m.set_property("interpolation", prev);
+            }
+            if let Some(prev) = self.docked_prev_tscale.take() {
+                let _ = m.set_property("tscale", prev);
+            }
+
+            self.docked_downscale_applied = false;
+            self.docked_fps_limit_applied = false;
+        }
+    }
+
     /// PERF FASE 2: Starts async polling thread for offloading FFI calls from main thread
     ///
     /// This moves the polling to a background thread, preventing main thread blocking.
@@ -634,6 +740,8 @@ impl MpvPreview {
                 .map_err(|e| format!("Failed to enable VSR: {:?}", e))?;
             self.is_vsr_enabled = true;
             eprintln!("[MpvPreview] NVIDIA VSR Enabled");
+            // Ensure docked filters are re-applied if needed
+            self.update_docked_downscale(true);
             Ok(())
         } else {
             Err("MPV instance not initialized".to_string())
@@ -647,6 +755,8 @@ impl MpvPreview {
                 .map_err(|e| format!("Failed to disable VSR: {:?}", e))?;
             self.is_vsr_enabled = false;
             eprintln!("[MpvPreview] VSR Disabled");
+            // Ensure docked filters are re-applied if needed
+            self.update_docked_downscale(true);
             Ok(())
         } else {
             Err("MPV instance not initialized".to_string())
