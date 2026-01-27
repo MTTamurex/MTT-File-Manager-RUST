@@ -139,6 +139,39 @@ impl PriorityThumbnailQueue {
     }
 }
 
+/// Semaphore to limit concurrent resource usage
+struct Semaphore {
+    count: Mutex<usize>,
+    condvar: Condvar,
+    max: usize,
+}
+
+impl Semaphore {
+    fn new(max: usize) -> Self {
+        Self {
+            count: Mutex::new(0),
+            condvar: Condvar::new(),
+            max,
+        }
+    }
+
+    fn acquire(&self) {
+        let mut count = self.count.lock().unwrap();
+        while *count >= self.max {
+            count = self.condvar.wait(count).unwrap();
+        }
+        *count += 1;
+    }
+
+    fn release(&self) {
+        let mut count = self.count.lock().unwrap();
+        if *count > 0 {
+            *count -= 1;
+        }
+        self.condvar.notify_one();
+    }
+}
+
 /// Spawns thumbnail worker threads with concurrency limiting
 pub fn spawn_thumbnail_workers(
     queue: Arc<PriorityThumbnailQueue>,
@@ -147,20 +180,20 @@ pub fn spawn_thumbnail_workers(
     gen_tracker: Arc<AtomicUsize>,
     disk_cache: Arc<ThumbnailDiskCache>,
 ) {
-    // Condvar for semaphore-like behavior (RAM limiter)
-    let active_decodes = Arc::new((Mutex::new(0), Condvar::new()));
+    // Semaphore for RAM limiter
+    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_DECODES));
 
-    // 4 worker threads (reduced from 8 - counter limits actual concurrent work)
+    // 4 worker threads
     for _ in 0..4 {
         let queue = queue.clone();
         let tx = tx.clone();
         let gen_tracker = gen_tracker.clone();
         let ctx = ctx.clone();
         let disk_cache = disk_cache.clone();
-        let active_counter = active_decodes.clone();
+        let semaphore = semaphore.clone();
 
         std::thread::spawn(move || {
-            thumbnail_worker_loop(queue, tx, ctx, gen_tracker, disk_cache, active_counter);
+            thumbnail_worker_loop(queue, tx, ctx, gen_tracker, disk_cache, semaphore);
         });
     }
 }
@@ -171,7 +204,7 @@ fn thumbnail_worker_loop(
     ctx: egui::Context,
     gen_tracker: Arc<AtomicUsize>,
     disk_cache: Arc<ThumbnailDiskCache>,
-    active_decodes: Arc<(Mutex<usize>, Condvar)>,
+    semaphore: Arc<Semaphore>,
 ) {
     let mut last_repaint = Instant::now();
     unsafe {
@@ -264,13 +297,7 @@ fn thumbnail_worker_loop(
                     // STEP 1: Se não está em cache, decodifica com limite de concorrência
                     if final_result.is_none() {
                         // Aguarda até ter um slot disponível (max 4 decodes simultâneos)
-                        {
-                            let mut count = active_decodes.0.lock().unwrap();
-                            while *count >= MAX_CONCURRENT_DECODES {
-                                count = active_decodes.1.wait(count).unwrap();
-                            }
-                            *count += 1;
-                        }
+                        semaphore.acquire();
 
                         // HYBRID PIPELINE com resize imediato
                         if let Some((raw_data, w, h)) = generate_thumbnail_hybrid(&path) {
@@ -291,11 +318,7 @@ fn thumbnail_worker_loop(
                         // raw_data é dropado aqui automaticamente (libera RAM)
 
                         // Libera slot
-                        {
-                            let mut count = active_decodes.0.lock().unwrap();
-                            if *count > 0 { *count -= 1; }
-                            active_decodes.1.notify_one();
-                        }
+                        semaphore.release();
                     }
 
                     let (data, w, h) = final_result.unwrap_or_else(|| (Vec::new(), 0, 0));
@@ -930,3 +953,48 @@ fn throttle_repaint(ctx: &egui::Context, last_repaint: &mut Instant) {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
+
+    #[test]
+    fn test_semaphore_concurrency() {
+        let max_concurrent = 2;
+        let semaphore = Arc::new(Semaphore::new(max_concurrent));
+        let active_count = Arc::new(Mutex::new(0));
+
+        let mut handles = vec![];
+
+        for i in 0..5 {
+            let semaphore = semaphore.clone();
+            let active_count = active_count.clone();
+
+            handles.push(thread::spawn(move || {
+                semaphore.acquire();
+
+                {
+                    let mut count = active_count.lock().unwrap();
+                    *count += 1;
+                    assert!(*count <= max_concurrent, "Too many threads!");
+                    println!("Thread {} running. Active: {}", i, *count);
+                }
+
+                thread::sleep(Duration::from_millis(50));
+
+                {
+                    let mut count = active_count.lock().unwrap();
+                    *count -= 1;
+                }
+
+                semaphore.release();
+            }));
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
+    }
+}
