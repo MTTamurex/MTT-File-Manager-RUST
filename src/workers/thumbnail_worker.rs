@@ -303,7 +303,7 @@ fn thumbnail_worker_loop(
                         if let Some((raw_data, w, h)) = generate_thumbnail_hybrid(&path) {
                             // STEP 2: Resize to bucket (libera RAM e otimiza upload GPU)
                             let bucket_size = get_bucket_size(req_size);
-                            let resized = resize_to_bucket(&raw_data, w, h, bucket_size);
+                            let resized = resize_to_bucket(raw_data, w, h, bucket_size);
 
                             // STEP 3: Salva versão otimizada em SQLite
                             let _ =
@@ -352,10 +352,10 @@ fn get_bucket_size(req_size: u32) -> u32 {
 }
 
 /// Resize RGBA buffer to bucket size while preserving aspect ratio
-fn resize_to_bucket(rgba_data: &[u8], width: u32, height: u32, max_dim: u32) -> (Vec<u8>, u32, u32) {
+fn resize_to_bucket(rgba_data: Vec<u8>, width: u32, height: u32, max_dim: u32) -> (Vec<u8>, u32, u32) {
     // Se já é pequeno o suficiente, retorna como está
     if width <= max_dim && height <= max_dim {
-        return (rgba_data.to_vec(), width, height);
+        return (rgba_data, width, height);
     }
 
     // Calcula novo tamanho mantendo aspect ratio
@@ -363,17 +363,26 @@ fn resize_to_bucket(rgba_data: &[u8], width: u32, height: u32, max_dim: u32) -> 
     let new_w = ((width as f32) * scale).round() as u32;
     let new_h = ((height as f32) * scale).round() as u32;
 
-    // Usa image crate para resize
-    if let Some(img) = image::ImageBuffer::from_raw(width, height, rgba_data.to_vec()) {
+    // Ensure we don't lose the buffer if from_raw fails (which consumes it)
+    // We check the condition beforehand.
+    // ImageBuffer::from_raw requires buffer.len() >= width * height * 4
+    let min_len = (width as usize) * (height as usize) * 4;
+
+    if rgba_data.len() >= min_len {
+        // Usa image crate para resize
+        // Safe to unwrap because we checked the dimensions
+        let img = image::ImageBuffer::from_raw(width, height, rgba_data)
+            .expect("Buffer size check passed but from_raw failed");
+
         let dynamic = DynamicImage::ImageRgba8(img);
         // Use CatmullRom for high-quality sharpening with good performance.
         let resized = dynamic.resize(new_w, new_h, image::imageops::FilterType::CatmullRom);
-        let rgba = resized.to_rgba8();
-        return (rgba.to_vec(), rgba.width(), rgba.height());
+        let rgba = resized.into_rgba8();
+        return (rgba.into_vec(), rgba.width(), rgba.height());
     }
 
-    // Fallback: retorna original se resize falhar
-    (rgba_data.to_vec(), width, height)
+    // Fallback: retorna original se resize falhar ou tamanho incorreto
+    (rgba_data, width, height)
 }
 
 /// The 4-Step Hybrid Pipeline
