@@ -1,8 +1,9 @@
 //! Main application state management
 //! Follows .cursorrules: orchestration of component states, < 300 lines
 
-use std::collections::HashSet;
 use std::path::PathBuf;
+// PERFORMANCE: FxHashSet uses faster hashing for PathBuf keys
+use crate::ui::cache::FxHashSet;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
@@ -56,7 +57,7 @@ pub struct AppState {
     pub renaming_state: Option<RenamingState>,
 
     // Caches (to be managed separately)
-    pub scanned_folders: HashSet<PathBuf>,
+    pub scanned_folders: FxHashSet<PathBuf>,
     pub last_grid_cols: usize,
 
     // System information
@@ -98,7 +99,7 @@ impl AppState {
             watcher: WatcherState::new(),
             renaming_state: None,
 
-            scanned_folders: HashSet::new(),
+            scanned_folders: FxHashSet::default(),
             last_grid_cols: 1,
 
             disks,

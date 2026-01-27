@@ -5,6 +5,8 @@ use eframe::egui::{self, Color32, Rect, Sense, Ui};
 use std::path::PathBuf;
 
 use crate::domain::file_entry::FileEntry;
+// PERFORMANCE: Use FxHashSet for PathBuf keys - faster hashing than std::collections::HashSet
+use crate::ui::cache::FxHashSet;
 
 // PERFORMANCE: Tooltip debounce to avoid creation/destruction during scroll
 const TOOLTIP_DELAY_SECS: f32 = 0.3; // Only show tooltip after 300ms hover
@@ -50,7 +52,7 @@ pub struct GridViewContext<'a> {
     pub items: &'a [FileEntry],
     pub selected_item: Option<usize>,
     pub selected_file: Option<&'a FileEntry>,
-    pub multi_selection: &'a std::collections::HashSet<PathBuf>,
+    pub multi_selection: &'a FxHashSet<PathBuf>,
     pub thumbnail_size: f32,
     pub last_grid_cols: usize,
     pub renaming_state: Option<(usize, String)>,
@@ -59,14 +61,14 @@ pub struct GridViewContext<'a> {
     pub is_computer_view: bool,
     pub is_recycle_bin_view: bool,
     pub texture_cache: &'a mut lru::LruCache<PathBuf, egui::TextureHandle>,
-    pub loading_set: &'a mut std::collections::HashSet<PathBuf>,
-    pub scanned_folders: &'a mut std::collections::HashSet<PathBuf>,
+    pub loading_set: &'a mut FxHashSet<PathBuf>,
+    pub scanned_folders: &'a mut FxHashSet<PathBuf>,
     pub folder_icon_texture: Option<&'a egui::TextureHandle>,
     pub computer_icon: Option<&'a egui::TextureHandle>,
     pub drive_icon_cache: &'a mut lru::LruCache<String, egui::TextureHandle>,
     pub item_icon_loader: &'a mut crate::ui::icon_loader::IconLoader,
     pub folder_preview_cache: &'a mut lru::LruCache<PathBuf, egui::TextureHandle>,
-    pub folder_preview_loading: &'a mut std::collections::HashSet<PathBuf>,
+    pub folder_preview_loading: &'a mut FxHashSet<PathBuf>,
     /// PERFORMANCE: Shared buffer for pending operations (reused across items)
     pub pending_ops: &'a mut PendingOperations,
     /// Caminhos que falharam no thumbnail (LRU bounded)
@@ -80,7 +82,7 @@ pub struct GridViewContext<'a> {
     pub last_scroll_time: &'a mut std::time::Instant,
     pub last_scroll_offset: &'a mut f32,
     /// Conjunto de itens aguardando upload GPU
-    pub pending_upload_set: &'a mut std::collections::HashSet<PathBuf>,
+    pub pending_upload_set: &'a mut FxHashSet<PathBuf>,
     /// PERFORMANCE: True if video is playing in docked mode (reduces prefetch to minimize HDD I/O)
     pub is_video_playing_docked: bool,
 }
@@ -725,17 +727,68 @@ fn render_item_slot_for_grid(
     }
 }
 
-/// Helper function to get file type string
-fn get_file_type_string(item: &FileEntry) -> String {
+/// Helper function to get file type string.
+///
+/// PERFORMANCE: Uses Cow<'static, str> to return static strings for common types
+/// without allocation. Only allocates for dynamic extension strings.
+fn get_file_type_string(item: &FileEntry) -> std::borrow::Cow<'static, str> {
+    use std::borrow::Cow;
+
+    // PERFORMANCE: Use case-insensitive comparison without allocation
+    let name_lower = item.name.to_ascii_lowercase();
+
     // Check for ZIP manually because is_dir might be true
-    if item.name.to_lowercase().ends_with(".zip") {
-        return "Arquivo ZIP".to_string();
+    if name_lower.ends_with(".zip") {
+        return Cow::Borrowed("Arquivo ZIP");
     }
     if item.is_dir {
-        return "Pasta".to_string();
+        return Cow::Borrowed("Pasta");
     }
+
+    // For files, check common extensions first (static strings)
     if let Some(ext) = item.path.extension() {
-        return format!("Arquivo {}", ext.to_string_lossy().to_uppercase());
+        let ext_lower = ext.to_ascii_lowercase();
+        let ext_str = ext_lower.to_string_lossy();
+
+        // PERFORMANCE: Return static strings for common file types
+        match ext_str.as_ref() {
+            "txt" => return Cow::Borrowed("Arquivo TXT"),
+            "pdf" => return Cow::Borrowed("Arquivo PDF"),
+            "doc" | "docx" => return Cow::Borrowed("Arquivo Word"),
+            "xls" | "xlsx" => return Cow::Borrowed("Arquivo Excel"),
+            "ppt" | "pptx" => return Cow::Borrowed("Arquivo PowerPoint"),
+            "jpg" | "jpeg" => return Cow::Borrowed("Arquivo JPEG"),
+            "png" => return Cow::Borrowed("Arquivo PNG"),
+            "gif" => return Cow::Borrowed("Arquivo GIF"),
+            "bmp" => return Cow::Borrowed("Arquivo BMP"),
+            "webp" => return Cow::Borrowed("Arquivo WebP"),
+            "mp4" => return Cow::Borrowed("Arquivo MP4"),
+            "mkv" => return Cow::Borrowed("Arquivo MKV"),
+            "avi" => return Cow::Borrowed("Arquivo AVI"),
+            "mov" => return Cow::Borrowed("Arquivo MOV"),
+            "wmv" => return Cow::Borrowed("Arquivo WMV"),
+            "mp3" => return Cow::Borrowed("Arquivo MP3"),
+            "wav" => return Cow::Borrowed("Arquivo WAV"),
+            "flac" => return Cow::Borrowed("Arquivo FLAC"),
+            "exe" => return Cow::Borrowed("Arquivo Executável"),
+            "dll" => return Cow::Borrowed("Biblioteca DLL"),
+            "html" | "htm" => return Cow::Borrowed("Arquivo HTML"),
+            "css" => return Cow::Borrowed("Arquivo CSS"),
+            "js" => return Cow::Borrowed("Arquivo JavaScript"),
+            "json" => return Cow::Borrowed("Arquivo JSON"),
+            "xml" => return Cow::Borrowed("Arquivo XML"),
+            "rs" => return Cow::Borrowed("Arquivo Rust"),
+            "py" => return Cow::Borrowed("Arquivo Python"),
+            "java" => return Cow::Borrowed("Arquivo Java"),
+            "c" | "cpp" | "h" | "hpp" => return Cow::Borrowed("Arquivo C/C++"),
+            "lnk" => return Cow::Borrowed("Atalho"),
+            "iso" => return Cow::Borrowed("Imagem de Disco"),
+            _ => {
+                // Dynamic allocation only for unknown extensions
+                return Cow::Owned(format!("Arquivo {}", ext.to_string_lossy().to_uppercase()));
+            }
+        }
     }
-    "Arquivo".to_string()
+
+    Cow::Borrowed("Arquivo")
 }

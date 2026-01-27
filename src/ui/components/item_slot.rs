@@ -4,6 +4,8 @@
 
 use crate::domain::file_entry::{FileEntry, SyncStatus};
 use crate::ui::icon_loader::IconLoader;
+// PERFORMANCE: Use FxHashSet for PathBuf keys - faster hashing
+use crate::ui::cache::FxHashSet;
 use eframe::egui;
 
 /// Trait para operações necessárias para renderizar um item slot
@@ -39,17 +41,17 @@ pub struct ItemSlotContext<'a> {
     /// Carregador de ícones (PERSISTENTE - não crie novo a cada chamada!)
     pub icon_loader: &'a mut IconLoader,
     /// Conjunto de pastas escaneadas
-    pub scanned_folders: &'a mut std::collections::HashSet<std::path::PathBuf>,
+    pub scanned_folders: &'a mut FxHashSet<std::path::PathBuf>,
     /// Conjunto de itens carregando (thumbnails de arquivos)
-    pub loading_set: &'a mut std::collections::HashSet<std::path::PathBuf>,
+    pub loading_set: &'a mut FxHashSet<std::path::PathBuf>,
     /// Cache de previews de pastas (Native Sandwich)
     pub folder_preview_cache: &'a mut lru::LruCache<std::path::PathBuf, egui::TextureHandle>,
     /// Conjunto de pastas carregando preview nativo
-    pub folder_preview_loading: &'a mut std::collections::HashSet<std::path::PathBuf>,
+    pub folder_preview_loading: &'a mut FxHashSet<std::path::PathBuf>,
     /// Caminhos que falharam no thumbnail (LRU bounded)
     pub failed_thumbnails: &'a lru::LruCache<std::path::PathBuf, ()>,
     /// Conjunto de itens aguardando upload GPU
-    pub pending_upload_set: &'a mut std::collections::HashSet<std::path::PathBuf>,
+    pub pending_upload_set: &'a mut FxHashSet<std::path::PathBuf>,
     /// MODO DENSO (Zoom Mínimo): Se true, renderiza APENAS ícone (sem texto/badges)
     pub is_dense_mode: bool,
 }
@@ -323,8 +325,10 @@ fn render_directory_slot<O: ItemSlotOperations>(
 
             ui.painter().add(egui::Shape::line(points, stroke));
 
-            // Força repaint para animação contínua
-            ui.ctx().request_repaint();
+            // PERFORMANCE: Request repaint after delay instead of immediate.
+            // Spinner only needs ~15 FPS to look smooth (66ms interval).
+            // This prevents CPU spinning at 60+ FPS when multiple folders are loading.
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(66));
         }
     }
 

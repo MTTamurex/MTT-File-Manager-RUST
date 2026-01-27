@@ -6,7 +6,11 @@ use lru::LruCache;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 
-use std::collections::HashSet;
+// PERFORMANCE: FxHashSet uses a faster hash function than std::collections::HashSet.
+// This is especially beneficial for PathBuf keys which have expensive default hashing.
+// FxHash is ~2-4x faster for string-like keys.
+// Re-exported for use in other modules.
+pub use rustc_hash::FxHashSet;
 
 /// Texture cache configuration
 pub struct TextureCacheConfig {
@@ -27,18 +31,18 @@ impl Default for TextureCacheConfig {
 pub struct CacheManager {
     pub texture_cache: LruCache<PathBuf, egui::TextureHandle>,
     pub icon_cache: LruCache<String, egui::TextureHandle>,
-    pub loading_set: std::collections::HashSet<PathBuf>,
+    pub loading_set: FxHashSet<PathBuf>,
     pub folder_icon_texture: Option<egui::TextureHandle>,
     pub computer_icon: Option<egui::TextureHandle>,
     pub drive_icon_cache: LruCache<String, egui::TextureHandle>,
     /// Cache for folder preview thumbnails (sandwich effect)
     pub folder_preview_cache: LruCache<PathBuf, egui::TextureHandle>,
     /// Set of folder paths currently being loaded
-    pub folder_preview_loading: HashSet<PathBuf>,
+    pub folder_preview_loading: FxHashSet<PathBuf>,
     /// Set of paths that failed thumbnail extraction (LRU bounded to 1000)
     pub failed_thumbnails: LruCache<PathBuf, ()>,
     /// Set of paths received from worker but waiting for GPU upload
-    pub pending_upload_set: HashSet<PathBuf>,
+    pub pending_upload_set: FxHashSet<PathBuf>,
     /// PERFORMANCE: RAM cache for decoded RGBA data (Layer 2 - larger than VRAM cache)
     /// When a texture is evicted from VRAM, the RGBA data remains here for fast re-upload
     /// without needing disk I/O. This is critical for HDD performance during video playback.
@@ -54,14 +58,14 @@ impl CacheManager {
             // PERFORMANCE: 500 items - balanced between memory usage and cache hits
             texture_cache: LruCache::new(NonZeroUsize::new(500).unwrap()),
             icon_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
-            loading_set: std::collections::HashSet::new(),
+            loading_set: FxHashSet::default(),
             folder_icon_texture: None,
             computer_icon: None,
             drive_icon_cache: LruCache::new(NonZeroUsize::new(10).unwrap()),
             folder_preview_cache: LruCache::new(NonZeroUsize::new(150).unwrap()),
-            folder_preview_loading: HashSet::new(),
+            folder_preview_loading: FxHashSet::default(),
             failed_thumbnails: LruCache::new(NonZeroUsize::new(1000).unwrap()),
-            pending_upload_set: HashSet::new(),
+            pending_upload_set: FxHashSet::default(),
             // PERFORMANCE: RAM cache for RGBA data - helps avoid disk I/O on re-scroll
             // 800 items ≈ 200-400MB RAM for 512x512 thumbnails
             rgba_data_cache: LruCache::new(NonZeroUsize::new(800).unwrap()),
@@ -75,14 +79,14 @@ impl CacheManager {
         Self {
             texture_cache: LruCache::new(NonZeroUsize::new(config.max_size).unwrap()),
             icon_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
-            loading_set: std::collections::HashSet::new(),
+            loading_set: FxHashSet::default(),
             folder_icon_texture: None,
             computer_icon: None,
             drive_icon_cache: LruCache::new(NonZeroUsize::new(10).unwrap()),
             folder_preview_cache: LruCache::new(NonZeroUsize::new(150).unwrap()),
-            folder_preview_loading: HashSet::new(),
+            folder_preview_loading: FxHashSet::default(),
             failed_thumbnails: LruCache::new(NonZeroUsize::new(1000).unwrap()),
-            pending_upload_set: HashSet::new(),
+            pending_upload_set: FxHashSet::default(),
             // PERFORMANCE: RAM cache - 1.6x the VRAM cache size, minimum 800
             rgba_data_cache: LruCache::new(NonZeroUsize::new((config.max_size * 8 / 5).max(800)).unwrap()),
 
