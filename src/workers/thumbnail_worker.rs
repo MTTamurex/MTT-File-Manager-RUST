@@ -793,11 +793,15 @@ fn convert_nv12_to_rgba(nv12_data: &[u8], width: u32, height: u32) -> Vec<u8> {
             let u_val = uv_plane[uv_index] as i32 - 128;
             let v_val = uv_plane[uv_index + 1] as i32 - 128;
 
-            // YUV to RGB conversion (BT.601 standard)
-            let r = (y_val + (1.402 * v_val as f32) as i32).clamp(0, 255);
-            let g = (y_val - (0.344 * u_val as f32) as i32 - (0.714 * v_val as f32) as i32)
-                .clamp(0, 255);
-            let b = (y_val + (1.772 * u_val as f32) as i32).clamp(0, 255);
+            // YUV to RGB conversion (BT.601 standard) optimized with integer arithmetic
+            // 1.402 * 1024 = 1435.648 -> 1436
+            // 0.344 * 1024 = 352.256 -> 352
+            // 0.714 * 1024 = 731.136 -> 731
+            // 1.772 * 1024 = 1814.528 -> 1815
+            let y_shifted = y_val << 10;
+            let r = ((y_shifted + 1436 * v_val) >> 10).clamp(0, 255);
+            let g = ((y_shifted - 352 * u_val - 731 * v_val) >> 10).clamp(0, 255);
+            let b = ((y_shifted + 1815 * u_val) >> 10).clamp(0, 255);
 
             let rgba_index = y_index * 4;
             rgba[rgba_index] = r as u8;
