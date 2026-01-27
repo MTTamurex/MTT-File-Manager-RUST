@@ -77,10 +77,16 @@ impl ThumbnailDiskCache {
 
         // Migration: Add path column if missing (for existing DBs)
         let _ = conn.execute("ALTER TABLE thumbnails ADD COLUMN path TEXT", []);
-        
+
         // Migration: Add width and height columns if missing (for size-aware cache)
-        let _ = conn.execute("ALTER TABLE thumbnails ADD COLUMN width INTEGER DEFAULT 0", []);
-        let _ = conn.execute("ALTER TABLE thumbnails ADD COLUMN height INTEGER DEFAULT 0", []);
+        let _ = conn.execute(
+            "ALTER TABLE thumbnails ADD COLUMN width INTEGER DEFAULT 0",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE thumbnails ADD COLUMN height INTEGER DEFAULT 0",
+            [],
+        );
 
         // OPTIMIZATION: Index on path to speed up directory clearing (DELETE ... WHERE path LIKE ...)
         conn.execute(
@@ -164,7 +170,9 @@ impl ThumbnailDiskCache {
 
         let db = self.db.lock().ok()?;
         let mut stmt = db
-            .prepare_cached("SELECT data, width, height FROM thumbnails WHERE id = ? AND modified_at = ?")
+            .prepare_cached(
+                "SELECT data, width, height FROM thumbnails WHERE id = ? AND modified_at = ?",
+            )
             .ok()?;
 
         stmt.query_row(params![id, mod_time], |row| {
@@ -172,7 +180,8 @@ impl ThumbnailDiskCache {
             let width_i64: i64 = row.get(1)?;
             let height_i64: i64 = row.get(2)?;
             Ok((data, width_i64 as u32, height_i64 as u32))
-        }).ok()
+        })
+        .ok()
     }
 
     /// Saves a thumbnail to SQLite with optimized compression
@@ -265,7 +274,10 @@ impl ThumbnailDiskCache {
 
     /// Gets covers (thumbnails) for multiple folders at once
     /// OPTIMIZED: Executes a single SQL query for N folders
-    pub fn get_folder_covers(&self, folder_paths: &[PathBuf]) -> std::collections::HashMap<PathBuf, PathBuf> {
+    pub fn get_folder_covers(
+        &self,
+        folder_paths: &[PathBuf],
+    ) -> std::collections::HashMap<PathBuf, PathBuf> {
         let mut results = std::collections::HashMap::new();
         if folder_paths.is_empty() {
             return results;
@@ -292,16 +304,18 @@ impl ThumbnailDiskCache {
                     .map(|p| p.to_string_lossy().to_string())
                     .collect();
 
-                if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(path_strs.iter()), |row| {
-                    let f_path: String = row.get(0)?;
-                    let c_path: String = row.get(1)?;
-                    Ok((f_path, c_path))
-                }) {
+                if let Ok(rows) =
+                    stmt.query_map(rusqlite::params_from_iter(path_strs.iter()), |row| {
+                        let f_path: String = row.get(0)?;
+                        let c_path: String = row.get(1)?;
+                        Ok((f_path, c_path))
+                    })
+                {
                     for row in rows.flatten() {
                         raw_results.push((row.0, row.1));
                     }
                 }
-            }
+            };
         } // Lock release
 
         // Validate existence outside lock to allow concurrency
@@ -465,25 +479,31 @@ impl ThumbnailDiskCache {
                 let _ = db.execute("BEGIN TRANSACTION", []);
 
                 // Helper local para deletar em lotes
-                let execute_batch_delete = |table: &str, key_col: &str, items: &[String]| -> usize {
-                    let mut count = 0;
-                    const BATCH_SIZE: usize = 500; // Limite seguro para variáveis SQLite
+                let execute_batch_delete =
+                    |table: &str, key_col: &str, items: &[String]| -> usize {
+                        let mut count = 0;
+                        const BATCH_SIZE: usize = 500; // Limite seguro para variáveis SQLite
 
-                    for chunk in items.chunks(BATCH_SIZE) {
-                        let placeholders = std::iter::repeat("?")
-                            .take(chunk.len())
-                            .collect::<Vec<_>>()
-                            .join(",");
+                        for chunk in items.chunks(BATCH_SIZE) {
+                            let placeholders = std::iter::repeat("?")
+                                .take(chunk.len())
+                                .collect::<Vec<_>>()
+                                .join(",");
 
-                        let sql = format!("DELETE FROM {} WHERE {} IN ({})", table, key_col, placeholders);
+                            let sql = format!(
+                                "DELETE FROM {} WHERE {} IN ({})",
+                                table, key_col, placeholders
+                            );
 
-                        match db.execute(&sql, rusqlite::params_from_iter(chunk.iter())) {
-                            Ok(c) => count += c,
-                            Err(e) => eprintln!("[GC] Failed to delete batch from {}: {:?}", table, e),
+                            match db.execute(&sql, rusqlite::params_from_iter(chunk.iter())) {
+                                Ok(c) => count += c,
+                                Err(e) => {
+                                    eprintln!("[GC] Failed to delete batch from {}: {:?}", table, e)
+                                }
+                            }
                         }
-                    }
-                    count
-                };
+                        count
+                    };
 
                 // Remove thumbnails
                 if !orphan_thumbs.is_empty() {
@@ -492,7 +512,8 @@ impl ThumbnailDiskCache {
 
                 // Remove folder_covers
                 if !orphan_folders.is_empty() {
-                    removed += execute_batch_delete("folder_covers", "folder_path", &orphan_folders);
+                    removed +=
+                        execute_batch_delete("folder_covers", "folder_path", &orphan_folders);
                 }
 
                 // Commit e VACUUM
