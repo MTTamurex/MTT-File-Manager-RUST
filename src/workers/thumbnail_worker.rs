@@ -9,7 +9,7 @@ use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex, Condvar};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Instant, SystemTime};
 use windows::core::Interface;
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
@@ -100,12 +100,12 @@ impl PriorityThumbnailQueue {
 
     pub fn push(&self, path: PathBuf, gen: usize, request_size: u32, priority: ThumbnailPriority) {
         let mut state = self.state.lock().unwrap();
-        
+
         // Deduplication: if already pending, skip
         if !state.pending.insert(path.clone()) {
-             // Optional: If priority is High and existing was Low, promote?
-             // For simplicity/performance, we skip. Most re-requests are same priority.
-             return;
+            // Optional: If priority is High and existing was Low, promote?
+            // For simplicity/performance, we skip. Most re-requests are same priority.
+            return;
         }
 
         // LIFO for High Priority (latest scroll is most important)
@@ -218,121 +218,127 @@ fn thumbnail_worker_loop(
             Some(v) => v,
             None => break,
         };
-        
-        { // Block to scope the work variable was unused, flattened loop logic instead
 
-        if true { // Simplified matching
-             {
-                if req_gen == gen_tracker.load(Ordering::Relaxed) {
-                    // EARLY EXIT 1: Skip files that already failed in this session
-                    // Prevents repeated slow retries on broken files (e.g., 0x8004B205)
-                    if is_known_failure(&path) {
-                        let _ = tx.send(ThumbnailData {
-                            path,
-                            image_data: Vec::new(),
-                            width: 0,
-                            height: 0,
-                            generation: req_gen,
-                        });
-                        throttle_repaint(&ctx, &mut last_repaint);
-                        continue;
-                    }
+        {
+            // Block to scope the work variable was unused, flattened loop logic instead
 
-                    // EARLY EXIT 1: Validate path exists before processing
-                    if !path.exists() {
-                        mark_as_failed(path.clone());
-                        let _ = tx.send(ThumbnailData {
-                            path,
-                            image_data: Vec::new(),
-                            width: 0,
-                            height: 0,
-                            generation: req_gen,
-                        });
-                        throttle_repaint(&ctx, &mut last_repaint);
-                        continue;
-                    }
-
-                    // EARLY EXIT 2: Skip cloud-only OneDrive files (not downloaded)
-                    if crate::infrastructure::onedrive::is_onedrive_path(&path)
-                        && !crate::infrastructure::onedrive::is_locally_available(&path)
-                    {
-                        mark_as_failed(path.clone());
-                        let _ = tx.send(ThumbnailData {
-                            path,
-                            image_data: Vec::new(),
-                            width: 0,
-                            height: 0,
-                            generation: req_gen,
-                        });
-                        throttle_repaint(&ctx, &mut last_repaint);
-                        continue;
-                    }
-
-                    let modified = std::fs::metadata(&path)
-                        .and_then(|m| m.modified())
-                        .unwrap_or(SystemTime::UNIX_EPOCH);
-
-                    let mut final_result = None;
-
-                    // STEP 0: Check Disk Cache with SIZE VALIDATION
-                    if let Some((cached_bytes, cached_w, cached_h)) = disk_cache.get(&path, modified) {
-                        let cached_max_dim = cached_w.max(cached_h);
-                        
-                        // Only use cache if it meets or exceeds the requested size
-                        // OR if dimensions are unknown (0) from old cache entries - regenerate those
-                        if cached_max_dim >= req_size && cached_max_dim > 0 {
-                            // Cache is good enough (or better), use it
-                            if let Ok(img) =
-                                image::load_from_memory_with_format(&cached_bytes, ImageFormat::WebP)
-                            {
-                                let rgba = img.to_rgba8();
-                                final_result = Some((rgba.to_vec(), rgba.width(), rgba.height()));
-                            }
-                        } else {
+            if true {
+                // Simplified matching
+                {
+                    if req_gen == gen_tracker.load(Ordering::Relaxed) {
+                        // EARLY EXIT 1: Skip files that already failed in this session
+                        // Prevents repeated slow retries on broken files (e.g., 0x8004B205)
+                        if is_known_failure(&path) {
+                            let _ = tx.send(ThumbnailData {
+                                path,
+                                image_data: Vec::new(),
+                                width: 0,
+                                height: 0,
+                                generation: req_gen,
+                            });
+                            throttle_repaint(&ctx, &mut last_repaint);
+                            continue;
                         }
-                        // If cached_max_dim < req_size or == 0, fall through to regeneration
-                    } else {
-                    }
 
-                    // STEP 1: Se não está em cache, decodifica com limite de concorrência
-                    if final_result.is_none() {
-                        // Aguarda até ter um slot disponível (max 4 decodes simultâneos)
-                        semaphore.acquire();
-
-                        // HYBRID PIPELINE com resize imediato
-                        if let Some((raw_data, w, h)) = generate_thumbnail_hybrid(&path) {
-                            // STEP 2: Resize to bucket (libera RAM e otimiza upload GPU)
-                            let bucket_size = get_bucket_size(req_size);
-                            let resized = resize_to_bucket(raw_data, w, h, bucket_size);
-
-                            // STEP 3: Salva versão otimizada em SQLite
-                            let _ =
-                                disk_cache.put(&path, modified, &resized.0, resized.1, resized.2);
-
-                            // STEP 4: Usa a versão resizada (já otimizada)
-                            final_result = Some(resized);
-                        } else {
-                            // EXTRACTION FAILED: Mark as failed to skip future attempts
+                        // EARLY EXIT 1: Validate path exists before processing
+                        if !path.exists() {
                             mark_as_failed(path.clone());
+                            let _ = tx.send(ThumbnailData {
+                                path,
+                                image_data: Vec::new(),
+                                width: 0,
+                                height: 0,
+                                generation: req_gen,
+                            });
+                            throttle_repaint(&ctx, &mut last_repaint);
+                            continue;
                         }
-                        // raw_data é dropado aqui automaticamente (libera RAM)
 
-                        // Libera slot
-                        semaphore.release();
+                        // EARLY EXIT 2: Skip cloud-only OneDrive files (not downloaded)
+                        if crate::infrastructure::onedrive::is_onedrive_path(&path)
+                            && !crate::infrastructure::onedrive::is_locally_available(&path)
+                        {
+                            mark_as_failed(path.clone());
+                            let _ = tx.send(ThumbnailData {
+                                path,
+                                image_data: Vec::new(),
+                                width: 0,
+                                height: 0,
+                                generation: req_gen,
+                            });
+                            throttle_repaint(&ctx, &mut last_repaint);
+                            continue;
+                        }
+
+                        let modified = std::fs::metadata(&path)
+                            .and_then(|m| m.modified())
+                            .unwrap_or(SystemTime::UNIX_EPOCH);
+
+                        let mut final_result = None;
+
+                        // STEP 0: Check Disk Cache with SIZE VALIDATION
+                        if let Some((cached_bytes, cached_w, cached_h)) =
+                            disk_cache.get(&path, modified)
+                        {
+                            let cached_max_dim = cached_w.max(cached_h);
+
+                            // Only use cache if it meets or exceeds the requested size
+                            // OR if dimensions are unknown (0) from old cache entries - regenerate those
+                            if cached_max_dim >= req_size && cached_max_dim > 0 {
+                                // Cache is good enough (or better), use it
+                                if let Ok(img) = image::load_from_memory_with_format(
+                                    &cached_bytes,
+                                    ImageFormat::WebP,
+                                ) {
+                                    let rgba = img.to_rgba8();
+                                    final_result =
+                                        Some((rgba.to_vec(), rgba.width(), rgba.height()));
+                                }
+                            } else {
+                            }
+                            // If cached_max_dim < req_size or == 0, fall through to regeneration
+                        } else {
+                        }
+
+                        // STEP 1: Se não está em cache, decodifica com limite de concorrência
+                        if final_result.is_none() {
+                            // Aguarda até ter um slot disponível (max 4 decodes simultâneos)
+                            semaphore.acquire();
+
+                            // HYBRID PIPELINE com resize imediato
+                            if let Some((raw_data, w, h)) = generate_thumbnail_hybrid(&path) {
+                                // STEP 2: Resize to bucket (libera RAM e otimiza upload GPU)
+                                let bucket_size = get_bucket_size(req_size);
+                                let resized = resize_to_bucket(raw_data, w, h, bucket_size);
+
+                                // STEP 3: Salva versão otimizada em SQLite
+                                let _ = disk_cache
+                                    .put(&path, modified, &resized.0, resized.1, resized.2);
+
+                                // STEP 4: Usa a versão resizada (já otimizada)
+                                final_result = Some(resized);
+                            } else {
+                                // EXTRACTION FAILED: Mark as failed to skip future attempts
+                                mark_as_failed(path.clone());
+                            }
+                            // raw_data é dropado aqui automaticamente (libera RAM)
+
+                            // Libera slot
+                            semaphore.release();
+                        }
+
+                        let (data, w, h) = final_result.unwrap_or_else(|| (Vec::new(), 0, 0));
+
+                        let _ = tx.send(ThumbnailData {
+                            path,
+                            image_data: data,
+                            width: w,
+                            height: h,
+                            generation: req_gen,
+                        });
+                        throttle_repaint(&ctx, &mut last_repaint);
                     }
-
-                    let (data, w, h) = final_result.unwrap_or_else(|| (Vec::new(), 0, 0));
-
-                    let _ = tx.send(ThumbnailData {
-                        path,
-                        image_data: data,
-                        width: w,
-                        height: h,
-                        generation: req_gen,
-                    });
-                    throttle_repaint(&ctx, &mut last_repaint);
                 }
-            }
             }
         }
     }
@@ -352,7 +358,12 @@ fn get_bucket_size(req_size: u32) -> u32 {
 }
 
 /// Resize RGBA buffer to bucket size while preserving aspect ratio
-fn resize_to_bucket(rgba_data: Vec<u8>, width: u32, height: u32, max_dim: u32) -> (Vec<u8>, u32, u32) {
+fn resize_to_bucket(
+    rgba_data: Vec<u8>,
+    width: u32,
+    height: u32,
+    max_dim: u32,
+) -> (Vec<u8>, u32, u32) {
     // Se já é pequeno o suficiente, retorna como está
     if width <= max_dim && height <= max_dim {
         return (rgba_data, width, height);
@@ -378,7 +389,9 @@ fn resize_to_bucket(rgba_data: Vec<u8>, width: u32, height: u32, max_dim: u32) -
         // Use CatmullRom for high-quality sharpening with good performance.
         let resized = dynamic.resize(new_w, new_h, image::imageops::FilterType::CatmullRom);
         let rgba = resized.into_rgba8();
-        return (rgba.into_vec(), rgba.width(), rgba.height());
+        let w = rgba.width();
+        let h = rgba.height();
+        return (rgba.into_vec(), w, h);
     }
 
     // Fallback: retorna original se resize falhar ou tamanho incorreto
@@ -954,8 +967,6 @@ fn hbitmap_to_rgba(
         Ok((buffer, width as u32, height as u32))
     }
 }
-
-
 
 fn throttle_repaint(ctx: &egui::Context, last_repaint: &mut Instant) {
     if last_repaint.elapsed().as_millis() >= 33 {
