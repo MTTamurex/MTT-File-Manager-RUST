@@ -1,7 +1,6 @@
 use clipboard_win::{formats, Clipboard, Setter};
 use std::path::{Path, PathBuf};
 use windows::core::{Interface, PCWSTR};
-use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER,
     COINIT_APARTMENTTHREADED,
@@ -10,11 +9,17 @@ use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
 
 use crate::infrastructure::windows::recycle_bin;
 use crate::infrastructure::windows::shell_operations;
+use windows::Win32::Foundation::HWND;
 
 /// Error type for file operations
 type OpResult<T> = Result<T, String>;
 
 /// Deletes a file or directory using Windows Shell (Recycle Bin).
+///
+/// # Warning
+/// This is a BLOCKING operation. Do not use on the UI thread.
+/// Use `ImageViewerApp::delete_with_shell_for_paths` instead which uses a worker.
+#[deprecated(note = "Blocking operation. Use ImageViewerApp::file_op_sender instead.")]
 pub fn delete_with_shell(path: &Path, hwnd: Option<HWND>) -> OpResult<bool> {
     let hwnd = hwnd.unwrap_or(HWND(std::ptr::null_mut()));
     let success = shell_operations::delete_item_with_shell(path, hwnd);
@@ -32,6 +37,11 @@ pub fn open_with_shell(path: &Path, _hwnd: Option<HWND>) -> OpResult<()> {
 }
 
 /// Renames a file using Windows Shell.
+///
+/// # Warning
+/// This is a BLOCKING operation. Do not use on the UI thread.
+/// Use `ImageViewerApp::rename_with_shell` instead which uses a worker.
+#[deprecated(note = "Blocking operation. Use ImageViewerApp::file_op_sender instead.")]
 pub fn rename_with_shell(path: &Path, new_name: &str, hwnd: Option<HWND>) -> OpResult<bool> {
     let hwnd = hwnd.unwrap_or(HWND(std::ptr::null_mut()));
     let success = shell_operations::rename_item_with_shell(path, new_name, hwnd);

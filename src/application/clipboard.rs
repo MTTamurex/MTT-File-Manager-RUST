@@ -1,8 +1,6 @@
 use crate::application::file_operations;
-use crate::infrastructure::windows::shell_operations;
 use crate::infrastructure::windows_clipboard;
 use std::path::PathBuf;
-use windows::Win32::Foundation::HWND;
 
 /// Clipboard operation type
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -77,56 +75,22 @@ impl ClipboardManager {
         self.internal_op = Some(ClipboardOp::Move);
     }
 
-    /// Paste files to destination
-    /// Returns: Ok(true) if files were moved (source should be cleared), Ok(false) if copied.
-    pub fn paste(&mut self, dest_folder: &PathBuf, hwnd: Option<HWND>) -> Result<bool, String> {
-        let hwnd = hwnd.unwrap_or(HWND(std::ptr::null_mut()));
-
+    /// Returns files and operation type (is_move) for pasting.
+    /// Does NOT perform the operation. Use this to prepare an async operation.
+    pub fn get_files_to_paste(&self) -> Option<(Vec<PathBuf>, bool)> {
         // 1. Try System Clipboard first
         if let Some(files) = windows_clipboard::get_files_from_clipboard() {
             let op = windows_clipboard::get_clipboard_operation();
             let is_move = matches!(op, Some(windows_clipboard::ClipboardFileOp::Move));
+            return Some((files, is_move));
+        }
 
-            self.execute_paste(files, is_move, dest_folder, hwnd)
-        } else if !self.internal_files.is_empty() {
-            // 2. Fallback to Internal
+        // 2. Fallback to Internal
+        if !self.internal_files.is_empty() {
             let is_move = matches!(self.internal_op, Some(ClipboardOp::Move));
-            let files = self.internal_files.clone();
-
-            let result = self.execute_paste(files, is_move, dest_folder, hwnd)?;
-
-            if result && is_move {
-                self.internal_files.clear();
-                self.internal_op = None;
-            }
-            Ok(result)
-        } else {
-            Err("Área de transferência vazia".to_string())
-        }
-    }
-
-    fn execute_paste(
-        &self,
-        files: Vec<PathBuf>,
-        is_move: bool,
-        dest_folder: &PathBuf,
-        hwnd: HWND,
-    ) -> Result<bool, String> {
-        let mut any_success = false;
-
-        for src_path in files {
-            // Skip logic is inside shell_operations helper for move, but explicit check implies intention
-            if is_move {
-                if shell_operations::move_item_with_shell(&src_path, dest_folder, hwnd) {
-                    any_success = true;
-                }
-            } else {
-                if shell_operations::copy_item_with_shell(&src_path, dest_folder, hwnd) {
-                    any_success = true;
-                }
-            }
+            return Some((self.internal_files.clone(), is_move));
         }
 
-        Ok(any_success)
+        None
     }
 }
