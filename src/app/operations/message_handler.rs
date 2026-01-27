@@ -310,22 +310,32 @@ impl ImageViewerApp {
         }
 
         // 3. Icon Worker: Recebe resultados de ícones assíncronos
-        while let Ok((path, pixels, width, height)) = self.icon_res_receiver.try_recv() {
-            self.loading_icons.remove(&path);
+        // PERFORMANCE: Throttle icon uploads to prevent stutter (Max 5 per frame)
+        let mut icon_uploads = 0;
+        while icon_uploads < 5 {
+            if let Ok((path, pixels, width, height)) = self.icon_res_receiver.try_recv() {
+                self.loading_icons.remove(&path);
 
-            // Carrega textura no cache de ícones
-            let cache_key = path.to_string_lossy().to_string();
-            if !self.item_icon_loader.icon_cache.contains(&cache_key) {
-                let texture = ctx.load_texture(
-                    cache_key.clone(),
-                    egui::ColorImage::from_rgba_unmultiplied(
-                        [width as usize, height as usize],
-                        &pixels,
-                    ),
-                    egui::TextureOptions::NEAREST,
-                );
-                self.item_icon_loader.icon_cache.put(cache_key, texture);
+                // Carrega textura no cache de ícones
+                let cache_key = path.to_string_lossy().to_string();
+                if !self.item_icon_loader.icon_cache.contains(&cache_key) {
+                    let texture = ctx.load_texture(
+                        cache_key.clone(),
+                        egui::ColorImage::from_rgba_unmultiplied(
+                            [width as usize, height as usize],
+                            &pixels,
+                        ),
+                        egui::TextureOptions::NEAREST,
+                    );
+                    self.item_icon_loader.icon_cache.put(cache_key, texture);
+                }
+                icon_uploads += 1;
+            } else {
+                break;
             }
+        }
+        if icon_uploads >= 5 {
+            ctx.request_repaint();
         }
 
         // 4. Metadata Worker: drena respostas mesmo sem thumbnails
@@ -377,9 +387,9 @@ impl ImageViewerApp {
 
         // Generous upload limits since cache reads from SSD are fast
         let max_uploads_per_frame = if is_scrolling {
-            10 // Good throughput during scroll - SSD cache is fast
+            5 // Reduced to prevent stutter during scrolling
         } else {
-            30 // Very generous when idle - quickly load all visible thumbnails
+            10 // Moderate when idle to maintain responsiveness
         };
 
         let mut uploads_this_frame = 0;
@@ -441,22 +451,32 @@ impl ImageViewerApp {
         }
 
         // 6. Folder Previews (Native Sandwich effect)
-        while let Ok(data) = self.folder_preview_receiver.try_recv() {
-            self.cache_manager.finish_folder_preview_loading(&data.path);
+        // PERFORMANCE: Throttle folder preview uploads (Max 2 per frame - heavy textures)
+        let mut folder_uploads = 0;
+        while folder_uploads < 2 {
+            if let Ok(data) = self.folder_preview_receiver.try_recv() {
+                self.cache_manager.finish_folder_preview_loading(&data.path);
 
-            // Only create texture if we have actual data
-            if !data.rgba_data.is_empty() {
-                let texture = ctx.load_texture(
-                    format!("folder_preview_{}", data.path.to_string_lossy()),
-                    egui::ColorImage::from_rgba_unmultiplied(
-                        [data.width as usize, data.height as usize],
-                        &data.rgba_data,
-                    ),
-                    egui::TextureOptions::NEAREST,
-                );
+                // Only create texture if we have actual data
+                if !data.rgba_data.is_empty() {
+                    let texture = ctx.load_texture(
+                        format!("folder_preview_{}", data.path.to_string_lossy()),
+                        egui::ColorImage::from_rgba_unmultiplied(
+                            [data.width as usize, data.height as usize],
+                            &data.rgba_data,
+                        ),
+                        egui::TextureOptions::NEAREST,
+                    );
 
-                self.cache_manager.put_folder_preview(data.path, texture);
+                    self.cache_manager.put_folder_preview(data.path, texture);
+                }
+                folder_uploads += 1;
+            } else {
+                break;
             }
+        }
+        if folder_uploads >= 2 {
+            ctx.request_repaint();
         }
 
         // 9. FOLDER SIZE RESULTS
