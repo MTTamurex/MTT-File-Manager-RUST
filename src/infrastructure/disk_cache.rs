@@ -263,6 +263,58 @@ impl ThumbnailDiskCache {
         }
     }
 
+    /// Gets covers (thumbnails) for multiple folders at once
+    /// OPTIMIZED: Executes a single SQL query for N folders
+    pub fn get_folder_covers(&self, folder_paths: &[PathBuf]) -> std::collections::HashMap<PathBuf, PathBuf> {
+        let mut results = std::collections::HashMap::new();
+        if folder_paths.is_empty() {
+            return results;
+        }
+
+        let mut raw_results = Vec::new();
+
+        {
+            let db = match self.db.lock() {
+                Ok(db) => db,
+                Err(_) => return results,
+            };
+
+            // SQLite parameter limit is usually 999, so 250 (batch size) is safe
+            let placeholders: Vec<&str> = folder_paths.iter().map(|_| "?").collect();
+            let query = format!(
+                "SELECT folder_path, cover_path FROM folder_covers WHERE folder_path IN ({})",
+                placeholders.join(",")
+            );
+
+            if let Ok(mut stmt) = db.prepare(&query) {
+                let path_strs: Vec<String> = folder_paths
+                    .iter()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect();
+
+                if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(path_strs.iter()), |row| {
+                    let f_path: String = row.get(0)?;
+                    let c_path: String = row.get(1)?;
+                    Ok((f_path, c_path))
+                }) {
+                    for row in rows.flatten() {
+                        raw_results.push((row.0, row.1));
+                    }
+                }
+            }
+        } // Lock release
+
+        // Validate existence outside lock to allow concurrency
+        for (f_path, c_path) in raw_results {
+            let cover = PathBuf::from(c_path);
+            if cover.exists() {
+                results.insert(PathBuf::from(f_path), cover);
+            }
+        }
+
+        results
+    }
+
     /// Obtém a capa (thumbnail) de uma pasta se já foi descoberta
     pub fn get_folder_cover(&self, folder_path: &Path) -> Option<PathBuf> {
         let db = self.db.lock().ok()?;
