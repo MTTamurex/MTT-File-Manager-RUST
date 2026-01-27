@@ -719,8 +719,10 @@ impl ImageViewerApp {
             return;
         }
 
-        // Clone item data to avoid borrowing self.items during the render
-        let item = self.items[idx].clone();
+        // Clone Arc to avoid borrowing self.items, allowing us to borrow the item
+        // without a deep clone while still mutating self later
+        let items_arc = self.items.clone();
+        let item = &items_arc[idx];
         let is_renaming = self
             .renaming_state
             .as_ref()
@@ -745,7 +747,7 @@ impl ImageViewerApp {
             let renaming_text = renaming_text_clone.as_mut();
 
             let mut ctx = ItemSlotContext {
-                item: &item,
+                item,
                 idx,
                 thumbnail_size: self.thumbnail_size,
                 is_renaming,
