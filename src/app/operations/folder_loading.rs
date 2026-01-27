@@ -196,11 +196,9 @@ impl ImageViewerApp {
                                     0
                                 };
 
-                                let folder_cover = if is_dir {
-                                    disk_cache.get_folder_cover(&full_path)
-                                } else {
-                                    None
-                                };
+                                // OPTIMIZATION: Folder cover loading moved to batch (outside loop)
+                                // to avoid N+1 queries in SQLite.
+                                let folder_cover = None;
 
                                 // Check if file is currently open (being used)
                                 let sync_status =
@@ -235,6 +233,23 @@ impl ImageViewerApp {
 
                                 // SE o lote encheu (250 itens), envia e limpa
                                 if batch.len() >= 250 {
+                                    // PRE-FETCH COVERS (Batch Optimization)
+                                    let folders: Vec<PathBuf> = batch.iter()
+                                        .filter(|e| e.is_dir)
+                                        .map(|e| e.path.clone())
+                                        .collect();
+
+                                    if !folders.is_empty() {
+                                        let covers = disk_cache.get_folder_covers(&folders);
+                                        for item in batch.iter_mut() {
+                                            if item.is_dir {
+                                                if let Some(cover) = covers.get(&item.path) {
+                                                    item.folder_cover = Some(cover.clone());
+                                                }
+                                            }
+                                        }
+                                    }
+
                                     let _ = file_entry_sender.send((my_gen, batch.clone()));
                                     batch.clear();
                                     ctx.request_repaint(); // Acorda a UI para mostrar progresso
@@ -252,6 +267,23 @@ impl ImageViewerApp {
 
             // Envia o restante (último lote) se sobrou algo e a geração ainda é válida
             if !batch.is_empty() && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+                // PRE-FETCH COVERS (Batch Optimization) - Last batch
+                let folders: Vec<PathBuf> = batch.iter()
+                    .filter(|e| e.is_dir)
+                    .map(|e| e.path.clone())
+                    .collect();
+
+                if !folders.is_empty() {
+                    let covers = disk_cache.get_folder_covers(&folders);
+                    for item in batch.iter_mut() {
+                        if item.is_dir {
+                            if let Some(cover) = covers.get(&item.path) {
+                                item.folder_cover = Some(cover.clone());
+                            }
+                        }
+                    }
+                }
+
                 let _ = file_entry_sender.send((my_gen, batch));
                 ctx.request_repaint();
             }
