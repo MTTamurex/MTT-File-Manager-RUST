@@ -319,17 +319,17 @@ impl ThumbnailDiskCache {
         } // Lock release
 
         // Validate existence outside lock to allow concurrency
+        // OPTIMIZATION: Removed `exists()` check to avoid N+1 I/O syscalls.
+        // The thumbnail worker will handle missing files gracefully.
         for (f_path, c_path) in raw_results {
-            let cover = PathBuf::from(c_path);
-            if cover.exists() {
-                results.insert(PathBuf::from(f_path), cover);
-            }
+            results.insert(PathBuf::from(f_path), PathBuf::from(c_path));
         }
 
         results
     }
 
     /// Obtém a capa (thumbnail) de uma pasta se já foi descoberta
+    #[allow(dead_code)]
     pub fn get_folder_cover(&self, folder_path: &Path) -> Option<PathBuf> {
         let db = self.db.lock().ok()?;
         let mut stmt = db
