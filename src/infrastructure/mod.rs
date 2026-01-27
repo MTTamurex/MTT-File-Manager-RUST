@@ -2,6 +2,7 @@
 
 pub mod cache;
 pub mod disk_cache;
+pub mod io_priority;
 pub mod onedrive;
 pub mod security;
 pub mod watcher;
