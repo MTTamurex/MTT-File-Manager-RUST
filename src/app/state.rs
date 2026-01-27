@@ -13,9 +13,11 @@ pub enum LastInput {
     Keyboard,
 }
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 // use std::num::NonZeroUsize;
 use std::path::PathBuf;
+// PERFORMANCE: FxHashSet uses faster hashing for PathBuf keys
+use crate::ui::cache::FxHashSet;
 use std::sync::atomic::AtomicUsize;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
@@ -55,7 +57,7 @@ pub struct ImageViewerApp {
     // COVER WORKER: Sistema de capas de pasta (Single Thread Worker)
     pub cover_worker_sender: Sender<PathBuf>, // UI → Worker: Envia pasta para processar
     pub cover_worker_receiver: Receiver<(PathBuf, Option<PathBuf>)>, // Worker → UI: Resultado
-    pub scanned_folders: HashSet<PathBuf>,    // Cache: evita re-scan
+    pub scanned_folders: FxHashSet<PathBuf>,    // Cache: evita re-scan
 
     // FOLDER PREVIEW WORKER: Native Windows Shell folder previews (sandwich effect)
     pub folder_preview_sender: Sender<PathBuf>,
@@ -85,7 +87,7 @@ pub struct ImageViewerApp {
     pub thumbnail_size: f32, // Zoom: 64-512
     pub selected_item: Option<usize>,
     pub selected_file: Option<FileEntry>,
-    pub multi_selection: HashSet<PathBuf>,
+    pub multi_selection: FxHashSet<PathBuf>,
     pub selected_thumbnail: Option<egui::TextureHandle>, // Persistent thumbnail for preview panel
     pub selected_gif: Option<crate::ui::components::media_preview::GifPlayer>, // Local GIF for preview panel
     pub media_preview: Option<MediaPreview>,              // Global media preview (video/image)
@@ -94,7 +96,7 @@ pub struct ImageViewerApp {
     pub metadata_req_sender: Sender<(PathBuf, u64)>,
     pub metadata_res_receiver: Receiver<(PathBuf, u64, windows_infra::MediaMetadata)>,
     pub metadata_cache: LruCache<PathBuf, (u64, windows_infra::MediaMetadata)>,
-    pub metadata_loading: HashSet<PathBuf>,
+    pub metadata_loading: FxHashSet<PathBuf>,
     pub last_metadata_refresh: Instant,
     pub last_metadata_path: Option<PathBuf>,
     pub show_preview_panel: bool,
@@ -145,7 +147,7 @@ pub struct ImageViewerApp {
     // ASYNC ICON WORKER (evita I/O bloqueante no render loop)
     pub icon_req_sender: Sender<PathBuf>, // UI → Worker
     pub icon_res_receiver: Receiver<(PathBuf, Vec<u8>, u32, u32)>, // Worker → UI
-    pub loading_icons: HashSet<PathBuf>,  // Tracking in-progress
+    pub loading_icons: FxHashSet<PathBuf>,  // Tracking in-progress
 
     // NOTIFICATION SYSTEM (toast messages)
     pub notifications: crate::application::NotificationManager,
@@ -195,7 +197,7 @@ pub struct ImageViewerApp {
     pub folder_size_req_sender: Sender<PathBuf>, // UI → Worker
     pub folder_size_res_receiver: Receiver<(PathBuf, u64)>, // Worker → UI
     pub folder_size_cache: std::collections::HashMap<PathBuf, u64>, // Calculated sizes
-    pub folder_size_loading: HashSet<PathBuf>,   // Currently calculating
+    pub folder_size_loading: FxHashSet<PathBuf>,   // Currently calculating
 
     // RECYCLE BIN CACHE
     pub deletion_date_cache: LruCache<String, String>,

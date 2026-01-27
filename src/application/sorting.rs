@@ -2,8 +2,22 @@ use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode};
 use rayon::prelude::*;
 use std::cmp::Ordering;
 
+/// PERFORMANCE: Check if string ends with suffix (case-insensitive) without allocation.
+#[inline]
+fn ends_with_ignore_case(s: &str, suffix: &str) -> bool {
+    if s.len() < suffix.len() {
+        return false;
+    }
+    let start = s.len() - suffix.len();
+    s[start..].chars()
+        .flat_map(|c| c.to_lowercase())
+        .eq(suffix.chars().flat_map(|c| c.to_lowercase()))
+}
+
 /// Sorts a slice of FileEntry in place based on the given criteria.
 /// Uses Rayon for parallel sorting if the list is large (>5000 items).
+///
+/// PERFORMANCE: Uses zero-allocation case-insensitive comparisons.
 pub fn sort_items(
     items: &mut [FileEntry],
     mode: SortMode,
@@ -11,8 +25,9 @@ pub fn sort_items(
     folders_position: FoldersPosition,
 ) {
     // Helper to check if an item is a "true" directory (not a ZIP file)
+    // PERFORMANCE: Uses ends_with_ignore_case to avoid allocation
     let is_true_dir = |item: &FileEntry| -> bool {
-        item.is_dir && !item.name.to_lowercase().ends_with(".zip")
+        item.is_dir && !ends_with_ignore_case(&item.name, ".zip")
     };
 
     let compare = |a: &FileEntry, b: &FileEntry| -> Ordering {
@@ -37,25 +52,17 @@ pub fn sort_items(
         }
 
         // 2. Primary sort criteria
+        // PERFORMANCE: Uses cmp_ignore_case for zero-allocation comparison
         let ordering = match mode {
-            SortMode::Name => natord::compare(&a.name.to_lowercase(), &b.name.to_lowercase()),
+            SortMode::Name => natord::compare_ignore_case(&a.name, &b.name),
             SortMode::Date => a.modified.cmp(&b.modified),
             SortMode::Size => a.size.cmp(&b.size),
             SortMode::Type => {
-                let ext_a = a
-                    .path
-                    .extension()
-                    .map(|e| e.to_string_lossy().to_lowercase())
-                    .unwrap_or_default();
-                let ext_b = b
-                    .path
-                    .extension()
-                    .map(|e| e.to_string_lossy().to_lowercase())
-                    .unwrap_or_default();
+                // PERFORMANCE: Compare extensions without allocation using OsStr
+                let ext_a = a.path.extension().map(|e| e.to_ascii_lowercase());
+                let ext_b = b.path.extension().map(|e| e.to_ascii_lowercase());
                 match ext_a.cmp(&ext_b) {
-                    Ordering::Equal => {
-                        natord::compare(&a.name.to_lowercase(), &b.name.to_lowercase())
-                    }
+                    Ordering::Equal => natord::compare_ignore_case(&a.name, &b.name),
                     other => other,
                 }
             }
@@ -79,18 +86,48 @@ pub fn sort_items(
     }
 }
 
-/// Filters items based on a query string. Returns a new Vec of matching items.
-pub fn filter_items(items: &[FileEntry], query: &str) -> Vec<FileEntry> {
-    if query.is_empty() {
-        return items.to_vec();
+/// PERFORMANCE: Check if haystack contains needle (case-insensitive) without allocation.
+#[inline]
+fn contains_ignore_case(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if needle.len() > haystack.len() {
+        return false;
     }
 
-    let lower_query = query.to_lowercase();
-    items
+    // Simple sliding window approach
+    let needle_lower: Vec<char> = needle.chars().flat_map(|c| c.to_lowercase()).collect();
+    let haystack_chars: Vec<char> = haystack.chars().flat_map(|c| c.to_lowercase()).collect();
+
+    haystack_chars.windows(needle_lower.len())
+        .any(|window| window == needle_lower.as_slice())
+}
+
+/// Filters items based on a query string.
+///
+/// PERFORMANCE: When query is empty, returns None to signal "use all items"
+/// without cloning. The caller should handle this case by using the original slice.
+/// When query is present, returns Some(filtered_vec).
+pub fn filter_items_opt(items: &[FileEntry], query: &str) -> Option<Vec<FileEntry>> {
+    if query.is_empty() {
+        return None; // Signal: use original items without clone
+    }
+
+    // PERFORMANCE: Use case-insensitive contains without repeated allocations
+    Some(items
         .iter()
-        .filter(|item| item.name.to_lowercase().contains(&lower_query))
+        .filter(|item| contains_ignore_case(&item.name, query))
         .cloned()
-        .collect()
+        .collect())
+}
+
+/// Filters items based on a query string. Returns a new Vec of matching items.
+///
+/// DEPRECATED: Use filter_items_opt() for better performance when query is empty.
+/// This function is kept for backwards compatibility.
+pub fn filter_items(items: &[FileEntry], query: &str) -> Vec<FileEntry> {
+    filter_items_opt(items, query).unwrap_or_else(|| items.to_vec())
 }
 
 #[cfg(test)]

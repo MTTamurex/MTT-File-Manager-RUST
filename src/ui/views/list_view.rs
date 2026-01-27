@@ -6,6 +6,8 @@ use std::path::PathBuf;
 
 use crate::domain::file_entry::{FileEntry, SortMode, SyncStatus};
 use crate::infrastructure::windows::{format_date, format_size};
+// PERFORMANCE: Use FxHashSet for PathBuf keys - faster hashing than std::collections::HashSet
+use crate::ui::cache::FxHashSet;
 
 // PERFORMANCE: Tooltip debounce to avoid creation/destruction during scroll
 const TOOLTIP_DELAY_SECS: f32 = 0.3; // Only show tooltip after 300ms hover
@@ -15,7 +17,7 @@ pub struct ListViewContext<'a> {
     pub items: &'a [FileEntry],
     pub selected_item: Option<usize>,
     pub selected_file: Option<&'a FileEntry>,
-    pub multi_selection: &'a std::collections::HashSet<PathBuf>,
+    pub multi_selection: &'a FxHashSet<PathBuf>,
     pub sort_mode: SortMode,
     pub sort_descending: bool,
     pub renaming_state: Option<(usize, String)>,
@@ -25,8 +27,8 @@ pub struct ListViewContext<'a> {
     pub is_recycle_bin_view: bool,
     pub is_onedrive_folder: bool,
     pub texture_cache: &'a mut lru::LruCache<PathBuf, egui::TextureHandle>,
-    pub loading_set: &'a mut std::collections::HashSet<PathBuf>,
-    pub scanned_folders: &'a mut std::collections::HashSet<PathBuf>,
+    pub loading_set: &'a mut FxHashSet<PathBuf>,
+    pub scanned_folders: &'a mut FxHashSet<PathBuf>,
     pub folder_icon_texture: Option<&'a egui::TextureHandle>,
     pub computer_icon: Option<&'a egui::TextureHandle>,
     pub drive_icon_cache: &'a mut lru::LruCache<String, egui::TextureHandle>,
@@ -43,7 +45,7 @@ pub struct ListViewContext<'a> {
     pub last_scroll_time: &'a mut std::time::Instant,
     pub last_scroll_offset: &'a mut f32,
     /// Conjunto de itens aguardando upload GPU
-    pub pending_upload_set: &'a mut std::collections::HashSet<PathBuf>,
+    pub pending_upload_set: &'a mut FxHashSet<PathBuf>,
 }
 
 /// Action returned by list view

@@ -20,6 +20,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 webp = "0.3"  # For lossy WebP compression with quality control
 
 kamadak-exif = "0.5"  # For direct EXIF reading from JPEG files
+rustc-hash = "2.0"    # FxHashSet/FxHashMap - faster hashing for PathBuf keys
 clipboard-win = "5.4"  # For Windows clipboard integration (CF_HDROP format)
 resvg = "0.44"          # For SVG icon rendering
 usvg = "0.44"           # For SVG parsing

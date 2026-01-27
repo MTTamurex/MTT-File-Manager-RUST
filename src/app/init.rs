@@ -5,8 +5,9 @@
 
 // use eframe::egui;
 use lru::LruCache;
-use std::collections::HashSet;
 use std::num::NonZeroUsize;
+// PERFORMANCE: FxHashSet uses faster hashing for PathBuf keys
+use crate::ui::cache::FxHashSet;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::mpsc;
@@ -252,7 +253,7 @@ impl ImageViewerApp {
             // Cover Worker
             cover_worker_sender: cover_req_tx,
             cover_worker_receiver: cover_res_rx,
-            scanned_folders: HashSet::new(),
+            scanned_folders: FxHashSet::default(),
             // audio_device, // Removed
             // Folder Preview Worker (Native Windows Shell)
             folder_preview_sender: folder_preview_tx,
@@ -284,7 +285,7 @@ impl ImageViewerApp {
             last_drive_refresh: Instant::now(),
             thumbnail_size, // Loaded from SQLite
             selected_item: None,
-            multi_selection: HashSet::new(),
+            multi_selection: FxHashSet::default(),
             total_items: 0,
             // Search & Navigation (NEW)
             all_items: Vec::new(),
@@ -318,7 +319,7 @@ impl ImageViewerApp {
             // ASYNC ICON WORKER
             icon_req_sender: icon_req_tx,
             icon_res_receiver: icon_res_rx,
-            loading_icons: HashSet::new(),
+            loading_icons: FxHashSet::default(),
 
             // NOTIFICATION SYSTEM
             notifications: crate::application::NotificationManager::new(),
@@ -365,7 +366,7 @@ impl ImageViewerApp {
             metadata_req_sender: meta_req_tx,
             metadata_res_receiver: meta_res_rx,
             metadata_cache: LruCache::new(NonZeroUsize::new(theme::METADATA_CACHE_SIZE).unwrap()),
-            metadata_loading: HashSet::new(),
+            metadata_loading: FxHashSet::default(),
             last_metadata_refresh: Instant::now(),
             last_metadata_path: None,
 
@@ -382,7 +383,7 @@ impl ImageViewerApp {
             folder_size_req_sender: folder_size_req_tx,
             folder_size_res_receiver: folder_size_res_rx,
             folder_size_cache: std::collections::HashMap::new(),
-            folder_size_loading: HashSet::new(),
+            folder_size_loading: FxHashSet::default(),
 
             // RECYCLE BIN CACHE
             deletion_date_cache: LruCache::new(NonZeroUsize::new(200).unwrap()),
