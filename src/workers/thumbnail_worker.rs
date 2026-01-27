@@ -1,11 +1,17 @@
 //! Thumbnail worker for parallel hybrid thumbnail extraction
 //! Pipeline: 1. image crate (Fast) -> 2. WIC (Robust/CMYK) -> 3. Shell API (Universal/Video)
+//!
+//! PERFORMANCE: Uses I/O priority system to:
+//! - Minimize disk seeks on HDDs by grouping requests by directory
+//! - Adjust thread priority based on request urgency
+//! - Prioritize visible thumbnails over prefetch/background work
 
 use crate::domain::thumbnail::ThumbnailData;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
+use crate::infrastructure::io_priority::{self, IOPriority};
 use eframe::egui;
 use image::{DynamicImage, ImageFormat};
-use std::collections::{HashSet, VecDeque};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
@@ -19,10 +25,10 @@ const MAX_CONCURRENT_DECODES: usize = 4;
 
 /// Global cache of paths that failed thumbnail extraction (shared across workers)
 /// Prevents re-attempting extraction on files that consistently fail (e.g., corrupt files)
-static FAILED_PATHS: std::sync::OnceLock<Mutex<HashSet<PathBuf>>> = std::sync::OnceLock::new();
+static FAILED_PATHS: std::sync::OnceLock<Mutex<FxHashSet<PathBuf>>> = std::sync::OnceLock::new();
 
-fn get_failed_paths() -> &'static Mutex<HashSet<PathBuf>> {
-    FAILED_PATHS.get_or_init(|| Mutex::new(HashSet::new()))
+fn get_failed_paths() -> &'static Mutex<FxHashSet<PathBuf>> {
+    FAILED_PATHS.get_or_init(|| Mutex::new(FxHashSet::default()))
 }
 
 /// Check if a path has previously failed extraction
@@ -60,17 +66,34 @@ pub fn clear_all_failures() {
     }
 }
 
-/// Priority levels for thumbnail requests
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ThumbnailPriority {
-    High, // Visible items (LIFO/FIFO)
-    Low,  // Prefetch (Background)
+/// Legacy alias for backwards compatibility with old ThumbnailPriority enum
+/// High -> Interactive, Low -> Prefetch
+pub type ThumbnailPriority = IOPriority;
+
+/// Thumbnail request with priority and metadata
+#[derive(Debug, Clone)]
+struct ThumbnailRequest {
+    path: PathBuf,
+    generation: usize,
+    size: u32,
+    priority: IOPriority,
 }
 
+/// Queue state with directory-grouped requests for HDD optimization
 struct QueueState {
-    high: VecDeque<(PathBuf, usize, u32)>,
-    low: VecDeque<(PathBuf, usize, u32)>,
-    pending: HashSet<PathBuf>,
+    /// Requests grouped by parent directory (for HDD locality optimization)
+    by_directory: FxHashMap<PathBuf, Vec<ThumbnailRequest>>,
+
+    /// Quick lookup to prevent duplicates
+    pending: FxHashSet<PathBuf>,
+
+    /// Whether we're on an SSD (detected on first request)
+    is_ssd: Option<bool>,
+
+    /// Current directory being processed (for HDD locality)
+    current_directory: Option<PathBuf>,
+
+    /// Shutdown flag
     shutdown: bool,
 }
 
@@ -83,9 +106,10 @@ impl PriorityThumbnailQueue {
     pub fn new() -> Self {
         Self {
             state: Mutex::new(QueueState {
-                high: VecDeque::new(),
-                low: VecDeque::new(),
-                pending: HashSet::new(),
+                by_directory: FxHashMap::default(),
+                pending: FxHashSet::default(),
+                is_ssd: None,
+                current_directory: None,
                 shutdown: false,
             }),
             condvar: Condvar::new(),
@@ -98,44 +122,182 @@ impl PriorityThumbnailQueue {
         self.condvar.notify_all();
     }
 
-    pub fn push(&self, path: PathBuf, gen: usize, request_size: u32, priority: ThumbnailPriority) {
+    /// Push a thumbnail request with the new IOPriority system
+    pub fn push(&self, path: PathBuf, gen: usize, request_size: u32, priority: IOPriority) {
         let mut state = self.state.lock().unwrap();
 
         // Deduplication: if already pending, skip
         if !state.pending.insert(path.clone()) {
-            // Optional: If priority is High and existing was Low, promote?
-            // For simplicity/performance, we skip. Most re-requests are same priority.
             return;
         }
 
-        // LIFO for High Priority (latest scroll is most important)
-        // FIFO for Low Priority (finish prefetch in order)
-        match priority {
-            ThumbnailPriority::High => state.high.push_back((path, gen, request_size)),
-            ThumbnailPriority::Low => state.low.push_back((path, gen, request_size)),
+        // Detect disk type on first request
+        if state.is_ssd.is_none() {
+            state.is_ssd = Some(io_priority::is_ssd(&path));
+            if !state.is_ssd.unwrap() {
+                eprintln!("[IO] HDD detected - enabling directory grouping for seek optimization");
+            }
         }
+
+        // Group by parent directory (for HDD seek optimization)
+        let parent = path.parent().unwrap_or(&path).to_path_buf();
+
+        let request = ThumbnailRequest {
+            path,
+            generation: gen,
+            size: request_size,
+            priority,
+        };
+
+        state
+            .by_directory
+            .entry(parent)
+            .or_insert_with(Vec::new)
+            .push(request);
+
         self.condvar.notify_one();
     }
 
+    /// Pop the next request, optimizing for disk locality on HDDs
     pub fn pop(&self) -> Option<(PathBuf, usize, u32)> {
         let mut state = self.state.lock().unwrap();
+
         loop {
             if state.shutdown {
                 return None;
             }
-            // High priority first (LIFO - pop_back to prioritize newest)
-            if let Some(item) = state.high.pop_back() {
-                state.pending.remove(&item.0);
-                return Some(item);
+
+            // Try to get next item
+            if let Some(request) = Self::pop_next_request(&mut state) {
+                state.pending.remove(&request.path);
+
+                // Adjust thread priority based on request priority
+                io_priority::set_thread_priority(request.priority);
+
+                return Some((request.path, request.generation, request.size));
             }
-            // Low priority second (FIFO)
-            if let Some(item) = state.low.pop_front() {
-                state.pending.remove(&item.0);
-                return Some(item);
-            }
+
             // Wait for new work
             state = self.condvar.wait(state).unwrap();
         }
+    }
+
+    /// Get the next request, using locality optimization for HDDs
+    fn pop_next_request(state: &mut QueueState) -> Option<ThumbnailRequest> {
+        if state.by_directory.is_empty() {
+            return None;
+        }
+
+        let is_ssd = state.is_ssd.unwrap_or(true);
+
+        if is_ssd {
+            // SSD: Just get highest priority item from any directory
+            Self::pop_highest_priority(state)
+        } else {
+            // HDD: Prefer items from current directory to minimize seeks
+            Self::pop_with_locality(state)
+        }
+    }
+
+    /// Pop highest priority item regardless of directory (SSD mode)
+    fn pop_highest_priority(state: &mut QueueState) -> Option<ThumbnailRequest> {
+        // Find directory with highest priority item
+        let best_dir = state
+            .by_directory
+            .iter()
+            .filter(|(_, items)| !items.is_empty())
+            .min_by_key(|(_, items)| {
+                items
+                    .iter()
+                    .map(|r| r.priority)
+                    .min()
+                    .unwrap_or(IOPriority::Background)
+            })
+            .map(|(dir, _)| dir.clone())?;
+
+        Self::pop_from_directory(state, &best_dir)
+    }
+
+    /// Pop item with locality preference (HDD mode)
+    fn pop_with_locality(state: &mut QueueState) -> Option<ThumbnailRequest> {
+        // If we have a current directory with items, continue there
+        // (unless there's a higher priority item elsewhere)
+        if let Some(ref dir) = state.current_directory.clone() {
+            if let Some(items) = state.by_directory.get(dir) {
+                if !items.is_empty() {
+                    // Check if current dir has interactive priority
+                    let current_best = items
+                        .iter()
+                        .map(|r| r.priority)
+                        .min()
+                        .unwrap_or(IOPriority::Background);
+
+                    // Only switch directories if there's an Interactive request elsewhere
+                    let should_switch = state.by_directory.iter().any(|(other_dir, other_items)| {
+                        other_dir != dir
+                            && other_items
+                                .iter()
+                                .any(|r| r.priority == IOPriority::Interactive)
+                            && current_best != IOPriority::Interactive
+                    });
+
+                    if !should_switch {
+                        return Self::pop_from_directory(state, dir);
+                    }
+                }
+            }
+        }
+
+        // Find directory with highest priority item
+        let best_dir = state
+            .by_directory
+            .iter()
+            .filter(|(_, items)| !items.is_empty())
+            .min_by_key(|(_, items)| {
+                items
+                    .iter()
+                    .map(|r| r.priority)
+                    .min()
+                    .unwrap_or(IOPriority::Background)
+            })
+            .map(|(dir, _)| dir.clone())?;
+
+        state.current_directory = Some(best_dir.clone());
+        Self::pop_from_directory(state, &best_dir)
+    }
+
+    /// Pop highest priority item from a specific directory
+    fn pop_from_directory(state: &mut QueueState, dir: &PathBuf) -> Option<ThumbnailRequest> {
+        let items = state.by_directory.get_mut(dir)?;
+
+        if items.is_empty() {
+            state.by_directory.remove(dir);
+            return None;
+        }
+
+        // Find index of highest priority item (Interactive first, then by LIFO for same priority)
+        let best_idx = items
+            .iter()
+            .enumerate()
+            .min_by(|(idx_a, a), (idx_b, b)| {
+                match a.priority.cmp(&b.priority) {
+                    std::cmp::Ordering::Equal => idx_b.cmp(idx_a), // LIFO for same priority
+                    other => other,
+                }
+            })
+            .map(|(idx, _)| idx)?;
+
+        let request = items.swap_remove(best_idx);
+
+        // Clean up empty directories
+        if items.is_empty() {
+            state.by_directory.remove(dir);
+            if state.current_directory.as_ref() == Some(dir) {
+                state.current_directory = None;
+            }
+        }
+
+        Some(request)
     }
 }
 

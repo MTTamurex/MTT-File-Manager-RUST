@@ -26,7 +26,7 @@ impl ImageViewerApp {
         }
 
         // Not in RAM cache - send to worker (will read from disk cache or generate)
-        self.thumbnail_queue.push(path, self.generation, size_px, ThumbnailPriority::High);
+        self.thumbnail_queue.push(path, self.generation, size_px, ThumbnailPriority::Interactive);
     }
 
     pub fn request_thumbnail_prefetch(&mut self, path: PathBuf, size_px: u32) {
@@ -44,7 +44,7 @@ impl ImageViewerApp {
         }
 
         // Envia pedido BAIXA PRIORIDADE (Prefetch) com hint de tamanho
-        self.thumbnail_queue.push(path, self.generation, size_px, ThumbnailPriority::Low);
+        self.thumbnail_queue.push(path, self.generation, size_px, ThumbnailPriority::Prefetch);
     }
 
     pub fn request_folder_preview_load(&mut self, path: PathBuf) {
