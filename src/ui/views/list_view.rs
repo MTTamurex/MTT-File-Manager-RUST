@@ -28,6 +28,7 @@ pub struct ListViewContext<'a> {
     pub is_onedrive_folder: bool,
     pub texture_cache: &'a mut lru::LruCache<PathBuf, egui::TextureHandle>,
     pub loading_set: &'a mut FxHashSet<PathBuf>,
+    pub loading_icons: &'a mut FxHashSet<PathBuf>,
     pub scanned_folders: &'a mut FxHashSet<PathBuf>,
     pub folder_icon_texture: Option<&'a egui::TextureHandle>,
     pub computer_icon: Option<&'a egui::TextureHandle>,
@@ -209,22 +210,22 @@ pub fn render_list_view(
     // 1. Handle mouse wheel scroll (Manual Source of Truth)
     let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
     if scroll_delta != 0.0 {
-        *ctx.mut_scroll_offset_y -= scroll_delta * 5.0; 
+        *ctx.mut_scroll_offset_y -= scroll_delta * 5.0;
     }
 
     // 2. Clamp scroll offset
     let max_scroll = (total_content_height - viewport_h).max(0.0);
     *ctx.mut_scroll_offset_y = ctx.mut_scroll_offset_y.clamp(0.0, max_scroll);
-    
+
     // 2.5 KEYBOARD SCROLL SYNC: Ensure selected item is visible
     if ctx.scroll_to_selected {
         if let Some(selected_idx) = ctx.selected_item {
             if selected_idx < total_rows {
                 let item_top = selected_idx as f32 * row_height;
                 let item_bottom = item_top + row_height;
-                
+
                 let current_scroll_check = *ctx.mut_scroll_offset_y;
-                
+
                 // Scroll up if item is above viewport
                 if item_top < current_scroll_check {
                     *ctx.mut_scroll_offset_y = item_top.max(0.0);
@@ -248,7 +249,7 @@ pub fn render_list_view(
     // 3. Render Virtual List
     // DETECT BACKGROUND INTERACTION (Sense::click() captures secondary_clicked without global leakage)
     let bg_response = ui.interact(viewport_rect, ui.id().with("list_bg"), Sense::click());
-    
+
     let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(viewport_rect));
     child_ui.set_clip_rect(viewport_rect);
 
@@ -274,17 +275,41 @@ pub fn render_list_view(
 
         if !local.is_empty() {
             let header_h = 30.0;
-            let header_rect = Rect::from_min_size(egui::pos2(content_min.x, current_y), egui::vec2(available_w, header_h));
+            let header_rect = Rect::from_min_size(
+                egui::pos2(content_min.x, current_y),
+                egui::vec2(available_w, header_h),
+            );
             if child_ui.is_rect_visible(header_rect) {
-                let mut header_ui = child_ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
+                let mut header_ui =
+                    child_ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
                 render_section_header(&mut header_ui, "Discos locais");
             }
             current_y += header_h;
 
             for (i, item) in local {
-                let item_rect = Rect::from_min_size(egui::pos2(content_min.x, current_y), egui::vec2(available_w, row_height));
+                let item_rect = Rect::from_min_size(
+                    egui::pos2(content_min.x, current_y),
+                    egui::vec2(available_w, row_height),
+                );
                 if child_ui.is_rect_visible(item_rect) {
-                    render_list_item(&mut child_ui, i, item, item_rect, ctx, ops, available_rect, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item, w_name, w_date, w_type, w_size, w_status, row_height);
+                    render_list_item(
+                        &mut child_ui,
+                        i,
+                        item,
+                        item_rect,
+                        ctx,
+                        ops,
+                        available_rect,
+                        &mut clicked_item,
+                        &mut double_clicked_item,
+                        &mut secondary_clicked_item,
+                        w_name,
+                        w_date,
+                        w_type,
+                        w_size,
+                        w_status,
+                        row_height,
+                    );
                 }
                 current_y += row_height;
             }
@@ -293,17 +318,41 @@ pub fn render_list_view(
 
         if !network.is_empty() {
             let header_h = 30.0;
-            let header_rect = Rect::from_min_size(egui::pos2(content_min.x, current_y), egui::vec2(available_w, header_h));
+            let header_rect = Rect::from_min_size(
+                egui::pos2(content_min.x, current_y),
+                egui::vec2(available_w, header_h),
+            );
             if child_ui.is_rect_visible(header_rect) {
-                let mut header_ui = child_ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
+                let mut header_ui =
+                    child_ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
                 render_section_header(&mut header_ui, "Unidades de rede");
             }
             current_y += header_h;
 
             for (i, item) in network {
-                let item_rect = Rect::from_min_size(egui::pos2(content_min.x, current_y), egui::vec2(available_w, row_height));
+                let item_rect = Rect::from_min_size(
+                    egui::pos2(content_min.x, current_y),
+                    egui::vec2(available_w, row_height),
+                );
                 if child_ui.is_rect_visible(item_rect) {
-                    render_list_item(&mut child_ui, i, item, item_rect, ctx, ops, available_rect, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item, w_name, w_date, w_type, w_size, w_status, row_height);
+                    render_list_item(
+                        &mut child_ui,
+                        i,
+                        item,
+                        item_rect,
+                        ctx,
+                        ops,
+                        available_rect,
+                        &mut clicked_item,
+                        &mut double_clicked_item,
+                        &mut secondary_clicked_item,
+                        w_name,
+                        w_date,
+                        w_type,
+                        w_size,
+                        w_status,
+                        row_height,
+                    );
                 }
                 current_y += row_height;
             }
@@ -318,11 +367,31 @@ pub fn render_list_view(
         for i in vis_min_row..vis_max_row {
             let item = &ctx.items[i];
             let item_rect = Rect::from_min_size(
-                egui::pos2(content_min.x, content_min.y + (i as f32 * row_height) - current_scroll),
-                egui::vec2(available_w, row_height)
+                egui::pos2(
+                    content_min.x,
+                    content_min.y + (i as f32 * row_height) - current_scroll,
+                ),
+                egui::vec2(available_w, row_height),
             );
-            
-            render_list_item(&mut child_ui, i, item, item_rect, ctx, ops, available_rect, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item, w_name, w_date, w_type, w_size, w_status, row_height);
+
+            render_list_item(
+                &mut child_ui,
+                i,
+                item,
+                item_rect,
+                ctx,
+                ops,
+                available_rect,
+                &mut clicked_item,
+                &mut double_clicked_item,
+                &mut secondary_clicked_item,
+                w_name,
+                w_date,
+                w_type,
+                w_size,
+                w_status,
+                row_height,
+            );
         }
     }
 
@@ -330,21 +399,24 @@ pub fn render_list_view(
     if total_content_height > viewport_h {
         let scroll_bar_w = 4.0;
         let scroll_bar_rect = Rect::from_min_max(
-            egui::pos2(viewport_rect.right() - scroll_bar_w - 2.0, viewport_rect.top()),
-            egui::pos2(viewport_rect.right() - 2.0, viewport_rect.bottom())
+            egui::pos2(
+                viewport_rect.right() - scroll_bar_w - 2.0,
+                viewport_rect.top(),
+            ),
+            egui::pos2(viewport_rect.right() - 2.0, viewport_rect.bottom()),
         );
 
         let handle_h = (viewport_h / total_content_height * viewport_h).max(30.0);
         let handle_top = current_scroll / max_scroll * (viewport_h - handle_h);
         let handle_rect = Rect::from_min_size(
             egui::pos2(scroll_bar_rect.left(), viewport_rect.top() + handle_top),
-            egui::vec2(scroll_bar_w, handle_h)
+            egui::vec2(scroll_bar_w, handle_h),
         );
 
         // Interaction: click_and_drag for both track-click and handle drag
         let scroll_id = ui.id().with("list_scrollbar");
         let response = ui.interact(scroll_bar_rect, scroll_id, Sense::click_and_drag());
-        
+
         if response.clicked() {
             // TRACK-CLICK: Jump to clicked position
             if let Some(click_pos) = ui.input(|i| i.pointer.interact_pos()) {
@@ -361,7 +433,8 @@ pub fn render_list_view(
         }
 
         // Draw track
-        ui.painter().rect_filled(scroll_bar_rect, 0.0, Color32::from_black_alpha(10));
+        ui.painter()
+            .rect_filled(scroll_bar_rect, 0.0, Color32::from_black_alpha(10));
         // Draw handle
         let handle_color = if response.dragged() {
             Color32::from_gray(100)
@@ -441,11 +514,7 @@ fn render_list_item(
         let is_media_file = item
             .path
             .extension()
-            .map(|ext| {
-                crate::infrastructure::windows::is_media_extension(
-                    &ext.to_string_lossy(),
-                )
-            })
+            .map(|ext| crate::infrastructure::windows::is_media_extension(&ext.to_string_lossy()))
             .unwrap_or(false);
 
         if is_media_file
@@ -480,11 +549,11 @@ fn render_list_item(
 
         // --- VISUAL FEEDBACK: BORDER-ONLY (MODERN DESIGN) ---
         let is_selected = ctx.multi_selection.contains(&item.path);
-        
+
         // STRICT HOVER LOGIC: Only allow hover if LastInput was Mouse
         let allow_hover = matches!(ctx.last_input, crate::app::state::LastInput::Mouse);
         let is_hovered_visual = allow_hover && response.hovered() && !is_selected;
-        
+
         let is_focused = ctx.selected_item == Some(i);
 
         let rounding = 4.0;
@@ -521,17 +590,18 @@ fn render_list_item(
             let hover_id = response.id.with("hover_start");
 
             // Track hover start time using egui's memory
-            let hover_start_time = ui.ctx().data_mut(|d| {
-                *d.get_temp_mut_or_insert_with(hover_id, || current_time)
-            });
+            let hover_start_time = ui
+                .ctx()
+                .data_mut(|d| *d.get_temp_mut_or_insert_with(hover_id, || current_time));
 
             let hover_duration = (current_time - hover_start_time) as f32;
 
             // Request repaint when approaching tooltip delay to ensure it appears
             if hover_duration < TOOLTIP_DELAY_SECS {
-                ui.ctx().request_repaint_after(std::time::Duration::from_secs_f32(
-                    TOOLTIP_DELAY_SECS - hover_duration + 0.01
-                ));
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_secs_f32(
+                        TOOLTIP_DELAY_SECS - hover_duration + 0.01,
+                    ));
             }
 
             // Only show tooltip if hover duration exceeds threshold
@@ -652,7 +722,8 @@ fn render_list_item(
                     Color32::GRAY,
                 );
             } else if let Some(file_icon) =
-                ctx.item_icon_loader.get_or_load_icon(ui.ctx(), &item.path, false)
+                ctx.item_icon_loader
+                    .get_or_load_icon(ui.ctx(), &item.path, false, false)
             {
                 ui.painter().image(
                     file_icon.id(),
@@ -696,9 +767,7 @@ fn render_list_item(
                 }
 
                 // Confirma renomeação com Enter (enquanto tem foco)
-                if response.has_focus()
-                    && ui.input(|i_in| i_in.key_pressed(egui::Key::Enter))
-                {
+                if response.has_focus() && ui.input(|i_in| i_in.key_pressed(egui::Key::Enter)) {
                     ops.rename_with_shell(i);
                 }
             });
@@ -787,7 +856,7 @@ fn render_list_item(
 
             // 3. Type (truncated)
             let type_str = get_file_type_string(item);
-            let max_type_chars = 14; 
+            let max_type_chars = 14;
             let display_type: String = if type_str.chars().count() > max_type_chars {
                 type_str
                     .chars()

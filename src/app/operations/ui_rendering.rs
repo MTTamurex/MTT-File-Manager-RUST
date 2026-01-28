@@ -4,17 +4,17 @@
 //! It bridges the App state with the UI components.
 
 use eframe::egui;
-use std::time::Instant;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use crate::app::state::ImageViewerApp;
-use crate::ui::views::{list_view, ListViewContext, ListViewOperations};
-use crate::ui::views::{grid_view, GridViewContext, GridViewOperations};
 use crate::ui::components::item_slot::{render_item_slot, ItemSlotContext};
+use crate::ui::views::{grid_view, GridViewContext, GridViewOperations};
+use crate::ui::views::{list_view, ListViewContext, ListViewOperations};
 
 // Helper function equivalent to open_with_shell from ops
 fn open_with_shell(path: &Path) {
-     let _ = crate::application::file_operations::open_with_shell(path, None);
+    let _ = crate::application::file_operations::open_with_shell(path, None);
 }
 
 impl ImageViewerApp {
@@ -31,10 +31,18 @@ impl ImageViewerApp {
             let mut pending_delta: i32 = 0;
             let mut page_action: Option<bool> = None; // true = PageDown, false = PageUp
 
-            if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) { pending_delta += 1; }
-            if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) { pending_delta -= 1; }
-            if ui.input(|i| i.key_pressed(egui::Key::PageDown)) { page_action = Some(true); }
-            if ui.input(|i| i.key_pressed(egui::Key::PageUp)) { page_action = Some(false); }
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                pending_delta += 1;
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                pending_delta -= 1;
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::PageDown)) {
+                page_action = Some(true);
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::PageUp)) {
+                page_action = Some(false);
+            }
 
             let shift = ui.input(|i| i.modifiers.shift);
             let row_height = 24.0;
@@ -45,14 +53,28 @@ impl ImageViewerApp {
             let mut new_index = None;
             if let Some(is_down) = page_action {
                 if is_down {
-                    new_index = Some(current_index.map(|idx| (idx + visible_count).min(self.items.len().saturating_sub(1))).unwrap_or(visible_count));
+                    new_index = Some(
+                        current_index
+                            .map(|idx| {
+                                (idx + visible_count).min(self.items.len().saturating_sub(1))
+                            })
+                            .unwrap_or(visible_count),
+                    );
                 } else {
                     // PageUp based on viewport, not selected_index
                     let first_visible_index = (self.scroll_offset_y / row_height).floor() as usize;
                     new_index = Some(first_visible_index.saturating_sub(visible_count));
                 }
             } else if pending_delta != 0 {
-                new_index = Some(current_index.map(|idx| (idx as i32 + pending_delta).clamp(0, self.items.len().saturating_sub(1) as i32) as usize).unwrap_or(0));
+                new_index = Some(
+                    current_index
+                        .map(|idx| {
+                            (idx as i32 + pending_delta)
+                                .clamp(0, self.items.len().saturating_sub(1) as i32)
+                                as usize
+                        })
+                        .unwrap_or(0),
+                );
             }
 
             if let Some(idx) = new_index {
@@ -74,7 +96,11 @@ impl ImageViewerApp {
                             self.selection_anchor = old_focus;
                         }
                         if let Some(anchor) = self.selection_anchor {
-                            let (start, end) = if anchor < clamped { (anchor, clamped) } else { (clamped, anchor) };
+                            let (start, end) = if anchor < clamped {
+                                (anchor, clamped)
+                            } else {
+                                (clamped, anchor)
+                            };
                             // Range between anchor and focus (Add-only as per "NÃO limpar seleção fora do range")
                             for i in start..=end {
                                 if let Some(it) = self.items.get(i) {
@@ -86,10 +112,10 @@ impl ImageViewerApp {
                         // Navigation without shift: Single-item selection (clear + add focused item)
                         // This ensures the focused item shows the dark blue selection border
                         self.multi_selection.clear();
-                    self.multi_selection.insert(item_path.clone());
+                        self.multi_selection.insert(item_path.clone());
                         self.selection_anchor = Some(clamped);
                     }
-                    
+
                     // Trigger scroll normalization in the view
                     self.scroll_to_selected = true;
 
@@ -197,7 +223,8 @@ impl ImageViewerApp {
 
             fn request_thumbnail_load(&mut self, path: PathBuf) {
                 // List view always requests small thumbnails (64px)
-                self.actions.push(ListAction::RequestThumbnailLoad(path, 64));
+                self.actions
+                    .push(ListAction::RequestThumbnailLoad(path, 64));
             }
 
             fn request_folder_scan(&mut self, path: PathBuf) {
@@ -245,24 +272,28 @@ impl ImageViewerApp {
                         self.selection_anchor = Some(idx);
                         self.selected_file = Some(item.clone());
                     } else if shift {
-                         // Shift + Click: Range between anchor and click
-                         if let Some(anchor) = self.selection_anchor {
-                             let (start, end) = if anchor < idx { (anchor, idx) } else { (idx, anchor) };
-                             // Add range to selection (Do NOT clear outside selection as requested)
-                             for i in start..=end {
-                                 if let Some(it) = self.items.get(i) {
-                                     self.multi_selection.insert(it.path.clone());
-                                 }
-                             }
-                             self.selected_item = Some(idx);
-                             self.selected_file = Some(item.clone());
-                         } else {
-                             // Fallback: simple insert
-                             self.multi_selection.insert(item.path.clone());
-                             self.selected_item = Some(idx);
-                             self.selection_anchor = Some(idx);
-                             self.selected_file = Some(item.clone());
-                         }
+                        // Shift + Click: Range between anchor and click
+                        if let Some(anchor) = self.selection_anchor {
+                            let (start, end) = if anchor < idx {
+                                (anchor, idx)
+                            } else {
+                                (idx, anchor)
+                            };
+                            // Add range to selection (Do NOT clear outside selection as requested)
+                            for i in start..=end {
+                                if let Some(it) = self.items.get(i) {
+                                    self.multi_selection.insert(it.path.clone());
+                                }
+                            }
+                            self.selected_item = Some(idx);
+                            self.selected_file = Some(item.clone());
+                        } else {
+                            // Fallback: simple insert
+                            self.multi_selection.insert(item.path.clone());
+                            self.selected_item = Some(idx);
+                            self.selection_anchor = Some(idx);
+                            self.selected_file = Some(item.clone());
+                        }
                     } else {
                         // Simple Click: Reset selection to target and set focus/anchor
                         self.multi_selection.clear();
@@ -296,7 +327,11 @@ impl ImageViewerApp {
                         }
                     } else {
                         let path = item.path.clone();
-                        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                        let extension = path
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            .unwrap_or("")
+                            .to_lowercase();
                         if extension == "iso" {
                             self.mount_and_navigate_iso(path);
                         } else {
@@ -313,17 +348,18 @@ impl ImageViewerApp {
                 if let Some(item) = self.items.get(idx) {
                     // Update selection logic for right-click
                     if !self.multi_selection.contains(&item.path) {
-                         self.multi_selection.clear();
-                         self.multi_selection.insert(item.path.clone());
-                         self.selected_item = Some(idx);
-                         self.selected_file = Some(item.clone());
+                        self.multi_selection.clear();
+                        self.multi_selection.insert(item.path.clone());
+                        self.selected_item = Some(idx);
+                        self.selected_file = Some(item.clone());
                     } else {
-                         self.selected_item = Some(idx);
-                         self.selected_file = Some(item.clone());
+                        self.selected_item = Some(idx);
+                        self.selected_file = Some(item.clone());
                     }
 
                     // Coletar todos os paths selecionados
-                    let selected_paths: Vec<PathBuf> = self.multi_selection.iter().cloned().collect();
+                    let selected_paths: Vec<PathBuf> =
+                        self.multi_selection.iter().cloned().collect();
                     self.context_menu.target_paths = selected_paths.clone();
 
                     // Usar o novo sistema de menu estilizado
@@ -332,8 +368,13 @@ impl ImageViewerApp {
 
                     // Populate with multiple paths
                     self.populate_context_menu(ui.ctx(), &selected_paths, false, Some(idx));
-                    self.context_menu
-                        .open(pointer_pos, right_bound, Some(idx), selected_paths, false);
+                    self.context_menu.open(
+                        pointer_pos,
+                        right_bound,
+                        Some(idx),
+                        selected_paths,
+                        false,
+                    );
                 }
             }
             Some(list_view::ListViewAction::SortChange(mode)) => {
@@ -352,7 +393,8 @@ impl ImageViewerApp {
                 let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
                 let right_bound = ui.available_rect_before_wrap().right();
                 self.populate_context_menu(ui.ctx(), &[path.clone()], true, None);
-                self.context_menu.open(pointer_pos, right_bound, None, vec![path], true);
+                self.context_menu
+                    .open(pointer_pos, right_bound, None, vec![path], true);
             }
             _ => {}
         }
@@ -362,7 +404,9 @@ impl ImageViewerApp {
             match action {
                 ListAction::NavigateTo(path) => self.navigate_to(&path),
                 ListAction::OpenWithShell(path) => open_with_shell(&path),
-                ListAction::RequestThumbnailLoad(path, size) => self.request_thumbnail_load(path, size),
+                ListAction::RequestThumbnailLoad(path, size) => {
+                    self.request_thumbnail_load(path, size)
+                }
                 ListAction::RequestFolderScan(path) => self.request_folder_scan(path),
                 ListAction::RequestFolderPreviewLoad(path) => {
                     self.request_folder_preview_load(path)
@@ -398,12 +442,24 @@ impl ImageViewerApp {
             let mut pending_delta: i32 = 0;
             let mut page_action: Option<bool> = None;
 
-            if ui.input(|i| i.key_pressed(egui::Key::ArrowRight)) { pending_delta += 1; }
-            if ui.input(|i| i.key_pressed(egui::Key::ArrowLeft)) { pending_delta -= 1; }
-            if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) { pending_delta += cols as i32; }
-            if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) { pending_delta -= cols as i32; }
-            if ui.input(|i| i.key_pressed(egui::Key::PageDown)) { page_action = Some(true); }
-            if ui.input(|i| i.key_pressed(egui::Key::PageUp)) { page_action = Some(false); }
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
+                pending_delta += 1;
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
+                pending_delta -= 1;
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                pending_delta += cols as i32;
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                pending_delta -= cols as i32;
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::PageDown)) {
+                page_action = Some(true);
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::PageUp)) {
+                page_action = Some(false);
+            }
 
             let shift = ui.input(|i| i.modifiers.shift);
             let viewport_h = ui.available_height();
@@ -413,12 +469,28 @@ impl ImageViewerApp {
             let mut new_index = None;
             if let Some(is_down) = page_action {
                 if is_down {
-                    new_index = Some(current_index.map(|idx| (idx + jump).min(self.items.len().saturating_sub(1))).unwrap_or(jump));
+                    new_index = Some(
+                        current_index
+                            .map(|idx| (idx + jump).min(self.items.len().saturating_sub(1)))
+                            .unwrap_or(jump),
+                    );
                 } else {
-                    new_index = Some(current_index.map(|idx| idx.saturating_sub(jump)).unwrap_or(0));
+                    new_index = Some(
+                        current_index
+                            .map(|idx| idx.saturating_sub(jump))
+                            .unwrap_or(0),
+                    );
                 }
             } else if pending_delta != 0 {
-                new_index = Some(current_index.map(|idx| (idx as i32 + pending_delta).clamp(0, self.items.len().saturating_sub(1) as i32) as usize).unwrap_or(0));
+                new_index = Some(
+                    current_index
+                        .map(|idx| {
+                            (idx as i32 + pending_delta)
+                                .clamp(0, self.items.len().saturating_sub(1) as i32)
+                                as usize
+                        })
+                        .unwrap_or(0),
+                );
             }
 
             if let Some(idx) = new_index {
@@ -426,7 +498,7 @@ impl ImageViewerApp {
                 if let Some(item) = self.items.get(clamped) {
                     // Clone path before any mutable borrows
                     let item_path = item.path.clone();
-                    
+
                     // UPDATED: Decoupled Focus (selected_item) from Selection (multi_selection)
                     let old_focus = self.selected_item;
                     self.selected_item = Some(clamped);
@@ -440,7 +512,11 @@ impl ImageViewerApp {
                             self.selection_anchor = old_focus;
                         }
                         if let Some(anchor) = self.selection_anchor {
-                            let (start, end) = if anchor < clamped { (anchor, clamped) } else { (clamped, anchor) };
+                            let (start, end) = if anchor < clamped {
+                                (anchor, clamped)
+                            } else {
+                                (clamped, anchor)
+                            };
                             // Add range between anchor and focus (NÃO limpar seleção fora do range)
                             for i in start..=end {
                                 if let Some(it) = self.items.get(i) {
@@ -493,7 +569,7 @@ impl ImageViewerApp {
         // Criar contexto com referências mutáveis separadas
         let scroll_to_selected = self.scroll_to_selected;
         let multi_selection = &self.multi_selection;
-        
+
         // PERFORMANCE: Clear shared buffers before rendering (reuse, don't reallocate)
         self.pending_ops.clear();
 
@@ -561,7 +637,8 @@ impl ImageViewerApp {
             }
 
             fn request_thumbnail_load(&mut self, path: PathBuf, size: u32) {
-                self.actions.push(GridAction::RequestThumbnailLoad(path, size));
+                self.actions
+                    .push(GridAction::RequestThumbnailLoad(path, size));
             }
 
             fn request_folder_scan(&mut self, path: PathBuf) {
@@ -573,7 +650,8 @@ impl ImageViewerApp {
             }
 
             fn request_thumbnail_prefetch(&mut self, path: PathBuf, size: u32) {
-                self.actions.push(GridAction::RequestThumbnailPrefetch(path, size));
+                self.actions
+                    .push(GridAction::RequestThumbnailPrefetch(path, size));
             }
 
             fn request_icon_load(&mut self, path: PathBuf) {
@@ -615,23 +693,27 @@ impl ImageViewerApp {
                         self.selection_anchor = Some(idx);
                         self.selected_file = Some(item.clone());
                     } else if shift {
-                         // Shift + Click: Range between anchor and click
-                         if let Some(anchor) = self.selection_anchor {
-                             let (start, end) = if anchor < idx { (anchor, idx) } else { (idx, anchor) };
-                             for i in start..=end {
-                                 if let Some(it) = self.items.get(i) {
-                                     self.multi_selection.insert(it.path.clone());
-                                 }
-                             }
-                             self.selected_item = Some(idx);
-                             self.selected_file = Some(item.clone());
-                         } else {
-                             // Fallback
-                             self.multi_selection.insert(item.path.clone());
-                             self.selected_item = Some(idx);
-                             self.selection_anchor = Some(idx);
-                             self.selected_file = Some(item.clone());
-                         }
+                        // Shift + Click: Range between anchor and click
+                        if let Some(anchor) = self.selection_anchor {
+                            let (start, end) = if anchor < idx {
+                                (anchor, idx)
+                            } else {
+                                (idx, anchor)
+                            };
+                            for i in start..=end {
+                                if let Some(it) = self.items.get(i) {
+                                    self.multi_selection.insert(it.path.clone());
+                                }
+                            }
+                            self.selected_item = Some(idx);
+                            self.selected_file = Some(item.clone());
+                        } else {
+                            // Fallback
+                            self.multi_selection.insert(item.path.clone());
+                            self.selected_item = Some(idx);
+                            self.selection_anchor = Some(idx);
+                            self.selected_file = Some(item.clone());
+                        }
                     } else {
                         // Simple Click: Reset selection and set focus/anchor
                         self.multi_selection.clear();
@@ -653,7 +735,11 @@ impl ImageViewerApp {
                         }
                     } else {
                         let path = item.path.clone();
-                        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                        let extension = path
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            .unwrap_or("")
+                            .to_lowercase();
                         if extension == "iso" {
                             self.mount_and_navigate_iso(path);
                         } else {
@@ -670,17 +756,18 @@ impl ImageViewerApp {
                 if let Some(item) = self.items.get(idx) {
                     // Update selection logic for right-click
                     if !self.multi_selection.contains(&item.path) {
-                         self.multi_selection.clear();
-                         self.multi_selection.insert(item.path.clone());
-                         self.selected_item = Some(idx);
-                         self.selected_file = Some(item.clone());
+                        self.multi_selection.clear();
+                        self.multi_selection.insert(item.path.clone());
+                        self.selected_item = Some(idx);
+                        self.selected_file = Some(item.clone());
                     } else {
-                         self.selected_item = Some(idx);
-                         self.selected_file = Some(item.clone());
+                        self.selected_item = Some(idx);
+                        self.selected_file = Some(item.clone());
                     }
 
                     // Coletar todos os paths selecionados
-                    let selected_paths: Vec<PathBuf> = self.multi_selection.iter().cloned().collect();
+                    let selected_paths: Vec<PathBuf> =
+                        self.multi_selection.iter().cloned().collect();
                     self.context_menu.target_paths = selected_paths.clone();
 
                     // Usar o novo sistema de menu estilizado
@@ -688,8 +775,13 @@ impl ImageViewerApp {
                     let right_bound = ui.available_rect_before_wrap().right();
 
                     self.populate_context_menu(ui.ctx(), &selected_paths, false, Some(idx));
-                    self.context_menu
-                        .open(pointer_pos, right_bound, Some(idx), selected_paths, false);
+                    self.context_menu.open(
+                        pointer_pos,
+                        right_bound,
+                        Some(idx),
+                        selected_paths,
+                        false,
+                    );
                 }
             }
             Some(grid_view::GridViewAction::EmptyAreaSecondaryClick) if !is_renaming => {
@@ -697,7 +789,8 @@ impl ImageViewerApp {
                 let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
                 let right_bound = ui.available_rect_before_wrap().right();
                 self.populate_context_menu(ui.ctx(), &[path.clone()], true, None);
-                self.context_menu.open(pointer_pos, right_bound, None, vec![path], true);
+                self.context_menu
+                    .open(pointer_pos, right_bound, None, vec![path], true);
             }
             _ => {}
         }
@@ -707,12 +800,16 @@ impl ImageViewerApp {
             match action {
                 GridAction::NavigateTo(path) => self.navigate_to(&path),
                 GridAction::OpenWithShell(path) => open_with_shell(&path),
-                GridAction::RequestThumbnailLoad(path, size) => self.request_thumbnail_load(path, size),
+                GridAction::RequestThumbnailLoad(path, size) => {
+                    self.request_thumbnail_load(path, size)
+                }
                 GridAction::RequestFolderScan(path) => self.request_folder_scan(path),
                 GridAction::RequestFolderPreviewLoad(path) => {
                     self.request_folder_preview_load(path)
                 }
-                GridAction::RequestThumbnailPrefetch(path, size) => self.request_thumbnail_prefetch(path, size),
+                GridAction::RequestThumbnailPrefetch(path, size) => {
+                    self.request_thumbnail_prefetch(path, size)
+                }
                 GridAction::RequestIconLoad(path) => self.request_icon_load(path),
                 GridAction::RenameWithShell(idx) => self.rename_with_shell(idx),
             }
@@ -741,6 +838,7 @@ impl ImageViewerApp {
         let mut pending_thumbnail_loads: Vec<(std::path::PathBuf, u32)> = Vec::new();
         let mut pending_folder_scans: Vec<std::path::PathBuf> = Vec::new();
         let mut pending_folder_preview_loads: Vec<std::path::PathBuf> = Vec::new();
+        let mut pending_icon_loads: Vec<std::path::PathBuf> = Vec::new();
         let mut pending_rename: Option<usize> = None;
 
         // Texto de renomeação precisa ser tratado separadamente
@@ -805,7 +903,6 @@ impl ImageViewerApp {
                 }
             }
 
-            let mut pending_icon_loads: Vec<std::path::PathBuf> = Vec::new();
             let mut ops = SimpleOps {
                 thumbnail_loads: &mut pending_thumbnail_loads,
                 folder_scans: &mut pending_folder_scans,
