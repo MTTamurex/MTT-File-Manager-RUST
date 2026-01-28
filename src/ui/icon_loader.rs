@@ -82,74 +82,77 @@ impl IconLoader {
         path: &Path,
         size: IconSize,
         is_folder: bool,
-        allow_blocking: bool,
+        _allow_blocking: bool,
     ) -> Option<egui::TextureHandle> {
         let cache_key = format!("{}_{:?}", path.to_string_lossy(), size);
 
-        // Check cache first
+        // UNIQUE ICON FILES: .exe, .lnk, .ico, .cur, .ani, .com have unique embedded icons per file.
+        // For these files, ONLY return from cache if async worker has populated it.
+        // NEVER fall back to generic icons - they must be loaded via async worker.
+        if !is_folder {
+            let ext_str = path.extension()
+                .map(|e| e.to_string_lossy().to_lowercase())
+                .or_else(|| {
+                    // Manual extension parsing fallback for paths without proper extension
+                    let path_str = path.to_string_lossy();
+                    path_str.rfind('.').and_then(|idx| {
+                        let candidate = &path_str[idx+1..];
+                        if !candidate.contains('/') && !candidate.contains('\\') {
+                            Some(candidate.to_lowercase())
+                        } else {
+                            None
+                        }
+                    })
+                });
+
+            if let Some(ref ext) = ext_str {
+                if matches!(ext.as_str(), "exe" | "lnk" | "ico" | "cur" | "ani" | "com") {
+                    // Check cache - async worker may have loaded the real icon
+                    if let Some(texture) = self.icon_cache.get(&cache_key) {
+                        return Some(texture.clone());
+                    }
+                    // Not in cache - return None to trigger async load
+                    // CRITICAL: Never use generic fallback for unique icon files!
+                    return None;
+                }
+            }
+        }
+
+        // For other files (not unique icon types): check cache first
         if let Some(texture) = self.icon_cache.get(&cache_key) {
             return Some(texture.clone());
         }
 
         // PERFORMANCE FIX: NEVER call path.exists() in render loop!
         // On OneDrive, this can trigger network calls (28ms+ per file).
-        
+
         let icon_result = if is_folder {
             // Folders (including virtual ones in Zips) can use the generic folder icon logic
-            // passing checks for "folder" extension or type
             windows::get_file_type_icon(true, "", size)
         } else if let Some(ext) = path.extension() {
             let ext_str = ext.to_string_lossy().to_lowercase();
-            
-            // EXCEPTION: Executables and shortcuts (.exe, .lnk, .ico, etc.) 
-            // ALWAYS use path-based extraction to show their unique embedded icons.
-            if matches!(ext_str.as_str(), "exe" | "lnk" | "ico" | "cur" | "ani") {
-                if !allow_blocking {
-                    return None; // Caller must request async load
-                }
-
-                // Check if path exists before trying to extract from file.
-                // If it's a virtual path (e.g. inside Zip), this would fail/crash/freeze.
-                if path.exists() {
-                    windows::extract_file_icon_by_path(path, IconSize::Jumbo)
+            // Extension-based lookup is FAST (uses registry, no file access)
+            windows::get_file_type_icon(false, &ext_str, size)
+        } else {
+            // No extension - try manual parsing or generic fallback
+            let path_str = path.to_string_lossy();
+            let manual_ext = if let Some(idx) = path_str.rfind('.') {
+                let candidate = &path_str[idx+1..];
+                if !candidate.contains('/') && !candidate.contains('\\') {
+                    Some(candidate.to_lowercase())
                 } else {
-                    // Fallback for virtual exe/lnk: use generic icon
-                     windows::get_file_type_icon(false, &ext_str, size)
+                    None
                 }
             } else {
-                // Extension-based lookup is FAST (uses registry, no file access)
-                windows::get_file_type_icon(false, &ext_str, size)
+                None
+            };
+
+            if let Some(ext) = manual_ext {
+                windows::get_file_type_icon(false, &ext, size)
+            } else {
+                // No extension at all -> Generic File Icon
+                windows::get_file_type_icon(false, "", size)
             }
-        } else {
-            // No extension - try path-based if exists
-             // MANUAL EXTENSION PARSING FALLBACK
-             let path_str = path.to_string_lossy();
-             let manual_ext = if let Some(idx) = path_str.rfind('.') {
-                 let candidate = &path_str[idx+1..];
-                 // Basic sanity check: extension shouldn't contain separators
-                 if !candidate.contains('/') && !candidate.contains('\\') {
-                     Some(candidate.to_lowercase())
-                 } else {
-                     None
-                 }
-             } else {
-                 None
-             };
-
-             if let Some(ext) = manual_ext {
-                 windows::get_file_type_icon(false, &ext, size)
-             } else {
-                 if !allow_blocking {
-                     return None; // Caller must request async load
-                 }
-
-                 if path.exists() {
-                    windows::extract_file_icon_by_path(path, IconSize::Jumbo)
-                 } else {
-                     // Virtual file with no extension -> Generic File Icon
-                     windows::get_file_type_icon(false, "", size)
-                 }
-             }
         };
 
         if let Ok((pixels, width, height)) = icon_result {

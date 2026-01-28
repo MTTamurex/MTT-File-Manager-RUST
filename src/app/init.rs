@@ -187,11 +187,11 @@ impl ImageViewerApp {
         std::thread::spawn(move || {
             use crate::domain::file_entry::IconSize;
             use crate::infrastructure::windows::extract_file_icon_by_path;
-            use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+            use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 
-            // IMPORTANT: Initialize COM for this thread - required for IShellItemImageFactory
+            // Initialize COM for this thread (multithreaded like other workers)
             unsafe {
-                let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
             }
 
             // PERFORMANCE: Set background priority to minimize HDD contention with video playback
@@ -200,10 +200,9 @@ impl ImageViewerApp {
             );
 
             while let Ok(path) = icon_req_rx.recv() {
-                // FIX: Use IconSize::Jumbo to get proper embedded icons from .exe files
-                // Large uses SHGetFileInfoW which may return generic icons
-                // Jumbo uses IShellItemImageFactory which properly extracts embedded icons
-                match extract_file_icon_by_path(&path, IconSize::Jumbo) {
+                // Use IconSize::Large to match the cache key lookup in icon_loader.rs
+                // Note: SHGetFileInfoW should work for .exe embedded icons
+                match extract_file_icon_by_path(&path, IconSize::Large) {
                     Ok((pixels, width, height)) => {
                         let _ = icon_res_tx.send((path, pixels, width, height));
                     }
