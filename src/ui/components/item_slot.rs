@@ -58,8 +58,8 @@ pub struct ItemSlotContext<'a> {
     pub failed_thumbnails: &'a lru::LruCache<std::path::PathBuf, ()>,
     /// Conjunto de itens aguardando upload GPU
     pub pending_upload_set: &'a mut FxHashSet<std::path::PathBuf>,
-    /// MODO DENSO (Zoom Mínimo): Se true, renderiza APENAS ícone (sem texto/badges)
     pub is_dense_mode: bool,
+    pub is_scrolling: bool,
 }
 
 /// Renderiza um item slot para grid view
@@ -311,9 +311,8 @@ fn render_directory_slot<O: ItemSlotOperations>(
             ui.painter()
                 .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
 
-            // Spinner animado usando tempo do UI
             let time = ui.input(|i| i.time);
-            let angle = (time * 3.0) as f32; // 3 rotações por segundo
+            let angle = (time * 3.0) as f32;
 
             // Desenha arco do spinner
             let center = spinner_rect.center();

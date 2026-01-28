@@ -875,6 +875,7 @@ impl ImageViewerApp {
                 failed_thumbnails: &self.cache_manager.failed_thumbnails,
                 pending_upload_set: &mut self.cache_manager.pending_upload_set,
                 is_dense_mode: false,
+                is_scrolling: false,
             };
 
             // Create simple ops struct that collects operations
