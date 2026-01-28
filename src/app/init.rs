@@ -41,6 +41,13 @@ impl ImageViewerApp {
         // 1. Canais para comunicação Workers → UI
         let (file_entry_sender, file_entry_receiver) = mpsc::channel::<(usize, Vec<FileEntry>)>();
 
+        // Initialize disk cache (MOVED UP for Cover Worker access)
+        let cache_dir = dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("MTT-File-Manager")
+            .join("thumbnails");
+        let disk_cache = Arc::new(ThumbnailDiskCache::new(cache_dir));
+
         // COVER WORKER: Worker único para processar capas de pasta
         let (cover_req_tx, cover_req_rx) = mpsc::channel::<PathBuf>(); // UI → Worker
         let (cover_res_tx, cover_res_rx) = mpsc::channel(); // Worker → UI
@@ -49,12 +56,18 @@ impl ImageViewerApp {
 
         windows_infra::start_device_change_listener(device_event_sender, ctx.clone());
 
+        let cover_worker_cache = disk_cache.clone();
         // Spawna WORKER THREAD: fica em loop processando fila
         std::thread::spawn(move || {
             // Loop infinito: consome requisições da fila
             while let Ok(folder_path) = cover_req_rx.recv() {
                 // Executa busca (imagem ou vídeo) usando detecção dinâmica baseado no Registro do Windows
                 let cover = windows_infra::find_folder_preview_item(&folder_path);
+
+                // SAVE TO DB IN WORKER THREAD (Avoids Main Thread Lock Contention)
+                if let Some(c) = &cover {
+                    cover_worker_cache.set_folder_cover(&folder_path, c);
+                }
 
                 // Devolve resultado para UI thread
                 let _ = cover_res_tx.send((folder_path, cover));
@@ -69,13 +82,6 @@ impl ImageViewerApp {
 
         // Initialize OneDrive path detection
         onedrive::init_onedrive_paths();
-
-        // Initialize disk cache
-        let cache_dir = dirs::data_local_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("MTT-File-Manager")
-            .join("thumbnails");
-        let disk_cache = Arc::new(ThumbnailDiskCache::new(cache_dir));
 
         // Load Preferences from SQLite
         let sort_mode = disk_cache
