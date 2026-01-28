@@ -212,6 +212,11 @@ pub struct ImageViewerApp {
     // PERFORMANCE: Scroll state tracking for adaptive GPU upload throttling
     pub last_scroll_time: Instant,
     pub last_scroll_offset: f32,
+    pub frame_time_avg_ms: f32,
+    pub frame_time_peak_ms: f32,
+    pub fps_avg: f32,
+    pub upload_budget_ms: f32,
+    pub last_upload_budget_update: Instant,
 
     // Explicit scroll request for keyboard navigation
     pub scroll_request: ScrollRequest,

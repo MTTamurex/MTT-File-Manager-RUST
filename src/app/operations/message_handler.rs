@@ -397,25 +397,71 @@ impl ImageViewerApp {
         let is_scrolling = self.last_scroll_time.elapsed() < std::time::Duration::from_millis(100);
         let is_video_playing = self.is_video_playing_docked();
 
-        // Adaptive upload limits:
-        // - Video playing: minimal uploads to avoid GPU contention
-        // - Scrolling: moderate uploads
-        // - Idle: generous uploads for responsiveness
-        let max_uploads_per_frame = if is_video_playing && is_scrolling {
-            2 // Minimal when video + scrolling to prevent stutter
+        let base_max_uploads = if is_video_playing && is_scrolling {
+            2
         } else if is_scrolling {
-            4 // Moderate during scroll
+            4
         } else if is_video_playing {
-            3 // Low when video playing to preserve GPU for decoder
+            3
         } else {
-            8 // Generous when idle
+            8
         };
+        let perf_scale = if self.frame_time_avg_ms <= 0.0 {
+            1.0
+        } else if self.frame_time_avg_ms < 12.0 {
+            1.25
+        } else if self.frame_time_avg_ms < 18.0 {
+            1.0
+        } else if self.frame_time_avg_ms < 24.0 {
+            0.85
+        } else {
+            0.7
+        };
+        let max_uploads_per_frame =
+            ((base_max_uploads as f32) * perf_scale).round().clamp(1.0, 10.0) as usize;
 
         let mut uploads_this_frame = 0;
+        let upload_start = Instant::now();
+        let now = Instant::now();
+        if now.duration_since(self.last_upload_budget_update) > Duration::from_millis(750) {
+            let target_budget_ms = if self.frame_time_avg_ms <= 0.0 {
+                self.upload_budget_ms
+            } else if self.frame_time_avg_ms < 12.0 {
+                8.0
+            } else if self.frame_time_avg_ms < 18.0 {
+                6.0
+            } else if self.frame_time_avg_ms < 24.0 {
+                4.0
+            } else {
+                3.0
+            };
+            if (self.upload_budget_ms - target_budget_ms).abs() >= 0.5 {
+                self.upload_budget_ms = target_budget_ms.clamp(2.0, 10.0);
+                self.disk_cache
+                    .set_preference("upload_budget_ms", &self.upload_budget_ms.to_string());
+            }
+            self.last_upload_budget_update = now;
+        }
+
+        let base_budget_ms = if is_video_playing && is_scrolling {
+            self.upload_budget_ms * 0.6
+        } else if is_video_playing {
+            self.upload_budget_ms * 0.75
+        } else if is_scrolling {
+            self.upload_budget_ms * 0.85
+        } else {
+            self.upload_budget_ms
+        };
+        let upload_budget_ms = (base_budget_ms * perf_scale).clamp(2.0, 10.0);
+        let upload_budget = Duration::from_millis(upload_budget_ms.round() as u64);
 
         // Process thumbnails from the buffer up to the per-frame limit
         while uploads_this_frame < max_uploads_per_frame {
             if let Some(thumbnail_data) = self.pending_thumbnails.pop_front() {
+                if upload_start.elapsed() >= upload_budget {
+                    self.pending_thumbnails.push_front(thumbnail_data);
+                    break;
+                }
                 // Ensure thumbnail is still relevant (generation check again just in case)
                 if thumbnail_data.generation != self.generation {
                     self.cache_manager.finish_pending_upload(&thumbnail_data.path);
@@ -424,35 +470,40 @@ impl ImageViewerApp {
 
                 // PERFORMANCE: Store RGBA data in RAM cache before GPU upload
                 // This allows fast re-upload if texture is evicted from VRAM without disk I/O
+                let path = thumbnail_data.path.clone();
+                let width = thumbnail_data.width;
+                let height = thumbnail_data.height;
                 self.cache_manager.put_rgba_data(
-                    thumbnail_data.path.clone(),
-                    thumbnail_data.image_data.clone(),
-                    thumbnail_data.width,
-                    thumbnail_data.height,
+                    path.clone(),
+                    thumbnail_data.image_data,
+                    width,
+                    height,
                 );
 
                 // Carrega textura no GPU
-                let texture = ctx.load_texture(
-                    thumbnail_data.path.to_string_lossy().to_string(),
-                    egui::ColorImage::from_rgba_unmultiplied(
-                        [
-                            thumbnail_data.width as usize,
-                            thumbnail_data.height as usize,
-                        ],
-                        &thumbnail_data.image_data,
-                    ),
-                    egui::TextureOptions::NEAREST,
-                );
+                let texture = if let Some((rgba_data, _, _)) = self.cache_manager.get_rgba_data(&path) {
+                    ctx.load_texture(
+                        path.to_string_lossy().to_string(),
+                        egui::ColorImage::from_rgba_unmultiplied(
+                            [width as usize, height as usize],
+                            rgba_data,
+                        ),
+                        egui::TextureOptions::NEAREST,
+                    )
+                } else {
+                    self.cache_manager.finish_pending_upload(&path);
+                    continue;
+                };
 
                 self.cache_manager
-                    .put_thumbnail(thumbnail_data.path.clone(), texture.clone());
+                    .put_thumbnail(path.clone(), texture.clone());
 
                 // Limpa status de pending upload
-                self.cache_manager.finish_pending_upload(&thumbnail_data.path);
+                self.cache_manager.finish_pending_upload(&path);
 
                 // Update selected_thumbnail if it matches the selected_file
                 if let Some(selected_file) = &self.selected_file {
-                    if selected_file.path == thumbnail_data.path {
+                    if selected_file.path == path {
                         self.selected_thumbnail = Some(texture);
                     }
                 }
