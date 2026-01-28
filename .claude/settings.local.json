@@ -10,7 +10,8 @@
       "Bash(git commit:*)",
       "Bash(cargo build:*)",
       "Bash(dir:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(git show:*)"
     ],
     "additionalDirectories": [
       "c:\\Users\\mtamu\\github\\MTT-File-Manager-RUST\\docs"
