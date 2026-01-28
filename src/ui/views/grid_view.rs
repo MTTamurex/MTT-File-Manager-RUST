@@ -383,23 +383,30 @@ pub fn render_grid_view(
         let keep_min_row = vis_min_row.saturating_sub(cleanup_margin);
         let keep_max_row = (vis_max_row + cleanup_margin).min(total_rows);
 
-        // Collect paths to keep based on row index
-        let mut paths_to_keep = std::collections::HashSet::with_capacity((keep_max_row - keep_min_row) * cols);
-        for row in keep_min_row..keep_max_row {
-            for col in 0..cols {
-                let index = row * cols + col;
-                if index < count {
-                    paths_to_keep.insert(ctx.items[index].path.clone());
-                    // Also keep folder covers
-                    if let Some(ref cover) = ctx.items[index].folder_cover {
-                        paths_to_keep.insert(cover.clone());
+        // PERFORMANCE: Calculate index range instead of building a HashSet
+        // This avoids O(n) PathBuf clones and HashSet allocations
+        let keep_start_idx = keep_min_row * cols;
+        let keep_end_idx = (keep_max_row * cols).min(count);
+
+        // Remove stale entries - compare by reference, no clones needed
+        ctx.loading_set.retain(|path| {
+            // Linear scan is faster than HashSet for ~50-100 items due to:
+            // 1. No allocation overhead
+            // 2. Cache-friendly sequential access
+            // 3. PathBuf comparison is cheaper than hash computation
+            for idx in keep_start_idx..keep_end_idx {
+                if &ctx.items[idx].path == path {
+                    return true;
+                }
+                // Also check folder covers
+                if let Some(ref cover) = ctx.items[idx].folder_cover {
+                    if cover == path {
+                        return true;
                     }
                 }
             }
-        }
-
-        // Remove stale entries (paths not in visible range + margin)
-        ctx.loading_set.retain(|path| paths_to_keep.contains(path));
+            false
+        });
     }
 
     // STABLE OVERSCAN: Fixed value, no velocity dependency
