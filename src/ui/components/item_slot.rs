@@ -421,11 +421,12 @@ fn render_file_slot<O: ItemSlotOperations>(
     // PERFORMANCE: allow_blocking=false prevents UI stutter on slow icons (exe/lnk)
     let file_icon = ctx.icon_loader.get_or_load_icon(ui.ctx(), &path_clone, false, false);
 
-    // Se ícone não está cacheado E não estamos na lixeira E não está carregando E não falhou:
+    // Se ícone não está cacheado E não está carregando E não falhou:
     // Dispara carregamento assíncrono (apenas para casos lentos onde allow_blocking=false retornou None)
     // NOTE: Do NOT insert into loading_icons here - request_icon_load handles it.
     // Inserting here would cause the deferred request_icon_load to skip (already in set).
-    if file_icon.is_none() && !ctx.is_recycle_bin_view {
+    // NOTE: Also works for Recycle Bin - physical_path ($R files) contain embedded icons.
+    if file_icon.is_none() {
         if !ctx.loading_icons.contains(&path_clone) && !ctx.failed_icons.contains(&path_clone) {
             ops.request_icon_load(path_clone.clone());
         }
