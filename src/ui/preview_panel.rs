@@ -327,7 +327,7 @@ pub fn render_preview_panel(
                     // NOW TAKES preview AND svg_manager AS ARGUMENT TO AVOID BORROW ISSUES
                     let draw_controls = |ui: &mut egui::Ui, preview: &mut MediaPreview, full_width: f32, svg_manager: &mut SvgIconManager| {
                          ui.set_width(full_width);
-                        
+
                         // Seek Bar
                         ui.horizontal(|ui| {
                             ui.spacing_mut().slider_width = full_width;
@@ -341,42 +341,88 @@ pub fn render_preview_panel(
                             }
                         });
 
-                        ui.add_space(8.0);
+                        ui.add_space(6.0);
 
                         // Buttons & Time
                         ui.horizontal(|ui| {
                             let icon_color = if ui.visuals().dark_mode { [240, 240, 240, 255] } else { [60, 60, 60, 255] };
+                            let btn_size = 18.0; // Smaller button size
 
-                            // Play/Pause - with hover effect
+                            // Helper: Create frameless button with hover effect
+                            let add_icon_button = |ui: &mut egui::Ui, tex: &egui::TextureHandle, tooltip: &str| -> bool {
+                                let desired_size = egui::vec2(btn_size + 8.0, btn_size + 8.0);
+                                let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+
+                                // Draw hover background (rounded rect)
+                                if response.hovered() {
+                                    let hover_color = if ui.visuals().dark_mode {
+                                        egui::Color32::from_white_alpha(25)
+                                    } else {
+                                        egui::Color32::from_black_alpha(15)
+                                    };
+                                    ui.painter().rect_filled(rect, 4.0, hover_color);
+                                }
+
+                                // Draw icon centered
+                                let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(btn_size, btn_size));
+                                ui.painter().image(
+                                    tex.id(),
+                                    icon_rect,
+                                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                    egui::Color32::WHITE,
+                                );
+
+                                response.on_hover_text(tooltip).clicked()
+                            };
+
+                            // Play/Pause
                             let play_icon = if is_playing { "pause" } else { "play" };
                             if let Some(tex) = svg_manager.get_icon(ui.ctx(), play_icon, 48, icon_color) {
-                                let btn = egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(22.0, 22.0)));
-                                if ui.add(btn).on_hover_text(if is_playing { "Pausar" } else { "Reproduzir" }).clicked() {
+                                let tooltip = if is_playing { "Pausar" } else { "Reproduzir" };
+                                if add_icon_button(ui, &tex, tooltip) {
                                     preview.toggle_play();
                                 }
                             }
 
-                            ui.add_space(10.0);
+                            ui.add_space(2.0);
 
-                            // Volume - with hover effect
+                            // Detach Button (moved here, between Play and Volume)
+                            let detach_icon_name = if is_detached { "minimize_2" } else { "external-link" };
+                            let detach_tooltip = if is_detached { "Anexar ao painel" } else { "Desacoplar vídeo" };
+                            if let Some(tex) = svg_manager.get_icon(ui.ctx(), detach_icon_name, 48, icon_color) {
+                                if add_icon_button(ui, &tex, detach_tooltip) {
+                                    if is_detached && preview.is_maximized() {
+                                        preview.set_fullscreen_applied(false);
+                                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                                        if preview.prev_app_maximized() {
+                                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                                        }
+                                    }
+                                    preview.toggle_detached();
+                                }
+                            }
+
+                            ui.add_space(2.0);
+
+                            // Volume
                             let vol_icon = if is_muted { "vol_mute" } else { "vol_high" };
                             if let Some(tex) = svg_manager.get_icon(ui.ctx(), vol_icon, 48, icon_color) {
-                                let btn = egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(22.0, 22.0)));
-                                if ui.add(btn).on_hover_text(if is_muted { "Ativar som" } else { "Mudo" }).clicked() {
+                                let vol_tooltip = if is_muted { "Ativar som" } else { "Mudo" };
+                                if add_icon_button(ui, &tex, vol_tooltip) {
                                     preview.toggle_mute();
                                 }
                             }
 
                             // Volume Slider
                             let mut vol = volume;
-                            ui.add_space(5.0);
-                            ui.spacing_mut().slider_width = 80.0;
+                            ui.add_space(4.0);
+                            ui.spacing_mut().slider_width = 70.0;
                             ui.visuals_mut().selection.bg_fill = crate::ui::theme::COLOR_ACCENT;
                             if ui.add(egui::Slider::new(&mut vol, 0.0..=1.0).show_value(false)).changed() {
                                 preview.set_volume(vol);
                             }
 
-                            ui.add_space(15.0);
+                            ui.add_space(10.0);
 
                             // Time
                             let time_text = format!(
@@ -385,57 +431,50 @@ pub fn render_preview_panel(
                                 crate::ui::components::media_preview::format_time(duration)
                             );
                             let time_color = if ui.visuals().dark_mode { egui::Color32::LIGHT_GRAY } else { egui::Color32::DARK_GRAY };
-                            ui.label(egui::RichText::new(time_text).size(13.0).color(time_color));
-                            
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                // Detach Button - with hover effect
-                                let detach_icon_name = if is_detached { "minimize_2" } else { "external-link" }; 
-                                let tooltip = if is_detached { "Anexar ao painel" } else { "Desacoplar vídeo" };
+                            ui.label(egui::RichText::new(time_text).size(12.0).color(time_color));
 
-                                if let Some(tex) = svg_manager.get_icon(ui.ctx(), detach_icon_name, 48, icon_color) {
-                                    let btn = egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(18.0, 18.0)));
-                                    if ui.add(btn).on_hover_text(tooltip).clicked() {
-                                        if is_detached && preview.is_maximized() {
-                                            // Handle cleanup if re-attaching from fullscreen
-                                            preview.set_fullscreen_applied(false);
-                                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
-                                            if preview.prev_app_maximized() {
-                                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
-                                            }
-                                        }
-                                        preview.toggle_detached();
-                                    }
-                                } else {
-                                    if ui.button(if is_detached { "Anexar" } else { "Desacoplar" }).on_hover_text(tooltip).clicked() {
-                                        if is_detached && preview.is_maximized() {
-                                            preview.set_fullscreen_applied(false);
-                                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
-                                            if preview.prev_app_maximized() {
-                                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
-                                            }
-                                        }
-                                        preview.toggle_detached();
-                                    }
-                                }
+                            // Right-aligned buttons (only in detached mode)
+                            if is_detached {
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    // Fullscreen Button
+                                    let is_fullscreen = preview.is_maximized();
+                                    let fs_icon_name = if is_fullscreen { "minimize" } else { "maximize" };
+                                    let fs_tooltip = if is_fullscreen { "Sair da Tela Cheia (ESC)" } else { "Tela Cheia" };
 
-                                // VSR Button (NVIDIA Video Super Resolution)
-                                // Only show in detached/fullscreen mode as requested
-                                if is_detached {
+                                    if let Some(tex) = svg_manager.get_icon(ui.ctx(), fs_icon_name, 48, icon_color) {
+                                        if add_icon_button(ui, &tex, fs_tooltip) {
+                                            if !is_fullscreen {
+                                                let was_maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+                                                preview.set_prev_app_maximized(was_maximized);
+                                                preview.set_fullscreen_applied(false);
+                                            } else {
+                                                preview.set_fullscreen_applied(false);
+                                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                                                if preview.prev_app_maximized() {
+                                                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                                                }
+                                            }
+                                            preview.toggle_maximized();
+                                        }
+                                    }
+
                                     ui.add_space(4.0);
 
+                                    // VSR Button (NVIDIA Video Super Resolution)
                                     let is_vsr = preview.is_vsr_enabled();
                                     let label = if is_vsr { "VSR On" } else { "VSR Off" };
-                                    
+
                                     // Custom style for ON state (NVIDIA Green), Standard style for OFF state
                                     let btn = if is_vsr {
                                         egui::Button::new(
-                                            egui::RichText::new(label).strong().size(11.0).color(egui::Color32::WHITE)
+                                            egui::RichText::new(label).strong().size(10.0).color(egui::Color32::WHITE)
                                         )
                                         .fill(egui::Color32::from_rgb(118, 185, 0))
                                     } else {
                                         egui::Button::new(
-                                            egui::RichText::new(label).size(11.0)
+                                            egui::RichText::new(label).size(10.0)
                                         )
+                                        .fill(egui::Color32::TRANSPARENT)
                                     };
 
                                     if ui.add(btn).on_hover_text(
@@ -445,51 +484,8 @@ pub fn render_preview_panel(
                                             eprintln!("Error toggling VSR: {}", e);
                                         }
                                     }
-                                }
-
-                                // Fullscreen Button (Only in detached mode) - with hover effect
-                                if is_detached {
-                                    ui.add_space(4.0);
-                                    let is_fullscreen = preview.is_maximized();
-                                    let fs_icon_name = if is_fullscreen { "minimize" } else { "maximize" };
-                                    let fs_tooltip = if is_fullscreen { "Sair da Tela Cheia (ESC)" } else { "Tela Cheia" };
-                                    
-                                    if let Some(tex) = svg_manager.get_icon(ui.ctx(), fs_icon_name, 48, icon_color) {
-                                        let btn = egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(18.0, 18.0)));
-                                        if ui.add(btn).on_hover_text(fs_tooltip).clicked() {
-                                            if !is_fullscreen {
-                                                let was_maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
-                                                preview.set_prev_app_maximized(was_maximized);
-                                                preview.set_fullscreen_applied(false);
-                                            } else {
-                                                preview.set_fullscreen_applied(false);
-                                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
-                                                if preview.prev_app_maximized() {
-                                                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
-                                                }
-                                            }
-                                            preview.toggle_maximized();
-                                        }
-                                    } else {
-                                        // Fallback text
-                                        let text = if is_fullscreen { "⮌" } else { "⛶" };
-                                        if ui.button(text).on_hover_text(fs_tooltip).clicked() {
-                                            if !is_fullscreen {
-                                                let was_maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
-                                                preview.set_prev_app_maximized(was_maximized);
-                                                preview.set_fullscreen_applied(false);
-                                            } else {
-                                                preview.set_fullscreen_applied(false);
-                                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
-                                                if preview.prev_app_maximized() {
-                                                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
-                                                }
-                                            }
-                                            preview.toggle_maximized();
-                                        }
-                                    }
-                                }
-                            });
+                                });
+                            }
                         });
                     };
 
