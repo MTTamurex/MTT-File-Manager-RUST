@@ -29,6 +29,8 @@ pub struct ListViewContext<'a> {
     pub texture_cache: &'a mut lru::LruCache<PathBuf, egui::TextureHandle>,
     pub loading_set: &'a mut FxHashSet<PathBuf>,
     pub loading_icons: &'a mut FxHashSet<PathBuf>,
+    /// Set of icons that failed extraction (prevents infinite retry)
+    pub failed_icons: &'a FxHashSet<PathBuf>,
     pub scanned_folders: &'a mut FxHashSet<PathBuf>,
     pub folder_icon_texture: Option<&'a egui::TextureHandle>,
     pub computer_icon: Option<&'a egui::TextureHandle>,

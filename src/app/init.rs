@@ -187,6 +187,12 @@ impl ImageViewerApp {
         std::thread::spawn(move || {
             use crate::domain::file_entry::IconSize;
             use crate::infrastructure::windows::extract_file_icon_by_path;
+            use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+
+            // IMPORTANT: Initialize COM for this thread - required for IShellItemImageFactory
+            unsafe {
+                let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            }
 
             // PERFORMANCE: Set background priority to minimize HDD contention with video playback
             crate::infrastructure::io_priority::set_thread_priority(
@@ -194,12 +200,24 @@ impl ImageViewerApp {
             );
 
             while let Ok(path) = icon_req_rx.recv() {
-                if let Ok((pixels, width, height)) =
-                    extract_file_icon_by_path(&path, IconSize::Large)
-                {
-                    let _ = icon_res_tx.send((path, pixels, width, height));
-                    icon_ctx.request_repaint();
+                // FIX: Use IconSize::Jumbo to get proper embedded icons from .exe files
+                // Large uses SHGetFileInfoW which may return generic icons
+                // Jumbo uses IShellItemImageFactory which properly extracts embedded icons
+                match extract_file_icon_by_path(&path, IconSize::Jumbo) {
+                    Ok((pixels, width, height)) => {
+                        let _ = icon_res_tx.send((path, pixels, width, height));
+                    }
+                    Err(_) => {
+                        // Send empty data to signal failure - this clears loading_icons
+                        // so the UI can show a fallback icon
+                        let _ = icon_res_tx.send((path, Vec::new(), 0, 0));
+                    }
                 }
+                icon_ctx.request_repaint();
+            }
+
+            unsafe {
+                CoUninitialize();
             }
         });
 
@@ -348,6 +366,7 @@ impl ImageViewerApp {
             icon_req_sender: icon_req_tx,
             icon_res_receiver: icon_res_rx,
             loading_icons: FxHashSet::default(),
+            failed_icons: FxHashSet::default(),
 
             // NOTIFICATION SYSTEM
             notifications: crate::application::NotificationManager::new(),

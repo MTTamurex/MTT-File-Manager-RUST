@@ -375,6 +375,10 @@ fn thumbnail_worker_loop(
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
     }
 
+    // PERFORMANCE: Set background priority to minimize HDD contention with video playback
+    // This applies to all 4 thumbnail worker threads
+    io_priority::set_thread_priority(IOPriority::Background);
+
     loop {
         let (path, req_gen, req_size) = match queue.pop() {
             Some(v) => v,

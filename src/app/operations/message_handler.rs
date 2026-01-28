@@ -310,14 +310,25 @@ impl ImageViewerApp {
         }
 
         // 3. Icon Worker: Recebe resultados de ícones assíncronos
-        // PERFORMANCE: Throttle icon uploads to prevent stutter (Max 5 per frame)
+        // PERFORMANCE: Throttle icon uploads - reduce when video is playing
+        let max_icon_uploads = if self.is_video_playing_docked() { 2 } else { 5 };
         let mut icon_uploads = 0;
-        while icon_uploads < 5 {
+        while icon_uploads < max_icon_uploads {
             if let Ok((path, pixels, width, height)) = self.icon_res_receiver.try_recv() {
                 self.loading_icons.remove(&path);
 
+                // Skip texture creation if extraction failed (empty data)
+                // Track failed icons to prevent infinite retry loops
+                if pixels.is_empty() || width == 0 || height == 0 {
+                    self.failed_icons.insert(path);
+                    icon_uploads += 1;
+                    continue;
+                }
+
                 // Carrega textura no cache de ícones
-                let cache_key = path.to_string_lossy().to_string();
+                // FIX: Cache key must match icon_loader.rs format (path + size)
+                // Icon worker uses IconSize::Large, so append "_Large"
+                let cache_key = format!("{}_Large", path.to_string_lossy());
                 if !self.item_icon_loader.icon_cache.contains(&cache_key) {
                     let texture = ctx.load_texture(
                         cache_key.clone(),
@@ -334,7 +345,7 @@ impl ImageViewerApp {
                 break;
             }
         }
-        if icon_uploads >= 5 {
+        if icon_uploads >= max_icon_uploads {
             ctx.request_repaint();
         }
 
@@ -381,15 +392,23 @@ impl ImageViewerApp {
             received_any = true;
         }
 
-        // PERFORMANCE: Adaptive GPU upload throttling based on scroll state
+        // PERFORMANCE: Adaptive GPU upload throttling based on scroll state AND video playback
         // Note: Thumbnail cache is on SSD, so we can be more generous with uploads
         let is_scrolling = self.last_scroll_time.elapsed() < std::time::Duration::from_millis(100);
+        let is_video_playing = self.is_video_playing_docked();
 
-        // Generous upload limits since cache reads from SSD are fast
-        let max_uploads_per_frame = if is_scrolling {
-            5 // Reduced to prevent stutter during scrolling
+        // Adaptive upload limits:
+        // - Video playing: minimal uploads to avoid GPU contention
+        // - Scrolling: moderate uploads
+        // - Idle: generous uploads for responsiveness
+        let max_uploads_per_frame = if is_video_playing && is_scrolling {
+            2 // Minimal when video + scrolling to prevent stutter
+        } else if is_scrolling {
+            4 // Moderate during scroll
+        } else if is_video_playing {
+            3 // Low when video playing to preserve GPU for decoder
         } else {
-            10 // Moderate when idle to maintain responsiveness
+            8 // Generous when idle
         };
 
         let mut uploads_this_frame = 0;
