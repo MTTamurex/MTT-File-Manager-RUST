@@ -424,9 +424,10 @@ fn render_file_slot<O: ItemSlotOperations>(
 
     // Se ícone não está cacheado E não estamos na lixeira E não está carregando E não falhou:
     // Dispara carregamento assíncrono (apenas para casos lentos onde allow_blocking=false retornou None)
+    // NOTE: Do NOT insert into loading_icons here - request_icon_load handles it.
+    // Inserting here would cause the deferred request_icon_load to skip (already in set).
     if file_icon.is_none() && !ctx.is_recycle_bin_view {
         if !ctx.loading_icons.contains(&path_clone) && !ctx.failed_icons.contains(&path_clone) {
-            ctx.loading_icons.insert(path_clone.clone());
             ops.request_icon_load(path_clone.clone());
         }
     }
