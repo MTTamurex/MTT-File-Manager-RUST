@@ -24,6 +24,27 @@ impl eframe::App for ImageViewerApp {
         // 2. Lifecycle: Startup sequence & window state tracking
         app::lifecycle::handle_startup_sequence(self, ctx);
         app::lifecycle::track_window_state(self, ctx);
+        let frame_ms = (ctx.input(|i| i.stable_dt) * 1000.0) as f32;
+        if frame_ms > 0.0 {
+            if self.frame_time_avg_ms <= 0.0 {
+                self.frame_time_avg_ms = frame_ms;
+            } else {
+                self.frame_time_avg_ms = self.frame_time_avg_ms * 0.9 + frame_ms * 0.1;
+            }
+            if self.frame_time_peak_ms <= 0.0 {
+                self.frame_time_peak_ms = frame_ms;
+            } else {
+                self.frame_time_peak_ms *= 0.95;
+                if frame_ms > self.frame_time_peak_ms {
+                    self.frame_time_peak_ms = frame_ms;
+                }
+            }
+            self.fps_avg = if self.frame_time_avg_ms > 0.0 {
+                1000.0 / self.frame_time_avg_ms
+            } else {
+                0.0
+            };
+        }
 
         // 3. Infrastructure updates (skip heavy processing during resize)
         self.ensure_window_handle(frame);
@@ -93,6 +114,10 @@ fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 &mut app.sort_descending,
                 &mut app.folders_position,
                 &app.cache_manager.texture_cache,
+                app.frame_time_avg_ms,
+                app.frame_time_peak_ms,
+                app.fps_avg,
+                app.upload_budget_ms,
             );
             match action {
                 StatusBarAction::SortChanged => {

@@ -134,6 +134,12 @@ impl ImageViewerApp {
             .map(|s| s != "false")
             .unwrap_or(true);
 
+        let upload_budget_ms = disk_cache
+            .get_preference("upload_budget_ms")
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(6.0)
+            .clamp(2.0, 10.0);
+
         // Load window state from SQLite
         let saved_window_width = disk_cache
             .get_preference("window_width")
@@ -443,6 +449,11 @@ impl ImageViewerApp {
             // PERFORMANCE: Scroll state tracking for adaptive GPU upload throttling
             last_scroll_time: Instant::now(),
             last_scroll_offset: 0.0,
+            frame_time_avg_ms: 0.0,
+            frame_time_peak_ms: 0.0,
+            fps_avg: 0.0,
+            upload_budget_ms,
+            last_upload_budget_update: Instant::now(),
 
             scroll_request: crate::app::state::ScrollRequest::None,
 

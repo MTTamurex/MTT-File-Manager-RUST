@@ -51,6 +51,8 @@ impl ImageViewerApp {
                 "false"
             },
         );
+        self.disk_cache
+            .set_preference("upload_budget_ms", &self.upload_budget_ms.to_string());
 
         // Window state persistence
         self.disk_cache
