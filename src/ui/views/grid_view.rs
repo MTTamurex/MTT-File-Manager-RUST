@@ -223,17 +223,32 @@ pub fn render_grid_view(
                     let is_recycle = ctx.is_recycle_bin_view;
                     let mouse_pos = ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
 
-                    // SMART TOOLTIP: Inverte se estiver perto da borda direita
-                    let right_bound = ui.ctx().screen_rect().right();
-                    let tooltip_pos = if mouse_pos.x + 320.0 > right_bound {
-                        mouse_pos - egui::vec2(320.0, 0.0)
+                    // SMART TOOLTIP: Position to avoid video player overlay
+                    // Native HWND windows (MPV) render above egui content, so we must avoid that area
+                    let screen_right = ui.ctx().screen_rect().right();
+                    let tooltip_width = 320.0;
+
+                    // When video is docked, the preview panel takes ~25-30% of window width
+                    // Only flip tooltip when it would actually overlap the video area
+                    let effective_right = if ctx.is_video_playing_docked {
+                        screen_right * 0.72 // Preview panel is ~28% of window
+                    } else {
+                        screen_right
+                    };
+
+                    let tooltip_pos = if mouse_pos.x + tooltip_width > effective_right {
+                        // Position tooltip to the LEFT of the item
+                        egui::pos2(rect.left() - tooltip_width - 10.0, mouse_pos.y)
+                            .max(egui::pos2(10.0, mouse_pos.y))
                     } else {
                         mouse_pos
                     };
 
+                    // Use Order::Tooltip layer (though it won't help with native HWND windows)
+                    let tooltip_layer = egui::LayerId::new(egui::Order::Tooltip, response.id.with("tooltip"));
                     egui::show_tooltip_at(
                         ui.ctx(),
-                        ui.layer_id(),
+                        tooltip_layer,
                         response.id,
                         tooltip_pos,
                         |ui: &mut Ui| {

@@ -49,6 +49,8 @@ pub struct ListViewContext<'a> {
     pub last_scroll_offset: &'a mut f32,
     /// Conjunto de itens aguardando upload GPU
     pub pending_upload_set: &'a mut FxHashSet<PathBuf>,
+    /// PERFORMANCE: True if video is playing in docked mode (tooltip avoids video area)
+    pub is_video_playing_docked: bool,
 }
 
 /// Action returned by list view
@@ -608,19 +610,34 @@ fn render_list_item(
 
             // Only show tooltip if hover duration exceeds threshold
             if hover_duration >= TOOLTIP_DELAY_SECS {
-                let right_bound = available_rect.right();
                 let mouse_pos = ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
 
-                // SMART TOOLTIP: Inverte se estiver perto da borda direita (área do player)
-                let tooltip_pos = if mouse_pos.x + 320.0 > right_bound {
-                    mouse_pos - egui::vec2(320.0, 0.0)
+                // SMART TOOLTIP: Position to avoid video player overlay
+                // Native HWND windows (MPV) render above egui content, so we must avoid that area
+                let screen_right = ui.ctx().screen_rect().right();
+                let tooltip_width = 320.0;
+
+                // When video is docked, the preview panel takes ~25-30% of window width
+                // Only flip tooltip when it would actually overlap the video area
+                let effective_right = if ctx.is_video_playing_docked {
+                    screen_right * 0.72 // Preview panel is ~28% of window
+                } else {
+                    screen_right
+                };
+
+                let tooltip_pos = if mouse_pos.x + tooltip_width > effective_right {
+                    // Position tooltip to the LEFT of the item
+                    egui::pos2(rect.left() - tooltip_width - 10.0, mouse_pos.y)
+                        .max(egui::pos2(10.0, mouse_pos.y))
                 } else {
                     mouse_pos
                 };
 
+                // Use Order::Tooltip layer (though it won't help with native HWND windows)
+                let tooltip_layer = egui::LayerId::new(egui::Order::Tooltip, response.id.with("tooltip"));
                 egui::show_tooltip_at(
                     ui.ctx(),
-                    ui.layer_id(),
+                    tooltip_layer,
                     response.id,
                     tooltip_pos,
                     |ui: &mut Ui| {

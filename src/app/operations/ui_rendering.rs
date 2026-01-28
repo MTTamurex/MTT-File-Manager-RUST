@@ -164,6 +164,7 @@ impl ImageViewerApp {
 
         // Criar contexto com referências mutáveis separadas
         let scroll_to_selected = self.scroll_to_selected;
+        let is_video_playing_docked = self.is_video_playing_docked();
         let multi_selection = &self.multi_selection;
         let mut ctx = ListViewContext {
             items: &items,
@@ -195,6 +196,7 @@ impl ImageViewerApp {
             last_scroll_time: &mut self.last_scroll_time,
             last_scroll_offset: &mut self.last_scroll_offset,
             pending_upload_set: &mut self.cache_manager.pending_upload_set,
+            is_video_playing_docked,
         };
 
         // Usar uma abordagem diferente: coletar ações em vetores
