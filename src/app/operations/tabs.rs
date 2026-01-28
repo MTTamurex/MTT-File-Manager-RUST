@@ -40,24 +40,25 @@ impl ImageViewerApp {
 
     /// Sincroniza o estado da aba ativa para o app
     pub fn sync_from_tab(&mut self) {
-        // Clonamos o estado da aba para evitar problemas de borrow checker ao atualizar self
-        let active = self.tab_manager.active().clone();
-        self.current_path = active.path;
-        self.path_input = active.path_input;
-        self.is_computer_view = active.is_computer_view;
-        self.is_recycle_bin_view = active.is_recycle_bin_view;
-        self.navigation = active.navigation.clone();
-        self.items = active.items;
-        self.all_items = active.all_items;
-        self.selected_item = active.selected_item;
-        self.selected_file = active.selected_file;
-        self.selected_thumbnail = active.selected_thumbnail;
-        self.selected_gif = active.selected_gif;
-        self.selected_metadata = active.selected_metadata;
-        self.search_query = active.search_query;
-        self.scroll_to_selected = active.scroll_to_selected;
-        self.scroll_offset_y = active.scroll_offset_y;
-        self.total_items = active.total_items;
+        {
+            let active = self.tab_manager.active_mut();
+            self.current_path = active.path.clone();
+            self.path_input = active.path_input.clone();
+            self.is_computer_view = active.is_computer_view;
+            self.is_recycle_bin_view = active.is_recycle_bin_view;
+            self.navigation = active.navigation.clone();
+            self.items = active.items.clone();
+            self.all_items = std::mem::take(&mut active.all_items);
+            self.selected_item = active.selected_item;
+            self.selected_file = active.selected_file.clone();
+            self.selected_thumbnail = active.selected_thumbnail.clone();
+            self.selected_gif = active.selected_gif.clone();
+            self.selected_metadata = active.selected_metadata.clone();
+            self.search_query = active.search_query.clone();
+            self.scroll_to_selected = active.scroll_to_selected;
+            self.scroll_offset_y = active.scroll_offset_y;
+            self.total_items = active.total_items;
+        }
 
         self.watch_current_folder();
         
