@@ -4,7 +4,6 @@ use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
-use serde_json;
 
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::HWND;
@@ -416,47 +415,50 @@ impl MpvPreview {
 
         // PERF FASE 2: State updates now handled by async event loop (zero polling overhead!)
         // Only tracks still need manual fetching (heavy JSON parse, done once per file)
+        // NOTE: We must wait for file to be loaded before querying tracks, otherwise we get empty list
         if let Some(m) = &self.mpv {
-            // CACHE: Track list (read once, then cache until file change or manual refresh)
-            if self.cached_tracks.is_none() {
-                // Only parse JSON once on initial load
-                if let Ok(tracks_str) = m.get_property::<String>("track-list") {
-                    if let Ok(tracks_val) = serde_json::from_str::<serde_json::Value>(&tracks_str) {
-                        if let Some(tracks_arr) = tracks_val.as_array() {
-                            let mut audio_tracks = Vec::new();
-                            let mut sub_tracks = Vec::new();
+            // Check if file is ready by checking if duration is available
+            let file_ready = m.get_property::<f64>("duration").map(|d| d > 0.0).unwrap_or(false);
 
-                            for t in tracks_arr {
-                                let id = t["id"].as_i64().unwrap_or(0);
-                                let t_type = t["type"].as_str().unwrap_or("").to_string();
-                                let selected = t["selected"].as_bool().unwrap_or(false);
-                                let title = t["title"].as_str().map(|s| s.to_string());
-                                let lang = t["lang"].as_str().map(|s| s.to_string());
+            // CACHE: Track list (read once file is ready, then cache until file change)
+            if self.cached_tracks.is_none() && file_ready {
+                let mut audio_tracks = Vec::new();
+                let mut sub_tracks = Vec::new();
 
-                                let info = TrackInfo {
-                                    id,
-                                    track_type: t_type.clone(),
-                                    title,
-                                    lang,
-                                    selected,
-                                };
+                // Query mpv array properties via track-list/N/*
+                if let Ok(count) = m.get_property::<i64>("track-list/count") {
+                    if count > 0 {
+                        for i in 0..count {
+                            let base = format!("track-list/{}/", i);
+                            let t_type = m.get_property::<String>(&(base.clone() + "type")).unwrap_or_default();
+                            let id = m.get_property::<i64>(&(base.clone() + "id")).unwrap_or(0);
+                            let selected = m.get_property::<bool>(&(base.clone() + "selected")).unwrap_or(false);
+                            let title = m.get_property::<String>(&(base.clone() + "title")).ok();
+                            let lang = m.get_property::<String>(&(base + "lang")).ok();
 
-                                if t_type == "audio" {
-                                    audio_tracks.push(info);
-                                } else if t_type == "sub" {
-                                    sub_tracks.push(info);
-                                }
-                            }
+                            let info = TrackInfo {
+                                id,
+                                track_type: t_type.clone(),
+                                title,
+                                lang,
+                                selected,
+                            };
 
-                            // Cache the tracks
-                            self.cached_tracks = Some((audio_tracks.clone(), sub_tracks.clone()));
-                            
-                            if let Ok(mut state) = self.state.write() {
-                                state.audio_tracks = audio_tracks;
-                                state.subtitle_tracks = sub_tracks;
+                            if t_type == "audio" {
+                                audio_tracks.push(info);
+                            } else if t_type == "sub" {
+                                sub_tracks.push(info);
                             }
                         }
                     }
+                }
+
+                // Cache the tracks (even if empty, file is loaded so this is final)
+                self.cached_tracks = Some((audio_tracks.clone(), sub_tracks.clone()));
+
+                if let Ok(mut state) = self.state.write() {
+                    state.audio_tracks = audio_tracks;
+                    state.subtitle_tracks = sub_tracks;
                 }
             } else if let Some((ref audio, ref subs)) = self.cached_tracks {
                 // Use cached tracks
