@@ -200,9 +200,9 @@ impl ImageViewerApp {
             );
 
             while let Ok(path) = icon_req_rx.recv() {
-                // Use IconSize::Large to match the cache key lookup in icon_loader.rs
-                // Note: SHGetFileInfoW should work for .exe embedded icons
-                match extract_file_icon_by_path(&path, IconSize::Large) {
+                // Use IconSize::Jumbo (256x256) for high-quality icons
+                // IShellItemImageFactory properly extracts embedded icons from .exe/.lnk files
+                match extract_file_icon_by_path(&path, IconSize::Jumbo) {
                     Ok((pixels, width, height)) => {
                         let _ = icon_res_tx.send((path, pixels, width, height));
                     }

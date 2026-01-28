@@ -104,7 +104,7 @@ pub enum ViewMode {
 }
 
 /// Tamanho de ícones
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum IconSize {
     Small, // 16x16 ou 32x32 (depende do DPI)
     Large, // 32x32 ou 48x48

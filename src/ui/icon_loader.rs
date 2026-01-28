@@ -76,19 +76,19 @@ impl IconLoader {
     /// PERFORMANCE: Avoids blocking I/O by using extension-based lookup first
     ///
     /// `allow_blocking`: If false, returns None for operations that require disk access (e.g. EXEs).
+    ///                   If true, will attempt blocking extraction (suitable for preview panel).
     pub fn get_or_load_icon_sized(
         &mut self,
         ctx: &egui::Context,
         path: &Path,
         size: IconSize,
         is_folder: bool,
-        _allow_blocking: bool,
+        allow_blocking: bool,
     ) -> Option<egui::TextureHandle> {
         let cache_key = format!("{}_{:?}", path.to_string_lossy(), size);
 
         // UNIQUE ICON FILES: .exe, .lnk, .ico, .cur, .ani, .com have unique embedded icons per file.
-        // For these files, ONLY return from cache if async worker has populated it.
-        // NEVER fall back to generic icons - they must be loaded via async worker.
+        // For these files, check cache first, then either return None (async) or load blocking.
         if !is_folder {
             let ext_str = path.extension()
                 .map(|e| e.to_string_lossy().to_lowercase())
@@ -107,12 +107,37 @@ impl IconLoader {
 
             if let Some(ref ext) = ext_str {
                 if matches!(ext.as_str(), "exe" | "lnk" | "ico" | "cur" | "ani" | "com") {
-                    // Check cache - async worker may have loaded the real icon
+                    // Check cache first - async worker may have loaded the real icon
                     if let Some(texture) = self.icon_cache.get(&cache_key) {
                         return Some(texture.clone());
                     }
-                    // Not in cache - return None to trigger async load
-                    // CRITICAL: Never use generic fallback for unique icon files!
+
+                    // Also check Jumbo size cache (async worker uses Jumbo for high-quality)
+                    if size != IconSize::Jumbo {
+                        let jumbo_key = format!("{}_{:?}", path.to_string_lossy(), IconSize::Jumbo);
+                        if let Some(texture) = self.icon_cache.get(&jumbo_key) {
+                            return Some(texture.clone());
+                        }
+                    }
+
+                    // Not in cache - if blocking allowed, try to load now (for preview panel)
+                    if allow_blocking && path.exists() {
+                        if let Ok((pixels, width, height)) = windows::extract_file_icon_by_path(path, size) {
+                            let texture = ctx.load_texture(
+                                cache_key.clone(),
+                                egui::ColorImage::from_rgba_unmultiplied(
+                                    [width as usize, height as usize],
+                                    &pixels,
+                                ),
+                                egui::TextureOptions::LINEAR,
+                            );
+                            let cloned = texture.clone();
+                            self.icon_cache.put(cache_key, texture);
+                            return Some(cloned);
+                        }
+                    }
+
+                    // Not in cache and blocking not allowed - return None to trigger async load
                     return None;
                 }
             }
