@@ -327,8 +327,8 @@ impl ImageViewerApp {
 
                 // Carrega textura no cache de ícones
                 // FIX: Cache key must match icon_loader.rs format (path + size)
-                // Icon worker uses IconSize::Large, so append "_Large"
-                let cache_key = format!("{}_Large", path.to_string_lossy());
+                // Icon worker uses IconSize::Jumbo for high-quality icons
+                let cache_key = format!("{}_Jumbo", path.to_string_lossy());
                 if !self.item_icon_loader.icon_cache.contains(&cache_key) {
                     let texture = ctx.load_texture(
                         cache_key.clone(),
