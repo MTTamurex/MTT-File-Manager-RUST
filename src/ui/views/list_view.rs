@@ -265,9 +265,10 @@ pub fn render_list_view(
         let mut network = Vec::new();
 
         for (i, item) in ctx.items.iter().enumerate() {
-            let is_remote = item.drive_info.as_ref().map_or(false, |di| {
-                di.drive_type == crate::infrastructure::windows::DriveType::Remote
-            });
+            let is_remote = item
+                .drive_info
+                .as_ref()
+                .is_some_and(|di| di.drive_type == crate::infrastructure::windows::DriveType::Remote);
             if is_remote {
                 network.push((i, item));
             } else {
@@ -363,7 +364,11 @@ pub fn render_list_view(
         }
     } else {
         // Regular virtualized list
-        let overscan = 3;
+        let is_scrolling = std::time::Instant::now()
+            .duration_since(*ctx.last_scroll_time)
+            .as_millis()
+            < 80;
+        let overscan = if is_scrolling { 2 } else { 5 };
         let vis_min_row = ((current_scroll / row_height).floor() as usize).saturating_sub(overscan);
         let vis_max_row = (((current_scroll + viewport_h) / row_height).ceil() as usize) + overscan;
         let vis_max_row = vis_max_row.min(total_rows);
@@ -491,7 +496,7 @@ fn render_list_item(
     rect: Rect,
     ctx: &mut ListViewContext,
     ops: &mut dyn ListViewOperations,
-    available_rect: Rect,
+    _available_rect: Rect,
     clicked_item: &mut Option<usize>,
     double_clicked_item: &mut Option<usize>,
     secondary_clicked_item: &mut Option<usize>,
@@ -691,7 +696,7 @@ fn render_list_item(
             egui::vec2(icon_size_px, icon_size_px),
         );
 
-        if let Some(_) = &item.drive_info {
+        if item.drive_info.is_some() {
             // Drive: use specialized drive icon loader
             if let Some(drive_icon) = ctx
                 .item_icon_loader
@@ -765,7 +770,7 @@ fn render_list_item(
         let is_renaming_this = ctx
             .renaming_state
             .as_ref()
-            .map_or(false, |(idx, _)| *idx == i);
+            .is_some_and(|(idx, _)| *idx == i);
         if is_renaming_this {
             let mut text = ctx.renaming_state.as_ref().unwrap().1.clone();
             let name_rect = Rect::from_min_size(

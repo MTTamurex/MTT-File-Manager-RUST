@@ -154,6 +154,7 @@ pub fn render_grid_view(
         clicked_item: &mut Option<usize>,
         double_clicked_item: &mut Option<usize>,
         secondary_clicked_item: &mut Option<usize>,
+        is_scrolling: bool,
     ) {
         let response = ui.interact(rect, ui.id().with(index), Sense::click());
         if response.clicked() {
@@ -283,7 +284,7 @@ pub fn render_grid_view(
         // STANDARD RENDERING
         let inner_rect = rect.shrink(3.0);
         ui.allocate_new_ui(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
-            render_item_slot_for_grid(ui, index, item, ctx);
+            render_item_slot_for_grid(ui, index, item, ctx, is_scrolling);
         });
     }
 
@@ -500,7 +501,7 @@ pub fn render_grid_view(
                                 egui::pos2(content_min.x + x_pos, item_y),
                                 egui::vec2(item_w, item_h),
                             );
-                            render_grid_item(ui, real_idx, item, item_rect, ctx, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item);
+                                render_grid_item(ui, real_idx, item, item_rect, ctx, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item, is_scrolling);
                         }
                         
                         current_idx += 1;
@@ -529,7 +530,7 @@ pub fn render_grid_view(
                     egui::vec2(item_w, item_h),
                 );
 
-                render_grid_item(&mut child_ui, index, &ctx.items[index], item_rect, ctx, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item);
+                render_grid_item(&mut child_ui, index, &ctx.items[index], item_rect, ctx, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item, is_scrolling);
             }
         }
     }
@@ -615,11 +616,7 @@ pub fn render_grid_view(
         let rows = (count as f32 / cols as f32).ceil() as usize;
 
         // Adaptive prefetch margin based on scroll status
-        let prefetch_margin = if is_scrolling {
-            2 // During scroll, moderate prefetch
-        } else {
-            5 // When idle, prefetch more ahead
-        };
+        let prefetch_margin = if is_scrolling { 2 } else { 5 };
 
         let start_prefetch = vis_min.saturating_sub(prefetch_margin);
         let end_prefetch = (vis_max + prefetch_margin).min(rows);
@@ -682,7 +679,8 @@ fn render_item_slot_for_grid(
     ui: &mut Ui,
     idx: usize,
     item: &FileEntry,
-    ctx: &mut GridViewContext
+    ctx: &mut GridViewContext,
+    is_scrolling: bool,
 ) {
     use crate::ui::components::item_slot::{render_item_slot, ItemSlotContext};
 
@@ -721,6 +719,7 @@ fn render_item_slot_for_grid(
             failed_thumbnails: ctx.failed_thumbnails,
             pending_upload_set: ctx.pending_upload_set,
             is_dense_mode: false, // Legacy: dense mode logic removed from grid view
+            is_scrolling,
         };
 
         // PERFORMANCE: SimpleOps now writes directly to shared buffers

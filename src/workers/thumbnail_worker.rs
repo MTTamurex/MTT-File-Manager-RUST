@@ -22,7 +22,7 @@ use windows::core::Interface;
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 
 /// Maximum concurrent decode operations (RAM limiter)
-const MAX_CONCURRENT_DECODES: usize = 4;
+const MAX_CONCURRENT_DECODES: usize = 5;
 
 /// Global cache of paths that failed thumbnail extraction (shared across workers)
 /// Prevents re-attempting extraction on files that consistently fail (e.g., corrupt files)
@@ -103,6 +103,12 @@ pub struct PriorityThumbnailQueue {
     condvar: Condvar,
 }
 
+impl Default for PriorityThumbnailQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PriorityThumbnailQueue {
     pub fn new() -> Self {
         Self {
@@ -153,7 +159,7 @@ impl PriorityThumbnailQueue {
         state
             .by_directory
             .entry(parent)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(request);
 
         self.condvar.notify_one();
@@ -380,11 +386,7 @@ fn thumbnail_worker_loop(
     // This applies to all 4 thumbnail worker threads
     io_priority::set_thread_priority(IOPriority::Background);
 
-    loop {
-        let (path, req_gen, req_size) = match queue.pop() {
-            Some(v) => v,
-            None => break,
-        };
+    while let Some((path, req_gen, req_size)) = queue.pop() {
 
         {
             // Block to scope the work variable was unused, flattened loop logic instead
@@ -1046,7 +1048,7 @@ fn hbitmap_to_rgba(
         );
 
         let width = bm.bmWidth as usize;
-        let height = bm.bmHeight.abs() as usize;
+        let height = bm.bmHeight.unsigned_abs() as usize;
         let mut buffer = vec![0u8; width * height * 4];
 
         let mut bi = BITMAPINFO {
@@ -1056,7 +1058,7 @@ fn hbitmap_to_rgba(
                 biHeight: -(height as i32),
                 biPlanes: 1,
                 biBitCount: 32,
-                biCompression: BI_RGB.0 as u32,
+                biCompression: BI_RGB.0,
                 ..Default::default()
             },
             ..Default::default()
@@ -1065,7 +1067,7 @@ fn hbitmap_to_rgba(
         let hdc = GetDC(None);
         GetDIBits(
             hdc,
-            hbitmap.into(),
+            hbitmap,
             0,
             height as u32,
             Some(buffer.as_mut_ptr() as *mut _),
