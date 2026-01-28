@@ -55,4 +55,11 @@ impl ImageViewerApp {
             let _ = self.folder_preview_sender.send(path);
         }
     }
+
+    pub fn request_icon_load(&mut self, path: PathBuf) {
+        if !self.loading_icons.contains(&path) {
+            self.loading_icons.insert(path.clone());
+            let _ = self.icon_req_sender.send(path);
+        }
+    }
 }

@@ -154,6 +154,7 @@ impl ImageViewerApp {
             is_onedrive_folder,
             texture_cache: &mut self.cache_manager.texture_cache,
             loading_set: &mut self.cache_manager.loading_set,
+            loading_icons: &mut self.loading_icons,
             scanned_folders: &mut self.scanned_folders,
             folder_icon_texture: folder_icon_texture.as_ref(),
             computer_icon: computer_icon.as_ref(),
@@ -513,6 +514,7 @@ impl ImageViewerApp {
             is_recycle_bin_view: self.is_recycle_bin_view,
             texture_cache: &mut self.cache_manager.texture_cache,
             loading_set: &mut self.cache_manager.loading_set,
+            loading_icons: &mut self.loading_icons,
             scanned_folders: &mut self.scanned_folders,
             folder_icon_texture: folder_icon_texture.as_ref(),
             computer_icon: computer_icon.as_ref(),
@@ -545,6 +547,7 @@ impl ImageViewerApp {
             RequestFolderScan(PathBuf),
             RequestFolderPreviewLoad(PathBuf),
             RequestThumbnailPrefetch(PathBuf, u32),
+            RequestIconLoad(PathBuf),
             RenameWithShell(usize),
         }
 
@@ -571,6 +574,10 @@ impl ImageViewerApp {
 
             fn request_thumbnail_prefetch(&mut self, path: PathBuf, size: u32) {
                 self.actions.push(GridAction::RequestThumbnailPrefetch(path, size));
+            }
+
+            fn request_icon_load(&mut self, path: PathBuf) {
+                self.actions.push(GridAction::RequestIconLoad(path));
             }
 
             fn rename_with_shell(&mut self, idx: usize) {
@@ -706,6 +713,7 @@ impl ImageViewerApp {
                     self.request_folder_preview_load(path)
                 }
                 GridAction::RequestThumbnailPrefetch(path, size) => self.request_thumbnail_prefetch(path, size),
+                GridAction::RequestIconLoad(path) => self.request_icon_load(path),
                 GridAction::RenameWithShell(idx) => self.rename_with_shell(idx),
             }
         }
@@ -758,6 +766,7 @@ impl ImageViewerApp {
                 icon_loader: &mut self.item_icon_loader,
                 scanned_folders: &mut self.scanned_folders,
                 loading_set: &mut self.cache_manager.loading_set,
+                loading_icons: &mut self.loading_icons,
                 folder_preview_cache: &mut self.cache_manager.folder_preview_cache,
                 folder_preview_loading: &mut self.cache_manager.folder_preview_loading,
                 failed_thumbnails: &self.cache_manager.failed_thumbnails,
@@ -770,6 +779,7 @@ impl ImageViewerApp {
                 thumbnail_loads: &'a mut Vec<(std::path::PathBuf, u32)>,
                 folder_scans: &'a mut Vec<std::path::PathBuf>,
                 folder_preview_loads: &'a mut Vec<std::path::PathBuf>,
+                icon_loads: &'a mut Vec<std::path::PathBuf>,
                 pending_rename: &'a mut Option<usize>,
             }
 
@@ -786,15 +796,21 @@ impl ImageViewerApp {
                     self.folder_preview_loads.push(path);
                 }
 
+                fn request_icon_load(&mut self, path: std::path::PathBuf) {
+                    self.icon_loads.push(path);
+                }
+
                 fn rename_item(&mut self, idx: usize) {
                     *self.pending_rename = Some(idx);
                 }
             }
 
+            let mut pending_icon_loads: Vec<std::path::PathBuf> = Vec::new();
             let mut ops = SimpleOps {
                 thumbnail_loads: &mut pending_thumbnail_loads,
                 folder_scans: &mut pending_folder_scans,
                 folder_preview_loads: &mut pending_folder_preview_loads,
+                icon_loads: &mut pending_icon_loads,
                 pending_rename: &mut pending_rename,
             };
 
@@ -821,6 +837,10 @@ impl ImageViewerApp {
 
         for path in pending_folder_preview_loads {
             self.request_folder_preview_load(path);
+        }
+
+        for path in pending_icon_loads {
+            self.request_icon_load(path);
         }
 
         if let Some(rename_idx) = pending_rename {

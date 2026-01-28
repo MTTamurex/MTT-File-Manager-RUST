@@ -25,6 +25,7 @@ pub struct PendingOperations {
     pub thumbnail_loads: Vec<(PathBuf, u32)>,
     pub folder_scans: Vec<PathBuf>,
     pub folder_preview_loads: Vec<PathBuf>,
+    pub icon_loads: Vec<PathBuf>,
     pub renames: Vec<usize>,
 }
 
@@ -34,6 +35,7 @@ impl PendingOperations {
             thumbnail_loads: Vec::with_capacity(16),
             folder_scans: Vec::with_capacity(16),
             folder_preview_loads: Vec::with_capacity(16),
+            icon_loads: Vec::with_capacity(16),
             renames: Vec::with_capacity(2),
         }
     }
@@ -43,6 +45,7 @@ impl PendingOperations {
         self.thumbnail_loads.clear();
         self.folder_scans.clear();
         self.folder_preview_loads.clear();
+        self.icon_loads.clear();
         self.renames.clear();
     }
 }
@@ -62,6 +65,8 @@ pub struct GridViewContext<'a> {
     pub is_recycle_bin_view: bool,
     pub texture_cache: &'a mut lru::LruCache<PathBuf, egui::TextureHandle>,
     pub loading_set: &'a mut FxHashSet<PathBuf>,
+    /// Set of icons currently loading (async)
+    pub loading_icons: &'a mut FxHashSet<PathBuf>,
     pub scanned_folders: &'a mut FxHashSet<PathBuf>,
     pub folder_icon_texture: Option<&'a egui::TextureHandle>,
     pub computer_icon: Option<&'a egui::TextureHandle>,
@@ -95,6 +100,7 @@ pub trait GridViewOperations {
     fn request_folder_scan(&mut self, path: PathBuf);
     fn request_folder_preview_load(&mut self, path: PathBuf);
     fn request_thumbnail_prefetch(&mut self, path: PathBuf, size: u32);
+    fn request_icon_load(&mut self, path: PathBuf);
     fn rename_with_shell(&mut self, idx: usize);
 }
 
@@ -578,6 +584,9 @@ pub fn render_grid_view(
     for path in ctx.pending_ops.folder_preview_loads.drain(..) {
         ops.request_folder_preview_load(path);
     }
+    for path in ctx.pending_ops.icon_loads.drain(..) {
+        ops.request_icon_load(path);
+    }
     for rename_idx in ctx.pending_ops.renames.drain(..) {
         ops.rename_with_shell(rename_idx);
     }
@@ -688,6 +697,7 @@ fn render_item_slot_for_grid(
             icon_loader: ctx.item_icon_loader,
             scanned_folders: ctx.scanned_folders,
             loading_set: ctx.loading_set,
+            loading_icons: ctx.loading_icons,
             folder_preview_cache: ctx.folder_preview_cache,
             folder_preview_loading: ctx.folder_preview_loading,
             failed_thumbnails: ctx.failed_thumbnails,
@@ -710,6 +720,9 @@ fn render_item_slot_for_grid(
             }
             fn request_folder_preview_load(&mut self, path: std::path::PathBuf) {
                 self.pending_ops.folder_preview_loads.push(path);
+            }
+            fn request_icon_load(&mut self, path: std::path::PathBuf) {
+                self.pending_ops.icon_loads.push(path);
             }
 
             fn rename_item(&mut self, idx: usize) {
