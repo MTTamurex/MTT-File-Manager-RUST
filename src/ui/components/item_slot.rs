@@ -48,6 +48,8 @@ pub struct ItemSlotContext<'a> {
     pub loading_set: &'a mut FxHashSet<std::path::PathBuf>,
     /// Conjunto de itens carregando ícones (ex: .exe)
     pub loading_icons: &'a mut FxHashSet<std::path::PathBuf>,
+    /// Conjunto de ícones que falharam (evita retry infinito)
+    pub failed_icons: &'a FxHashSet<std::path::PathBuf>,
     /// Cache de previews de pastas (Native Sandwich)
     pub folder_preview_cache: &'a mut lru::LruCache<std::path::PathBuf, egui::TextureHandle>,
     /// Conjunto de pastas carregando preview nativo
@@ -420,10 +422,10 @@ fn render_file_slot<O: ItemSlotOperations>(
     // PERFORMANCE: allow_blocking=false prevents UI stutter on slow icons (exe/lnk)
     let file_icon = ctx.icon_loader.get_or_load_icon(ui.ctx(), &path_clone, false, false);
 
-    // Se ícone não está cacheado E não estamos na lixeira E não está carregando:
+    // Se ícone não está cacheado E não estamos na lixeira E não está carregando E não falhou:
     // Dispara carregamento assíncrono (apenas para casos lentos onde allow_blocking=false retornou None)
     if file_icon.is_none() && !ctx.is_recycle_bin_view {
-        if !ctx.loading_icons.contains(&path_clone) {
+        if !ctx.loading_icons.contains(&path_clone) && !ctx.failed_icons.contains(&path_clone) {
             ctx.loading_icons.insert(path_clone.clone());
             ops.request_icon_load(path_clone.clone());
         }

@@ -271,14 +271,13 @@ fn render_resize_handles(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
 fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
     if let Some(file) = app.selected_file.clone() {
-        // For virtual paths (Recycle Bin or inside ZIP), don't check path.exists()
-        let is_virtual_path = app.is_recycle_bin_view
-            || crate::infrastructure::windows::shell_folder::is_shell_navigation_path(&file.path);
-        if is_virtual_path || file.path.exists() {
-            Some(file)
-        } else {
-            None
-        }
+        // PERFORMANCE FIX: NEVER call path.exists() in render loop!
+        // On HDD with video playing, this causes I/O spikes every frame.
+        // File existence is validated on:
+        // 1. Selection (when user clicks)
+        // 2. File system watcher events (auto-refresh)
+        // Trust the cached state - it's updated by the file watcher.
+        Some(file)
     } else if app.is_recycle_bin_view {
         Some(FileEntry {
             path: PathBuf::from("Lixeira"),

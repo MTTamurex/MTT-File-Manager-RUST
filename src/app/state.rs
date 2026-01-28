@@ -148,6 +148,7 @@ pub struct ImageViewerApp {
     pub icon_req_sender: Sender<PathBuf>, // UI → Worker
     pub icon_res_receiver: Receiver<(PathBuf, Vec<u8>, u32, u32)>, // Worker → UI
     pub loading_icons: FxHashSet<PathBuf>,  // Tracking in-progress
+    pub failed_icons: FxHashSet<PathBuf>,   // Icons that failed extraction (prevents infinite retry)
 
     // NOTIFICATION SYSTEM (toast messages)
     pub notifications: crate::application::NotificationManager,

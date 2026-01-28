@@ -67,6 +67,8 @@ pub struct GridViewContext<'a> {
     pub loading_set: &'a mut FxHashSet<PathBuf>,
     /// Set of icons currently loading (async)
     pub loading_icons: &'a mut FxHashSet<PathBuf>,
+    /// Set of icons that failed extraction (prevents infinite retry)
+    pub failed_icons: &'a FxHashSet<PathBuf>,
     pub scanned_folders: &'a mut FxHashSet<PathBuf>,
     pub folder_icon_texture: Option<&'a egui::TextureHandle>,
     pub computer_icon: Option<&'a egui::TextureHandle>,
@@ -698,6 +700,7 @@ fn render_item_slot_for_grid(
             scanned_folders: ctx.scanned_folders,
             loading_set: ctx.loading_set,
             loading_icons: ctx.loading_icons,
+            failed_icons: ctx.failed_icons,
             folder_preview_cache: ctx.folder_preview_cache,
             folder_preview_loading: ctx.folder_preview_loading,
             failed_thumbnails: ctx.failed_thumbnails,
