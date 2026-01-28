@@ -9,6 +9,7 @@
 use crate::domain::thumbnail::ThumbnailData;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::io_priority::{self, IOPriority};
+use crate::infrastructure::windows::file_type::is_video_extension;
 use eframe::egui;
 use image::{DynamicImage, ImageFormat};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -704,35 +705,9 @@ fn try_wic_extraction(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
 /// a video frame using IMFSourceReader. This works even when the thumbnail
 /// cache is broken or returns 0x8004B205 (extraction pending) indefinitely.
 fn try_media_foundation_extraction(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
-    // Only for video files
+    // Only for video files - use centralized extension check
     let ext = path.extension()?.to_string_lossy().to_lowercase();
-    let is_video = matches!(
-        ext.as_str(),
-        "mp4"
-            | "mkv"
-            | "avi"
-            | "mov"
-            | "wmv"
-            | "flv"
-            | "webm"
-            | "m4v"
-            | "mpg"
-            | "mpeg"
-            | "3gp"
-            | "3g2"
-            | "ts"
-            | "mts"
-            | "m2ts"
-            | "vob"
-            | "ogv"
-            | "divx"
-            | "f4v"
-            | "rm"
-            | "rmvb"
-            | "asf"
-    );
-
-    if !is_video {
+    if !is_video_extension(&ext) {
         return None;
     }
 
@@ -1014,40 +989,13 @@ fn extract_windows_thumbnail_shell(
         },
     };
 
-    // Determine size based on file type
+    // Determine size based on file type - use centralized extension check
     // Videos: 512px (high quality for preview panel)
     // Others: 1024px (high-res system icons, executables, etc.)
     let is_video = path
         .extension()
         .and_then(|e| e.to_str())
-        .map(|ext| {
-            let ext_lower = ext.to_lowercase();
-            matches!(
-                ext_lower.as_str(),
-                "mp4"
-                    | "mkv"
-                    | "avi"
-                    | "mov"
-                    | "wmv"
-                    | "flv"
-                    | "webm"
-                    | "m4v"
-                    | "mpg"
-                    | "mpeg"
-                    | "3gp"
-                    | "3g2"
-                    | "ts"
-                    | "mts"
-                    | "m2ts"
-                    | "vob"
-                    | "ogv"
-                    | "divx"
-                    | "f4v"
-                    | "rm"
-                    | "rmvb"
-                    | "asf"
-            )
-        })
+        .map(|ext| is_video_extension(&ext.to_lowercase()))
         .unwrap_or(false);
 
     let size_px = if is_video { 512 } else { 1024 };

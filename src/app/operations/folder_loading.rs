@@ -14,6 +14,7 @@ use std::os::windows::ffi::OsStringExt;
 use crate::app::state::ImageViewerApp;
 use crate::application::sorting;
 use crate::domain::file_entry::FileEntry;
+use crate::infrastructure::io_priority;
 use crate::infrastructure::onedrive;
 use crate::infrastructure::windows::{is_shell_navigation_path, list_shell_folder};
 
@@ -109,12 +110,20 @@ impl ImageViewerApp {
         let ctx = self.ui_ctx.clone();
         let disk_cache = self.disk_cache.clone();
 
-        // STREAMING BATCH LOADING: Envia lotes de 250 itens progressivamente
+        // STREAMING BATCH LOADING: Adaptive batch size based on disk type
         std::thread::spawn(move || {
             let scan_start = std::time::Instant::now();
-            eprintln!("[PERF] Starting folder scan: {:?}", current_path);
+
+            // PERFORMANCE: Detect disk type and adapt batch size
+            // SSD: Large batches (500) for throughput - fast random access
+            // HDD: Small batches (100) for responsiveness - minimize seek delays
+            let is_ssd = io_priority::is_ssd(&PathBuf::from(&current_path));
+            let batch_size = if is_ssd { 500 } else { 100 };
+            eprintln!("[PERF] Starting folder scan: {:?} (batch_size={}, is_ssd={})",
+                current_path, batch_size, is_ssd);
+
             // Buffer para envio em lotes
-            let mut batch = Vec::with_capacity(250);
+            let mut batch = Vec::with_capacity(batch_size);
 
             // Normaliza o path base: drive roots precisam de trailing backslash
             // Ex: "Z:" -> "Z:\\" para que PathBuf::join funcione corretamente
@@ -261,8 +270,8 @@ impl ImageViewerApp {
                                 // Adiciona ao lote
                                 batch.push(entry);
 
-                                // SE o lote encheu (250 itens), envia e limpa
-                                if batch.len() >= 250 {
+                                // SE o lote encheu, envia e limpa (tamanho adaptado para SSD/HDD)
+                                if batch.len() >= batch_size {
                                     // PRE-FETCH COVERS (Batch Optimization)
                                     let folders: Vec<PathBuf> = batch.iter()
                                         .filter(|e| e.is_dir)
