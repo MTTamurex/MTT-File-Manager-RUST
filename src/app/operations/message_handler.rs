@@ -291,7 +291,7 @@ impl ImageViewerApp {
                 // Atualiza em all_items (fonte mutável)
                 if let Some(item) = self.all_items.iter_mut().find(|i| i.path == folder_path) {
                     item.folder_cover = Some(cover.clone());
-                    self.disk_cache.set_folder_cover(&folder_path, &cover);
+                    // PERFORMANCE: DB write moved to worker thread to avoid main thread stutter
                     folder_updates = true;
 
                     // Requisita thumbnail se necessário (Marcando como em carregamento para evitar loop)
