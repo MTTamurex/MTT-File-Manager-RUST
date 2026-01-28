@@ -59,6 +59,12 @@ impl ImageViewerApp {
         let cover_worker_cache = disk_cache.clone();
         // Spawna WORKER THREAD: fica em loop processando fila
         std::thread::spawn(move || {
+            // PERFORMANCE: Set background priority to minimize HDD contention with video playback
+            // This worker scans folders to find first image - low priority I/O
+            crate::infrastructure::io_priority::set_thread_priority(
+                crate::infrastructure::io_priority::IOPriority::Background
+            );
+
             // Loop infinito: consome requisições da fila
             while let Ok(folder_path) = cover_req_rx.recv() {
                 // Executa busca (imagem ou vídeo) usando detecção dinâmica baseado no Registro do Windows
@@ -182,6 +188,11 @@ impl ImageViewerApp {
             use crate::domain::file_entry::IconSize;
             use crate::infrastructure::windows::extract_file_icon_by_path;
 
+            // PERFORMANCE: Set background priority to minimize HDD contention with video playback
+            crate::infrastructure::io_priority::set_thread_priority(
+                crate::infrastructure::io_priority::IOPriority::Background
+            );
+
             while let Ok(path) = icon_req_rx.recv() {
                 if let Ok((pixels, width, height)) =
                     extract_file_icon_by_path(&path, IconSize::Large)
@@ -198,6 +209,11 @@ impl ImageViewerApp {
         let meta_ctx = ctx.clone();
 
         std::thread::spawn(move || {
+            // PERFORMANCE: Set background priority to minimize HDD contention with video playback
+            crate::infrastructure::io_priority::set_thread_priority(
+                crate::infrastructure::io_priority::IOPriority::Background
+            );
+
             while let Ok((path, mtime)) = meta_req_rx.recv() {
                 let meta = windows_infra::extract_media_metadata(&path);
                 let _ = meta_res_tx.send((path, mtime, meta));
@@ -220,6 +236,12 @@ impl ImageViewerApp {
         let folder_size_ctx = ctx.clone();
 
         std::thread::spawn(move || {
+            // PERFORMANCE: Set background priority to minimize HDD contention with video playback
+            // This worker is especially heavy - walks entire directory trees
+            crate::infrastructure::io_priority::set_thread_priority(
+                crate::infrastructure::io_priority::IOPriority::Background
+            );
+
             while let Ok(folder_path) = folder_size_req_rx.recv() {
                 // Calculate folder size recursively using walkdir
                 let mut total_size: u64 = 0;
