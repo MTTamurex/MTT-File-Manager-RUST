@@ -168,7 +168,16 @@ pub fn render_preview_panel(
                 let is_zip_archive = file.name.to_lowercase().ends_with(".zip");
                 let treat_as_folder = file.is_dir && !is_zip_archive;
                 
-                if let Some(icon) = item_icon_loader.get_or_load_icon_sized(ui.ctx(), &file.path, IconSize::Jumbo, treat_as_folder) {
+                // Allow blocking for preview panel (selected item) to ensure high-quality icon is shown immediately if possible.
+                // We use allow_blocking=false if we want to avoid main-thread stutter, but preview panel updates less frequently than scroll.
+                // However, for consistency and smoothness, let's use false and let it load async if needed?
+                // Wait, preview panel is rendered every frame. If allow_blocking=false returns None, we see "??".
+                // Since there is no "request_icon_load" mechanism for preview panel yet (it's separate from grid view),
+                // we should allow blocking here for now, or just accept that "??".
+                // Ideally, we should trigger async load if None.
+                // Since this is just for the *selected* item (1 item), blocking IS acceptable (10-30ms) compared to scrolling (many items).
+                // Let's use allow_blocking=true for Preview Panel to guarantee icon appearance.
+                if let Some(icon) = item_icon_loader.get_or_load_icon_sized(ui.ctx(), &file.path, IconSize::Jumbo, treat_as_folder, true) {
                     let image_resp = ui.add(
                         egui::Image::new(&icon)
                             .max_size(egui::vec2(icon_size * 0.8, icon_size * 0.8)),

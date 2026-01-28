@@ -16,6 +16,8 @@ pub trait ItemSlotOperations {
     fn request_folder_scan(&mut self, path: std::path::PathBuf);
     /// Requisita carregamento de preview nativo da pasta (sandwich effect)
     fn request_folder_preview_load(&mut self, path: std::path::PathBuf);
+    /// Requisita carregamento de ícone assíncrono (ex: .exe)
+    fn request_icon_load(&mut self, path: std::path::PathBuf);
     /// Executa rename
     fn rename_item(&mut self, idx: usize);
 }
@@ -44,6 +46,8 @@ pub struct ItemSlotContext<'a> {
     pub scanned_folders: &'a mut FxHashSet<std::path::PathBuf>,
     /// Conjunto de itens carregando (thumbnails de arquivos)
     pub loading_set: &'a mut FxHashSet<std::path::PathBuf>,
+    /// Conjunto de itens carregando ícones (ex: .exe)
+    pub loading_icons: &'a mut FxHashSet<std::path::PathBuf>,
     /// Cache de previews de pastas (Native Sandwich)
     pub folder_preview_cache: &'a mut lru::LruCache<std::path::PathBuf, egui::TextureHandle>,
     /// Conjunto de pastas carregando preview nativo
@@ -269,8 +273,8 @@ fn render_directory_slot<O: ItemSlotOperations>(
                         .fit_to_original_size(1.0)
                         .max_size(egui::vec2(icon_size, icon_size))
                 );
-            } else if let Some(icon) = ctx.icon_loader.get_or_load_icon(ui.ctx(), &item.path, true) {
-                // Fallback para ícone específico do item
+            } else if let Some(icon) = ctx.icon_loader.get_or_load_icon(ui.ctx(), &item.path, true, true) {
+                // Fallback para ícone específico do item (allow_blocking=true for folders usually safe, or use false if needed)
                 let icon_size = folder_w.min(folder_h);
                 let icon_rect = egui::Rect::from_center_size(
                     folder_rect.center(),
@@ -413,7 +417,17 @@ fn render_file_slot<O: ItemSlotOperations>(
 
     // Carrega ícone (sempre, servirá como fallback)
     // Na Lixeira, usa get_or_load_icon que agora suporta paths virtuais com extensão
-    let file_icon = ctx.icon_loader.get_or_load_icon(ui.ctx(), &path_clone, false);
+    // PERFORMANCE: allow_blocking=false prevents UI stutter on slow icons (exe/lnk)
+    let file_icon = ctx.icon_loader.get_or_load_icon(ui.ctx(), &path_clone, false, false);
+
+    // Se ícone não está cacheado E não estamos na lixeira E não está carregando:
+    // Dispara carregamento assíncrono (apenas para casos lentos onde allow_blocking=false retornou None)
+    if file_icon.is_none() && !ctx.is_recycle_bin_view {
+        if !ctx.loading_icons.contains(&path_clone) {
+            ctx.loading_icons.insert(path_clone.clone());
+            ops.request_icon_load(path_clone.clone());
+        }
+    }
 
     // GEOMETRIA - reduz tamanho para caber na area com margem
     let available_h = ui.available_height();
