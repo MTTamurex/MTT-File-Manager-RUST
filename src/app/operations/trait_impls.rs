@@ -21,6 +21,10 @@ impl ItemSlotOperations for ImageViewerApp {
         ImageViewerApp::request_folder_preview_load(self, path);
     }
 
+    fn request_icon_load(&mut self, path: std::path::PathBuf) {
+        ImageViewerApp::request_icon_load(self, path);
+    }
+
     fn rename_item(&mut self, idx: usize) {
         self.rename_with_shell(idx);
     }
