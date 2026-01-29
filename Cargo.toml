@@ -67,7 +67,7 @@ features = [
 ]
 
 [features]
-default = ["notify-watcher"]
+default = ["usn-watcher"]
 notify-watcher = ["notify"]
 usn-watcher = []
 
