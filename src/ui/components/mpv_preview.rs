@@ -21,6 +21,8 @@ const DOCKED_DOWNSCALE_MARKER: &str = "min(ih,480)";
 // FPS limit filter applied only in docked mode (preview in sidebar)
 const DOCKED_FPS_FILTER: &str = "fps=fps=30";
 const DOCKED_FPS_MARKER: &str = "fps=fps=30";
+const DEINTERLACE_FILTER: &str = "bwdif=mode=auto:parity=auto:deint=all";
+const DEINTERLACE_MARKER: &str = "bwdif=";
 
 /// Track information for audio/subtitles.
 #[derive(Clone, Debug, Default)]
@@ -469,6 +471,8 @@ impl MpvPreview {
             }
         }
 
+        self.update_deinterlace_filter();
+
         // Move/resize child window (OPTIMIZED: Only when rect actually changes)
         #[cfg(target_os = "windows")]
         if rect != self.last_rect {
@@ -697,6 +701,99 @@ impl MpvPreview {
             self.docked_downscale_applied = false;
             self.docked_fps_limit_applied = false;
         }
+    }
+
+    fn update_deinterlace_filter(&mut self) {
+        let Some(m) = &self.mpv else {
+            return;
+        };
+        let interlaced = match Self::detect_interlaced(m) {
+            Some(value) => value,
+            None => {
+                let _ = m.set_property("deinterlace", "auto");
+                return;
+            }
+        };
+        let current_vf = m.get_property::<String>("vf").unwrap_or_default();
+        let has_deinterlace = current_vf.contains(DEINTERLACE_MARKER);
+
+        if interlaced && !has_deinterlace {
+            let _ = m.set_property("deinterlace", "yes");
+            let new_vf = Self::append_vf_filter(&current_vf, DEINTERLACE_FILTER);
+            let _ = m.set_property("vf", new_vf);
+            self.update_prev_vf_deinterlace(true);
+        } else if !interlaced && has_deinterlace {
+            let _ = m.set_property("deinterlace", "no");
+            let new_vf = Self::remove_vf_filter(&current_vf, DEINTERLACE_MARKER);
+            let _ = m.set_property("vf", new_vf);
+            self.update_prev_vf_deinterlace(false);
+        } else if !interlaced {
+            let _ = m.set_property("deinterlace", "no");
+        }
+    }
+
+    fn detect_interlaced(m: &mpv::Mpv) -> Option<bool> {
+        if let Ok(value) = m.get_property::<bool>("video-params/interlaced") {
+            return Some(value);
+        }
+        if let Ok(value) = m.get_property::<i64>("video-params/interlaced") {
+            return Some(value != 0);
+        }
+        if let Ok(value) = m.get_property::<String>("video-params/interlaced") {
+            let value = value.to_lowercase();
+            if value == "yes" || value == "true" || value == "1" {
+                return Some(true);
+            }
+            if value == "no" || value == "false" || value == "0" {
+                return Some(false);
+            }
+        }
+        if let Ok(field) = m.get_property::<String>("video-params/field") {
+            let field = field.to_lowercase();
+            if field == "top" || field == "bottom" || field == "tff" || field == "bff" {
+                return Some(true);
+            }
+            if field == "progressive" {
+                return Some(false);
+            }
+        }
+        None
+    }
+
+    fn update_prev_vf_deinterlace(&mut self, apply: bool) {
+        let Some(prev) = self.docked_prev_vf.clone() else {
+            return;
+        };
+        let updated = if apply {
+            if prev.contains(DEINTERLACE_MARKER) {
+                prev
+            } else {
+                Self::append_vf_filter(&prev, DEINTERLACE_FILTER)
+            }
+        } else if prev.contains(DEINTERLACE_MARKER) {
+            Self::remove_vf_filter(&prev, DEINTERLACE_MARKER)
+        } else {
+            prev
+        };
+        self.docked_prev_vf = Some(updated);
+    }
+
+    fn append_vf_filter(current_vf: &str, filter: &str) -> String {
+        if current_vf.trim().is_empty() {
+            filter.to_string()
+        } else {
+            format!("{},{}", current_vf, filter)
+        }
+    }
+
+    fn remove_vf_filter(current_vf: &str, marker: &str) -> String {
+        let mut parts: Vec<&str> = current_vf
+            .split(',')
+            .map(|part| part.trim())
+            .filter(|part| !part.is_empty())
+            .collect();
+        parts.retain(|part| !part.contains(marker));
+        parts.join(",")
     }
 
 
