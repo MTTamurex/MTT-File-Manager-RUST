@@ -107,8 +107,12 @@ Fase 1: FILE_FLAG_SEQUENTIAL_SCAN     [Sem dependencias, baixo risco]
 Fase 2: Persistent Thumbnail Index    [Sem dependencias, baixo risco]
 Fase 3: USN Journal                   [Substitui notify, medio risco]
 Fase 4: I/O Priority por Handle       [Complementa thread priority]
-Fase 5: MFT Direct Read               [OPCIONAL - Requer admin, alta complexidade]
+Fase 5: MFT Direct Read               [OPCIONAL - NAO IMPLEMENTAR SEM ORDEM EXPLICITA]
 ```
+
+> **⚠️ IMPORTANTE:** A Fase 5 (MFT Direct Read) NAO deve ser implementada automaticamente.
+> Aguardar solicitacao explicita do usuario antes de iniciar esta fase.
+> Motivos: requer privilegios de administrador, alta complexidade, uso especifico.
 
 ### Resumo das Decisoes de Conflitos
 
@@ -1524,6 +1528,11 @@ fn try_image_crate_extraction(path: &Path, priority: IOPriority) -> Option<(Vec<
 
 ## Fase 5: MFT Direct Read (OPCIONAL - Avancado)
 
+> **⛔ NAO IMPLEMENTAR SEM ORDEM EXPLICITA DO USUARIO**
+>
+> Esta fase so deve ser iniciada quando o usuario solicitar explicitamente.
+> Nao faz parte do fluxo padrao de otimizacoes.
+
 ### 5.1 Descricao
 
 A Master File Table (MFT) e a estrutura central do NTFS que contem metadados de TODOS os arquivos do volume. Ler diretamente da MFT permite enumerar milhoes de arquivos em segundos - e o que o **Everything (voidtools)** usa.
@@ -2161,7 +2170,8 @@ pub fn global_search(query: &str) -> Vec<SearchResult> {
 - [ ] Testar que operacoes background nao interferem com interativas
 - [ ] Verificar que nao ha conflito com THREAD_MODE_BACKGROUND_BEGIN
 
-### Fase 5: MFT Direct Read (OPCIONAL)
+### Fase 5: MFT Direct Read (⛔ NAO IMPLEMENTAR SEM ORDEM EXPLICITA)
+- [ ] **AGUARDAR SOLICITACAO EXPLICITA DO USUARIO**
 - [ ] Criar `src/infrastructure/mft_reader.rs`
 - [ ] Adicionar funcao `has_admin_privileges()`
 - [ ] Implementar `MftReader::read_all_entries()`
@@ -2235,7 +2245,8 @@ Para cada fase, medir:
    └── Substitui notify (FileSystemWatcher)
    └── Impacto: ~90% menos overhead de monitoramento
 
-5. [OPTIONAL] MFT Direct Read
+5. [⛔ NAO IMPLEMENTAR SEM ORDEM EXPLICITA] MFT Direct Read
+   └── AGUARDAR solicitacao explicita do usuario
    └── Requer Administrador, alta complexidade
    └── Usar APENAS para busca global ou indexacao
    └── NAO usar para navegacao de pastas (NtQueryDirectoryFile e suficiente)
@@ -2269,3 +2280,5 @@ Precisa enumerar volume inteiro?
 5. **Fallbacks** - Sempre ter fallback para quando APIs nao estao disponiveis
 
 6. **Testar em Windows 10 e 11** - Algumas APIs podem se comportar diferente
+
+7. **⛔ Fase 5 (MFT) e BLOQUEADA** - NAO implementar sem ordem explicita do usuario. As Fases 1-4 cobrem todos os casos de uso normais de um file manager.
