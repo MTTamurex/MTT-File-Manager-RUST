@@ -1,6 +1,7 @@
 //! Worker thread for Windows Shell file operations.
 //! Ensures COM is initialized as STA (COINIT_APARTMENTTHREADED) for correct shell behavior.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use windows::Win32::Foundation::HWND;
@@ -15,6 +16,8 @@ pub enum FileOperationResult {
     Finished,
     /// Specifically for Recycle Bin operations to trigger targeted refresh
     RecycleBinChanged,
+    /// Delete operation completed - parent folders need refresh
+    DeleteCompleted { parent_folders: Vec<PathBuf> },
     /// Move operation completed - source folder needs refresh in all tabs
     MoveCompleted { source_folder: PathBuf },
 }
@@ -87,6 +90,17 @@ pub fn start_file_operation_worker(
             match request {
                 FileOperationRequest::Delete { paths, hwnd } => {
                     let _ = shell_operations::delete_items_with_shell(&paths, hwnd.0);
+                    let mut parents = HashSet::new();
+                    for path in &paths {
+                        if let Some(parent) = path.parent() {
+                            parents.insert(parent.to_path_buf());
+                        }
+                    }
+                    if !parents.is_empty() {
+                        let _ = result_sender.send(FileOperationResult::DeleteCompleted {
+                            parent_folders: parents.into_iter().collect(),
+                        });
+                    }
                     let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
                 }
                 FileOperationRequest::Rename { path, new_name, hwnd } => {
