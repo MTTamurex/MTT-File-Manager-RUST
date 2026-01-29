@@ -5,6 +5,7 @@
 
 use eframe::egui;
 use lru::LruCache;
+#[cfg(feature = "notify-watcher")]
 use notify::RecommendedWatcher;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,7 +30,10 @@ use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
 use crate::domain::thumbnail::ThumbnailData;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::directory_cache::DirectoryCache;
+use crate::infrastructure::directory_index::DirectoryIndex;
 use crate::infrastructure::windows as windows_infra;
+#[cfg(feature = "usn-watcher")]
+use crate::workers::usn_watcher::{FsEvent, UsnWatcherState};
 // use crate::ui::cache::CacheManager;
 use crate::ui::context_menu::ContextMenuState;
 use crate::ui::components::media_preview::MediaPreview;
@@ -75,6 +79,7 @@ pub struct ImageViewerApp {
     // Persistence Layer
     pub disk_cache: Arc<ThumbnailDiskCache>,
     pub directory_cache: Arc<DirectoryCache>,
+    pub directory_index: Option<Arc<DirectoryIndex>>,
 
     // View Mode
     pub view_mode: ViewMode,
@@ -126,9 +131,18 @@ pub struct ImageViewerApp {
     pub focus_rename: bool,                      // Trigger para focar no input
 
     // SISTEMA DE WATCHER (AUTO-REFRESH)
+    #[cfg(feature = "notify-watcher")]
     pub watcher: Option<RecommendedWatcher>,
+    #[cfg(feature = "notify-watcher")]
     pub fs_event_receiver: Receiver<notify::Result<notify::Event>>,
+    #[cfg(feature = "notify-watcher")]
     pub fs_event_sender: Sender<notify::Result<notify::Event>>,
+    #[cfg(feature = "usn-watcher")]
+    pub usn_watcher_state: Arc<UsnWatcherState>,
+    #[cfg(feature = "usn-watcher")]
+    pub fs_event_receiver: Receiver<FsEvent>,
+    #[cfg(feature = "usn-watcher")]
+    pub fs_event_sender: Sender<FsEvent>,
     pub device_event_receiver: Receiver<()>,
     pub last_auto_reload: Instant,
     pub pending_auto_reload: bool,

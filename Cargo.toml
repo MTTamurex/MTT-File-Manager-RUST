@@ -9,7 +9,7 @@ rayon = "1.10"
 walkdir = "2.5"
 rfd = "0.15"
 lru = "0.12"
-notify = "6.1.1"
+notify = { version = "6.1.1", optional = true }
 natord = "1.0"
 dirs = "5.0"
 dashmap = "5.5"
@@ -65,6 +65,11 @@ features = [
     "Win32_System_IO",
     "Win32_System_WindowsProgramming",
 ]
+
+[features]
+default = ["notify-watcher"]
+notify-watcher = ["notify"]
+usn-watcher = []
 
 
 

@@ -4,11 +4,13 @@
 //! to detect external changes in the current directory.
 
 use std::path::{Path, PathBuf};
-use notify::{Watcher, RecursiveMode};
+#[cfg(feature = "notify-watcher")]
+use notify::{RecursiveMode, Watcher};
 use crate::app::state::ImageViewerApp;
 
 impl ImageViewerApp {
     /// Configura o monitoramento da pasta atual
+    #[cfg(feature = "notify-watcher")]
     pub fn watch_current_folder(&mut self) {
         let current_path = self.current_path.clone();
 
@@ -43,5 +45,20 @@ impl ImageViewerApp {
                 self.watcher = Some(watcher);
             }
         }
+    }
+}
+
+#[cfg(feature = "usn-watcher")]
+impl ImageViewerApp {
+    pub fn watch_current_folder(&mut self) {
+        let current_path = self.current_path.clone();
+
+        let path_to_watch = if let Ok(p) = Path::new(&current_path).canonicalize() {
+            p
+        } else {
+            PathBuf::from(&current_path)
+        };
+
+        self.usn_watcher_state.set_single_watch(path_to_watch);
     }
 }
