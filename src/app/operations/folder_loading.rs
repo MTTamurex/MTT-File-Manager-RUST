@@ -16,7 +16,9 @@ use crate::application::sorting;
 use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::io_priority;
 use crate::infrastructure::onedrive;
+use crate::infrastructure::ntfs_reader;
 use crate::infrastructure::windows::{is_shell_navigation_path, list_shell_folder};
+use crate::workers::prefetch_worker::PrefetchMessage;
 
 impl ImageViewerApp {
     /// Filtra e ordena itens baseado na query de busca atual.
@@ -86,6 +88,7 @@ impl ImageViewerApp {
             self.cache_manager.folder_preview_cache.clear();
             self.cache_manager.failed_thumbnails.clear();
             crate::workers::thumbnail_worker::clear_all_failures();
+            self.directory_cache.clear();
         }
 
         self.items = Arc::new(Vec::new()); // Novo Arc vazio (antigo é dropped automaticamente)
@@ -109,6 +112,9 @@ impl ImageViewerApp {
         let file_entry_sender = self.file_entry_sender.clone();
         let ctx = self.ui_ctx.clone();
         let disk_cache = self.disk_cache.clone();
+        let directory_cache = self.directory_cache.clone();
+        let prefetch_sender = self.prefetch_sender.clone();
+        let force_refresh = force_refresh;
 
         // STREAMING BATCH LOADING: Adaptive batch size based on disk type
         std::thread::spawn(move || {
@@ -124,6 +130,7 @@ impl ImageViewerApp {
 
             // Buffer para envio em lotes
             let mut batch = Vec::with_capacity(batch_size);
+            let mut all_entries_disk: Vec<FileEntry> = Vec::new();
 
             // Normaliza o path base: drive roots precisam de trailing backslash
             // Ex: "Z:" -> "Z:\\" para que PathBuf::join funcione corretamente
@@ -142,6 +149,131 @@ impl ImageViewerApp {
                         ctx.request_repaint();
                         return;
                     }
+                }
+            }
+
+            if !force_refresh {
+                if let Some(cached_entries) = directory_cache.get(&PathBuf::from(&base_path)) {
+                    for chunk in cached_entries.chunks(batch_size) {
+                        if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
+                            return;
+                        }
+                        let _ = file_entry_sender.send((my_gen, chunk.to_vec()));
+                        ctx.request_repaint();
+                    }
+                    let _ = file_entry_sender.send((my_gen, Vec::new()));
+                    ctx.request_repaint();
+
+                    if !is_ssd && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+                        let subdirs: Vec<PathBuf> = cached_entries
+                            .iter()
+                            .filter(|e| e.is_dir)
+                            .take(5)
+                            .map(|e| e.path.clone())
+                            .collect();
+                        if !subdirs.is_empty() {
+                            let _ = prefetch_sender.send(PrefetchMessage::Prefetch(subdirs));
+                        }
+                    }
+                    return;
+                }
+            }
+
+            // OPTIMIZATION: Use NtQueryDirectoryFile on HDD when available
+            let use_fast_reader = !is_ssd && ntfs_reader::is_available();
+
+            if use_fast_reader {
+                if let Some(entries) = ntfs_reader::read_directory_fast(&PathBuf::from(&base_path)) {
+                    for dir_entry in entries {
+                        if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
+                            break;
+                        }
+                        let is_hidden = (dir_entry.attributes & 0x02) != 0;
+                        let is_system = (dir_entry.attributes & 0x04) != 0;
+                        let is_special = matches!(
+                            dir_entry.name.to_lowercase().as_str(),
+                            "desktop.ini" | "thumbs.db" | "$recycle.bin" | "system volume information"
+                        );
+                        if !is_hidden && !is_system && !is_special && !dir_entry.name.starts_with('.') {
+                            let full_path = PathBuf::from(&base_path).join(&dir_entry.name);
+                            let mut is_dir = dir_entry.is_dir;
+                            if !is_dir && dir_entry.name.to_lowercase().ends_with(".zip") {
+                                is_dir = true;
+                            }
+                            let is_onedrive = onedrive::is_onedrive_path(&full_path);
+                            let sync_status = onedrive::get_sync_status(dir_entry.attributes, is_onedrive);
+                            let entry = crate::domain::file_entry::FileEntry {
+                                path: full_path,
+                                name: dir_entry.name,
+                                is_dir,
+                                size: if is_dir { 0 } else { dir_entry.size },
+                                modified: dir_entry.modified,
+                                folder_cover: None,
+                                drive_info: None,
+                                sync_status,
+                                deletion_date: None,
+                                recycle_original_path: None,
+                            };
+                            all_entries_disk.push(entry.clone());
+                            batch.push(entry);
+                            if batch.len() >= batch_size {
+                                let folders: Vec<PathBuf> = batch.iter()
+                                    .filter(|e| e.is_dir)
+                                    .map(|e| e.path.clone())
+                                    .collect();
+                                if !folders.is_empty() {
+                                    let covers = disk_cache.get_folder_covers(&folders);
+                                    for item in batch.iter_mut() {
+                                        if item.is_dir {
+                                            if let Some(cover) = covers.get(&item.path) {
+                                                item.folder_cover = Some(cover.clone());
+                                            }
+                                        }
+                                    }
+                                }
+                                let _ = file_entry_sender.send((my_gen, batch.clone()));
+                                batch.clear();
+                                ctx.request_repaint();
+                            }
+                        }
+                    }
+                    if !batch.is_empty() && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+                        let folders: Vec<PathBuf> = batch.iter()
+                            .filter(|e| e.is_dir)
+                            .map(|e| e.path.clone())
+                            .collect();
+                        if !folders.is_empty() {
+                            let covers = disk_cache.get_folder_covers(&folders);
+                            for item in batch.iter_mut() {
+                                if item.is_dir {
+                                    if let Some(cover) = covers.get(&item.path) {
+                                        item.folder_cover = Some(cover.clone());
+                                    }
+                                }
+                            }
+                        }
+                        let _ = file_entry_sender.send((my_gen, batch));
+                        ctx.request_repaint();
+                    }
+                    if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+                        let _ = file_entry_sender.send((my_gen, Vec::new()));
+                        ctx.request_repaint();
+                    }
+                    if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+                        directory_cache.put(PathBuf::from(&base_path), all_entries_disk.clone());
+                    }
+                    if !is_ssd && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+                        let subdirs: Vec<PathBuf> = all_entries_disk
+                            .iter()
+                            .filter(|e| e.is_dir)
+                            .take(5)
+                            .map(|e| e.path.clone())
+                            .collect();
+                        if !subdirs.is_empty() {
+                            let _ = prefetch_sender.send(PrefetchMessage::Prefetch(subdirs));
+                        }
+                    }
+                    return;
                 }
             }
 
@@ -268,6 +400,7 @@ impl ImageViewerApp {
                                 };
 
                                 // Adiciona ao lote
+                                all_entries_disk.push(entry.clone());
                                 batch.push(entry);
 
                                 // SE o lote encheu, envia e limpa (tamanho adaptado para SSD/HDD)
@@ -337,6 +470,21 @@ impl ImageViewerApp {
                 );
                 let _ = file_entry_sender.send((my_gen, Vec::new()));
                 ctx.request_repaint();
+            }
+
+            if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+                directory_cache.put(PathBuf::from(&base_path), all_entries_disk.clone());
+            }
+            if !is_ssd && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+                let subdirs: Vec<PathBuf> = all_entries_disk
+                    .iter()
+                    .filter(|e| e.is_dir)
+                    .take(5)
+                    .map(|e| e.path.clone())
+                    .collect();
+                if !subdirs.is_empty() {
+                    let _ = prefetch_sender.send(PrefetchMessage::Prefetch(subdirs));
+                }
             }
         });
     }

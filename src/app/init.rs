@@ -18,6 +18,7 @@ use crate::application::navigation::NavigationHistory;
 use crate::application::ClipboardManager;
 use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
+use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::onedrive;
 use crate::infrastructure::windows as windows_infra;
 // use crate::ui::cache::CacheManager;
@@ -88,6 +89,8 @@ impl ImageViewerApp {
 
         // Initialize OneDrive path detection
         onedrive::init_onedrive_paths();
+
+        let directory_cache = Arc::new(DirectoryCache::new());
 
         // Load Preferences from SQLite
         let sort_mode = disk_cache
@@ -282,6 +285,12 @@ impl ImageViewerApp {
             }
         });
 
+        let (prefetch_tx, prefetch_rx) = mpsc::channel();
+        crate::workers::prefetch_worker::spawn_prefetch_worker(
+            prefetch_rx,
+            directory_cache.clone(),
+        );
+
         // --- FILE OPERATION WORKER (Background Shell ops) ---
         let (file_op_tx, file_op_rx) = mpsc::channel();
         let (file_op_res_tx, file_op_res_rx) = mpsc::channel();
@@ -316,6 +325,7 @@ impl ImageViewerApp {
             sort_descending,
             folders_position,
             disk_cache: disk_cache.clone(),
+            directory_cache: directory_cache.clone(),
             // View mode: loaded from SQLite
             view_mode,
             // Selection & Preview
@@ -442,6 +452,7 @@ impl ImageViewerApp {
             
             // PERFORMANCE: Reusable buffers for grid rendering
             pending_ops: crate::ui::views::grid_view::PendingOperations::new(),
+            scroll_predictor: crate::ui::views::grid_view::ScrollPredictor::new(),
 
             // Scroll offset for manual grid virtualization
             scroll_offset_y: 0.0,
@@ -460,6 +471,7 @@ impl ImageViewerApp {
             // FILE OPERATION WORKER
             file_op_sender: file_op_tx,
             file_op_res_receiver: file_op_res_rx,
+            prefetch_sender: prefetch_tx,
 
             // ISO MOUNTING
             pending_iso_mount: None,
