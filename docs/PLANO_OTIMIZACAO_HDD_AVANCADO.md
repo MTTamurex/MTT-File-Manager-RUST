@@ -2282,3 +2282,337 @@ Precisa enumerar volume inteiro?
 6. **Testar em Windows 10 e 11** - Algumas APIs podem se comportar diferente
 
 7. **⛔ Fase 5 (MFT) e BLOQUEADA** - NAO implementar sem ordem explicita do usuario. As Fases 1-4 cobrem todos os casos de uso normais de um file manager.
+
+---
+
+## Apendice A: Otimizacoes para exFAT e Dispositivos USB
+
+### A.1 Contexto
+
+Dispositivos USB externos (especialmente HDDs de alta capacidade) frequentemente usam exFAT por:
+- Suporte a arquivos >4GB (limitacao do FAT32)
+- Compatibilidade cross-platform (Windows, Mac, Linux)
+- Nao requer privilegios especiais como NTFS em outros sistemas
+
+### A.2 Importante: HDDs USB aparecem como "Fixed Disk"
+
+**Observacao critica:** HDDs externos USB de alta capacidade (4TB+) geralmente aparecem como "Fixed Disk" no Windows, NAO como "Removable". Isso acontece porque o fabricante define o **Removable Media Bit (RMB) = 0**.
+
+| Dispositivo | RMB | Windows mostra | Motivo |
+|-------------|-----|----------------|--------|
+| Pen drive USB 8GB | 1 | Removivel | Padrao para flash drives |
+| HDD externo USB 8TB | 0 | **Disco Fixo** | Permite particoes, boot, melhor cache |
+| SSD externo USB | 0 ou 1 | Varia | Depende do fabricante |
+
+**Consequencia:** A funcao `GetDriveTypeW` retorna `DRIVE_FIXED` para HDDs USB grandes. Para detectar corretamente se e USB, usar **BusType**.
+
+### A.3 Compatibilidade das Otimizacoes por Filesystem
+
+| Otimizacao | NTFS | exFAT | FAT32 |
+|------------|------|-------|-------|
+| NtQueryDirectoryFile | ✅ | ✅ | ✅ |
+| FILE_FLAG_SEQUENTIAL_SCAN | ✅ | ✅ | ✅ |
+| I/O Priority por Handle | ✅ | ✅ | ✅ |
+| Cache de Diretorios (RAM) | ✅ | ✅ | ✅ |
+| Persistent Index (SQLite) | ✅ | ✅ | ✅ |
+| Prefetch de subdiretorios | ✅ | ✅ | ✅ |
+| USN Journal | ✅ | ❌ | ❌ |
+| MFT Direct Read | ✅ | ❌ | ❌ |
+
+### A.4 Deteccao de Filesystem e BusType
+
+#### A.4.1 Detectar Tipo de Filesystem
+
+```rust
+// Em src/infrastructure/io_priority.rs ou novo modulo
+
+/// Filesystem types
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilesystemType {
+    Ntfs,
+    ExFat,
+    Fat32,
+    ReFS,
+    Unknown,
+}
+
+/// Detect the filesystem type for a drive
+pub fn get_filesystem_type(drive_letter: char) -> FilesystemType {
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
+
+    let root_path = format!("{}:\\", drive_letter);
+    let wide_path: Vec<u16> = root_path.encode_utf16().chain(std::iter::once(0)).collect();
+
+    let mut fs_name_buffer = [0u16; 256];
+
+    let result = unsafe {
+        GetVolumeInformationW(
+            PCWSTR(wide_path.as_ptr()),
+            None,
+            None,
+            None,
+            None,
+            Some(&mut fs_name_buffer),
+        )
+    };
+
+    if result.is_err() {
+        return FilesystemType::Unknown;
+    }
+
+    let fs_name_len = fs_name_buffer.iter().position(|&c| c == 0).unwrap_or(0);
+    let fs_name = String::from_utf16_lossy(&fs_name_buffer[..fs_name_len]);
+
+    match fs_name.to_uppercase().as_str() {
+        "NTFS" => FilesystemType::Ntfs,
+        "EXFAT" => FilesystemType::ExFat,
+        "FAT32" | "FAT" => FilesystemType::Fat32,
+        "REFS" => FilesystemType::ReFS,
+        _ => FilesystemType::Unknown,
+    }
+}
+
+/// Check if USN Journal is available for a drive
+pub fn supports_usn_journal(drive_letter: char) -> bool {
+    matches!(get_filesystem_type(drive_letter), FilesystemType::Ntfs)
+}
+```
+
+#### A.4.2 Detectar BusType (USB vs SATA vs NVMe)
+
+**IMPORTANTE:** NAO usar `GetDriveTypeW` para detectar USB. Usar `IOCTL_STORAGE_QUERY_PROPERTY` com `StorageDeviceProperty` para obter o BusType.
+
+```rust
+/// Storage bus types
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StorageBusType {
+    Ata,      // SATA/IDE interno
+    Usb,      // USB (pen drive OU HDD externo)
+    Nvme,     // NVMe SSD
+    Sata,     // SATA (alguns controladores reportam separado)
+    Sas,      // SAS (servidores)
+    Unknown,
+}
+
+/// Detect the bus type for a drive
+///
+/// This correctly identifies USB drives even when they appear as "Fixed Disk"
+/// in Windows (common for large external HDDs).
+pub fn get_bus_type(drive_letter: char) -> StorageBusType {
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    };
+    use windows::Win32::System::IO::DeviceIoControl;
+    use windows::Win32::System::Ioctl::IOCTL_STORAGE_QUERY_PROPERTY;
+
+    let device_path = format!("\\\\.\\{}:", drive_letter);
+    let wide_path: Vec<u16> = device_path.encode_utf16().chain(std::iter::once(0)).collect();
+
+    unsafe {
+        let handle = CreateFileW(
+            PCWSTR(wide_path.as_ptr()),
+            0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            None,
+            OPEN_EXISTING,
+            windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES(0),
+            None,
+        );
+
+        let handle = match handle {
+            Ok(h) if h != INVALID_HANDLE_VALUE => h,
+            _ => return StorageBusType::Unknown,
+        };
+
+        // StorageDeviceProperty = 0
+        const STORAGE_DEVICE_PROPERTY: u32 = 0;
+        const PROPERTY_STANDARD_QUERY: u32 = 0;
+
+        #[repr(C)]
+        struct StoragePropertyQuery {
+            property_id: u32,
+            query_type: u32,
+            additional_parameters: [u8; 1],
+        }
+
+        // STORAGE_DEVICE_DESCRIPTOR (simplified - we only need BusType)
+        #[repr(C)]
+        struct StorageDeviceDescriptor {
+            version: u32,
+            size: u32,
+            device_type: u8,
+            device_type_modifier: u8,
+            removable_media: u8,
+            command_queueing: u8,
+            vendor_id_offset: u32,
+            product_id_offset: u32,
+            product_revision_offset: u32,
+            serial_number_offset: u32,
+            bus_type: u32,  // STORAGE_BUS_TYPE enum
+            raw_properties_length: u32,
+            raw_device_properties: [u8; 1],
+        }
+
+        let query = StoragePropertyQuery {
+            property_id: STORAGE_DEVICE_PROPERTY,
+            query_type: PROPERTY_STANDARD_QUERY,
+            additional_parameters: [0],
+        };
+
+        let mut buffer = [0u8; 1024];
+        let mut bytes_returned: u32 = 0;
+
+        let success = DeviceIoControl(
+            handle,
+            IOCTL_STORAGE_QUERY_PROPERTY,
+            Some(&query as *const _ as *const std::ffi::c_void),
+            std::mem::size_of::<StoragePropertyQuery>() as u32,
+            Some(buffer.as_mut_ptr() as *mut std::ffi::c_void),
+            buffer.len() as u32,
+            Some(&mut bytes_returned),
+            None,
+        );
+
+        let _ = CloseHandle(handle);
+
+        if success.is_err() || bytes_returned < 28 {
+            return StorageBusType::Unknown;
+        }
+
+        // BusType is at offset 24 in STORAGE_DEVICE_DESCRIPTOR
+        let bus_type = u32::from_le_bytes([buffer[24], buffer[25], buffer[26], buffer[27]]);
+
+        // STORAGE_BUS_TYPE enum values:
+        // BusTypeAta = 3, BusTypeSata = 11, BusTypeUsb = 7, BusTypeNvme = 17
+        match bus_type {
+            3 => StorageBusType::Ata,
+            7 => StorageBusType::Usb,
+            11 => StorageBusType::Sata,
+            17 => StorageBusType::Nvme,
+            _ => StorageBusType::Unknown,
+        }
+    }
+}
+
+/// Check if a drive is connected via USB
+///
+/// Works correctly for both pen drives AND external HDDs that appear as "Fixed Disk"
+pub fn is_usb_drive(drive_letter: char) -> bool {
+    matches!(get_bus_type(drive_letter), StorageBusType::Usb)
+}
+```
+
+### A.5 Fallback do USN Journal para non-NTFS
+
+Quando USN Journal nao esta disponivel (exFAT, FAT32), manter a crate `notify` como fallback:
+
+```rust
+// Em src/workers/usn_watcher.rs
+
+/// Unified filesystem watcher
+pub enum FsWatcher {
+    /// USN Journal (NTFS only, mais eficiente)
+    Usn(UsnWatcherState),
+    /// notify crate (universal, menos eficiente)
+    Notify(notify::RecommendedWatcher),
+}
+
+impl FsWatcher {
+    pub fn new_for_path(path: &Path) -> Result<Self, String> {
+        let drive_letter = path.to_str()
+            .and_then(|s| s.chars().next())
+            .ok_or("Invalid path")?;
+
+        if supports_usn_journal(drive_letter) {
+            eprintln!("[Watcher] Using USN Journal for NTFS drive {}", drive_letter);
+            Ok(FsWatcher::Usn(UsnWatcherState::new()))
+        } else {
+            let fs_type = get_filesystem_type(drive_letter);
+            eprintln!("[Watcher] Using notify fallback for {:?} drive {}", fs_type, drive_letter);
+            let watcher = notify::recommended_watcher(|_| {})
+                .map_err(|e| e.to_string())?;
+            Ok(FsWatcher::Notify(watcher))
+        }
+    }
+}
+```
+
+### A.6 Ajuste de Buffer para USB
+
+USB pode se beneficiar de buffers maiores para compensar latencia de protocolo:
+
+```rust
+/// Get optimal buffer size based on connection type
+pub fn get_optimal_buffer_size(path: &Path) -> usize {
+    let drive_letter = path.to_str()
+        .and_then(|s| s.chars().next())
+        .unwrap_or('C');
+
+    let is_usb = is_usb_drive(drive_letter);
+    let is_ssd_drive = is_ssd(path);
+
+    if is_usb {
+        // USB: buffers maiores para compensar latencia de protocolo
+        // USB 3.0 tem boa bandwidth, buffers grandes ajudam
+        131072  // 128KB
+    } else if is_ssd_drive {
+        // SSD interno: buffers medios
+        65536   // 64KB
+    } else {
+        // HDD interno SATA: buffers menores para melhor responsividade
+        32768   // 32KB
+    }
+}
+```
+
+### A.7 Log de Diagnostico
+
+```rust
+/// Log drive characteristics for debugging
+pub fn log_drive_info(path: &Path) {
+    let drive_letter = path.to_str()
+        .and_then(|s| s.chars().next())
+        .unwrap_or('?');
+
+    let fs_type = get_filesystem_type(drive_letter);
+    let bus_type = get_bus_type(drive_letter);
+    let is_ssd_drive = is_ssd(path);
+    let usn_supported = supports_usn_journal(drive_letter);
+
+    eprintln!(
+        "[DriveInfo] {}:
+  Filesystem: {:?}
+  Bus: {:?}
+  Media: {}
+  USN Journal: {}",
+        drive_letter,
+        fs_type,
+        bus_type,
+        if is_ssd_drive { "SSD" } else { "HDD" },
+        if usn_supported { "Supported" } else { "Not available" }
+    );
+}
+```
+
+**Exemplo de saida para HDD externo USB de 8TB com exFAT:**
+```
+[DriveInfo] E:
+  Filesystem: ExFat
+  Bus: Usb
+  Media: HDD
+  USN Journal: Not available
+```
+
+### A.8 Checklist para exFAT/USB
+
+- [ ] Implementar `get_filesystem_type()` em io_priority.rs
+- [ ] Implementar `get_bus_type()` em io_priority.rs (usando IOCTL, NAO GetDriveTypeW)
+- [ ] Implementar `is_usb_drive()` baseado em BusType
+- [ ] Implementar `supports_usn_journal()`
+- [ ] Criar enum `FsWatcher` com fallback para notify em non-NTFS
+- [ ] Ajustar tamanho de buffers para USB
+- [ ] Adicionar `log_drive_info()` para debug
+- [ ] Testar em drive exFAT USB 3.0 (HDD externo 8TB)
