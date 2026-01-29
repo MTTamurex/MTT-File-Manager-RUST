@@ -69,6 +69,27 @@ impl ImageViewerApp {
                         self.sync_to_tab();
                     }
                 }
+                FileOperationResult::DeleteCompleted { parent_folders } => {
+                    let current_str = self.current_path.to_lowercase();
+                    let mut should_reload_current = false;
+                    for parent in parent_folders {
+                        self.directory_cache.invalidate(&parent);
+                        let parent_str = parent.to_string_lossy().to_lowercase();
+                        if parent_str == current_str {
+                            should_reload_current = true;
+                        }
+                        for tab in self.tab_manager.tabs.iter_mut() {
+                            let tab_path = tab.path.to_lowercase();
+                            if tab_path == parent_str {
+                                tab.items = std::sync::Arc::new(Vec::new());
+                                tab.all_items.clear();
+                            }
+                        }
+                    }
+                    if should_reload_current {
+                        self.load_folder(false);
+                    }
+                }
                 FileOperationResult::MoveCompleted { source_folder } => {
                     // Cross-tab sync: refresh any tab pointing to the source folder
                     let source_str = source_folder.to_string_lossy().to_lowercase();
