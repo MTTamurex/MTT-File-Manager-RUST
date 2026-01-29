@@ -88,7 +88,15 @@ impl eframe::App for ImageViewerApp {
             // 10. Operations: Resize borders (on top) - REMOVED, handled by native subclass
             // app::input::handle_resize_borders(self, ctx);
 
-            // 11. Notifications
+            // 11. Virtual drive settings modal
+            if self.show_virtual_drive_settings {
+                self.show_virtual_drive_settings = crate::ui::components::virtual_drive_settings::render_virtual_drive_settings(
+                    ctx,
+                    self.show_virtual_drive_settings,
+                );
+            }
+
+            // 12. Notifications
             app::notifications::render_notifications(self, ctx);
         }
     }
@@ -123,6 +131,9 @@ fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 StatusBarAction::SortChanged => {
                     app.sort_items();
                     app.save_preferences();
+                }
+                StatusBarAction::OpenVirtualDriveSettings => {
+                    app.show_virtual_drive_settings = true;
                 }
                 _ => {}
             }

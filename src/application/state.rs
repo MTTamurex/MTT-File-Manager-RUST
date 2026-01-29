@@ -55,6 +55,9 @@ pub struct AppState {
     pub clipboard: ClipboardManager,
     pub watcher: WatcherState,
     pub renaming_state: Option<RenamingState>,
+    
+    // UI states
+    pub show_virtual_drive_settings: bool,
 
     // Caches (to be managed separately)
     pub scanned_folders: FxHashSet<PathBuf>,
@@ -98,6 +101,8 @@ impl AppState {
             clipboard: ClipboardManager::new(),
             watcher: WatcherState::new(),
             renaming_state: None,
+            
+            show_virtual_drive_settings: false,
 
             scanned_folders: FxHashSet::default(),
             last_grid_cols: 1,

@@ -380,6 +380,7 @@ impl ImageViewerApp {
             computer_view_local_indices: Vec::new(),
             computer_view_network_indices: Vec::new(),
             is_recycle_bin_view: false,
+            show_virtual_drive_settings: false,
             navigation: NavigationHistory::new(PATH_PADRAO.to_string()),
             path_input: PATH_PADRAO.to_string(),
             disks,
