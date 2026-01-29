@@ -50,9 +50,10 @@ impl ThumbnailDiskCache {
             }
         };
 
-        // Performance Tuning: Use DELETE mode for immediate sync (WAL was causing issues)
-        let _ = conn.execute("PRAGMA journal_mode = DELETE", []).ok();
-        let _ = conn.execute("PRAGMA synchronous = FULL", []).ok();
+        // Performance Tuning: Use WAL mode for better concurrency (readers don't block writers)
+        // and NORMAL synchronous for faster writes (safe in WAL mode).
+        let _ = conn.execute("PRAGMA journal_mode = WAL", []).ok();
+        let _ = conn.execute("PRAGMA synchronous = NORMAL", []).ok();
 
         // Create table (with path for GC)
         conn.execute(
