@@ -9,6 +9,48 @@ use crate::workers::thumbnail_worker::ThumbnailPriority;
 
 impl ImageViewerApp {
     pub fn request_thumbnail_load(&mut self, path: PathBuf, size_px: u32) {
+        self.request_thumbnail_load_internal(path, size_px, None, ThumbnailPriority::Interactive);
+    }
+
+    pub fn request_thumbnail_load_with_index(
+        &mut self,
+        path: PathBuf,
+        size_px: u32,
+        directory_index: usize,
+    ) {
+        self.request_thumbnail_load_internal(
+            path,
+            size_px,
+            Some(directory_index),
+            ThumbnailPriority::Interactive,
+        );
+    }
+
+    pub fn request_thumbnail_prefetch(&mut self, path: PathBuf, size_px: u32) {
+        self.request_thumbnail_load_internal(path, size_px, None, ThumbnailPriority::Prefetch);
+    }
+
+    pub fn request_thumbnail_prefetch_with_index(
+        &mut self,
+        path: PathBuf,
+        size_px: u32,
+        directory_index: usize,
+    ) {
+        self.request_thumbnail_load_internal(
+            path,
+            size_px,
+            Some(directory_index),
+            ThumbnailPriority::Prefetch,
+        );
+    }
+
+    fn request_thumbnail_load_internal(
+        &mut self,
+        path: PathBuf,
+        size_px: u32,
+        directory_index: Option<usize>,
+        priority: ThumbnailPriority,
+    ) {
         // PERFORMANCE: Check RAM cache first before sending to worker
         // This avoids disk I/O entirely if the RGBA data is already in RAM
         if let Some((rgba_data, width, height)) = self.cache_manager.get_rgba_data(&path).map(|(d, w, h)| (d.clone(), *w, *h)) {
@@ -26,25 +68,13 @@ impl ImageViewerApp {
         }
 
         // Not in RAM cache - send to worker (will read from disk cache or generate)
-        self.thumbnail_queue.push(path, self.generation, size_px, ThumbnailPriority::Interactive);
-    }
-
-    pub fn request_thumbnail_prefetch(&mut self, path: PathBuf, size_px: u32) {
-        // PERFORMANCE: Check RAM cache first for prefetch too
-        if let Some((rgba_data, width, height)) = self.cache_manager.get_rgba_data(&path).map(|(d, w, h)| (d.clone(), *w, *h)) {
-            self.cache_manager.start_pending_upload(path.clone());
-            self.pending_thumbnails.push_back(ThumbnailData {
-                path,
-                image_data: rgba_data,
-                width,
-                height,
-                generation: self.generation,
-            });
-            return;
+        if let Some(index) = directory_index {
+            self.thumbnail_queue
+                .push_with_index(path, self.generation, size_px, priority, Some(index));
+        } else {
+            self.thumbnail_queue
+                .push(path, self.generation, size_px, priority);
         }
-
-        // Envia pedido BAIXA PRIORIDADE (Prefetch) com hint de tamanho
-        self.thumbnail_queue.push(path, self.generation, size_px, ThumbnailPriority::Prefetch);
     }
 
     pub fn request_folder_preview_load(&mut self, path: PathBuf) {

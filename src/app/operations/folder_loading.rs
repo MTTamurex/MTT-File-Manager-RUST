@@ -14,12 +14,15 @@ use std::os::windows::ffi::OsStringExt;
 use crate::app::state::ImageViewerApp;
 use crate::application::sorting;
 use crate::domain::file_entry::{FileEntry, SyncStatus};
+use crate::infrastructure::adaptive_batch::{AdaptiveBatchConfig, AdaptiveBatchTracker};
 use crate::infrastructure::io_priority;
 use crate::infrastructure::onedrive;
 use crate::infrastructure::ntfs_reader;
 use crate::infrastructure::directory_index::IndexedFile;
 use crate::infrastructure::windows::{is_shell_navigation_path, list_shell_folder};
+use crate::workers::idle_warmup::IdleWarmupMessage;
 use crate::workers::prefetch_worker::PrefetchMessage;
+use crate::workers::predictive_prefetch::PredictiveMessage;
 
 impl ImageViewerApp {
     /// Filtra e ordena itens baseado na query de busca atual.
@@ -83,6 +86,28 @@ impl ImageViewerApp {
         self.current_generation
             .store(self.generation, AtomicOrdering::Relaxed); // Sincroniza com workers
 
+        let current_path_buf = PathBuf::from(&self.current_path);
+        let _ = self
+            .predictive_sender
+            .send(PredictiveMessage::NavigatedTo(current_path_buf.clone()));
+        let history_paths: Vec<PathBuf> = self
+            .navigation
+            .paths
+            .iter()
+            .rev()
+            .take(5)
+            .filter(|p| p.len() >= 2 && p.chars().nth(1) == Some(':'))
+            .map(PathBuf::from)
+            .collect();
+        if !history_paths.is_empty() {
+            let _ = self
+                .predictive_sender
+                .send(PredictiveMessage::HistoryUpdated(history_paths));
+        }
+        let _ = self
+            .idle_warmup_sender
+            .send(IdleWarmupMessage::CurrentDirectory(current_path_buf));
+
         // 1. Limpeza de Estado (UI Thread)
         if force_refresh {
             self.cache_manager.texture_cache.clear();
@@ -122,25 +147,30 @@ impl ImageViewerApp {
         std::thread::spawn(move || {
             let scan_start = std::time::Instant::now();
 
-            // PERFORMANCE: Detect disk type and adapt batch size
-            // SSD: Large batches (500) for throughput - fast random access
-            // HDD: Small batches (100) for responsiveness - minimize seek delays
-            let is_ssd = io_priority::is_ssd(&PathBuf::from(&current_path));
-            let batch_size = if is_ssd { 500 } else { 100 };
-            eprintln!("[PERF] Starting folder scan: {:?} (batch_size={}, is_ssd={})",
-                current_path, batch_size, is_ssd);
-
-            // Buffer para envio em lotes
-            let mut batch = Vec::with_capacity(batch_size);
-            let mut all_entries_disk: Vec<FileEntry> = Vec::new();
-
-            // Normaliza o path base: drive roots precisam de trailing backslash
-            // Ex: "Z:" -> "Z:\\" para que PathBuf::join funcione corretamente
             let base_path = if current_path.len() == 2 && current_path.ends_with(':') {
                 format!("{}\\", current_path)
             } else {
                 current_path.clone()
             };
+
+            let is_ssd = io_priority::is_ssd(&PathBuf::from(&current_path));
+            let config = AdaptiveBatchConfig {
+                is_ssd,
+                total_items: directory_index_opt
+                    .as_ref()
+                    .and_then(|di| di.get_directory(&PathBuf::from(&base_path)))
+                    .map(|(meta, _)| meta.file_count),
+            };
+            let mut batch_tracker = AdaptiveBatchTracker::new(config);
+            let mut batch_size = batch_tracker.batch_size();
+            eprintln!(
+                "[PERF] Starting folder scan: {:?} (batch_size={}, is_ssd={})",
+                current_path, batch_size, is_ssd
+            );
+
+            let mut batch = Vec::with_capacity(batch_size);
+            let mut all_entries_disk: Vec<FileEntry> = Vec::new();
+            let mut batch_start = std::time::Instant::now();
             
             // Check if we are navigating a virtual Shell folder (like a ZIP)
             if is_shell_navigation_path(&PathBuf::from(&base_path)) {
@@ -194,12 +224,19 @@ impl ImageViewerApp {
 
                             directory_cache.put(base.clone(), entries.clone());
 
-                            for chunk in entries.chunks(batch_size) {
+                            let mut offset = 0;
+                            while offset < entries.len() {
                                 if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
                                     return;
                                 }
-                                let _ = file_entry_sender.send((my_gen, chunk.to_vec()));
+                                let end = (offset + batch_size).min(entries.len());
+                                let chunk = entries[offset..end].to_vec();
+                                let _ = file_entry_sender.send((my_gen, chunk));
                                 ctx.request_repaint();
+                                batch_tracker.record_batch(batch_start.elapsed(), end - offset);
+                                batch_size = batch_tracker.batch_size();
+                                batch_start = std::time::Instant::now();
+                                offset = end;
                             }
                             let _ = file_entry_sender.send((my_gen, Vec::new()));
                             ctx.request_repaint();
@@ -211,12 +248,19 @@ impl ImageViewerApp {
 
             if !force_refresh {
                 if let Some(cached_entries) = directory_cache.get(&PathBuf::from(&base_path)) {
-                    for chunk in cached_entries.chunks(batch_size) {
+                    let mut offset = 0;
+                    while offset < cached_entries.len() {
                         if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
                             return;
                         }
-                        let _ = file_entry_sender.send((my_gen, chunk.to_vec()));
+                        let end = (offset + batch_size).min(cached_entries.len());
+                        let chunk = cached_entries[offset..end].to_vec();
+                        let _ = file_entry_sender.send((my_gen, chunk));
                         ctx.request_repaint();
+                        batch_tracker.record_batch(batch_start.elapsed(), end - offset);
+                        batch_size = batch_tracker.batch_size();
+                        batch_start = std::time::Instant::now();
+                        offset = end;
                     }
                     let _ = file_entry_sender.send((my_gen, Vec::new()));
                     ctx.request_repaint();
@@ -288,7 +332,11 @@ impl ImageViewerApp {
                                         }
                                     }
                                 }
+                                let batch_len = batch.len();
                                 let _ = file_entry_sender.send((my_gen, batch.clone()));
+                                batch_tracker.record_batch(batch_start.elapsed(), batch_len);
+                                batch_size = batch_tracker.batch_size();
+                                batch_start = std::time::Instant::now();
                                 batch.clear();
                                 ctx.request_repaint();
                             }
@@ -309,7 +357,9 @@ impl ImageViewerApp {
                                 }
                             }
                         }
+                        let batch_len = batch.len();
                         let _ = file_entry_sender.send((my_gen, batch));
+                        batch_tracker.record_batch(batch_start.elapsed(), batch_len);
                         ctx.request_repaint();
                     }
                     if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
@@ -495,7 +545,11 @@ impl ImageViewerApp {
                                         }
                                     }
 
+                                    let batch_len = batch.len();
                                     let _ = file_entry_sender.send((my_gen, batch.clone()));
+                                    batch_tracker.record_batch(batch_start.elapsed(), batch_len);
+                                    batch_size = batch_tracker.batch_size();
+                                    batch_start = std::time::Instant::now();
                                     batch.clear();
                                     ctx.request_repaint(); // Acorda a UI para mostrar progresso
                                 }
@@ -529,7 +583,9 @@ impl ImageViewerApp {
                     }
                 }
 
+                let batch_len = batch.len();
                 let _ = file_entry_sender.send((my_gen, batch));
+                batch_tracker.record_batch(batch_start.elapsed(), batch_len);
                 ctx.request_repaint();
             }
 

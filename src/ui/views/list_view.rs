@@ -8,6 +8,7 @@ use crate::domain::file_entry::{FileEntry, SortMode, SyncStatus};
 use crate::infrastructure::windows::{format_date, format_size};
 // PERFORMANCE: Use FxHashSet for PathBuf keys - faster hashing than std::collections::HashSet
 use crate::ui::cache::FxHashSet;
+use crate::ui::views::ViewportTracker;
 
 // PERFORMANCE: Tooltip debounce to avoid creation/destruction during scroll
 const TOOLTIP_DELAY_SECS: f32 = 0.3; // Only show tooltip after 300ms hover
@@ -51,6 +52,7 @@ pub struct ListViewContext<'a> {
     pub pending_upload_set: &'a mut FxHashSet<PathBuf>,
     /// PERFORMANCE: True if video is playing in docked mode (tooltip avoids video area)
     pub is_video_playing_docked: bool,
+    pub prefetch_rows: usize,
 }
 
 /// Action returned by list view
@@ -66,10 +68,17 @@ pub enum ListViewAction {
 pub trait ListViewOperations {
     fn navigate_to(&mut self, path: &str);
     fn open_with_shell(&mut self, path: &PathBuf);
-    fn request_thumbnail_load(&mut self, path: PathBuf);
+    fn request_thumbnail_load(&mut self, path: PathBuf, directory_index: usize);
     fn request_folder_scan(&mut self, path: PathBuf);
     fn request_folder_preview_load(&mut self, path: PathBuf);
     fn rename_with_shell(&mut self, idx: usize);
+    fn request_thumbnail_prefetch_with_index(
+        &mut self,
+        path: PathBuf,
+        size: u32,
+        directory_index: usize,
+    );
+    fn notify_idle_visible_items(&mut self, items: Vec<PathBuf>);
 }
 
 /// Renders the list view
@@ -456,6 +465,52 @@ pub fn render_list_view(
     }
     // --- MANUAL VIRTUALIZATION END ---
 
+    if total_rows > 0 {
+        let first_visible_index = (current_scroll / row_height).floor() as usize;
+        let last_visible_index = ((current_scroll + viewport_h) / row_height)
+            .ceil() as usize;
+        let first_visible_index = first_visible_index.min(total_rows.saturating_sub(1));
+        let last_visible_index = last_visible_index.min(total_rows).saturating_sub(1);
+
+        let tracker = ViewportTracker {
+            first_visible_index,
+            last_visible_index,
+            prefetch_rows: ctx.prefetch_rows,
+            columns: 1,
+        };
+        let (prefetch_start, prefetch_end) = tracker.get_prefetch_range(total_rows);
+
+        for index in prefetch_start..prefetch_end {
+            if index >= total_rows {
+                break;
+            }
+            if tracker.is_visible(index) {
+                continue;
+            }
+            let item = &ctx.items[index];
+            if !item.is_dir {
+                if !ctx.texture_cache.contains(&item.path)
+                    && !ctx.loading_set.contains(&item.path)
+                    && !ctx.pending_upload_set.contains(&item.path)
+                {
+                    ctx.loading_set.insert(item.path.clone());
+                    ops.request_thumbnail_prefetch_with_index(item.path.clone(), 64, index);
+                }
+            }
+        }
+
+        let mut idle_visible_items = Vec::new();
+        for index in first_visible_index..=last_visible_index {
+            let item = &ctx.items[index];
+            if !item.is_dir {
+                idle_visible_items.push(item.path.clone());
+            }
+        }
+        if !idle_visible_items.is_empty() {
+            ops.notify_idle_visible_items(idle_visible_items);
+        }
+    }
+
     // Fallback global: detect secondary click on empty area if no item was clicked
     if secondary_clicked_item.is_none() && bg_response.secondary_clicked() {
         empty_area_secondary_click = true;
@@ -534,7 +589,7 @@ fn render_list_item(
             && ctx.loading_set.len() < 200
         {
             ctx.loading_set.insert(item.path.clone());
-            ops.request_thumbnail_load(item.path.clone());
+            ops.request_thumbnail_load(item.path.clone(), i);
         }
     }
 

@@ -11,7 +11,12 @@ use eframe::egui;
 /// Trait para operações necessárias para renderizar um item slot
 pub trait ItemSlotOperations {
     /// Requisita carregamento de thumbnail
-    fn request_thumbnail_load(&mut self, path: std::path::PathBuf, size: u32);
+    fn request_thumbnail_load(
+        &mut self,
+        path: std::path::PathBuf,
+        size: u32,
+        directory_index: Option<usize>,
+    );
     /// Requisita scan de pasta
     fn request_folder_scan(&mut self, path: std::path::PathBuf);
     /// Requisita carregamento de preview nativo da pasta (sandwich effect)
@@ -197,7 +202,7 @@ fn render_directory_slot<O: ItemSlotOperations>(
                 && ctx.loading_set.len() < 200
             {
                 ctx.loading_set.insert(cover_path.clone());
-                ops.request_thumbnail_load(cover_path.clone(), ctx.thumbnail_size as u32);
+                ops.request_thumbnail_load(cover_path.clone(), ctx.thumbnail_size as u32, None);
             }
         }
     }
@@ -412,7 +417,11 @@ fn render_file_slot<O: ItemSlotOperations>(
         if !has_texture && !is_loading && !is_failed && !is_pending_upload && ctx.loading_set.len() < 200 {
             // MAX_CONCURRENT_LOADS (increased for performance - stale entries are cleaned by grid_view)
             ctx.loading_set.insert(path_clone.clone());
-            ops.request_thumbnail_load(path_clone.clone(), ctx.thumbnail_size as u32);
+            ops.request_thumbnail_load(
+                path_clone.clone(),
+                ctx.thumbnail_size as u32,
+                Some(ctx.idx),
+            );
         }
     }
 

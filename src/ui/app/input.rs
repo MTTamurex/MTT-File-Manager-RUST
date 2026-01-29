@@ -1,8 +1,10 @@
 use eframe::egui;
+use crate::workers::idle_warmup::IdleWarmupMessage;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 use crate::app::ImageViewerApp;
 
 pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
+    let mut user_active = false;
     if app.renaming_state.is_none() && !app.is_address_editing {
         // Handle media hardware input first (overrides normal navigation when player focused)
         if handle_media_hardware_input(app, ctx) {
@@ -20,6 +22,10 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             // CRITICAL: Do NOT detect passive mouse movement (delta) to avoid interfering with keyboard navigation
             if i.pointer.any_pressed() || i.pointer.any_click() {
                 app.last_input = crate::app::state::LastInput::Mouse;
+                user_active = true;
+            }
+            if i.raw_scroll_delta != egui::Vec2::ZERO {
+                user_active = true;
             }
 
             for event in &i.events {
@@ -32,6 +38,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     } => {
                         // 2. Keyboard detection (Navigation keys)
                         if *pressed {
+                            user_active = true;
                             match key {
                                 egui::Key::ArrowDown | egui::Key::ArrowUp | 
                                 egui::Key::ArrowLeft | egui::Key::ArrowRight |
@@ -79,9 +86,18 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
                             }
                         }
                     }
-                    egui::Event::Copy => do_copy = true,
-                    egui::Event::Cut => do_cut = true,
-                    egui::Event::Paste(_) => do_paste = true,
+                    egui::Event::Copy => {
+                        do_copy = true;
+                        user_active = true;
+                    }
+                    egui::Event::Cut => {
+                        do_cut = true;
+                        user_active = true;
+                    }
+                    egui::Event::Paste(_) => {
+                        do_paste = true;
+                        user_active = true;
+                    }
                     _ => {}
                 }
             }
@@ -107,18 +123,24 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         // Delete: Excluir
         if ctx.input(|i| i.key_pressed(egui::Key::Delete)) {
             app.delete_with_shell_for_idx(None);
+            user_active = true;
         }
 
         // Ctrl + Shift + N: Nova Pasta
         if ctx.input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::N)) {
             app.create_new_folder();
+            user_active = true;
         }
     } else {
         // Durante renomeação: ESC cancela a operação
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             app.renaming_state = None;
             app.focus_rename = false;
+            user_active = true;
         }
+    }
+    if user_active {
+        let _ = app.idle_warmup_sender.send(IdleWarmupMessage::UserActive);
     }
 }
 
