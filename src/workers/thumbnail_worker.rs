@@ -156,11 +156,7 @@ impl PriorityThumbnailQueue {
             priority,
         };
 
-        state
-            .by_directory
-            .entry(parent)
-            .or_default()
-            .push(request);
+        state.by_directory.entry(parent).or_default().push(request);
 
         self.condvar.notify_one();
     }
@@ -240,13 +236,14 @@ impl PriorityThumbnailQueue {
                         .unwrap_or(IOPriority::Background);
 
                     // Only switch directories if there's an Interactive request elsewhere
-                    let should_switch = state.by_directory.iter().any(|(other_dir, other_items)| {
-                        other_dir != dir
-                            && other_items
-                                .iter()
-                                .any(|r| r.priority == IOPriority::Interactive)
-                            && current_best != IOPriority::Interactive
-                    });
+                    let should_switch =
+                        state.by_directory.iter().any(|(other_dir, other_items)| {
+                            other_dir != dir
+                                && other_items
+                                    .iter()
+                                    .any(|r| r.priority == IOPriority::Interactive)
+                                && current_best != IOPriority::Interactive
+                        });
 
                     if !should_switch {
                         return Self::pop_from_directory(state, dir);
@@ -380,6 +377,21 @@ fn thumbnail_worker_loop(
         // SAFETY: Initializing COM with Multithreaded support for this worker thread.
         // It is paired with `CoUninitialize` at the end of the thread loop.
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+
+        // SAFETY: Initialize Media Foundation ONCE per thread working with video processing.
+        // This avoids the expensive overhead of MFStartup/MFShutdown for every single file.
+        // MF_VERSION = 0x00020070, MFSTARTUP_NOSOCKET = 0x1
+        use windows::Win32::Media::MediaFoundation::{MFStartup, MFSTARTUP_NOSOCKET};
+        if let Err(e) = MFStartup(0x00020070, MFSTARTUP_NOSOCKET) {
+            eprintln!(
+                "[ThumbnailWorker] Failed to initialize Media Foundation: {:?}",
+                e
+            );
+        } else {
+            // Register a deferred shutdown
+            // Ideally we would do this in a scope guard, but for this loop structure:
+            // We consciously call MFShutdown before CoUninitialize below.
+        }
     }
 
     // PERFORMANCE: Set background priority to minimize HDD contention with video playback
@@ -387,14 +399,17 @@ fn thumbnail_worker_loop(
     io_priority::set_thread_priority(IOPriority::Background);
 
     while let Some((path, req_gen, req_size)) = queue.pop() {
-
+        // ... loop content ...
         {
             // Block to scope the work variable was unused, flattened loop logic instead
-
             if true {
                 // Simplified matching
                 {
                     if req_gen == gen_tracker.load(Ordering::Relaxed) {
+                        // ... existing logic ...
+                        // The body of the loop remains unchanged except for removing MFStartup/Shutdown calls
+                        // inside `try_media_foundation_extraction`.
+
                         // EARLY EXIT 1: Skip files that already failed in this session
                         // Prevents repeated slow retries on broken files (e.g., 0x8004B205)
                         if is_known_failure(&path) {
@@ -513,6 +528,8 @@ fn thumbnail_worker_loop(
     }
     unsafe {
         // SAFETY: Cleaning up COM for this thread before exit.
+        use windows::Win32::Media::MediaFoundation::MFShutdown;
+        let _ = MFShutdown();
         CoUninitialize();
     }
 }
@@ -725,10 +742,9 @@ fn try_media_foundation_extraction(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
     unsafe {
         // MFStartup/Shutdown - the thumbnail worker thread already has COM initialized
         // SAFETY: MF_VERSION = 0x00020070 (MF 2.0)
-        if MFStartup(0x00020070, MFSTARTUP_NOSOCKET).is_err() {
-            eprintln!("[Thumbnail] Stage 5: MFStartup failed");
-            return None;
-        }
+        // MFStartup is now called ONCE at thread start (see thumbnail_worker_loop)
+        // so we don't need to call it here for every file.
+        // if MFStartup(0x00020070, MFSTARTUP_NOSOCKET).is_err() { ... }
 
         // Convert path to wide string
         let wide_path: Vec<u16> = path
@@ -746,7 +762,7 @@ fn try_media_foundation_extraction(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
                         "[Thumbnail] Stage 5: Failed to create source reader: {:?}",
                         e
                     );
-                    let _ = MFShutdown();
+                    // MFShutdown moved to thread lifecycle
                     return None;
                 }
             };
@@ -759,7 +775,7 @@ fn try_media_foundation_extraction(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
             Ok(mt) => mt,
             Err(e) => {
                 eprintln!("[Thumbnail] Stage 5: No video stream found: {:?}", e);
-                let _ = MFShutdown();
+                // MFShutdown moved to thread lifecycle
                 return None;
             }
         };
@@ -771,7 +787,7 @@ fn try_media_foundation_extraction(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
 
         if width == 0 || height == 0 {
             eprintln!("[Thumbnail] Stage 5: Invalid dimensions");
-            let _ = MFShutdown();
+            // MFShutdown moved to thread lifecycle
             return None;
         }
 
@@ -779,7 +795,7 @@ fn try_media_foundation_extraction(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
         let output_type: IMFMediaType = match MFCreateMediaType() {
             Ok(mt) => mt,
             Err(_) => {
-                let _ = MFShutdown();
+                // MFShutdown moved to thread lifecycle
                 return None;
             }
         };
@@ -807,7 +823,7 @@ fn try_media_foundation_extraction(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
                 .is_err()
             {
                 eprintln!("[Thumbnail] Stage 5: Failed to set NV12 output");
-                let _ = MFShutdown();
+                // MFShutdown moved to thread lifecycle
                 return None;
             }
             true
@@ -835,7 +851,7 @@ fn try_media_foundation_extraction(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
 
         if result.is_err() {
             eprintln!("[Thumbnail] Stage 5: ReadSample failed: {:?}", result.err());
-            let _ = MFShutdown();
+            // MFShutdown moved to thread lifecycle
             return None;
         }
 
@@ -843,7 +859,7 @@ fn try_media_foundation_extraction(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
             Some(s) => s,
             None => {
                 eprintln!("[Thumbnail] Stage 5: No sample returned");
-                let _ = MFShutdown();
+                // MFShutdown moved to thread lifecycle
                 return None;
             }
         };
@@ -856,7 +872,7 @@ fn try_media_foundation_extraction(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
                     "[Thumbnail] Stage 5: ConvertToContiguousBuffer failed: {:?}",
                     e
                 );
-                let _ = MFShutdown();
+                // MFShutdown moved to thread lifecycle
                 return None;
             }
         };
@@ -870,7 +886,7 @@ fn try_media_foundation_extraction(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
             .is_err()
         {
             eprintln!("[Thumbnail] Stage 5: Lock failed");
-            let _ = MFShutdown();
+            // MFShutdown moved to thread lifecycle
             return None;
         }
 
@@ -887,7 +903,7 @@ fn try_media_foundation_extraction(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
                     current_len, expected_size
                 );
                 let _ = buffer.Unlock();
-                let _ = MFShutdown();
+                // MFShutdown moved to thread lifecycle
                 return None;
             }
 
@@ -902,7 +918,7 @@ fn try_media_foundation_extraction(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
                     current_len, expected_size
                 );
                 let _ = buffer.Unlock();
-                let _ = MFShutdown();
+                // MFShutdown moved to thread lifecycle
                 return None;
             }
 
@@ -912,7 +928,7 @@ fn try_media_foundation_extraction(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
         };
 
         let _ = buffer.Unlock();
-        let _ = MFShutdown();
+        // MFShutdown moved to thread lifecycle
 
         // Convert BGRA to RGBA if RGB32 was used (swap R and B channels)
         let mut rgba_data = rgba_data;
