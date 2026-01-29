@@ -162,7 +162,7 @@ impl PriorityThumbnailQueue {
     }
 
     /// Pop the next request, optimizing for disk locality on HDDs
-    pub fn pop(&self) -> Option<(PathBuf, usize, u32)> {
+    pub fn pop(&self) -> Option<(PathBuf, usize, u32, IOPriority)> {
         let mut state = self.state.lock().unwrap();
 
         loop {
@@ -177,7 +177,12 @@ impl PriorityThumbnailQueue {
                 // Adjust thread priority based on request priority
                 io_priority::set_thread_priority(request.priority);
 
-                return Some((request.path, request.generation, request.size));
+                return Some((
+                    request.path,
+                    request.generation,
+                    request.size,
+                    request.priority,
+                ));
             }
 
             // Wait for new work
@@ -398,7 +403,7 @@ fn thumbnail_worker_loop(
     // This applies to all 4 thumbnail worker threads
     io_priority::set_thread_priority(IOPriority::Background);
 
-    while let Some((path, req_gen, req_size)) = queue.pop() {
+    while let Some((path, req_gen, req_size, req_priority)) = queue.pop() {
         // ... loop content ...
         {
             // Block to scope the work variable was unused, flattened loop logic instead
@@ -490,7 +495,9 @@ fn thumbnail_worker_loop(
                             semaphore.acquire();
 
                             // HYBRID PIPELINE com resize imediato
-                            if let Some((raw_data, w, h)) = generate_thumbnail_hybrid(&path) {
+                            if let Some((raw_data, w, h)) =
+                                generate_thumbnail_hybrid(&path, req_priority)
+                            {
                                 // STEP 2: Resize to bucket (libera RAM e otimiza upload GPU)
                                 let bucket_size = get_bucket_size(req_size);
                                 let resized = resize_to_bucket(raw_data, w, h, bucket_size);
@@ -585,9 +592,12 @@ fn resize_to_bucket(
 }
 
 /// The 4-Step Hybrid Pipeline
-fn generate_thumbnail_hybrid(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
+fn generate_thumbnail_hybrid(
+    path: &Path,
+    priority: IOPriority,
+) -> Option<(Vec<u8>, u32, u32)> {
     // Stage 1: image crate (Fast Path)
-    if let Some(result) = try_image_crate_extraction(path) {
+    if let Some(result) = try_image_crate_extraction(path, priority) {
         return Some(result);
     }
 
@@ -639,7 +649,10 @@ fn generate_thumbnail_hybrid(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
     None
 }
 
-fn try_image_crate_extraction(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
+fn try_image_crate_extraction(
+    path: &Path,
+    priority: IOPriority,
+) -> Option<(Vec<u8>, u32, u32)> {
     let ext = path.extension()?.to_string_lossy().to_lowercase();
     if !matches!(
         ext.as_str(),
@@ -648,7 +661,20 @@ fn try_image_crate_extraction(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
         return None;
     }
 
-    match image::open(path) {
+    use crate::infrastructure::windows::file_flags::{
+        open_sequential, open_sequential_background, open_sequential_low_priority,
+    };
+    use std::io::BufReader;
+
+    let file = match priority {
+        IOPriority::Interactive => open_sequential(path).ok()?,
+        IOPriority::Prefetch => open_sequential_low_priority(path).ok()?,
+        IOPriority::Background => open_sequential_background(path).ok()?,
+    };
+    let reader = BufReader::with_capacity(65536, file);
+    let format = ImageFormat::from_extension(&ext)?;
+
+    match image::load(reader, format) {
         Ok(img) => {
             let rgba = img.to_rgba8();
             Some((rgba.to_vec(), rgba.width(), rgba.height()))

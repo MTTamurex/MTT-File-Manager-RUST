@@ -119,43 +119,38 @@ impl ImageViewerApp {
         }
 
         let current_path_norm = normalize_for_match(Path::new(&self.current_path));
+        let should_ignore = |p: &Path| -> bool {
+            let name = p
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_lowercase();
+            if name.starts_with("dumpstack.log")
+                || name.starts_with("hiberfil.sys")
+                || name.starts_with("pagefile.sys")
+                || name.starts_with("swapfile.sys")
+                || name == "desktop.ini"
+                || name == "thumbs.db"
+            {
+                return true;
+            }
 
+            if let Ok(metadata) = std::fs::metadata(p) {
+                use std::os::windows::fs::MetadataExt;
+                let attrs = metadata.file_attributes();
+                if (attrs & 0x02) != 0 || (attrs & 0x04) != 0 {
+                    return true;
+                }
+            }
+            false
+        };
+
+        #[cfg(feature = "notify-watcher")]
         while let Ok(event) = self.fs_event_receiver.try_recv() {
             match event {
                 Ok(evt) => {
                     let mut meaningful_change = false;
 
-                    // Filter out hidden/system files to prevent infinite reload loops (e.g. C:\DumpStack.log.tmp)
-                    let should_ignore = |p: &Path| -> bool {
-                        let name = p
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .to_lowercase();
-                        // Ignore common noisy system files
-                        if name.starts_with("dumpstack.log")
-                            || name.starts_with("hiberfil.sys")
-                            || name.starts_with("pagefile.sys")
-                            || name.starts_with("swapfile.sys")
-                            || name == "desktop.ini"
-                            || name == "thumbs.db"
-                        {
-                            return true;
-                        }
-
-                        // Check attributes if file exists
-                        if let Ok(metadata) = std::fs::metadata(p) {
-                            // 0x02 = Hidden, 0x04 = System
-                            use std::os::windows::fs::MetadataExt;
-                            let attrs = metadata.file_attributes();
-                            if (attrs & 0x02) != 0 || (attrs & 0x04) != 0 {
-                                return true;
-                            }
-                        }
-                        false
-                    };
-
-                    // Detecta eventos de Remove para limpar cache automaticamente
                     if matches!(evt.kind, notify::EventKind::Remove(_)) {
                         for path in &evt.paths {
                             if should_ignore(path) {
@@ -176,14 +171,12 @@ impl ImageViewerApp {
                         }
                     }
 
-                    // Detecta Modify para invalidar folder previews
                     for path in &evt.paths {
                         if should_ignore(path) {
                             continue;
                         }
                         meaningful_change = true;
 
-                        // 1. Se o path alterado é uma subpasta direta da pasta atual
                         if let Some(parent) = path.parent() {
                             let parent_norm = normalize_for_match(parent);
                             if parent_norm == current_path_norm {
@@ -199,7 +192,6 @@ impl ImageViewerApp {
                             }
                         }
 
-                        // 2. Se o path alterado é UM ARQUIVO dentro de uma subpasta da pasta atual
                         if let Some(parent) = path.parent() {
                             if let Some(grandparent) = parent.parent() {
                                 let grandparent_norm = normalize_for_match(grandparent);
@@ -218,9 +210,6 @@ impl ImageViewerApp {
                             }
                         }
 
-                        // 3. Clear thumbnail caches for THIS specific file (including failure caches)
-                        // This fixes the bug where videos copied/downloaded fail extraction initially (busy)
-                        // and are never retried until app restart.
                         let cleaned = clean_path(path);
                         self.cache_manager.texture_cache.pop(&cleaned);
                         self.cache_manager.failed_thumbnails.pop(&cleaned);
@@ -232,6 +221,104 @@ impl ImageViewerApp {
                     }
                 }
                 Err(e) => eprintln!("Erro de watch: {:?}", e),
+            }
+        }
+
+        #[cfg(feature = "usn-watcher")]
+        while let Ok(event) = self.fs_event_receiver.try_recv() {
+            let mut meaningful_change_local = false;
+
+            let handle_remove = |path: &Path| -> bool {
+                if should_ignore(path) {
+                    return false;
+                }
+                let cleaned = clean_path(path);
+                if let Some(parent) = cleaned.parent() {
+                    self.directory_cache.invalidate(&parent.to_path_buf());
+                }
+                self.directory_cache.invalidate_children(&cleaned);
+                eprintln!(
+                    "[FS] Detected removal, clearing disk cache for: {:?}",
+                    cleaned
+                );
+                self.disk_cache.remove_cache_for_path(&cleaned);
+                true
+            };
+
+            let mut handle_modify = |path: &Path| -> bool {
+                if should_ignore(path) {
+                    return false;
+                }
+                if let Some(parent) = path.parent() {
+                    let parent_norm = normalize_for_match(parent);
+                    if parent_norm == current_path_norm {
+                        let cleaned = clean_path(path);
+                        if let Some(cache_parent) = cleaned.parent() {
+                            self.directory_cache.invalidate(&cache_parent.to_path_buf());
+                        }
+                        eprintln!(
+                            "[FS] Direct subfolder modified: {:?}",
+                            cleaned.file_name()
+                        );
+                        self.cache_manager.invalidate_folder_preview(&cleaned);
+                    }
+                }
+
+                if let Some(parent) = path.parent() {
+                    if let Some(grandparent) = parent.parent() {
+                        let grandparent_norm = normalize_for_match(grandparent);
+                        if grandparent_norm == current_path_norm {
+                            let cleaned_parent = clean_path(parent);
+                            if let Some(cache_parent) = cleaned_parent.parent() {
+                                self.directory_cache.invalidate(&cache_parent.to_path_buf());
+                            }
+                            eprintln!(
+                                "[FS] File in subfolder modified, invalidating: {:?}",
+                                cleaned_parent.file_name()
+                            );
+                            self.cache_manager.invalidate_folder_preview(&cleaned_parent);
+                        }
+                    }
+                }
+
+                let cleaned = clean_path(path);
+                self.cache_manager.texture_cache.pop(&cleaned);
+                self.cache_manager.failed_thumbnails.pop(&cleaned);
+                crate::workers::thumbnail_worker::clear_failure_cache(&cleaned);
+                true
+            };
+
+            match event {
+                crate::workers::usn_watcher::FsEvent::Created(path) => {
+                    if handle_modify(&path) {
+                        meaningful_change_local = true;
+                    }
+                }
+                crate::workers::usn_watcher::FsEvent::Deleted(path) => {
+                    if handle_remove(&path) {
+                        meaningful_change_local = true;
+                    }
+                    if handle_modify(&path) {
+                        meaningful_change_local = true;
+                    }
+                }
+                crate::workers::usn_watcher::FsEvent::Modified(path) => {
+                    if handle_modify(&path) {
+                        meaningful_change_local = true;
+                    }
+                }
+                crate::workers::usn_watcher::FsEvent::Renamed(old_path, new_path) => {
+                    if handle_remove(&old_path) {
+                        meaningful_change_local = true;
+                    }
+                    if handle_modify(&new_path) {
+                        meaningful_change_local = true;
+                    }
+                }
+            }
+
+            if meaningful_change_local {
+                self.pending_auto_reload = true;
             }
         }
 

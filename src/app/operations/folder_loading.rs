@@ -13,10 +13,11 @@ use std::os::windows::ffi::OsStringExt;
 
 use crate::app::state::ImageViewerApp;
 use crate::application::sorting;
-use crate::domain::file_entry::FileEntry;
+use crate::domain::file_entry::{FileEntry, SyncStatus};
 use crate::infrastructure::io_priority;
 use crate::infrastructure::onedrive;
 use crate::infrastructure::ntfs_reader;
+use crate::infrastructure::directory_index::IndexedFile;
 use crate::infrastructure::windows::{is_shell_navigation_path, list_shell_folder};
 use crate::workers::prefetch_worker::PrefetchMessage;
 
@@ -113,6 +114,7 @@ impl ImageViewerApp {
         let ctx = self.ui_ctx.clone();
         let disk_cache = self.disk_cache.clone();
         let directory_cache = self.directory_cache.clone();
+        let directory_index_opt = self.directory_index.clone();
         let prefetch_sender = self.prefetch_sender.clone();
         let force_refresh = force_refresh;
 
@@ -148,6 +150,61 @@ impl ImageViewerApp {
                         let _ = file_entry_sender.send((my_gen, Vec::new()));
                         ctx.request_repaint();
                         return;
+                    }
+                }
+            }
+
+            if !force_refresh {
+                if let Some(di) = &directory_index_opt {
+                    let base = PathBuf::from(&base_path);
+                    if !di.might_have_changed(&base) {
+                        if let Some((_meta, indexed_files)) = di.get_directory(&base) {
+                            let mut entries: Vec<FileEntry> = indexed_files
+                                .into_iter()
+                                .filter(|f| !f.name.starts_with('.'))
+                                .map(|f| FileEntry {
+                                    path: base.join(&f.name),
+                                    name: f.name,
+                                    is_dir: f.is_dir,
+                                    size: if f.is_dir { 0 } else { f.size },
+                                    modified: f.modified,
+                                    folder_cover: None,
+                                    drive_info: None,
+                                    sync_status: SyncStatus::None,
+                                    deletion_date: None,
+                                    recycle_original_path: None,
+                                })
+                                .collect();
+
+                            let folders: Vec<PathBuf> = entries
+                                .iter()
+                                .filter(|e| e.is_dir)
+                                .map(|e| e.path.clone())
+                                .collect();
+                            if !folders.is_empty() {
+                                let covers = disk_cache.get_folder_covers(&folders);
+                                for entry in entries.iter_mut() {
+                                    if entry.is_dir {
+                                        if let Some(cover) = covers.get(&entry.path) {
+                                            entry.folder_cover = Some(cover.clone());
+                                        }
+                                    }
+                                }
+                            }
+
+                            directory_cache.put(base.clone(), entries.clone());
+
+                            for chunk in entries.chunks(batch_size) {
+                                if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
+                                    return;
+                                }
+                                let _ = file_entry_sender.send((my_gen, chunk.to_vec()));
+                                ctx.request_repaint();
+                            }
+                            let _ = file_entry_sender.send((my_gen, Vec::new()));
+                            ctx.request_repaint();
+                            return;
+                        }
                     }
                 }
             }
@@ -261,6 +318,22 @@ impl ImageViewerApp {
                     }
                     if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                         directory_cache.put(PathBuf::from(&base_path), all_entries_disk.clone());
+                        if let Some(di) = &directory_index_opt {
+                            let indexed: Vec<IndexedFile> = all_entries_disk
+                                .iter()
+                                .map(|e| IndexedFile {
+                                    name: e.name.clone(),
+                                    size: e.size,
+                                    modified: e.modified,
+                                    is_dir: e.is_dir,
+                                })
+                                .collect();
+                            let _ = di.put_directory(
+                                &PathBuf::from(&base_path),
+                                &indexed,
+                                scan_start.elapsed().as_millis() as u64,
+                            );
+                        }
                     }
                     if !is_ssd && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                         let subdirs: Vec<PathBuf> = all_entries_disk
@@ -474,6 +547,22 @@ impl ImageViewerApp {
 
             if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                 directory_cache.put(PathBuf::from(&base_path), all_entries_disk.clone());
+                if let Some(di) = &directory_index_opt {
+                    let indexed: Vec<IndexedFile> = all_entries_disk
+                        .iter()
+                        .map(|e| IndexedFile {
+                            name: e.name.clone(),
+                            size: e.size,
+                            modified: e.modified,
+                            is_dir: e.is_dir,
+                        })
+                        .collect();
+                    let _ = di.put_directory(
+                        &PathBuf::from(&base_path),
+                        &indexed,
+                        scan_start.elapsed().as_millis() as u64,
+                    );
+                }
             }
             if !is_ssd && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                 let subdirs: Vec<PathBuf> = all_entries_disk

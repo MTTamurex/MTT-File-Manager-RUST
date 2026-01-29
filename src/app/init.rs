@@ -13,12 +13,15 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Instant;
+#[cfg(feature = "usn-watcher")]
+use std::time::Duration;
 
 use crate::application::navigation::NavigationHistory;
 use crate::application::ClipboardManager;
 use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::directory_cache::DirectoryCache;
+use crate::infrastructure::directory_index::DirectoryIndex;
 use crate::infrastructure::onedrive;
 use crate::infrastructure::windows as windows_infra;
 // use crate::ui::cache::CacheManager;
@@ -26,6 +29,8 @@ use crate::ui::context_menu::ContextMenuState;
 use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::theme;
+#[cfg(feature = "usn-watcher")]
+use crate::workers::usn_watcher::{FsEvent, UsnWatcherState};
 
 use super::state::{ImageViewerApp, LastInput};
 
@@ -47,12 +52,22 @@ impl ImageViewerApp {
             .unwrap_or_else(|| PathBuf::from("."))
             .join("MTT-File-Manager")
             .join("thumbnails");
-        let disk_cache = Arc::new(ThumbnailDiskCache::new(cache_dir));
+        let disk_cache = Arc::new(ThumbnailDiskCache::new(cache_dir.clone()));
+        let directory_index = match DirectoryIndex::open(&cache_dir.join("thumbnails.db")) {
+            Ok(index) => Some(Arc::new(index)),
+            Err(e) => {
+                eprintln!("[Cache] Warning: Failed to open directory index: {:?}", e);
+                None
+            }
+        };
 
         // COVER WORKER: Worker único para processar capas de pasta
         let (cover_req_tx, cover_req_rx) = mpsc::channel::<PathBuf>(); // UI → Worker
         let (cover_res_tx, cover_res_rx) = mpsc::channel(); // Worker → UI
+        #[cfg(feature = "notify-watcher")]
         let (fs_tx, fs_rx) = mpsc::channel();
+        #[cfg(feature = "usn-watcher")]
+        let (fs_tx, fs_rx) = mpsc::channel::<FsEvent>();
         let (device_event_sender, device_event_receiver) = mpsc::channel();
 
         windows_infra::start_device_change_listener(device_event_sender, ctx.clone());
@@ -91,6 +106,14 @@ impl ImageViewerApp {
         onedrive::init_onedrive_paths();
 
         let directory_cache = Arc::new(DirectoryCache::new());
+        #[cfg(feature = "usn-watcher")]
+        let usn_watcher_state = Arc::new(UsnWatcherState::new());
+        #[cfg(feature = "usn-watcher")]
+        crate::workers::usn_watcher::spawn_usn_watcher(
+            usn_watcher_state.clone(),
+            fs_tx.clone(),
+            Duration::from_millis(500),
+        );
 
         // Load Preferences from SQLite
         let sort_mode = disk_cache
@@ -326,6 +349,7 @@ impl ImageViewerApp {
             folders_position,
             disk_cache: disk_cache.clone(),
             directory_cache: directory_cache.clone(),
+            directory_index: directory_index.clone(),
             // View mode: loaded from SQLite
             view_mode,
             // Selection & Preview
@@ -361,8 +385,17 @@ impl ImageViewerApp {
             renaming_state: None,
             focus_rename: false,
 
+            #[cfg(feature = "notify-watcher")]
             watcher: None,
+            #[cfg(feature = "notify-watcher")]
             fs_event_receiver: fs_rx,
+            #[cfg(feature = "notify-watcher")]
+            fs_event_sender: fs_tx,
+            #[cfg(feature = "usn-watcher")]
+            usn_watcher_state: usn_watcher_state.clone(),
+            #[cfg(feature = "usn-watcher")]
+            fs_event_receiver: fs_rx,
+            #[cfg(feature = "usn-watcher")]
             fs_event_sender: fs_tx,
             device_event_receiver,
             last_auto_reload: Instant::now(),

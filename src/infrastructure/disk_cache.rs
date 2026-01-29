@@ -131,6 +131,53 @@ impl ThumbnailDiskCache {
             0 // continue
         });
 
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS directory_index (
+                dir_path TEXT PRIMARY KEY,
+                file_count INTEGER NOT NULL,
+                total_size INTEGER NOT NULL,
+                last_scan_time INTEGER NOT NULL,
+                scan_duration_ms INTEGER NOT NULL
+            )",
+            [],
+        )
+        .unwrap_or_else(|e| {
+            eprintln!(
+                "[Cache] Warning: Failed to create directory_index table: {:?}",
+                e
+            );
+            0
+        });
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS file_index (
+                id INTEGER PRIMARY KEY,
+                dir_path TEXT NOT NULL,
+                file_name TEXT NOT NULL,
+                file_size INTEGER NOT NULL,
+                modified_time INTEGER NOT NULL,
+                is_dir INTEGER NOT NULL,
+                UNIQUE(dir_path, file_name)
+            )",
+            [],
+        )
+        .unwrap_or_else(|e| {
+            eprintln!("[Cache] Warning: Failed to create file_index table: {:?}", e);
+            0
+        });
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_file_index_dir ON file_index(dir_path)",
+            [],
+        )
+        .unwrap_or_else(|e| {
+            eprintln!(
+                "[Cache] Warning: Failed to create idx_file_index_dir index: {:?}",
+                e
+            );
+            0
+        });
+
         Self {
             db: Arc::new(Mutex::new(conn)),
             cache_dir,
