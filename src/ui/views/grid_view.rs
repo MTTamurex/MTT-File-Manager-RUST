@@ -304,13 +304,8 @@ pub fn render_grid_view(
     // 1. Handle Input (Target Scroll)
     let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
     if scroll_delta != 0.0 {
-        // SCROLL CONFIGURATION - PIXEL BASED
-        let notches = scroll_delta / 50.0;
-        let px_per_notch = ctx.thumbnail_size + padding; // Height + Padding (Simplificado conforme regra)
-        
-        let move_px = notches * px_per_notch;
-        
-        *ctx.mut_scroll_offset_y -= move_px;
+        let speed = 2.5;
+        *ctx.mut_scroll_offset_y -= scroll_delta * speed;
     }
 
     // 1.5 Clamp Target
