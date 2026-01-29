@@ -19,6 +19,72 @@ struct ScrollState {
     visual_scroll_y: f32,
 }
 
+#[derive(Clone, Copy)]
+pub struct ScrollPredictor {
+    last_visible_start: usize,
+    last_visible_end: usize,
+    scroll_direction: ScrollDirection,
+    velocity: f32,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum ScrollDirection {
+    None,
+    Down,
+    Up,
+}
+
+impl ScrollPredictor {
+    pub fn new() -> Self {
+        Self {
+            last_visible_start: 0,
+            last_visible_end: 0,
+            scroll_direction: ScrollDirection::None,
+            velocity: 0.0,
+        }
+    }
+
+    pub fn update(&mut self, visible_start: usize, visible_end: usize) {
+        if visible_start > self.last_visible_start {
+            self.scroll_direction = ScrollDirection::Down;
+            self.velocity = (visible_start - self.last_visible_start) as f32;
+        } else if visible_start < self.last_visible_start {
+            self.scroll_direction = ScrollDirection::Up;
+            self.velocity = (self.last_visible_start - visible_start) as f32;
+        } else {
+            self.velocity *= 0.9;
+            if self.velocity < 0.5 {
+                self.scroll_direction = ScrollDirection::None;
+            }
+        }
+
+        self.last_visible_start = visible_start;
+        self.last_visible_end = visible_end;
+    }
+
+    pub fn get_prefetch_range(&self, total_items: usize) -> (usize, usize) {
+        let prefetch_count = 20;
+        match self.scroll_direction {
+            ScrollDirection::Down => {
+                let start = self.last_visible_end;
+                let end = (start + prefetch_count).min(total_items);
+                (start, end)
+            }
+            ScrollDirection::Up => {
+                let end = self.last_visible_start;
+                let start = end.saturating_sub(prefetch_count);
+                (start, end)
+            }
+            ScrollDirection::None => {
+                let mid = (self.last_visible_start + self.last_visible_end) / 2;
+                let start = mid.saturating_sub(prefetch_count / 2);
+                let end = (mid + prefetch_count / 2).min(total_items);
+                (start, end)
+            }
+        }
+    }
+}
+
 /// Pre-allocated buffers for pending operations (PERFORMANCE: avoids per-item allocations)
 #[derive(Default)]
 pub struct PendingOperations {
@@ -85,6 +151,7 @@ pub struct GridViewContext<'a> {
     /// Mutable reference to update scroll offset
     pub mut_scroll_offset_y: &'a mut f32,
     pub last_input: crate::app::state::LastInput,
+    pub scroll_predictor: &'a mut ScrollPredictor,
     /// PERFORMANCE: Scroll state tracking for GPU upload throttling
     pub last_scroll_time: &'a mut std::time::Instant,
     pub last_scroll_offset: &'a mut f32,
@@ -653,43 +720,32 @@ pub fn render_grid_view(
         ops.rename_with_shell(rename_idx);
     }
 
-    // PERFORMANCE: Adaptive prefetch based on scroll state
-    // Note: Thumbnail cache is on SSD, so prefetch is always beneficial
     if let Some((vis_min, vis_max)) = visible_rows_range {
         let count = ctx.items.len();
-        let rows = (count as f32 / cols as f32).ceil() as usize;
+        let first_visible_index = (vis_min * cols).min(count);
+        let last_visible_index = (vis_max * cols).min(count);
+        ctx.scroll_predictor.update(first_visible_index, last_visible_index);
 
-        // Adaptive prefetch margin based on scroll status
-        let prefetch_margin = if is_scrolling { 2 } else { 5 };
+        let (prefetch_start, prefetch_end) = ctx.scroll_predictor.get_prefetch_range(count);
 
-        let start_prefetch = vis_min.saturating_sub(prefetch_margin);
-        let end_prefetch = (vis_max + prefetch_margin).min(rows);
-
-        for row in start_prefetch..end_prefetch {
-            // Skip visible + overscan rows (already handled by render loop)
-            if row >= vis_min.saturating_sub(overscan) && row < (vis_max + overscan).min(rows) {
+        for index in prefetch_start..prefetch_end {
+            if index >= count {
+                break;
+            }
+            if index >= first_visible_index && index < last_visible_index {
                 continue;
             }
-
-            for col in 0..cols {
-                let index = row * cols + col;
-                if index >= count {
-                    break;
-                }
-
-                let item = &ctx.items[index];
-                if !item.is_dir {
-                    // Check if needs thumbnail - skip if already in cache, loading, or pending upload
-                    if !ctx.texture_cache.contains(&item.path)
-                        && !ctx.loading_set.contains(&item.path)
-                        && !ctx.pending_upload_set.contains(&item.path)
-                    {
-                        ctx.loading_set.insert(item.path.clone());
-                        ops.request_thumbnail_prefetch(
-                            item.path.clone(),
-                            ctx.thumbnail_size as u32,
-                        );
-                    }
+            let item = &ctx.items[index];
+            if !item.is_dir {
+                if !ctx.texture_cache.contains(&item.path)
+                    && !ctx.loading_set.contains(&item.path)
+                    && !ctx.pending_upload_set.contains(&item.path)
+                {
+                    ctx.loading_set.insert(item.path.clone());
+                    ops.request_thumbnail_prefetch(
+                        item.path.clone(),
+                        ctx.thumbnail_size as u32,
+                    );
                 }
             }
         }

@@ -28,6 +28,7 @@ use crate::application::ClipboardManager;
 use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
 use crate::domain::thumbnail::ThumbnailData;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
+use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::windows as windows_infra;
 // use crate::ui::cache::CacheManager;
 use crate::ui::context_menu::ContextMenuState;
@@ -73,6 +74,7 @@ pub struct ImageViewerApp {
 
     // Persistence Layer
     pub disk_cache: Arc<ThumbnailDiskCache>,
+    pub directory_cache: Arc<DirectoryCache>,
 
     // View Mode
     pub view_mode: ViewMode,
@@ -205,6 +207,7 @@ pub struct ImageViewerApp {
     
     // PERFORMANCE: Reusable buffers for grid view rendering (avoid per-item allocations)
     pub pending_ops: crate::ui::views::grid_view::PendingOperations,
+    pub scroll_predictor: crate::ui::views::grid_view::ScrollPredictor,
 
     // Scroll offset for manual grid virtualization
     pub scroll_offset_y: f32,
@@ -224,6 +227,7 @@ pub struct ImageViewerApp {
     // FILE OPERATION WORKER
     pub file_op_sender: Sender<crate::workers::file_operation_worker::FileOperationRequest>,
     pub file_op_res_receiver: Receiver<crate::workers::file_operation_worker::FileOperationResult>,
+    pub prefetch_sender: Sender<crate::workers::prefetch_worker::PrefetchMessage>,
 
     // ISO MOUNTING
     pub pending_iso_mount: Option<PathBuf>,

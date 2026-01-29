@@ -164,6 +164,10 @@ impl ImageViewerApp {
                             meaningful_change = true;
 
                             let cleaned = clean_path(path);
+                            if let Some(parent) = cleaned.parent() {
+                                self.directory_cache.invalidate(&parent.to_path_buf());
+                            }
+                            self.directory_cache.invalidate_children(&cleaned);
                             eprintln!(
                                 "[FS] Detected removal, clearing disk cache for: {:?}",
                                 cleaned
@@ -184,6 +188,9 @@ impl ImageViewerApp {
                             let parent_norm = normalize_for_match(parent);
                             if parent_norm == current_path_norm {
                                 let cleaned = clean_path(path);
+                                if let Some(cache_parent) = cleaned.parent() {
+                                    self.directory_cache.invalidate(&cache_parent.to_path_buf());
+                                }
                                 eprintln!(
                                     "[FS] Direct subfolder modified: {:?}",
                                     cleaned.file_name()
@@ -198,6 +205,9 @@ impl ImageViewerApp {
                                 let grandparent_norm = normalize_for_match(grandparent);
                                 if grandparent_norm == current_path_norm {
                                     let cleaned_parent = clean_path(parent);
+                                    if let Some(cache_parent) = cleaned_parent.parent() {
+                                        self.directory_cache.invalidate(&cache_parent.to_path_buf());
+                                    }
                                     eprintln!(
                                         "[FS] File in subfolder modified, invalidating: {:?}",
                                         cleaned_parent.file_name()

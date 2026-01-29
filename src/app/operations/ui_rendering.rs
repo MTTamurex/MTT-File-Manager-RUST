@@ -607,6 +607,7 @@ impl ImageViewerApp {
             scroll_offset_y: self.scroll_offset_y,
             mut_scroll_offset_y: &mut self.scroll_offset_y,
             last_input: self.last_input,
+            scroll_predictor: &mut self.scroll_predictor,
             last_scroll_time: &mut self.last_scroll_time,
             last_scroll_offset: &mut self.last_scroll_offset,
             pending_upload_set: &mut self.cache_manager.pending_upload_set,
