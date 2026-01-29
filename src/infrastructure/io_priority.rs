@@ -17,6 +17,67 @@ fn get_disk_cache() -> &'static std::sync::Mutex<FxHashMap<char, bool>> {
     DISK_TYPE_CACHE.get_or_init(|| std::sync::Mutex::new(FxHashMap::default()))
 }
 
+/// Detects if a drive is a virtual Cryptomator drive
+///
+/// Cryptomator mounts encrypted vaults as virtual drives using CryptoFS.
+/// These should be treated as HDDs if the underlying storage is an HDD.
+fn is_virtual_drive(drive_letter: char) -> bool {
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
+
+    let root_path = format!("{}:\\", drive_letter);
+    let wide_path: Vec<u16> = root_path.encode_utf16().chain(std::iter::once(0)).collect();
+
+    let mut volume_name = [0u16; 261];
+    let mut file_system_name = [0u16; 261];
+    let mut serial_number: u32 = 0;
+    let mut max_component_len: u32 = 0;
+    let mut fs_flags: u32 = 0;
+
+    let ok = unsafe {
+        GetVolumeInformationW(
+            PCWSTR(wide_path.as_ptr()),
+            Some(&mut volume_name),
+            Some(&mut serial_number),
+            Some(&mut max_component_len),
+            Some(&mut fs_flags),
+            Some(&mut file_system_name),
+        )
+    };
+
+    if !ok.is_ok() {
+        return false;
+    }
+
+    let volume_len = volume_name
+        .iter()
+        .position(|&c| c == 0)
+        .unwrap_or(volume_name.len());
+    let fs_len = file_system_name
+        .iter()
+        .position(|&c| c == 0)
+        .unwrap_or(file_system_name.len());
+
+    let volume = String::from_utf16_lossy(&volume_name[..volume_len]).to_lowercase();
+    let file_system = String::from_utf16_lossy(&file_system_name[..fs_len]).to_lowercase();
+
+    // Detect virtual drive indicators (CryptoFS is the file system name used by Cryptomator on Windows)
+    let is_virtual = volume.contains("cryptomator")
+        || file_system.contains("cryptofs")
+        || file_system.contains("dokan")
+        || file_system.contains("winfsp")
+        || file_system == "fuse";
+
+    if is_virtual {
+        eprintln!(
+            "[IO] Virtual drive detected: {}:\\ (Volume: '{}', FS: '{}') - treating as HDD",
+            drive_letter, volume, file_system
+        );
+    }
+
+    is_virtual
+}
+
 /// Priority levels for I/O operations
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum IOPriority {
@@ -44,6 +105,10 @@ impl Default for IOPriority {
 /// Uses Windows DeviceIoControl with IOCTL_STORAGE_QUERY_PROPERTY to check
 /// the StorageDeviceSeekPenaltyProperty. SSDs return IncursSeekPenalty = false.
 ///
+/// Special handling for virtual drives (like Cryptomator):
+/// - Virtual drives are treated as HDDs since the underlying encrypted storage
+///   is typically on HDDs and benefits from seek-minimizing strategies
+///
 /// Results are cached per drive letter for performance.
 pub fn is_ssd(path: &Path) -> bool {
     // Extract drive letter (e.g., "C:" from "C:\Users\...")
@@ -59,6 +124,15 @@ pub fn is_ssd(path: &Path) -> bool {
         if let Some(&is_ssd) = cache.get(&drive_letter) {
             return is_ssd;
         }
+    }
+
+    // Check if it's a virtual drive (Cryptomator, Dokan, WinFsp)
+    // Virtual drives should be treated as HDDs for optimization purposes
+    if is_virtual_drive(drive_letter) {
+        if let Ok(mut cache) = get_disk_cache().lock() {
+            cache.insert(drive_letter, false);
+        }
+        return false;
     }
 
     // Query Windows for disk type
