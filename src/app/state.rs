@@ -111,6 +111,7 @@ pub struct ImageViewerApp {
     pub computer_view_local_indices: Vec<usize>,  // Pre-computed indices for local drives (virtualization)
     pub computer_view_network_indices: Vec<usize>, // Pre-computed indices for network drives (virtualization)
     pub is_recycle_bin_view: bool, // Se estamos na view da Lixeira
+    pub show_virtual_drive_settings: bool, // Modal de configuração de drives virtuais
 
     pub total_items: usize,
 

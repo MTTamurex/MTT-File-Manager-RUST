@@ -14,6 +14,8 @@ pub enum StatusBarAction {
     SortChanged,
     /// View mode changed
     ViewModeChanged,
+    /// Open virtual drive settings
+    OpenVirtualDriveSettings,
     /// No action
     None,
 }
@@ -38,6 +40,17 @@ pub fn render_status_bar(
     let mut action = StatusBarAction::None;
 
     ui.horizontal(|ui| {
+        // === LEFTMOST: Virtual drive settings button ===
+        if ui
+            .button("⚙")
+            .on_hover_text("Configurar otimização de drives virtuais")
+            .clicked()
+        {
+            action = StatusBarAction::OpenVirtualDriveSettings;
+        }
+
+        ui.separator();
+
         // === LEFT SIDE: Item count and loading status ===
         if *is_loading_folder {
             ui.spinner();

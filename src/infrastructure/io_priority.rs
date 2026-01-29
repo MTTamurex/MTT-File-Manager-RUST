@@ -62,20 +62,11 @@ fn is_virtual_drive(drive_letter: char) -> bool {
     let file_system = String::from_utf16_lossy(&file_system_name[..fs_len]).to_lowercase();
 
     // Detect virtual drive indicators (CryptoFS is the file system name used by Cryptomator on Windows)
-    let is_virtual = volume.contains("cryptomator")
+    volume.contains("cryptomator")
         || file_system.contains("cryptofs")
         || file_system.contains("dokan")
         || file_system.contains("winfsp")
-        || file_system == "fuse";
-
-    if is_virtual {
-        eprintln!(
-            "[IO] Virtual drive detected: {}:\\ (Volume: '{}', FS: '{}') - treating as HDD",
-            drive_letter, volume, file_system
-        );
-    }
-
-    is_virtual
+        || file_system == "fuse"
 }
 
 /// Priority levels for I/O operations
@@ -106,10 +97,10 @@ impl Default for IOPriority {
 /// the StorageDeviceSeekPenaltyProperty. SSDs return IncursSeekPenalty = false.
 ///
 /// Special handling for virtual drives (like Cryptomator):
-/// - Virtual drives are treated as HDDs since the underlying encrypted storage
-///   is typically on HDDs and benefits from seek-minimizing strategies
+/// - Checks user configuration first for manual overrides
+/// - Virtual drives can be configured as SSD or HDD via settings UI
 ///
-/// Results are cached per drive letter for performance.
+/// Results are cached per drive letter for performance (including user overrides).
 pub fn is_ssd(path: &Path) -> bool {
     // Extract drive letter (e.g., "C:" from "C:\Users\...")
     let drive_letter = match path.to_str() {
@@ -119,24 +110,15 @@ pub fn is_ssd(path: &Path) -> bool {
         _ => return true, // Assume SSD for network paths, etc.
     };
 
-    // Check cache first
+    // Check cache first (fast path - no locks if cache hit)
     if let Ok(cache) = get_disk_cache().lock() {
         if let Some(&is_ssd) = cache.get(&drive_letter) {
             return is_ssd;
         }
     }
 
-    // Check if it's a virtual drive (Cryptomator, Dokan, WinFsp)
-    // Virtual drives should be treated as HDDs for optimization purposes
-    if is_virtual_drive(drive_letter) {
-        if let Ok(mut cache) = get_disk_cache().lock() {
-            cache.insert(drive_letter, false);
-        }
-        return false;
-    }
-
-    // Query Windows for disk type
-    let result = query_disk_seek_penalty(drive_letter);
+    // Cache miss - determine type and cache it
+    let result = determine_disk_type(drive_letter);
 
     // Cache the result
     if let Ok(mut cache) = get_disk_cache().lock() {
@@ -144,6 +126,30 @@ pub fn is_ssd(path: &Path) -> bool {
     }
 
     result
+}
+
+/// Determine disk type for a drive letter (not cached)
+fn determine_disk_type(drive_letter: char) -> bool {
+    // Check user configuration first (manual overrides)
+    if let Some(override_type) = crate::infrastructure::virtual_drive_config::get_drive_override(drive_letter) {
+        return matches!(override_type, crate::infrastructure::virtual_drive_config::DiskTypeOverride::SSD);
+    }
+
+    // Check if it's a virtual drive
+    if is_virtual_drive(drive_letter) {
+        // Default to SSD for unconfigured virtual drives (safe default)
+        return true;
+    }
+
+    // Query Windows for disk type
+    query_disk_seek_penalty(drive_letter)
+}
+
+/// Invalidate cache for a specific drive (useful after configuration changes)
+pub fn invalidate_drive_cache(drive_letter: char) {
+    if let Ok(mut cache) = get_disk_cache().lock() {
+        cache.remove(&drive_letter.to_ascii_uppercase());
+    }
 }
 
 /// Query Windows for whether a disk has seek penalty (HDD) or not (SSD)
