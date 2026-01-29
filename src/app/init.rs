@@ -314,6 +314,22 @@ impl ImageViewerApp {
             directory_cache.clone(),
         );
 
+        let (predictive_tx, predictive_rx) = mpsc::channel();
+        crate::workers::predictive_prefetch::spawn_predictive_prefetcher(
+            predictive_rx,
+            directory_cache.clone(),
+            directory_index.clone(),
+        );
+
+        let (idle_warmup_tx, idle_warmup_rx) = mpsc::channel();
+        crate::workers::idle_warmup::spawn_idle_warmup_worker(
+            idle_warmup_rx,
+            thumbnail_queue.clone(),
+            directory_cache.clone(),
+            shared_gen.clone(),
+            prefetch_tx.clone(),
+        );
+
         // --- FILE OPERATION WORKER (Background Shell ops) ---
         let (file_op_tx, file_op_rx) = mpsc::channel();
         let (file_op_res_tx, file_op_res_rx) = mpsc::channel();
@@ -505,6 +521,8 @@ impl ImageViewerApp {
             file_op_sender: file_op_tx,
             file_op_res_receiver: file_op_res_rx,
             prefetch_sender: prefetch_tx,
+            predictive_sender: predictive_tx,
+            idle_warmup_sender: idle_warmup_tx,
 
             // ISO MOUNTING
             pending_iso_mount: None,

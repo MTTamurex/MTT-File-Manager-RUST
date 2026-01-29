@@ -242,6 +242,8 @@ pub struct ImageViewerApp {
     pub file_op_sender: Sender<crate::workers::file_operation_worker::FileOperationRequest>,
     pub file_op_res_receiver: Receiver<crate::workers::file_operation_worker::FileOperationResult>,
     pub prefetch_sender: Sender<crate::workers::prefetch_worker::PrefetchMessage>,
+    pub predictive_sender: Sender<crate::workers::predictive_prefetch::PredictiveMessage>,
+    pub idle_warmup_sender: Sender<crate::workers::idle_warmup::IdleWarmupMessage>,
 
     // ISO MOUNTING
     pub pending_iso_mount: Option<PathBuf>,

@@ -199,13 +199,16 @@ pub fn render_tab_bar(
                     .layout_no_wrap(title_text.clone(), font_id.clone(), title_color);
 
             if galley.rect.width() > title_max_width {
-                // Binary search for the right truncation point
-                let mut low = 0;
-                let mut high = full_text.len();
+                let mut boundaries: Vec<usize> =
+                    full_text.char_indices().map(|(i, _)| i).collect();
+                boundaries.push(full_text.len());
+                let mut low = 0usize;
+                let mut high = boundaries.len().saturating_sub(1);
 
                 while low < high {
                     let mid = (low + high + 1) / 2;
-                    let test_text = format!("{}...", &full_text[..mid.min(full_text.len())]);
+                    let byte_idx = boundaries[mid];
+                    let test_text = format!("{}...", &full_text[..byte_idx]);
                     let test_galley = ui.painter().layout_no_wrap(
                         test_text.clone(),
                         font_id.clone(),
@@ -220,7 +223,8 @@ pub fn render_tab_bar(
                 }
 
                 if low > 0 {
-                    title_text = format!("{}...", &full_text[..low.min(full_text.len())]);
+                    let byte_idx = boundaries[low];
+                    title_text = format!("{}...", &full_text[..byte_idx]);
                 } else {
                     title_text = "...".to_string();
                 }

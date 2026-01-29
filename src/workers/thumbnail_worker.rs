@@ -78,6 +78,7 @@ struct ThumbnailRequest {
     generation: usize,
     size: u32,
     priority: IOPriority,
+    directory_index: Option<usize>,
 }
 
 /// Queue state with directory-grouped requests for HDD optimization
@@ -131,6 +132,17 @@ impl PriorityThumbnailQueue {
 
     /// Push a thumbnail request with the new IOPriority system
     pub fn push(&self, path: PathBuf, gen: usize, request_size: u32, priority: IOPriority) {
+        self.push_with_index(path, gen, request_size, priority, None);
+    }
+
+    pub fn push_with_index(
+        &self,
+        path: PathBuf,
+        gen: usize,
+        request_size: u32,
+        priority: IOPriority,
+        directory_index: Option<usize>,
+    ) {
         let mut state = self.state.lock().unwrap();
 
         // Deduplication: if already pending, skip
@@ -154,9 +166,19 @@ impl PriorityThumbnailQueue {
             generation: gen,
             size: request_size,
             priority,
+            directory_index,
         };
 
-        state.by_directory.entry(parent).or_default().push(request);
+        state.by_directory.entry(parent.clone()).or_default().push(request);
+
+        if !state.is_ssd.unwrap_or(true) {
+            if let Some(items) = state.by_directory.get_mut(&parent) {
+                items.sort_by(|a, b| match a.priority.cmp(&b.priority) {
+                    std::cmp::Ordering::Equal => a.directory_index.cmp(&b.directory_index),
+                    other => other,
+                });
+            }
+        }
 
         self.condvar.notify_one();
     }
@@ -284,17 +306,33 @@ impl PriorityThumbnailQueue {
             return None;
         }
 
-        // Find index of highest priority item (Interactive first, then by LIFO for same priority)
-        let best_idx = items
-            .iter()
-            .enumerate()
-            .min_by(|(idx_a, a), (idx_b, b)| {
-                match a.priority.cmp(&b.priority) {
-                    std::cmp::Ordering::Equal => idx_b.cmp(idx_a), // LIFO for same priority
+        let is_ssd = state.is_ssd.unwrap_or(true);
+        let best_idx = if is_ssd {
+            items
+                .iter()
+                .enumerate()
+                .min_by(|(idx_a, a), (idx_b, b)| match a.priority.cmp(&b.priority) {
+                    std::cmp::Ordering::Equal => idx_b.cmp(idx_a),
                     other => other,
-                }
-            })
-            .map(|(idx, _)| idx)?;
+                })
+                .map(|(idx, _)| idx)?
+        } else {
+            items
+                .iter()
+                .enumerate()
+                .min_by(|(idx_a, a), (idx_b, b)| match a.priority.cmp(&b.priority) {
+                    std::cmp::Ordering::Equal => {
+                        let a_index = a.directory_index.unwrap_or(usize::MAX);
+                        let b_index = b.directory_index.unwrap_or(usize::MAX);
+                        match a_index.cmp(&b_index) {
+                            std::cmp::Ordering::Equal => idx_b.cmp(idx_a),
+                            other => other,
+                        }
+                    }
+                    other => other,
+                })
+                .map(|(idx, _)| idx)?
+        };
 
         let request = items.swap_remove(best_idx);
 
@@ -1141,6 +1179,7 @@ mod tests {
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
+    use tempfile::tempdir;
 
     #[test]
     fn test_semaphore_concurrency() {
@@ -1178,5 +1217,26 @@ mod tests {
         for h in handles {
             h.join().unwrap();
         }
+    }
+
+    #[test]
+    fn test_read_coalescing_order_hdd() {
+        let dir = tempdir().unwrap();
+        let parent = dir.path().join("dir");
+        std::fs::create_dir(&parent).unwrap();
+        let path_a = parent.join("a.png");
+        let path_b = parent.join("b.png");
+
+        let queue = PriorityThumbnailQueue::new();
+        {
+            let mut state = queue.state.lock().unwrap();
+            state.is_ssd = Some(false);
+        }
+
+        queue.push_with_index(path_a.clone(), 1, 64, IOPriority::Prefetch, Some(2));
+        queue.push_with_index(path_b.clone(), 1, 64, IOPriority::Prefetch, Some(1));
+
+        let (path, _, _, _) = queue.pop().unwrap();
+        assert_eq!(path, path_b);
     }
 }

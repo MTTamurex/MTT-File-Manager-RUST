@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use crate::domain::file_entry::FileEntry;
 // PERFORMANCE: Use FxHashSet for PathBuf keys - faster hashing than std::collections::HashSet
 use crate::ui::cache::FxHashSet;
+use crate::ui::views::ViewportTracker;
 
 // PERFORMANCE: Tooltip debounce to avoid creation/destruction during scroll
 const TOOLTIP_DELAY_SECS: f32 = 0.3; // Only show tooltip after 300ms hover
@@ -88,7 +89,7 @@ impl ScrollPredictor {
 /// Pre-allocated buffers for pending operations (PERFORMANCE: avoids per-item allocations)
 #[derive(Default)]
 pub struct PendingOperations {
-    pub thumbnail_loads: Vec<(PathBuf, u32)>,
+    pub thumbnail_loads: Vec<(PathBuf, u32, Option<usize>)>,
     pub folder_scans: Vec<PathBuf>,
     pub folder_preview_loads: Vec<PathBuf>,
     pub icon_loads: Vec<PathBuf>,
@@ -159,6 +160,7 @@ pub struct GridViewContext<'a> {
     pub pending_upload_set: &'a mut FxHashSet<PathBuf>,
     /// PERFORMANCE: True if video is playing in docked mode (reduces prefetch to minimize HDD I/O)
     pub is_video_playing_docked: bool,
+    pub prefetch_rows: usize,
 }
 
 /// Operations that can be performed from grid view
@@ -166,11 +168,19 @@ pub trait GridViewOperations {
     fn navigate_to(&mut self, path: &str);
     fn open_with_shell(&mut self, path: &PathBuf);
     fn request_thumbnail_load(&mut self, path: PathBuf, size: u32);
+    fn request_thumbnail_load_with_index(&mut self, path: PathBuf, size: u32, directory_index: usize);
     fn request_folder_scan(&mut self, path: PathBuf);
     fn request_folder_preview_load(&mut self, path: PathBuf);
     fn request_thumbnail_prefetch(&mut self, path: PathBuf, size: u32);
+    fn request_thumbnail_prefetch_with_index(
+        &mut self,
+        path: PathBuf,
+        size: u32,
+        directory_index: usize,
+    );
     fn request_icon_load(&mut self, path: PathBuf);
     fn rename_with_shell(&mut self, idx: usize);
+    fn notify_idle_visible_items(&mut self, items: Vec<PathBuf>);
 }
 
 /// Action returned by grid view
@@ -704,8 +714,12 @@ pub fn render_grid_view(
     // BATCH PROCESSING: Flush all pending operations collected during render
     // This avoids context switching and virtual dispatch inside the render loop
     // Note: Thumbnail cache is on SSD, so we don't skip I/O even during video playback
-    for (path, size) in ctx.pending_ops.thumbnail_loads.drain(..) {
-        ops.request_thumbnail_load(path, size);
+    for (path, size, index) in ctx.pending_ops.thumbnail_loads.drain(..) {
+        if let Some(index) = index {
+            ops.request_thumbnail_load_with_index(path, size, index);
+        } else {
+            ops.request_thumbnail_load(path, size);
+        }
     }
     for path in ctx.pending_ops.folder_scans.drain(..) {
         ops.request_folder_scan(path);
@@ -722,31 +736,48 @@ pub fn render_grid_view(
 
     if let Some((vis_min, vis_max)) = visible_rows_range {
         let count = ctx.items.len();
-        let first_visible_index = (vis_min * cols).min(count);
-        let last_visible_index = (vis_max * cols).min(count);
-        ctx.scroll_predictor.update(first_visible_index, last_visible_index);
+        if count > 0 {
+            let first_visible_index = (vis_min * cols).min(count.saturating_sub(1));
+            let last_visible_index = (vis_max * cols).min(count).saturating_sub(1);
+            let tracker = ViewportTracker {
+                first_visible_index,
+                last_visible_index,
+                prefetch_rows: ctx.prefetch_rows,
+                columns: cols,
+            };
+            let (prefetch_start, prefetch_end) = tracker.get_prefetch_range(count);
 
-        let (prefetch_start, prefetch_end) = ctx.scroll_predictor.get_prefetch_range(count);
-
-        for index in prefetch_start..prefetch_end {
-            if index >= count {
-                break;
-            }
-            if index >= first_visible_index && index < last_visible_index {
-                continue;
-            }
-            let item = &ctx.items[index];
-            if !item.is_dir {
-                if !ctx.texture_cache.contains(&item.path)
-                    && !ctx.loading_set.contains(&item.path)
-                    && !ctx.pending_upload_set.contains(&item.path)
-                {
-                    ctx.loading_set.insert(item.path.clone());
-                    ops.request_thumbnail_prefetch(
-                        item.path.clone(),
-                        ctx.thumbnail_size as u32,
-                    );
+            for index in prefetch_start..prefetch_end {
+                if index >= count {
+                    break;
                 }
+                if tracker.is_visible(index) {
+                    continue;
+                }
+                let item = &ctx.items[index];
+                if !item.is_dir {
+                    if !ctx.texture_cache.contains(&item.path)
+                        && !ctx.loading_set.contains(&item.path)
+                        && !ctx.pending_upload_set.contains(&item.path)
+                    {
+                        ctx.loading_set.insert(item.path.clone());
+                        ops.request_thumbnail_prefetch_with_index(
+                            item.path.clone(),
+                            ctx.thumbnail_size as u32,
+                            index,
+                        );
+                    }
+                }
+            }
+            let mut idle_visible_items = Vec::new();
+            for index in first_visible_index..=last_visible_index {
+                let item = &ctx.items[index];
+                if !item.is_dir {
+                    idle_visible_items.push(item.path.clone());
+                }
+            }
+            if !idle_visible_items.is_empty() {
+                ops.notify_idle_visible_items(idle_visible_items);
             }
         }
     }
@@ -833,8 +864,15 @@ fn render_item_slot_for_grid(
         }
 
         impl<'a> crate::ui::components::item_slot::ItemSlotOperations for SimpleOps<'a> {
-            fn request_thumbnail_load(&mut self, path: std::path::PathBuf, size: u32) {
-                self.pending_ops.thumbnail_loads.push((path, size));
+            fn request_thumbnail_load(
+                &mut self,
+                path: std::path::PathBuf,
+                size: u32,
+                directory_index: Option<usize>,
+            ) {
+                self.pending_ops
+                    .thumbnail_loads
+                    .push((path, size, directory_index));
             }
 
             fn request_folder_scan(&mut self, path: std::path::PathBuf) {

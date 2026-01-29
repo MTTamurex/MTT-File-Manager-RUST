@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::app::state::ImageViewerApp;
+use crate::infrastructure::io_priority;
 use crate::ui::components::item_slot::{render_item_slot, ItemSlotContext};
 use crate::ui::views::{grid_view, GridViewContext, GridViewOperations};
 use crate::ui::views::{list_view, ListViewContext, ListViewOperations};
@@ -166,6 +167,8 @@ impl ImageViewerApp {
         let scroll_to_selected = self.scroll_to_selected;
         let is_video_playing_docked = self.is_video_playing_docked();
         let multi_selection = &self.multi_selection;
+        let is_ssd = io_priority::is_ssd(&PathBuf::from(&self.current_path));
+        let prefetch_rows = if is_ssd { 1 } else { 3 };
         let mut ctx = ListViewContext {
             items: &items,
             selected_item,
@@ -197,6 +200,7 @@ impl ImageViewerApp {
             last_scroll_offset: &mut self.last_scroll_offset,
             pending_upload_set: &mut self.cache_manager.pending_upload_set,
             is_video_playing_docked,
+            prefetch_rows,
         };
 
         // Usar uma abordagem diferente: coletar ações em vetores
@@ -209,10 +213,12 @@ impl ImageViewerApp {
         enum ListAction {
             NavigateTo(String),
             OpenWithShell(PathBuf),
-            RequestThumbnailLoad(PathBuf, u32),
+            RequestThumbnailLoad(PathBuf, u32, usize),
             RequestFolderScan(PathBuf),
             RequestFolderPreviewLoad(PathBuf),
             RenameWithShell(usize),
+            RequestThumbnailPrefetchWithIndex(PathBuf, u32, usize),
+            NotifyIdleVisibleItems(Vec<PathBuf>),
         }
 
         impl ListViewOperations for ListOps<'_> {
@@ -224,10 +230,10 @@ impl ImageViewerApp {
                 self.actions.push(ListAction::OpenWithShell(path.clone()));
             }
 
-            fn request_thumbnail_load(&mut self, path: PathBuf) {
+            fn request_thumbnail_load(&mut self, path: PathBuf, directory_index: usize) {
                 // List view always requests small thumbnails (64px)
                 self.actions
-                    .push(ListAction::RequestThumbnailLoad(path, 64));
+                    .push(ListAction::RequestThumbnailLoad(path, 64, directory_index));
             }
 
             fn request_folder_scan(&mut self, path: PathBuf) {
@@ -241,6 +247,20 @@ impl ImageViewerApp {
 
             fn rename_with_shell(&mut self, idx: usize) {
                 self.actions.push(ListAction::RenameWithShell(idx));
+            }
+
+            fn request_thumbnail_prefetch_with_index(
+                &mut self,
+                path: PathBuf,
+                size: u32,
+                directory_index: usize,
+            ) {
+                self.actions
+                    .push(ListAction::RequestThumbnailPrefetchWithIndex(path, size, directory_index));
+            }
+
+            fn notify_idle_visible_items(&mut self, items: Vec<PathBuf>) {
+                self.actions.push(ListAction::NotifyIdleVisibleItems(items));
             }
         }
 
@@ -407,14 +427,22 @@ impl ImageViewerApp {
             match action {
                 ListAction::NavigateTo(path) => self.navigate_to(&path),
                 ListAction::OpenWithShell(path) => open_with_shell(&path),
-                ListAction::RequestThumbnailLoad(path, size) => {
-                    self.request_thumbnail_load(path, size)
+                ListAction::RequestThumbnailLoad(path, size, index) => {
+                    self.request_thumbnail_load_with_index(path, size, index)
                 }
                 ListAction::RequestFolderScan(path) => self.request_folder_scan(path),
                 ListAction::RequestFolderPreviewLoad(path) => {
                     self.request_folder_preview_load(path)
                 }
                 ListAction::RenameWithShell(idx) => self.rename_with_shell(idx),
+                ListAction::RequestThumbnailPrefetchWithIndex(path, size, index) => {
+                    self.request_thumbnail_prefetch_with_index(path, size, index)
+                }
+                ListAction::NotifyIdleVisibleItems(items) => {
+                    let _ = self.idle_warmup_sender.send(
+                        crate::workers::idle_warmup::IdleWarmupMessage::VisibleItems(items),
+                    );
+                }
             }
         }
 
@@ -579,6 +607,8 @@ impl ImageViewerApp {
         // Check if video is playing in docked mode to reduce disk I/O
         let is_video_playing_docked = self.is_video_playing_docked();
 
+        let is_ssd = io_priority::is_ssd(&PathBuf::from(&self.current_path));
+        let prefetch_rows = if is_ssd { 1 } else { 3 };
         let mut ctx = GridViewContext {
             items: &items,
             selected_item,
@@ -612,6 +642,7 @@ impl ImageViewerApp {
             last_scroll_offset: &mut self.last_scroll_offset,
             pending_upload_set: &mut self.cache_manager.pending_upload_set,
             is_video_playing_docked,
+            prefetch_rows,
         };
 
         // Usar uma abordagem diferente: coletar ações em vetores
@@ -625,11 +656,14 @@ impl ImageViewerApp {
             NavigateTo(String),
             OpenWithShell(PathBuf),
             RequestThumbnailLoad(PathBuf, u32),
+            RequestThumbnailLoadWithIndex(PathBuf, u32, usize),
             RequestFolderScan(PathBuf),
             RequestFolderPreviewLoad(PathBuf),
             RequestThumbnailPrefetch(PathBuf, u32),
+            RequestThumbnailPrefetchWithIndex(PathBuf, u32, usize),
             RequestIconLoad(PathBuf),
             RenameWithShell(usize),
+            NotifyIdleVisibleItems(Vec<PathBuf>),
         }
 
         impl GridViewOperations for GridOps<'_> {
@@ -646,6 +680,16 @@ impl ImageViewerApp {
                     .push(GridAction::RequestThumbnailLoad(path, size));
             }
 
+            fn request_thumbnail_load_with_index(
+                &mut self,
+                path: PathBuf,
+                size: u32,
+                directory_index: usize,
+            ) {
+                self.actions
+                    .push(GridAction::RequestThumbnailLoadWithIndex(path, size, directory_index));
+            }
+
             fn request_folder_scan(&mut self, path: PathBuf) {
                 self.actions.push(GridAction::RequestFolderScan(path));
             }
@@ -659,12 +703,29 @@ impl ImageViewerApp {
                     .push(GridAction::RequestThumbnailPrefetch(path, size));
             }
 
+            fn request_thumbnail_prefetch_with_index(
+                &mut self,
+                path: PathBuf,
+                size: u32,
+                directory_index: usize,
+            ) {
+                self.actions.push(GridAction::RequestThumbnailPrefetchWithIndex(
+                    path,
+                    size,
+                    directory_index,
+                ));
+            }
+
             fn request_icon_load(&mut self, path: PathBuf) {
                 self.actions.push(GridAction::RequestIconLoad(path));
             }
 
             fn rename_with_shell(&mut self, idx: usize) {
                 self.actions.push(GridAction::RenameWithShell(idx));
+            }
+
+            fn notify_idle_visible_items(&mut self, items: Vec<PathBuf>) {
+                self.actions.push(GridAction::NotifyIdleVisibleItems(items));
             }
         }
 
@@ -808,6 +869,9 @@ impl ImageViewerApp {
                 GridAction::RequestThumbnailLoad(path, size) => {
                     self.request_thumbnail_load(path, size)
                 }
+                GridAction::RequestThumbnailLoadWithIndex(path, size, index) => {
+                    self.request_thumbnail_load_with_index(path, size, index)
+                }
                 GridAction::RequestFolderScan(path) => self.request_folder_scan(path),
                 GridAction::RequestFolderPreviewLoad(path) => {
                     self.request_folder_preview_load(path)
@@ -815,8 +879,16 @@ impl ImageViewerApp {
                 GridAction::RequestThumbnailPrefetch(path, size) => {
                     self.request_thumbnail_prefetch(path, size)
                 }
+                GridAction::RequestThumbnailPrefetchWithIndex(path, size, index) => {
+                    self.request_thumbnail_prefetch_with_index(path, size, index)
+                }
                 GridAction::RequestIconLoad(path) => self.request_icon_load(path),
                 GridAction::RenameWithShell(idx) => self.rename_with_shell(idx),
+                GridAction::NotifyIdleVisibleItems(items) => {
+                    let _ = self.idle_warmup_sender.send(
+                        crate::workers::idle_warmup::IdleWarmupMessage::VisibleItems(items),
+                    );
+                }
             }
         }
 
@@ -840,7 +912,8 @@ impl ImageViewerApp {
 
         // Para evitar conflitos de borrow, coletamos as operações pendentes
         // e executamos depois de renderizar
-        let mut pending_thumbnail_loads: Vec<(std::path::PathBuf, u32)> = Vec::new();
+        let mut pending_thumbnail_loads: Vec<(std::path::PathBuf, u32, Option<usize>)> =
+            Vec::new();
         let mut pending_folder_scans: Vec<std::path::PathBuf> = Vec::new();
         let mut pending_folder_preview_loads: Vec<std::path::PathBuf> = Vec::new();
         let mut pending_icon_loads: Vec<std::path::PathBuf> = Vec::new();
@@ -881,7 +954,7 @@ impl ImageViewerApp {
 
             // Create simple ops struct that collects operations
             struct SimpleOps<'a> {
-                thumbnail_loads: &'a mut Vec<(std::path::PathBuf, u32)>,
+                thumbnail_loads: &'a mut Vec<(std::path::PathBuf, u32, Option<usize>)>,
                 folder_scans: &'a mut Vec<std::path::PathBuf>,
                 folder_preview_loads: &'a mut Vec<std::path::PathBuf>,
                 icon_loads: &'a mut Vec<std::path::PathBuf>,
@@ -889,8 +962,13 @@ impl ImageViewerApp {
             }
 
             impl<'a> crate::ui::components::item_slot::ItemSlotOperations for SimpleOps<'a> {
-                fn request_thumbnail_load(&mut self, path: std::path::PathBuf, size: u32) {
-                    self.thumbnail_loads.push((path, size));
+                fn request_thumbnail_load(
+                    &mut self,
+                    path: std::path::PathBuf,
+                    size: u32,
+                    directory_index: Option<usize>,
+                ) {
+                    self.thumbnail_loads.push((path, size, directory_index));
                 }
 
                 fn request_folder_scan(&mut self, path: std::path::PathBuf) {
@@ -931,8 +1009,12 @@ impl ImageViewerApp {
         }
 
         // Execute pending operations
-        for (path, size) in pending_thumbnail_loads {
-            self.request_thumbnail_load(path, size);
+        for (path, size, index) in pending_thumbnail_loads {
+            if let Some(index) = index {
+                self.request_thumbnail_load_with_index(path, size, index);
+            } else {
+                self.request_thumbnail_load(path, size);
+            }
         }
 
         for path in pending_folder_scans {

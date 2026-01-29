@@ -9,9 +9,10 @@ fn ends_with_ignore_case(s: &str, suffix: &str) -> bool {
         return false;
     }
     let start = s.len() - suffix.len();
-    s[start..].chars()
-        .flat_map(|c| c.to_lowercase())
-        .eq(suffix.chars().flat_map(|c| c.to_lowercase()))
+    s.as_bytes()[start..]
+        .iter()
+        .zip(suffix.as_bytes())
+        .all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
 }
 
 /// Sorts a slice of FileEntry in place based on the given criteria.
@@ -219,6 +220,18 @@ mod tests {
         assert_eq!(items[0].name, "a_file.txt");
         assert_eq!(items[1].name, "a_dir");
         assert_eq!(items[2].name, "z_dir");
+    }
+
+    #[test]
+    fn test_ends_with_ignore_case_unicode_safe() {
+        assert!(ends_with_ignore_case(
+            "06 Os Cavaleiros do Zodíaco Saga Hades Santuário.zip",
+            ".zip"
+        ));
+        assert!(!ends_with_ignore_case(
+            "06 Os Cavaleiros do Zodíaco Saga Hades Santuário",
+            ".zip"
+        ));
     }
 
     #[test]
