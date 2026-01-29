@@ -10,7 +10,7 @@ use crate::ui::cache::FxHashSet;
 
 // PERFORMANCE: Tooltip debounce to avoid creation/destruction during scroll
 const TOOLTIP_DELAY_SECS: f32 = 0.3; // Only show tooltip after 300ms hover
-// STRICT LIMIT: Mínimo zoom permitido para evitar degradação de performance
+                                     // STRICT LIMIT: Mínimo zoom permitido para evitar degradação de performance
 const MIN_THUMBNAIL_SIZE: f32 = 96.0;
 
 /// Scroll state tracking for visual smoothing
@@ -39,7 +39,7 @@ impl PendingOperations {
             renames: Vec::with_capacity(2),
         }
     }
-    
+
     /// Clear all buffers (call before each frame)
     pub fn clear(&mut self) {
         self.thumbnail_loads.clear();
@@ -169,11 +169,11 @@ pub fn render_grid_view(
 
         // --- VISUAL FEEDBACK: BORDER-ONLY (MODERN DESIGN) ---
         let is_selected = ctx.multi_selection.contains(&item.path);
-        
+
         // STRICT HOVER LOGIC: Only allow hover if LastInput was Mouse
         let allow_hover = matches!(ctx.last_input, crate::app::state::LastInput::Mouse);
         let is_hovered_visual = allow_hover && response.hovered() && !is_selected;
-        
+
         let is_focused = ctx.selected_item == Some(index);
 
         let rounding = 4.0;
@@ -201,85 +201,95 @@ pub fn render_grid_view(
 
         // PERFORMANCE: Tooltip with debounce to avoid spam during scroll
         if response.hovered() {
-                let current_time = ui.input(|i| i.time);
-                let hover_id = response.id.with("hover_start");
+            let current_time = ui.input(|i| i.time);
+            let hover_id = response.id.with("hover_start");
 
-                // Track hover start time using egui's memory
-                let hover_start_time = ui.ctx().data_mut(|d| {
-                    *d.get_temp_mut_or_insert_with(hover_id, || current_time)
-                });
+            // Track hover start time using egui's memory
+            let hover_start_time = ui
+                .ctx()
+                .data_mut(|d| *d.get_temp_mut_or_insert_with(hover_id, || current_time));
 
-                let hover_duration = (current_time - hover_start_time) as f32;
+            let hover_duration = (current_time - hover_start_time) as f32;
 
-                // Request repaint when approaching tooltip delay to ensure it appears
-                if hover_duration < TOOLTIP_DELAY_SECS {
-                    ui.ctx().request_repaint_after(std::time::Duration::from_secs_f32(
-                        TOOLTIP_DELAY_SECS - hover_duration + 0.01
+            // Request repaint when approaching tooltip delay to ensure it appears
+            if hover_duration < TOOLTIP_DELAY_SECS {
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_secs_f32(
+                        TOOLTIP_DELAY_SECS - hover_duration + 0.01,
                     ));
-                }
-
-                // Only show tooltip if hover duration exceeds threshold
-                // This prevents tooltip spam during scroll
-                if hover_duration >= TOOLTIP_DELAY_SECS {
-                    let is_recycle = ctx.is_recycle_bin_view;
-                    let mouse_pos = ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
-
-                    // SMART TOOLTIP: Position to avoid video player overlay
-                    // Native HWND windows (MPV) render above egui content, so we must avoid that area
-                    let screen_right = ui.ctx().screen_rect().right();
-                    let tooltip_width = 320.0;
-
-                    // When video is docked, the preview panel takes ~25-30% of window width
-                    // Only flip tooltip when it would actually overlap the video area
-                    let effective_right = if ctx.is_video_playing_docked {
-                        screen_right * 0.72 // Preview panel is ~28% of window
-                    } else {
-                        screen_right
-                    };
-
-                    let tooltip_pos = if mouse_pos.x + tooltip_width > effective_right {
-                        // Position tooltip to the LEFT of the item
-                        egui::pos2(rect.left() - tooltip_width - 10.0, mouse_pos.y)
-                            .max(egui::pos2(10.0, mouse_pos.y))
-                    } else {
-                        mouse_pos
-                    };
-
-                    // Use Order::Tooltip layer (though it won't help with native HWND windows)
-                    let tooltip_layer = egui::LayerId::new(egui::Order::Tooltip, response.id.with("tooltip"));
-                    egui::show_tooltip_at(
-                        ui.ctx(),
-                        tooltip_layer,
-                        response.id,
-                        tooltip_pos,
-                        |ui: &mut Ui| {
-                            ui.set_max_width(300.0);
-                            ui.vertical(|ui| {
-                                ui.label(egui::RichText::new(&item.name).strong());
-                                ui.separator();
-                                ui.label(format!("Tipo: {}", get_file_type_string(item)));
-                                let is_zip = item.name.to_lowercase().ends_with(".zip");
-                                if !item.is_dir || is_zip {
-                                    ui.label(format!(
-                                        "Tamanho: {}",
-                                        crate::infrastructure::windows::format_size(item.size)
-                                    ));
-                                }
-                                let (date_lbl, date_val) = if is_recycle {
-                                    ("Data de Exclusão", item.deletion_date.clone().unwrap_or_else(|| "-".to_string()))
-                                } else {
-                                    ("Última modificação", crate::infrastructure::windows::format_date(item.modified))
-                                };
-                                ui.label(format!("{}: {}", date_lbl, date_val));
-                            });
-                        },
-                    );
-                }
-            } else {
-                // Clear hover time when not hovering
-                let hover_id = response.id.with("hover_start");
-                ui.ctx().data_mut(|d| d.remove::<f64>(hover_id));
             }
+
+            // Only show tooltip if hover duration exceeds threshold
+            // This prevents tooltip spam during scroll
+            if hover_duration >= TOOLTIP_DELAY_SECS {
+                let is_recycle = ctx.is_recycle_bin_view;
+                let mouse_pos = ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
+
+                // SMART TOOLTIP: Position to avoid video player overlay
+                // Native HWND windows (MPV) render above egui content, so we must avoid that area
+                let screen_right = ui.ctx().screen_rect().right();
+                let tooltip_width = 320.0;
+
+                // When video is docked, the preview panel takes ~25-30% of window width
+                // Only flip tooltip when it would actually overlap the video area
+                let effective_right = if ctx.is_video_playing_docked {
+                    screen_right * 0.72 // Preview panel is ~28% of window
+                } else {
+                    screen_right
+                };
+
+                let tooltip_pos = if mouse_pos.x + tooltip_width > effective_right {
+                    // Position tooltip to the LEFT of the item
+                    egui::pos2(rect.left() - tooltip_width - 10.0, mouse_pos.y)
+                        .max(egui::pos2(10.0, mouse_pos.y))
+                } else {
+                    mouse_pos
+                };
+
+                // Use Order::Tooltip layer (though it won't help with native HWND windows)
+                let tooltip_layer =
+                    egui::LayerId::new(egui::Order::Tooltip, response.id.with("tooltip"));
+                egui::show_tooltip_at(
+                    ui.ctx(),
+                    tooltip_layer,
+                    response.id,
+                    tooltip_pos,
+                    |ui: &mut Ui| {
+                        ui.set_max_width(300.0);
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new(&item.name).strong());
+                            ui.separator();
+                            ui.label(format!("Tipo: {}", get_file_type_string(item)));
+                            let is_zip = item.name.to_lowercase().ends_with(".zip");
+                            if !item.is_dir || is_zip {
+                                ui.label(format!(
+                                    "Tamanho: {}",
+                                    crate::infrastructure::windows::format_size(item.size)
+                                ));
+                            }
+                            let (date_lbl, date_val) = if is_recycle {
+                                (
+                                    "Data de Exclusão",
+                                    item.deletion_date
+                                        .clone()
+                                        .unwrap_or_else(|| "-".to_string()),
+                                )
+                            } else {
+                                (
+                                    "Última modificação",
+                                    crate::infrastructure::windows::format_date(item.modified),
+                                )
+                            };
+                            ui.label(format!("{}: {}", date_lbl, date_val));
+                        });
+                    },
+                );
+            }
+        } else {
+            // Clear hover time when not hovering
+            let hover_id = response.id.with("hover_start");
+            ui.ctx().data_mut(|d| d.remove::<f64>(hover_id));
+        }
 
         // STANDARD RENDERING
         let inner_rect = rect.shrink(3.0);
@@ -310,13 +320,13 @@ pub fn render_grid_view(
 
     // 1.5 Clamp Target
     *ctx.mut_scroll_offset_y = ctx.mut_scroll_offset_y.clamp(0.0, max_scroll);
-    
+
     // 2. Interpolate Visual Scroll (Frame-based smoothing)
     let scroll_target = *ctx.mut_scroll_offset_y;
     let scroll_state_id = ui.id().with("scroll_state");
     // Limit dt to avoid massive jumps on lag spikes (e.g., 30ms max)
-    let dt = ui.input(|i| i.stable_dt).min(0.03); 
-    
+    let dt = ui.input(|i| i.stable_dt).min(0.03);
+
     let visual_scroll = ui.ctx().data_mut(|d| {
         let state = d.get_temp_mut_or_insert_with::<ScrollState>(scroll_state_id, || ScrollState {
             visual_scroll_y: scroll_target,
@@ -344,7 +354,7 @@ pub fn render_grid_view(
     let current_scroll = visual_scroll;
 
     // PERFORMANCE: Track scroll changes for GPU upload throttling (using visual scroll to capture checking)
-    // Note: We update last_scroll_offset matching target to keep logic consistent with state, 
+    // Note: We update last_scroll_offset matching target to keep logic consistent with state,
     // but we use visual change to trigger "is moving" logic.
     if (*ctx.mut_scroll_offset_y - *ctx.last_scroll_offset).abs() > 0.1 {
         *ctx.last_scroll_time = std::time::Instant::now();
@@ -360,12 +370,12 @@ pub fn render_grid_view(
                 let selected_row = selected_idx / cols;
                 let item_top = selected_row as f32 * virtual_cell_h + padding;
                 let item_bottom = item_top + item_h; // Keep item_h for visual bottom check
-                
+
                 // We check against TARGET scroll to ensure we snap to the final correct position
                 // but we might want to check visual if we want to smooth scroll TO the item.
                 // For now, snap target instantly as per requirement (keyboard nav usually snaps)
                 let current_target = *ctx.mut_scroll_offset_y;
-                
+
                 if item_top < current_target {
                     *ctx.mut_scroll_offset_y = item_top.max(0.0);
                 } else if item_bottom > current_target + viewport_h {
@@ -374,11 +384,11 @@ pub fn render_grid_view(
             }
         }
     }
-    
+
     // 3. Render Virtual Grid
     // DETECT BACKGROUND INTERACTION
     let bg_response = ui.interact(viewport_rect, ui.id().with("grid_bg"), Sense::click());
-    
+
     let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(viewport_rect));
     child_ui.set_clip_rect(viewport_rect);
 
@@ -441,91 +451,121 @@ pub fn render_grid_view(
     if ctx.is_computer_view {
         // Computer view with sections (Manual Scroll & Layout)
         let mut current_y = content_min.y - current_scroll;
-        
-        // ZERO-ALLOCATION RENDERING: Iterate directly instead of creating vectors
-        
-        // Helper to render a section by filtering items on the fly
-        // We pass a closure to filter: is_network_drive -> bool
-        let mut render_section_direct = |ui: &mut Ui, title: &str, is_network: bool, start_y: &mut f32| {
-            // first count items to calculate height (cheap iteration)
-            let mut section_count = 0;
-            for item in ctx.items.iter() {
-                let is_remote = item.drive_info.as_ref().map_or(false, |di| {
-                    di.drive_type == crate::infrastructure::windows::DriveType::Remote
-                });
-                if is_remote == is_network {
-                    section_count += 1;
+
+        // ZERO-ALLOCATION RENDERING: Partitioning optimization
+        // OPTIMIZATION: Partition indices once instead of iterating all items multiple times
+        let mut local_indices = Vec::with_capacity(count / 2);
+        let mut network_indices = Vec::with_capacity(count / 2);
+
+        for (i, item) in ctx.items.iter().enumerate() {
+            let is_remote = item.drive_info.as_ref().map_or(false, |di| {
+                di.drive_type == crate::infrastructure::windows::DriveType::Remote
+            });
+            if is_remote {
+                network_indices.push(i);
+            } else {
+                local_indices.push(i);
+            }
+        }
+
+        // Helper to render a section from a list of indices
+        let mut render_section_indices =
+            |ui: &mut Ui, title: &str, indices: &[usize], start_y: &mut f32| {
+                let section_count = indices.len();
+                if section_count == 0 {
+                    return;
                 }
-            }
 
-            if section_count == 0 { return; }
+                // Header
+                let header_h = 25.0;
+                // Check visibility of header
+                if *start_y + header_h > content_min.y && *start_y < content_min.y + viewport_h {
+                    let header_rect = Rect::from_min_size(
+                        egui::pos2(content_min.x, *start_y),
+                        egui::vec2(available_w, header_h),
+                    );
+                    let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
+                    render_section_header(&mut header_ui, title);
+                }
+                *start_y += header_h;
 
-            // Header
-            let header_h = 25.0;
-            // Check visibility of header
-            if *start_y + header_h > content_min.y && *start_y < content_min.y + viewport_h {
-                let header_rect = Rect::from_min_size(egui::pos2(content_min.x, *start_y), egui::vec2(available_w, header_h));
-                let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
-                render_section_header(&mut header_ui, title);
-            }
-            *start_y += header_h;
+                let rows = (section_count as f32 / cols as f32).ceil() as usize;
+                let section_h = rows as f32 * virtual_cell_h + padding;
 
-            let rows = (section_count as f32 / cols as f32).ceil() as usize;
-            let section_h = rows as f32 * virtual_cell_h + padding;
+                // Render items in this section
+                // Optimization: Only iterate if section is visible
+                if *start_y + section_h > content_min.y && *start_y < content_min.y + viewport_h {
+                    for (section_arr_idx, &real_idx) in indices.iter().enumerate() {
+                        let row = section_arr_idx / cols;
+                        let col_idx = section_arr_idx % cols;
 
-            // Render items in this section
-            // Optimization: Only iterate if section is visible
-            if *start_y + section_h > content_min.y && *start_y < content_min.y + viewport_h {
-                let mut current_idx = 0;
-                for (real_idx, item) in ctx.items.iter().enumerate() {
-                    let is_remote = item.drive_info.as_ref().map_or(false, |di| {
-                        di.drive_type == crate::infrastructure::windows::DriveType::Remote
-                    });
-                    
-                    if is_remote == is_network {
-                        // Calculate position
-                        let row = current_idx / cols;
-                        let col_idx = current_idx % cols;
-                        
                         let item_y = *start_y + row as f32 * virtual_cell_h + padding;
-                        
-                        // Culling check
+
                         if item_y + item_h > content_min.y && item_y < content_min.y + viewport_h {
-                             let x_pos = col_idx as f32 * (item_w + padding) + padding;
-                             let item_rect = Rect::from_min_size(
+                            let x_pos = col_idx as f32 * (item_w + padding) + padding;
+                            let item_rect = Rect::from_min_size(
                                 egui::pos2(content_min.x + x_pos, item_y),
                                 egui::vec2(item_w, item_h),
                             );
-                                render_grid_item(ui, real_idx, item, item_rect, ctx, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item, is_scrolling);
+                            let item = &ctx.items[real_idx];
+                            render_grid_item(
+                                ui,
+                                real_idx,
+                                item,
+                                item_rect,
+                                ctx,
+                                &mut clicked_item,
+                                &mut double_clicked_item,
+                                &mut secondary_clicked_item,
+                                is_scrolling,
+                            );
                         }
-                        
-                        current_idx += 1;
                     }
                 }
-            }
 
-            *start_y += section_h;
-        };
+                *start_y += section_h;
+            };
 
-        render_section_direct(&mut child_ui, "Discos locais", false, &mut current_y);
-        render_section_direct(&mut child_ui, "Unidades de rede", true, &mut current_y);
-
+        render_section_indices(
+            &mut child_ui,
+            "Discos locais",
+            &local_indices,
+            &mut current_y,
+        );
+        render_section_indices(
+            &mut child_ui,
+            "Unidades de rede",
+            &network_indices,
+            &mut current_y,
+        );
     } else {
         // Standard Grid Virtualization
         for row in loop_min_row..loop_max_row {
             for col in 0..cols {
                 let index = row * cols + col;
-                if index >= count { break; }
+                if index >= count {
+                    break;
+                }
 
                 let x_pos = col as f32 * (item_w + padding) + padding;
                 let y_pos = content_min.y + row as f32 * virtual_cell_h + padding - current_scroll;
-                
+
                 let item_rect = Rect::from_min_size(
                     egui::pos2(content_min.x + x_pos, y_pos),
                     egui::vec2(item_w, item_h),
                 );
 
-                render_grid_item(&mut child_ui, index, &ctx.items[index], item_rect, ctx, &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item, is_scrolling);
+                render_grid_item(
+                    &mut child_ui,
+                    index,
+                    &ctx.items[index],
+                    item_rect,
+                    ctx,
+                    &mut clicked_item,
+                    &mut double_clicked_item,
+                    &mut secondary_clicked_item,
+                    is_scrolling,
+                );
             }
         }
     }
@@ -535,21 +575,26 @@ pub fn render_grid_view(
         let scrollbar_w = 12.0;
         let scrollbar_rect = Rect::from_min_max(
             viewport_rect.right_top() - egui::vec2(scrollbar_w, 0.0),
-            viewport_rect.right_bottom()
+            viewport_rect.right_bottom(),
         );
-        
-        ui.painter().rect_filled(scrollbar_rect, 0.0, Color32::from_gray(245));
+
+        ui.painter()
+            .rect_filled(scrollbar_rect, 0.0, Color32::from_gray(245));
 
         let handle_h = (viewport_h / total_content_height * viewport_h).max(30.0);
         // Use VISUAL scroll for handle position to match rendering
         let handle_y = (current_scroll / max_scroll) * (viewport_h - handle_h);
         let handle_rect = Rect::from_min_size(
             scrollbar_rect.min + egui::vec2(2.0, handle_y),
-            egui::vec2(scrollbar_w - 4.0, handle_h)
+            egui::vec2(scrollbar_w - 4.0, handle_h),
         );
 
-        let interact = ui.interact(scrollbar_rect, ui.id().with("scrollbar"), Sense::click_and_drag());
-        
+        let interact = ui.interact(
+            scrollbar_rect,
+            ui.id().with("scrollbar"),
+            Sense::click_and_drag(),
+        );
+
         if interact.clicked() {
             if let Some(click_pos) = ui.input(|i| i.pointer.interact_pos()) {
                 let relative_y = click_pos.y - scrollbar_rect.top();
@@ -566,12 +611,16 @@ pub fn render_grid_view(
             *ctx.mut_scroll_offset_y = ctx.mut_scroll_offset_y.clamp(0.0, max_scroll);
         }
 
-        let color = if interact.dragged() { Color32::from_gray(150) } else if interact.hovered() { Color32::from_gray(180) } else { Color32::from_gray(200) };
+        let color = if interact.dragged() {
+            Color32::from_gray(150)
+        } else if interact.hovered() {
+            Color32::from_gray(180)
+        } else {
+            Color32::from_gray(200)
+        };
         ui.painter().rect_filled(handle_rect, 4.0, color);
     }
     // --- MANUAL VIRTUALIZATION END ---
-
-
 
     // Header helper
     fn render_section_header(ui: &mut Ui, title: &str) {
@@ -624,7 +673,9 @@ pub fn render_grid_view(
 
             for col in 0..cols {
                 let index = row * cols + col;
-                if index >= count { break; }
+                if index >= count {
+                    break;
+                }
 
                 let item = &ctx.items[index];
                 if !item.is_dir {
@@ -634,7 +685,10 @@ pub fn render_grid_view(
                         && !ctx.pending_upload_set.contains(&item.path)
                     {
                         ctx.loading_set.insert(item.path.clone());
-                        ops.request_thumbnail_prefetch(item.path.clone(), ctx.thumbnail_size as u32);
+                        ops.request_thumbnail_prefetch(
+                            item.path.clone(),
+                            ctx.thumbnail_size as u32,
+                        );
                     }
                 }
             }
