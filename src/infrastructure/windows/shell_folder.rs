@@ -33,22 +33,23 @@ impl Drop for ComGuard {
 
 /// Checks if a path should be handled via Shell Namespace (e.g. ZIP files)
 pub fn is_shell_navigation_path(path: &Path, is_known_dir: bool) -> bool {
-    // If it is ALREADY known as a directory (scanned as such), it is NOT a virtual file-based folder (like ZIP)
-    // Exception: If the directory ITSELF is a zip wrapper (unlikely in standard use, but possible)
-    // Actually, Shell Navigation usually applies to Files that act like Folders.
-    // If 'is_known_dir' is true, it means it's a physical directory. System handles physical directories natively.
-    // We only care if it's a ZIP FILE that we want to browse.
+    // If the path is inside a ZIP (virtual path), it should ALWAYS be handled by Shell Namespace
+    let path_str = path.to_string_lossy().to_lowercase();
+    if path_str.contains(".zip\\") || path_str.contains(".zip/") {
+        return true;
+    }
 
+    // If it is ALREADY known as a directory (scanned as such), it is NOT a virtual file-based folder (like ZIP)
+    // Exception handled above for virtual ZIP paths.
     if is_known_dir {
         return false;
     }
 
-    let path_str = path.to_string_lossy().to_lowercase();
-    if path_str.contains(".zip") {
-        // Optimization: We already know it's NOT a directory (is_known_dir=false),
-        // so we don't need to check disk!
+    // ZIP files themselves should be handled via Shell Namespace
+    if path_str.ends_with(".zip") {
         return true;
     }
+
     false
 }
 
@@ -119,9 +120,15 @@ unsafe fn process_shell_child(
     let item: IShellItem = SHCreateShellItem(None, Some(parent), child_pidl)?;
     let item2: IShellItem2 = item.cast()?;
 
-    let mut attributes = 0x20000000u32; // SFGAO_FOLDER
+    // Check multiple folder attributes for better detection inside ZIPs
+    let mut attributes = 0u32;
     parent.GetAttributesOf(&[child_pidl as *const _], &mut attributes)?;
-    let is_dir = (attributes & 0x20000000) != 0;
+    
+    // SFGAO_FOLDER (0x20000000) - Primary folder check
+    // SFGAO_STREAM (0x00400000) - If NOT set, likely a folder
+    // SFGAO_FILESYSTEM (0x40000000) - File system object
+    let is_dir = (attributes & 0x20000000) != 0;  // SFGAO_FOLDER
+    
 
     // Size (System.Size)
     let size = match item2.GetUInt64(&crate::infrastructure::windows::recycle_bin::PKEY_SIZE) {

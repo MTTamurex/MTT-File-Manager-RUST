@@ -772,7 +772,37 @@ fn render_list_item(
             }
         } else if item.is_dir && !item.name.to_lowercase().ends_with(".zip") {
             // folder: Windows native icon
-            if let Some(folder_icon) = ctx.folder_icon_texture {
+            let is_virtual_zip = item.path.to_string_lossy().to_lowercase().contains(".zip\\")
+                || item.path.to_string_lossy().to_lowercase().contains(".zip/");
+
+            if is_virtual_zip {
+                if let Some(folder_icon) = ctx
+                    .item_icon_loader
+                    .get_or_load_icon(ui.ctx(), &item.path, true, false)
+                {
+                    ui.painter().image(
+                        folder_icon.id(),
+                        icon_rect,
+                        Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                } else if let Some(folder_icon) = ctx.folder_icon_texture {
+                    ui.painter().image(
+                        folder_icon.id(),
+                        icon_rect,
+                        Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                } else {
+                    ui.painter().text(
+                        icon_rect.min,
+                        egui::Align2::LEFT_TOP,
+                        "\u{ED9F}", // ICON_FOLDER
+                        FontId::new(14.0, egui::FontFamily::Name("icons".into())),
+                        Color32::from_rgb(255, 193, 7),
+                    );
+                }
+            } else if let Some(folder_icon) = ctx.folder_icon_texture {
                 ui.painter().image(
                     folder_icon.id(),
                     icon_rect,
@@ -800,7 +830,7 @@ fn render_list_item(
                 );
             } else if let Some(file_icon) =
                 ctx.item_icon_loader
-                    .get_or_load_icon(ui.ctx(), &item.path, false, false)
+                    .get_or_load_icon(ui.ctx(), &item.path, item.is_dir, false)
             {
                 ui.painter().image(
                     file_icon.id(),
