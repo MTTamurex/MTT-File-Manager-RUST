@@ -1,10 +1,12 @@
-use eframe::egui;
-use std::time::{Duration, Instant};
-use std::sync::{Arc, Mutex};
-use std::path::PathBuf;
 use crate::ui::components::gif_manager::GifData;
+use eframe::egui;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
-use super::mpv_preview::{format_time as backend_format_time, MpvPreview as VideoPreview, MpvState as VideoState};
+use super::mpv_preview::{
+    format_time as backend_format_time, MpvPreview as VideoPreview, MpvState as VideoState,
+};
 
 // ============================================================================
 // GIF Player (Mantido inalterado)
@@ -36,7 +38,7 @@ impl GifPlayer {
             if d.frames.is_empty() {
                 return;
             }
-            
+
             let frame_idx = self.current_frame % d.frames.len();
             let frame = &d.frames[frame_idx];
             (Some(frame.clone()), frame.delay_ms, d.is_complete)
@@ -61,7 +63,7 @@ impl GifPlayer {
                     let d = self.data.lock().unwrap();
                     self.current_frame % d.frames.len()
                 };
-                
+
                 let next_frame = {
                     let d = self.data.lock().unwrap();
                     d.frames[next_idx].clone()
@@ -71,20 +73,21 @@ impl GifPlayer {
                     [next_frame.width as usize, next_frame.height as usize],
                     &next_frame.rgba,
                 );
-                
+
                 if let Some(tex) = &mut self.texture {
                     tex.set(color_image, Default::default());
                 }
-                
+
                 self.last_update = Instant::now();
                 ctx.request_repaint_after(Duration::from_millis(next_frame.delay_ms));
             } else {
                 // Not yet time for next frame
-                let remaining = Duration::from_millis(delay_ms).saturating_sub(self.last_update.elapsed());
+                let remaining =
+                    Duration::from_millis(delay_ms).saturating_sub(self.last_update.elapsed());
                 ctx.request_repaint_after(remaining);
             }
         }
-        
+
         // If not complete, keep checking for new frames
         if !is_complete {
             ctx.request_repaint_after(Duration::from_millis(100));
@@ -112,7 +115,11 @@ impl MediaPreview {
         match self {
             MediaPreview::StaticImage(texture) => {
                 let max_size = egui::vec2(ui.available_width(), ui.available_height());
-                ui.add(egui::Image::new(&*texture).max_size(max_size).shrink_to_fit())
+                ui.add(
+                    egui::Image::new(&*texture)
+                        .max_size(max_size)
+                        .shrink_to_fit(),
+                )
             }
             MediaPreview::AnimatedGif(player) => {
                 player.update(ui.ctx());
@@ -126,26 +133,27 @@ impl MediaPreview {
             MediaPreview::Video(player) => {
                 player.update(ui, frame);
                 // Return a minimal response - the video preview already allocated its space
-                ui.allocate_response(egui::vec2(0.0, 0.0), egui::Sense::hover()) 
+                ui.allocate_response(egui::vec2(0.0, 0.0), egui::Sense::hover())
             }
             MediaPreview::Error(msg) => {
                 ui.vertical_centered(|ui| {
                     ui.add_space(20.0);
                     ui.colored_label(egui::Color32::RED, format!("Error: {}", msg));
-                }).response
+                })
+                .response
             }
         }
     }
-    
+
     // ========================================================================
     // Video control methods (delegate to MPV preview)
     // ========================================================================
-    
+
     /// Check if this is a video preview
     pub fn is_video(&self) -> bool {
         matches!(self, MediaPreview::Video(_))
     }
-    
+
     /// Check if video player is showing (not just thumbnail)
     pub fn is_player_visible(&self) -> bool {
         if let MediaPreview::Video(player) = self {
@@ -154,7 +162,7 @@ impl MediaPreview {
             false
         }
     }
-    
+
     /// Get video playback state
     pub fn get_video_state(&self) -> Option<VideoState> {
         if let MediaPreview::Video(player) = self {
@@ -163,7 +171,7 @@ impl MediaPreview {
             None
         }
     }
-    
+
     /// Toggle play/pause and show player if needed
     pub fn toggle_play(&mut self) {
         if let MediaPreview::Video(player) = self {
@@ -171,7 +179,7 @@ impl MediaPreview {
             player.toggle_play();
         }
     }
-    
+
     /// Start playing video
     pub fn play(&mut self) {
         if let MediaPreview::Video(player) = self {
@@ -179,14 +187,14 @@ impl MediaPreview {
             player.play();
         }
     }
-    
+
     /// Pause video
     pub fn pause(&mut self) {
         if let MediaPreview::Video(player) = self {
             player.pause();
         }
     }
-    
+
     /// Seek to specific time
     pub fn seek(&self, time: f64) {
         if let MediaPreview::Video(player) = self {
@@ -200,14 +208,14 @@ impl MediaPreview {
             player.seek_relative(delta_seconds);
         }
     }
-    
+
     /// Set volume (0.0 to 1.0)
     pub fn set_volume(&self, volume: f32) {
         if let MediaPreview::Video(player) = self {
             player.set_volume(volume);
         }
     }
-    
+
     /// Toggle mute
     pub fn toggle_mute(&self) {
         if let MediaPreview::Video(player) = self {
@@ -323,7 +331,7 @@ impl MediaPreview {
             if player.is_maximized {
                 // Going from Maximized -> Normal
                 player.is_maximized = false;
-                player.restore_needed = true;
+                player.restore_frames = 10;
             } else {
                 // Going from Normal -> Maximized
                 player.is_maximized = true;
@@ -334,7 +342,7 @@ impl MediaPreview {
 
     pub fn should_restore(&self) -> bool {
         if let MediaPreview::Video(player) = self {
-            player.restore_needed
+            player.restore_frames > 0
         } else {
             false
         }
@@ -342,17 +350,19 @@ impl MediaPreview {
 
     pub fn complete_restore(&mut self) {
         if let MediaPreview::Video(player) = self {
-            player.restore_needed = false;
+            if player.restore_frames > 0 {
+                player.restore_frames -= 1;
+            }
         }
     }
-    
+
     /// Set restore needed flag
     pub fn set_restore_needed(&mut self, needed: bool) {
         if let MediaPreview::Video(player) = self {
-            player.restore_needed = needed;
+            player.restore_frames = if needed { 10 } else { 0 };
         }
     }
-    
+
     /// Check if was minimized
     pub fn was_minimized(&self) -> bool {
         if let MediaPreview::Video(player) = self {
@@ -361,7 +371,7 @@ impl MediaPreview {
             false
         }
     }
-    
+
     /// Set was minimized flag
     pub fn set_was_minimized(&mut self, minimized: bool) {
         if let MediaPreview::Video(player) = self {
