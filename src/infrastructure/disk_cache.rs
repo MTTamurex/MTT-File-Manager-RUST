@@ -12,7 +12,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Manages persistent thumbnail storage in SQLite
 pub struct ThumbnailDiskCache {
-    db: Arc<Mutex<Connection>>,
+    writer: Arc<Mutex<Connection>>, // For put, set_*, garbage_collect (DELETE)
+    reader: Arc<Mutex<Connection>>, // For get, get_*, check existence
     #[allow(dead_code)]
     cache_dir: PathBuf,
 }
@@ -29,7 +30,9 @@ impl ThumbnailDiskCache {
         Self::cleanup_legacy(&cache_dir);
 
         let db_path = cache_dir.join("thumbnails.db");
-        let conn = match Connection::open(&db_path) {
+
+        // 1. Open WRITER connection (Primary)
+        let writer_conn = match Connection::open(&db_path) {
             Ok(c) => c,
             Err(e) => {
                 eprintln!(
@@ -40,7 +43,6 @@ impl ThumbnailDiskCache {
                 match Connection::open_in_memory() {
                     Ok(c) => c,
                     Err(fatal_e) => {
-                        // This really shouldn't happen, but if it does, we must panic as we need a DB connection
                         panic!(
                             "[FATAL] Cannot create even an in-memory database: {:?}",
                             fatal_e
@@ -52,9 +54,34 @@ impl ThumbnailDiskCache {
 
         // Performance Tuning: Use WAL mode for better concurrency (readers don't block writers)
         // and NORMAL synchronous for faster writes (safe in WAL mode).
-        let _ = conn.execute("PRAGMA journal_mode = WAL", []).ok();
-        let _ = conn.execute("PRAGMA synchronous = NORMAL", []).ok();
+        let _ = writer_conn.execute("PRAGMA journal_mode = WAL", []).ok();
+        let _ = writer_conn.execute("PRAGMA synchronous = NORMAL", []).ok();
 
+        // 2. Open READER connection (Secondary)
+        // In WAL mode, this can read while writer is busy
+        let reader_conn = match Connection::open(&db_path) {
+            Ok(c) => c,
+            Err(_) => {
+                // Return a clone of writer if secondary fails (unlikely)
+                // or open in memory if original was in memory?
+                // Simplest fallback: Just open again.
+                // If main failed, we handled it. If main succeeded, this should too.
+                Connection::open(&db_path).unwrap_or_else(|_| Connection::open_in_memory().unwrap())
+            }
+        };
+        let _ = reader_conn.execute("PRAGMA synchronous = NORMAL", []).ok();
+
+        // 3. Schema Migrations (Run on Writer)
+        Self::run_migrations(&writer_conn);
+
+        Self {
+            writer: Arc::new(Mutex::new(writer_conn)),
+            reader: Arc::new(Mutex::new(reader_conn)),
+            cache_dir,
+        }
+    }
+
+    fn run_migrations(conn: &Connection) {
         // Create table (with path for GC)
         conn.execute(
             "CREATE TABLE IF NOT EXISTS thumbnails (
@@ -73,13 +100,13 @@ impl ThumbnailDiskCache {
                 "[Cache] Warning: Failed to create thumbnails table: {:?}",
                 e
             );
-            0 // continue
+            0
         });
 
-        // Migration: Add path column if missing (for existing DBs)
+        // Migration: Add path column if missing
         let _ = conn.execute("ALTER TABLE thumbnails ADD COLUMN path TEXT", []);
 
-        // Migration: Add width and height columns if missing (for size-aware cache)
+        // Migration: Add width and height columns if missing
         let _ = conn.execute(
             "ALTER TABLE thumbnails ADD COLUMN width INTEGER DEFAULT 0",
             [],
@@ -89,15 +116,12 @@ impl ThumbnailDiskCache {
             [],
         );
 
-        // OPTIMIZATION: Index on path to speed up directory clearing (DELETE ... WHERE path LIKE ...)
+        // OPTIMIZATION: Index on path to speed up directory clearing
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_thumbnails_path ON thumbnails(path)",
             [],
         )
-        .unwrap_or_else(|e| {
-            eprintln!("[Cache] Warning: Failed to create index on path: {:?}", e);
-            0
-        });
+        .unwrap_or(0);
 
         // Create preferences table
         conn.execute(
@@ -107,13 +131,7 @@ impl ThumbnailDiskCache {
             )",
             [],
         )
-        .unwrap_or_else(|e| {
-            eprintln!(
-                "[Cache] Warning: Failed to create preferences table: {:?}",
-                e
-            );
-            0 // continue
-        });
+        .unwrap_or(0);
 
         // Create folder covers table
         conn.execute(
@@ -123,14 +141,9 @@ impl ThumbnailDiskCache {
             )",
             [],
         )
-        .unwrap_or_else(|e| {
-            eprintln!(
-                "[Cache] Warning: Failed to create folder covers table: {:?}",
-                e
-            );
-            0 // continue
-        });
+        .unwrap_or(0);
 
+        // Directory index tables
         conn.execute(
             "CREATE TABLE IF NOT EXISTS directory_index (
                 dir_path TEXT PRIMARY KEY,
@@ -141,13 +154,7 @@ impl ThumbnailDiskCache {
             )",
             [],
         )
-        .unwrap_or_else(|e| {
-            eprintln!(
-                "[Cache] Warning: Failed to create directory_index table: {:?}",
-                e
-            );
-            0
-        });
+        .unwrap_or(0);
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS file_index (
@@ -161,27 +168,13 @@ impl ThumbnailDiskCache {
             )",
             [],
         )
-        .unwrap_or_else(|e| {
-            eprintln!("[Cache] Warning: Failed to create file_index table: {:?}", e);
-            0
-        });
+        .unwrap_or(0);
 
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_file_index_dir ON file_index(dir_path)",
             [],
         )
-        .unwrap_or_else(|e| {
-            eprintln!(
-                "[Cache] Warning: Failed to create idx_file_index_dir index: {:?}",
-                e
-            );
-            0
-        });
-
-        Self {
-            db: Arc::new(Mutex::new(conn)),
-            cache_dir,
-        }
+        .unwrap_or(0);
     }
 
     /// Migration utility: removes old folder-based cache
@@ -208,7 +201,7 @@ impl ThumbnailDiskCache {
     }
 
     /// Tries to retrieve a thumbnail from SQLite with dimensions
-    /// Returns: Option<(data_bytes, width, height)>
+    /// [READER] concurrency friendly
     pub fn get(&self, path: &Path, modified: SystemTime) -> Option<(Vec<u8>, u32, u32)> {
         let id = Self::hash_path(path);
         let mod_time = modified
@@ -216,7 +209,7 @@ impl ThumbnailDiskCache {
             .unwrap_or_default()
             .as_secs() as i64;
 
-        let db = self.db.lock().ok()?;
+        let db = self.reader.lock().ok()?;
         let mut stmt = db
             .prepare_cached(
                 "SELECT data, width, height FROM thumbnails WHERE id = ? AND modified_at = ?",
@@ -233,6 +226,7 @@ impl ThumbnailDiskCache {
     }
 
     /// Saves a thumbnail to SQLite with optimized compression
+    /// [WRITER]
     pub fn put(
         &self,
         path: &Path,
@@ -252,7 +246,6 @@ impl ThumbnailDiskCache {
             .as_secs() as i64;
 
         // STEP 1: Process Image (Resize + Strip)
-        // Ensure rgba_data has correct size before creating buffer
         if rgba_data.len() != (width * height * 4) as usize {
             return Err("Invalid RGBA data length".into());
         }
@@ -262,33 +255,21 @@ impl ThumbnailDiskCache {
                 .ok_or("Failed to create image buffer")?;
         let dynamic_img = DynamicImage::ImageRgba8(img);
 
-        // Adaptive resize: only downscale if larger than 1024px, never upscale
-        // This preserves high-quality thumbnails for the preview panel
         let resized = if width > 1024 || height > 1024 {
             dynamic_img.resize(1024, 1024, image::imageops::FilterType::Lanczos3)
         } else {
-            dynamic_img // Keep original size
+            dynamic_img
         };
 
-        // STEP 2: Encode to WebP Lossy (Quality 60 - optimized for HiDPI)
-        // Convert to RGB8 for webp crate (it doesn't support RGBA directly)
+        // STEP 2: Encode to WebP Lossy
         let rgb_img = resized.to_rgb8();
         let (final_width, final_height) = (rgb_img.width(), rgb_img.height());
-
-        // Use webp crate for lossy compression with quality control
         let encoder = webp::Encoder::from_rgb(&rgb_img, final_width, final_height);
-        let webp_data = encoder.encode(85.0); // Quality 85 (High quality for local file manager)
+        let webp_data = encoder.encode(85.0);
 
-        // STEP 3: Save to SQLite (with path for GC)
-        let db = self.db.lock().map_err(|_| "Database lock failed")?;
+        // STEP 3: Save to SQLite (Writer)
+        let db = self.writer.lock().map_err(|_| "Database lock failed")?;
         let path_str = path.to_string_lossy().to_string();
-
-        // DEBUG: Log first few saves
-        static SAVE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let count = SAVE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if count < 3 {
-            eprintln!("[PUT] Saving thumbnail for: {}", path_str);
-        }
 
         db.execute(
             "INSERT OR REPLACE INTO thumbnails (id, path, data, modified_at, created_at, width, height) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -299,8 +280,9 @@ impl ThumbnailDiskCache {
     }
 
     /// Sets a user preference
+    /// [WRITER]
     pub fn set_preference(&self, key: &str, value: &str) {
-        if let Ok(db) = self.db.lock() {
+        if let Ok(db) = self.writer.lock() {
             let _ = db.execute(
                 "INSERT OR REPLACE INTO user_preferences (key, value) VALUES (?, ?)",
                 params![key, value],
@@ -309,8 +291,9 @@ impl ThumbnailDiskCache {
     }
 
     /// Gets a user preference
+    /// [READER]
     pub fn get_preference(&self, key: &str) -> Option<String> {
-        if let Ok(db) = self.db.lock() {
+        if let Ok(db) = self.reader.lock() {
             let mut stmt = db
                 .prepare("SELECT value FROM user_preferences WHERE key = ?")
                 .ok()?;
@@ -321,7 +304,7 @@ impl ThumbnailDiskCache {
     }
 
     /// Gets covers (thumbnails) for multiple folders at once
-    /// OPTIMIZED: Executes a single SQL query for N folders
+    /// [READER]
     pub fn get_folder_covers(
         &self,
         folder_paths: &[PathBuf],
@@ -334,7 +317,7 @@ impl ThumbnailDiskCache {
         let mut raw_results = Vec::new();
 
         {
-            let db = match self.db.lock() {
+            let db = match self.reader.lock() {
                 Ok(db) => db,
                 Err(_) => return results,
             };
@@ -364,11 +347,8 @@ impl ThumbnailDiskCache {
                     }
                 }
             };
-        } // Lock release
+        }
 
-        // Validate existence outside lock to allow concurrency
-        // OPTIMIZATION: Removed `exists()` check to avoid N+1 I/O syscalls.
-        // The thumbnail worker will handle missing files gracefully.
         for (f_path, c_path) in raw_results {
             results.insert(PathBuf::from(f_path), PathBuf::from(c_path));
         }
@@ -377,9 +357,10 @@ impl ThumbnailDiskCache {
     }
 
     /// Obtém a capa (thumbnail) de uma pasta se já foi descoberta
+    /// [READER]
     #[allow(dead_code)]
     pub fn get_folder_cover(&self, folder_path: &Path) -> Option<PathBuf> {
-        let db = self.db.lock().ok()?;
+        let db = self.reader.lock().ok()?;
         let mut stmt = db
             .prepare_cached("SELECT cover_path FROM folder_covers WHERE folder_path = ?")
             .ok()?;
@@ -394,14 +375,14 @@ impl ThumbnailDiskCache {
         if cover_path.exists() {
             Some(cover_path)
         } else {
-            // Cover file no longer exists - return None to trigger re-scan
             None
         }
     }
 
     /// Salva a capa (thumbnail) descoberta para uma pasta
+    /// [WRITER]
     pub fn set_folder_cover(&self, folder_path: &Path, cover_path: &Path) {
-        if let Ok(db) = self.db.lock() {
+        if let Ok(db) = self.writer.lock() {
             let _ = db.execute(
                 "INSERT OR REPLACE INTO folder_covers (folder_path, cover_path) VALUES (?, ?)",
                 [folder_path.to_string_lossy(), cover_path.to_string_lossy()],
@@ -410,17 +391,15 @@ impl ThumbnailDiskCache {
     }
 
     /// Remove cache entries for a specific path (file or folder)
-    /// If the path is a folder, removes all entries that start with that path
+    /// [WRITER]
     pub fn remove_cache_for_path(&self, path: &Path) {
-        // Normaliza o path removendo o prefixo \\?\ do Windows
         let path_str = path.to_string_lossy().to_string();
         let path_str = path_str
             .strip_prefix(r"\\?\")
             .unwrap_or(&path_str)
             .to_string();
 
-        if let Ok(db) = self.db.lock() {
-            // Pattern: C:\folder\* (precisa adicionar barra antes de %)
+        if let Ok(db) = self.writer.lock() {
             let pattern = format!("{}\\%", path_str.trim_end_matches('\\'));
 
             // Remove entradas de thumbnails
@@ -443,7 +422,7 @@ impl ThumbnailDiskCache {
                 [&pattern],
             );
 
-            // Se deletou algo, roda VACUUM para reduzir tamanho do arquivo
+            // Se deletou algo, roda VACUUM
             if deleted > 0 {
                 let _ = db.execute("VACUUM", []);
                 eprintln!("[Cache] Cleaned {} entries for: {}", deleted, path_str);
@@ -453,18 +432,17 @@ impl ThumbnailDiskCache {
 
     /// Garbage Collector: Remove entradas de arquivos que não existem mais
     /// OTIMIZADO: Libera o lock durante verificações de arquivo (I/O lento)
-    /// Roda em background na inicialização para não bloquear a UI
     pub fn garbage_collect(&self) -> usize {
         eprintln!("[GC] Starting garbage collection...");
 
         let mut removed = 0;
 
-        // FASE 1: Lê todos os paths (lock curto - apenas leitura do banco)
+        // FASE 1: Lê todos os paths ([READER] lock curto)
         let all_entries: Vec<(String, String)>;
         let all_folders: Vec<String>;
 
         {
-            let db = match self.db.lock() {
+            let db = match self.reader.lock() {
                 Ok(db) => db,
                 Err(_) => {
                     eprintln!("[GC] Failed to acquire database lock!");
@@ -492,7 +470,6 @@ impl ThumbnailDiskCache {
                 })
                 .unwrap_or_default();
         }
-        // ^^^ Lock liberado aqui!
 
         eprintln!(
             "[GC] Loaded {} thumbnails, {} folder covers to check",
@@ -501,7 +478,6 @@ impl ThumbnailDiskCache {
         );
 
         // FASE 2: Verifica existência de arquivos (SEM lock - I/O puro)
-        // Esta é a parte lenta, mas não bloqueia o banco
         let orphan_thumbs: Vec<String> = all_entries
             .into_iter()
             .filter(|(_, path)| !Path::new(path).exists())
@@ -519,18 +495,17 @@ impl ThumbnailDiskCache {
             orphan_folders.len()
         );
 
-        // FASE 3: Remove órfãos usando BATCH DELETE
-        // Otimização: Usa DELETE WHERE id IN (...) em lotes para evitar N+1 queries
+        // FASE 3: Remove órfãos usando BATCH DELETE ([WRITER] lock)
         if !orphan_thumbs.is_empty() || !orphan_folders.is_empty() {
-            if let Ok(db) = self.db.lock() {
+            if let Ok(db) = self.writer.lock() {
                 // Inicia transação
                 let _ = db.execute("BEGIN TRANSACTION", []);
 
-                // Helper local para deletar em lotes
+                // Helper local
                 let execute_batch_delete =
                     |table: &str, key_col: &str, items: &[String]| -> usize {
                         let mut count = 0;
-                        const BATCH_SIZE: usize = 500; // Limite seguro para variáveis SQLite
+                        const BATCH_SIZE: usize = 500;
 
                         for chunk in items.chunks(BATCH_SIZE) {
                             let placeholders = std::iter::repeat("?")
@@ -553,18 +528,15 @@ impl ThumbnailDiskCache {
                         count
                     };
 
-                // Remove thumbnails
                 if !orphan_thumbs.is_empty() {
                     removed += execute_batch_delete("thumbnails", "id", &orphan_thumbs);
                 }
 
-                // Remove folder_covers
                 if !orphan_folders.is_empty() {
                     removed +=
                         execute_batch_delete("folder_covers", "folder_path", &orphan_folders);
                 }
 
-                // Commit e VACUUM
                 let _ = db.execute("COMMIT", []);
 
                 if removed > 0 {

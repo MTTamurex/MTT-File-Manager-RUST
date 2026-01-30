@@ -3,26 +3,26 @@
 //! This module handles scanning folders, filtering results, sorting, and manual refresh triggers.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::Ordering as AtomicOrdering;
+use std::sync::Arc;
 use std::time::Instant;
 
-use windows::Win32::Storage::FileSystem::*;
-use windows::core::PCWSTR;
 use std::os::windows::ffi::OsStringExt;
+use windows::core::PCWSTR;
+use windows::Win32::Storage::FileSystem::*;
 
 use crate::app::state::ImageViewerApp;
 use crate::application::sorting;
 use crate::domain::file_entry::{FileEntry, SyncStatus};
 use crate::infrastructure::adaptive_batch::{AdaptiveBatchConfig, AdaptiveBatchTracker};
-use crate::infrastructure::io_priority;
-use crate::infrastructure::onedrive;
-use crate::infrastructure::ntfs_reader;
 use crate::infrastructure::directory_index::IndexedFile;
+use crate::infrastructure::io_priority;
+use crate::infrastructure::ntfs_reader;
+use crate::infrastructure::onedrive;
 use crate::infrastructure::windows::{is_shell_navigation_path, list_shell_folder};
 use crate::workers::idle_warmup::IdleWarmupMessage;
-use crate::workers::prefetch_worker::PrefetchMessage;
 use crate::workers::predictive_prefetch::PredictiveMessage;
+use crate::workers::prefetch_worker::PrefetchMessage;
 
 impl ImageViewerApp {
     /// Filtra e ordena itens baseado na query de busca atual.
@@ -171,9 +171,9 @@ impl ImageViewerApp {
             let mut batch = Vec::with_capacity(batch_size);
             let mut all_entries_disk: Vec<FileEntry> = Vec::new();
             let mut batch_start = std::time::Instant::now();
-            
+
             // Check if we are navigating a virtual Shell folder (like a ZIP)
-            if is_shell_navigation_path(&PathBuf::from(&base_path)) {
+            if is_shell_navigation_path(&PathBuf::from(&base_path), false) {
                 if let Ok(shell_items) = list_shell_folder(&PathBuf::from(&base_path)) {
                     if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                         let _ = file_entry_sender.send((my_gen, shell_items));
@@ -284,7 +284,8 @@ impl ImageViewerApp {
             let use_fast_reader = !is_ssd && ntfs_reader::is_available();
 
             if use_fast_reader {
-                if let Some(entries) = ntfs_reader::read_directory_fast(&PathBuf::from(&base_path)) {
+                if let Some(entries) = ntfs_reader::read_directory_fast(&PathBuf::from(&base_path))
+                {
                     for dir_entry in entries {
                         if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
                             break;
@@ -293,16 +294,24 @@ impl ImageViewerApp {
                         let is_system = (dir_entry.attributes & 0x04) != 0;
                         let is_special = matches!(
                             dir_entry.name.to_lowercase().as_str(),
-                            "desktop.ini" | "thumbs.db" | "$recycle.bin" | "system volume information"
+                            "desktop.ini"
+                                | "thumbs.db"
+                                | "$recycle.bin"
+                                | "system volume information"
                         );
-                        if !is_hidden && !is_system && !is_special && !dir_entry.name.starts_with('.') {
+                        if !is_hidden
+                            && !is_system
+                            && !is_special
+                            && !dir_entry.name.starts_with('.')
+                        {
                             let full_path = PathBuf::from(&base_path).join(&dir_entry.name);
                             let mut is_dir = dir_entry.is_dir;
                             if !is_dir && dir_entry.name.to_lowercase().ends_with(".zip") {
                                 is_dir = true;
                             }
                             let is_onedrive = onedrive::is_onedrive_path(&full_path);
-                            let sync_status = onedrive::get_sync_status(dir_entry.attributes, is_onedrive);
+                            let sync_status =
+                                onedrive::get_sync_status(dir_entry.attributes, is_onedrive);
                             let entry = crate::domain::file_entry::FileEntry {
                                 path: full_path,
                                 name: dir_entry.name,
@@ -318,7 +327,8 @@ impl ImageViewerApp {
                             all_entries_disk.push(entry.clone());
                             batch.push(entry);
                             if batch.len() >= batch_size {
-                                let folders: Vec<PathBuf> = batch.iter()
+                                let folders: Vec<PathBuf> = batch
+                                    .iter()
                                     .filter(|e| e.is_dir)
                                     .map(|e| e.path.clone())
                                     .collect();
@@ -343,7 +353,8 @@ impl ImageViewerApp {
                         }
                     }
                     if !batch.is_empty() && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
-                        let folders: Vec<PathBuf> = batch.iter()
+                        let folders: Vec<PathBuf> = batch
+                            .iter()
                             .filter(|e| e.is_dir)
                             .map(|e| e.path.clone())
                             .collect();
@@ -467,7 +478,7 @@ impl ImageViewerApp {
                             if !is_hidden && !is_system && !is_special && !filename.starts_with('.')
                             {
                                 let mut is_dir = (extended_attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
-                                
+
                                 // Treat ZIP files as navigable folders
                                 if !is_dir && filename.to_lowercase().ends_with(".zip") {
                                     is_dir = true;
@@ -529,7 +540,8 @@ impl ImageViewerApp {
                                 // SE o lote encheu, envia e limpa (tamanho adaptado para SSD/HDD)
                                 if batch.len() >= batch_size {
                                     // PRE-FETCH COVERS (Batch Optimization)
-                                    let folders: Vec<PathBuf> = batch.iter()
+                                    let folders: Vec<PathBuf> = batch
+                                        .iter()
                                         .filter(|e| e.is_dir)
                                         .map(|e| e.path.clone())
                                         .collect();
@@ -567,7 +579,8 @@ impl ImageViewerApp {
             // Envia o restante (último lote) se sobrou algo e a geração ainda é válida
             if !batch.is_empty() && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                 // PRE-FETCH COVERS (Batch Optimization) - Last batch
-                let folders: Vec<PathBuf> = batch.iter()
+                let folders: Vec<PathBuf> = batch
+                    .iter()
                     .filter(|e| e.is_dir)
                     .map(|e| e.path.clone())
                     .collect();

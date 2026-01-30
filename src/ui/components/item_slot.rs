@@ -70,21 +70,23 @@ pub struct ItemSlotContext<'a> {
 /// Renderiza um item slot para grid view
 pub fn render_item_slot<O: ItemSlotOperations>(
     ui: &mut egui::Ui,
+    rect: egui::Rect,
     ctx: &mut ItemSlotContext,
     ops: &mut O,
 ) {
     if let Some(drive_info) = &ctx.item.drive_info {
-        render_drive_slot(ui, ctx, drive_info);
+        render_drive_slot(ui, rect, ctx, drive_info);
     } else if ctx.item.is_dir && !ctx.item.name.to_lowercase().ends_with(".zip") {
-        render_directory_slot(ui, ctx, ops);
+        render_directory_slot(ui, rect, ctx, ops);
     } else {
-        render_file_slot(ui, ctx, ops);
+        render_file_slot(ui, rect, ctx, ops);
     }
 }
 
 /// Renderiza um slot de drive (Este Computador)
 fn render_drive_slot(
     ui: &mut egui::Ui,
+    rect: egui::Rect,
     ctx: &mut ItemSlotContext,
     drive_info: &crate::domain::file_entry::DriveInfo,
 ) {
@@ -97,91 +99,129 @@ fn render_drive_slot(
         .get_or_load_drive_icon(ui.ctx(), &path_clone.to_string_lossy());
 
     // GEOMETRIA
-    let available_h = ui.available_height();
-    let available_w = ui.available_width();
+    let available_h = rect.height();
+    let available_w = rect.width();
     let icon_size = (ctx.thumbnail_size * 0.4).min(available_w * 0.5);
     let progress_w = (available_w * 0.8).min(150.0);
     let text_height = 36.0; // Nome + Espaço Livre
     let content_h = icon_size + 12.0 + 8.0 + text_height; // Ícone + Barra + Padding + Texto
 
     let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
-    ui.add_space(vertical_margin);
 
-    ui.vertical_centered(|ui| {
-        // 1. ÍCONE
-        if let Some(tex) = drive_icon {
-            ui.add(
-                egui::Image::new(&tex)
-                    .max_size(egui::vec2(icon_size, icon_size))
-                    .maintain_aspect_ratio(true),
-            );
+    // Use `rect` as base for calculation instead of allocating space
+    let start_y = rect.top() + vertical_margin;
+    let mut current_y = start_y;
+
+    // 1. ÍCONE
+    let icon_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.center().x, current_y + icon_size / 2.0),
+        egui::vec2(icon_size, icon_size),
+    );
+
+    if let Some(tex) = drive_icon {
+        ui.put(
+            icon_rect,
+            egui::Image::new(&tex)
+                .max_size(egui::vec2(icon_size, icon_size))
+                .maintain_aspect_ratio(true),
+        );
+    } else {
+        ui.painter().text(
+            icon_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "💽",
+            egui::FontId::proportional(icon_size * 0.8),
+            egui::Color32::GRAY,
+        );
+    }
+
+    current_y += icon_size + 8.0;
+
+    // 2. BARRA DE PROGRESSO (Espaço Usado)
+    if drive_info.total_space > 0 {
+        let bar_rect = egui::Rect::from_center_size(
+            egui::pos2(rect.center().x, current_y + 6.0),
+            egui::vec2(progress_w, 12.0),
+        );
+
+        let used_space = drive_info.total_space - drive_info.free_space;
+        let usage_ratio = used_space as f32 / drive_info.total_space as f32;
+
+        // Cor da barra: azul ou vermelho se estiver cheio (> 90%)
+        let bar_color = if usage_ratio > 0.9 {
+            egui::Color32::from_rgb(230, 50, 50) // Vermelho
         } else {
-            ui.label(egui::RichText::new("💽").size(icon_size * 0.8));
-        }
-        ui.add_space(8.0);
+            egui::Color32::from_rgb(30, 130, 230) // Azul Windows
+        };
 
-        // 2. BARRA DE PROGRESSO (Espaço Usado)
-        if drive_info.total_space > 0 {
-            let used_space = drive_info.total_space - drive_info.free_space;
-            let usage_ratio = used_space as f32 / drive_info.total_space as f32;
+        let bg_color = egui::Color32::from_gray(230);
 
-            // Cor da barra: azul ou vermelho se estiver cheio (> 90%)
-            let bar_color = if usage_ratio > 0.9 {
-                egui::Color32::from_rgb(230, 50, 50) // Vermelho
-            } else {
-                egui::Color32::from_rgb(30, 130, 230) // Azul Windows
-            };
+        ui.painter().rect_filled(bar_rect, 2.0, bg_color);
 
-            let bg_color = egui::Color32::from_gray(230);
+        let filled_w = progress_w * usage_ratio;
+        let filled_rect = egui::Rect::from_min_size(bar_rect.min, egui::vec2(filled_w, 12.0));
+        ui.painter().rect_filled(filled_rect, 2.0, bar_color);
 
-            let (bar_rect, _) =
-                ui.allocate_exact_size(egui::vec2(progress_w, 12.0), egui::Sense::hover());
-            ui.painter().rect_filled(bar_rect, 2.0, bg_color);
+        // Add hover interaction for the bar
+        ui.interact(bar_rect, ui.id().with("drive_bar"), egui::Sense::hover());
+    }
 
-            let filled_w = progress_w * usage_ratio;
-            let filled_rect = egui::Rect::from_min_size(bar_rect.min, egui::vec2(filled_w, 12.0));
-            ui.painter().rect_filled(filled_rect, 2.0, bar_color);
-        }
+    current_y += 12.0 + 6.0;
 
-        ui.add_space(6.0);
+    // 3. TEXTO (Nome e Espaço Livre)
+    // Label for Name
+    let name_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.center().x, current_y + 9.0), // ~half text height
+        egui::vec2(progress_w, 18.0),
+    );
 
-        // 3. TEXTO (Nome e Espaço Livre)
-        ui.add(egui::Label::new(egui::RichText::new(&item.name).size(11.0).strong()).truncate());
+    ui.put(
+        name_rect,
+        egui::Label::new(egui::RichText::new(&item.name).size(11.0).strong()).truncate(),
+    );
 
-        if drive_info.total_space > 0 {
-            let free_gb = drive_info.free_space as f64 / (1024.0 * 1024.0 * 1024.0);
-            let total_gb = drive_info.total_space as f64 / (1024.0 * 1024.0 * 1024.0);
+    current_y += 18.0;
 
-            let (free_val, unit) = if total_gb >= 1000.0 {
-                (free_gb / 1024.0, "TB")
-            } else {
-                (free_gb, "GB")
-            };
+    if drive_info.total_space > 0 {
+        let free_gb = drive_info.free_space as f64 / (1024.0 * 1024.0 * 1024.0);
+        let total_gb = drive_info.total_space as f64 / (1024.0 * 1024.0 * 1024.0);
 
-            let (total_val, total_unit) = if total_gb >= 1000.0 {
-                (total_gb / 1024.0, "TB")
-            } else {
-                (total_gb, "GB")
-            };
+        let (free_val, unit) = if total_gb >= 1000.0 {
+            (free_gb / 1024.0, "TB")
+        } else {
+            (free_gb, "GB")
+        };
 
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(format!(
-                        "{:.1} {} livres de {:.1} {}",
-                        free_val, unit, total_val, total_unit
-                    ))
-                    .size(9.0)
-                    .color(egui::Color32::from_gray(100)),
-                )
-                .truncate(),
-            );
-        }
-    });
+        let (total_val, total_unit) = if total_gb >= 1000.0 {
+            (total_gb / 1024.0, "TB")
+        } else {
+            (total_gb, "GB")
+        };
+
+        let details_rect = egui::Rect::from_center_size(
+            egui::pos2(rect.center().x, current_y + 9.0),
+            egui::vec2(progress_w, 18.0),
+        );
+
+        ui.put(
+            details_rect,
+            egui::Label::new(
+                egui::RichText::new(format!(
+                    "{:.1} {} livres de {:.1} {}",
+                    free_val, unit, total_val, total_unit
+                ))
+                .size(9.0)
+                .color(egui::Color32::from_gray(100)),
+            )
+            .truncate(),
+        );
+    }
 }
 
 /// Renderiza um slot de diretório
 fn render_directory_slot<O: ItemSlotOperations>(
     ui: &mut egui::Ui,
+    rect: egui::Rect,
     ctx: &mut ItemSlotContext,
     ops: &mut O,
 ) {
@@ -208,20 +248,17 @@ fn render_directory_slot<O: ItemSlotOperations>(
     }
 
     // GEOMETRIA - Aumentado para 0.85 para folder preview maior
-    let available_h = ui.available_height();
+    let available_h = rect.height();
     let folder_w = ctx.thumbnail_size * 0.85;
     let folder_h = folder_w * 0.85;
     let text_height = 18.0;
     let content_h = folder_h + text_height;
     let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
 
-    // Margem superior para centralizar verticalmente
-    ui.add_space(vertical_margin);
-
     // Centraliza a pasta horizontalmente na celula
-    let cell_width = ui.available_width();
+    let cell_width = rect.width();
     let x_offset = (cell_width - folder_w) / 2.0;
-    let start_pos = ui.cursor().min + egui::vec2(x_offset.max(0.0), 0.0);
+    let start_pos = rect.min + egui::vec2(x_offset.max(0.0), vertical_margin);
     let folder_rect = egui::Rect::from_min_size(start_pos, egui::vec2(folder_w, folder_h));
 
     // === DESENHO DA PASTA ===
@@ -261,7 +298,11 @@ fn render_directory_slot<O: ItemSlotOperations>(
         );
     } else {
         // Se não tem preview nativo
-        let is_virtual_path = ctx.is_recycle_bin_view || crate::infrastructure::windows::shell_folder::is_shell_navigation_path(&item.path);
+        let is_virtual_path = ctx.is_recycle_bin_view
+            || crate::infrastructure::windows::shell_folder::is_shell_navigation_path(
+                &item.path,
+                item.is_dir,
+            );
 
         if is_virtual_path {
             // NA LIXEIRA ou ZIP (Paths Virtuais)
@@ -278,9 +319,12 @@ fn render_directory_slot<O: ItemSlotOperations>(
                     icon_rect,
                     egui::Image::new(sys_icon)
                         .fit_to_original_size(1.0)
-                        .max_size(egui::vec2(icon_size, icon_size))
+                        .max_size(egui::vec2(icon_size, icon_size)),
                 );
-            } else if let Some(icon) = ctx.icon_loader.get_or_load_icon(ui.ctx(), &item.path, true, true) {
+            } else if let Some(icon) =
+                ctx.icon_loader
+                    .get_or_load_icon(ui.ctx(), &item.path, true, true)
+            {
                 // Fallback para ícone específico do item (allow_blocking=true for folders usually safe, or use false if needed)
                 let icon_size = folder_w.min(folder_h);
                 let icon_rect = egui::Rect::from_center_size(
@@ -290,8 +334,7 @@ fn render_directory_slot<O: ItemSlotOperations>(
 
                 ui.put(
                     icon_rect,
-                    egui::Image::new(&icon)
-                        .max_size(egui::vec2(icon_size, icon_size))
+                    egui::Image::new(&icon).max_size(egui::vec2(icon_size, icon_size)),
                 );
             } else {
                 // Final Fallback para virtual paths: área vazia estilizada
@@ -338,7 +381,8 @@ fn render_directory_slot<O: ItemSlotOperations>(
             // PERFORMANCE: Request repaint after delay instead of immediate.
             // Spinner only needs ~15 FPS to look smooth (66ms interval).
             // This prevents CPU spinning at 60+ FPS when multiple folders are loading.
-            ui.ctx().request_repaint_after(std::time::Duration::from_millis(66));
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(66));
         }
     }
 
@@ -347,46 +391,45 @@ fn render_directory_slot<O: ItemSlotOperations>(
         render_sync_badge(ui, folder_rect, item.sync_status);
     }
 
-    // Aloca espaço da pasta
-    ui.allocate_rect(folder_rect, egui::Sense::hover());
+    // NOTE: Allocation for interaction is handled by caller using `rect`
 
     // TEXTO: Usa Label com truncate (igual aos arquivos) para respeitar limites
-    ui.add_space(6.0); // Gap entre pasta e texto
+    let text_start_y = folder_rect.bottom() + 6.0;
 
     if !ctx.is_dense_mode {
+        let text_rect = egui::Rect::from_min_size(
+            egui::pos2(rect.left(), text_start_y),
+            egui::vec2(rect.width(), 20.0), // Fixed height for text
+        );
+
         if ctx.is_renaming {
             if let Some(text) = &mut ctx.renaming_text {
-                let response = ui.add(
+                ui.put(
+                    text_rect,
                     egui::TextEdit::singleline(&mut **text)
                         .frame(true)
                         .horizontal_align(egui::Align::Center)
                         .id_source("rename_input_dir"),
-                );
+                )
+                .request_focus(); // Ensure it requests focus
 
-                if ctx.focus_rename {
-                    response.request_focus();
-                }
-
-                // Confirma renomeação com Enter (enquanto tem foco)
-                if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                // Note: Handle Enter key somewhere else or here?
+                // We're inside render, so events are tricky if not using Ui::add response
+                // But we are using ui.put which returns response. So we can check.
+                if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     ops.rename_item(ctx.idx);
-                } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                    // Cancel rename - handled by caller
-                } else if response.clicked_elsewhere() {
-                    // Cancel rename - handled by caller
                 }
             }
         } else {
-            ui.vertical_centered(|ui| {
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(&item.name)
-                            .size(11.0)
-                            .color(egui::Color32::BLACK),
-                    )
-                    .truncate(),
-                );
-            });
+            ui.put(
+                text_rect,
+                egui::Label::new(
+                    egui::RichText::new(&item.name)
+                        .size(11.0)
+                        .color(egui::Color32::BLACK),
+                )
+                .truncate(),
+            );
         }
     }
 }
@@ -394,6 +437,7 @@ fn render_directory_slot<O: ItemSlotOperations>(
 /// Renderiza um slot de arquivo
 fn render_file_slot<O: ItemSlotOperations>(
     ui: &mut egui::Ui,
+    rect: egui::Rect,
     ctx: &mut ItemSlotContext,
     ops: &mut O,
 ) {
@@ -414,7 +458,12 @@ fn render_file_slot<O: ItemSlotOperations>(
         let is_failed = ctx.failed_thumbnails.contains(&path_clone);
         let is_pending_upload = ctx.pending_upload_set.contains(&path_clone);
 
-        if !has_texture && !is_loading && !is_failed && !is_pending_upload && ctx.loading_set.len() < 200 {
+        if !has_texture
+            && !is_loading
+            && !is_failed
+            && !is_pending_upload
+            && ctx.loading_set.len() < 200
+        {
             // MAX_CONCURRENT_LOADS (increased for performance - stale entries are cleaned by grid_view)
             ctx.loading_set.insert(path_clone.clone());
             ops.request_thumbnail_load(
@@ -428,7 +477,9 @@ fn render_file_slot<O: ItemSlotOperations>(
     // Carrega ícone (sempre, servirá como fallback)
     // Na Lixeira, usa get_or_load_icon que agora suporta paths virtuais com extensão
     // PERFORMANCE: allow_blocking=false prevents UI stutter on slow icons (exe/lnk)
-    let file_icon = ctx.icon_loader.get_or_load_icon(ui.ctx(), &path_clone, false, false);
+    let file_icon = ctx
+        .icon_loader
+        .get_or_load_icon(ui.ctx(), &path_clone, false, false);
 
     // Se ícone não está cacheado E não está carregando E não falhou:
     // Dispara carregamento assíncrono (apenas para casos lentos onde allow_blocking=false retornou None)
@@ -442,19 +493,16 @@ fn render_file_slot<O: ItemSlotOperations>(
     }
 
     // GEOMETRIA - reduz tamanho para caber na area com margem
-    let available_h = ui.available_height();
-    let available_w = ui.available_width();
+    let available_h = rect.height();
+    let available_w = rect.width();
     let thumb_size = (ctx.thumbnail_size - 6.0).min(available_w - 4.0); // 6px margem total
     let text_height = 18.0;
     let content_h = thumb_size + text_height;
     let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
 
-    // Margem superior para centralizar verticalmente
-    ui.add_space(vertical_margin);
-
     // Centraliza horizontalmente na area disponivel
     let x_offset = (available_w - thumb_size) / 2.0;
-    let start_pos = ui.cursor().min + egui::vec2(x_offset.max(0.0), 0.0);
+    let start_pos = rect.min + egui::vec2(x_offset.max(0.0), vertical_margin);
     let thumb_rect = egui::Rect::from_min_size(start_pos, egui::vec2(thumb_size, thumb_size));
 
     // Desenha thumbnail ou ícone
@@ -526,42 +574,39 @@ fn render_file_slot<O: ItemSlotOperations>(
     ui.allocate_rect(thumb_rect, egui::Sense::hover());
 
     // Texto do nome - igual as pastas
-    ui.add_space(4.0);
+    let text_start_y = thumb_rect.bottom() + 4.0;
 
     if !ctx.is_dense_mode {
+        let text_rect = egui::Rect::from_min_size(
+            egui::pos2(rect.left(), text_start_y),
+            egui::vec2(rect.width(), 20.0),
+        );
+
         if ctx.is_renaming {
             if let Some(text) = &mut ctx.renaming_text {
-                let response = ui.add(
+                ui.put(
+                    text_rect,
                     egui::TextEdit::singleline(&mut **text)
                         .frame(true)
                         .horizontal_align(egui::Align::Center)
                         .id_source("rename_input_file"),
-                );
+                )
+                .request_focus();
 
-                if ctx.focus_rename {
-                    response.request_focus();
-                }
-
-                // Confirma renomeação com Enter (enquanto tem foco)
-                if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     ops.rename_item(ctx.idx);
-                } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                    // Cancel rename - handled by caller
-                } else if response.clicked_elsewhere() {
-                    // Cancel rename - handled by caller
                 }
             }
         } else {
-            ui.vertical_centered(|ui| {
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(&item.name)
-                            .size(11.0)
-                            .color(egui::Color32::BLACK),
-                    )
-                    .truncate(),
-                );
-            });
+            ui.put(
+                text_rect,
+                egui::Label::new(
+                    egui::RichText::new(&item.name)
+                        .size(11.0)
+                        .color(egui::Color32::BLACK),
+                )
+                .truncate(),
+            );
         }
     }
 }

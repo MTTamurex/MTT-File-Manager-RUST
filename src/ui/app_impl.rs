@@ -11,6 +11,15 @@ impl eframe::App for ImageViewerApp {
 
         // 1. Initial validation
         if self.startup_tick == 0 {
+            // Check for loaded fonts
+            if let Some(rx) = &self.font_loader_rx {
+                if let Ok(fonts) = rx.try_recv() {
+                    ctx.set_fonts(fonts);
+                    self.font_loader_rx = None; // Disable loader once done
+                    ctx.request_repaint(); // Force refresh with new fonts
+                }
+            }
+
             if let Some(ref file) = self.selected_file {
                 if !file.path.exists() {
                     self.selected_file = None;
