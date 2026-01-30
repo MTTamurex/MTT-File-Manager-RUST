@@ -3,10 +3,12 @@
 //! This module processes incoming messages from various background workers
 //! (filesystem events, thumbnails, folder sizes, etc.) and updates the UI state.
 
-use crate::app::state::ImageViewerApp;
+use crate::app::state::{ImageViewerApp, ItemsRebuildResult};
+use crate::application::sorting;
 use crate::ui::theme;
 use eframe::egui;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 impl ImageViewerApp {
@@ -56,6 +58,19 @@ impl ImageViewerApp {
                 // Force immediate repaint without waiting for input events
                 ctx.request_repaint_after(std::time::Duration::from_millis(0));
             }
+        }
+
+        // Apply async rebuild results (filter/sort) from background thread
+        while let Ok(result) = self.items_rebuild_receiver.try_recv() {
+            if result.generation != self.generation {
+                continue;
+            }
+            if result.request_id != self.items_rebuild_request_id {
+                continue;
+            }
+            self.items = Arc::new(result.items);
+            self.total_items = result.total_items;
+            ctx.request_repaint();
         }
 
         fn normalize_for_match(p: &Path) -> String {
@@ -387,6 +402,7 @@ impl ImageViewerApp {
                         }
                         eprintln!("[FS] Direct subfolder modified: {:?}", cleaned.file_name());
                         self.cache_manager.invalidate_folder_preview(&cleaned);
+                        self.disk_cache.remove_folder_cover(&cleaned);
                     }
                 }
 
@@ -404,6 +420,7 @@ impl ImageViewerApp {
                             );
                             self.cache_manager
                                 .invalidate_folder_preview(&cleaned_parent);
+                            self.disk_cache.remove_folder_cover(&cleaned_parent);
                         }
                     }
                 }
@@ -495,15 +512,71 @@ impl ImageViewerApp {
             self.is_loading_folder = false;
             self.pending_items_rebuild = false;
             self.pending_items_count = 0;
-            // Ordenação final (filter_items já chama sort_items internamente)
-            self.filter_items();
+            // Ordenação final em background (evita stutter no UI thread)
+            self.items_rebuild_request_id = self.items_rebuild_request_id.wrapping_add(1);
+            let request_id = self.items_rebuild_request_id;
+            let gen = self.generation;
+            let items = self.all_items.clone();
+            let query = self.search_query.clone();
+            let sort_mode = self.sort_mode;
+            let sort_descending = self.sort_descending;
+            let folders_position = self.folders_position;
+            let sender = self.items_rebuild_sender.clone();
+            std::thread::spawn(move || {
+                let mut result_items = match sorting::filter_items_opt(&items, &query) {
+                    Some(filtered) => filtered,
+                    None => {
+                        let mut all = items;
+                        sorting::sort_items(&mut all, sort_mode, sort_descending, folders_position);
+                        all
+                    }
+                };
+                if !query.is_empty() {
+                    sorting::sort_items(&mut result_items, sort_mode, sort_descending, folders_position);
+                }
+                let total = result_items.len();
+                let _ = sender.send(ItemsRebuildResult {
+                    generation: gen,
+                    request_id,
+                    items: result_items,
+                    total_items: total,
+                });
+            });
             self.last_items_rebuild = Instant::now();
             ctx.request_repaint();
         } else if self.pending_items_rebuild {
             // Throttle rebuild para evitar sort a cada lote
             let elapsed = self.last_items_rebuild.elapsed();
             if elapsed > Duration::from_millis(80) || self.pending_items_count >= 1200 {
-                self.filter_items();
+                self.items_rebuild_request_id = self.items_rebuild_request_id.wrapping_add(1);
+                let request_id = self.items_rebuild_request_id;
+                let gen = self.generation;
+                let items = self.all_items.clone();
+                let query = self.search_query.clone();
+                let sort_mode = self.sort_mode;
+                let sort_descending = self.sort_descending;
+                let folders_position = self.folders_position;
+                let sender = self.items_rebuild_sender.clone();
+                std::thread::spawn(move || {
+                    let mut result_items = match sorting::filter_items_opt(&items, &query) {
+                        Some(filtered) => filtered,
+                        None => {
+                            let mut all = items;
+                            sorting::sort_items(&mut all, sort_mode, sort_descending, folders_position);
+                            all
+                        }
+                    };
+                    if !query.is_empty() {
+                        sorting::sort_items(&mut result_items, sort_mode, sort_descending, folders_position);
+                    }
+                    let total = result_items.len();
+                    let _ = sender.send(ItemsRebuildResult {
+                        generation: gen,
+                        request_id,
+                        items: result_items,
+                        total_items: total,
+                    });
+                });
                 self.last_items_rebuild = Instant::now();
                 self.pending_items_count = 0;
                 self.pending_items_rebuild = false;

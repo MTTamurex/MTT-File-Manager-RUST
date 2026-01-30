@@ -390,6 +390,17 @@ impl ThumbnailDiskCache {
         }
     }
 
+    /// Remove a capa armazenada de uma pasta
+    /// [WRITER]
+    pub fn remove_folder_cover(&self, folder_path: &Path) {
+        if let Ok(db) = self.writer.lock() {
+            let _ = db.execute(
+                "DELETE FROM folder_covers WHERE folder_path = ?",
+                [folder_path.to_string_lossy()],
+            );
+        }
+    }
+
     /// Remove cache entries for a specific path (file or folder)
     /// [WRITER]
     pub fn remove_cache_for_path(&self, path: &Path) {

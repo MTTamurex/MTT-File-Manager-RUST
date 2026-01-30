@@ -32,7 +32,7 @@ use crate::ui::theme;
 #[cfg(feature = "usn-watcher")]
 use crate::workers::usn_watcher::{FsEvent, UsnWatcherState};
 
-use super::state::{ImageViewerApp, LastInput};
+use super::state::{ImageViewerApp, ItemsRebuildResult, LastInput};
 
 // These are referenced from main.rs and need to be accessible
 const PATH_PADRAO: &str = "C:\\";
@@ -46,6 +46,8 @@ impl ImageViewerApp {
 
         // 1. Canais para comunicação Workers → UI
         let (file_entry_sender, file_entry_receiver) = mpsc::channel::<(usize, Vec<FileEntry>)>();
+        let (items_rebuild_sender, items_rebuild_receiver) =
+            mpsc::channel::<ItemsRebuildResult>();
 
         // Initialize disk cache (MOVED UP for Cover Worker access)
         let cache_dir = dirs::data_local_dir()
@@ -423,6 +425,9 @@ impl ImageViewerApp {
             file_entry_receiver,
             file_entry_sender,
             is_loading_folder: false,
+            items_rebuild_sender,
+            items_rebuild_receiver,
+            items_rebuild_request_id: 0,
             // Cover Worker
             cover_worker_sender: cover_req_tx,
             cover_worker_receiver: cover_res_rx,

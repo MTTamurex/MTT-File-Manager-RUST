@@ -43,6 +43,13 @@ use crate::workers::thumbnail_worker::PriorityThumbnailQueue;
 
 use windows::Win32::Foundation::HWND;
 
+pub struct ItemsRebuildResult {
+    pub generation: usize,
+    pub request_id: usize,
+    pub items: Vec<FileEntry>,
+    pub total_items: usize,
+}
+
 pub struct ImageViewerApp {
     pub current_path: String,
 
@@ -58,6 +65,11 @@ pub struct ImageViewerApp {
     pub file_entry_receiver: Receiver<(usize, Vec<FileEntry>)>,
     pub file_entry_sender: Sender<(usize, Vec<FileEntry>)>,
     pub is_loading_folder: bool,
+
+    // Async rebuild (filter/sort) to keep UI smooth during heavy loads
+    pub items_rebuild_sender: Sender<ItemsRebuildResult>,
+    pub items_rebuild_receiver: Receiver<ItemsRebuildResult>,
+    pub items_rebuild_request_id: usize,
 
     // COVER WORKER: Sistema de capas de pasta (Single Thread Worker)
     pub cover_worker_sender: Sender<PathBuf>, // UI → Worker: Envia pasta para processar
