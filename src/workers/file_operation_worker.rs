@@ -16,6 +16,8 @@ pub enum FileOperationResult {
     Finished,
     /// Specifically for Recycle Bin operations to trigger targeted refresh
     RecycleBinChanged,
+    /// Restore operation completed - original folders need refresh
+    RestoreCompleted { parent_folders: Vec<PathBuf> },
     /// Delete operation completed - parent folders need refresh
     DeleteCompleted { parent_folders: Vec<PathBuf> },
     /// Move operation completed - source folder needs refresh in all tabs, dest needs reload if active
@@ -178,9 +180,18 @@ pub fn start_file_operation_worker(
                     }
                 }
                 FileOperationRequest::RestoreFromRecycleBin { items } => {
+                    let mut parents = HashSet::new();
                     for (physical_path, original_path) in items {
+                        if let Some(parent) = original_path.parent() {
+                            parents.insert(parent.to_path_buf());
+                        }
                         let _ =
                             recycle_bin::restore_from_recycle_bin(&physical_path, &original_path);
+                    }
+                    if !parents.is_empty() {
+                        let _ = result_sender.send(FileOperationResult::RestoreCompleted {
+                            parent_folders: parents.into_iter().collect(),
+                        });
                     }
                     let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
                 }

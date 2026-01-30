@@ -112,6 +112,34 @@ impl ImageViewerApp {
                         self.sync_to_tab();
                     }
                 }
+                FileOperationResult::RestoreCompleted { parent_folders } => {
+                    let current_str = normalize_for_match(Path::new(&self.current_path));
+                    let mut should_reload_current = false;
+
+                    for parent in parent_folders {
+                        self.directory_cache.invalidate(&parent);
+                        if let Some(di) = &self.directory_index {
+                            let _ = di.invalidate(&parent);
+                        }
+
+                        let parent_str = normalize_for_match(parent.as_path());
+                        if parent_str == current_str {
+                            should_reload_current = true;
+                        }
+
+                        for tab in self.tab_manager.tabs.iter_mut() {
+                            let tab_path = normalize_for_match(Path::new(&tab.path));
+                            if tab_path == parent_str {
+                                tab.items = std::sync::Arc::new(Vec::new());
+                                tab.all_items.clear();
+                            }
+                        }
+                    }
+
+                    if should_reload_current {
+                        self.load_folder(false);
+                    }
+                }
                 FileOperationResult::DeleteCompleted { parent_folders } => {
                     let current_str = normalize_for_match(Path::new(&self.current_path));
                     let mut should_reload_current = false;
