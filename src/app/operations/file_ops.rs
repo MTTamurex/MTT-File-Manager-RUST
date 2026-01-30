@@ -79,6 +79,10 @@ impl ImageViewerApp {
     }
 
     pub fn create_new_folder(&mut self) {
+        if self.is_computer_view || self.is_recycle_bin_view {
+            return;
+        }
+
         let base_path = PathBuf::from(&self.current_path);
 
         match file_operations::create_new_folder(&base_path) {
@@ -104,8 +108,14 @@ impl ImageViewerApp {
                     self.focus_rename = true;
                 }
 
-                // Request background real load to sync with disk
-                self.load_folder(false);
+                if let Some(parent) = full_path.parent() {
+                    self.directory_cache.invalidate(&parent.to_path_buf());
+                    if let Some(directory_index) = &self.directory_index {
+                        let _ = directory_index.invalidate(parent);
+                    }
+                }
+
+                self.ui_ctx.request_repaint();
             }
             Err(e) => {
                 eprintln!("Erro ao criar pasta: {}", e);

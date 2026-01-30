@@ -112,6 +112,7 @@ impl ImageViewerApp {
 
         // ========== SECONDARY ITEMS (App-specific) ==========
         let can_paste = self.clipboard.has_content();
+        let can_create_folder = !self.is_computer_view && !self.is_recycle_bin_view;
         if is_empty_area {
             items.push(ContextMenuItem::separator());
             items.push(
@@ -120,7 +121,11 @@ impl ImageViewerApp {
                     .with_shortcut("Ctrl+V")
                     .enabled(can_paste),
             );
-            items.push(ContextMenuItem::new(-1, "Criar pasta").with_shortcut("Ctrl+Shift+N"));
+            items.push(
+                ContextMenuItem::new(-1, "Criar pasta")
+                    .with_shortcut("Ctrl+Shift+N")
+                    .enabled(can_create_folder),
+            );
         } else {
             items.push(ContextMenuItem::separator());
             items.push(ContextMenuItem::new(-20, "Abrir"));

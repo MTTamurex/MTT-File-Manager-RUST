@@ -70,6 +70,24 @@ impl ImageViewerApp {
         while let Ok(res) = self.file_op_res_receiver.try_recv() {
             use crate::workers::file_operation_worker::FileOperationResult;
             match res {
+                FileOperationResult::RenameCompleted { parent_folder } => {
+                    let current_str = normalize_for_match(Path::new(&self.current_path));
+                    let parent_str = normalize_for_match(parent_folder.as_path());
+                    self.directory_cache.invalidate(&parent_folder);
+                    if let Some(di) = &self.directory_index {
+                        let _ = di.invalidate(&parent_folder);
+                    }
+                    for tab in self.tab_manager.tabs.iter_mut() {
+                        let tab_path = normalize_for_match(Path::new(&tab.path));
+                        if tab_path == parent_str {
+                            tab.items = std::sync::Arc::new(Vec::new());
+                            tab.all_items.clear();
+                        }
+                    }
+                    if parent_str == current_str {
+                        self.load_folder(false);
+                    }
+                }
                 FileOperationResult::RecycleBinChanged => {
                     if self.is_recycle_bin_view {
                         eprintln!("[RECYCLE] Operation finished, refreshing view.");
