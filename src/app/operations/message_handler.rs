@@ -70,13 +70,29 @@ impl ImageViewerApp {
         while let Ok(res) = self.file_op_res_receiver.try_recv() {
             use crate::workers::file_operation_worker::FileOperationResult;
             match res {
-                FileOperationResult::RenameCompleted { parent_folder } => {
+                FileOperationResult::RenameCompleted {
+                    path,
+                    new_name,
+                    parent_folder,
+                } => {
                     let current_str = normalize_for_match(Path::new(&self.current_path));
                     let parent_str = normalize_for_match(parent_folder.as_path());
                     self.directory_cache.invalidate(&parent_folder);
                     if let Some(di) = &self.directory_index {
                         let _ = di.invalidate(&parent_folder);
                     }
+
+                    // FIX: If the renamed item is currently selected, update the selection state
+                    // This prevents stale data in the Details Panel even before reload completes.
+                    // Note: load_folder() does NOT clear selected_file, so this persists correctly.
+                    if let Some(selected) = &mut self.selected_file {
+                        if normalize_for_match(&selected.path) == normalize_for_match(&path) {
+                            let new_path = parent_folder.join(&new_name);
+                            selected.path = new_path;
+                            selected.name = new_name;
+                        }
+                    }
+
                     for tab in self.tab_manager.tabs.iter_mut() {
                         let tab_path = normalize_for_match(Path::new(&tab.path));
                         if tab_path == parent_str {
@@ -101,6 +117,9 @@ impl ImageViewerApp {
                     let mut should_reload_current = false;
                     for parent in parent_folders {
                         self.directory_cache.invalidate(&parent);
+                        if let Some(di) = &self.directory_index {
+                            let _ = di.invalidate(&parent);
+                        }
                         let parent_str = normalize_for_match(parent.as_path());
                         if parent_str == current_str {
                             should_reload_current = true;
@@ -122,6 +141,9 @@ impl ImageViewerApp {
                     let current_str = normalize_for_match(Path::new(&self.current_path));
 
                     self.directory_cache.invalidate(&dest_folder);
+                    if let Some(di) = &self.directory_index {
+                        let _ = di.invalidate(&dest_folder);
+                    }
                     for tab in self.tab_manager.tabs.iter_mut() {
                         let tab_path = normalize_for_match(Path::new(&tab.path));
                         if tab_path == dest_str {
@@ -148,7 +170,13 @@ impl ImageViewerApp {
 
                     // 1. Source Logic (Item Removed)
                     self.directory_cache.invalidate(&source_folder);
+                    if let Some(di) = &self.directory_index {
+                        let _ = di.invalidate(&source_folder);
+                    }
                     self.directory_cache.invalidate(&dest_folder);
+                    if let Some(di) = &self.directory_index {
+                        let _ = di.invalidate(&dest_folder);
+                    }
 
                     if current_str == source_str {
                         eprintln!(
