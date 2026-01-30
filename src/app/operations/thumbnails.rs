@@ -53,18 +53,27 @@ impl ImageViewerApp {
     ) {
         // PERFORMANCE: Check RAM cache first before sending to worker
         // This avoids disk I/O entirely if the RGBA data is already in RAM
-        if let Some((rgba_data, width, height)) = self.cache_manager.get_rgba_data(&path).map(|(d, w, h)| (d.clone(), *w, *h)) {
-            // Data is in RAM cache - add directly to pending_thumbnails for GPU upload
-            // No disk I/O needed!
-            self.cache_manager.start_pending_upload(path.clone());
-            self.pending_thumbnails.push_back(ThumbnailData {
-                path,
-                image_data: rgba_data,
-                width,
-                height,
-                generation: self.generation,
-            });
-            return;
+        if let Some((rgba_data, width, height)) = self
+            .cache_manager
+            .get_rgba_data(&path)
+            .map(|(d, w, h)| (d.clone(), *w, *h))
+        {
+            let cached_max_dim = width.max(height);
+
+            // Only reuse RAM cache if it meets or exceeds the requested size
+            if cached_max_dim >= size_px {
+                // Data is in RAM cache - add directly to pending_thumbnails for GPU upload
+                // No disk I/O needed!
+                self.cache_manager.start_pending_upload(path.clone());
+                self.pending_thumbnails.push_back(ThumbnailData {
+                    path,
+                    image_data: rgba_data,
+                    width,
+                    height,
+                    generation: self.generation,
+                });
+                return;
+            }
         }
 
         // Not in RAM cache - send to worker (will read from disk cache or generate)
