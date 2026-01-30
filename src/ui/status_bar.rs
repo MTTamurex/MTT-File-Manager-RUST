@@ -3,6 +3,7 @@
 //! This module contains the rendering logic for the application status bar.
 
 use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
+use crate::ui::theme;
 use eframe::egui;
 use lru::LruCache;
 use std::path::PathBuf;
@@ -27,7 +28,6 @@ pub fn render_status_bar(
     is_loading_folder: &mut bool,
     total_items: usize,
     view_mode: &mut ViewMode,
-    thumbnail_size: &mut f32,
     sort_mode: &mut SortMode,
     sort_descending: &mut bool,
     folders_position: &mut FoldersPosition,
@@ -39,10 +39,30 @@ pub fn render_status_bar(
 ) -> StatusBarAction {
     let mut action = StatusBarAction::None;
 
-    ui.horizontal(|ui| {
+    ui.scope(|ui| {
+        let hover_color = if ui.visuals().dark_mode {
+            theme::color_dark_hover()
+        } else {
+            theme::color_hover()
+        };
+        ui.visuals_mut().override_text_color = Some(egui::Color32::BLACK);
+        ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
+        ui.visuals_mut().widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+        ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
+        ui.visuals_mut().widgets.inactive.fg_stroke = egui::Stroke::NONE;
+        ui.visuals_mut().widgets.hovered.bg_fill = hover_color;
+        ui.visuals_mut().widgets.hovered.weak_bg_fill = hover_color;
+        ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
+        ui.visuals_mut().widgets.hovered.fg_stroke = egui::Stroke::NONE;
+        ui.visuals_mut().widgets.active.bg_fill = hover_color;
+        ui.visuals_mut().widgets.active.weak_bg_fill = hover_color;
+        ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
+        ui.visuals_mut().widgets.active.fg_stroke = egui::Stroke::NONE;
+
+        ui.horizontal(|ui| {
         // === LEFTMOST: Virtual drive settings button ===
         if ui
-            .button("⚙")
+            .button(egui::RichText::new("⚙").color(egui::Color32::BLACK))
             .on_hover_text("Configurar otimização de drives virtuais")
             .clicked()
         {
@@ -66,7 +86,7 @@ pub fn render_status_bar(
 
         ui.separator();
 
-        // === CENTER: View mode and thumbnail size ===
+        // === CENTER: View mode ===
         ui.label("Modo:");
         if ui
             .selectable_label(*view_mode == ViewMode::Grid, "Grade")
@@ -82,11 +102,6 @@ pub fn render_status_bar(
             *view_mode = ViewMode::List;
             action = StatusBarAction::ViewModeChanged;
         }
-
-        ui.separator();
-
-        ui.label("Tamanho:");
-        ui.add(egui::Slider::new(thumbnail_size, 64.0..=256.0).show_value(false));
 
         ui.separator();
 
@@ -176,6 +191,7 @@ pub fn render_status_bar(
                 "VRAM: {:.1} MB",
                 vram_usage as f64 / 1024.0 / 1024.0
             ));
+        });
         });
     });
 

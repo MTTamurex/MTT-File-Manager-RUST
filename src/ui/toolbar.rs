@@ -162,13 +162,19 @@ pub fn render_toolbar(
             let sort_symbol = if sort_descending { "↓" } else { "↑" };
             
             ui.scope(|ui| {
+                let hover_color = if ui.visuals().dark_mode {
+                    theme::color_dark_hover()
+                } else {
+                    theme::color_hover()
+                };
+
                 // Make sort button transparent/frameless, only show background on hover
                 ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
                 ui.visuals_mut().widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
                 ui.visuals_mut().widgets.inactive.fg_stroke = egui::Stroke::NONE;
                 ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
                 
-                ui.visuals_mut().widgets.hovered.bg_fill = egui::Color32::from_gray(240);
+                ui.visuals_mut().widgets.hovered.bg_fill = hover_color;
                 ui.visuals_mut().widgets.hovered.fg_stroke = egui::Stroke::NONE;
                 ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
                 
@@ -183,6 +189,12 @@ pub fn render_toolbar(
 
             // ComboBox com fundo branco e borda preta permanente
             ui.scope(|ui| {
+                let hover_color = if ui.visuals().dark_mode {
+                    theme::color_dark_hover()
+                } else {
+                    theme::color_hover()
+                };
+
                 // Force all visual states to white background with black strokes
                 let black_stroke = egui::Stroke::new(1.0, egui::Color32::BLACK);
                 
@@ -197,12 +209,12 @@ pub fn render_toolbar(
                 ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE; // No Border
                 
                 // hovered
-                ui.visuals_mut().widgets.hovered.bg_fill = egui::Color32::from_gray(245); // Subtle feedback
+                ui.visuals_mut().widgets.hovered.bg_fill = hover_color;
                 ui.visuals_mut().widgets.hovered.fg_stroke = black_stroke;
                 ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
                 
                 // active
-                ui.visuals_mut().widgets.active.bg_fill = egui::Color32::from_gray(235);
+                ui.visuals_mut().widgets.active.bg_fill = hover_color;
                 ui.visuals_mut().widgets.active.fg_stroke = black_stroke;
                 ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
                 
@@ -411,12 +423,18 @@ pub fn render_toolbar(
 
                         // Breadcrumb clicável - transparente, cinza claro no hover
                         let btn_resp = addr_ui.scope(|ui| {
+                            let hover_color = if ui.visuals().dark_mode {
+                                theme::color_dark_hover()
+                            } else {
+                                theme::color_hover()
+                            };
+
                             ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
                             ui.visuals_mut().widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
                             ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
 
-                            ui.visuals_mut().widgets.hovered.bg_fill = egui::Color32::from_gray(230);
-                            ui.visuals_mut().widgets.hovered.weak_bg_fill = egui::Color32::from_gray(230);
+                            ui.visuals_mut().widgets.hovered.bg_fill = hover_color;
+                            ui.visuals_mut().widgets.hovered.weak_bg_fill = hover_color;
                             ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
 
                             ui.visuals_mut().widgets.active.bg_fill = egui::Color32::from_gray(210);

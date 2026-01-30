@@ -125,7 +125,6 @@ fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 &mut app.is_loading_folder,
                 app.total_items,
                 &mut app.view_mode,
-                &mut app.thumbnail_size,
                 &mut app.sort_mode,
                 &mut app.sort_descending,
                 &mut app.folders_position,
