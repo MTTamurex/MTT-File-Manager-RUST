@@ -1,10 +1,12 @@
 //! Windows icon extraction functions
 //! Follows .cursorrules: single responsibility, < 300 lines
 
+use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use windows::{
     core::*, Win32::Foundation::*, Win32::Graphics::Gdi::*, Win32::Storage::FileSystem::*,
-    Win32::System::Com::*, Win32::UI::Shell::*, Win32::UI::WindowsAndMessaging::*,
+    Win32::System::Com::*, Win32::UI::Shell::Common::*, Win32::UI::Shell::*,
+    Win32::UI::WindowsAndMessaging::*,
 };
 
 use crate::domain::file_entry::IconSize;
@@ -19,8 +21,7 @@ pub fn extract_computer_icon(
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     unsafe {
         // 1. Get PIDL for "My Computer" (CSIDL_DRIVES)
-        let pidl = match SHGetSpecialFolderLocation(Some(HWND::default()), CSIDL_DRIVES as i32)
-        {
+        let pidl = match SHGetSpecialFolderLocation(Some(HWND::default()), CSIDL_DRIVES as i32) {
             Ok(p) => p,
             Err(_) => {
                 return Err("Failed to get PIDL for My Computer".into());
@@ -220,7 +221,7 @@ pub fn extract_file_icon(
         // For Jumbo icons, use IShellItemImageFactory even with dummy path (if possible)
         // Note: SHCreateItemFromParsingName with dummy path rarely works for Jumbo.
         // We stick to SHGetFileInfo for dummy icons, but ensure we use Large if Jumbo requested.
-        
+
         let mut shfi = SHFILEINFOW::default();
 
         // CORRECT FLAGS: USEFILEATTRIBUTES allows dummy path
@@ -261,12 +262,18 @@ pub fn extract_folder_icon(
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     unsafe {
         if matches!(size, IconSize::Jumbo) {
-            // High quality folder icon using known folder ID if possible, 
+            // High quality folder icon using known folder ID if possible,
             // or just a common path that is guaranteed to be a directory.
-            let windows_dir = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
-            let path_wide: Vec<u16> = windows_dir.encode_utf16().chain(std::iter::once(0)).collect();
-            
-            if let Ok(shell_item) = SHCreateItemFromParsingName::<_, _, IShellItem>(PCWSTR(path_wide.as_ptr()), None) {
+            let windows_dir =
+                std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+            let path_wide: Vec<u16> = windows_dir
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+
+            if let Ok(shell_item) =
+                SHCreateItemFromParsingName::<_, _, IShellItem>(PCWSTR(path_wide.as_ptr()), None)
+            {
                 if let Ok(image_factory) = shell_item.cast::<IShellItemImageFactory>() {
                     let size_factory = SIZE { cx: 256, cy: 256 };
                     if let Ok(hbitmap) = image_factory.GetImage(size_factory, SIIGBF_ICONONLY) {
@@ -329,7 +336,9 @@ pub fn extract_file_icon_by_path(
 
         // For Jumbo icons, use IShellItemImageFactory (higher quality)
         if matches!(size, IconSize::Jumbo) {
-            if let Ok(shell_item) = SHCreateItemFromParsingName::<_, _, IShellItem>(PCWSTR(path_wide.as_ptr()), None) {
+            if let Ok(shell_item) =
+                SHCreateItemFromParsingName::<_, _, IShellItem>(PCWSTR(path_wide.as_ptr()), None)
+            {
                 if let Ok(image_factory) = shell_item.cast::<IShellItemImageFactory>() {
                     let size_factory = SIZE { cx: 256, cy: 256 };
                     // SIIGBF_ICONONLY to ensure we get the icon and not a thumbnail if it were a file
@@ -457,9 +466,9 @@ pub fn get_file_type_icon(
         let _ = CoInitialize(None);
 
         if matches!(size, IconSize::Jumbo) && is_folder {
-             if let Ok(res) = extract_folder_icon(IconSize::Jumbo) {
-                 return Ok(res);
-             }
+            if let Ok(res) = extract_folder_icon(IconSize::Jumbo) {
+                return Ok(res);
+            }
         }
 
         let mut shfi = SHFILEINFOW::default();
@@ -550,6 +559,61 @@ pub fn extract_recycle_bin_icon(
 
         if result == 0 || shfi.hIcon.is_invalid() {
             return Err("Failed to get recycle bin icon".into());
+        }
+
+        let hicon = shfi.hIcon;
+        let conversion_result = super::bitmap_conversion::hicon_to_rgba(hicon);
+        let _ = DestroyIcon(hicon);
+
+        conversion_result
+    }
+}
+
+/// Extracts icon using Shell Namespace (PIDL), supporting virtual paths (ZIP contents).
+///
+/// This resolves the path to an ITEMIDLIST (PIDL) using standard Shell parsing,
+/// allowing icons to be retrieved for items inside ZIPs.
+pub fn extract_shell_icon(
+    path: &Path,
+    size: IconSize,
+) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
+    unsafe {
+        // 1. Parse Path to PIDL
+        let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
+        let path_wide: Vec<u16> = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        // SHParseDisplayName handles virtual paths like "C:\Archive.zip\Folder"
+        if SHParseDisplayName(PCWSTR(path_wide.as_ptr()), None, &mut pidl, 0, None).is_err() {
+            return Err("Failed to parse shell path".into());
+        }
+
+        let mut shfi = SHFILEINFOW::default();
+
+        // 2. Use SHGFI_PIDL flag to query by PIDL instead of path string
+        let flags = SHGFI_PIDL
+            | SHGFI_ICON
+            | match size {
+                IconSize::Small => SHGFI_SMALLICON,
+                IconSize::Large | IconSize::Jumbo => SHGFI_LARGEICON,
+            };
+
+        let result = SHGetFileInfoW(
+            PCWSTR(pidl as *const u16),
+            FILE_FLAGS_AND_ATTRIBUTES(0),
+            Some(&mut shfi),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            flags,
+        );
+
+        // 3. Always Free PIDL
+        CoTaskMemFree(Some(pidl as *const std::ffi::c_void));
+
+        if result == 0 || shfi.hIcon.is_invalid() {
+            return Err("Failed to get shell icon".into());
         }
 
         let hicon = shfi.hIcon;

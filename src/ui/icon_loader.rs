@@ -144,8 +144,64 @@ impl IconLoader {
                         }
                     }
 
-                    // Not in cache and blocking not allowed - return None to trigger async load
-                    return None;
+                    // FIX: If path doesn't exist (e.g. inside ZIP), try to extract using Shell Namespace (PIDL)
+                    // This creates the correct icon for EXEs, LNKs etc inside ZIPs.
+                    if !path.exists() {
+                        if let Ok((pixels, width, height)) = windows::extract_shell_icon(path, size)
+                        {
+                            let texture = ctx.load_texture(
+                                cache_key.clone(),
+                                egui::ColorImage::from_rgba_unmultiplied(
+                                    [width as usize, height as usize],
+                                    &pixels,
+                                ),
+                                egui::TextureOptions::LINEAR,
+                            );
+                            let cloned = texture.clone();
+                            self.icon_cache.put(cache_key, texture);
+                            return Some(cloned);
+                        }
+                        // If PIDL extraction fails, fallback to Generic Extension Logic below...
+                    } else {
+                        // For REAL files on disk: Return None to allow Async Loader to handle it
+                        // (prevents blocking UI for large EXEs on slow drives)
+                        return None;
+                    }
+                }
+            }
+        }
+
+        // Check if path is inside a ZIP file (virtual path)
+        // MUST check this BEFORE cache lookups to avoid returning stale generic icons
+        let path_str = path.to_string_lossy();
+        let is_virtual_path = path_str.to_lowercase().contains(".zip\\") 
+            || path_str.to_lowercase().contains(".zip/");
+
+        // For virtual paths (inside ZIPs), check cache first but load with Shell API if not cached
+        if is_virtual_path {
+            // Check cache first (specific to this file)
+            if let Some(texture) = self.icon_cache.get(&cache_key) {
+                return Some(texture.clone());
+            }
+
+            // Not in cache - use Shell Namespace API (PIDL) to get correct icon
+            // This works for folders, executables, and all file types inside ZIPs
+            match windows::extract_shell_icon(path, size) {
+                Ok((pixels, width, height)) => {
+                    let texture = ctx.load_texture(
+                        cache_key.clone(),
+                        egui::ColorImage::from_rgba_unmultiplied(
+                            [width as usize, height as usize],
+                            &pixels,
+                        ),
+                        egui::TextureOptions::LINEAR,
+                    );
+                    let cloned = texture.clone();
+                    self.icon_cache.put(cache_key, texture);
+                    return Some(cloned);
+                }
+                Err(_) => {
+                    // Fallback to generic extension logic below
                 }
             }
         }
