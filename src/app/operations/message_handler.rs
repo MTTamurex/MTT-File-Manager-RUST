@@ -3,11 +3,11 @@
 //! This module processes incoming messages from various background workers
 //! (filesystem events, thumbnails, folder sizes, etc.) and updates the UI state.
 
-use std::time::{Duration, Instant};
-use std::path::{Path, PathBuf};
-use eframe::egui;
 use crate::app::state::ImageViewerApp;
 use crate::ui::theme;
+use eframe::egui;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 impl ImageViewerApp {
     pub fn process_incoming_messages(&mut self, ctx: &egui::Context) {
@@ -25,7 +25,7 @@ impl ImageViewerApp {
             let old_disks = self.disks.clone();
             if self.reload_drive_list() {
                 self.last_drive_refresh = Instant::now();
-                
+
                 // AUTO-FOCUS PARA ISO RECÉM-MONTADA
                 if let Some(_iso_path) = self.pending_iso_mount.take() {
                     let mut target_drive = None;
@@ -39,12 +39,12 @@ impl ImageViewerApp {
                             }
                         }
                     }
-                    
+
                     if let Some(drive) = target_drive {
                         // Navega para ele!
                         self.navigate_to(&drive);
                     } else {
-                        // Se não encontrou drive válido, devolve para o estado pendente 
+                        // Se não encontrou drive válido, devolve para o estado pendente
                         // para tentar no próximo evento (pode ser que o Windows mande vários)
                         self.pending_iso_mount = Some(_iso_path);
                     }
@@ -55,6 +55,15 @@ impl ImageViewerApp {
                 }
                 // Force immediate repaint without waiting for input events
                 ctx.request_repaint_after(std::time::Duration::from_millis(0));
+            }
+        }
+
+        fn normalize_for_match(p: &Path) -> String {
+            let s = p.to_string_lossy().to_string().to_lowercase();
+            if let Some(stripped) = s.strip_prefix(r"\\?\") {
+                stripped.to_string()
+            } else {
+                s
             }
         }
 
@@ -70,16 +79,16 @@ impl ImageViewerApp {
                     }
                 }
                 FileOperationResult::DeleteCompleted { parent_folders } => {
-                    let current_str = self.current_path.to_lowercase();
+                    let current_str = normalize_for_match(Path::new(&self.current_path));
                     let mut should_reload_current = false;
                     for parent in parent_folders {
                         self.directory_cache.invalidate(&parent);
-                        let parent_str = parent.to_string_lossy().to_lowercase();
+                        let parent_str = normalize_for_match(parent.as_path());
                         if parent_str == current_str {
                             should_reload_current = true;
                         }
                         for tab in self.tab_manager.tabs.iter_mut() {
-                            let tab_path = tab.path.to_lowercase();
+                            let tab_path = normalize_for_match(Path::new(&tab.path));
                             if tab_path == parent_str {
                                 tab.items = std::sync::Arc::new(Vec::new());
                                 tab.all_items.clear();
@@ -90,46 +99,70 @@ impl ImageViewerApp {
                         self.load_folder(false);
                     }
                 }
-                FileOperationResult::MoveCompleted { source_folder } => {
-                    // Cross-tab sync: refresh any tab pointing to the source folder
-                    let source_str = source_folder.to_string_lossy().to_lowercase();
-                    let current_str = self.current_path.to_lowercase();
-                    
-                    // If active tab is viewing the source folder, reload immediately
-                    if current_str == source_str {
-                        eprintln!("[MOVE] Source folder matches current view, reloading: {}", self.current_path);
-                        self.load_folder(false);
-                    }
-                    
-                    // Also update cached items in other tabs pointing to this folder
+                FileOperationResult::CopyCompleted { dest_folder } => {
+                    let dest_str = normalize_for_match(dest_folder.as_path());
+                    let current_str = normalize_for_match(Path::new(&self.current_path));
+
+                    self.directory_cache.invalidate(&dest_folder);
                     for tab in self.tab_manager.tabs.iter_mut() {
-                        let tab_path = tab.path.to_lowercase();
-                        if tab_path == source_str {
-                            // Clear the tab's cached items so next switch triggers reload
-                            // Note: items is Arc<Vec<_>>, so we replace with a new empty Arc
+                        let tab_path = normalize_for_match(Path::new(&tab.path));
+                        if tab_path == dest_str {
                             tab.items = std::sync::Arc::new(Vec::new());
                             tab.all_items.clear();
-                            eprintln!("[MOVE] Cleared cached items for tab: {}", tab.path);
                         }
                     }
+
+                    if dest_str == current_str {
+                        eprintln!(
+                            "[COPY] Dest folder matches current view, reloading: {}",
+                            self.current_path
+                        );
+                        self.load_folder(false);
+                    }
                 }
-                FileOperationResult::Finished => {
-                    // General operation finished, maybe refresh some cache if needed
+                FileOperationResult::MoveCompleted {
+                    source_folder,
+                    dest_folder,
+                } => {
+                    let source_str = normalize_for_match(source_folder.as_path());
+                    let dest_str = normalize_for_match(dest_folder.as_path());
+                    let current_str = normalize_for_match(Path::new(&self.current_path));
+
+                    // 1. Source Logic (Item Removed)
+                    self.directory_cache.invalidate(&source_folder);
+                    self.directory_cache.invalidate(&dest_folder);
+
+                    if current_str == source_str {
+                        eprintln!(
+                            "[MOVE] Source folder matches current view, reloading: {}",
+                            self.current_path
+                        );
+                        self.load_folder(false);
+                    }
+
+                    // Also update cached items in other tabs pointing to this folder
+                    for tab in self.tab_manager.tabs.iter_mut() {
+                        let tab_path = normalize_for_match(Path::new(&tab.path));
+                        if tab_path == source_str || tab_path == dest_str {
+                            tab.items = std::sync::Arc::new(Vec::new());
+                            tab.all_items.clear();
+                        }
+                    }
+
+                    // 2. Destination Logic (Item Added)
+                    if current_str == dest_str {
+                        eprintln!(
+                            "[MOVE] Dest folder matches current view, reloading: {}",
+                            self.current_path
+                        );
+                        self.load_folder(false);
+                    }
                 }
+                FileOperationResult::Finished => {}
             }
         }
-
 
         // 2. CHECK DE AUTO-REFRESH (WATCHER)
-        fn normalize_for_match(p: &Path) -> String {
-            let s = p.to_string_lossy().to_string().to_lowercase();
-            if let Some(stripped) = s.strip_prefix(r"\\?\") {
-                stripped.to_string()
-            } else {
-                s
-            }
-        }
-
         fn clean_path(p: &Path) -> PathBuf {
             let s = p.to_string_lossy().to_string();
             if let Some(stripped) = s.strip_prefix(r"\\?\") {
@@ -219,7 +252,8 @@ impl ImageViewerApp {
                                 if grandparent_norm == current_path_norm {
                                     let cleaned_parent = clean_path(parent);
                                     if let Some(cache_parent) = cleaned_parent.parent() {
-                                        self.directory_cache.invalidate(&cache_parent.to_path_buf());
+                                        self.directory_cache
+                                            .invalidate(&cache_parent.to_path_buf());
                                     }
                                     eprintln!(
                                         "[FS] File in subfolder modified, invalidating: {:?}",
@@ -277,10 +311,7 @@ impl ImageViewerApp {
                         if let Some(cache_parent) = cleaned.parent() {
                             self.directory_cache.invalidate(&cache_parent.to_path_buf());
                         }
-                        eprintln!(
-                            "[FS] Direct subfolder modified: {:?}",
-                            cleaned.file_name()
-                        );
+                        eprintln!("[FS] Direct subfolder modified: {:?}", cleaned.file_name());
                         self.cache_manager.invalidate_folder_preview(&cleaned);
                     }
                 }
@@ -297,7 +328,8 @@ impl ImageViewerApp {
                                 "[FS] File in subfolder modified, invalidating: {:?}",
                                 cleaned_parent.file_name()
                             );
-                            self.cache_manager.invalidate_folder_preview(&cleaned_parent);
+                            self.cache_manager
+                                .invalidate_folder_preview(&cleaned_parent);
                         }
                     }
                 }
@@ -347,7 +379,10 @@ impl ImageViewerApp {
         if self.pending_auto_reload {
             let elapsed = self.last_auto_reload.elapsed();
             if elapsed > Duration::from_millis(theme::AUTO_RELOAD_MS) {
-                eprintln!("[DEBUG] Checking auto-reload for path: '{}'", self.current_path);
+                eprintln!(
+                    "[DEBUG] Checking auto-reload for path: '{}'",
+                    self.current_path
+                );
                 // VALIDA SE O PATH ATUAL AINDA EXISTE (pode ter sido renomeado/deletado)
                 // SKIP for special views (Recycle Bin/Computer) which are managed manually via events
                 if self.is_recycle_bin_view || self.is_computer_view {
@@ -500,12 +535,14 @@ impl ImageViewerApp {
 
             // Se a imagem veio vazia, marca como falha para evitar retry infinito
             if thumbnail_data.image_data.is_empty() {
-                self.cache_manager.mark_as_failed(thumbnail_data.path.clone());
+                self.cache_manager
+                    .mark_as_failed(thumbnail_data.path.clone());
                 continue;
             }
 
             // Adiciona ao buffer persistente para upload posterior
-            self.cache_manager.start_pending_upload(thumbnail_data.path.clone());
+            self.cache_manager
+                .start_pending_upload(thumbnail_data.path.clone());
             self.pending_thumbnails.push_back(thumbnail_data);
             received_any = true;
         }
@@ -535,8 +572,9 @@ impl ImageViewerApp {
         } else {
             0.7
         };
-        let max_uploads_per_frame =
-            ((base_max_uploads as f32) * perf_scale).round().clamp(1.0, 10.0) as usize;
+        let max_uploads_per_frame = ((base_max_uploads as f32) * perf_scale)
+            .round()
+            .clamp(1.0, 10.0) as usize;
 
         let mut uploads_this_frame = 0;
         let upload_start = Instant::now();
@@ -582,7 +620,8 @@ impl ImageViewerApp {
                 }
                 // Ensure thumbnail is still relevant (generation check again just in case)
                 if thumbnail_data.generation != self.generation {
-                    self.cache_manager.finish_pending_upload(&thumbnail_data.path);
+                    self.cache_manager
+                        .finish_pending_upload(&thumbnail_data.path);
                     continue;
                 }
 
@@ -599,19 +638,20 @@ impl ImageViewerApp {
                 );
 
                 // Carrega textura no GPU
-                let texture = if let Some((rgba_data, _, _)) = self.cache_manager.get_rgba_data(&path) {
-                    ctx.load_texture(
-                        path.to_string_lossy().to_string(),
-                        egui::ColorImage::from_rgba_unmultiplied(
-                            [width as usize, height as usize],
-                            rgba_data,
-                        ),
-                        egui::TextureOptions::NEAREST,
-                    )
-                } else {
-                    self.cache_manager.finish_pending_upload(&path);
-                    continue;
-                };
+                let texture =
+                    if let Some((rgba_data, _, _)) = self.cache_manager.get_rgba_data(&path) {
+                        ctx.load_texture(
+                            path.to_string_lossy().to_string(),
+                            egui::ColorImage::from_rgba_unmultiplied(
+                                [width as usize, height as usize],
+                                rgba_data,
+                            ),
+                            egui::TextureOptions::NEAREST,
+                        )
+                    } else {
+                        self.cache_manager.finish_pending_upload(&path);
+                        continue;
+                    };
 
                 self.cache_manager
                     .put_thumbnail(path.clone(), texture.clone());
