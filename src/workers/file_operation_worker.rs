@@ -17,19 +17,17 @@ pub enum FileOperationResult {
     /// Specifically for Recycle Bin operations to trigger targeted refresh
     RecycleBinChanged,
     /// Delete operation completed - parent folders need refresh
-    DeleteCompleted {
-        parent_folders: Vec<PathBuf>,
-    },
+    DeleteCompleted { parent_folders: Vec<PathBuf> },
     /// Move operation completed - source folder needs refresh in all tabs, dest needs reload if active
     MoveCompleted {
         source_folder: PathBuf,
         dest_folder: PathBuf,
     },
     /// Copy operation completed - dest folder needs reload if active
-    CopyCompleted {
-        dest_folder: PathBuf,
-    },
+    CopyCompleted { dest_folder: PathBuf },
     RenameCompleted {
+        path: PathBuf,
+        new_name: String,
         parent_folder: PathBuf,
     },
 }
@@ -140,6 +138,8 @@ pub fn start_file_operation_worker(
                     if success {
                         if let Some(parent) = path.parent() {
                             let _ = result_sender.send(FileOperationResult::RenameCompleted {
+                                path: path.clone(),
+                                new_name: new_name.clone(),
                                 parent_folder: parent.to_path_buf(),
                             });
                         }
