@@ -269,8 +269,8 @@ pub fn render_preview_panel(
                                        svg_manager: &mut SvgIconManager|
      -> Option<PreviewPanelAction> {
         let max_preview_width = ui.available_width() - 16.0;
-        let max_preview_side = max_preview_width.min(PREVIEW_MAX_HEIGHT);
-        let max_preview_size = egui::vec2(max_preview_side, max_preview_side);
+        let max_preview_height = PREVIEW_MAX_HEIGHT;
+        let max_preview_size = egui::vec2(max_preview_width, max_preview_height);
 
         let image_resp = ui.add(
             egui::Image::new(tex)
@@ -404,9 +404,8 @@ pub fn render_preview_panel(
             gif_player.update(ui.ctx());
             if let Some(texture) = gif_player.texture() {
                 let max_preview_width = ui.available_width() - 16.0;
-                let max_preview_height = ui.available_height() * 0.35;
-                let max_preview_side = max_preview_width.min(max_preview_height);
-                let max_preview_size = egui::vec2(max_preview_side, max_preview_side);
+                let max_preview_height = PREVIEW_MAX_HEIGHT;
+                let max_preview_size = egui::vec2(max_preview_width, max_preview_height);
                 ui.add(
                     egui::Image::new(texture)
                         .max_size(max_preview_size)
@@ -427,8 +426,8 @@ pub fn render_preview_panel(
                 let is_muted = video_state.as_ref().map(|s| s.is_muted).unwrap_or(false);
 
         let max_preview_width = ui.available_width() - 16.0;
-        let max_preview_side = max_preview_width.min(PREVIEW_MAX_HEIGHT);
-        let max_preview_size = egui::vec2(max_preview_side, max_preview_side);
+        let max_preview_height = PREVIEW_MAX_HEIGHT;
+        let max_preview_size = egui::vec2(max_preview_width, max_preview_height);
 
                 // PATH CHECK: Only show active player if the file is the one playing AND we are the owner
                 let paths_match = preview.path() == Some(&file.path);
@@ -1154,8 +1153,8 @@ pub fn render_preview_panel(
             // Show thumbnail with Play Overlay
             if let Some(tex) = &texture {
                 let max_preview_width = ui.available_width() - 16.0;
-                let max_preview_side = max_preview_width.min(PREVIEW_MAX_HEIGHT);
-                let max_preview_size = egui::vec2(max_preview_side, max_preview_side);
+                let max_preview_height = PREVIEW_MAX_HEIGHT;
+                let max_preview_size = egui::vec2(max_preview_width, max_preview_height);
 
                 let image_resp = ui.add(
                     egui::Image::new(tex)
