@@ -11,6 +11,7 @@
 use crate::tabs::TabManager;
 use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
+use crate::ui::theme;
 use eframe::egui::{self, Color32, CornerRadius, Stroke, Vec2};
 
 /// Result of tab bar interaction
@@ -59,9 +60,9 @@ pub fn render_tab_bar(
         Color32::from_rgb(230, 230, 230) // Darker gray for inactive tabs
     };
     let hover_bg = if is_dark {
-        Color32::from_rgb(55, 55, 55)
+        theme::color_dark_hover()
     } else {
-        Color32::from_rgb(238, 238, 238) // Medium gray for hover
+        theme::color_hover()
     };
     let text_color = if is_dark {
         Color32::from_rgb(220, 220, 220)
@@ -423,9 +424,9 @@ fn render_window_controls(
     };
     // Hover um pouco mais claro
     let hover_bg = if is_dark {
-        Color32::from_rgb(60, 60, 60)
+        theme::color_dark_hover()
     } else {
-        Color32::from_rgb(218, 218, 218)
+        theme::color_hover()
     };
     let close_hover_bg = Color32::from_rgb(232, 17, 35); // Windows red
 

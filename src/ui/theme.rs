@@ -29,14 +29,14 @@ pub fn color_selection_hover() -> Color32 {
 pub const COLOR_ACCENT: Color32 = Color32::from_rgb(0, 120, 215);
 
 pub fn color_hover() -> Color32 {
-    Color32::from_black_alpha(40)
+    Color32::from_black_alpha(15)
 }
 
 // === COLORS (Dark Mode) ===
 pub const COLOR_DARK_BG: Color32 = Color32::from_rgb(45, 45, 45);
 
 pub fn color_dark_hover() -> Color32 {
-    Color32::from_white_alpha(40)
+    Color32::from_white_alpha(25)
 }
 
 // === TIMING ===
