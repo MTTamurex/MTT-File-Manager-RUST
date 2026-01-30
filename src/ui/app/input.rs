@@ -127,7 +127,10 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         }
 
         // Ctrl + Shift + N: Nova Pasta
-        if ctx.input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::N)) {
+        if ctx.input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::N))
+            && !app.is_computer_view
+            && !app.is_recycle_bin_view
+        {
             app.create_new_folder();
             user_active = true;
         }

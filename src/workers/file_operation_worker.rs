@@ -25,6 +25,7 @@ pub enum FileOperationResult {
     },
     /// Copy operation completed - dest folder needs reload if active
     CopyCompleted { dest_folder: PathBuf },
+    RenameCompleted { parent_folder: PathBuf },
 }
 
 /// Transparent wrapper for HWND to make it Send.
@@ -128,7 +129,14 @@ pub fn start_file_operation_worker(
                     new_name,
                     hwnd,
                 } => {
-                    let _ = shell_operations::rename_item_with_shell(&path, &new_name, hwnd.0);
+                    let success = shell_operations::rename_item_with_shell(&path, &new_name, hwnd.0);
+                    if success {
+                        if let Some(parent) = path.parent() {
+                            let _ = result_sender.send(FileOperationResult::RenameCompleted {
+                                parent_folder: parent.to_path_buf(),
+                            });
+                        }
+                    }
                 }
                 FileOperationRequest::Copy {
                     path,

@@ -1,6 +1,7 @@
 use eframe::egui;
 use crate::app::ImageViewerApp;
 use crate::ui::app;
+use crate::ui::theme;
 use crate::infrastructure::windows::window_subclass::is_in_size_move;
 
 impl eframe::App for ImageViewerApp {
@@ -364,12 +365,13 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                 Copy,
                 Paste,
                 Rename,
+                CreateFolder,
                 Delete,
             }
             let mut action = SecAction::None;
 
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
+                ui.spacing_mut().item_spacing = egui::vec2(6.0, 0.0);
 
                 let icon_size = egui::vec2(28.0, 28.0); // Consistent button size
                 
@@ -378,6 +380,7 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                 let has_selection = app.selected_file.is_some() || !app.multi_selection.is_empty();
                 let is_single_selection = app.multi_selection.len() <= 1 && (app.multi_selection.len() == 1 || app.selected_file.is_some());
                 let can_paste = app.clipboard.has_content();
+                let can_create_folder = !app.is_computer_view && !app.is_recycle_bin_view;
 
                 // Colors
                 let icon_color = if ui.visuals().dark_mode {
@@ -393,24 +396,52 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                 // --- Helper Closure for Rendering Buttons ---
                 let mut render_btn = |icon_name: &str, enabled: bool, tooltip: &str| -> bool {
                     let color = if enabled { icon_color } else { disabled_color };
-                    let response = if let Some(texture) = svg_manager.get_icon(
+                    let sense = if enabled { egui::Sense::click() } else { egui::Sense::hover() };
+                    let (rect, response) = ui.allocate_exact_size(icon_size, sense);
+
+                    if enabled && response.hovered() {
+                        let bg_color = if ui.visuals().dark_mode {
+                            theme::color_dark_hover()
+                        } else {
+                            theme::color_hover()
+                        };
+                        ui.painter().rect_filled(rect, 6.0, bg_color);
+                    }
+
+                    if let Some(texture) = svg_manager.get_icon(
                         ui.ctx(),
                         icon_name,
-                        32, // Render high-res
+                        32,
                         color,
                     ) {
-                        let img = egui::Image::from_texture(egui::load::SizedTexture::new(
+                        let display_size = if icon_name == "folder_new" { 18.0 } else { 16.0 };
+                        let icon_rect = egui::Rect::from_center_size(
+                            rect.center(),
+                            egui::vec2(display_size, display_size),
+                        );
+                        ui.painter().image(
                             texture.id(),
-                            egui::vec2(16.0, 16.0), // Display size
-                        ));
-                         ui.add_sized(icon_size, egui::ImageButton::new(img).frame(false))
+                            icon_rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
                     } else {
-                        // Fallback text
                         let fallback = icon_name.chars().next().unwrap_or('?').to_string();
-                        let btn = egui::Button::new(egui::RichText::new(fallback).size(12.0));
-                        ui.add_sized(icon_size, btn)
+                        ui.painter().text(
+                            rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            fallback,
+                            egui::FontId::proportional(12.0),
+                            egui::Color32::from_rgba_unmultiplied(color[0], color[1], color[2], color[3]),
+                        );
+                    }
+
+                    let response = if enabled {
+                        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+                    } else {
+                        response
                     };
-                    
+
                     if enabled {
                         response.on_hover_text(tooltip).clicked()
                     } else {
@@ -439,7 +470,12 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                      action = SecAction::Rename;
                 }
 
-                // 5. Delete
+                // 5. Create Folder
+                if render_btn("folder_new", can_create_folder, "Criar Nova Pasta (Ctrl+Shift+N)") {
+                     action = SecAction::CreateFolder;
+                }
+
+                // 6. Delete
                 if render_btn("delete", has_selection, "Excluir (Del)") {
                      action = SecAction::Delete;
                 }
@@ -458,6 +494,7 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                         }
                     }
                 },
+                SecAction::CreateFolder => app.create_new_folder(),
                 SecAction::Delete => {
                     let mut targets = Vec::new();
                     if app.multi_selection.is_empty() {

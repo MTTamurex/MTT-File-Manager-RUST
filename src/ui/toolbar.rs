@@ -85,22 +85,6 @@ pub fn render_toolbar(
 
         ui.separator();
 
-        // Botão de Nova Pasta
-        if widgets::icon_button(
-            ui,
-            svg_manager,
-            theme::ICON_FOLDER_ADD,
-            "Criar Nova Pasta (Ctrl+Shift+N)",
-            None,
-        )
-        .clicked()
-            && !_is_renaming
-        {
-            action = Some(ToolbarAction::CreateFolder);
-        }
-
-        ui.separator();
-
         // Home / Computer
         if widgets::icon_button(
             ui,
