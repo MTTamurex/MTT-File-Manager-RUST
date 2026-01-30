@@ -7,8 +7,8 @@ use std::sync::mpsc::Receiver;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
 
-use crate::infrastructure::windows::shell_operations;
 use crate::infrastructure::windows::recycle_bin;
+use crate::infrastructure::windows::shell_operations;
 
 /// Results sent back from the worker to the UI.
 pub enum FileOperationResult {
@@ -18,8 +18,13 @@ pub enum FileOperationResult {
     RecycleBinChanged,
     /// Delete operation completed - parent folders need refresh
     DeleteCompleted { parent_folders: Vec<PathBuf> },
-    /// Move operation completed - source folder needs refresh in all tabs
-    MoveCompleted { source_folder: PathBuf },
+    /// Move operation completed - source folder needs refresh in all tabs, dest needs reload if active
+    MoveCompleted {
+        source_folder: PathBuf,
+        dest_folder: PathBuf,
+    },
+    /// Copy operation completed - dest folder needs reload if active
+    CopyCompleted { dest_folder: PathBuf },
 }
 
 /// Transparent wrapper for HWND to make it Send.
@@ -61,16 +66,31 @@ pub enum FileOperationRequest {
 impl FileOperationRequest {
     // Helper to wrap HWND
     pub fn delete(paths: Vec<PathBuf>, hwnd: HWND) -> Self {
-        Self::Delete { paths, hwnd: SendHwnd(hwnd) }
+        Self::Delete {
+            paths,
+            hwnd: SendHwnd(hwnd),
+        }
     }
     pub fn rename(path: PathBuf, new_name: String, hwnd: HWND) -> Self {
-        Self::Rename { path, new_name, hwnd: SendHwnd(hwnd) }
+        Self::Rename {
+            path,
+            new_name,
+            hwnd: SendHwnd(hwnd),
+        }
     }
     pub fn copy(path: PathBuf, dest_folder: PathBuf, hwnd: HWND) -> Self {
-        Self::Copy { path, dest_folder, hwnd: SendHwnd(hwnd) }
+        Self::Copy {
+            path,
+            dest_folder,
+            hwnd: SendHwnd(hwnd),
+        }
     }
     pub fn file_move(path: PathBuf, dest_folder: PathBuf, hwnd: HWND) -> Self {
-        Self::Move { path, dest_folder, hwnd: SendHwnd(hwnd) }
+        Self::Move {
+            path,
+            dest_folder,
+            hwnd: SendHwnd(hwnd),
+        }
     }
 }
 
@@ -103,30 +123,49 @@ pub fn start_file_operation_worker(
                     }
                     let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
                 }
-                FileOperationRequest::Rename { path, new_name, hwnd } => {
+                FileOperationRequest::Rename {
+                    path,
+                    new_name,
+                    hwnd,
+                } => {
                     let _ = shell_operations::rename_item_with_shell(&path, &new_name, hwnd.0);
                 }
-                FileOperationRequest::Copy { path, dest_folder, hwnd } => {
+                FileOperationRequest::Copy {
+                    path,
+                    dest_folder,
+                    hwnd,
+                } => {
                     if crate::infrastructure::windows::is_shell_navigation_path(&path) {
-                        let _ = shell_operations::copy_item_with_file_op(&path, &dest_folder, hwnd.0);
+                        let _ =
+                            shell_operations::copy_item_with_file_op(&path, &dest_folder, hwnd.0);
                     } else {
                         let _ = shell_operations::copy_item_with_shell(&path, &dest_folder, hwnd.0);
                     }
+                    let _ = result_sender.send(FileOperationResult::CopyCompleted { dest_folder });
                 }
-                FileOperationRequest::Move { path, dest_folder, hwnd } => {
+                FileOperationRequest::Move {
+                    path,
+                    dest_folder,
+                    hwnd,
+                } => {
                     // Capture source folder before move
                     let source_folder = path.parent().map(|p| p.to_path_buf());
-                    let success = shell_operations::move_item_with_shell(&path, &dest_folder, hwnd.0);
+                    let success =
+                        shell_operations::move_item_with_shell(&path, &dest_folder, hwnd.0);
                     // Notify source folder for cross-tab refresh
                     if success {
                         if let Some(src) = source_folder {
-                            let _ = result_sender.send(FileOperationResult::MoveCompleted { source_folder: src });
+                            let _ = result_sender.send(FileOperationResult::MoveCompleted {
+                                source_folder: src,
+                                dest_folder,
+                            });
                         }
                     }
                 }
                 FileOperationRequest::RestoreFromRecycleBin { items } => {
                     for (physical_path, original_path) in items {
-                        let _ = recycle_bin::restore_from_recycle_bin(&physical_path, &original_path);
+                        let _ =
+                            recycle_bin::restore_from_recycle_bin(&physical_path, &original_path);
                     }
                     let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
                 }
@@ -141,7 +180,7 @@ pub fn start_file_operation_worker(
                     let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
                 }
             }
-            
+
             // Notify general completion for other operations
             let _ = result_sender.send(FileOperationResult::Finished);
         }

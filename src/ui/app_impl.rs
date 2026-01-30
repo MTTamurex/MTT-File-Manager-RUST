@@ -70,6 +70,9 @@ impl eframe::App for ImageViewerApp {
         // 7. Layout: Toolbar (Top 2) - lightweight, always render
         render_toolbar_layer(self, ctx);
 
+        // 7b. Layout: Secondary Toolbar (Top 3) - lightweight, always render
+        render_secondary_toolbar_layer(self, ctx);
+
         // 8-11. Heavy operations: Skip during resize for smooth animation
         if is_resizing {
             // Simplified placeholder during resize
@@ -336,6 +339,142 @@ fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     }
                     _ => {}
                 }
+            }
+        });
+}
+
+fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context) {
+    egui::TopBottomPanel::top("secondary_nav_bar")
+        .show_separator_line(true)
+        .exact_height(46.0) // Same height as main toolbar
+        .frame(egui::Frame {
+            fill: if ctx.style().visuals.dark_mode {
+                egui::Color32::from_rgb(45, 45, 45)
+            } else {
+                egui::Color32::from_rgb(243, 243, 243)
+            },
+            inner_margin: egui::Margin { left: 8, right: 8, top: 7, bottom: 7 },
+            ..Default::default()
+        })
+        .show(ctx, |ui| {
+            // Internal enum to defer actions and avoid borrow checker conflicts
+            enum SecAction {
+                None,
+                Cut,
+                Copy,
+                Paste,
+                Rename,
+                Delete,
+            }
+            let mut action = SecAction::None;
+
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(4.0, 0.0);
+
+                let icon_size = egui::vec2(28.0, 28.0); // Consistent button size
+                
+                // --- Logic for Enablement ---
+                // Calculated BEFORE the mutable borrow of svg_icon_manager
+                let has_selection = app.selected_file.is_some() || !app.multi_selection.is_empty();
+                let is_single_selection = app.multi_selection.len() <= 1 && (app.multi_selection.len() == 1 || app.selected_file.is_some());
+                let can_paste = app.clipboard.has_content();
+
+                // Colors
+                let icon_color = if ui.visuals().dark_mode {
+                    [220, 220, 220, 255]
+                } else {
+                    [60, 60, 60, 255]
+                };
+                let disabled_color = [128, 128, 128, 180];
+
+                // Borrrow manager for the closure scope
+                let svg_manager = &mut app.svg_icon_manager;
+
+                // --- Helper Closure for Rendering Buttons ---
+                let mut render_btn = |icon_name: &str, enabled: bool, tooltip: &str| -> bool {
+                    let color = if enabled { icon_color } else { disabled_color };
+                    let response = if let Some(texture) = svg_manager.get_icon(
+                        ui.ctx(),
+                        icon_name,
+                        32, // Render high-res
+                        color,
+                    ) {
+                        let img = egui::Image::from_texture(egui::load::SizedTexture::new(
+                            texture.id(),
+                            egui::vec2(16.0, 16.0), // Display size
+                        ));
+                         ui.add_sized(icon_size, egui::ImageButton::new(img).frame(false))
+                    } else {
+                        // Fallback text
+                        let fallback = icon_name.chars().next().unwrap_or('?').to_string();
+                        let btn = egui::Button::new(egui::RichText::new(fallback).size(12.0));
+                        ui.add_sized(icon_size, btn)
+                    };
+                    
+                    if enabled {
+                        response.on_hover_text(tooltip).clicked()
+                    } else {
+                        response.on_hover_text(format!("{} (Desabilitado)", tooltip));
+                        false
+                    }
+                };
+
+                // 1. Cut
+                if render_btn("cut", has_selection, "Recortar (Ctrl+X)") {
+                     action = SecAction::Cut;
+                }
+
+                // 2. Copy
+                if render_btn("copy", has_selection, "Copiar (Ctrl+C)") {
+                     action = SecAction::Copy;
+                }
+
+                // 3. Paste
+                if render_btn("paste", can_paste, "Colar (Ctrl+V)") {
+                     action = SecAction::Paste;
+                }
+
+                // 4. Rename
+                if render_btn("rename", is_single_selection, "Renomear (F2)") {
+                     action = SecAction::Rename;
+                }
+
+                // 5. Delete
+                if render_btn("delete", has_selection, "Excluir (Del)") {
+                     action = SecAction::Delete;
+                }
+            });
+
+            // Execute deferred action
+            match action {
+                SecAction::Cut => app.command_cut(Option::from(app.selected_item)),
+                SecAction::Copy => app.command_copy(Option::from(app.selected_item)),
+                SecAction::Paste => app.command_paste(None),
+                SecAction::Rename => {
+                     if let Some(idx) = app.selected_item {
+                        if let Some(item) = app.items.get(idx) {
+                            app.renaming_state = Some((idx, item.name.clone()));
+                            app.focus_rename = true;
+                        }
+                    }
+                },
+                SecAction::Delete => {
+                    let mut targets = Vec::new();
+                    if app.multi_selection.is_empty() {
+                         if let Some(idx) = app.selected_item {
+                             if let Some(item) = app.items.get(idx) {
+                                 targets.push(item.path.clone());
+                             }
+                         }
+                    } else {
+                        targets.extend(app.multi_selection.iter().cloned());
+                    }
+
+                    if !targets.is_empty() {
+                        app.delete_with_shell_for_paths(&targets);
+                    }
+                },
+                SecAction::None => {}
             }
         });
 }
