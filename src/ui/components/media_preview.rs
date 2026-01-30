@@ -163,6 +163,14 @@ impl MediaPreview {
         }
     }
 
+    pub fn is_visible(&self) -> bool {
+        if let MediaPreview::Video(player) = self {
+            player.is_visible
+        } else {
+            false
+        }
+    }
+
     /// Get video playback state
     pub fn get_video_state(&self) -> Option<VideoState> {
         if let MediaPreview::Video(player) = self {
