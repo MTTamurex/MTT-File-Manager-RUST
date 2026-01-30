@@ -50,8 +50,7 @@ pub struct ListViewContext<'a> {
     pub last_scroll_offset: &'a mut f32,
     /// Conjunto de itens aguardando upload GPU
     pub pending_upload_set: &'a mut FxHashSet<PathBuf>,
-    /// PERFORMANCE: True if video is playing in docked mode (tooltip avoids video area)
-    pub is_video_playing_docked: bool,
+    pub is_video_docked_visible: bool,
     pub prefetch_rows: usize,
 }
 
@@ -679,19 +678,18 @@ fn render_list_item(
 
                 // When video is docked, the preview panel takes ~25-30% of window width
                 // Only flip tooltip when it would actually overlap the video area
-                let effective_right = if ctx.is_video_playing_docked {
+                let effective_right = if ctx.is_video_docked_visible {
                     screen_right * 0.72 // Preview panel is ~28% of window
                 } else {
                     screen_right
                 };
 
-                let tooltip_pos = if mouse_pos.x + tooltip_width > effective_right {
-                    // Position tooltip to the LEFT of the item
-                    egui::pos2(rect.left() - tooltip_width - 10.0, mouse_pos.y)
-                        .max(egui::pos2(10.0, mouse_pos.y))
+                let tooltip_x = if mouse_pos.x + tooltip_width > effective_right {
+                    (effective_right - tooltip_width - 5.0).max(10.0)
                 } else {
-                    mouse_pos
+                    mouse_pos.x
                 };
+                let tooltip_pos = egui::pos2(tooltip_x, mouse_pos.y);
 
                 // Use Order::Tooltip layer (though it won't help with native HWND windows)
                 let tooltip_layer = egui::LayerId::new(egui::Order::Tooltip, response.id.with("tooltip"));

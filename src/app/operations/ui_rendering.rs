@@ -165,7 +165,7 @@ impl ImageViewerApp {
 
         // Criar contexto com referências mutáveis separadas
         let scroll_to_selected = self.scroll_to_selected;
-        let is_video_playing_docked = self.is_video_playing_docked();
+        let is_video_docked_visible = self.is_video_docked_visible();
         let multi_selection = &self.multi_selection;
         let is_ssd = io_priority::is_ssd(&PathBuf::from(&self.current_path));
         let prefetch_rows = if is_ssd { 1 } else { 3 };
@@ -199,7 +199,7 @@ impl ImageViewerApp {
             last_scroll_time: &mut self.last_scroll_time,
             last_scroll_offset: &mut self.last_scroll_offset,
             pending_upload_set: &mut self.cache_manager.pending_upload_set,
-            is_video_playing_docked,
+            is_video_docked_visible,
             prefetch_rows,
         };
 
@@ -605,7 +605,7 @@ impl ImageViewerApp {
         self.pending_ops.clear();
 
         // Check if video is playing in docked mode to reduce disk I/O
-        let is_video_playing_docked = self.is_video_playing_docked();
+        let is_video_docked_visible = self.is_video_docked_visible();
 
         let is_ssd = io_priority::is_ssd(&PathBuf::from(&self.current_path));
         let prefetch_rows = if is_ssd { 1 } else { 3 };
@@ -641,7 +641,7 @@ impl ImageViewerApp {
             last_scroll_time: &mut self.last_scroll_time,
             last_scroll_offset: &mut self.last_scroll_offset,
             pending_upload_set: &mut self.cache_manager.pending_upload_set,
-            is_video_playing_docked,
+            is_video_docked_visible,
             prefetch_rows,
         };
 

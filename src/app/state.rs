@@ -268,6 +268,14 @@ impl ImageViewerApp {
         false
     }
 
+    pub fn is_video_docked_visible(&self) -> bool {
+        if let Some(preview) = &self.media_preview {
+            !preview.is_detached() && preview.is_visible()
+        } else {
+            false
+        }
+    }
+
     /// Check if the media player should currently capture all keyboard arrow/space input.
     /// Returns true if player is detached/fullscreen AND has focus.
     pub fn is_media_keyboard_focused(&self) -> bool {
