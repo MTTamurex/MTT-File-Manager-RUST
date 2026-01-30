@@ -98,11 +98,15 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, fr
         let _right_panel_response = egui::SidePanel::right("preview_panel")
             .exact_width(target_width)
             .resizable(false)  // Resize handled manually via drag handles
-            .frame(egui::Frame::NONE.fill(if ctx.style().visuals.dark_mode {
-                egui::Color32::from_rgb(45, 45, 45)
-            } else {
-                egui::Color32::WHITE
-            }))
+            .frame(egui::Frame {
+                fill: if ctx.style().visuals.dark_mode {
+                    egui::Color32::from_rgb(45, 45, 45)
+                } else {
+                    egui::Color32::WHITE
+                },
+                inner_margin: egui::Margin { left: 12, right: 12, top: 8, bottom: 8 },
+                ..Default::default()
+            })
             .show(ctx, |ui| {
                 use crate::ui::preview_panel::{render_preview_panel, PreviewPanelAction};
 
