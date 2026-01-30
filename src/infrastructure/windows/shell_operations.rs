@@ -4,8 +4,8 @@
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use windows::{
-    core::*, Win32::Foundation::*, Win32::System::Com::*,
-    Win32::UI::Shell::Common::*, Win32::UI::Shell::*, Win32::UI::WindowsAndMessaging::*,
+    core::*, Win32::Foundation::*, Win32::System::Com::*, Win32::UI::Shell::Common::*,
+    Win32::UI::Shell::*, Win32::UI::WindowsAndMessaging::*,
 };
 
 /// Opens a file with its default application using ShellExecuteW.
@@ -113,7 +113,9 @@ pub fn show_shell_context_menu(
         }
 
         // SAFETY: hmenu is a valid menu handle; command ids start at 1.
-        context_menu.QueryContextMenu(hmenu, 0, 1, 0x7FFF, windows::Win32::UI::Shell::CMF_NORMAL).ok()?;
+        context_menu
+            .QueryContextMenu(hmenu, 0, 1, 0x7FFF, windows::Win32::UI::Shell::CMF_NORMAL)
+            .ok()?;
 
         let command_id = TrackPopupMenuEx(
             hmenu,
@@ -208,8 +210,10 @@ fn paths_to_double_null_terminated(paths: &[std::path::PathBuf]) -> Vec<u16> {
 /// Deletes multiple files or directories using Windows Shell (moves to Recycle Bin by default).
 /// Returns true if operation was successful (not cancelled).
 pub fn delete_items_with_shell(paths: &[std::path::PathBuf], hwnd: HWND) -> bool {
-    if paths.is_empty() { return false; }
-    
+    if paths.is_empty() {
+        return false;
+    }
+
     let from_vec = paths_to_double_null_terminated(paths);
 
     let mut op = SHFILEOPSTRUCTW {
@@ -238,6 +242,14 @@ pub fn rename_item_with_shell(path: &Path, new_name: &str, hwnd: HWND) -> bool {
 
     let new_path = parent.join(new_name);
 
+    // CRITICO: Verificação manual de colisão.
+    // Se o destino JÁ EXISTE, o SHFileOperation com FOF_RENAME pode tentar mesclar (pastas) ou substituir silenciosamente se FOF_NOCONFIRMATION estiver ativo.
+    // O usuário relatou que a pasta "sumiu" ao renomear para um nome existente.
+    // A melhor proteção é impedir o rename se o destino já existe.
+    if new_path.exists() {
+        return false;
+    }
+
     let from_str = path.to_string_lossy();
     let to_str = new_path.to_string_lossy();
 
@@ -249,7 +261,9 @@ pub fn rename_item_with_shell(path: &Path, new_name: &str, hwnd: HWND) -> bool {
         wFunc: FO_RENAME,
         pFrom: PCWSTR(from_vec.as_ptr()),
         pTo: PCWSTR(to_vec.as_ptr()),
-        fFlags: (FOF_ALLOWUNDO | FOF_NO_UI).0 as u16,
+        // REMOVIDO FOF_NO_UI para permitir que o Windows mostre erros se algo der errado
+        // MANTIDO FOF_ALLOWUNDO para permitir Ctrl+Z
+        fFlags: (FOF_ALLOWUNDO).0 as u16,
         ..Default::default()
     };
 
@@ -316,32 +330,42 @@ pub fn move_item_with_shell(path: &Path, dest_folder: &Path, hwnd: HWND) -> bool
 pub fn copy_item_with_file_op(path: &Path, dest_folder: &Path, hwnd: HWND) -> bool {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-        
+
         // Use IFileOperation for modern Shell features (like ZIP extraction)
         let file_op: IFileOperation = match CoCreateInstance(&FileOperation, None, CLSCTX_ALL) {
             Ok(op) => op,
-            Err(_) => return copy_item_with_shell(path, dest_folder, hwnd), 
+            Err(_) => return copy_item_with_shell(path, dest_folder, hwnd),
         };
-        
+
         let _ = file_op.SetOwnerWindow(hwnd);
         let _ = file_op.SetOperationFlags(FOF_ALLOWUNDO | FOF_WANTNUKEWARNING);
-        
-        let src_wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
-        let src_item: IShellItem = match SHCreateItemFromParsingName(PCWSTR(src_wide.as_ptr()), None) {
-            Ok(i) => i,
-            Err(_) => return copy_item_with_shell(path, dest_folder, hwnd),
-        };
-        
-        let dest_wide: Vec<u16> = dest_folder.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
-        let dest_item: IShellItem = match SHCreateItemFromParsingName(PCWSTR(dest_wide.as_ptr()), None) {
-            Ok(i) => i,
-            Err(_) => return copy_item_with_shell(path, dest_folder, hwnd),
-        };
-        
+
+        let src_wide: Vec<u16> = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let src_item: IShellItem =
+            match SHCreateItemFromParsingName(PCWSTR(src_wide.as_ptr()), None) {
+                Ok(i) => i,
+                Err(_) => return copy_item_with_shell(path, dest_folder, hwnd),
+            };
+
+        let dest_wide: Vec<u16> = dest_folder
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let dest_item: IShellItem =
+            match SHCreateItemFromParsingName(PCWSTR(dest_wide.as_ptr()), None) {
+                Ok(i) => i,
+                Err(_) => return copy_item_with_shell(path, dest_folder, hwnd),
+            };
+
         if file_op.CopyItem(&src_item, &dest_item, None, None).is_err() {
             return copy_item_with_shell(path, dest_folder, hwnd);
         }
-        
+
         file_op.PerformOperations().is_ok()
     }
 }
