@@ -167,7 +167,12 @@ pub trait GridViewOperations {
     fn navigate_to(&mut self, path: &str);
     fn open_with_shell(&mut self, path: &PathBuf);
     fn request_thumbnail_load(&mut self, path: PathBuf, size: u32);
-    fn request_thumbnail_load_with_index(&mut self, path: PathBuf, size: u32, directory_index: usize);
+    fn request_thumbnail_load_with_index(
+        &mut self,
+        path: PathBuf,
+        size: u32,
+        directory_index: usize,
+    );
     fn request_folder_scan(&mut self, path: PathBuf);
     fn request_folder_preview_load(&mut self, path: PathBuf);
     fn request_thumbnail_prefetch(&mut self, path: PathBuf, size: u32);
@@ -368,9 +373,7 @@ pub fn render_grid_view(
 
         // STANDARD RENDERING
         let inner_rect = rect.shrink(3.0);
-        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(inner_rect), |ui| {
-            render_item_slot_for_grid(ui, index, item, ctx, is_scrolling);
-        });
+        render_item_slot_for_grid(ui, inner_rect, index, item, ctx, is_scrolling);
     }
 
     // --- MANUAL VIRTUALIZATION START ---
@@ -399,21 +402,30 @@ pub fn render_grid_view(
     // 2. Interpolate Visual Scroll (Frame-based smoothing)
     let scroll_target = *ctx.mut_scroll_offset_y;
     let scroll_state_id = ui.id().with("scroll_state");
-    // Limit dt to avoid massive jumps on lag spikes (e.g., 30ms max)
-    let dt = ui.input(|i| i.stable_dt).min(0.03);
+    // Limit dt to avoid massive jumps on lag spikes
+    let dt = ui.input(|i| i.stable_dt).min(0.05);
 
     let visual_scroll = ui.ctx().data_mut(|d| {
         let state = d.get_temp_mut_or_insert_with::<ScrollState>(scroll_state_id, || ScrollState {
             visual_scroll_y: scroll_target,
         });
 
-        // LERP: Move 25% of the way to target per 16ms frame (approx)
-        // Adjust '15.0' to tune stiffness/smoothness
-        let t = (dt * 15.0).min(1.0);
-        state.visual_scroll_y = state.visual_scroll_y + (scroll_target - state.visual_scroll_y) * t;
+        // TUNED SMOOTHING:
+        // Use a stiffer spring (higher factor) to reduce "heavy/laggy" feel.
+        // Factor 25.0 = ~60% movement per 33ms frame (snappy but smooth)
+        // Factor 15.0 was ~40% (too floating)
+        let t = (dt * 25.0).min(1.0);
+
+        // If delta is huge (page jump), skip smoothing to avoid "teleporting" look
+        if (state.visual_scroll_y - scroll_target).abs() > viewport_h * 1.5 {
+            state.visual_scroll_y = scroll_target;
+        } else {
+            state.visual_scroll_y =
+                state.visual_scroll_y + (scroll_target - state.visual_scroll_y) * t;
+        }
 
         // Snap to target if very close to stop micro-adjustments
-        if (state.visual_scroll_y - scroll_target).abs() < 0.5 {
+        if (state.visual_scroll_y - scroll_target).abs() < 1.0 {
             state.visual_scroll_y = scroll_target;
         }
 
@@ -428,14 +440,12 @@ pub fn render_grid_view(
     // Use visual_scroll for rendering from here on
     let current_scroll = visual_scroll;
 
-    // PERFORMANCE: Track scroll changes for GPU upload throttling (using visual scroll to capture checking)
-    // Note: We update last_scroll_offset matching target to keep logic consistent with state,
-    // but we use visual change to trigger "is moving" logic.
+    // PERFORMANCE: Track scroll changes
     if (*ctx.mut_scroll_offset_y - *ctx.last_scroll_offset).abs() > 0.1 {
         *ctx.last_scroll_time = std::time::Instant::now();
         *ctx.last_scroll_offset = *ctx.mut_scroll_offset_y;
     }
-    // Simple "is scrolling" check for optimization (if visual is changing, we are scrolling)
+    // Is scrolling if visual position is changing
     let is_scrolling = visual_scroll != scroll_target;
 
     // 2.5 KEYBOARD SCROLL SYNC: Ensure selected item is visible
@@ -811,6 +821,7 @@ pub fn render_grid_view(
 /// PERFORMANCE: Uses shared buffers from ctx.pending_ops instead of allocating per-item
 fn render_item_slot_for_grid(
     ui: &mut Ui,
+    rect: Rect,
     idx: usize,
     item: &FileEntry,
     ctx: &mut GridViewContext,
@@ -892,7 +903,7 @@ fn render_item_slot_for_grid(
             pending_ops: ctx.pending_ops,
         };
 
-        render_item_slot(ui, &mut item_slot_ctx, &mut simple_ops);
+        render_item_slot(ui, rect, &mut item_slot_ctx, &mut simple_ops);
     }
 
     // Apply changes after render

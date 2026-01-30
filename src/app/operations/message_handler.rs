@@ -571,13 +571,13 @@ impl ImageViewerApp {
         let is_video_playing = self.is_video_playing_docked();
 
         let base_max_uploads = if is_video_playing && is_scrolling {
-            2
+            2 // Restore loading during scroll+video (balanced)
         } else if is_scrolling {
-            4
+            3 // Moderate limit during scroll
         } else if is_video_playing {
-            3
+            3 // Moderate limit during video
         } else {
-            8
+            6 // Standard idle speed
         };
         let perf_scale = if self.frame_time_avg_ms <= 0.0 {
             1.0

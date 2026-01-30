@@ -28,15 +28,15 @@ use crate::application::navigation::NavigationHistory;
 use crate::application::ClipboardManager;
 use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
 use crate::domain::thumbnail::ThumbnailData;
-use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::directory_index::DirectoryIndex;
+use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::windows as windows_infra;
 #[cfg(feature = "usn-watcher")]
 use crate::workers::usn_watcher::{FsEvent, UsnWatcherState};
 // use crate::ui::cache::CacheManager;
-use crate::ui::context_menu::ContextMenuState;
 use crate::ui::components::media_preview::MediaPreview;
+use crate::ui::context_menu::ContextMenuState;
 use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
 use crate::workers::thumbnail_worker::PriorityThumbnailQueue;
@@ -47,9 +47,9 @@ pub struct ImageViewerApp {
     pub current_path: String,
 
     // --- SISTEMA DE THUMBNAILS OTIMIZADO ---
-    pub thumbnail_queue: Arc<PriorityThumbnailQueue>,   // UI -> Worker Pool (Priority Queue)
-    pub image_receiver: Receiver<ThumbnailData>,        // Worker Pool -> UI
-    pub pending_thumbnails: VecDeque<ThumbnailData>,    // PERFORMANCE: Buffer for throttled uploads
+    pub thumbnail_queue: Arc<PriorityThumbnailQueue>, // UI -> Worker Pool (Priority Queue)
+    pub image_receiver: Receiver<ThumbnailData>,      // Worker Pool -> UI
+    pub pending_thumbnails: VecDeque<ThumbnailData>,  // PERFORMANCE: Buffer for throttled uploads
 
     // File system
     pub items: Arc<Vec<FileEntry>>, // Arc para clone barato em render loops (60 FPS)
@@ -62,7 +62,7 @@ pub struct ImageViewerApp {
     // COVER WORKER: Sistema de capas de pasta (Single Thread Worker)
     pub cover_worker_sender: Sender<PathBuf>, // UI → Worker: Envia pasta para processar
     pub cover_worker_receiver: Receiver<(PathBuf, Option<PathBuf>)>, // Worker → UI: Resultado
-    pub scanned_folders: FxHashSet<PathBuf>,    // Cache: evita re-scan
+    pub scanned_folders: FxHashSet<PathBuf>,  // Cache: evita re-scan
 
     // FOLDER PREVIEW WORKER: Native Windows Shell folder previews (sandwich effect)
     pub folder_preview_sender: Sender<PathBuf>,
@@ -97,8 +97,8 @@ pub struct ImageViewerApp {
     pub multi_selection: FxHashSet<PathBuf>,
     pub selected_thumbnail: Option<egui::TextureHandle>, // Persistent thumbnail for preview panel
     pub selected_gif: Option<crate::ui::components::media_preview::GifPlayer>, // Local GIF for preview panel
-    pub media_preview: Option<MediaPreview>,              // Global media preview (video/image)
-    pub media_preview_owner_tab_id: Option<usize>,        // Tab that owns the current media preview
+    pub media_preview: Option<MediaPreview>, // Global media preview (video/image)
+    pub media_preview_owner_tab_id: Option<usize>, // Tab that owns the current media preview
     pub selected_metadata: Option<(PathBuf, windows_infra::MediaMetadata)>,
     pub metadata_req_sender: Sender<(PathBuf, u64)>,
     pub metadata_res_receiver: Receiver<(PathBuf, u64, windows_infra::MediaMetadata)>,
@@ -107,11 +107,11 @@ pub struct ImageViewerApp {
     pub last_metadata_refresh: Instant,
     pub last_metadata_path: Option<PathBuf>,
     pub show_preview_panel: bool,
-    pub is_computer_view: bool,    // Se estamos na view "Este Computador"
-    pub computer_view_local_indices: Vec<usize>,  // Pre-computed indices for local drives (virtualization)
+    pub is_computer_view: bool, // Se estamos na view "Este Computador"
+    pub computer_view_local_indices: Vec<usize>, // Pre-computed indices for local drives (virtualization)
     pub computer_view_network_indices: Vec<usize>, // Pre-computed indices for network drives (virtualization)
-    pub is_recycle_bin_view: bool, // Se estamos na view da Lixeira
-    pub show_virtual_drive_settings: bool, // Modal de configuração de drives virtuais
+    pub is_recycle_bin_view: bool,                 // Se estamos na view da Lixeira
+    pub show_virtual_drive_settings: bool,         // Modal de configuração de drives virtuais
 
     pub total_items: usize,
 
@@ -164,8 +164,8 @@ pub struct ImageViewerApp {
     // ASYNC ICON WORKER (evita I/O bloqueante no render loop)
     pub icon_req_sender: Sender<PathBuf>, // UI → Worker
     pub icon_res_receiver: Receiver<(PathBuf, Vec<u8>, u32, u32)>, // Worker → UI
-    pub loading_icons: FxHashSet<PathBuf>,  // Tracking in-progress
-    pub failed_icons: FxHashSet<PathBuf>,   // Icons that failed extraction (prevents infinite retry)
+    pub loading_icons: FxHashSet<PathBuf>, // Tracking in-progress
+    pub failed_icons: FxHashSet<PathBuf>, // Icons that failed extraction (prevents infinite retry)
 
     // NOTIFICATION SYSTEM (toast messages)
     pub notifications: crate::application::NotificationManager,
@@ -173,6 +173,9 @@ pub struct ImageViewerApp {
     // ONEDRIVE SIDEBAR SHORTCUT
     pub onedrive_path: Option<String>, // Caminho do OneDrive (se instalado)
     pub onedrive_icon: Option<egui::TextureHandle>, // Ícone nativo do OneDrive
+
+    // STARTUP OPTIMIZATION: Async Font Loading
+    pub font_loader_rx: Option<Receiver<egui::FontDefinitions>>,
 
     // NAVEGAÇÃO / ADDRESS BAR (Breadcrumbs vs Edit)
     pub is_address_editing: bool,
@@ -215,11 +218,11 @@ pub struct ImageViewerApp {
     pub folder_size_req_sender: Sender<PathBuf>, // UI → Worker
     pub folder_size_res_receiver: Receiver<(PathBuf, u64)>, // Worker → UI
     pub folder_size_cache: std::collections::HashMap<PathBuf, u64>, // Calculated sizes
-    pub folder_size_loading: FxHashSet<PathBuf>,   // Currently calculating
+    pub folder_size_loading: FxHashSet<PathBuf>, // Currently calculating
 
     // RECYCLE BIN CACHE
     pub deletion_date_cache: LruCache<String, String>,
-    
+
     // PERFORMANCE: Reusable buffers for grid view rendering (avoid per-item allocations)
     pub pending_ops: crate::ui::views::grid_view::PendingOperations,
     pub scroll_predictor: crate::ui::views::grid_view::ScrollPredictor,
@@ -279,8 +282,12 @@ impl ImageViewerApp {
     /// Check if the media player should currently capture all keyboard arrow/space input.
     /// Returns true if player is detached/fullscreen AND has focus.
     pub fn is_media_keyboard_focused(&self) -> bool {
-        let preview = if let Some(p) = &self.media_preview { p } else { return false; };
-        
+        let preview = if let Some(p) = &self.media_preview {
+            p
+        } else {
+            return false;
+        };
+
         // Condition 1: Must be detached or fullscreen
         if !preview.is_detached() && !preview.is_maximized() {
             return false;
@@ -296,7 +303,9 @@ impl ImageViewerApp {
         {
             use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
             let foreground = unsafe { GetForegroundWindow() };
-            if foreground.is_invalid() { return false; }
+            if foreground.is_invalid() {
+                return false;
+            }
 
             // Focused if either the main app or the MPV child window is in foreground
             self.native_hwnd == Some(foreground) || preview.get_hwnd() == Some(foreground)

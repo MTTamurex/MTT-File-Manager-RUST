@@ -12,16 +12,16 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::mpsc;
 use std::sync::Arc;
-use std::time::Instant;
 #[cfg(feature = "usn-watcher")]
 use std::time::Duration;
+use std::time::Instant;
 
 use crate::application::navigation::NavigationHistory;
 use crate::application::ClipboardManager;
 use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
-use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::directory_index::DirectoryIndex;
+use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::onedrive;
 use crate::infrastructure::windows as windows_infra;
 // use crate::ui::cache::CacheManager;
@@ -78,7 +78,7 @@ impl ImageViewerApp {
             // PERFORMANCE: Set background priority to minimize HDD contention with video playback
             // This worker scans folders to find first image - low priority I/O
             crate::infrastructure::io_priority::set_thread_priority(
-                crate::infrastructure::io_priority::IOPriority::Background
+                crate::infrastructure::io_priority::IOPriority::Background,
             );
 
             // Loop infinito: consome requisições da fila
@@ -130,6 +130,75 @@ impl ImageViewerApp {
             .get_preference("sort_descending")
             .map(|s| s == "true")
             .unwrap_or(false);
+
+        // STARTUP OPTIMIZATION: Async Font Loader
+        // Spawns a thread to load fonts while the app frame initializes
+        let (font_tx, font_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut fonts = eframe::egui::FontDefinitions::default();
+            let mut loaded_fonts = Vec::new();
+
+            // 1. Segoe UI (fonte principal)
+            let segoe_path = std::path::PathBuf::from("C:\\Windows\\Fonts\\segoeui.ttf");
+            if let Ok(font_data) = std::fs::read(&segoe_path) {
+                fonts.font_data.insert(
+                    "segoe_ui".to_owned(),
+                    std::sync::Arc::new(eframe::egui::FontData::from_owned(font_data)),
+                );
+                loaded_fonts.push("segoe_ui".to_owned());
+            }
+
+            // 2. Segoe UI Symbol (fallback 1 - símbolos)
+            let symbol_path = std::path::PathBuf::from("C:\\Windows\\Fonts\\seguisym.ttf");
+            if let Ok(font_data) = std::fs::read(&symbol_path) {
+                fonts.font_data.insert(
+                    "segoe_ui_symbol".to_owned(),
+                    std::sync::Arc::new(eframe::egui::FontData::from_owned(font_data)),
+                );
+                loaded_fonts.push("segoe_ui_symbol".to_owned());
+            }
+
+            // 3. Arial Unicode MS (fallback 2 - se disponível)
+            // ESTE ARQUIVO É GRANDE (~22MB) - O carregamento síncrono trava o startup
+            let arial_path = std::path::PathBuf::from("C:\\Windows\\Fonts\\ARIALUNI.TTF");
+            if let Ok(font_data) = std::fs::read(&arial_path) {
+                fonts.font_data.insert(
+                    "arial_unicode".to_owned(),
+                    std::sync::Arc::new(eframe::egui::FontData::from_owned(font_data)),
+                );
+                loaded_fonts.push("arial_unicode".to_owned());
+            }
+
+            // 4. Remix Icon (Fonte de Ícones dedicada) - Embarcada no executável
+            {
+                let data = crate::embedded_assets::REMIXICON_TTF.to_vec();
+                fonts.font_data.insert(
+                    "remix_icon".to_owned(),
+                    std::sync::Arc::new(eframe::egui::FontData::from_owned(data)),
+                );
+                fonts.families.insert(
+                    eframe::egui::FontFamily::Name("icons".into()),
+                    vec!["remix_icon".to_owned()],
+                );
+            }
+
+            // Adiciona apenas fontes carregadas
+            if !loaded_fonts.is_empty() {
+                fonts
+                    .families
+                    .get_mut(&eframe::egui::FontFamily::Proportional)
+                    .unwrap()
+                    .extend(loaded_fonts.clone());
+
+                fonts
+                    .families
+                    .get_mut(&eframe::egui::FontFamily::Monospace)
+                    .unwrap()
+                    .extend(loaded_fonts.clone());
+            }
+
+            let _ = font_tx.send(fonts);
+        });
 
         let folders_position = disk_cache
             .get_preference("folders_position")
@@ -219,7 +288,9 @@ impl ImageViewerApp {
         std::thread::spawn(move || {
             use crate::domain::file_entry::IconSize;
             use crate::infrastructure::windows::extract_file_icon_by_path;
-            use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
+            use windows::Win32::System::Com::{
+                CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED,
+            };
 
             // Initialize COM for this thread (multithreaded like other workers)
             unsafe {
@@ -228,7 +299,7 @@ impl ImageViewerApp {
 
             // PERFORMANCE: Set background priority to minimize HDD contention with video playback
             crate::infrastructure::io_priority::set_thread_priority(
-                crate::infrastructure::io_priority::IOPriority::Background
+                crate::infrastructure::io_priority::IOPriority::Background,
             );
 
             while let Ok(path) = icon_req_rx.recv() {
@@ -260,7 +331,7 @@ impl ImageViewerApp {
         std::thread::spawn(move || {
             // PERFORMANCE: Set background priority to minimize HDD contention with video playback
             crate::infrastructure::io_priority::set_thread_priority(
-                crate::infrastructure::io_priority::IOPriority::Background
+                crate::infrastructure::io_priority::IOPriority::Background,
             );
 
             while let Ok((path, mtime)) = meta_req_rx.recv() {
@@ -288,7 +359,7 @@ impl ImageViewerApp {
             // PERFORMANCE: Set background priority to minimize HDD contention with video playback
             // This worker is especially heavy - walks entire directory trees
             crate::infrastructure::io_priority::set_thread_priority(
-                crate::infrastructure::io_priority::IOPriority::Background
+                crate::infrastructure::io_priority::IOPriority::Background,
             );
 
             while let Ok(folder_path) = folder_size_req_rx.recv() {
@@ -333,7 +404,10 @@ impl ImageViewerApp {
         // --- FILE OPERATION WORKER (Background Shell ops) ---
         let (file_op_tx, file_op_rx) = mpsc::channel();
         let (file_op_res_tx, file_op_res_rx) = mpsc::channel();
-        crate::workers::file_operation_worker::start_file_operation_worker(file_op_rx, file_op_res_tx);
+        crate::workers::file_operation_worker::start_file_operation_worker(
+            file_op_rx,
+            file_op_res_tx,
+        );
 
         let disks = windows_infra::get_all_drives();
 
@@ -465,6 +539,9 @@ impl ImageViewerApp {
             // 3-stage startup counter
             startup_tick: 0,
 
+            // STARTUP OPTIMIZATION: Async Font Loader
+            font_loader_rx: Some(font_rx),
+
             // Window state persistence
             saved_window_width,
             saved_window_height,
@@ -499,7 +576,7 @@ impl ImageViewerApp {
 
             // RECYCLE BIN CACHE
             deletion_date_cache: LruCache::new(NonZeroUsize::new(200).unwrap()),
-            
+
             // PERFORMANCE: Reusable buffers for grid rendering
             pending_ops: crate::ui::views::grid_view::PendingOperations::new(),
             scroll_predictor: crate::ui::views::grid_view::ScrollPredictor::new(),
@@ -550,12 +627,11 @@ impl ImageViewerApp {
 
         // NOTE: Shell warmup is now done in window.rs after HWND is obtained
         // Removed duplicate warmup here to avoid protection issues
-        
+
         // --- PDF WEBVIEW2 WARMUP ---
         // Initializes the runtime in a background thread to reduce latency on first PDF open.
         // Completely invisible and non-blocking.
         crate::pdf_viewer::warmup();
-
 
         app
     }

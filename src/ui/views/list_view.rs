@@ -77,6 +77,7 @@ pub trait ListViewOperations {
         size: u32,
         directory_index: usize,
     );
+    fn request_icon_load(&mut self, path: PathBuf);
     fn notify_idle_visible_items(&mut self, items: Vec<PathBuf>);
 }
 
@@ -273,10 +274,9 @@ pub fn render_list_view(
         let mut network = Vec::new();
 
         for (i, item) in ctx.items.iter().enumerate() {
-            let is_remote = item
-                .drive_info
-                .as_ref()
-                .is_some_and(|di| di.drive_type == crate::infrastructure::windows::DriveType::Remote);
+            let is_remote = item.drive_info.as_ref().is_some_and(|di| {
+                di.drive_type == crate::infrastructure::windows::DriveType::Remote
+            });
             if is_remote {
                 network.push((i, item));
             } else {
@@ -466,8 +466,7 @@ pub fn render_list_view(
 
     if total_rows > 0 {
         let first_visible_index = (current_scroll / row_height).floor() as usize;
-        let last_visible_index = ((current_scroll + viewport_h) / row_height)
-            .ceil() as usize;
+        let last_visible_index = ((current_scroll + viewport_h) / row_height).ceil() as usize;
         let first_visible_index = first_visible_index.min(total_rows.saturating_sub(1));
         let last_visible_index = last_visible_index.min(total_rows).saturating_sub(1);
 
@@ -692,7 +691,8 @@ fn render_list_item(
                 let tooltip_pos = egui::pos2(tooltip_x, mouse_pos.y);
 
                 // Use Order::Tooltip layer (though it won't help with native HWND windows)
-                let tooltip_layer = egui::LayerId::new(egui::Order::Tooltip, response.id.with("tooltip"));
+                let tooltip_layer =
+                    egui::LayerId::new(egui::Order::Tooltip, response.id.with("tooltip"));
                 egui::show_tooltip_at(
                     ui.ctx(),
                     tooltip_layer,
@@ -809,6 +809,12 @@ fn render_list_item(
                     Color32::WHITE,
                 );
             } else {
+                // If icon not in cache and not loading, request it (async)
+                if !ctx.loading_icons.contains(&item.path) && !ctx.failed_icons.contains(&item.path)
+                {
+                    ops.request_icon_load(item.path.clone());
+                }
+
                 ui.painter().text(
                     icon_rect.min,
                     egui::Align2::LEFT_TOP,

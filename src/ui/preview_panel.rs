@@ -117,6 +117,7 @@ pub fn render_preview_panel(
                 }
             } else if crate::infrastructure::windows::shell_folder::is_shell_navigation_path(
                 &file.path,
+                file.is_dir,
             ) {
                 // ZIP / SHELL PATH: Use System Folder Icon (No Preview)
                 item_icon_loader.ensure_folder_icon(ui.ctx());
@@ -425,9 +426,9 @@ pub fn render_preview_panel(
                 let volume = video_state.as_ref().map(|s| s.volume).unwrap_or(1.0);
                 let is_muted = video_state.as_ref().map(|s| s.is_muted).unwrap_or(false);
 
-        let max_preview_width = ui.available_width() - 16.0;
-        let max_preview_height = PREVIEW_MAX_HEIGHT;
-        let max_preview_size = egui::vec2(max_preview_width, max_preview_height);
+                let max_preview_width = ui.available_width() - 16.0;
+                let max_preview_height = PREVIEW_MAX_HEIGHT;
+                let max_preview_size = egui::vec2(max_preview_width, max_preview_height);
 
                 // PATH CHECK: Only show active player if the file is the one playing AND we are the owner
                 let paths_match = preview.path() == Some(&file.path);

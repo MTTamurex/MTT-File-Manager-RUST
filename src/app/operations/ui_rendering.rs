@@ -219,6 +219,7 @@ impl ImageViewerApp {
             RenameWithShell(usize),
             RequestThumbnailPrefetchWithIndex(PathBuf, u32, usize),
             NotifyIdleVisibleItems(Vec<PathBuf>),
+            RequestIconLoad(PathBuf),
         }
 
         impl ListViewOperations for ListOps<'_> {
@@ -256,11 +257,19 @@ impl ImageViewerApp {
                 directory_index: usize,
             ) {
                 self.actions
-                    .push(ListAction::RequestThumbnailPrefetchWithIndex(path, size, directory_index));
+                    .push(ListAction::RequestThumbnailPrefetchWithIndex(
+                        path,
+                        size,
+                        directory_index,
+                    ));
             }
 
             fn notify_idle_visible_items(&mut self, items: Vec<PathBuf>) {
                 self.actions.push(ListAction::NotifyIdleVisibleItems(items));
+            }
+
+            fn request_icon_load(&mut self, path: PathBuf) {
+                self.actions.push(ListAction::RequestIconLoad(path));
             }
         }
 
@@ -439,10 +448,11 @@ impl ImageViewerApp {
                     self.request_thumbnail_prefetch_with_index(path, size, index)
                 }
                 ListAction::NotifyIdleVisibleItems(items) => {
-                    let _ = self.idle_warmup_sender.send(
-                        crate::workers::idle_warmup::IdleWarmupMessage::VisibleItems(items),
-                    );
+                    let _ = self
+                        .idle_warmup_sender
+                        .send(crate::workers::idle_warmup::IdleWarmupMessage::VisibleItems(items));
                 }
+                ListAction::RequestIconLoad(path) => self.request_icon_load(path),
             }
         }
 
@@ -686,8 +696,11 @@ impl ImageViewerApp {
                 size: u32,
                 directory_index: usize,
             ) {
-                self.actions
-                    .push(GridAction::RequestThumbnailLoadWithIndex(path, size, directory_index));
+                self.actions.push(GridAction::RequestThumbnailLoadWithIndex(
+                    path,
+                    size,
+                    directory_index,
+                ));
             }
 
             fn request_folder_scan(&mut self, path: PathBuf) {
@@ -709,11 +722,12 @@ impl ImageViewerApp {
                 size: u32,
                 directory_index: usize,
             ) {
-                self.actions.push(GridAction::RequestThumbnailPrefetchWithIndex(
-                    path,
-                    size,
-                    directory_index,
-                ));
+                self.actions
+                    .push(GridAction::RequestThumbnailPrefetchWithIndex(
+                        path,
+                        size,
+                        directory_index,
+                    ));
             }
 
             fn request_icon_load(&mut self, path: PathBuf) {
@@ -885,9 +899,9 @@ impl ImageViewerApp {
                 GridAction::RequestIconLoad(path) => self.request_icon_load(path),
                 GridAction::RenameWithShell(idx) => self.rename_with_shell(idx),
                 GridAction::NotifyIdleVisibleItems(items) => {
-                    let _ = self.idle_warmup_sender.send(
-                        crate::workers::idle_warmup::IdleWarmupMessage::VisibleItems(items),
-                    );
+                    let _ = self
+                        .idle_warmup_sender
+                        .send(crate::workers::idle_warmup::IdleWarmupMessage::VisibleItems(items));
                 }
             }
         }
@@ -912,8 +926,7 @@ impl ImageViewerApp {
 
         // Para evitar conflitos de borrow, coletamos as operações pendentes
         // e executamos depois de renderizar
-        let mut pending_thumbnail_loads: Vec<(std::path::PathBuf, u32, Option<usize>)> =
-            Vec::new();
+        let mut pending_thumbnail_loads: Vec<(std::path::PathBuf, u32, Option<usize>)> = Vec::new();
         let mut pending_folder_scans: Vec<std::path::PathBuf> = Vec::new();
         let mut pending_folder_preview_loads: Vec<std::path::PathBuf> = Vec::new();
         let mut pending_icon_loads: Vec<std::path::PathBuf> = Vec::new();
@@ -996,7 +1009,10 @@ impl ImageViewerApp {
                 pending_rename: &mut pending_rename,
             };
 
-            render_item_slot(ui, &mut ctx, &mut ops);
+            let item_w = self.thumbnail_size;
+            let item_h = self.thumbnail_size + 24.0; // Margin + Text
+            let rect = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(item_w, item_h));
+            render_item_slot(ui, rect, &mut ctx, &mut ops);
         }
 
         // Apply changes after render

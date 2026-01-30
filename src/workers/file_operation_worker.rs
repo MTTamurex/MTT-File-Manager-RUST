@@ -17,15 +17,21 @@ pub enum FileOperationResult {
     /// Specifically for Recycle Bin operations to trigger targeted refresh
     RecycleBinChanged,
     /// Delete operation completed - parent folders need refresh
-    DeleteCompleted { parent_folders: Vec<PathBuf> },
+    DeleteCompleted {
+        parent_folders: Vec<PathBuf>,
+    },
     /// Move operation completed - source folder needs refresh in all tabs, dest needs reload if active
     MoveCompleted {
         source_folder: PathBuf,
         dest_folder: PathBuf,
     },
     /// Copy operation completed - dest folder needs reload if active
-    CopyCompleted { dest_folder: PathBuf },
-    RenameCompleted { parent_folder: PathBuf },
+    CopyCompleted {
+        dest_folder: PathBuf,
+    },
+    RenameCompleted {
+        parent_folder: PathBuf,
+    },
 }
 
 /// Transparent wrapper for HWND to make it Send.
@@ -129,7 +135,8 @@ pub fn start_file_operation_worker(
                     new_name,
                     hwnd,
                 } => {
-                    let success = shell_operations::rename_item_with_shell(&path, &new_name, hwnd.0);
+                    let success =
+                        shell_operations::rename_item_with_shell(&path, &new_name, hwnd.0);
                     if success {
                         if let Some(parent) = path.parent() {
                             let _ = result_sender.send(FileOperationResult::RenameCompleted {
@@ -143,7 +150,7 @@ pub fn start_file_operation_worker(
                     dest_folder,
                     hwnd,
                 } => {
-                    if crate::infrastructure::windows::is_shell_navigation_path(&path) {
+                    if crate::infrastructure::windows::is_shell_navigation_path(&path, false) {
                         let _ =
                             shell_operations::copy_item_with_file_op(&path, &dest_folder, hwnd.0);
                     } else {

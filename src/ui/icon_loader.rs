@@ -26,6 +26,9 @@ pub struct IconLoader {
     drive_icon_cache: HashMap<String, egui::TextureHandle>,
     /// Remember failed drive/shell icon attempts to avoid retrying every frame
     failed_drive_icons: HashSet<String>,
+    /// Cache for extension-based icons (extension -> texture)
+    /// This prevents calling SHGetFileInfoW repeatedly for common types like .txt, .pdf
+    extension_cache: HashMap<String, egui::TextureHandle>,
 }
 
 impl IconLoader {
@@ -38,6 +41,7 @@ impl IconLoader {
             recycle_bin_icon_texture: None,
             drive_icon_cache: HashMap::new(),
             failed_drive_icons: HashSet::new(),
+            extension_cache: HashMap::new(),
         }
     }
 
@@ -90,13 +94,14 @@ impl IconLoader {
         // UNIQUE ICON FILES: .exe, .lnk, .ico, .cur, .ani, .com have unique embedded icons per file.
         // For these files, check cache first, then either return None (async) or load blocking.
         if !is_folder {
-            let ext_str = path.extension()
+            let ext_str = path
+                .extension()
                 .map(|e| e.to_string_lossy().to_lowercase())
                 .or_else(|| {
                     // Manual extension parsing fallback for paths without proper extension
                     let path_str = path.to_string_lossy();
                     path_str.rfind('.').and_then(|idx| {
-                        let candidate = &path_str[idx+1..];
+                        let candidate = &path_str[idx + 1..];
                         if !candidate.contains('/') && !candidate.contains('\\') {
                             Some(candidate.to_lowercase())
                         } else {
@@ -122,7 +127,9 @@ impl IconLoader {
 
                     // Not in cache - if blocking allowed, try to load now (for preview panel)
                     if allow_blocking && path.exists() {
-                        if let Ok((pixels, width, height)) = windows::extract_file_icon_by_path(path, size) {
+                        if let Ok((pixels, width, height)) =
+                            windows::extract_file_icon_by_path(path, size)
+                        {
                             let texture = ctx.load_texture(
                                 cache_key.clone(),
                                 egui::ColorImage::from_rgba_unmultiplied(
@@ -148,6 +155,25 @@ impl IconLoader {
             return Some(texture.clone());
         }
 
+        // PERFORMANCE FIX: Check Extension Cache (Memory) BEFORE hitting Windows Shell API
+        // This avoids calling SHGetFileInfoW for every single .txt/.pdf/etc file.
+        // We only key storage by extension+size.
+        if !is_folder {
+            if let Some(ext) = path.extension() {
+                let ext_str = ext.to_string_lossy().to_lowercase();
+                let ext_key = format!("{}_{:?}", ext_str, size);
+
+                if let Some(texture) = self.extension_cache.get(&ext_key) {
+                    // It's a common icon! Cache it for THIS file too (to speed up LRU hits)
+                    // but we can just return it.
+                    // Note: We might want to put it in icon_cache to keep "hot" files hot?
+                    // Actually, if we hit extension cache, we don't need to pollute LRU with file paths.
+                    // But LRU removal might be tricky. Let's just return it.
+                    return Some(texture.clone());
+                }
+            }
+        }
+
         // PERFORMANCE FIX: NEVER call path.exists() in render loop!
         // On OneDrive, this can trigger network calls (28ms+ per file).
 
@@ -157,12 +183,14 @@ impl IconLoader {
         } else if let Some(ext) = path.extension() {
             let ext_str = ext.to_string_lossy().to_lowercase();
             // Extension-based lookup is FAST (uses registry, no file access)
+
+            // Try load
             windows::get_file_type_icon(false, &ext_str, size)
         } else {
             // No extension - try manual parsing or generic fallback
             let path_str = path.to_string_lossy();
             let manual_ext = if let Some(idx) = path_str.rfind('.') {
-                let candidate = &path_str[idx+1..];
+                let candidate = &path_str[idx + 1..];
                 if !candidate.contains('/') && !candidate.contains('\\') {
                     Some(candidate.to_lowercase())
                 } else {
@@ -190,8 +218,17 @@ impl IconLoader {
                 egui::TextureOptions::LINEAR,
             );
 
-            // Cache the texture
             let cloned = texture.clone();
+
+            // Populate Extension Cache if applicable
+            if !is_folder {
+                if let Some(ext) = path.extension() {
+                    let ext_str = ext.to_string_lossy().to_lowercase();
+                    let ext_key = format!("{}_{:?}", ext_str, size);
+                    self.extension_cache.insert(ext_key, texture.clone());
+                }
+            }
+
             self.icon_cache.put(cache_key, texture);
             return Some(cloned);
         }
@@ -234,8 +271,7 @@ impl IconLoader {
             let image =
                 egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &data);
 
-            let texture =
-                ctx.load_texture("recycle_bin_icon", image, egui::TextureOptions::LINEAR);
+            let texture = ctx.load_texture("recycle_bin_icon", image, egui::TextureOptions::LINEAR);
             self.recycle_bin_icon_texture = Some(texture.clone());
             return Some(texture);
         }
