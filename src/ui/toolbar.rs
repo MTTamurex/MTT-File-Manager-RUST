@@ -259,9 +259,10 @@ pub fn render_toolbar(
 
             // Busca
             let search_width = 250.0;
+            let input_height = 26.0;
             // Cria um container visualmente similar a um input, mas manual para conter o botão
             let (search_rect, search_resp) = ui.allocate_exact_size(
-                egui::vec2(search_width, 22.0),
+                egui::vec2(search_width, input_height),
                 egui::Sense::click_and_drag(),
             );
 
@@ -299,7 +300,7 @@ pub fn render_toolbar(
             let text_available_w = search_ui.available_width() - if has_text { 22.0 + 4.0 } else { 4.0 };
 
             let text_resp = search_ui.add_sized(
-                egui::vec2(text_available_w, 20.0),
+                egui::vec2(text_available_w, input_height - 2.0),
                 egui::TextEdit::singleline(search_query)
                     .frame(false)
                     .hint_text(egui::RichText::new("Buscar...").color(egui::Color32::from_gray(120)))
@@ -339,7 +340,7 @@ pub fn render_toolbar(
             // Mesma técnica da barra de busca: allocate + new_child
             let addr_width = (ui.available_width() - 4.0).max(100.0);
             let (addr_rect, addr_resp) = ui.allocate_exact_size(
-                egui::vec2(addr_width, 22.0),
+                egui::vec2(addr_width, input_height),
                 egui::Sense::click(),
             );
 
