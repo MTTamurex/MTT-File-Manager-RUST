@@ -78,7 +78,11 @@ impl eframe::App for ImageViewerApp {
         if is_resizing {
             // Simplified placeholder during resize
             egui::CentralPanel::default()
-                .frame(egui::Frame::NONE.fill(ctx.style().visuals.panel_fill))
+                .frame(egui::Frame::NONE.fill(if ctx.style().visuals.dark_mode {
+                    egui::Color32::from_rgb(45, 45, 45)
+                } else {
+                    egui::Color32::WHITE
+                }))
                 .show(ctx, |_ui| {
                     // Empty panel - just fill with background color
                 });
@@ -352,7 +356,7 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
             fill: if ctx.style().visuals.dark_mode {
                 egui::Color32::from_rgb(45, 45, 45)
             } else {
-                egui::Color32::from_rgb(243, 243, 243)
+                egui::Color32::WHITE
             },
             inner_margin: egui::Margin { left: 8, right: 8, top: 7, bottom: 7 },
             ..Default::default()
@@ -371,7 +375,7 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
             let mut action = SecAction::None;
 
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(6.0, 0.0);
+                ui.spacing_mut().item_spacing = egui::vec2(12.0, 0.0);
 
                 let icon_size = egui::vec2(28.0, 28.0); // Consistent button size
                 

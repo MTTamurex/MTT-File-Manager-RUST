@@ -48,6 +48,11 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) {
     let sidebar_response = egui::SidePanel::left("sidebar")
         .exact_width(target_width)
         .resizable(false)  // Resize handled manually via drag handles
+        .frame(egui::Frame::NONE.fill(if ctx.style().visuals.dark_mode {
+            egui::Color32::from_rgb(45, 45, 45)
+        } else {
+            egui::Color32::WHITE
+        }))
         .show(ctx, |ui| {
             use crate::ui::sidebar::{render_sidebar, SidebarContext};
 
@@ -93,6 +98,11 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, fr
         let _right_panel_response = egui::SidePanel::right("preview_panel")
             .exact_width(target_width)
             .resizable(false)  // Resize handled manually via drag handles
+            .frame(egui::Frame::NONE.fill(if ctx.style().visuals.dark_mode {
+                egui::Color32::from_rgb(45, 45, 45)
+            } else {
+                egui::Color32::WHITE
+            }))
             .show(ctx, |ui| {
                 use crate::ui::preview_panel::{render_preview_panel, PreviewPanelAction};
 
@@ -331,7 +341,13 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
 }
 
 fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
-    egui::CentralPanel::default().show(ctx, |ui| {
+    egui::CentralPanel::default()
+        .frame(egui::Frame::NONE.fill(if ctx.style().visuals.dark_mode {
+            egui::Color32::from_rgb(45, 45, 45)
+        } else {
+            egui::Color32::WHITE
+        }))
+        .show(ctx, |ui| {
         if app.is_loading_folder && app.items.is_empty() {
             ui.centered_and_justified(|ui| {
                 ui.spinner();
@@ -392,6 +408,6 @@ fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 });
             }
         }
-    });
+        });
 }
 
