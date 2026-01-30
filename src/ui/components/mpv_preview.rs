@@ -1,22 +1,23 @@
 use eframe::egui;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "windows")]
+use windows::core::w;
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::HWND;
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, MoveWindow, ShowWindow, CW_USEDEFAULT, SW_HIDE, SW_SHOW,
-    WS_CHILD, WS_CLIPSIBLINGS, WS_VISIBLE, WINDOW_EX_STYLE,
+    WINDOW_EX_STYLE, WS_CHILD, WS_CLIPSIBLINGS, WS_VISIBLE,
 };
-#[cfg(target_os = "windows")]
-use windows::core::w;
 
 // Downscale filter applied only in docked mode (preview in sidebar)
-const DOCKED_DOWNSCALE_FILTER: &str = "scale=w='min(iw,854)':h='min(ih,480)':force_original_aspect_ratio=decrease";
+const DOCKED_DOWNSCALE_FILTER: &str =
+    "scale=w='min(iw,854)':h='min(ih,480)':force_original_aspect_ratio=decrease";
 const DOCKED_DOWNSCALE_MARKER: &str = "min(ih,480)";
 // FPS limit filter applied only in docked mode (preview in sidebar)
 const DOCKED_FPS_FILTER: &str = "fps=fps=30";
@@ -57,7 +58,7 @@ pub struct MpvPreview {
     pub is_maximized: bool,
     pub fullscreen_applied: bool,
     pub prev_app_maximized: bool,
-    pub restore_needed: bool,
+    pub restore_frames: u8,
     pub last_window_rect: Option<egui::Rect>,
     pub forced_size: Option<egui::Vec2>,
     pub last_mouse_activity: Option<Instant>,
@@ -127,7 +128,7 @@ impl MpvPreview {
             is_maximized: false,
             fullscreen_applied: false,
             prev_app_maximized: false,
-            restore_needed: false,
+            restore_frames: 0,
             last_window_rect: None,
             forced_size: None,
             last_mouse_activity: None,
@@ -401,7 +402,7 @@ impl MpvPreview {
                 }
             }
             self.loaded_path = Some(self.path.clone());
-            
+
             // Clear cached values for new file
             self.cached_duration = None;
             self.cached_tracks = None;
@@ -414,13 +415,15 @@ impl MpvPreview {
             self.update_docked_downscale(false);
         }
 
-
         // PERF FASE 2: State updates now handled by async event loop (zero polling overhead!)
         // Only tracks still need manual fetching (heavy JSON parse, done once per file)
         // NOTE: We must wait for file to be loaded before querying tracks, otherwise we get empty list
         if let Some(m) = &self.mpv {
             // Check if file is ready by checking if duration is available
-            let file_ready = m.get_property::<f64>("duration").map(|d| d > 0.0).unwrap_or(false);
+            let file_ready = m
+                .get_property::<f64>("duration")
+                .map(|d| d > 0.0)
+                .unwrap_or(false);
 
             // CACHE: Track list (read once file is ready, then cache until file change)
             if self.cached_tracks.is_none() && file_ready {
@@ -432,9 +435,13 @@ impl MpvPreview {
                     if count > 0 {
                         for i in 0..count {
                             let base = format!("track-list/{}/", i);
-                            let t_type = m.get_property::<String>(&(base.clone() + "type")).unwrap_or_default();
+                            let t_type = m
+                                .get_property::<String>(&(base.clone() + "type"))
+                                .unwrap_or_default();
                             let id = m.get_property::<i64>(&(base.clone() + "id")).unwrap_or(0);
-                            let selected = m.get_property::<bool>(&(base.clone() + "selected")).unwrap_or(false);
+                            let selected = m
+                                .get_property::<bool>(&(base.clone() + "selected"))
+                                .unwrap_or(false);
                             let title = m.get_property::<String>(&(base.clone() + "title")).ok();
                             let lang = m.get_property::<String>(&(base + "lang")).ok();
 
@@ -540,20 +547,24 @@ impl MpvPreview {
         }
 
         match action {
-            crate::ui::components::video_menu::VideoMenuAction::None => {},
+            crate::ui::components::video_menu::VideoMenuAction::None => {}
             crate::ui::components::video_menu::VideoMenuAction::TogglePlay => self.toggle_play(),
             crate::ui::components::video_menu::VideoMenuAction::ToggleMute => self.toggle_mute(),
-            crate::ui::components::video_menu::VideoMenuAction::SetAudioTrack(id) => self.set_audio_track(id),
-            crate::ui::components::video_menu::VideoMenuAction::SetSubtitleTrack(id) => self.set_subtitle_track(id),
+            crate::ui::components::video_menu::VideoMenuAction::SetAudioTrack(id) => {
+                self.set_audio_track(id)
+            }
+            crate::ui::components::video_menu::VideoMenuAction::SetSubtitleTrack(id) => {
+                self.set_subtitle_track(id)
+            }
             crate::ui::components::video_menu::VideoMenuAction::ToggleFullscreen => {
                 // Toggle is handled externally - just set the flag
                 self.is_maximized = !self.is_maximized;
-            },
+            }
             crate::ui::components::video_menu::VideoMenuAction::Close => {
-                 self.video_menu.is_open = false;
-                 self.video_menu.active_submenu = None;
-                 self.video_menu.submenu_position = None;
-            },
+                self.video_menu.is_open = false;
+                self.video_menu.active_submenu = None;
+                self.video_menu.submenu_position = None;
+            }
             crate::ui::components::video_menu::VideoMenuAction::RightClickOutside(pos) => {
                 // Menu was closed, now reopen at the provided position
                 self.video_menu.is_open = true;
@@ -647,13 +658,16 @@ impl MpvPreview {
                 self.docked_prev_cache_secs = m.get_property::<f64>("cache-secs").ok();
             }
             if self.docked_prev_readahead_secs.is_none() {
-                self.docked_prev_readahead_secs = m.get_property::<f64>("demuxer-readahead-secs").ok();
+                self.docked_prev_readahead_secs =
+                    m.get_property::<f64>("demuxer-readahead-secs").ok();
             }
             if self.docked_prev_demuxer_max_bytes.is_none() {
-                self.docked_prev_demuxer_max_bytes = m.get_property::<i64>("demuxer-max-bytes").ok();
+                self.docked_prev_demuxer_max_bytes =
+                    m.get_property::<i64>("demuxer-max-bytes").ok();
             }
             if self.docked_prev_demuxer_max_back_bytes.is_none() {
-                self.docked_prev_demuxer_max_back_bytes = m.get_property::<i64>("demuxer-max-back-bytes").ok();
+                self.docked_prev_demuxer_max_back_bytes =
+                    m.get_property::<i64>("demuxer-max-back-bytes").ok();
             }
 
             let _ = m.set_property("cache", "yes");
@@ -696,7 +710,6 @@ impl MpvPreview {
             if let Some(prev) = self.docked_prev_demuxer_max_back_bytes.take() {
                 let _ = m.set_property("demuxer-max-back-bytes", prev);
             }
-
 
             self.docked_downscale_applied = false;
             self.docked_fps_limit_applied = false;
@@ -796,7 +809,6 @@ impl MpvPreview {
         parts.join(",")
     }
 
-
     /// PERF FASE 2: Starts async polling thread for offloading FFI calls from main thread
     ///
     /// This moves the polling to a background thread, preventing main thread blocking.
@@ -883,7 +895,7 @@ impl MpvPreview {
     }
 
     /// Enables NVIDIA RTX Video Super Resolution (VSR).
-    /// 
+    ///
     /// Requires MPV to be initialized with:
     /// - vo=gpu
     /// - gpu-api=d3d11

@@ -36,186 +36,236 @@ pub fn render_preview_panel(
 ) -> Option<PreviewPanelAction> {
     // Metadados são processados de forma assíncrona; se chegarem, o metadata será Some(...)
     let mut action = None;
-    
+
     // Check if this is a video file
-    let is_video = file.path.extension()
+    let is_video = file
+        .path
+        .extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| crate::infrastructure::windows::is_video_extension(ext))
         .unwrap_or(false);
-    
+
     // === MULTI-SELECTION VIEW ===
     if multi_selection_count > 1 {
         ui.vertical_centered(|ui| {
             ui.add_space(40.0);
-            
+
             // Multiple Items Icon (Stack)
             if let Some(tex) = svg_manager.get_icon(ui.ctx(), "copy", 128, [180, 180, 180, 255]) {
-                 ui.add(egui::Image::new(&tex).max_size(egui::vec2(128.0, 128.0)));
+                ui.add(egui::Image::new(&tex).max_size(egui::vec2(128.0, 128.0)));
             } else {
-                 ui.label(egui::RichText::new("📚").size(64.0));
+                ui.label(egui::RichText::new("📚").size(64.0));
             }
-            
+
             ui.add_space(20.0);
-            ui.label(egui::RichText::new(format!("{} itens selecionados", multi_selection_count)).strong().size(18.0));
+            ui.label(
+                egui::RichText::new(format!("{} itens selecionados", multi_selection_count))
+                    .strong()
+                    .size(18.0),
+            );
             ui.add_space(10.0);
-            ui.label(egui::RichText::new("Selecione um único item para ver detalhes").color(egui::Color32::GRAY));
+            ui.label(
+                egui::RichText::new("Selecione um único item para ver detalhes")
+                    .color(egui::Color32::GRAY),
+            );
         });
         return None;
     }
 
     // Reuseable fallback logic for rendering icons when no preview is available
-    let mut render_fallback = |ui: &mut egui::Ui, svg_manager: &mut SvgIconManager| -> Option<PreviewPanelAction> {
-            let mut val_action = None;
-            // Pasta ou Drive ou Arquivo sem Thumbnail
-            let max_w: f32 = ui.available_width() - 40.0;
-            let icon_size: f32 = (120.0f32).min(max_w);
+    let mut render_fallback = |ui: &mut egui::Ui,
+                               svg_manager: &mut SvgIconManager|
+     -> Option<PreviewPanelAction> {
+        let mut val_action = None;
+        // Pasta ou Drive ou Arquivo sem Thumbnail
+        let max_w: f32 = ui.available_width() - 40.0;
+        let icon_size: f32 = (120.0f32).min(max_w);
 
-            if file.name == "Este Computador" {
-                // ESTE COMPUTADOR - usa o ícone de computador
-                item_icon_loader.ensure_computer_icon(ui.ctx());
-                if let Some(icon) = item_icon_loader.computer_icon() {
+        if file.name == "Este Computador" {
+            // ESTE COMPUTADOR - usa o ícone de computador
+            item_icon_loader.ensure_computer_icon(ui.ctx());
+            if let Some(icon) = item_icon_loader.computer_icon() {
+                ui.add(egui::Image::new(icon).max_size(egui::vec2(icon_size, icon_size)));
+            } else {
+                ui.label(egui::RichText::new("💻").size(icon_size * 0.6));
+            }
+        } else if let Some(_) = &file.drive_info {
+            if let Some(icon) =
+                item_icon_loader.get_or_load_drive_icon(ui.ctx(), &file.path.to_string_lossy())
+            {
+                ui.add(egui::Image::new(&icon).max_size(egui::vec2(icon_size, icon_size)));
+            } else {
+                ui.label(egui::RichText::new("??").size(icon_size * 0.8));
+            }
+        } else if is_recycle_bin_view && file.name == "Lixeira" {
+            // LIXEIRA
+            if let Some(icon) = item_icon_loader.ensure_recycle_bin_icon(ui.ctx()) {
+                ui.add(egui::Image::new(&icon).max_size(egui::vec2(icon_size, icon_size)));
+            } else {
+                ui.label(egui::RichText::new("🗑").size(icon_size * 0.6));
+            }
+        } else if file.is_dir && !file.name.to_lowercase().ends_with(".zip") {
+            // PASTA (Exceto Zip)
+            if is_recycle_bin_view {
+                item_icon_loader.ensure_folder_icon(ui.ctx());
+                if let Some(icon) = item_icon_loader.folder_icon() {
                     ui.add(egui::Image::new(icon).max_size(egui::vec2(icon_size, icon_size)));
                 } else {
-                    ui.label(egui::RichText::new("💻").size(icon_size * 0.6));
+                    ui.label(egui::RichText::new("📁").size(icon_size * 0.6));
                 }
-            } else if let Some(_) = &file.drive_info {
-                if let Some(icon) =
-                    item_icon_loader.get_or_load_drive_icon(ui.ctx(), &file.path.to_string_lossy())
-                {
-                    ui.add(egui::Image::new(&icon).max_size(egui::vec2(icon_size, icon_size)));
+            } else if crate::infrastructure::windows::shell_folder::is_shell_navigation_path(
+                &file.path,
+            ) {
+                // ZIP / SHELL PATH: Use System Folder Icon (No Preview)
+                item_icon_loader.ensure_folder_icon(ui.ctx());
+                if let Some(icon) = item_icon_loader.folder_icon() {
+                    ui.add(egui::Image::new(icon).max_size(egui::vec2(icon_size, icon_size)));
                 } else {
-                    ui.label(egui::RichText::new("??").size(icon_size * 0.8));
+                    ui.label(egui::RichText::new("📁").size(icon_size * 0.6));
                 }
-            } else if is_recycle_bin_view && file.name == "Lixeira" {
-                // LIXEIRA
-                if let Some(icon) = item_icon_loader.ensure_recycle_bin_icon(ui.ctx()) {
-                    ui.add(egui::Image::new(&icon).max_size(egui::vec2(icon_size, icon_size)));
-                } else {
-                    ui.label(egui::RichText::new("🗑").size(icon_size * 0.6));
-                }
+            } else {
+                let folder_rect = ui
+                    .allocate_exact_size(egui::vec2(icon_size, icon_size), egui::Sense::hover())
+                    .0;
 
-            } else if file.is_dir && !file.name.to_lowercase().ends_with(".zip") {
-                // PASTA (Exceto Zip)
-                if is_recycle_bin_view {
-                    item_icon_loader.ensure_folder_icon(ui.ctx());
-                    if let Some(icon) = item_icon_loader.folder_icon() {
-                        ui.add(egui::Image::new(icon).max_size(egui::vec2(icon_size, icon_size)));
+                if let Some(tex) = folder_preview_peek.as_ref() {
+                    // ... (Render Preview as before)
+                    let tex_size = tex.size_vec2();
+                    let aspect = tex_size.x / tex_size.y;
+
+                    let (draw_w, draw_h) = if aspect > 1.0 {
+                        (folder_rect.width(), folder_rect.width() / aspect)
                     } else {
-                        ui.label(egui::RichText::new("📁").size(icon_size * 0.6));
-                    }
-                } else if crate::infrastructure::windows::shell_folder::is_shell_navigation_path(&file.path) {
-                    // ZIP / SHELL PATH: Use System Folder Icon (No Preview)
-                    item_icon_loader.ensure_folder_icon(ui.ctx());
-                    if let Some(icon) = item_icon_loader.folder_icon() {
-                        ui.add(egui::Image::new(icon).max_size(egui::vec2(icon_size, icon_size)));
-                    } else {
-                        ui.label(egui::RichText::new("📁").size(icon_size * 0.6));
-                    }
+                        (folder_rect.height() * aspect, folder_rect.height())
+                    };
+
+                    let offset_x = (folder_rect.width() - draw_w) / 2.0;
+                    let offset_y = (folder_rect.height() - draw_h) / 2.0;
+                    let draw_rect = egui::Rect::from_min_size(
+                        folder_rect.min + egui::vec2(offset_x, offset_y),
+                        egui::vec2(draw_w, draw_h),
+                    );
+
+                    ui.painter().image(
+                        tex.id(),
+                        draw_rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                } else if is_folder_preview_loading {
+                    // Spinner
+                    ui.painter()
+                        .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
+                    ui.add(egui::Spinner::new());
                 } else {
-                    let folder_rect = ui
-                        .allocate_exact_size(egui::vec2(icon_size, icon_size), egui::Sense::hover())
-                        .0;
+                    // Dispara carregamento
+                    val_action = Some(PreviewPanelAction::LoadFolderPreview(file.path.clone()));
 
-                    if let Some(tex) = folder_preview_peek.as_ref() {
-                        // ... (Render Preview as before)
-                        let tex_size = tex.size_vec2();
-                        let aspect = tex_size.x / tex_size.y;
+                    // Placeholder
+                    ui.painter()
+                        .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(240));
+                    ui.painter().text(
+                        folder_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "📁",
+                        egui::FontId::proportional(icon_size * 0.4),
+                        egui::Color32::from_gray(180),
+                    );
+                }
+            }
+        } else {
+            // IS FILE (or Zip Archive)
+            use crate::domain::file_entry::IconSize;
+            // Force is_folder=false for Zip archives to get the Zip Icon
+            let is_zip_archive = file.name.to_lowercase().ends_with(".zip");
+            let treat_as_folder = file.is_dir && !is_zip_archive;
 
-                        let (draw_w, draw_h) = if aspect > 1.0 {
-                            (folder_rect.width(), folder_rect.width() / aspect)
+            // Allow blocking for preview panel (selected item) to ensure high-quality icon is shown immediately if possible.
+            // We use allow_blocking=false if we want to avoid main-thread stutter, but preview panel updates less frequently than scroll.
+            // However, for consistency and smoothness, let's use false and let it load async if needed?
+            // Wait, preview panel is rendered every frame. If allow_blocking=false returns None, we see "??".
+            // Since there is no "request_icon_load" mechanism for preview panel yet (it's separate from grid view),
+            // we should allow blocking here for now, or just accept that "??".
+            // Ideally, we should trigger async load if None.
+            // Since this is just for the *selected* item (1 item), blocking IS acceptable (10-30ms) compared to scrolling (many items).
+            // Let's use allow_blocking=true for Preview Panel to guarantee icon appearance.
+            if let Some(icon) = item_icon_loader.get_or_load_icon_sized(
+                ui.ctx(),
+                &file.path,
+                IconSize::Jumbo,
+                treat_as_folder,
+                true,
+            ) {
+                let image_resp = ui.add(
+                    egui::Image::new(&icon).max_size(egui::vec2(icon_size * 0.8, icon_size * 0.8)),
+                );
+
+                // PDF Overlay for Fallback Icons
+                let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                if extension.eq_ignore_ascii_case("pdf") {
+                    let media_rect = image_resp.rect;
+                    let hover_pos = ui.input(|i| i.pointer.hover_pos());
+                    let is_hovered = hover_pos.map_or(false, |pos| media_rect.contains(pos));
+
+                    if is_hovered {
+                        let center_size = 48.0;
+                        let center_rect = egui::Rect::from_center_size(
+                            media_rect.center(),
+                            egui::vec2(center_size, center_size),
+                        );
+
+                        ui.painter().rect_filled(
+                            center_rect,
+                            center_size / 2.0,
+                            egui::Color32::from_black_alpha(100),
+                        );
+
+                        if let Some(tex_lupa) =
+                            svg_manager.get_icon(ui.ctx(), "search", 96, [255, 255, 255, 255])
+                        {
+                            ui.painter().image(
+                                tex_lupa.id(),
+                                center_rect.shrink(10.0),
+                                egui::Rect::from_min_max(
+                                    egui::pos2(0.0, 0.0),
+                                    egui::pos2(1.0, 1.0),
+                                ),
+                                egui::Color32::WHITE,
+                            );
                         } else {
-                            (folder_rect.height() * aspect, folder_rect.height())
-                        };
-
-                        let offset_x = (folder_rect.width() - draw_w) / 2.0;
-                        let offset_y = (folder_rect.height() - draw_h) / 2.0;
-                        let draw_rect = egui::Rect::from_min_size(
-                            folder_rect.min + egui::vec2(offset_x, offset_y),
-                            egui::vec2(draw_w, draw_h),
-                        );
-
-                        ui.painter().image(
-                            tex.id(),
-                            draw_rect,
-                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            egui::Color32::WHITE,
-                        );
-                    } else if is_folder_preview_loading {
-                        // Spinner
-                        ui.painter()
-                            .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
-                        ui.add(egui::Spinner::new());
-                    } else {
-                        // Dispara carregamento
-                        val_action = Some(PreviewPanelAction::LoadFolderPreview(file.path.clone()));
-
-                        // Placeholder
-                        ui.painter()
-                            .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(240));
-                        ui.painter().text(
-                            folder_rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            "📁",
-                            egui::FontId::proportional(icon_size * 0.4),
-                            egui::Color32::from_gray(180),
-                        );
+                            ui.painter().text(
+                                center_rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                "🔍",
+                                egui::FontId::proportional(24.0),
+                                egui::Color32::WHITE,
+                            );
+                        }
+                    }
+                    // Área de clique = todo o thumbnail
+                    if ui
+                        .interact(
+                            media_rect,
+                            egui::Id::new("pdf_fallback_overlay"),
+                            egui::Sense::click(),
+                        )
+                        .clicked()
+                    {
+                        crate::pdf_viewer::open_pdf_viewer(file.path.clone());
                     }
                 }
             } else {
-                // IS FILE (or Zip Archive)
-                use crate::domain::file_entry::IconSize;
-                // Force is_folder=false for Zip archives to get the Zip Icon
-                let is_zip_archive = file.name.to_lowercase().ends_with(".zip");
-                let treat_as_folder = file.is_dir && !is_zip_archive;
-                
-                // Allow blocking for preview panel (selected item) to ensure high-quality icon is shown immediately if possible.
-                // We use allow_blocking=false if we want to avoid main-thread stutter, but preview panel updates less frequently than scroll.
-                // However, for consistency and smoothness, let's use false and let it load async if needed?
-                // Wait, preview panel is rendered every frame. If allow_blocking=false returns None, we see "??".
-                // Since there is no "request_icon_load" mechanism for preview panel yet (it's separate from grid view),
-                // we should allow blocking here for now, or just accept that "??".
-                // Ideally, we should trigger async load if None.
-                // Since this is just for the *selected* item (1 item), blocking IS acceptable (10-30ms) compared to scrolling (many items).
-                // Let's use allow_blocking=true for Preview Panel to guarantee icon appearance.
-                if let Some(icon) = item_icon_loader.get_or_load_icon_sized(ui.ctx(), &file.path, IconSize::Jumbo, treat_as_folder, true) {
-                    let image_resp = ui.add(
-                        egui::Image::new(&icon)
-                            .max_size(egui::vec2(icon_size * 0.8, icon_size * 0.8)),
-                    );
-
-                    // PDF Overlay for Fallback Icons
-                    let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                    if extension.eq_ignore_ascii_case("pdf") {
-                        let media_rect = image_resp.rect;
-                        let hover_pos = ui.input(|i| i.pointer.hover_pos());
-                        let is_hovered = hover_pos.map_or(false, |pos| media_rect.contains(pos));
-
-                        if is_hovered {
-                            let center_size = 48.0;
-                            let center_rect = egui::Rect::from_center_size(media_rect.center(), egui::vec2(center_size, center_size));
-
-                            ui.painter().rect_filled(center_rect, center_size / 2.0, egui::Color32::from_black_alpha(100));
-
-                            if let Some(tex_lupa) = svg_manager.get_icon(ui.ctx(), "search", 96, [255, 255, 255, 255]) {
-                                 ui.painter().image(tex_lupa.id(), center_rect.shrink(10.0), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
-                            } else {
-                                 ui.painter().text(center_rect.center(), egui::Align2::CENTER_CENTER, "🔍", egui::FontId::proportional(24.0), egui::Color32::WHITE);
-                            }
-                        }
-                        // Área de clique = todo o thumbnail
-                        if ui.interact(media_rect, egui::Id::new("pdf_fallback_overlay"), egui::Sense::click()).clicked() {
-                            crate::pdf_viewer::open_pdf_viewer(file.path.clone());
-                        }
-                    }
-                } else {
-                    ui.label(egui::RichText::new("??").size(icon_size * 0.6));
-                }
+                ui.label(egui::RichText::new("??").size(icon_size * 0.6));
             }
-            val_action
+        }
+        val_action
     };
 
     // Shared logic for rendering thumbnails with overlays (PDF, Image Magnifier)
-    let render_texture_with_overlay = |ui: &mut egui::Ui, tex: &egui::TextureHandle, svg_manager: &mut SvgIconManager| -> Option<PreviewPanelAction> {
+    let render_texture_with_overlay = |ui: &mut egui::Ui,
+                                       tex: &egui::TextureHandle,
+                                       svg_manager: &mut SvgIconManager|
+     -> Option<PreviewPanelAction> {
         let max_preview_width = ui.available_width() - 16.0;
         let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
 
@@ -233,42 +283,96 @@ pub fn render_preview_panel(
         let is_hovered = hover_pos.map_or(false, |pos| media_rect.contains(pos));
 
         if is_hovered {
-             if extension.eq_ignore_ascii_case("pdf") {
+            if extension.eq_ignore_ascii_case("pdf") {
                 let center_size = 48.0;
-                let center_rect = egui::Rect::from_center_size(media_rect.center(), egui::vec2(center_size, center_size));
+                let center_rect = egui::Rect::from_center_size(
+                    media_rect.center(),
+                    egui::vec2(center_size, center_size),
+                );
 
                 // Draw background for contrast
-                ui.painter().rect_filled(center_rect, center_size / 2.0, egui::Color32::from_black_alpha(100));
+                ui.painter().rect_filled(
+                    center_rect,
+                    center_size / 2.0,
+                    egui::Color32::from_black_alpha(100),
+                );
 
                 // Draw Lupa (Search) Icon
-                if let Some(tex_lupa) = svg_manager.get_icon(ui.ctx(), "search", 96, [255, 255, 255, 255]) {
-                        ui.painter().image(tex_lupa.id(), center_rect.shrink(10.0), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                if let Some(tex_lupa) =
+                    svg_manager.get_icon(ui.ctx(), "search", 96, [255, 255, 255, 255])
+                {
+                    ui.painter().image(
+                        tex_lupa.id(),
+                        center_rect.shrink(10.0),
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
                 } else {
-                        ui.painter().text(center_rect.center(), egui::Align2::CENTER_CENTER, "🔍", egui::FontId::proportional(24.0), egui::Color32::WHITE);
+                    ui.painter().text(
+                        center_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "🔍",
+                        egui::FontId::proportional(24.0),
+                        egui::Color32::WHITE,
+                    );
                 }
             } else if crate::infrastructure::windows::is_image_extension(extension) {
                 let center_size = 48.0;
-                let center_rect = egui::Rect::from_center_size(media_rect.center(), egui::vec2(center_size, center_size));
+                let center_rect = egui::Rect::from_center_size(
+                    media_rect.center(),
+                    egui::vec2(center_size, center_size),
+                );
 
                 // Draw background for contrast
-                ui.painter().rect_filled(center_rect, center_size / 2.0, egui::Color32::from_black_alpha(100));
+                ui.painter().rect_filled(
+                    center_rect,
+                    center_size / 2.0,
+                    egui::Color32::from_black_alpha(100),
+                );
 
                 // Draw Lupa (Search) Icon
-                if let Some(tex_lupa) = svg_manager.get_icon(ui.ctx(), "search", 96, [255, 255, 255, 255]) {
-                        ui.painter().image(tex_lupa.id(), center_rect.shrink(10.0), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                if let Some(tex_lupa) =
+                    svg_manager.get_icon(ui.ctx(), "search", 96, [255, 255, 255, 255])
+                {
+                    ui.painter().image(
+                        tex_lupa.id(),
+                        center_rect.shrink(10.0),
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
                 } else {
-                        ui.painter().text(center_rect.center(), egui::Align2::CENTER_CENTER, "🔍", egui::FontId::proportional(24.0), egui::Color32::WHITE);
+                    ui.painter().text(
+                        center_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "🔍",
+                        egui::FontId::proportional(24.0),
+                        egui::Color32::WHITE,
+                    );
                 }
             }
         }
 
         // Área de clique = todo o thumbnail (PDF ou imagem)
         if extension.eq_ignore_ascii_case("pdf") {
-            if ui.interact(media_rect, egui::Id::new("pdf_thumb_overlay"), egui::Sense::click()).clicked() {
+            if ui
+                .interact(
+                    media_rect,
+                    egui::Id::new("pdf_thumb_overlay"),
+                    egui::Sense::click(),
+                )
+                .clicked()
+            {
                 crate::pdf_viewer::open_pdf_viewer(file.path.clone());
             }
         } else if crate::infrastructure::windows::is_image_extension(extension) {
-            if ui.interact(media_rect, egui::Id::new("image_thumb_overlay"), egui::Sense::click()).clicked() {
+            if ui
+                .interact(
+                    media_rect,
+                    egui::Id::new("image_thumb_overlay"),
+                    egui::Sense::click(),
+                )
+                .clicked()
+            {
                 crate::pdf_viewer::open_image_viewer(file.path.clone());
             }
         }
@@ -298,7 +402,11 @@ pub fn render_preview_panel(
             if let Some(texture) = gif_player.texture() {
                 let max_preview_width = ui.available_width() - 16.0;
                 let max_preview_size = egui::vec2(max_preview_width, max_preview_width);
-                ui.add(egui::Image::new(texture).max_size(max_preview_size).shrink_to_fit());
+                ui.add(
+                    egui::Image::new(texture)
+                        .max_size(max_preview_size)
+                        .shrink_to_fit(),
+                );
             } else {
                 ui.add(egui::Spinner::new());
             }
@@ -318,176 +426,262 @@ pub fn render_preview_panel(
 
                 // PATH CHECK: Only show active player if the file is the one playing AND we are the owner
                 let paths_match = preview.path() == Some(&file.path);
-                
+
                 if is_player_visible && paths_match && is_owner {
                     // === ACTIVE PLAYER (OWNER) ===
                     let is_detached = preview.is_detached();
 
                     // Control Builder Closure (Shared between Attached and Detached views)
                     // NOW TAKES preview AND svg_manager AS ARGUMENT TO AVOID BORROW ISSUES
-                    let draw_controls = |ui: &mut egui::Ui, preview: &mut MediaPreview, full_width: f32, svg_manager: &mut SvgIconManager| {
-                         ui.set_width(full_width);
+                    let draw_controls =
+                        |ui: &mut egui::Ui,
+                         preview: &mut MediaPreview,
+                         full_width: f32,
+                         svg_manager: &mut SvgIconManager| {
+                            ui.set_width(full_width);
 
-                        // Seek Bar
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().slider_width = full_width;
-                            ui.visuals_mut().selection.bg_fill = crate::ui::theme::COLOR_ACCENT;
+                            // Seek Bar
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().slider_width = full_width;
+                                ui.visuals_mut().selection.bg_fill = crate::ui::theme::COLOR_ACCENT;
 
-                            let mut seek_value = current_time;
-                            if ui.add(egui::Slider::new(&mut seek_value, 0.0..=duration.max(0.1))
-                                .show_value(false)
-                                .trailing_fill(true)).changed() {
-                                preview.seek(seek_value);
-                            }
-                        });
+                                let mut seek_value = current_time;
+                                if ui
+                                    .add(
+                                        egui::Slider::new(&mut seek_value, 0.0..=duration.max(0.1))
+                                            .show_value(false)
+                                            .trailing_fill(true),
+                                    )
+                                    .changed()
+                                {
+                                    preview.seek(seek_value);
+                                }
+                            });
 
-                        ui.add_space(6.0);
+                            ui.add_space(6.0);
 
-                        // Buttons & Time
-                        ui.horizontal(|ui| {
-                            let icon_color = if ui.visuals().dark_mode { [240, 240, 240, 255] } else { [60, 60, 60, 255] };
-                            let btn_size = 18.0; // Smaller button size
+                            // Buttons & Time
+                            ui.horizontal(|ui| {
+                                let icon_color = if ui.visuals().dark_mode {
+                                    [240, 240, 240, 255]
+                                } else {
+                                    [60, 60, 60, 255]
+                                };
+                                let btn_size = 18.0; // Smaller button size
 
-                            // Helper: Create frameless button with hover effect
-                            let add_icon_button = |ui: &mut egui::Ui, tex: &egui::TextureHandle, tooltip: &str| -> bool {
-                                let desired_size = egui::vec2(btn_size + 8.0, btn_size + 8.0);
-                                let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+                                // Helper: Create frameless button with hover effect
+                                let add_icon_button = |ui: &mut egui::Ui,
+                                                       tex: &egui::TextureHandle,
+                                                       tooltip: &str|
+                                 -> bool {
+                                    let desired_size = egui::vec2(btn_size + 8.0, btn_size + 8.0);
+                                    let (rect, response) =
+                                        ui.allocate_exact_size(desired_size, egui::Sense::click());
 
-                                // Draw hover background (rounded rect)
-                                if response.hovered() {
-                                    let hover_color = if ui.visuals().dark_mode {
-                                        egui::Color32::from_white_alpha(25)
-                                    } else {
-                                        egui::Color32::from_black_alpha(15)
-                                    };
-                                    ui.painter().rect_filled(rect, 4.0, hover_color);
+                                    // Draw hover background (rounded rect)
+                                    if response.hovered() {
+                                        let hover_color = if ui.visuals().dark_mode {
+                                            egui::Color32::from_white_alpha(25)
+                                        } else {
+                                            egui::Color32::from_black_alpha(15)
+                                        };
+                                        ui.painter().rect_filled(rect, 4.0, hover_color);
+                                    }
+
+                                    // Draw icon centered
+                                    let icon_rect = egui::Rect::from_center_size(
+                                        rect.center(),
+                                        egui::vec2(btn_size, btn_size),
+                                    );
+                                    ui.painter().image(
+                                        tex.id(),
+                                        icon_rect,
+                                        egui::Rect::from_min_max(
+                                            egui::pos2(0.0, 0.0),
+                                            egui::pos2(1.0, 1.0),
+                                        ),
+                                        egui::Color32::WHITE,
+                                    );
+
+                                    response.on_hover_text(tooltip).clicked()
+                                };
+
+                                // Play/Pause
+                                let play_icon = if is_playing { "pause" } else { "play" };
+                                if let Some(tex) =
+                                    svg_manager.get_icon(ui.ctx(), play_icon, 48, icon_color)
+                                {
+                                    let tooltip = if is_playing { "Pausar" } else { "Reproduzir" };
+                                    if add_icon_button(ui, &tex, tooltip) {
+                                        preview.toggle_play();
+                                    }
                                 }
 
-                                // Draw icon centered
-                                let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(btn_size, btn_size));
-                                ui.painter().image(
-                                    tex.id(),
-                                    icon_rect,
-                                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                                    egui::Color32::WHITE,
+                                ui.add_space(2.0);
+
+                                // Detach Button (moved here, between Play and Volume)
+                                let detach_icon_name = if is_detached {
+                                    "minimize_2"
+                                } else {
+                                    "external-link"
+                                };
+                                let detach_tooltip = if is_detached {
+                                    "Anexar ao painel"
+                                } else {
+                                    "Desacoplar vídeo"
+                                };
+                                if let Some(tex) =
+                                    svg_manager.get_icon(ui.ctx(), detach_icon_name, 48, icon_color)
+                                {
+                                    if add_icon_button(ui, &tex, detach_tooltip) {
+                                        if is_detached && preview.is_maximized() {
+                                            preview.set_fullscreen_applied(false);
+                                            ui.ctx().send_viewport_cmd(
+                                                egui::ViewportCommand::Fullscreen(false),
+                                            );
+                                            if preview.prev_app_maximized() {
+                                                ui.ctx().send_viewport_cmd(
+                                                    egui::ViewportCommand::Maximized(true),
+                                                );
+                                            }
+                                        }
+                                        preview.toggle_detached();
+                                    }
+                                }
+
+                                ui.add_space(2.0);
+
+                                // Volume
+                                let vol_icon = if is_muted { "vol_mute" } else { "vol_high" };
+                                if let Some(tex) =
+                                    svg_manager.get_icon(ui.ctx(), vol_icon, 48, icon_color)
+                                {
+                                    let vol_tooltip = if is_muted { "Ativar som" } else { "Mudo" };
+                                    if add_icon_button(ui, &tex, vol_tooltip) {
+                                        preview.toggle_mute();
+                                    }
+                                }
+
+                                // Volume Slider
+                                let mut vol = volume;
+                                ui.add_space(4.0);
+                                ui.spacing_mut().slider_width = 70.0;
+                                ui.visuals_mut().selection.bg_fill = crate::ui::theme::COLOR_ACCENT;
+                                if ui
+                                    .add(egui::Slider::new(&mut vol, 0.0..=1.0).show_value(false))
+                                    .changed()
+                                {
+                                    preview.set_volume(vol);
+                                }
+
+                                ui.add_space(10.0);
+
+                                // Time
+                                let time_text = format!(
+                                    "{} / {}",
+                                    crate::ui::components::media_preview::format_time(current_time),
+                                    crate::ui::components::media_preview::format_time(duration)
+                                );
+                                let time_color = if ui.visuals().dark_mode {
+                                    egui::Color32::LIGHT_GRAY
+                                } else {
+                                    egui::Color32::DARK_GRAY
+                                };
+                                ui.label(
+                                    egui::RichText::new(time_text).size(12.0).color(time_color),
                                 );
 
-                                response.on_hover_text(tooltip).clicked()
-                            };
-
-                            // Play/Pause
-                            let play_icon = if is_playing { "pause" } else { "play" };
-                            if let Some(tex) = svg_manager.get_icon(ui.ctx(), play_icon, 48, icon_color) {
-                                let tooltip = if is_playing { "Pausar" } else { "Reproduzir" };
-                                if add_icon_button(ui, &tex, tooltip) {
-                                    preview.toggle_play();
-                                }
-                            }
-
-                            ui.add_space(2.0);
-
-                            // Detach Button (moved here, between Play and Volume)
-                            let detach_icon_name = if is_detached { "minimize_2" } else { "external-link" };
-                            let detach_tooltip = if is_detached { "Anexar ao painel" } else { "Desacoplar vídeo" };
-                            if let Some(tex) = svg_manager.get_icon(ui.ctx(), detach_icon_name, 48, icon_color) {
-                                if add_icon_button(ui, &tex, detach_tooltip) {
-                                    if is_detached && preview.is_maximized() {
-                                        preview.set_fullscreen_applied(false);
-                                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
-                                        if preview.prev_app_maximized() {
-                                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
-                                        }
-                                    }
-                                    preview.toggle_detached();
-                                }
-                            }
-
-                            ui.add_space(2.0);
-
-                            // Volume
-                            let vol_icon = if is_muted { "vol_mute" } else { "vol_high" };
-                            if let Some(tex) = svg_manager.get_icon(ui.ctx(), vol_icon, 48, icon_color) {
-                                let vol_tooltip = if is_muted { "Ativar som" } else { "Mudo" };
-                                if add_icon_button(ui, &tex, vol_tooltip) {
-                                    preview.toggle_mute();
-                                }
-                            }
-
-                            // Volume Slider
-                            let mut vol = volume;
-                            ui.add_space(4.0);
-                            ui.spacing_mut().slider_width = 70.0;
-                            ui.visuals_mut().selection.bg_fill = crate::ui::theme::COLOR_ACCENT;
-                            if ui.add(egui::Slider::new(&mut vol, 0.0..=1.0).show_value(false)).changed() {
-                                preview.set_volume(vol);
-                            }
-
-                            ui.add_space(10.0);
-
-                            // Time
-                            let time_text = format!(
-                                "{} / {}",
-                                crate::ui::components::media_preview::format_time(current_time),
-                                crate::ui::components::media_preview::format_time(duration)
-                            );
-                            let time_color = if ui.visuals().dark_mode { egui::Color32::LIGHT_GRAY } else { egui::Color32::DARK_GRAY };
-                            ui.label(egui::RichText::new(time_text).size(12.0).color(time_color));
-
-                            // Right-aligned buttons (only in detached mode)
-                            if is_detached {
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    // Fullscreen Button
-                                    let is_fullscreen = preview.is_maximized();
-                                    let fs_icon_name = if is_fullscreen { "minimize" } else { "maximize" };
-                                    let fs_tooltip = if is_fullscreen { "Sair da Tela Cheia (ESC)" } else { "Tela Cheia" };
-
-                                    if let Some(tex) = svg_manager.get_icon(ui.ctx(), fs_icon_name, 48, icon_color) {
-                                        if add_icon_button(ui, &tex, fs_tooltip) {
-                                            if !is_fullscreen {
-                                                let was_maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
-                                                preview.set_prev_app_maximized(was_maximized);
-                                                preview.set_fullscreen_applied(false);
+                                // Right-aligned buttons (only in detached mode)
+                                if is_detached {
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            // Fullscreen Button
+                                            let is_fullscreen = preview.is_maximized();
+                                            let fs_icon_name = if is_fullscreen {
+                                                "minimize"
                                             } else {
-                                                preview.set_fullscreen_applied(false);
-                                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
-                                                if preview.prev_app_maximized() {
-                                                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                                                "maximize"
+                                            };
+                                            let fs_tooltip = if is_fullscreen {
+                                                "Sair da Tela Cheia (ESC)"
+                                            } else {
+                                                "Tela Cheia"
+                                            };
+
+                                            if let Some(tex) = svg_manager.get_icon(
+                                                ui.ctx(),
+                                                fs_icon_name,
+                                                48,
+                                                icon_color,
+                                            ) {
+                                                if add_icon_button(ui, &tex, fs_tooltip) {
+                                                    if !is_fullscreen {
+                                                        let was_maximized = ui.ctx().input(|i| {
+                                                            i.viewport().maximized.unwrap_or(false)
+                                                        });
+                                                        preview
+                                                            .set_prev_app_maximized(was_maximized);
+                                                        preview.set_fullscreen_applied(false);
+                                                    } else {
+                                                        preview.set_fullscreen_applied(false);
+                                                        ui.ctx().send_viewport_cmd(
+                                                            egui::ViewportCommand::Fullscreen(
+                                                                false,
+                                                            ),
+                                                        );
+                                                        if preview.prev_app_maximized() {
+                                                            ui.ctx().send_viewport_cmd(
+                                                                egui::ViewportCommand::Maximized(
+                                                                    true,
+                                                                ),
+                                                            );
+                                                        }
+                                                    }
+                                                    preview.toggle_maximized();
                                                 }
                                             }
-                                            preview.toggle_maximized();
-                                        }
-                                    }
 
-                                    ui.add_space(4.0);
+                                            ui.add_space(4.0);
 
-                                    // VSR Button (NVIDIA Video Super Resolution)
-                                    let is_vsr = preview.is_vsr_enabled();
-                                    let label = if is_vsr { "VSR On" } else { "VSR Off" };
+                                            // VSR Button (NVIDIA Video Super Resolution)
+                                            let is_vsr = preview.is_vsr_enabled();
+                                            let label = if is_vsr { "VSR On" } else { "VSR Off" };
 
-                                    // Custom style for ON state (NVIDIA Green), Standard style for OFF state
-                                    let btn = if is_vsr {
-                                        egui::Button::new(
-                                            egui::RichText::new(label).strong().size(10.0).color(egui::Color32::WHITE)
-                                        )
-                                        .fill(egui::Color32::from_rgb(118, 185, 0))
-                                    } else {
-                                        egui::Button::new(
-                                            egui::RichText::new(label).size(10.0)
-                                        )
-                                        .fill(egui::Color32::TRANSPARENT)
-                                    };
+                                            // Custom style for ON state (NVIDIA Green), Standard style for OFF state
+                                            let btn = if is_vsr {
+                                                egui::Button::new(
+                                                    egui::RichText::new(label)
+                                                        .strong()
+                                                        .size(10.0)
+                                                        .color(egui::Color32::WHITE),
+                                                )
+                                                .fill(egui::Color32::from_rgb(118, 185, 0))
+                                            } else {
+                                                egui::Button::new(
+                                                    egui::RichText::new(label).size(10.0),
+                                                )
+                                                .fill(egui::Color32::TRANSPARENT)
+                                            };
 
-                                    if ui.add(btn).on_hover_text(
-                                        if is_vsr { "Desativar NVIDIA VSR Upscaling" } else { "Ativar NVIDIA VSR (AI Upscaling)" }
-                                    ).clicked() {
-                                        if let Err(e) = preview.toggle_vsr() {
-                                            eprintln!("Error toggling VSR: {}", e);
-                                        }
-                                    }
-                                });
-                            }
-                        });
-                    };
+                                            if ui
+                                                .add(btn)
+                                                .on_hover_text(if is_vsr {
+                                                    "Desativar NVIDIA VSR Upscaling"
+                                                } else {
+                                                    "Ativar NVIDIA VSR (AI Upscaling)"
+                                                })
+                                                .clicked()
+                                            {
+                                                if let Err(e) = preview.toggle_vsr() {
+                                                    eprintln!("Error toggling VSR: {}", e);
+                                                }
+                                            }
+                                        },
+                                    );
+                                }
+                            });
+                        };
 
                     if is_detached {
                         // === DETACHED MODE ===
@@ -496,31 +690,55 @@ pub fn render_preview_panel(
                         // Fix: Constrain height to avoid huge whitespace
                         let placeholder_height = 200.0;
                         let available_width = ui.available_width() - 32.0;
-                        
+
                         let mut reattach_clicked = false;
-                        
+
                         ui.allocate_ui_with_layout(
                             egui::vec2(available_width, placeholder_height),
                             egui::Layout::centered_and_justified(egui::Direction::TopDown),
                             |ui| {
                                 ui.vertical_centered(|ui| {
-                                    ui.label(egui::RichText::new("Vídeo Desacoplado").strong().size(16.0));
+                                    ui.label(
+                                        egui::RichText::new("Vídeo Desacoplado")
+                                            .strong()
+                                            .size(16.0),
+                                    );
                                     ui.add_space(8.0);
-                                    
+
                                     // Reattach Icon Button
-                                    let icon_color = if ui.visuals().dark_mode { [220, 220, 220, 255] } else { [60, 60, 60, 255] };
+                                    let icon_color = if ui.visuals().dark_mode {
+                                        [220, 220, 220, 255]
+                                    } else {
+                                        [60, 60, 60, 255]
+                                    };
                                     let tooltip = "Reacoplar vídeo ao painel";
-    
-                                    if let Some(tex) = svg_manager.get_icon(ui.ctx(), "minimize_2", 48, icon_color) {
-                                        if ui.add(egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(24.0, 24.0))).frame(false))
+
+                                    if let Some(tex) =
+                                        svg_manager.get_icon(ui.ctx(), "minimize_2", 48, icon_color)
+                                    {
+                                        if ui
+                                            .add(
+                                                egui::ImageButton::new(
+                                                    egui::load::SizedTexture::new(
+                                                        tex.id(),
+                                                        egui::vec2(24.0, 24.0),
+                                                    ),
+                                                )
+                                                .frame(false),
+                                            )
                                             .on_hover_text(tooltip)
-                                            .clicked() {
+                                            .clicked()
+                                        {
                                             if preview.is_maximized() {
                                                 // Handle cleanup if re-attaching from fullscreen
                                                 preview.set_fullscreen_applied(false);
-                                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                                                ui.ctx().send_viewport_cmd(
+                                                    egui::ViewportCommand::Fullscreen(false),
+                                                );
                                                 if preview.prev_app_maximized() {
-                                                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                                                    ui.ctx().send_viewport_cmd(
+                                                        egui::ViewportCommand::Maximized(true),
+                                                    );
                                                 }
                                             }
                                             preview.toggle_detached();
@@ -530,9 +748,13 @@ pub fn render_preview_panel(
                                         if ui.button("Reacoplar").on_hover_text(tooltip).clicked() {
                                             if preview.is_maximized() {
                                                 preview.set_fullscreen_applied(false);
-                                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                                                ui.ctx().send_viewport_cmd(
+                                                    egui::ViewportCommand::Fullscreen(false),
+                                                );
                                                 if preview.prev_app_maximized() {
-                                                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                                                    ui.ctx().send_viewport_cmd(
+                                                        egui::ViewportCommand::Maximized(true),
+                                                    );
                                                 }
                                             }
                                             preview.toggle_detached();
@@ -540,14 +762,14 @@ pub fn render_preview_panel(
                                         }
                                     }
                                 });
-                            }
+                            },
                         );
 
                         // If reattach was clicked, return early to let the next frame handle the "Attached" state cleanly.
                         // Continuing here with mixed state (is_detached=true locally, false in struct) causes rendering glitches.
                         if reattach_clicked {
-                             ui.ctx().request_repaint(); // Ensure immediate update
-                             return;
+                            ui.ctx().request_repaint(); // Ensure immediate update
+                            return;
                         }
 
                         // 2. Floating Window logic
@@ -555,9 +777,10 @@ pub fn render_preview_panel(
                         let is_fullscreen = preview.is_maximized(); // Renamed for clarity: this is now fullscreen
                         let mut should_restore = preview.should_restore();
                         let last_known_rect = preview.get_last_window_rect();
-                        
+
                         // Detect minimize/restore cycle to preserve window position
-                        let is_minimized = ui.ctx().input(|i| i.viewport().minimized.unwrap_or(false));
+                        let is_minimized =
+                            ui.ctx().input(|i| i.viewport().minimized.unwrap_or(false));
                         if is_minimized && !preview.was_minimized() {
                             // Just got minimized - mark it
                             preview.set_was_minimized(true);
@@ -574,9 +797,11 @@ pub fn render_preview_panel(
                             // === FULLSCREEN MODE ===
                             if !preview.fullscreen_applied() {
                                 if preview.prev_app_maximized() {
-                                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(false));
+                                    ui.ctx()
+                                        .send_viewport_cmd(egui::ViewportCommand::Maximized(false));
                                 }
-                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+                                ui.ctx()
+                                    .send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
                                 preview.set_fullscreen_applied(true);
                             }
 
@@ -591,7 +816,11 @@ pub fn render_preview_panel(
                                 .order(egui::Order::Foreground)
                                 .show(ui.ctx(), |ui| {
                                     ui.set_min_size(screen_rect.size());
-                                    ui.painter().rect_filled(screen_rect, 0.0, egui::Color32::BLACK);
+                                    ui.painter().rect_filled(
+                                        screen_rect,
+                                        0.0,
+                                        egui::Color32::BLACK,
+                                    );
 
                                     let total_size = screen_rect.size();
 
@@ -606,17 +835,22 @@ pub fn render_preview_panel(
                                     );
 
                                     // Allocate the full area
-                                    let _ = ui.allocate_exact_size(total_size, egui::Sense::click());
+                                    let _ =
+                                        ui.allocate_exact_size(total_size, egui::Sense::click());
 
                                     // Render Video
-                                    let mut video_ui = ui.new_child(egui::UiBuilder::new().max_rect(video_rect));
+                                    let mut video_ui =
+                                        ui.new_child(egui::UiBuilder::new().max_rect(video_rect));
                                     preview.set_forced_size(Some(video_rect.size()));
                                     preview.show(&mut video_ui, frame);
 
                                     // Render Controls when active
                                     if show_controls {
                                         let control_rect = egui::Rect::from_min_size(
-                                            egui::pos2(screen_rect.min.x, screen_rect.min.y + video_height),
+                                            egui::pos2(
+                                                screen_rect.min.x,
+                                                screen_rect.min.y + video_height,
+                                            ),
                                             egui::vec2(total_size.x, control_height),
                                         );
 
@@ -624,45 +858,64 @@ pub fn render_preview_panel(
                                         let bg_color = if ui.visuals().dark_mode {
                                             egui::Color32::from_rgb(35, 35, 38) // Dark mode panel background
                                         } else {
-                                            egui::Color32::from_rgb(245, 245, 248) // Light mode panel background
+                                            egui::Color32::from_rgb(245, 245, 248)
+                                            // Light mode panel background
                                         };
                                         ui.painter().rect_filled(control_rect, 0.0, bg_color);
 
-                                        let mut control_ui = ui.new_child(egui::UiBuilder::new().max_rect(control_rect));
+                                        let mut control_ui = ui.new_child(
+                                            egui::UiBuilder::new().max_rect(control_rect),
+                                        );
                                         control_ui.add_space(6.0);
-                                        draw_controls(&mut control_ui, preview, control_rect.width() - 20.0, svg_manager);
+                                        draw_controls(
+                                            &mut control_ui,
+                                            preview,
+                                            control_rect.width() - 20.0,
+                                            svg_manager,
+                                        );
                                     }
 
                                     // ESC to exit fullscreen
                                     if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                                         preview.toggle_maximized();
                                         preview.set_fullscreen_applied(false);
-                                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                                        ui.ctx().send_viewport_cmd(
+                                            egui::ViewportCommand::Fullscreen(false),
+                                        );
                                         if preview.prev_app_maximized() {
-                                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                                            ui.ctx().send_viewport_cmd(
+                                                egui::ViewportCommand::Maximized(true),
+                                            );
                                         }
                                     }
 
                                     // Only repaint when video is playing or controls visible (perf optimization)
-                                    if preview.get_video_state().map(|s| s.is_playing).unwrap_or(false) 
-                                       || preview.controls_active() {
-                                        ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+                                    if preview
+                                        .get_video_state()
+                                        .map(|s| s.is_playing)
+                                        .unwrap_or(false)
+                                        || preview.controls_active()
+                                    {
+                                        ui.ctx().request_repaint_after(
+                                            std::time::Duration::from_millis(200),
+                                        );
                                     }
                                 });
-                            
+
                             // Handle close via ESC already above
-                            
                         } else {
                             // === WINDOWED MODE ===
                             // Restore from fullscreen if needed
                             if preview.fullscreen_applied() {
                                 preview.set_fullscreen_applied(false);
-                                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                                ui.ctx()
+                                    .send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
                                 if preview.prev_app_maximized() {
-                                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                                    ui.ctx()
+                                        .send_viewport_cmd(egui::ViewportCommand::Maximized(true));
                                 }
                             }
-                            
+
                             // Condition Window Builder
                             let mut window_builder = egui::Window::new(&file.name)
                                 .open(&mut open)
@@ -682,7 +935,10 @@ pub fn render_preview_panel(
                                     let center = screen.center();
                                     let w = 640.0;
                                     let h = 480.0;
-                                    let rect = egui::Rect::from_min_size(egui::pos2(center.x - w/2.0, center.y - h/2.0), egui::vec2(w, h));
+                                    let rect = egui::Rect::from_min_size(
+                                        egui::pos2(center.x - w / 2.0, center.y - h / 2.0),
+                                        egui::vec2(w, h),
+                                    );
                                     window_builder = window_builder
                                         .current_pos(rect.min)
                                         .fixed_size(rect.size());
@@ -695,75 +951,94 @@ pub fn render_preview_panel(
                                         .default_size(rect.size())
                                         .resizable(true);
                                 } else {
-                                    window_builder = window_builder
-                                        .default_size([640.0, 480.0])
-                                        .resizable(true);
+                                    window_builder =
+                                        window_builder.default_size([640.0, 480.0]).resizable(true);
                                 }
                             }
-                        
+
                             let window_response = window_builder.show(ui.ctx(), |ui| {
-                            // === TRUE AUTOHIDE IMPLEMENTATION ===
-                            // Video takes 100% when idle, shrinks when controls are shown
-                            
-                            let total_rect = ui.available_rect_before_wrap();
-                            let total_size = total_rect.size();
-                            
-                            // Determine if controls should be visible
-                            // Primary: MPV area reports mouse activity
-                            let show_controls = preview.controls_active();
-                            
-                            // Control bar height (only when visible)
-                            let control_height = if show_controls { 75.0 } else { 0.0 };
-                            
-                            // Video takes remaining space
-                            let video_height = total_size.y - control_height;
-                            
-                            let video_rect = egui::Rect::from_min_size(
-                                total_rect.min,
-                                egui::vec2(total_size.x, video_height)
-                            );
+                                // === TRUE AUTOHIDE IMPLEMENTATION ===
+                                // Video takes 100% when idle, shrinks when controls are shown
 
-                            // Allocate the total space (locks window size)
-                            let _ = ui.allocate_exact_size(total_size, egui::Sense::hover());
+                                let total_rect = ui.available_rect_before_wrap();
+                                let total_size = total_rect.size();
 
-                            // 1. Render Video (full height when controls hidden)
-                            let mut video_ui = ui.new_child(egui::UiBuilder::new().max_rect(video_rect));
-                            preview.set_forced_size(Some(video_rect.size()));
-                            preview.show(&mut video_ui, frame);
+                                // Determine if controls should be visible
+                                // Primary: MPV area reports mouse activity
+                                let show_controls = preview.controls_active();
 
-                            // 2. Render Controls only when active
-                            if show_controls {
-                                let control_rect = egui::Rect::from_min_size(
-                                    egui::pos2(total_rect.min.x, total_rect.min.y + video_height),
-                                    egui::vec2(total_size.x, control_height)
+                                // Control bar height (only when visible)
+                                let control_height = if show_controls { 75.0 } else { 0.0 };
+
+                                // Video takes remaining space
+                                let video_height = total_size.y - control_height;
+
+                                let video_rect = egui::Rect::from_min_size(
+                                    total_rect.min,
+                                    egui::vec2(total_size.x, video_height),
                                 );
-                                
-                                // Background - use theme-aware colors
-                                let bg_color = if ui.visuals().dark_mode {
-                                    egui::Color32::from_rgb(35, 35, 38) // Dark mode panel background
-                                } else {
-                                    egui::Color32::from_rgb(245, 245, 248) // Light mode panel background
-                                };
-                                ui.painter().rect_filled(control_rect, 0.0, bg_color);
-                                
-                                let mut control_ui = ui.new_child(egui::UiBuilder::new().max_rect(control_rect));
-                                control_ui.add_space(6.0);
-                                draw_controls(&mut control_ui, preview, control_rect.width() - 20.0, svg_manager);
-                            }
-                            
+
+                                // Allocate the total space (locks window size)
+                                let _ = ui.allocate_exact_size(total_size, egui::Sense::hover());
+
+                                // 1. Render Video (full height when controls hidden)
+                                let mut video_ui =
+                                    ui.new_child(egui::UiBuilder::new().max_rect(video_rect));
+                                preview.set_forced_size(Some(video_rect.size()));
+                                preview.show(&mut video_ui, frame);
+
+                                // 2. Render Controls only when active
+                                if show_controls {
+                                    let control_rect = egui::Rect::from_min_size(
+                                        egui::pos2(
+                                            total_rect.min.x,
+                                            total_rect.min.y + video_height,
+                                        ),
+                                        egui::vec2(total_size.x, control_height),
+                                    );
+
+                                    // Background - use theme-aware colors
+                                    let bg_color = if ui.visuals().dark_mode {
+                                        egui::Color32::from_rgb(35, 35, 38) // Dark mode panel background
+                                    } else {
+                                        egui::Color32::from_rgb(245, 245, 248) // Light mode panel background
+                                    };
+                                    ui.painter().rect_filled(control_rect, 0.0, bg_color);
+
+                                    let mut control_ui =
+                                        ui.new_child(egui::UiBuilder::new().max_rect(control_rect));
+                                    control_ui.add_space(6.0);
+                                    draw_controls(
+                                        &mut control_ui,
+                                        preview,
+                                        control_rect.width() - 20.0,
+                                        svg_manager,
+                                    );
+                                }
+
                                 // Request repaint to check timeout and hide controls
                                 // Only repaint when video is playing or controls visible (perf optimization)
-                                if preview.get_video_state().map(|s| s.is_playing).unwrap_or(false) 
-                                   || preview.controls_active() {
-                                    ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+                                if preview
+                                    .get_video_state()
+                                    .map(|s| s.is_playing)
+                                    .unwrap_or(false)
+                                    || preview.controls_active()
+                                {
+                                    ui.ctx().request_repaint_after(
+                                        std::time::Duration::from_millis(200),
+                                    );
                                 }
-                        });
+                            });
 
                             // Post-Show Logic (only for windowed mode)
                             // 1. If Normal State, update last_known_rect
-                            if !should_restore {
+                            // PROTECT: Only save if NOT minimized AND size is valid (>50px) to prevent "squashed" restore
+                            if !should_restore && !is_minimized {
                                 if let Some(inner) = &window_response {
-                                    preview.set_last_window_rect(inner.response.rect);
+                                    let r = inner.response.rect;
+                                    if r.width() > 50.0 && r.height() > 50.0 {
+                                        preview.set_last_window_rect(r);
+                                    }
                                 }
                             }
 
@@ -771,20 +1046,24 @@ pub fn render_preview_panel(
                             if should_restore {
                                 preview.complete_restore();
                             }
-                            
+
                             // Handle close
                             if !open {
                                 if preview.is_maximized() {
                                     preview.set_fullscreen_applied(false);
-                                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                                    ui.ctx()
+                                        .send_viewport_cmd(egui::ViewportCommand::Fullscreen(
+                                            false,
+                                        ));
                                     if preview.prev_app_maximized() {
-                                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                                        ui.ctx().send_viewport_cmd(
+                                            egui::ViewportCommand::Maximized(true),
+                                        );
                                     }
                                 }
                                 preview.set_detached(false);
                             }
                         } // end windowed mode
-
                     } else {
                         // === ATTACHED MODE (Standard) ===
                         preview.show(ui, frame);
@@ -795,7 +1074,6 @@ pub fn render_preview_panel(
                             draw_controls(ui, preview, max_preview_width, svg_manager);
                         });
                     }
-
                 } else {
                     // === THUMBNAIL WITH PLAY OVERLAY (NON-OWNER) ===
                     if let Some(tex) = &texture {
@@ -811,18 +1089,42 @@ pub fn render_preview_panel(
                         let is_hovered = hover_pos.map_or(false, |pos| media_rect.contains(pos));
 
                         if is_hovered {
-                    // Show play overlay for ALL video files - transcoding handles incompatible formats
-                    let center_size = 64.0;
-                    let center_rect = egui::Rect::from_center_size(media_rect.center(), egui::vec2(center_size, center_size));
-                    ui.painter().rect_filled(center_rect, center_size / 2.0, egui::Color32::from_black_alpha(160));
-                    if let Some(tex_play) = svg_manager.get_icon(ui.ctx(), "play", 96, [255, 255, 255, 255]) {
-                        ui.painter().image(tex_play.id(), center_rect.shrink(14.0), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
-                    }
-                }
-                // Área de clique = todo o thumbnail
-                if ui.interact(media_rect, egui::Id::new("video_play_overlay_1"), egui::Sense::click()).clicked() {
-                    action = Some(PreviewPanelAction::RequestPlay(file.path.clone()));
-                }
+                            // Show play overlay for ALL video files - transcoding handles incompatible formats
+                            let center_size = 64.0;
+                            let center_rect = egui::Rect::from_center_size(
+                                media_rect.center(),
+                                egui::vec2(center_size, center_size),
+                            );
+                            ui.painter().rect_filled(
+                                center_rect,
+                                center_size / 2.0,
+                                egui::Color32::from_black_alpha(160),
+                            );
+                            if let Some(tex_play) =
+                                svg_manager.get_icon(ui.ctx(), "play", 96, [255, 255, 255, 255])
+                            {
+                                ui.painter().image(
+                                    tex_play.id(),
+                                    center_rect.shrink(14.0),
+                                    egui::Rect::from_min_max(
+                                        egui::pos2(0.0, 0.0),
+                                        egui::pos2(1.0, 1.0),
+                                    ),
+                                    egui::Color32::WHITE,
+                                );
+                            }
+                        }
+                        // Área de clique = todo o thumbnail
+                        if ui
+                            .interact(
+                                media_rect,
+                                egui::Id::new("video_play_overlay_1"),
+                                egui::Sense::click(),
+                            )
+                            .clicked()
+                        {
+                            action = Some(PreviewPanelAction::RequestPlay(file.path.clone()));
+                        }
                     } else {
                         ui.allocate_space(egui::vec2(max_preview_width, 200.0));
                     }
@@ -841,7 +1143,7 @@ pub fn render_preview_panel(
                     }
                 }
             }
-    } else if is_video {
+        } else if is_video {
             // === NO ACTIVE MEDIA PREVIEW YET (Non-owner tab or first selection) ===
             // Show thumbnail with Play Overlay
             if let Some(tex) = &texture {
@@ -861,32 +1163,51 @@ pub fn render_preview_panel(
                 if is_hovered {
                     // Show play overlay for ALL video files - transcoding handles incompatible formats
                     let center_size = 64.0;
-                    let center_rect = egui::Rect::from_center_size(media_rect.center(), egui::vec2(center_size, center_size));
-                    ui.painter().rect_filled(center_rect, center_size / 2.0, egui::Color32::from_black_alpha(160));
-                    if let Some(tex_play) = svg_manager.get_icon(ui.ctx(), "play", 96, [255, 255, 255, 255]) {
-                        ui.painter().image(tex_play.id(), center_rect.shrink(14.0), egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                    let center_rect = egui::Rect::from_center_size(
+                        media_rect.center(),
+                        egui::vec2(center_size, center_size),
+                    );
+                    ui.painter().rect_filled(
+                        center_rect,
+                        center_size / 2.0,
+                        egui::Color32::from_black_alpha(160),
+                    );
+                    if let Some(tex_play) =
+                        svg_manager.get_icon(ui.ctx(), "play", 96, [255, 255, 255, 255])
+                    {
+                        ui.painter().image(
+                            tex_play.id(),
+                            center_rect.shrink(14.0),
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
                     }
                 }
                 // Área de clique = todo o thumbnail
-                if ui.interact(media_rect, egui::Id::new("video_play_overlay_2"), egui::Sense::click()).clicked() {
+                if ui
+                    .interact(
+                        media_rect,
+                        egui::Id::new("video_play_overlay_2"),
+                        egui::Sense::click(),
+                    )
+                    .clicked()
+                {
                     action = Some(PreviewPanelAction::RequestPlay(file.path.clone()));
                 }
             } else {
                 ui.allocate_space(egui::vec2(ui.available_width() - 16.0, 200.0));
             }
-
         } else if let Some(tex) = &texture {
             // Fallback: Static Thumbnail (No MediaPreview state)
             if let Some(act) = render_texture_with_overlay(ui, tex, svg_manager) {
                 action = Some(act);
             }
         } else {
-           if let Some(act) = render_fallback(ui, svg_manager) {
+            if let Some(act) = render_fallback(ui, svg_manager) {
                 action = Some(act);
-           }
+            }
         }
         ui.add_space(20.0);
-
     });
 
     // Tabela de Detalhes
@@ -898,7 +1219,7 @@ pub fn render_preview_panel(
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 ui.add_space(5.0);
-                
+
                 let has_button = !file.is_dir && file.drive_info.is_none();
                 // Reserve space for button if needed
                 let button_width = if has_button { 22.0 } else { 0.0 };
@@ -910,30 +1231,45 @@ pub fn render_preview_panel(
                 // to center the text horizontally within this region.
                 ui.allocate_ui_with_layout(
                     egui::vec2(available_width, 0.0), // width=available, height=auto
-                    egui::Layout::top_down(egui::Align::Center), 
+                    egui::Layout::top_down(egui::Align::Center),
                     |ui| {
                         ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(&file.name).strong().size(15.0)
-                            ).wrap()
+                            egui::Label::new(egui::RichText::new(&file.name).strong().size(15.0))
+                                .wrap(),
                         );
-                    }
+                    },
                 );
 
                 // 2. Refresh Button (Right aligned)
                 if has_button {
                     let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
                     let is_media = crate::infrastructure::windows::is_media_extension(extension);
-                    
+
                     if is_media {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
                             ui.add_space(5.0); // Spacing between text and button
-                            let icon_color = if ui.visuals().dark_mode { [220, 220, 220, 255] } else { [60, 60, 60, 255] };
-                            if let Some(tex) = svg_manager.get_icon(ui.ctx(), "refresh", 32, icon_color) {
-                                if ui.add(egui::ImageButton::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(16.0, 16.0))).frame(false))
+                            let icon_color = if ui.visuals().dark_mode {
+                                [220, 220, 220, 255]
+                            } else {
+                                [60, 60, 60, 255]
+                            };
+                            if let Some(tex) =
+                                svg_manager.get_icon(ui.ctx(), "refresh", 32, icon_color)
+                            {
+                                if ui
+                                    .add(
+                                        egui::ImageButton::new(egui::load::SizedTexture::new(
+                                            tex.id(),
+                                            egui::vec2(16.0, 16.0),
+                                        ))
+                                        .frame(false),
+                                    )
                                     .on_hover_text("Recarregar Thumbnail")
-                                    .clicked() {
-                                    action = Some(PreviewPanelAction::RefreshThumbnail(file.path.clone()));
+                                    .clicked()
+                                {
+                                    action = Some(PreviewPanelAction::RefreshThumbnail(
+                                        file.path.clone(),
+                                    ));
                                 }
                             }
                         });
@@ -978,9 +1314,9 @@ pub fn render_preview_panel(
                 add_detail(ui, "Tipo:", format!("{:?}", drive.drive_type));
             } else if file.is_dir {
                 if file.name.to_lowercase().ends_with(".zip") {
-                     add_detail(ui, "Tipo:", "Arquivo ZIP".to_string());
+                    add_detail(ui, "Tipo:", "Arquivo ZIP".to_string());
                 } else {
-                     add_detail(ui, "Tipo:", "Pasta de Arquivos".to_string());
+                    add_detail(ui, "Tipo:", "Pasta de Arquivos".to_string());
                 }
             } else {
                 let ext = file
@@ -1158,7 +1494,6 @@ pub fn render_preview_panel(
                     },
                 );
             }
-
         });
     });
 
