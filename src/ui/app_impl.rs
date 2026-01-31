@@ -402,7 +402,7 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
             ui.horizontal(|ui| {
                 // Calculate approximate content width to center it
                 // 6 icons (28px) + sort button + combobox (~70px) + 2 view icons + slider (80px) + zoom label + separators + spacing
-                let content_width = 6.0 * 28.0 + 30.0 + 100.0 + 2.0 * 28.0 + 80.0 + 70.0 + 3.0 * 8.0 + 15.0 * 12.0;
+                let content_width = 6.0 * 28.0 + 30.0 + 110.0 + 2.0 * 28.0 + 80.0 + 80.0 + 3.0 * 8.0 + 16.0 * 12.0;
                 let available = ui.available_width();
                 let left_pad = ((available - content_width) / 2.0).max(0.0);
                 ui.add_space(left_pad);
