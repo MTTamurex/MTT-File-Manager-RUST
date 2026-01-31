@@ -1,4 +1,5 @@
 use eframe::egui;
+use std::time::Duration;
 use crate::app::ImageViewerApp;
 
 pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
@@ -55,6 +56,6 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     );
                 });
         }
-        ctx.request_repaint(); // Keep animating
+        ctx.request_repaint_after(Duration::from_millis(33));
     }
 }

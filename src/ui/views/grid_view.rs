@@ -3,6 +3,7 @@
 
 use eframe::egui::{self, Color32, Rect, Sense, Ui};
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::domain::file_entry::FileEntry;
 // PERFORMANCE: Use FxHashSet for PathBuf keys - faster hashing than std::collections::HashSet
@@ -434,7 +435,7 @@ pub fn render_grid_view(
 
     // Request repaint if we are still animating towards target
     if visual_scroll != scroll_target {
-        ui.ctx().request_repaint();
+        ui.ctx().request_repaint_after(Duration::from_millis(16));
     }
 
     // Use visual_scroll for rendering from here on
