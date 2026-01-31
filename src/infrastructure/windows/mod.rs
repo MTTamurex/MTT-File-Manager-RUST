@@ -9,6 +9,7 @@ pub mod file_flags;
 pub mod file_system;
 pub mod file_type;
 pub mod formatting;
+pub mod hdd_directory_reader;
 pub mod icons;
 pub mod iso_mount;
 pub mod media_foundation;
@@ -33,6 +34,7 @@ pub use file_type::{
     is_media_extension, is_video_extension, PerceivedType,
 };
 pub use formatting::*;
+pub use hdd_directory_reader::*;
 pub use icons::*;
 pub use iso_mount::*;
 pub use media_foundation::*;
