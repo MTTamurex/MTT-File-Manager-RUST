@@ -565,9 +565,11 @@ pub fn render_grid_view(
                 let header_h = 25.0;
                 // Check visibility of header
                 if *start_y + header_h > content_min.y && *start_y < content_min.y + viewport_h {
+                    let header_x = content_min.x + padding;
+                    let header_w = (available_w - padding).max(0.0);
                     let header_rect = Rect::from_min_size(
-                        egui::pos2(content_min.x, *start_y),
-                        egui::vec2(available_w, header_h),
+                        egui::pos2(header_x, *start_y),
+                        egui::vec2(header_w, header_h),
                     );
                     let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
                     render_section_header(&mut header_ui, title);
