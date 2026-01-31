@@ -92,6 +92,8 @@ pub struct MpvPreview {
     /// Stores previous demuxer back cache bytes to restore on undock
     docked_prev_demuxer_max_back_bytes: Option<i64>,
     audio_normalizer_enabled: bool,
+    last_deinterlace_check: Instant,
+    hidden_prev_vid: Option<String>,
 
     // Performance: Async event handling (Fase 2 optimization)
     event_thread_running: Arc<AtomicBool>,
@@ -150,6 +152,8 @@ impl MpvPreview {
             docked_prev_demuxer_max_bytes: None,
             docked_prev_demuxer_max_back_bytes: None,
             audio_normalizer_enabled: false,
+            last_deinterlace_check: Instant::now(),
+            hidden_prev_vid: None,
             event_thread_running: Arc::new(AtomicBool::new(false)),
             event_thread_handle: None,
             cached_duration: None,
@@ -508,7 +512,10 @@ impl MpvPreview {
             }
         }
 
-        self.update_deinterlace_filter();
+        if self.last_deinterlace_check.elapsed() >= Duration::from_millis(500) {
+            self.update_deinterlace_filter();
+            self.last_deinterlace_check = Instant::now();
+        }
 
         // Move/resize child window (OPTIMIZED: Only when rect actually changes)
         #[cfg(target_os = "windows")]
@@ -626,6 +633,16 @@ impl MpvPreview {
 
     pub fn set_visibility(&mut self, visible: bool) {
         self.is_visible = visible;
+        if let Some(m) = &self.mpv {
+            if visible {
+                if let Some(prev_vid) = self.hidden_prev_vid.take() {
+                    let _ = m.set_property("vid", prev_vid);
+                }
+            } else if self.hidden_prev_vid.is_none() {
+                self.hidden_prev_vid = m.get_property::<String>("vid").ok();
+                let _ = m.set_property("vid", "no");
+            }
+        }
         #[cfg(target_os = "windows")]
         if let Some(hwnd) = self.mpv_hwnd {
             unsafe {
