@@ -36,6 +36,7 @@ pub enum VideoMenuAction {
     None,
     TogglePlay,
     ToggleMute,
+    ToggleAudioNormalizer,
     SetAudioTrack(i64),
     SetSubtitleTrack(i64),
     ToggleFullscreen,
@@ -97,6 +98,7 @@ pub fn render_video_menu(
     audio_tracks: &[TrackInfo],
     sub_tracks: &[TrackInfo],
     is_fullscreen: bool,
+    audio_normalizer_enabled: bool,
 ) -> VideoMenuAction {
     let mut action = VideoMenuAction::None;
 
@@ -130,7 +132,7 @@ pub fn render_video_menu(
             .with_taskbar(false)
             .with_always_on_top()
             .with_resizable(false)
-            .with_inner_size([MENU_WIDTH, 110.0]) // Slightly larger to avoid rounding/clipping issues
+            .with_inner_size([MENU_WIDTH, 132.0]) // Slightly larger to avoid rounding/clipping issues
             .with_position(menu_pos),
         |ctx, _class| {
             egui::CentralPanel::default().frame(menu_frame).show(ctx, |ui| {
@@ -140,6 +142,15 @@ pub fn render_video_menu(
                     state.active_submenu = Some("audio".to_string());
                     let submenu_y = menu_pos.y + audio_resp.rect.min.y;
                     state.submenu_position = Some(egui::pos2(menu_pos.x + MENU_WIDTH, submenu_y));
+                }
+
+                let normalizer_text = if audio_normalizer_enabled {
+                    "✓ Normalizar áudio"
+                } else {
+                    "Normalizar áudio"
+                };
+                if menu_item(ui, normalizer_text, false).clicked() {
+                    action = VideoMenuAction::ToggleAudioNormalizer;
                 }
 
                 // Subtitle menu item
@@ -285,6 +296,7 @@ pub fn render_video_menu(
         action,
         VideoMenuAction::Close
             | VideoMenuAction::ToggleFullscreen
+            | VideoMenuAction::ToggleAudioNormalizer
             | VideoMenuAction::RightClickOutside(_)
     ) {
         state.active_submenu = None;
