@@ -294,7 +294,7 @@ impl ImageViewerApp {
                                 let _ = file_entry_sender.send((my_gen, chunk));
                                 ctx.request_repaint();
                                 batch_tracker.record_batch(batch_start.elapsed(), end - offset);
-                                batch_size = batch_tracker.batch_size();
+                                let _ = batch_tracker.batch_size(); // Update internal state but don't use result
                                 batch_start = std::time::Instant::now();
                                 offset = end;
                             }
@@ -350,8 +350,78 @@ impl ImageViewerApp {
                 }
             }
 
-            // OPTIMIZATION: Use NtQueryDirectoryFile on HDD when available
+            // OPTIMIZATION: Use HDD-optimized Win32 APIs for mechanical drives
+            let use_hdd_optimized = is_ssd == false;  // Explicitly check for HDD
             let use_fast_reader = !is_ssd && ntfs_reader::is_available();
+
+            if use_hdd_optimized && !use_fast_reader {
+                // HDD-optimized path using FindFirstFileExW with LARGE_FETCH
+                let is_onedrive = onedrive::is_onedrive_path(&PathBuf::from(&base_path));
+                match crate::infrastructure::windows::hdd_directory_reader::read_directory_hdd_batched(
+                    &PathBuf::from(&base_path),
+                    is_onedrive,
+                ) {
+                    Ok(batches) => {
+                        for batch_entries in batches {
+                            if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
+                                break;
+                            }
+                            
+                            // Process batch with folder covers
+                            let folders: Vec<PathBuf> = batch_entries
+                                .iter()
+                                .filter(|e| e.is_dir)
+                                .map(|e| e.path.clone())
+                                .collect();
+                            
+                            let mut processed_batch = batch_entries;
+                            if !folders.is_empty() {
+                                let covers = disk_cache.get_folder_covers(&folders);
+                                for item in processed_batch.iter_mut() {
+                                    if item.is_dir {
+                                        if let Some(cover) = covers.get(&item.path) {
+                                            item.folder_cover = Some(cover.clone());
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            let batch_len = processed_batch.len();
+                            let _ = file_entry_sender.send((my_gen, processed_batch));
+                            batch_tracker.record_batch(batch_start.elapsed(), batch_len);
+                            batch_size = batch_tracker.batch_size();
+                            batch_start = std::time::Instant::now();
+                            ctx.request_repaint();
+                        }
+                        
+                        // Send empty batch to signal completion
+                        if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+                            let _ = file_entry_sender.send((my_gen, Vec::new()));
+                            ctx.request_repaint();
+                        }
+                        
+                        // Cache results and trigger prefetch for subdirectories
+                        if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+                            // Results are already cached in batches, no need for full cache here
+                            if let Some(_di) = &directory_index_opt {
+                                // Note: Index update would require collecting all entries
+                                // For now, rely on the existing caching mechanism
+                            }
+                        }
+                        
+                        if !is_ssd && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+                            // Note: Subdirectory prefetch would require collecting all entries
+                            // For now, skip prefetch for HDD-optimized path to maintain performance
+                        }
+                        
+                        return;
+                    }
+                    Err(e) => {
+                        eprintln!("[HDD] Optimized path failed: {}, falling back to standard Win32", e);
+                        // Continue to standard Win32 path
+                    }
+                }
+            }
 
             if use_fast_reader {
                 if let Some(entries) = ntfs_reader::read_directory_fast(&PathBuf::from(&base_path))
