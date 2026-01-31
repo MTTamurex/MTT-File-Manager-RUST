@@ -1,7 +1,9 @@
 use eframe::egui;
 use crate::app::ImageViewerApp;
+use crate::domain::file_entry::{SortMode, ViewMode};
 use crate::ui::app;
 use crate::ui::theme;
+use crate::ui::widgets;
 use crate::infrastructure::windows::window_subclass::is_in_size_move;
 
 impl eframe::App for ImageViewerApp {
@@ -357,8 +359,14 @@ fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context) {
 }
 
 fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context) {
+    let separator_color = if ctx.style().visuals.dark_mode {
+        egui::Color32::from_rgb(80, 80, 80)
+    } else {
+        egui::Color32::from_rgb(210, 210, 210)
+    };
+    
     egui::TopBottomPanel::top("secondary_nav_bar")
-        .show_separator_line(true)
+        .show_separator_line(false)
         .exact_height(46.0) // Same height as main toolbar
         .frame(egui::Frame {
             fill: if ctx.style().visuals.dark_mode {
@@ -370,6 +378,14 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
             ..Default::default()
         })
         .show(ctx, |ui| {
+            // Draw bottom separator line manually
+            let rect = ui.max_rect();
+            ui.painter().hline(
+                rect.x_range(),
+                rect.bottom(),
+                egui::Stroke::new(1.0, separator_color),
+            );
+            
             // Internal enum to defer actions and avoid borrow checker conflicts
             enum SecAction {
                 None,
@@ -382,7 +398,15 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
             }
             let mut action = SecAction::None;
 
+            // Centered horizontal layout
             ui.horizontal(|ui| {
+                // Calculate approximate content width to center it
+                // 6 icons (28px) + sort button + combobox (~70px) + 2 view icons + slider (80px) + zoom label + separators + spacing
+                let content_width = 6.0 * 28.0 + 30.0 + 70.0 + 2.0 * 28.0 + 80.0 + 40.0 + 3.0 * 8.0 + 12.0 * 12.0;
+                let available = ui.available_width();
+                let left_pad = ((available - content_width) / 2.0).max(0.0);
+                ui.add_space(left_pad);
+                
                 ui.spacing_mut().item_spacing = egui::vec2(12.0, 0.0);
 
                 let icon_size = egui::vec2(28.0, 28.0); // Consistent button size
@@ -402,95 +426,230 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                 };
                 let disabled_color = [128, 128, 128, 180];
 
-                // Borrrow manager for the closure scope
-                let svg_manager = &mut app.svg_icon_manager;
+                {
+                    // Borrow manager for the closure scope
+                    let svg_manager = &mut app.svg_icon_manager;
 
-                // --- Helper Closure for Rendering Buttons ---
-                let mut render_btn = |icon_name: &str, enabled: bool, tooltip: &str| -> bool {
-                    let color = if enabled { icon_color } else { disabled_color };
-                    let sense = if enabled { egui::Sense::click() } else { egui::Sense::hover() };
-                    let (rect, response) = ui.allocate_exact_size(icon_size, sense);
+                    // --- Helper Closure for Rendering Buttons ---
+                    let mut render_btn = |icon_name: &str, enabled: bool, tooltip: &str| -> bool {
+                        let color = if enabled { icon_color } else { disabled_color };
+                        let sense = if enabled { egui::Sense::click() } else { egui::Sense::hover() };
+                        let (rect, response) = ui.allocate_exact_size(icon_size, sense);
 
-                    if enabled && response.hovered() {
-                        let bg_color = if ui.visuals().dark_mode {
-                            theme::color_dark_hover()
+                        if enabled && response.hovered() {
+                            let bg_color = if ui.visuals().dark_mode {
+                                theme::color_dark_hover()
+                            } else {
+                                theme::color_hover()
+                            };
+                            ui.painter().rect_filled(rect, 6.0, bg_color);
+                        }
+
+                        if let Some(texture) = svg_manager.get_icon(
+                            ui.ctx(),
+                            icon_name,
+                            32,
+                            color,
+                        ) {
+                            let display_size = if icon_name == "folder_new" { 18.0 } else { 16.0 };
+                            let icon_rect = egui::Rect::from_center_size(
+                                rect.center(),
+                                egui::vec2(display_size, display_size),
+                            );
+                            ui.painter().image(
+                                texture.id(),
+                                icon_rect,
+                                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                egui::Color32::WHITE,
+                            );
                         } else {
-                            theme::color_hover()
+                            let fallback = icon_name.chars().next().unwrap_or('?').to_string();
+                            ui.painter().text(
+                                rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                fallback,
+                                egui::FontId::proportional(12.0),
+                                egui::Color32::from_rgba_unmultiplied(color[0], color[1], color[2], color[3]),
+                            );
+                        }
+
+                        let response = if enabled {
+                            response.on_hover_cursor(egui::CursorIcon::PointingHand)
+                        } else {
+                            response
                         };
-                        ui.painter().rect_filled(rect, 6.0, bg_color);
-                    }
 
-                    if let Some(texture) = svg_manager.get_icon(
-                        ui.ctx(),
-                        icon_name,
-                        32,
-                        color,
-                    ) {
-                        let display_size = if icon_name == "folder_new" { 18.0 } else { 16.0 };
-                        let icon_rect = egui::Rect::from_center_size(
-                            rect.center(),
-                            egui::vec2(display_size, display_size),
-                        );
-                        ui.painter().image(
-                            texture.id(),
-                            icon_rect,
-                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            egui::Color32::WHITE,
-                        );
-                    } else {
-                        let fallback = icon_name.chars().next().unwrap_or('?').to_string();
-                        ui.painter().text(
-                            rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            fallback,
-                            egui::FontId::proportional(12.0),
-                            egui::Color32::from_rgba_unmultiplied(color[0], color[1], color[2], color[3]),
-                        );
-                    }
-
-                    let response = if enabled {
-                        response.on_hover_cursor(egui::CursorIcon::PointingHand)
-                    } else {
-                        response
+                        if enabled {
+                            response.on_hover_text(tooltip).clicked()
+                        } else {
+                            response.on_hover_text(format!("{} (Desabilitado)", tooltip));
+                            false
+                        }
                     };
 
-                    if enabled {
-                        response.on_hover_text(tooltip).clicked()
-                    } else {
-                        response.on_hover_text(format!("{} (Desabilitado)", tooltip));
-                        false
+                    // 1. Cut
+                    if render_btn("cut", has_selection, "Recortar (Ctrl+X)") {
+                        action = SecAction::Cut;
                     }
-                };
 
-                // 1. Cut
-                if render_btn("cut", has_selection, "Recortar (Ctrl+X)") {
-                     action = SecAction::Cut;
+                    // 2. Copy
+                    if render_btn("copy", has_selection, "Copiar (Ctrl+C)") {
+                        action = SecAction::Copy;
+                    }
+
+                    // 3. Paste
+                    if render_btn("paste", can_paste, "Colar (Ctrl+V)") {
+                        action = SecAction::Paste;
+                    }
+
+                    // 4. Rename
+                    if render_btn("rename", is_single_selection, "Renomear (F2)") {
+                        action = SecAction::Rename;
+                    }
+
+                    // 5. Create Folder
+                    if render_btn("folder_new", can_create_folder, "Criar Nova Pasta (Ctrl+Shift+N)") {
+                        action = SecAction::CreateFolder;
+                    }
+
+                    // 6. Delete
+                    if render_btn("delete", has_selection, "Excluir (Del)") {
+                        action = SecAction::Delete;
+                    }
                 }
 
-                // 2. Copy
-                if render_btn("copy", has_selection, "Copiar (Ctrl+C)") {
-                     action = SecAction::Copy;
+                ui.separator();
+
+                // Ordenação (dropdown + asc/desc)
+                let sort_symbol = if app.sort_descending { "↓" } else { "↑" };
+
+                ui.scope(|ui| {
+                    let hover_color = if ui.visuals().dark_mode {
+                        theme::color_dark_hover()
+                    } else {
+                        theme::color_hover()
+                    };
+
+                    ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
+                    ui.visuals_mut().widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+                    ui.visuals_mut().widgets.inactive.fg_stroke = egui::Stroke::NONE;
+                    ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
+
+                    ui.visuals_mut().widgets.hovered.bg_fill = hover_color;
+                    ui.visuals_mut().widgets.hovered.fg_stroke = egui::Stroke::NONE;
+                    ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
+
+                    if ui
+                        .add(egui::Button::new(egui::RichText::new(sort_symbol).color(egui::Color32::BLACK)))
+                        .on_hover_text("Inverter Ordem")
+                        .clicked()
+                    {
+                        app.sort_descending = !app.sort_descending;
+                        app.sort_items();
+                        app.save_preferences();
+                    }
+                });
+
+                ui.scope(|ui| {
+                    let hover_color = if ui.visuals().dark_mode {
+                        theme::color_dark_hover()
+                    } else {
+                        theme::color_hover()
+                    };
+
+                    let black_stroke = egui::Stroke::new(1.0, egui::Color32::BLACK);
+
+                    ui.visuals_mut().widgets.noninteractive.bg_fill = egui::Color32::WHITE;
+                    ui.visuals_mut().widgets.noninteractive.fg_stroke = black_stroke;
+                    ui.visuals_mut().widgets.noninteractive.bg_stroke = egui::Stroke::NONE;
+
+                    ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::WHITE;
+                    ui.visuals_mut().widgets.inactive.fg_stroke = black_stroke;
+                    ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
+
+                    ui.visuals_mut().widgets.hovered.bg_fill = hover_color;
+                    ui.visuals_mut().widgets.hovered.fg_stroke = black_stroke;
+                    ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
+
+                    ui.visuals_mut().widgets.active.bg_fill = hover_color;
+                    ui.visuals_mut().widgets.active.fg_stroke = black_stroke;
+                    ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
+
+                    ui.visuals_mut().override_text_color = Some(egui::Color32::BLACK);
+
+                    egui::ComboBox::from_id_salt("sort_mode_secondary")
+                        .selected_text(match app.sort_mode {
+                            SortMode::Name => "Nome",
+                            SortMode::Date => "Data",
+                            SortMode::Size => "Tamanho",
+                            SortMode::Type => "Tipo",
+                        })
+                        .show_ui(ui, |ui| {
+                            if ui.selectable_value(&mut SortMode::Name, app.sort_mode, "Nome").clicked() {
+                                app.sort_mode = SortMode::Name;
+                                app.sort_items();
+                                app.save_preferences();
+                            }
+                            if ui.selectable_value(&mut SortMode::Date, app.sort_mode, "Data").clicked() {
+                                app.sort_mode = SortMode::Date;
+                                app.sort_items();
+                                app.save_preferences();
+                            }
+                            if ui.selectable_value(&mut SortMode::Size, app.sort_mode, "Tamanho").clicked() {
+                                app.sort_mode = SortMode::Size;
+                                app.sort_items();
+                                app.save_preferences();
+                            }
+                            if ui.selectable_value(&mut SortMode::Type, app.sort_mode, "Tipo").clicked() {
+                                app.sort_mode = SortMode::Type;
+                                app.sort_items();
+                                app.save_preferences();
+                            }
+                        });
+                });
+
+                ui.separator();
+
+                // View mode
+                {
+                    let svg_manager = &mut app.svg_icon_manager;
+                    if widgets::toggle_icon_button(
+                        ui,
+                        svg_manager,
+                        theme::ICON_LIST,
+                        matches!(app.view_mode, ViewMode::List),
+                        "Lista",
+                    )
+                    .clicked()
+                    {
+                        if !matches!(app.view_mode, ViewMode::List) {
+                            app.view_mode = ViewMode::List;
+                        }
+                    }
+
+                    if widgets::toggle_icon_button(
+                        ui,
+                        svg_manager,
+                        theme::ICON_GRID,
+                        matches!(app.view_mode, ViewMode::Grid),
+                        "Grade",
+                    )
+                    .clicked()
+                    {
+                        if !matches!(app.view_mode, ViewMode::Grid) {
+                            app.view_mode = ViewMode::Grid;
+                        }
+                    }
                 }
 
-                // 3. Paste
-                if render_btn("paste", can_paste, "Colar (Ctrl+V)") {
-                     action = SecAction::Paste;
-                }
+                ui.separator();
 
-                // 4. Rename
-                if render_btn("rename", is_single_selection, "Renomear (F2)") {
-                     action = SecAction::Rename;
-                }
-
-                // 5. Create Folder
-                if render_btn("folder_new", can_create_folder, "Criar Nova Pasta (Ctrl+Shift+N)") {
-                     action = SecAction::CreateFolder;
-                }
-
-                // 6. Delete
-                if render_btn("delete", has_selection, "Excluir (Del)") {
-                     action = SecAction::Delete;
-                }
+                // Zoom
+                ui.add_sized(
+                    egui::vec2(80.0, 20.0),
+                    egui::Slider::new(&mut app.thumbnail_size, 64.0..=256.0).show_value(false),
+                );
+                ui.label("Zoom");
             });
 
             // Execute deferred action
