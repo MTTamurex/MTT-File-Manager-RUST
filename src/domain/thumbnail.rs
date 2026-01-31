@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 /// Dados de thumbnail extraídos de arquivo
+#[derive(Clone)]
 pub struct ThumbnailData {
     pub path: PathBuf,
     pub image_data: Vec<u8>,
