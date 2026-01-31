@@ -35,10 +35,10 @@ pub fn render_toolbar(
     is_editing_path: &mut bool,
     search_query: &mut String,
     navigation: &NavigationHistory,
-    view_mode: ViewMode,
-    sort_mode: SortMode,
-    sort_descending: bool,
-    thumbnail_size: &mut f32,
+    _view_mode: ViewMode,
+    _sort_mode: SortMode,
+    _sort_descending: bool,
+    _thumbnail_size: &mut f32,
     show_preview_panel: bool,
     _is_renaming: bool,
     computer_icon: Option<&egui::TextureHandle>,
@@ -103,15 +103,6 @@ pub fn render_toolbar(
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(4.0);
 
-            // Zoom
-            ui.add_sized(
-                egui::vec2(80.0, 20.0),
-                egui::Slider::new(thumbnail_size, 64.0..=256.0).show_value(false),
-            );
-            ui.label("Zoom");
-
-            ui.separator();
-
             // Detalhes (Preview Panel Toggle)
             if widgets::toggle_icon_button(
                 ui,
@@ -124,136 +115,6 @@ pub fn render_toolbar(
             {
                 action = Some(ToolbarAction::TogglePreviewPanel);
             }
-
-            ui.separator();
-
-            // View Mode
-            if widgets::toggle_icon_button(
-                ui,
-                svg_manager,
-                theme::ICON_LIST,
-                matches!(view_mode, ViewMode::List),
-                "Lista",
-            )
-            .clicked()
-            {
-                if !matches!(view_mode, ViewMode::List) {
-                    action = Some(ToolbarAction::ToggleViewMode);
-                }
-            }
-            if widgets::toggle_icon_button(
-                ui,
-                svg_manager,
-                theme::ICON_GRID,
-                matches!(view_mode, ViewMode::Grid),
-                "Grade",
-            )
-            .clicked()
-            {
-                if !matches!(view_mode, ViewMode::Grid) {
-                    action = Some(ToolbarAction::ToggleViewMode);
-                }
-            }
-
-            ui.separator();
-
-            // Ordenação
-            //Ordenação - Botão de seta
-            let sort_symbol = if sort_descending { "↓" } else { "↑" };
-            
-            ui.scope(|ui| {
-                let hover_color = if ui.visuals().dark_mode {
-                    theme::color_dark_hover()
-                } else {
-                    theme::color_hover()
-                };
-
-                // Make sort button transparent/frameless, only show background on hover
-                ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
-                ui.visuals_mut().widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
-                ui.visuals_mut().widgets.inactive.fg_stroke = egui::Stroke::NONE;
-                ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
-                
-                ui.visuals_mut().widgets.hovered.bg_fill = hover_color;
-                ui.visuals_mut().widgets.hovered.fg_stroke = egui::Stroke::NONE;
-                ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
-                
-                if ui
-                    .add(egui::Button::new(egui::RichText::new(sort_symbol).color(egui::Color32::BLACK)))
-                    .on_hover_text("Inverter Ordem")
-                    .clicked()
-                {
-                    action = Some(ToolbarAction::ToggleSortDescending);
-                }
-            });
-
-            // ComboBox com fundo branco e borda preta permanente
-            ui.scope(|ui| {
-                let hover_color = if ui.visuals().dark_mode {
-                    theme::color_dark_hover()
-                } else {
-                    theme::color_hover()
-                };
-
-                // Force all visual states to white background with black strokes
-                let black_stroke = egui::Stroke::new(1.0, egui::Color32::BLACK);
-                
-                // noninteractive (used for some default rendering)
-                ui.visuals_mut().widgets.noninteractive.bg_fill = egui::Color32::WHITE;
-                ui.visuals_mut().widgets.noninteractive.fg_stroke = black_stroke; // Arrow
-                ui.visuals_mut().widgets.noninteractive.bg_stroke = egui::Stroke::NONE; // No Border
-                
-                // inactive (normal state)
-                ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::WHITE;
-                ui.visuals_mut().widgets.inactive.fg_stroke = black_stroke; // Arrow
-                ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE; // No Border
-                
-                // hovered
-                ui.visuals_mut().widgets.hovered.bg_fill = hover_color;
-                ui.visuals_mut().widgets.hovered.fg_stroke = black_stroke;
-                ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
-                
-                // active
-                ui.visuals_mut().widgets.active.bg_fill = hover_color;
-                ui.visuals_mut().widgets.active.fg_stroke = black_stroke;
-                ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
-                
-                ui.visuals_mut().override_text_color = Some(egui::Color32::BLACK);
-                
-                egui::ComboBox::from_id_salt("sort_mode")
-                .selected_text(match sort_mode {
-                    SortMode::Name => "Nome",
-                    SortMode::Date => "Data",
-                    SortMode::Size => "Tamanho",
-                    SortMode::Type => "Tipo",
-                })
-                .show_ui(ui, |ui| {
-                    if ui
-                        .selectable_value(&mut SortMode::Name, sort_mode, "Nome")
-                        .clicked()
-                    {
-                        action = Some(ToolbarAction::ChangeSortMode(SortMode::Name));
-                    }
-                    if ui
-                        .selectable_value(&mut SortMode::Date, sort_mode, "Data")
-                        .clicked()
-                    {
-                        action = Some(ToolbarAction::ChangeSortMode(SortMode::Date));
-                    }
-                    if ui
-                        .selectable_value(&mut SortMode::Size, sort_mode, "Tamanho")
-                        .clicked()
-                    {
-                        action = Some(ToolbarAction::ChangeSortMode(SortMode::Size));
-                    }
-                    if ui
-                        .selectable_value(&mut SortMode::Type, sort_mode, "Tipo")
-                        .clicked()
-                    {
-                        action = Some(ToolbarAction::ChangeSortMode(SortMode::Type));
-                    }
-                });
-            });
 
             ui.separator();
 
