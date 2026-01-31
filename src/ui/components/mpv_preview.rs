@@ -24,6 +24,8 @@ const DOCKED_FPS_FILTER: &str = "fps=fps=30";
 const DOCKED_FPS_MARKER: &str = "fps=fps=30";
 const DEINTERLACE_FILTER: &str = "bwdif=mode=auto:parity=auto:deint=all";
 const DEINTERLACE_MARKER: &str = "bwdif=";
+const AUDIO_NORMALIZER_FILTER: &str = "dynaudnorm=f=75";
+const AUDIO_NORMALIZER_MARKER: &str = "dynaudnorm";
 
 /// Track information for audio/subtitles.
 #[derive(Clone, Debug, Default)]
@@ -89,6 +91,7 @@ pub struct MpvPreview {
     docked_prev_demuxer_max_bytes: Option<i64>,
     /// Stores previous demuxer back cache bytes to restore on undock
     docked_prev_demuxer_max_back_bytes: Option<i64>,
+    audio_normalizer_enabled: bool,
 
     // Performance: Async event handling (Fase 2 optimization)
     event_thread_running: Arc<AtomicBool>,
@@ -146,6 +149,7 @@ impl MpvPreview {
             docked_prev_readahead_secs: None,
             docked_prev_demuxer_max_bytes: None,
             docked_prev_demuxer_max_back_bytes: None,
+            audio_normalizer_enabled: false,
             event_thread_running: Arc::new(AtomicBool::new(false)),
             event_thread_handle: None,
             cached_duration: None,
@@ -232,6 +236,31 @@ impl MpvPreview {
         self.last_mouse_activity
             .map(|t| t.elapsed() < Duration::from_secs(3))
             .unwrap_or(false)
+    }
+
+    pub fn toggle_audio_normalizer(&mut self) {
+        let enabled = !self.audio_normalizer_enabled;
+        self.set_audio_normalizer(enabled);
+    }
+
+    pub fn is_audio_normalizer_enabled(&self) -> bool {
+        self.audio_normalizer_enabled
+    }
+
+    fn set_audio_normalizer(&mut self, enabled: bool) {
+        if let Some(m) = &self.mpv {
+            let current_af = m.get_property::<String>("af").unwrap_or_default();
+            let has_normalizer = current_af.contains(AUDIO_NORMALIZER_MARKER);
+            let next_af = if enabled && !has_normalizer {
+                Self::append_af_filter(&current_af, AUDIO_NORMALIZER_FILTER)
+            } else if !enabled && has_normalizer {
+                Self::remove_af_filter(&current_af, AUDIO_NORMALIZER_MARKER)
+            } else {
+                current_af
+            };
+            let _ = m.set_property("af", next_af);
+        }
+        self.audio_normalizer_enabled = enabled;
     }
 
     pub fn set_audio_track(&self, id: i64) {
@@ -337,6 +366,7 @@ impl MpvPreview {
                     self.start_event_loop(m.clone(), ui.ctx().clone());
 
                     self.mpv = Some(m);
+                    self.set_audio_normalizer(self.audio_normalizer_enabled);
                 }
                 Err(e) => {
                     eprintln!("[MpvPreview] Failed to create MPV: {:?}", e);
@@ -505,6 +535,7 @@ impl MpvPreview {
 
         // Render Context Menu (native viewport, appears above MPV HWND)
         // PERF: Clone tracks only if menu is actually open (avoids clone in 99% of frames)
+        let audio_normalizer_enabled = self.audio_normalizer_enabled;
         let action = if self.video_menu.is_open {
             let (audio_tracks, subtitle_tracks) = {
                 let state = self.state.read().unwrap();
@@ -518,6 +549,7 @@ impl MpvPreview {
                 &audio_tracks,
                 &subtitle_tracks,
                 self.is_maximized,
+                audio_normalizer_enabled,
             )
         } else {
             // Menu closed: skip rendering and avoid cloning
@@ -550,6 +582,9 @@ impl MpvPreview {
             crate::ui::components::video_menu::VideoMenuAction::None => {}
             crate::ui::components::video_menu::VideoMenuAction::TogglePlay => self.toggle_play(),
             crate::ui::components::video_menu::VideoMenuAction::ToggleMute => self.toggle_mute(),
+            crate::ui::components::video_menu::VideoMenuAction::ToggleAudioNormalizer => {
+                self.toggle_audio_normalizer()
+            }
             crate::ui::components::video_menu::VideoMenuAction::SetAudioTrack(id) => {
                 self.set_audio_track(id)
             }
@@ -801,6 +836,24 @@ impl MpvPreview {
 
     fn remove_vf_filter(current_vf: &str, marker: &str) -> String {
         let mut parts: Vec<&str> = current_vf
+            .split(',')
+            .map(|part| part.trim())
+            .filter(|part| !part.is_empty())
+            .collect();
+        parts.retain(|part| !part.contains(marker));
+        parts.join(",")
+    }
+
+    fn append_af_filter(current_af: &str, filter: &str) -> String {
+        if current_af.trim().is_empty() {
+            filter.to_string()
+        } else {
+            format!("{},{}", current_af, filter)
+        }
+    }
+
+    fn remove_af_filter(current_af: &str, marker: &str) -> String {
+        let mut parts: Vec<&str> = current_af
             .split(',')
             .map(|part| part.trim())
             .filter(|part| !part.is_empty())
