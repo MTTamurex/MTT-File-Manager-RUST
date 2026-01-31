@@ -195,6 +195,7 @@ impl ImageViewerApp {
         let ctx = self.ui_ctx.clone();
         let disk_cache = self.disk_cache.clone();
         let directory_cache = self.directory_cache.clone();
+        // Use existing directory_cache for cache-first strategy
         let directory_index_opt = self.directory_index.clone();
         let prefetch_sender = self.prefetch_sender.clone();
         let force_refresh = force_refresh;
@@ -219,6 +220,37 @@ impl ImageViewerApp {
             };
             let mut batch_tracker = AdaptiveBatchTracker::new(config);
             let mut batch_size = batch_tracker.batch_size();
+            
+            // CACHE-FIRST STRATEGY: Check directory cache first for instant navigation
+            let base_path_buf = PathBuf::from(&base_path);
+            if let Some(cached_entries) = crate::infrastructure::cache_first::get_cached_directory(
+                &directory_cache, &base_path_buf
+            ) {
+                // INSTANT RETURN: Send cached entries immediately
+                let mut offset = 0;
+                while offset < cached_entries.len() {
+                    if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
+                        return;
+                    }
+                    let end = (offset + batch_size).min(cached_entries.len());
+                    let chunk = cached_entries[offset..end].to_vec();
+                    let _ = file_entry_sender.send((my_gen, chunk));
+                    ctx.request_repaint();
+                    batch_tracker.record_batch(std::time::Instant::now().elapsed(), end - offset);
+                    batch_size = batch_tracker.batch_size();
+                    offset = end;
+                }
+                let _ = file_entry_sender.send((my_gen, Vec::new()));
+                ctx.request_repaint();
+                
+                // BACKGROUND REVALIDATION: Check if directory changed
+                crate::infrastructure::cache_first::trigger_background_revalidation(
+                    &directory_cache, &base_path_buf
+                );
+                
+                return; // EXIT EARLY - No disk I/O needed!
+            }
+            
             eprintln!(
                 "[PERF] Starting folder scan: {:?} (batch_size={}, is_ssd={})",
                 current_path, batch_size, is_ssd
@@ -755,7 +787,9 @@ impl ImageViewerApp {
             }
 
             if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+                // CACHE STORAGE: Store in directory cache for instant future navigation
                 directory_cache.put(PathBuf::from(&base_path), all_entries_disk.clone());
+                
                 if let Some(di) = &directory_index_opt {
                     let indexed: Vec<IndexedFile> = all_entries_disk
                         .iter()
