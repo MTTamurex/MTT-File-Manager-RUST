@@ -2,8 +2,6 @@ use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode};
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use rayon::prelude::*;
-use std::ffi::OsStr;
-use std::path::Path;
 
 /// PERFORMANCE: Converte String para Cow<str> para evitar clones desnecessários
 #[inline]
@@ -16,14 +14,6 @@ fn to_cow_str(s: &str) -> Cow<'_, str> {
 #[inline]
 fn compare_names_cow(a_name: &str, b_name: &str) -> Ordering {
     natord::compare_ignore_case(a_name, b_name)
-}
-
-/// PERFORMANCE: Comparação de extensões sem alocação
-#[inline]
-fn compare_extensions(a_path: &Path, b_path: &Path) -> Ordering {
-    let ext_a = a_path.extension().map(|e| e.to_ascii_lowercase());
-    let ext_b = b_path.extension().map(|e| e.to_ascii_lowercase());
-    ext_a.cmp(&ext_b)
 }
 
 /// PERFORMANCE: Verifica se termina com extensão ignorando case

@@ -222,6 +222,8 @@ pub unsafe fn read_fourcc(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<S
                 ((fourcc >> 24) & 0xFF) as u8,
             ];
             let codec_str = String::from_utf8(bytes.to_vec()).ok()?;
+            // Debug log para verificar FourCC do Property Store
+            eprintln!("[DEBUG] read_fourcc VT_UI4: fourcc=0x{:08X}, bytes={:?}, codec_str='{}'", fourcc, bytes, codec_str);
             if codec_str.trim().is_empty() {
                 None
             } else {
@@ -233,7 +235,10 @@ pub unsafe fn read_fourcc(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<S
             if !ptr.is_null() {
                 let len = (0..).take_while(|&i| unsafe { *ptr.0.add(i) != 0 }).count();
                 let slice = unsafe { std::slice::from_raw_parts(ptr.0, len) };
-                Some(String::from_utf16_lossy(slice))
+                let result = String::from_utf16_lossy(slice);
+                // Debug log para verificar FourCC do Property Store
+                eprintln!("[DEBUG] read_fourcc VT_LPWSTR: result='{}'", result);
+                Some(result)
             } else {
                 None
             }

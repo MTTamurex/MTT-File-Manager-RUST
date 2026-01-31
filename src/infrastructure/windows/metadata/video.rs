@@ -307,6 +307,9 @@ pub fn detect_codec_from_description(description: &str) -> Option<String> {
     if desc.contains("DIVX") || desc.contains("DX50") {
         return Some("DivX".to_string());
     }
+    if desc.contains("DIV3") || desc.contains("MP43") {
+        return Some("DivX 3".to_string());
+    }
     if desc.contains("PRORES") {
         return Some("ProRes".to_string());
     }
@@ -352,6 +355,9 @@ pub fn sanitize_codec_string(s: &str) -> String {
     }
     if upper.contains("DX50") || upper.contains("DIVX") {
         return "DivX".to_string();
+    }
+    if upper == "MP43" || upper == "DIV3" {
+        return "DivX 3".to_string();
     }
     if upper.contains("XVID") {
         return "XviD".to_string();

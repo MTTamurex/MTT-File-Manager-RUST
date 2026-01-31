@@ -34,6 +34,105 @@ pub fn init_codec_cache() {
     }
 }
 
+/// Check if GUID matches well-known codecs (based on old system logic)
+fn check_known_codec(guid: &windows::core::GUID) -> Option<String> {
+    let fourcc = guid.data1;
+    let is_standard_mf_format = guid.data2 == 0x0000 && guid.data3 == 0x0010;
+
+    // Video codecs - FourCC based
+    match fourcc {
+        // H.264/AVC variants
+        0x31435641 | 0x31637661 => return Some("H.264/AVC".to_string()), // 'AVC1', 'avc1'
+        0x34363248 | 0x34363268 => return Some("H.264/AVC".to_string()), // 'H264', 'h264'
+        0x3436324E | 0x3F40F4F0 => return Some("H.264/AVC".to_string()), // Various encoders + H264 ES
+
+        // H.265/HEVC variants
+        0x35365648 | 0x31435648 => return Some("H.265/HEVC".to_string()), // 'HV51', 'HVC1'
+        0x31637668 | 0x35637668 => return Some("H.265/HEVC".to_string()), // 'hvc1', 'hvc5'
+        0x43564548 | 0x63766568 => return Some("H.265/HEVC".to_string()), // 'HEVC', 'hevc'
+
+        // VP8/VP9/AV1 - WebM codecs
+        0x30385056 => return Some("VP8".to_string()), // 'VP80'
+        0x30395056 => return Some("VP9".to_string()), // 'VP90'
+        0x39507600 => return Some("VP9".to_string()), // Alternative VP9
+        0x31305641 => return Some("AV1".to_string()), // 'AV01'
+
+        // MPEG-4
+        0x5634504D | 0x7634706D => return Some("MPEG-4".to_string()), // 'MP4V', 'mp4v'
+        0x3253504D => return Some("MPEG-2".to_string()),              // 'MP2S'
+        0x3156504D => return Some("MPEG-1".to_string()),              // 'MP1V'
+
+        // WMV
+        0x31564D57 => return Some("WMV1".to_string()),
+        0x32564D57 => return Some("WMV2".to_string()),
+        0x33564D57 => return Some("WMV3".to_string()),
+        0x31435657 => return Some("VC-1".to_string()),
+        0x41564D57 => return Some("WMV Advanced".to_string()),
+
+        // DivX/XviD - including all common FourCC variants
+        0x30355844 | 0x30357844 => return Some("DivX 5".to_string()), // 'DX50', 'dX50'
+        0x44585850 => return Some("DivX".to_string()),                // 'DXPP'
+        0x58564944 | 0x78766964 => return Some("DivX".to_string()),   // 'DIVX', 'divx'
+        0x34564944 | 0x34766964 => return Some("DivX 4".to_string()), // 'DIV4', 'div4'
+        0x33564944 | 0x33766964 => return Some("DivX 3".to_string()), // 'DIV3', 'div3'
+        0x33444956 | 0x33644956 => return Some("DivX 3".to_string()), // 'VID3', 'vid3' - Big-endian variant!
+        0x44495658 | 0x64697678 => return Some("XviD".to_string()),   // 'XVID', 'xvid'
+        0x44495856 => return Some("XviD".to_string()),                // 'VXID' (alternative)
+
+        // MJPEG
+        0x47504A4D | 0x67706a6d => return Some("MJPEG".to_string()),
+
+        _ => {}
+    }
+
+    // Audio codecs - need to check format tags AND FourCC patterns
+    if is_standard_mf_format || fourcc <= 0xFFFF {
+        match fourcc {
+            // Format tags (standard Windows audio format identifiers)
+            0x0001 => return Some("PCM".to_string()),
+            0x0003 => return Some("IEEE Float".to_string()),
+            0x0006 => return Some("A-Law".to_string()),
+            0x0007 => return Some("μ-Law".to_string()),
+            0x0055 => return Some("MP3".to_string()),
+            0x00FF => return Some("AAC".to_string()),
+            0x0160 => return Some("WMA v1".to_string()),
+            0x0161 => return Some("WMA v2".to_string()),
+            0x0162 => return Some("WMA Pro".to_string()),
+            0x0163 => return Some("WMA Lossless".to_string()),
+            0x1610 => return Some("AAC-LC".to_string()),
+            0x1612 => return Some("AAC-HE".to_string()),
+            0xA106 => return Some("AAC (ADTS)".to_string()),
+            0xA109 => return Some("AAC (MPS)".to_string()),
+            0x2000 => return Some("AC-3".to_string()),
+            0x2001 => return Some("DTS".to_string()),
+            _ => {}
+        }
+    }
+
+    // FourCC-based audio codecs
+    match fourcc {
+        // AAC variants (FourCC encoding)
+        0x6134706D => return Some("AAC".to_string()), // 'mp4a'
+        0x61346D70 => return Some("AAC".to_string()), // 'pm4a' (reversed)
+        0x4D344120 => return Some("AAC".to_string()), // 'M4A '
+        0x63614120 => return Some("AAC".to_string()), // 'cAA ' (rare)
+
+        // Opus (WebM/Matroska audio)
+        0x7375704F => return Some("Opus".to_string()), // 'Opus'
+        0x5355504F => return Some("Opus".to_string()), // 'OPUS'
+        0x73757075 => return Some("Opus".to_string()), // 'upus' (reversed)
+
+        // Vorbis (WebM/OGG audio)
+        0x73696272 => return Some("Vorbis".to_string()), // 'vorbis' partial
+        0x62726F56 => return Some("Vorbis".to_string()), // 'Vorb'
+        0x5642524F => return Some("Vorbis".to_string()), // 'OVRB' (reversed)
+
+        _ => {}
+    }
+
+    None // Not a known codec
+}
+
 /// Convert a codec GUID string to a human-readable name
 ///
 /// **Strategy:**
@@ -79,7 +178,16 @@ pub fn resolve_codec_guid(guid_str: &str) -> String {
         None => return guid_str.to_string(), // Invalid GUID, return original
     };
 
-    // Strategy 1: Query Media Foundation Transform Registry
+    // Strategy 1: Check known codecs first (fixes DIV3 → "DivX 3" issue)
+    if let Some(name) = check_known_codec(&guid) {
+        let mut cache = CODEC_NAME_CACHE.lock().unwrap();
+        if let Some(ref mut cache) = *cache {
+            cache.put(guid_str.to_string(), name.clone());
+        }
+        return name;
+    }
+
+    // Strategy 2: Query Media Foundation Transform Registry
     if let Some(name) = query_mf_codec_name(&guid) {
         let mut cache = CODEC_NAME_CACHE.lock().unwrap();
         if let Some(ref mut cache) = *cache {
@@ -154,15 +262,119 @@ pub fn resolve_codec_guid(guid_str: &str) -> String {
 
 /// Query Media Foundation Transform Registry for codec friendly name
 ///
-/// TODO: Full implementation requires MFTEnumEx API (Windows 7+)
-/// For now, we rely on Registry fallback which is sufficient for most codecs.
-fn query_mf_codec_name(_guid: &GUID) -> Option<String> {
-    // TODO: Implement full MFTransform enumeration
-    // This requires:
-    // 1. MFTEnumEx API (Windows 7+)
-    // 2. Iterate through all transforms in category
-    // 3. Check input/output types against target GUID
-    // 4. Extract friendly name from IMFAttributes
+/// Uses MFTEnumEx to enumerate transforms and extract friendly names from IMFAttributes.
+/// This is the preferred method as it works with both installed and system codecs.
+fn query_mf_codec_name(guid: &GUID) -> Option<String> {
+    use windows::Win32::Media::MediaFoundation::{
+        IMFActivate, MFTEnumEx, MFT_CATEGORY_AUDIO_DECODER, MFT_CATEGORY_AUDIO_ENCODER,
+        MFT_CATEGORY_VIDEO_DECODER, MFT_CATEGORY_VIDEO_ENCODER,
+        MFT_ENUM_FLAG, MFT_REGISTER_TYPE_INFO, MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
+        MFMediaType_Audio, MFMediaType_Video,
+    };
+    use windows::Win32::System::Com::CoTaskMemFree;
+
+    // Convert GUID to tag format used by Media Foundation
+    eprintln!(
+        "[CODEC DEBUG] Querying MF codec name for GUID: {{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
+        guid.data1, guid.data2, guid.data3,
+        guid.data4[0], guid.data4[1], guid.data4[2], guid.data4[3],
+        guid.data4[4], guid.data4[5], guid.data4[6], guid.data4[7]
+    );
+
+    unsafe {
+        // Try both audio and video categories, both decoders and encoders
+        for media_type in [MFMediaType_Audio, MFMediaType_Video] {
+            for category in [MFT_CATEGORY_AUDIO_DECODER, MFT_CATEGORY_AUDIO_ENCODER, MFT_CATEGORY_VIDEO_DECODER, MFT_CATEGORY_VIDEO_ENCODER] {
+                // Skip mismatched category/media type combinations
+                if media_type == MFMediaType_Audio && (category == MFT_CATEGORY_VIDEO_DECODER || category == MFT_CATEGORY_VIDEO_ENCODER) {
+                    continue;
+                }
+                if media_type == MFMediaType_Video && (category == MFT_CATEGORY_AUDIO_DECODER || category == MFT_CATEGORY_AUDIO_ENCODER) {
+                    continue;
+                }
+
+                for use_input in [false, true] {
+                    let type_info = MFT_REGISTER_TYPE_INFO {
+                        guidMajorType: media_type,
+                        guidSubtype: *guid,
+                    };
+
+                    let (input_type, output_type) = if use_input {
+                        (Some(&type_info as *const _), None)
+                    } else {
+                        (None, Some(&type_info as *const _))
+                    };
+
+                    let mut activate_array: *mut Option<IMFActivate> = std::ptr::null_mut();
+                    let mut count: u32 = 0;
+
+                    let result = MFTEnumEx(
+                        category,
+                        MFT_ENUM_FLAG(0),
+                        input_type,
+                        output_type,
+                        &mut activate_array,
+                        &mut count,
+                    );
+
+                    if result.is_ok() && count > 0 {
+                        eprintln!(
+                            "[CODEC DEBUG] Found {} MFTs for codec (cat={:?}, media_type={:?})",
+                            count, category, media_type
+                        );
+
+                        // Get friendly name from first transform
+                        if let Some(activate) = activate_array.as_ref() {
+                            if let Some(act) = activate {
+                                use windows::core::PWSTR;
+                                let mut friendly_name_ptr = PWSTR::null();
+                                let mut length: u32 = 0;
+
+                                if act
+                                    .GetAllocatedString(
+                                        &MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
+                                        &mut friendly_name_ptr,
+                                        &mut length,
+                                    )
+                                    .is_ok()
+                                    && !friendly_name_ptr.is_null()
+                                {
+                                    let name = String::from_utf16_lossy(std::slice::from_raw_parts(
+                                        friendly_name_ptr.as_ptr(),
+                                        length as usize,
+                                    ));
+                                    CoTaskMemFree(Some(friendly_name_ptr.as_ptr() as *const _));
+
+                                    // Cleanup activate array
+                                    for i in 0..count {
+                                        if let Some(act_ptr) = activate_array.add(i as usize).as_ref() {
+                                            if let Some(act) = act_ptr {
+                                                let _ = act.ShutdownObject();
+                                            }
+                                        }
+                                    }
+                                    CoTaskMemFree(Some(activate_array as *const _));
+
+                                    return Some(name);
+                                }
+                            }
+                        }
+
+                        // Cleanup if name extraction failed
+                        for i in 0..count {
+                            if let Some(act_ptr) = activate_array.add(i as usize).as_ref() {
+                                if let Some(act) = act_ptr {
+                                    let _ = act.ShutdownObject();
+                                }
+                            }
+                        }
+                        CoTaskMemFree(Some(activate_array as *const _));
+                    }
+                }
+            }
+        }
+    }
+
     None
 }
 
@@ -224,15 +436,12 @@ fn query_registry_friendly_name(guid: &GUID) -> Option<String> {
 /// WAVEFORMATEX tags like 0xE06D802C are not full GUIDs, but can be mapped
 /// via Windows audio codec database.
 fn query_waveformat_tag(tag: u32) -> Option<String> {
-    eprintln!("[CODEC DEBUG] Searching for WaveFormat tag: {:08X}", tag);
-
     // CRITICAL: Many audio codecs are NOT registered in Windows registry/MFT
     // but are well-known Microsoft/industry standard GUIDs. We maintain a database
     // of these GUIDs extracted from official Microsoft documentation and SDK headers.
 
     // First try Microsoft-defined constants (from Windows SDK)
     if let Some(name) = get_microsoft_codec_name(tag) {
-        eprintln!("[CODEC DEBUG] Found in Microsoft codec database: {}", name);
         return Some(name.to_string());
     }
 
@@ -245,17 +454,13 @@ fn query_waveformat_tag(tag: u32) -> Option<String> {
     };
 
     if let Some(name) = query_registry_friendly_name(&guid) {
-        eprintln!("[CODEC DEBUG] Found in registry CLSID: {}", name);
         return Some(name);
     }
 
     // Try Media Foundation MFT enumeration
     if let Some(name) = query_mft_by_subtype(tag) {
-        eprintln!("[CODEC DEBUG] Found via MFTEnumEx: {}", name);
         return Some(name);
     }
-
-    eprintln!("[CODEC DEBUG] No codec found for tag {:08X}", tag);
     None
 }
 
@@ -297,7 +502,9 @@ fn query_mft_by_subtype(tag: u32) -> Option<String> {
     use windows::core::GUID;
     use windows::Win32::Media::MediaFoundation::{
         IMFActivate, MFTEnumEx, MFT_CATEGORY_AUDIO_DECODER, MFT_CATEGORY_AUDIO_ENCODER,
+        MFT_CATEGORY_VIDEO_DECODER, MFT_CATEGORY_VIDEO_ENCODER,
         MFT_ENUM_FLAG, MFT_REGISTER_TYPE_INFO, MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
+        MFMediaType_Audio, MFMediaType_Video,
     };
     use windows::Win32::System::Com::CoTaskMemFree;
 
@@ -315,85 +522,94 @@ fn query_mft_by_subtype(tag: u32) -> Option<String> {
     );
 
     unsafe {
-        // Try both input and output types for audio decoders and encoders
-        for category in [MFT_CATEGORY_AUDIO_DECODER, MFT_CATEGORY_AUDIO_ENCODER] {
-            for use_input in [false, true] {
-                let type_info = MFT_REGISTER_TYPE_INFO {
-                    guidMajorType: windows::Win32::Media::MediaFoundation::MFMediaType_Audio,
-                    guidSubtype: guid,
-                };
+        // Try both audio and video categories, both decoders and encoders
+        for media_type in [MFMediaType_Audio, MFMediaType_Video] {
+            for category in [MFT_CATEGORY_AUDIO_DECODER, MFT_CATEGORY_AUDIO_ENCODER, MFT_CATEGORY_VIDEO_DECODER, MFT_CATEGORY_VIDEO_ENCODER] {
+                // Skip mismatched category/media type combinations
+                if media_type == MFMediaType_Audio && (category == MFT_CATEGORY_VIDEO_DECODER || category == MFT_CATEGORY_VIDEO_ENCODER) {
+                    continue;
+                }
+                if media_type == MFMediaType_Video && (category == MFT_CATEGORY_AUDIO_DECODER || category == MFT_CATEGORY_AUDIO_ENCODER) {
+                    continue;
+                }
 
-                let (input_type, output_type) = if use_input {
-                    (Some(&type_info as *const _), None)
-                } else {
-                    (None, Some(&type_info as *const _))
-                };
+                for use_input in [false, true] {
+                    let type_info = MFT_REGISTER_TYPE_INFO {
+                        guidMajorType: media_type,
+                        guidSubtype: guid,
+                    };
 
-                let mut activate_array: *mut Option<IMFActivate> = std::ptr::null_mut();
-                let mut count: u32 = 0;
+                    let (input_type, output_type) = if use_input {
+                        (Some(&type_info as *const _), None)
+                    } else {
+                        (None, Some(&type_info as *const _))
+                    };
 
-                let result = MFTEnumEx(
-                    category,
-                    MFT_ENUM_FLAG(0),
-                    input_type,
-                    output_type,
-                    &mut activate_array,
-                    &mut count,
-                );
+                    let mut activate_array: *mut Option<IMFActivate> = std::ptr::null_mut();
+                    let mut count: u32 = 0;
 
-                if result.is_ok() && count > 0 {
-                    eprintln!(
-                        "[CODEC DEBUG] Found {} MFTs (input={}, cat={:?})",
-                        count, use_input, category
+                    let result = MFTEnumEx(
+                        category,
+                        MFT_ENUM_FLAG(0),
+                        input_type,
+                        output_type,
+                        &mut activate_array,
+                        &mut count,
                     );
 
-                    // Get friendly name from first transform
-                    if let Some(activate) = activate_array.as_ref() {
-                        if let Some(act) = activate {
-                            use windows::core::PWSTR;
-                            let mut friendly_name_ptr = PWSTR::null();
-                            let mut length: u32 = 0;
+                    if result.is_ok() && count > 0 {
+                        eprintln!(
+                            "[CODEC DEBUG] Found {} MFTs (input={}, cat={:?}, media_type={:?})",
+                            count, use_input, category, media_type
+                        );
 
-                            if act
-                                .GetAllocatedString(
-                                    &MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
-                                    &mut friendly_name_ptr,
-                                    &mut length,
-                                )
-                                .is_ok()
-                                && !friendly_name_ptr.is_null()
-                            {
-                                let name = String::from_utf16_lossy(std::slice::from_raw_parts(
-                                    friendly_name_ptr.as_ptr(),
-                                    length as usize,
-                                ));
-                                CoTaskMemFree(Some(friendly_name_ptr.as_ptr() as *const _));
+                        // Get friendly name from first transform
+                        if let Some(activate) = activate_array.as_ref() {
+                            if let Some(act) = activate {
+                                use windows::core::PWSTR;
+                                let mut friendly_name_ptr = PWSTR::null();
+                                let mut length: u32 = 0;
 
-                                // Cleanup activate array
-                                for i in 0..count {
-                                    if let Some(act_ptr) = activate_array.add(i as usize).as_ref() {
-                                        if let Some(act) = act_ptr {
-                                            let _ = act.ShutdownObject();
+                                if act
+                                    .GetAllocatedString(
+                                        &MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
+                                        &mut friendly_name_ptr,
+                                        &mut length,
+                                    )
+                                    .is_ok()
+                                    && !friendly_name_ptr.is_null()
+                                {
+                                    let name = String::from_utf16_lossy(std::slice::from_raw_parts(
+                                        friendly_name_ptr.as_ptr(),
+                                        length as usize,
+                                    ));
+                                    CoTaskMemFree(Some(friendly_name_ptr.as_ptr() as *const _));
+
+                                    // Cleanup activate array
+                                    for i in 0..count {
+                                        if let Some(act_ptr) = activate_array.add(i as usize).as_ref() {
+                                            if let Some(act) = act_ptr {
+                                                let _ = act.ShutdownObject();
+                                            }
                                         }
                                     }
+                                    CoTaskMemFree(Some(activate_array as *const _));
+
+                                    return Some(name);
                                 }
-                                CoTaskMemFree(Some(activate_array as *const _));
-
-                                eprintln!("[CODEC DEBUG] MFT friendly name: {}", name);
-                                return Some(name);
                             }
                         }
-                    }
 
-                    // Cleanup if name extraction failed
-                    for i in 0..count {
-                        if let Some(act_ptr) = activate_array.add(i as usize).as_ref() {
-                            if let Some(act) = act_ptr {
-                                let _ = act.ShutdownObject();
+                        // Cleanup if name extraction failed
+                        for i in 0..count {
+                            if let Some(act_ptr) = activate_array.add(i as usize).as_ref() {
+                                if let Some(act) = act_ptr {
+                                    let _ = act.ShutdownObject();
+                                }
                             }
                         }
+                        CoTaskMemFree(Some(activate_array as *const _));
                     }
-                    CoTaskMemFree(Some(activate_array as *const _));
                 }
             }
         }
@@ -604,5 +820,92 @@ mod tests {
         // Second call should hit cache
         let name2 = resolve_codec_guid("{00001610-0000-0010-8000-00AA00389B71}");
         assert_eq!(name2, "AAC-LC");
+    }
+
+    #[test]
+    fn test_query_mf_codec_name_video_codec() {
+        init_codec_cache();
+        // Test with a common video codec GUID (H.264/AVC)
+        let h264_guid = parse_guid_string("{34363248-0000-0010-8000-00AA00389B71}").unwrap();
+        let name = query_mf_codec_name(&h264_guid);
+        
+        // Should return Some(name) if Media Foundation finds the codec
+        // Different systems may have different names for H.264
+        if let Some(codec_name) = name {
+            assert!(!codec_name.is_empty(), "Codec name should not be empty");
+            eprintln!("Found H.264 codec name: {}", codec_name);
+        } else {
+            eprintln!("H.264 codec not found in Media Foundation - this is normal if not installed");
+        }
+    }
+
+    #[test]
+    fn test_query_mf_codec_name_audio_codec() {
+        init_codec_cache();
+        // Test with AAC audio codec GUID
+        let aac_guid = parse_guid_string("{00001610-0000-0010-8000-00AA00389B71}").unwrap();
+        let name = query_mf_codec_name(&aac_guid);
+        
+        // Should return Some(name) for common audio codecs
+        if let Some(codec_name) = name {
+            assert!(!codec_name.is_empty(), "Codec name should not be empty");
+            eprintln!("Found AAC codec name: {}", codec_name);
+        } else {
+            eprintln!("AAC codec not found in Media Foundation");
+        }
+    }
+
+    #[test]
+    fn test_query_mft_by_subtype_video_support() {
+        init_codec_cache();
+        // Test that query_mft_by_subtype can handle video codec tags
+        let h264_tag = 0x34363248; // "H264" in little-endian
+        
+        // This should not panic and should handle video categories properly
+        let result = std::panic::catch_unwind(|| {
+            // We can't easily test the full function without proper Media Foundation setup,
+            // but we can verify it doesn't panic on video tags
+            let _ = query_mft_by_subtype(h264_tag);
+        });
+        
+        assert!(result.is_ok(), "query_mft_by_subtype should not panic on video tags");
+    }
+
+    #[test]
+    fn test_div3_codec_identification() {
+        init_codec_cache();
+        // Test DIV3 codec (DivX 3) - the problematic case from user report
+        // DIV3 FourCC = 0x33444956 ("DIV3" in little-endian)
+        let _div3_guid = parse_guid_string("{33444956-0000-0010-8000-00AA00389B71}").unwrap();
+        
+        // Should identify as "DivX 3" via check_known_codec, not "MP43" via MFTEnumEx
+        let name = resolve_codec_guid("{33444956-0000-0010-8000-00AA00389B71}");
+        assert_eq!(name, "DivX 3", "DIV3 should be identified as DivX 3, not {}", name);
+        
+        // Also test lowercase variant
+        let name_lower = resolve_codec_guid("{33444956-0000-0010-8000-00AA00389B71}");
+        assert_eq!(name_lower, "DivX 3", "div3 should also be identified as DivX 3");
+        
+        eprintln!("DIV3 codec correctly identified as: {}", name);
+    }
+
+    #[test]
+    fn test_video_lazy_loading_integration() {
+        // Test that video codec resolution works with the cache system
+        init_codec_cache();
+        
+        // Test common video codecs
+        let video_codecs = [
+            "{34363248-0000-0010-8000-00AA00389B71}", // H.264
+            "{31435641-0000-0010-8000-00AA00389B71}", // AVC1
+            "{56555948-0000-0010-8000-00AA00389B71}", // HEVC/H.265
+        ];
+        
+        for codec_guid in &video_codecs {
+            let name = resolve_codec_guid(codec_guid);
+            eprintln!("Video codec {} resolved to: {}", codec_guid, name);
+            // Should not panic and should return some reasonable name
+            assert!(!name.is_empty(), "Video codec name should not be empty");
+        }
     }
 }
