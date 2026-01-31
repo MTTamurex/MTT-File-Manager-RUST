@@ -248,17 +248,21 @@ impl ImageViewerApp {
                             let mut entries: Vec<FileEntry> = indexed_files
                                 .into_iter()
                                 .filter(|f| !f.name.starts_with('.'))
-                                .map(|f| FileEntry {
-                                    path: base.join(&f.name),
-                                    name: f.name,
-                                    is_dir: f.is_dir,
-                                    size: if f.is_dir { 0 } else { f.size },
-                                    modified: f.modified,
-                                    folder_cover: None,
-                                    drive_info: None,
-                                    sync_status: SyncStatus::None,
-                                    deletion_date: None,
-                                    recycle_original_path: None,
+                                .map(|f| {
+                                    let is_zip = f.name.to_lowercase().ends_with(".zip");
+                                    let is_dir = f.is_dir || is_zip;
+                                    FileEntry {
+                                        path: base.join(&f.name),
+                                        name: f.name,
+                                        is_dir,
+                                        size: if is_dir && !is_zip { 0 } else { f.size },
+                                        modified: f.modified,
+                                        folder_cover: None,
+                                        drive_info: None,
+                                        sync_status: SyncStatus::None,
+                                        deletion_date: None,
+                                        recycle_original_path: None,
+                                    }
                                 })
                                 .collect();
 
@@ -303,7 +307,17 @@ impl ImageViewerApp {
             }
 
             if !force_refresh {
-                if let Some(cached_entries) = directory_cache.get(&PathBuf::from(&base_path)) {
+                if let Some(mut cached_entries) = directory_cache.get(&PathBuf::from(&base_path)) {
+                    let mut changed = false;
+                    for entry in cached_entries.iter_mut() {
+                        if !entry.is_dir && entry.name.to_lowercase().ends_with(".zip") {
+                            entry.is_dir = true;
+                            changed = true;
+                        }
+                    }
+                    if changed {
+                        directory_cache.put(PathBuf::from(&base_path), cached_entries.clone());
+                    }
                     let mut offset = 0;
                     while offset < cached_entries.len() {
                         if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
