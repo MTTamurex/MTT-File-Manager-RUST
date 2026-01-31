@@ -8,6 +8,7 @@ use crate::domain::thumbnail::ThumbnailData;
 use crate::workers::thumbnail_worker::ThumbnailPriority;
 
 impl ImageViewerApp {
+
     pub fn request_thumbnail_load(&mut self, path: PathBuf, size_px: u32) {
         self.request_thumbnail_load_internal(path, size_px, None, ThumbnailPriority::Interactive);
     }
@@ -76,6 +77,9 @@ impl ImageViewerApp {
             }
         }
 
+        // REMOVIDO: Lazy loading que impedia carregamento de vídeos
+        // Agora todos os thumbnails são carregados, mas com priorização inteligente
+
         // Not in RAM cache - send to worker (will read from disk cache or generate)
         if let Some(index) = directory_index {
             self.thumbnail_queue
@@ -101,4 +105,10 @@ impl ImageViewerApp {
             let _ = self.icon_req_sender.send(path);
         }
     }
+
+
+}
+
+#[cfg(test)]
+mod tests {
 }

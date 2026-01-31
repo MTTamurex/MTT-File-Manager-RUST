@@ -169,8 +169,23 @@ impl MpvPreview {
         }
     }
 
+    /// Retorna o estado atual de forma segura, com valor padrão em caso de erro
     pub fn get_state(&self) -> MpvState {
-        self.state.read().unwrap().clone()
+        match self.state.read() {
+            Ok(state) => state.clone(),
+            Err(_) => {
+                // Em caso de poison do RwLock, retorna estado padrão
+                eprintln!("[MpvPreview] Erro ao ler estado - RwLock poisonado");
+                MpvState::default()
+            }
+        }
+    }
+
+    /// Tenta obter o estado com tratamento de erro explícito
+    pub fn try_get_state(&self) -> Result<MpvState, String> {
+        self.state.read()
+            .map(|state| state.clone())
+            .map_err(|e| format!("[MpvPreview] RwLock poisonado: {}", e))
     }
 
     pub fn play(&self) {
@@ -186,11 +201,19 @@ impl MpvPreview {
     }
 
     pub fn toggle_play(&mut self) {
-        let is_playing = self.state.read().unwrap().is_playing;
-        if is_playing {
-            self.pause();
-        } else {
-            self.play();
+        match self.state.read() {
+            Ok(state) => {
+                if state.is_playing {
+                    self.pause();
+                } else {
+                    self.play();
+                }
+            }
+            Err(_) => {
+                eprintln!("[MpvPreview] Erro ao toggle play - RwLock poisonado");
+                // Tenta pausar como fallback seguro
+                self.pause();
+            }
         }
     }
 
@@ -232,8 +255,17 @@ impl MpvPreview {
     }
 
     pub fn toggle_mute(&self) {
-        let muted = self.state.read().unwrap().is_muted;
-        self.set_muted(!muted);
+        match self.state.read() {
+            Ok(state) => {
+                self.set_muted(!state.is_muted);
+            }
+            Err(_) => {
+                eprintln!("[MpvPreview] Erro ao toggle mute - RwLock poisonado");
+                // Como fallback, alterna o estado do mute sem saber o estado atual
+                // Isso é seguro pois set_muted já lida com erros internamente
+                self.set_muted(true);
+            }
+        }
     }
 
     pub fn controls_active(&self) -> bool {
@@ -545,9 +577,17 @@ impl MpvPreview {
         let audio_normalizer_enabled = self.audio_normalizer_enabled;
         let action = if self.video_menu.is_open {
             let (audio_tracks, subtitle_tracks) = {
-                let state = self.state.read().unwrap();
-                // Clone outside the render function to minimize lock duration
-                (state.audio_tracks.clone(), state.subtitle_tracks.clone())
+                match self.state.read() {
+                    Ok(state) => {
+                        // Clone outside the render function to minimize lock duration
+                        (state.audio_tracks.clone(), state.subtitle_tracks.clone())
+                    }
+                    Err(_) => {
+                        eprintln!("[MpvPreview] Erro ao ler tracks para menu - RwLock poisonado");
+                        // Retorna listas vazias como fallback
+                        (Vec::new(), Vec::new())
+                    }
+                }
             }; // Lock released here
 
             crate::ui::components::video_menu::render_video_menu(

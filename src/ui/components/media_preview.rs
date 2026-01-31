@@ -34,14 +34,21 @@ impl GifPlayer {
 
     pub fn update(&mut self, ctx: &egui::Context) {
         let (frame_to_show, delay_ms, is_complete) = {
-            let d = self.data.lock().unwrap();
-            if d.frames.is_empty() {
-                return;
-            }
+            match self.data.lock() {
+                Ok(d) => {
+                    if d.frames.is_empty() {
+                        return;
+                    }
 
-            let frame_idx = self.current_frame % d.frames.len();
-            let frame = &d.frames[frame_idx];
-            (Some(frame.clone()), frame.delay_ms, d.is_complete)
+                    let frame_idx = self.current_frame % d.frames.len();
+                    let frame = &d.frames[frame_idx];
+                    (Some(frame.clone()), frame.delay_ms, d.is_complete)
+                }
+                Err(_) => {
+                    eprintln!("[GifPlayer] Erro ao lock dados - Mutex poisonado");
+                    return;
+                }
+            }
         };
 
         if let Some(frame) = frame_to_show {
@@ -60,13 +67,23 @@ impl GifPlayer {
                 // Update existing texture content
                 self.current_frame += 1;
                 let next_idx = {
-                    let d = self.data.lock().unwrap();
-                    self.current_frame % d.frames.len()
+                    match self.data.lock() {
+                        Ok(d) => self.current_frame % d.frames.len(),
+                        Err(_) => {
+                            eprintln!("[GifPlayer] Erro ao lock dados para next_idx - Mutex poisonado");
+                            return;
+                        }
+                    }
                 };
 
                 let next_frame = {
-                    let d = self.data.lock().unwrap();
-                    d.frames[next_idx].clone()
+                    match self.data.lock() {
+                        Ok(d) => d.frames[next_idx].clone(),
+                        Err(_) => {
+                            eprintln!("[GifPlayer] Erro ao lock dados para next_frame - Mutex poisonado");
+                            return;
+                        }
+                    }
                 };
 
                 let color_image = egui::ColorImage::from_rgba_unmultiplied(

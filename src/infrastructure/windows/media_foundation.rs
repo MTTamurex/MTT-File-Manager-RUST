@@ -268,7 +268,8 @@ fn guid_to_codec_name(guid: &windows::core::GUID) -> String {
         0x44585850 => return "DivX".to_string(),                // 'DXPP'
         0x58564944 | 0x78766964 => return "DivX".to_string(),   // 'DIVX', 'divx'
         0x34564944 | 0x34766964 => return "DivX 4".to_string(), // 'DIV4', 'div4'
-        0x33564944 | 0x33766964 => return "DivX 3".to_string(), // 'DIV3', 'div3
+        0x33564944 | 0x33766964 => return "DivX 3".to_string(), // 'DIV3', 'div3'
+        0x33444956 | 0x33644956 => return "DivX 3".to_string(), // 'VID3', 'vid3' - Big-endian variant!
         0x44495658 | 0x64697678 => return "XviD".to_string(),   // 'XVID', 'xvid'
         0x44495856 => return "XviD".to_string(),                // 'VXID' (alternative)
 
@@ -409,5 +410,19 @@ mod tests {
     fn test_guid_to_codec_h264() {
         let guid = windows::core::GUID::from_u128(0x31435641_0000_0010_8000_00AA00389B71);
         assert_eq!(guid_to_codec_name(&guid), "H.264/AVC");
+    }
+
+    #[test]
+    fn test_guid_to_codec_div3_little_endian() {
+        // DIV3 little-endian: 0x33564944
+        let guid = windows::core::GUID::from_u128(0x33564944_0000_0010_8000_00AA00389B71);
+        assert_eq!(guid_to_codec_name(&guid), "DivX 3");
+    }
+
+    #[test]
+    fn test_guid_to_codec_div3_big_endian() {
+        // VID3 big-endian: 0x33444956
+        let guid = windows::core::GUID::from_u128(0x33444956_0000_0010_8000_00AA00389B71);
+        assert_eq!(guid_to_codec_name(&guid), "DivX 3");
     }
 }
