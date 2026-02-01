@@ -417,6 +417,7 @@ impl ImageViewerApp {
 
         let mut app = Self {
             current_path: PATH_PADRAO.to_string(),
+            loaded_path: String::new(), // Start empty - will be set when first folder loads
             thumbnail_queue,
             image_receiver: img_rx,
             pending_thumbnails: std::collections::VecDeque::new(),

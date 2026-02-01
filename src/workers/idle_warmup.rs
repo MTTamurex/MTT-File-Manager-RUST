@@ -60,55 +60,25 @@ pub fn spawn_idle_warmup_worker(
         let mut last_warmup = Instant::now();
 
         loop {
-            match receiver.recv_timeout(Duration::from_millis(100)) {
+            // BLOCKING: Wait for message instead of polling
+            match receiver.recv() {
                 Ok(IdleWarmupMessage::UserActive) => {
                     worker.on_activity();
+                    continue; // Process next message immediately
                 }
                 Ok(IdleWarmupMessage::CurrentDirectory(path)) => {
                     worker.current_directory = Some(path);
+                    continue;
                 }
                 Ok(IdleWarmupMessage::VisibleItems(items)) => {
                     worker.pending_thumbnails = items;
+                    continue;
                 }
                 Ok(IdleWarmupMessage::Shutdown) => {
                     break;
                 }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    break;
-                }
-            }
-
-            if !worker.is_idle() {
-                continue;
-            }
-
-            if last_warmup.elapsed() < WARMUP_INTERVAL {
-                continue;
-            }
-
-            worker.is_warming = true;
-
-            if let Some(path) = worker.pending_thumbnails.pop() {
-                let gen = current_generation.load(Ordering::Relaxed);
-                thumbnail_queue.push(path, gen, 256, IOPriority::Background);
-                last_warmup = Instant::now();
-                continue;
-            }
-
-            if let Some(ref current) = worker.current_directory {
-                if let Some(entries) = directory_cache.get(current) {
-                    let subdirs: Vec<PathBuf> = entries
-                        .iter()
-                        .filter(|e| e.is_dir)
-                        .filter(|e| directory_cache.get(&e.path).is_none())
-                        .take(3)
-                        .map(|e| e.path.clone())
-                        .collect();
-                    if !subdirs.is_empty() {
-                        let _ = prefetch_sender.send(PrefetchMessage::Prefetch(subdirs));
-                        last_warmup = Instant::now();
-                    }
+                Err(_) => {
+                    break; // Channel closed
                 }
             }
         }

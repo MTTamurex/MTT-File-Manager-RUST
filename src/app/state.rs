@@ -52,6 +52,7 @@ pub struct ItemsRebuildResult {
 
 pub struct ImageViewerApp {
     pub current_path: String,
+    pub loaded_path: String, // Tracks the last path we actually requested (prevents spam)
 
     // --- SISTEMA DE THUMBNAILS OTIMIZADO ---
     pub thumbnail_queue: Arc<PriorityThumbnailQueue>, // UI -> Worker Pool (Priority Queue)

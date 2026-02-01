@@ -28,6 +28,9 @@ impl ImageViewerApp {
             return;
         }
 
+        // Clear loaded_path to allow reload if navigating to same path (for consistency)
+        self.loaded_path.clear();
+
         // Adiciona novo caminho ao histórico
         self.navigation.navigate_to(normalized_path.clone());
 
@@ -76,6 +79,7 @@ impl ImageViewerApp {
                 }
 
                 self.current_path = path.clone();
+                self.loaded_path.clear(); // Clear to allow reload
                 self.sync_to_tab();
                 self.path_input = self.current_path.clone();
                 self.is_computer_view = false;
@@ -117,6 +121,7 @@ impl ImageViewerApp {
                 }
 
                 self.current_path = path.clone();
+                self.loaded_path.clear(); // Clear to allow reload
                 self.sync_to_tab();
                 self.path_input = self.current_path.clone();
                 self.is_computer_view = false;
