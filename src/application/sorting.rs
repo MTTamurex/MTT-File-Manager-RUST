@@ -15,6 +15,24 @@ fn ends_with_ignore_case(s: &str, suffix: &str) -> bool {
         .all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
 }
 
+/// Helper function to get the appropriate date for sorting.
+/// For recycle bin items with deletion_date, uses the deletion date string for comparison.
+/// For all other items, uses the modified timestamp.
+/// 
+/// PERFORMANCE: Para lixeira, compara strings de data diretamente (formato brasileiro dd/mm/yyyy)
+/// Para arquivos normais, usa o timestamp modificado como antes
+fn get_sort_date_for_comparison(a: &FileEntry, b: &FileEntry) -> Ordering {
+    match (&a.deletion_date, &b.deletion_date) {
+        // Ambos têm data de exclusão (lixeira): compara strings diretamente
+        (Some(a_date), Some(b_date)) => a_date.cmp(b_date),
+        // Apenas um tem data de exclusão: considera que items da lixeira vêm primeiro
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        // Nenhum tem data de exclusão: usa modified como antes
+        (None, None) => a.modified.cmp(&b.modified),
+    }
+}
+
 /// Sorts a slice of FileEntry in place based on the given criteria.
 /// Uses Rayon for parallel sorting if the list is large (>5000 items).
 ///
@@ -56,7 +74,7 @@ pub fn sort_items(
         // PERFORMANCE: Uses cmp_ignore_case for zero-allocation comparison
         let ordering = match mode {
             SortMode::Name => natord::compare_ignore_case(&a.name, &b.name),
-            SortMode::Date => a.modified.cmp(&b.modified),
+            SortMode::Date => get_sort_date_for_comparison(a, b),
             SortMode::Size => a.size.cmp(&b.size),
             SortMode::Type => {
                 // PERFORMANCE: Compare extensions without allocation using OsStr
@@ -249,5 +267,75 @@ mod tests {
 
         let filtered_empty = filter_items(&items, "");
         assert_eq!(filtered_empty.len(), 3);
+    }
+
+    #[test]
+    fn test_sort_by_date_recycle_bin() {
+        // Testa ordenação por data na lixeira (usa deletion_date)
+        let mut items = vec![
+            FileEntry {
+                path: PathBuf::from("file1.txt"),
+                name: "file1.txt".to_string(),
+                is_dir: false,
+                size: 100,
+                modified: 1000, // data antiga
+                folder_cover: None,
+                drive_info: None,
+                sync_status: crate::domain::file_entry::SyncStatus::None,
+                deletion_date: Some("02/01/2024 10:00".to_string()),
+                recycle_original_path: None,
+            },
+            FileEntry {
+                path: PathBuf::from("file2.txt"),
+                name: "file2.txt".to_string(),
+                is_dir: false,
+                size: 200,
+                modified: 2000, // data mais recente
+                folder_cover: None,
+                drive_info: None,
+                sync_status: crate::domain::file_entry::SyncStatus::None,
+                deletion_date: Some("01/01/2024 15:30".to_string()),
+                recycle_original_path: None,
+            },
+            FileEntry {
+                path: PathBuf::from("file3.txt"),
+                name: "file3.txt".to_string(),
+                is_dir: false,
+                size: 300,
+                modified: 3000, // data mais recente ainda
+                folder_cover: None,
+                drive_info: None,
+                sync_status: crate::domain::file_entry::SyncStatus::None,
+                deletion_date: Some("03/01/2024 08:15".to_string()),
+                recycle_original_path: None,
+            },
+        ];
+
+        // Ordena por data (ascendente)
+        sort_items(&mut items, SortMode::Date, false, FoldersPosition::Mixed);
+        
+        // Verifica se está ordenado pelas datas de exclusão (não por modified)
+        // file2 foi excluído primeiro (01/01), depois file1 (02/01), depois file3 (03/01)
+        assert_eq!(items[0].name, "file2.txt");
+        assert_eq!(items[1].name, "file1.txt");
+        assert_eq!(items[2].name, "file3.txt");
+    }
+
+    #[test]
+    fn test_sort_by_date_normal_files() {
+        // Testa ordenação por data para arquivos normais (usa modified)
+        let mut items = vec![
+            create_test_file("file1.txt", 100, 1000),  // modified antigo
+            create_test_file("file2.txt", 200, 2000),  // modified recente
+            create_test_file("file3.txt", 300, 3000),  // modified mais recente
+        ];
+
+        // Ordena por data (ascendente)
+        sort_items(&mut items, SortMode::Date, false, FoldersPosition::Mixed);
+        
+        // Verifica se está ordenado pelas datas de modificação
+        assert_eq!(items[0].name, "file1.txt");
+        assert_eq!(items[1].name, "file2.txt");
+        assert_eq!(items[2].name, "file3.txt");
     }
 }
