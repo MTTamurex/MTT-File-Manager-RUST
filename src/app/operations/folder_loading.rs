@@ -241,6 +241,8 @@ impl ImageViewerApp {
             // STALE-WHILE-REVALIDATE STRATEGY: Instant feedback with debounce
             // NOTE: Only used for HDDs - SSDs bypass cache entirely for raw speed
             let base_path_buf = PathBuf::from(&base_path);
+            let is_onedrive_base = onedrive::is_onedrive_path(&base_path_buf)
+                || onedrive::path_has_cloud_attributes(&base_path_buf);
             
             // Phase 1: Instant Feedback (The Cache Hit) - HDD ONLY
             if !is_ssd {
@@ -315,7 +317,7 @@ impl ImageViewerApp {
                 }
             }
 
-            if !force_refresh {
+            if !force_refresh && !is_onedrive_base {
                 if let Some(di) = &directory_index_opt {
                     let base = PathBuf::from(&base_path);
                     if !di.might_have_changed(&base) {
@@ -437,10 +439,9 @@ impl ImageViewerApp {
 
             if use_hdd_optimized && !use_fast_reader {
                 // HDD-optimized path using FindFirstFileExW with LARGE_FETCH
-                let is_onedrive = onedrive::is_onedrive_path(&PathBuf::from(&base_path));
                 match crate::infrastructure::windows::hdd_directory_reader::read_directory_hdd_batched(
                     &PathBuf::from(&base_path),
-                    is_onedrive,
+                    is_onedrive_base,
                 ) {
                     Ok(batches) => {
                         for batch_entries in batches {
@@ -530,9 +531,8 @@ impl ImageViewerApp {
                             if !is_dir && dir_entry.name.to_lowercase().ends_with(".zip") {
                                 is_dir = true;
                             }
-                            let is_onedrive = onedrive::is_onedrive_path(&full_path);
                             let sync_status =
-                                onedrive::get_sync_status(dir_entry.attributes, is_onedrive);
+                                onedrive::get_sync_status(dir_entry.attributes, is_onedrive_base);
                             let entry = crate::domain::file_entry::FileEntry {
                                 path: full_path,
                                 name: dir_entry.name,
@@ -648,7 +648,7 @@ impl ImageViewerApp {
             let mut find_data = WIN32_FIND_DATAW::default();
 
             // Check if we're in a OneDrive folder (for sync status)
-            let is_onedrive = onedrive::is_onedrive_path(&PathBuf::from(&current_path));
+            let is_onedrive = is_onedrive_base;
 
             unsafe {
                 // SAFETY: `wide_path` is a null-terminated UTF-16 string buffer.
