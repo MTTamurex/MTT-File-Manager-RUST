@@ -209,9 +209,12 @@ fn render_tab_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context, frame: &m
                 }
                 TabBarAction::NewTab => {
                     app.sync_to_tab();
-                    app.tab_manager.new_tab();
+                    let current_path = app.tab_manager.active().path.clone();
+                    app.tab_manager.new_tab_at(&current_path);
                     app.sync_from_tab();
-                    app.setup_computer_view();
+                    if current_path == "Este Computador" {
+                        app.setup_computer_view();
+                    }
                     app.sync_to_tab();
                     // Control player visibility based on owner
                     app.update_video_visibility();
