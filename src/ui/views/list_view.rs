@@ -149,19 +149,15 @@ pub fn render_list_view(
         }
 
         if ctx.is_computer_view {
-            let (clicked_type, _) = draw_header(ui, "Tipo", w_type, SortMode::Type);
-            if clicked_type {
-                return Some(SortMode::Type);
-            }
-
-            let (clicked_total, _) = draw_header(ui, "Espaço Total", w_date, SortMode::Size);
+            // Computer View: apenas Nome, Espaço Total e Espaço Livre (sem Tipo)
+            let (clicked_total, _) = draw_header(ui, "Espaço Total", w_date, SortMode::DriveTotalSpace);
             if clicked_total {
-                return Some(SortMode::Size);
+                return Some(SortMode::DriveTotalSpace);
             }
 
-            let (clicked_free, _) = draw_header(ui, "Espaço Livre", w_size, SortMode::Size);
+            let (clicked_free, _) = draw_header(ui, "Espaço Livre", w_size, SortMode::DriveFreeSpace);
             if clicked_free {
-                return Some(SortMode::Size);
+                return Some(SortMode::DriveFreeSpace);
             }
         } else {
             let date_label = if ctx.is_recycle_bin_view {

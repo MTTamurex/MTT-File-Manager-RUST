@@ -94,6 +94,10 @@ pub enum SortMode {
     Date,
     Size,
     Type,
+    /// Espaço total do drive (apenas para Computer View)
+    DriveTotalSpace,
+    /// Espaço livre do drive (apenas para Computer View)
+    DriveFreeSpace,
 }
 
 /// Modo de visualização
