@@ -93,3 +93,4 @@ coverage/
 # ============================================
 errors.txt
 debug_output.txt
+bench_perf/target/

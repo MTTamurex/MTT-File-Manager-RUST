@@ -1,8 +1,9 @@
 //! Main application state management
 //! Follows .cursorrules: orchestration of component states, < 300 lines
 
-use std::collections::HashSet;
 use std::path::PathBuf;
+// PERFORMANCE: FxHashSet uses faster hashing for PathBuf keys
+use crate::ui::cache::FxHashSet;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
@@ -10,7 +11,8 @@ use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::windows;
 
 // Import component states
-use super::{ClipboardState, ContextMenuState, NavigationHistory, RenamingState, WatcherState};
+use super::clipboard::{ClipboardManager, ClipboardOp};
+use super::{ContextMenuState, NavigationHistory, RenamingState, WatcherState};
 
 // Re-export for convenience
 pub use crate::domain::file_entry::{SortMode, ViewMode};
@@ -50,12 +52,15 @@ pub struct AppState {
 
     // Component states
     pub context_menu: ContextMenuState,
-    pub clipboard: ClipboardState,
+    pub clipboard: ClipboardManager,
     pub watcher: WatcherState,
     pub renaming_state: Option<RenamingState>,
+    
+    // UI states
+    pub show_virtual_drive_settings: bool,
 
     // Caches (to be managed separately)
-    pub scanned_folders: HashSet<PathBuf>,
+    pub scanned_folders: FxHashSet<PathBuf>,
     pub last_grid_cols: usize,
 
     // System information
@@ -93,11 +98,13 @@ impl AppState {
             current_generation: Arc::new(AtomicUsize::new(0)),
 
             context_menu: ContextMenuState::new(),
-            clipboard: ClipboardState::new(),
+            clipboard: ClipboardManager::new(),
             watcher: WatcherState::new(),
             renaming_state: None,
+            
+            show_virtual_drive_settings: false,
 
-            scanned_folders: HashSet::new(),
+            scanned_folders: FxHashSet::default(),
             last_grid_cols: 1,
 
             disks,
@@ -114,7 +121,7 @@ impl AppState {
         self.current_path = path.to_string();
         self.path_input = path.to_string();
         self.is_computer_view = false;
-        self.context_menu.target_path = None;
+        self.context_menu.target_paths.clear();
     }
 
     /// Goes back in navigation history
@@ -257,8 +264,7 @@ impl AppState {
     pub fn copy_to_clipboard(&mut self) {
         if let Some(index) = self.selected_item_index {
             if let Some(item) = self.items.get(index) {
-                self.clipboard
-                    .set(item.path.clone(), super::ClipboardOp::Copy);
+                self.clipboard.copy(&[item.path.clone()]);
             }
         }
     }
@@ -267,8 +273,7 @@ impl AppState {
     pub fn cut_to_clipboard(&mut self) {
         if let Some(index) = self.selected_item_index {
             if let Some(item) = self.items.get(index) {
-                self.clipboard
-                    .set(item.path.clone(), super::ClipboardOp::Move);
+                self.clipboard.cut(&[item.path.clone()]);
             }
         }
     }
@@ -279,8 +284,16 @@ impl AppState {
     }
 
     /// Gets clipboard state for paste operation
-    pub fn get_clipboard_for_paste(&self) -> Option<(&PathBuf, super::ClipboardOp)> {
-        self.clipboard.get_for_paste()
+    pub fn get_clipboard_for_paste(&self) -> Option<(&PathBuf, ClipboardOp)> {
+        let (file, op) = self.clipboard.internal_state();
+        // Since internal_state returns a slice of paths, we just take the first one if we want single-file behavior
+        // Or we should update get_clipboard_for_paste logic. But for now matching original attempt to zip:
+        // We probably want to return the first file and the op if available.
+        if let Some(first_file) = file.first() {
+            op.map(|op| (first_file, op))
+        } else {
+            None
+        }
     }
 
     /// Increments generation for async operations

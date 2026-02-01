@@ -1,0 +1,202 @@
+use windows::core::GUID;
+
+// Manual property key definitions (from Propkey.h)
+// These are not exposed by windows-rs, so we define them manually
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct PROPERTYKEY {
+    pub fmtid: GUID,
+    pub pid: u32,
+}
+
+// System.Media.Duration (64440490-4C8B-11D1-8B70-080036B11A03, 3)
+pub const PKEY_MEDIA_DURATION: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x64440490_4C8B_11D1_8B70_080036B11A03),
+    pid: 3,
+};
+
+// System.Video.FrameWidth (64440491-4C8B-11D1-8B70-080036B11A03, 3)
+pub const PKEY_VIDEO_FRAMEWIDTH: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x64440491_4C8B_11D1_8B70_080036B11A03),
+    pid: 3,
+};
+
+// System.Video.FrameHeight (64440491-4C8B-11D1-8B70-080036B11A03, 4)
+pub const PKEY_VIDEO_FRAMEHEIGHT: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x64440491_4C8B_11D1_8B70_080036B11A03),
+    pid: 4,
+};
+
+// System.Video.FrameRate (64440491-4C8B-11D1-8B70-080036B11A03, 6)
+pub const PKEY_VIDEO_FRAMERATE: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x64440491_4C8B_11D1_8B70_080036B11A03),
+    pid: 6,
+};
+
+// System.Image.CameraModel (14B81DA1-0135-4D31-96D9-6CBFC9671A99, 272)
+pub const PKEY_IMAGE_CAMERAMODEL: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x14B81DA1_0135_4D31_96D9_6CBFC9671A99),
+    pid: 272,
+};
+
+// System.Image.CameraMaker (14B81DA1-0135-4D31-96D9-6CBFC9671A99, 271)
+pub const PKEY_IMAGE_CAMERAMAKER: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x14B81DA1_0135_4D31_96D9_6CBFC9671A99),
+    pid: 271,
+};
+
+// System.Photo.FNumber (14B81DA1-0135-4D31-96D9-6CBFC9671A99, 33437)
+pub const PKEY_IMAGE_FNUMBER: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x14B81DA1_0135_4D31_96D9_6CBFC9671A99),
+    pid: 33437,
+};
+
+// System.Photo.ExposureTime (14B81DA1-0135-4D31-96D9-6CBFC9671A99, 33434)
+pub const PKEY_IMAGE_EXPOSURETIME: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x14B81DA1_0135_4D31_96D9_6CBFC9671A99),
+    pid: 33434,
+};
+
+// System.Photo.ISOSpeed (14B81DA1-0135-4D31-96D9-6CBFC9671A99, 34855)
+pub const PKEY_IMAGE_ISOSPEED: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x14B81DA1_0135_4D31_96D9_6CBFC9671A99),
+    pid: 34855,
+};
+
+// System.Photo.FocalLength (14B81DA1-0135-4D31-96D9-6CBFC9671A99, 37386)
+pub const PKEY_IMAGE_FOCALLENGTH: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x14B81DA1_0135_4D31_96D9_6CBFC9671A99),
+    pid: 37386,
+};
+
+// System.Photo.MaxAperture (14B81DA1-0135-4D31-96D9-6CBFC9671A99, 37381)
+pub const PKEY_IMAGE_MAXAPERTURE: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x14B81DA1_0135_4D31_96D9_6CBFC9671A99),
+    pid: 37381,
+};
+
+// System.Photo.MeteringMode (14B81DA1-0135-4D31-96D9-6CBFC9671A99, 37383)
+pub const PKEY_IMAGE_METERINGMODE: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x14B81DA1_0135_4D31_96D9_6CBFC9671A99),
+    pid: 37383,
+};
+
+// System.Photo.Flash (14B81DA1-0135-4D31-96D9-6CBFC9671A99, 37385)
+pub const PKEY_IMAGE_FLASH: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x14B81DA1_0135_4D31_96D9_6CBFC9671A99),
+    pid: 37385,
+};
+
+// System.Photo.DateTaken (14B81DA1-0135-4D31-96D9-6CBFC9671A99, 36867)
+pub const PKEY_IMAGE_DATETAKEN: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x14B81DA1_0135_4D31_96D9_6CBFC9671A99),
+    pid: 36867,
+};
+
+// System.Subject (F29F85E0-4FF9-1068-AB91-08002B27B3D9, 3)
+pub const PKEY_IMAGE_SUBJECT: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0xF29F85E0_4FF9_1068_AB91_08002B27B3D9),
+    pid: 3,
+};
+
+// System.Media.SubTitle (56A3372E-CE9C-11D2-9F0E-006097C686F6, 38) - Used for \"Video tracks\" in Explorer
+pub const PKEY_MEDIA_SUBTITLE: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x56A3372E_CE9C_11D2_9F0E_006097C686F6),
+    pid: 38,
+};
+
+// System.Media.EncodingSettings (64440490-4C8B-11D1-8B70-080036B11A03, 10)
+pub const PKEY_MEDIA_ENCODINGSETTINGS: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x64440490_4C8B_11D1_8B70_080036B11A03),
+    pid: 10,
+};
+
+// System.Audio.EncodingBitrate (64440490-4C8B-11D1-8B70-080036B11A03, 4)
+pub const PKEY_AUDIO_ENCODINGBITRATE: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x64440490_4C8B_11D1_8B70_080036B11A03),
+    pid: 4,
+};
+
+// System.Audio.ChannelCount (64440490-4C8B-11D1-8B70-080036B11A03, 7)
+pub const PKEY_AUDIO_CHANNELCOUNT: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x64440490_4C8B_11D1_8B70_080036B11A03),
+    pid: 7,
+};
+
+// System.Video.EncodingBitrate (64440491-4C8B-11D1-8B70-080036B11A03, 8)
+pub const PKEY_VIDEO_ENCODINGBITRATE: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x64440491_4C8B_11D1_8B70_080036B11A03),
+    pid: 8,
+};
+
+// System.Video.FourCC (64440491-4C8B-11D1-8B70-080036B11A03, 44)
+pub const PKEY_VIDEO_FOURCC: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x64440491_4C8B_11D1_8B70_080036B11A03),
+    pid: 44,
+};
+
+// System.Media.ContentType (64440492-4C8B-11D1-8B70-080036B11A03, 1)
+pub const PKEY_MEDIA_CONTENTTYPE: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x64440492_4C8B_11D1_8B70_080036B11A03),
+    pid: 1,
+};
+
+// System.Video.Compression (64440491-4C8B-11D1-8B70-080036B11A03, 10)
+pub const PKEY_VIDEO_COMPRESSION: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x64440491_4C8B_11D1_8B70_080036B11A03),
+    pid: 10,
+};
+
+// System.Video.StreamName (64440491-4C8B-11D1-8B70-080036B11A03, 2) - Used by K-Lite/Icaros
+pub const PKEY_VIDEO_STREAMNAME: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x64440491_4C8B_11D1_8B70_080036B11A03),
+    pid: 2,
+};
+
+// System.Audio.Format (64440490-4C8B-11D1-8B70-080036B11A03, 2)
+pub const PKEY_AUDIO_FORMAT: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x64440490_4C8B_11D1_8B70_080036B11A03),
+    pid: 2,
+};
+
+// System.Audio.StreamName (64440490-4C8B-11D1-8B70-080036B11A03, 9)
+pub const PKEY_AUDIO_STREAMNAME: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x64440490_4C8B_11D1_8B70_080036B11A03),
+    pid: 9,
+};
+
+// System.Audio.Compression (64440490-4C8B-11D1-8B70-080036B11A03, 10) - K-Lite/Icaros populates this!
+pub const PKEY_AUDIO_COMPRESSION: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x64440490_4C8B_11D1_8B70_080036B11A03),
+    pid: 10,
+};
+
+// System.Video.StreamDescription - K-Lite/Icaros provides \"Video: H.264 (AVC), 1920x1080\" here
+// This is the PRIMARY source for readable codec names from property handlers
+pub const PKEY_VIDEO_STREAMDESCRIPTION: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x64440491_4C8B_11D1_8B70_080036B11A03),
+    pid: 11, // System.Video.StreamDescription
+};
+
+pub const PKEY_VIDEO_TRACKS: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0xEC59938F_E25E_4592_82E3_8013018EDB74), // OGM Video Tracks
+    pid: 3,
+};
+
+pub const PKEY_AUDIO_TRACKS: PROPERTYKEY = PROPERTYKEY {
+    fmtid: GUID::from_u128(0x6F6B78A7_F4A2_4F9F_86B1_C6AAA6DEC9A5), // OGM Audio Tracks
+    pid: 4,
+};
+
+// PROPVARIANT type tags (from WTypes.h)
+pub const VT_UI4: u16 = 19;
+pub const VT_UI8: u16 = 21;
+pub const VT_I4: u16 = 3;
+pub const VT_I8: u16 = 20;
+pub const VT_R8: u16 = 5; // Double (64-bit float)
+pub const VT_UI2: u16 = 18; // Unsigned 16-bit int
+pub const VT_I2: u16 = 2; // Signed 16-bit int
+pub const VT_LPWSTR: u16 = 31;
+pub const VT_BSTR: u16 = 8;
+pub const VT_EMPTY: u16 = 0;
+pub const VT_VECTOR_LPWSTR: u16 = 4127; // VT_VECTOR | VT_LPWSTR (0x1000 | 31)

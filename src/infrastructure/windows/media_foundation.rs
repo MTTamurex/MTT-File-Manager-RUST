@@ -149,14 +149,14 @@ fn read_duration(reader: &IMFSourceReader) -> Option<u64> {
 
         // PROPVARIANT for duration contains VT_UI8 (u64)
         // Access the raw value directly from the anonymous union
-        let raw = propvar.as_raw();
-        let vt = raw.Anonymous.Anonymous.vt;
+        let raw = &*(&propvar.Anonymous.Anonymous as *const _ as *const windows::Win32::System::Com::StructuredStorage::PROPVARIANT_0_0);
+        let vt = raw.vt;
 
         // VT_UI8 = 21, VT_I8 = 20
-        match vt {
-            21 => Some(raw.Anonymous.Anonymous.Anonymous.uhVal as u64), // VT_UI8
+        match vt.0 {
+            21 => Some(raw.Anonymous.uhVal), // VT_UI8
             20 => {
-                let val = raw.Anonymous.Anonymous.Anonymous.hVal;
+                let val = raw.Anonymous.hVal;
                 if val >= 0 {
                     Some(val as u64)
                 } else {
@@ -237,7 +237,7 @@ fn guid_to_codec_name(guid: &windows::core::GUID) -> String {
         // H.264/AVC variants
         0x31435641 | 0x31637661 => return "H.264/AVC".to_string(), // 'AVC1', 'avc1'
         0x34363248 | 0x34363268 => return "H.264/AVC".to_string(), // 'H264', 'h264'
-        0x3436324E => return "H.264/AVC".to_string(),              // Various encoders
+        0x3436324E | 0x3F40F4F0 => return "H.264/AVC".to_string(), // Various encoders + H264 ES
 
         // H.265/HEVC variants
         0x35365648 | 0x31435648 => return "H.265/HEVC".to_string(), // 'HV51', 'HVC1'
@@ -268,7 +268,8 @@ fn guid_to_codec_name(guid: &windows::core::GUID) -> String {
         0x44585850 => return "DivX".to_string(),                // 'DXPP'
         0x58564944 | 0x78766964 => return "DivX".to_string(),   // 'DIVX', 'divx'
         0x34564944 | 0x34766964 => return "DivX 4".to_string(), // 'DIV4', 'div4'
-        0x33564944 | 0x33766964 => return "DivX 3".to_string(), // 'DIV3', 'div3
+        0x33564944 | 0x33766964 => return "DivX 3".to_string(), // 'DIV3', 'div3'
+        0x33444956 | 0x33644956 => return "DivX 3".to_string(), // 'VID3', 'vid3' - Big-endian variant!
         0x44495658 | 0x64697678 => return "XviD".to_string(),   // 'XVID', 'xvid'
         0x44495856 => return "XviD".to_string(),                // 'VXID' (alternative)
 
@@ -409,5 +410,19 @@ mod tests {
     fn test_guid_to_codec_h264() {
         let guid = windows::core::GUID::from_u128(0x31435641_0000_0010_8000_00AA00389B71);
         assert_eq!(guid_to_codec_name(&guid), "H.264/AVC");
+    }
+
+    #[test]
+    fn test_guid_to_codec_div3_little_endian() {
+        // DIV3 little-endian: 0x33564944
+        let guid = windows::core::GUID::from_u128(0x33564944_0000_0010_8000_00AA00389B71);
+        assert_eq!(guid_to_codec_name(&guid), "DivX 3");
+    }
+
+    #[test]
+    fn test_guid_to_codec_div3_big_endian() {
+        // VID3 big-endian: 0x33444956
+        let guid = windows::core::GUID::from_u128(0x33444956_0000_0010_8000_00AA00389B71);
+        assert_eq!(guid_to_codec_name(&guid), "DivX 3");
     }
 }

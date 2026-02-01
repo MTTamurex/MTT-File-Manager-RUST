@@ -1,14 +1,15 @@
 //! Tab management system for MTT File Manager
-//! 
+//!
 //! Each tab represents an independent file browser view with its own:
 //! - Current path
 //! - Navigation history
 //! - Selected items
 //! - Sort preferences
 
+use crate::application::navigation::NavigationHistory;
+use crate::domain::file_entry::FileEntry;
 use std::path::PathBuf;
 use std::sync::Arc;
-use crate::domain::file_entry::FileEntry;
 
 /// Represents a single browser tab
 #[derive(Clone)]
@@ -20,9 +21,7 @@ pub struct TabState {
     /// Display title (folder name or "Este Computador")
     pub title: String,
     /// Navigation history (linear)
-    pub navigation_history: Vec<String>,
-    /// Current position in history
-    pub history_index: usize,
+    pub navigation: NavigationHistory,
     /// Whether this tab is showing "Este Computador" view
     pub is_computer_view: bool,
     /// Items in this tab's view
@@ -39,6 +38,18 @@ pub struct TabState {
     pub scroll_to_selected: bool,
     /// Address bar input text
     pub path_input: String,
+    /// Whether this tab is showing the Recycle Bin view
+    pub is_recycle_bin_view: bool,
+    /// Persistent thumbnail for preview panel
+    pub selected_thumbnail: Option<eframe::egui::TextureHandle>,
+    /// Selected metadata for preview panel
+    pub selected_metadata: Option<(PathBuf, crate::infrastructure::windows::MediaMetadata)>,
+    /// Selected animated GIF for local preview (native)
+    pub selected_gif: Option<crate::ui::components::media_preview::GifPlayer>,
+    /// Scroll offset for grid view (manual virtualization)
+    pub scroll_offset_y: f32,
+    /// Total items in the folder (status bar)
+    pub total_items: usize,
 }
 
 impl TabState {
@@ -48,8 +59,7 @@ impl TabState {
             id,
             path: "Este Computador".to_string(),
             title: "Este Computador".to_string(),
-            navigation_history: vec!["Este Computador".to_string()],
-            history_index: 0,
+            navigation: NavigationHistory::new("Este Computador".to_string()),
             is_computer_view: true,
             items: Arc::new(Vec::new()),
             all_items: Vec::new(),
@@ -58,22 +68,27 @@ impl TabState {
             search_query: String::new(),
             scroll_to_selected: false,
             path_input: "Este Computador".to_string(),
+            is_recycle_bin_view: false,
+            selected_thumbnail: None,
+            selected_metadata: None,
+            selected_gif: None,
+            scroll_offset_y: 0.0,
+            total_items: 0,
         }
     }
-    
+
     /// Create a new tab at a specific path
     pub fn new_at_path(id: usize, path: &str) -> Self {
         let title = PathBuf::from(path)
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| path.to_string());
-            
+
         Self {
             id,
             path: path.to_string(),
             title,
-            navigation_history: vec![path.to_string()],
-            history_index: 0,
+            navigation: NavigationHistory::new(path.to_string()),
             is_computer_view: false,
             items: Arc::new(Vec::new()),
             all_items: Vec::new(),
@@ -82,29 +97,31 @@ impl TabState {
             search_query: String::new(),
             scroll_to_selected: false,
             path_input: path.to_string(),
+            is_recycle_bin_view: path == "Lixeira",
+            selected_thumbnail: None,
+            selected_metadata: None,
+            selected_gif: None,
+            scroll_offset_y: 0.0,
+            total_items: 0,
         }
     }
-    
+
     /// Navigate to a new path, pushing current to history
     pub fn navigate_to(&mut self, new_path: &str) {
         if new_path == self.path {
             return;
         }
-        
-        // Truncate future history if we were in the middle
-        if self.history_index < self.navigation_history.len().saturating_sub(1) {
-            self.navigation_history.truncate(self.history_index + 1);
-        }
-        
-        // Add to history
-        self.navigation_history.push(new_path.to_string());
-        self.history_index = self.navigation_history.len() - 1;
-        
+
+        // Delegate to navigation manager
+        self.navigation.navigate_to(new_path.to_string());
+
         // Update current path
         self.path = new_path.to_string();
         self.path_input = new_path.to_string();
         self.is_computer_view = new_path == "Este Computador";
-        
+        self.is_recycle_bin_view = new_path == "Lixeira";
+        self.scroll_offset_y = 0.0;
+
         // Update title
         if self.is_computer_view {
             self.title = "Este Computador".to_string();
@@ -115,35 +132,36 @@ impl TabState {
                 .unwrap_or_else(|| new_path.to_string());
         }
     }
-    
+
     /// Go back in history
     pub fn go_back(&mut self) -> bool {
-        if self.history_index > 0 {
-            self.history_index -= 1;
+        if let Some(path) = self.navigation.go_back().cloned() {
+            self.path = path.clone();
             self.sync_from_history();
             true
         } else {
             false
         }
     }
-    
+
     /// Go forward in history
     pub fn go_forward(&mut self) -> bool {
-        if self.history_index + 1 < self.navigation_history.len() {
-            self.history_index += 1;
+        if let Some(path) = self.navigation.go_forward().cloned() {
+            self.path = path.clone();
             self.sync_from_history();
             true
         } else {
             false
         }
     }
-    
+
     fn sync_from_history(&mut self) {
-        if let Some(path) = self.navigation_history.get(self.history_index) {
-            self.path = path.clone();
+        if let Some(path) = self.navigation.current_path() {
             self.path_input = path.clone();
             self.is_computer_view = path == "Este Computador";
-            
+            self.is_recycle_bin_view = path == "Lixeira";
+            self.scroll_offset_y = 0.0;
+
             if self.is_computer_view {
                 self.title = "Este Computador".to_string();
             } else {
@@ -154,13 +172,13 @@ impl TabState {
             }
         }
     }
-    
+
     pub fn can_go_back(&self) -> bool {
-        self.history_index > 0
+        self.navigation.can_go_back()
     }
-    
+
     pub fn can_go_forward(&self) -> bool {
-        self.history_index + 1 < self.navigation_history.len()
+        self.navigation.can_go_forward()
     }
 }
 
@@ -193,17 +211,17 @@ impl TabManager {
             closed_tabs: Vec::new(),
         }
     }
-    
+
     /// Get the currently active tab
     pub fn active(&self) -> &TabState {
         &self.tabs[self.active_tab]
     }
-    
+
     /// Get mutable reference to active tab
     pub fn active_mut(&mut self) -> &mut TabState {
         &mut self.tabs[self.active_tab]
     }
-    
+
     /// Add a new tab at "Este Computador" and switch to it
     pub fn new_tab(&mut self) {
         let tab = TabState::new_at_computer(self.next_id);
@@ -211,7 +229,7 @@ impl TabManager {
         self.tabs.push(tab);
         self.active_tab = self.tabs.len() - 1;
     }
-    
+
     /// Add a new tab at a specific path and switch to it
     pub fn new_tab_at(&mut self, path: &str) {
         let tab = TabState::new_at_path(self.next_id, path);
@@ -219,28 +237,31 @@ impl TabManager {
         self.tabs.push(tab);
         self.active_tab = self.tabs.len() - 1;
     }
-    
+
     /// Duplicate the current tab
     pub fn duplicate_tab(&mut self) {
         let current = self.active().clone();
         let mut new_tab = TabState::new_at_path(self.next_id, &current.path);
-        new_tab.navigation_history = current.navigation_history.clone();
-        new_tab.history_index = current.history_index;
+        new_tab.navigation = current.navigation.clone();
         new_tab.is_computer_view = current.is_computer_view;
         new_tab.items = current.items.clone();
         new_tab.all_items = current.all_items.clone();
         new_tab.selected_item = current.selected_item;
         new_tab.selected_file = current.selected_file.clone();
+        new_tab.selected_thumbnail = current.selected_thumbnail.clone();
+        new_tab.selected_metadata = current.selected_metadata.clone();
+        new_tab.selected_gif = current.selected_gif.clone();
         new_tab.search_query = current.search_query.clone();
-        
+        new_tab.total_items = current.total_items;
+
         self.next_id += 1;
-        
+
         // Insert after current tab
         let insert_pos = self.active_tab + 1;
         self.tabs.insert(insert_pos, new_tab);
         self.active_tab = insert_pos;
     }
-    
+
     /// Close the tab at the given index
     /// Returns true if the app should close (no tabs left)
     pub fn close_tab(&mut self, index: usize) -> bool {
@@ -248,43 +269,43 @@ impl TabManager {
             // Last tab - signal app should close
             return true;
         }
-        
+
         // Save to closed tabs for potential reopening
         let closed = self.tabs.remove(index);
         self.closed_tabs.push(closed);
-        
+
         // Keep max 10 closed tabs
         if self.closed_tabs.len() > 10 {
             self.closed_tabs.remove(0);
         }
-        
+
         // Adjust active tab index
         if self.active_tab >= self.tabs.len() {
             self.active_tab = self.tabs.len() - 1;
         } else if self.active_tab > index {
             self.active_tab = self.active_tab.saturating_sub(1);
         }
-        
+
         false
     }
-    
+
     /// Close the currently active tab
     pub fn close_active_tab(&mut self) -> bool {
         self.close_tab(self.active_tab)
     }
-    
+
     /// Switch to the tab at the given index
     pub fn switch_to(&mut self, index: usize) {
         if index < self.tabs.len() {
             self.active_tab = index;
         }
     }
-    
+
     /// Switch to the next tab (wrapping around)
     pub fn next_tab(&mut self) {
         self.active_tab = (self.active_tab + 1) % self.tabs.len();
     }
-    
+
     /// Switch to the previous tab (wrapping around)
     pub fn prev_tab(&mut self) {
         if self.active_tab == 0 {
@@ -293,22 +314,25 @@ impl TabManager {
             self.active_tab -= 1;
         }
     }
-    
+
     /// Reopen the most recently closed tab
     pub fn reopen_closed_tab(&mut self) -> bool {
         if let Some(tab) = self.closed_tabs.pop() {
             let mut reopened = TabState::new_at_path(self.next_id, &tab.path);
-            reopened.navigation_history = tab.navigation_history;
-            reopened.history_index = tab.history_index;
+            reopened.navigation = tab.navigation;
             reopened.is_computer_view = tab.is_computer_view;
             reopened.items = tab.items;
             reopened.all_items = tab.all_items;
             reopened.selected_item = tab.selected_item;
             reopened.selected_file = tab.selected_file;
+            reopened.selected_thumbnail = tab.selected_thumbnail;
+            reopened.selected_metadata = tab.selected_metadata;
+            reopened.selected_gif = tab.selected_gif;
             reopened.search_query = tab.search_query;
-            
+            reopened.total_items = tab.total_items;
+
             self.next_id += 1;
-            
+
             // Insert after active tab
             let insert_pos = self.active_tab + 1;
             self.tabs.insert(insert_pos, reopened);
@@ -318,7 +342,7 @@ impl TabManager {
             false
         }
     }
-    
+
     /// Get number of open tabs
     pub fn count(&self) -> usize {
         self.tabs.len()

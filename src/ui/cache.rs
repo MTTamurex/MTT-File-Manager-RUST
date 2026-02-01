@@ -6,6 +6,12 @@ use lru::LruCache;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 
+// PERFORMANCE: FxHashSet uses a faster hash function than std::collections::HashSet.
+// This is especially beneficial for PathBuf keys which have expensive default hashing.
+// FxHash is ~2-4x faster for string-like keys.
+// Re-exported for use in other modules.
+pub use rustc_hash::FxHashSet;
+
 /// Texture cache configuration
 pub struct TextureCacheConfig {
     pub max_size: usize,
@@ -15,25 +21,32 @@ pub struct TextureCacheConfig {
 impl Default for TextureCacheConfig {
     fn default() -> Self {
         Self {
-            max_size: 200, // ~50-100MB VRAM
-            max_concurrent_loads: 30,
+            max_size: 500, // ~125-250MB VRAM - balanced between performance and memory
+            max_concurrent_loads: 200, // High limit - stale entries cleaned by grid_view during scroll
         }
     }
 }
-
 
 /// Manages texture caches for thumbnails and icons
 pub struct CacheManager {
     pub texture_cache: LruCache<PathBuf, egui::TextureHandle>,
     pub icon_cache: LruCache<String, egui::TextureHandle>,
-    pub loading_set: std::collections::HashSet<PathBuf>,
+    pub loading_set: FxHashSet<PathBuf>,
     pub folder_icon_texture: Option<egui::TextureHandle>,
     pub computer_icon: Option<egui::TextureHandle>,
     pub drive_icon_cache: LruCache<String, egui::TextureHandle>,
     /// Cache for folder preview thumbnails (sandwich effect)
     pub folder_preview_cache: LruCache<PathBuf, egui::TextureHandle>,
     /// Set of folder paths currently being loaded
-    pub folder_preview_loading: std::collections::HashSet<PathBuf>,
+    pub folder_preview_loading: FxHashSet<PathBuf>,
+    /// Set of paths that failed thumbnail extraction (LRU bounded to 1000)
+    pub failed_thumbnails: LruCache<PathBuf, ()>,
+    /// Set of paths received from worker but waiting for GPU upload
+    pub pending_upload_set: FxHashSet<PathBuf>,
+    /// PERFORMANCE: RAM cache for decoded RGBA data (Layer 2 - larger than VRAM cache)
+    /// When a texture is evicted from VRAM, the RGBA data remains here for fast re-upload
+    /// without needing disk I/O. This is critical for HDD performance during video playback.
+    pub rgba_data_cache: LruCache<PathBuf, (Vec<u8>, u32, u32)>,
 
     config: TextureCacheConfig,
 }
@@ -42,14 +55,20 @@ impl CacheManager {
     /// Creates a new cache manager with default configuration
     pub fn new() -> Self {
         Self {
-            texture_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
+            // PERFORMANCE: 500 items - balanced between memory usage and cache hits
+            texture_cache: LruCache::new(NonZeroUsize::new(500).unwrap()),
             icon_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
-            loading_set: std::collections::HashSet::new(),
+            loading_set: FxHashSet::default(),
             folder_icon_texture: None,
             computer_icon: None,
             drive_icon_cache: LruCache::new(NonZeroUsize::new(10).unwrap()),
-            folder_preview_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
-            folder_preview_loading: std::collections::HashSet::new(),
+            folder_preview_cache: LruCache::new(NonZeroUsize::new(150).unwrap()),
+            folder_preview_loading: FxHashSet::default(),
+            failed_thumbnails: LruCache::new(NonZeroUsize::new(1000).unwrap()),
+            pending_upload_set: FxHashSet::default(),
+            // PERFORMANCE: RAM cache for RGBA data - helps avoid disk I/O on re-scroll
+            // 800 items ≈ 200-400MB RAM for 512x512 thumbnails
+            rgba_data_cache: LruCache::new(NonZeroUsize::new(800).unwrap()),
 
             config: TextureCacheConfig::default(),
         }
@@ -60,12 +79,16 @@ impl CacheManager {
         Self {
             texture_cache: LruCache::new(NonZeroUsize::new(config.max_size).unwrap()),
             icon_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
-            loading_set: std::collections::HashSet::new(),
+            loading_set: FxHashSet::default(),
             folder_icon_texture: None,
             computer_icon: None,
             drive_icon_cache: LruCache::new(NonZeroUsize::new(10).unwrap()),
-            folder_preview_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
-            folder_preview_loading: std::collections::HashSet::new(),
+            folder_preview_cache: LruCache::new(NonZeroUsize::new(150).unwrap()),
+            folder_preview_loading: FxHashSet::default(),
+            failed_thumbnails: LruCache::new(NonZeroUsize::new(1000).unwrap()),
+            pending_upload_set: FxHashSet::default(),
+            // PERFORMANCE: RAM cache - 1.6x the VRAM cache size, minimum 800
+            rgba_data_cache: LruCache::new(NonZeroUsize::new((config.max_size * 8 / 5).max(800)).unwrap()),
 
             config,
         }
@@ -106,6 +129,21 @@ impl CacheManager {
         self.loading_set.remove(path);
     }
 
+    /// Checks if a thumbnail is waiting for upload
+    pub fn is_pending_upload(&self, path: &PathBuf) -> bool {
+        self.pending_upload_set.contains(path)
+    }
+
+    /// Marks a thumbnail as waiting for upload
+    pub fn start_pending_upload(&mut self, path: PathBuf) {
+        self.pending_upload_set.insert(path);
+    }
+
+    /// Removes a thumbnail from pending upload status
+    pub fn finish_pending_upload(&mut self, path: &PathBuf) {
+        self.pending_upload_set.remove(path);
+    }
+
     /// Clears all caches
     pub fn clear_all(&mut self) {
         self.texture_cache.clear();
@@ -114,7 +152,42 @@ impl CacheManager {
         self.drive_icon_cache.clear();
         self.folder_preview_cache.clear();
         self.folder_preview_loading.clear();
+        self.failed_thumbnails.clear();
+        self.pending_upload_set.clear();
+        self.rgba_data_cache.clear();
         // Note: folder_icon_texture and computer_icon are kept as they're singletons
+    }
+
+    // ========== RAM Cache Methods (Layer 2 - RGBA Data) ==========
+
+    /// Checks if RGBA data is in the RAM cache
+    pub fn has_rgba_data(&self, path: &PathBuf) -> bool {
+        self.rgba_data_cache.contains(path)
+    }
+
+    /// Gets RGBA data from the RAM cache
+    pub fn get_rgba_data(&mut self, path: &PathBuf) -> Option<&(Vec<u8>, u32, u32)> {
+        self.rgba_data_cache.get(path)
+    }
+
+    /// Stores RGBA data in the RAM cache
+    pub fn put_rgba_data(&mut self, path: PathBuf, data: Vec<u8>, width: u32, height: u32) {
+        self.rgba_data_cache.put(path, (data, width, height));
+    }
+
+    /// Marks a path as having failed thumbnail extraction
+    pub fn mark_as_failed(&mut self, path: PathBuf) {
+        self.failed_thumbnails.put(path, ());
+    }
+
+    /// Checks if a path has previously failed thumbnail extraction
+    pub fn is_failed(&self, path: &PathBuf) -> bool {
+        self.failed_thumbnails.contains(path)
+    }
+
+    /// Clears the failure status for all paths
+    pub fn clear_failed(&mut self) {
+        self.failed_thumbnails.clear();
     }
 
     // ========== Folder Preview Methods (Native Windows Shell) ==========
@@ -192,6 +265,14 @@ impl CacheManager {
         texture_usage + icon_usage + drive_icon_usage
     }
 
+    /// Estimates RAM usage by the RGBA data cache in bytes
+    pub fn estimate_ram_cache_usage(&self) -> usize {
+        self.rgba_data_cache
+            .iter()
+            .map(|(_, (data, _, _))| data.len())
+            .sum()
+    }
+
     /// Gets or creates a drive icon
     pub fn get_drive_icon(
         &mut self,
@@ -211,7 +292,7 @@ impl CacheManager {
                         [width as usize, height as usize],
                         &rgba_data,
                     ),
-                    egui::TextureOptions::NEAREST,
+                    egui::TextureOptions::LINEAR,
                 );
 
                 let cloned = texture.clone();
@@ -253,7 +334,7 @@ impl CacheManager {
                         [width as usize, height as usize],
                         &rgba_data,
                     ),
-                    egui::TextureOptions::NEAREST,
+                    egui::TextureOptions::LINEAR,
                 );
 
                 let cloned = texture.clone();
@@ -282,7 +363,7 @@ impl CacheManager {
                         [width as usize, height as usize],
                         &rgba_data,
                     ),
-                    egui::TextureOptions::NEAREST,
+                    egui::TextureOptions::LINEAR,
                 );
                 self.folder_icon_texture = Some(texture);
             }
@@ -310,7 +391,7 @@ impl CacheManager {
                 );
 
                 self.computer_icon =
-                    Some(ctx.load_texture("computer_icon", image, egui::TextureOptions::NEAREST));
+                    Some(ctx.load_texture("computer_icon", image, egui::TextureOptions::LINEAR));
             }
             Err(_) => {
                 // Fallback

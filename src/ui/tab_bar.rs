@@ -1,5 +1,5 @@
 //! Tab bar UI component for MTT File Manager
-//! 
+//!
 //! Renders a Windows 11/Files-style tab bar with:
 //! - Tab icons and titles
 //! - Close buttons
@@ -8,10 +8,11 @@
 //! - Custom title bar with drag area
 //! - Auto-resizing tabs
 
-use eframe::egui::{self, Color32, CornerRadius, Stroke, Vec2};
 use crate::tabs::TabManager;
-use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::icon_loader::IconLoader;
+use crate::ui::svg_icons::SvgIconManager;
+use crate::ui::theme;
+use eframe::egui::{self, Color32, CornerRadius, Stroke, Vec2};
 
 /// Result of tab bar interaction
 pub enum TabBarAction {
@@ -22,6 +23,7 @@ pub enum TabBarAction {
     CloseApp,
     ToggleMaximize,
     Minimize,
+    ToggleMute(usize), // Tab index
 }
 
 /// Render the tab bar with custom title bar (Windows 11 style)
@@ -29,35 +31,38 @@ pub fn render_tab_bar(
     ui: &mut egui::Ui,
     tab_manager: &TabManager,
     svg_icons: &mut SvgIconManager,
-    frame: &mut eframe::Frame,
+    _frame: &mut eframe::Frame,
     computer_icon: Option<&egui::TextureHandle>,
     icon_loader: &mut IconLoader,
+    media_owner_id: Option<usize>,
+    is_playing: bool,
+    is_muted: bool,
 ) -> TabBarAction {
     let ctx = ui.ctx().clone();
     let mut action = TabBarAction::None;
-    
+
     let tab_height = 36.0; // Slightly taller for integrated title bar
     let tab_padding = 8.0;
     let close_btn_size = 16.0;
     let window_btn_width = 46.0; // Standard Windows button width
     let window_controls_width = window_btn_width * 3.0; // Min, Max, Close
-    
-    // Colors based on theme
+
+    // Colors based on theme (Windows Explorer style - gray tones)
     let is_dark = ui.visuals().dark_mode;
     let active_bg = if is_dark {
         Color32::from_rgb(45, 45, 45)
     } else {
-        Color32::from_rgb(255, 255, 255)
+        Color32::from_rgb(243, 243, 243) // Light gray for active tab (Windows Explorer style)
     };
     let inactive_bg = if is_dark {
         Color32::from_rgb(30, 30, 30)
     } else {
-        Color32::from_rgb(240, 240, 240)
+        Color32::from_rgb(230, 230, 230) // Darker gray for inactive tabs
     };
     let hover_bg = if is_dark {
-        Color32::from_rgb(55, 55, 55)
+        theme::color_dark_hover()
     } else {
-        Color32::from_rgb(230, 230, 230)
+        theme::color_hover()
     };
     let text_color = if is_dark {
         Color32::from_rgb(220, 220, 220)
@@ -69,39 +74,36 @@ pub fn render_tab_bar(
     } else {
         Color32::from_rgb(100, 100, 100)
     };
-    
+
     // Calculate available space for tabs
     let available_width = ui.available_width() - window_controls_width - 50.0; // 50.0 for new tab button
     let num_tabs = tab_manager.tabs.len();
-    
+
     // Dynamic tab width calculation (Windows Explorer behavior)
     let min_tab_width = 100.0;
     let max_tab_width = 200.0;
     let ideal_tab_width = (available_width / num_tabs as f32).clamp(min_tab_width, max_tab_width);
-    
+
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0; // Remove spacing between tabs
-        
+
         // Render tabs
         for (idx, tab) in tab_manager.tabs.iter().enumerate() {
             let is_active = idx == tab_manager.active_tab;
-            
-            
-            let (rect, response) = ui.allocate_exact_size(
-                Vec2::new(ideal_tab_width, tab_height),
-                egui::Sense::click(),
-            );
-            
+
+            let (rect, response) = ui
+                .allocate_exact_size(Vec2::new(ideal_tab_width, tab_height), egui::Sense::click());
+
             // Handle clicks
             if response.clicked() {
                 action = TabBarAction::SwitchTab(idx);
             }
-            
+
             // Middle click to close
             if response.middle_clicked() {
                 action = TabBarAction::CloseTab(idx);
             }
-            
+
             // Background
             let bg_color = if is_active {
                 active_bg
@@ -110,7 +112,7 @@ pub fn render_tab_bar(
             } else {
                 inactive_bg
             };
-            
+
             ui.painter().rect_filled(
                 rect,
                 CornerRadius {
@@ -121,28 +123,33 @@ pub fn render_tab_bar(
                 },
                 bg_color,
             );
-            
+
             // Subtle active indicator (removed thick blue line)
             // Active tab is already distinguished by lighter background
-            
+
             // Content area (icon + text + close button)
             let content_rect = rect.shrink2(Vec2::new(tab_padding, 4.0));
-            
+
             // Dynamic icon (computer for "Este Computador", folder for regular paths)
             let icon_size = 16.0;
-            let icon_pos = content_rect.min + Vec2::new(0.0, (content_rect.height() - icon_size) / 2.0);
+            let icon_pos =
+                content_rect.min + Vec2::new(0.0, (content_rect.height() - icon_size) / 2.0);
             let icon_rect = egui::Rect::from_min_size(icon_pos, Vec2::splat(icon_size));
-            
+
             // Render at 2x resolution for HiDPI clarity
             let render_size = 32;
-            let icon_name = if tab.is_computer_view { "home" } else { "folder" };
+            let icon_name = if tab.is_computer_view {
+                "home"
+            } else {
+                "folder"
+            };
             // Dark blue/gray color that's clearly visible
-            let icon_color = if is_active { 
+            let icon_color = if is_active {
                 [30, 90, 180, 255] // Dark blue for active
-            } else { 
+            } else {
                 [80, 80, 80, 255] // Dark gray for inactive
             };
-            
+
             let native_icon = if tab.is_computer_view {
                 computer_icon.cloned()
             } else if tab.path == "Lixeira" {
@@ -158,7 +165,9 @@ pub fn render_tab_bar(
                     egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                     Color32::WHITE,
                 );
-            } else if let Some(texture) = svg_icons.get_icon(ui.ctx(), icon_name, render_size, icon_color) {
+            } else if let Some(texture) =
+                svg_icons.get_icon(ui.ctx(), icon_name, render_size, icon_color)
+            {
                 ui.painter().image(
                     texture.id(),
                     icon_rect,
@@ -166,53 +175,62 @@ pub fn render_tab_bar(
                     Color32::WHITE,
                 );
             }
-            
+
             // Tab title (truncated dynamically based on available width)
             let title_x = icon_pos.x + icon_size + 6.0;
-            let title_max_width = ideal_tab_width - icon_size - close_btn_size - tab_padding * 2.0 - 12.0;
             
+            // Audio Indicator (Speaker) - only for media owner tab if playing
+            let speaker_btn_size = 14.0;
+            let has_speaker = media_owner_id == Some(tab.id) && is_playing;
+            let speaker_width = if has_speaker { speaker_btn_size + 8.0 } else { 0.0 };
+
+            let title_max_width =
+                ideal_tab_width - icon_size - close_btn_size - speaker_width - tab_padding * 2.0 - 12.0;
+
             // Use egui's galley to measure text and truncate properly
             let font_id = egui::FontId::proportional(13.0);
             let title_color = if is_active { text_color } else { inactive_text };
-            
+
             let full_text = tab.title.clone();
             let mut title_text = full_text.clone();
-            
+
             // Measure text width and truncate if needed
-            let galley = ui.painter().layout_no_wrap(
-                title_text.clone(),
-                font_id.clone(),
-                title_color,
-            );
-            
+            let galley =
+                ui.painter()
+                    .layout_no_wrap(title_text.clone(), font_id.clone(), title_color);
+
             if galley.rect.width() > title_max_width {
-                // Binary search for the right truncation point
-                let mut low = 0;
-                let mut high = full_text.len();
-                
+                let mut boundaries: Vec<usize> =
+                    full_text.char_indices().map(|(i, _)| i).collect();
+                boundaries.push(full_text.len());
+                let mut low = 0usize;
+                let mut high = boundaries.len().saturating_sub(1);
+
                 while low < high {
                     let mid = (low + high + 1) / 2;
-                    let test_text = format!("{}...", &full_text[..mid.min(full_text.len())]);
+                    let byte_idx = boundaries[mid];
+                    let test_text = format!("{}...", &full_text[..byte_idx]);
                     let test_galley = ui.painter().layout_no_wrap(
                         test_text.clone(),
                         font_id.clone(),
                         title_color,
                     );
-                    
+
                     if test_galley.rect.width() <= title_max_width {
                         low = mid;
                     } else {
                         high = mid - 1;
                     }
                 }
-                
+
                 if low > 0 {
-                    title_text = format!("{}...", &full_text[..low.min(full_text.len())]);
+                    let byte_idx = boundaries[low];
+                    title_text = format!("{}...", &full_text[..byte_idx]);
                 } else {
                     title_text = "...".to_string();
                 }
             }
-            
+
             ui.painter().text(
                 egui::pos2(title_x, content_rect.center().y),
                 egui::Align2::LEFT_CENTER,
@@ -220,7 +238,46 @@ pub fn render_tab_bar(
                 font_id,
                 title_color,
             );
-            
+
+            // Audio Indicator (Mute button)
+            if has_speaker {
+                let speaker_x = rect.max.x - close_btn_size - tab_padding - speaker_btn_size - 4.0;
+                let speaker_y = content_rect.center().y - speaker_btn_size / 2.0;
+                let speaker_rect = egui::Rect::from_min_size(
+                    egui::pos2(speaker_x, speaker_y),
+                    Vec2::splat(speaker_btn_size),
+                );
+
+                let speaker_response = ui.interact(
+                    speaker_rect,
+                    egui::Id::new(format!("speaker_{}", idx)),
+                    egui::Sense::click(),
+                );
+
+                if speaker_response.clicked() {
+                    action = TabBarAction::ToggleMute(idx);
+                }
+
+                // Render icon
+                let icon_name = if is_muted { "vol_mute" } else { "vol_high" };
+                let icon_color = if speaker_response.hovered() {
+                    if is_dark { [255, 255, 255, 255] } else { [0, 0, 0, 255] }
+                } else {
+                    if is_dark { [200, 200, 200, 255] } else { [80, 80, 80, 255] }
+                };
+
+                if let Some(tex) = svg_icons.get_icon(ui.ctx(), icon_name, 32, icon_color) {
+                    ui.painter().image(
+                        tex.id(),
+                        speaker_rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                }
+                
+                speaker_response.on_hover_text(if is_muted { "Ativar Áudio" } else { "Mutar Áudio" });
+            }
+
             // Close button
             let close_btn_x = rect.max.x - close_btn_size - tab_padding;
             let close_btn_y = content_rect.center().y - close_btn_size / 2.0;
@@ -228,24 +285,35 @@ pub fn render_tab_bar(
                 egui::pos2(close_btn_x, close_btn_y),
                 Vec2::splat(close_btn_size),
             );
-            
-            let close_response = ui.interact(close_btn_rect, egui::Id::new(format!("close_{}", idx)), egui::Sense::click());
-            
+
+            let close_response = ui.interact(
+                close_btn_rect,
+                egui::Id::new(format!("close_{}", idx)),
+                egui::Sense::click(),
+            );
+
             if close_response.clicked() {
                 action = TabBarAction::CloseTab(idx);
             }
-            
+
             // Close button background on hover
             if close_response.hovered() {
                 ui.painter().rect_filled(
                     close_btn_rect,
-                    2.0,
-                    Color32::from_rgba_unmultiplied(255, 255, 255, 30),
+                    CornerRadius::same(4),
+                    hover_bg,
                 );
             }
-            
+
             // X icon
-            let x_stroke = Stroke::new(1.5, if close_response.hovered() { Color32::WHITE } else { inactive_text });
+            let x_stroke = Stroke::new(
+                1.5,
+                if close_response.hovered() {
+                    text_color
+                } else {
+                    inactive_text
+                },
+            );
             let x_center = close_btn_rect.center();
             let x_radius = close_btn_size * 0.25;
             ui.painter().line_segment(
@@ -263,36 +331,39 @@ pub fn render_tab_bar(
                 x_stroke,
             );
         }
-        
+
         // New tab button (+)
         let new_tab_btn_width = 36.0;
         let (new_tab_rect, new_tab_response) = ui.allocate_exact_size(
             Vec2::new(new_tab_btn_width, tab_height),
             egui::Sense::click(),
         );
-        
+
         if new_tab_response.clicked() {
             action = TabBarAction::NewTab;
-        }        
+        }
         // Drag area (space between new tab button and window controls)
         let remaining_width = ui.available_width() - window_controls_width;
         if remaining_width > 0.0 {
             let (drag_rect, drag_response) = ui.allocate_exact_size(
                 Vec2::new(remaining_width, tab_height),
-                egui::Sense::click_and_drag(),  // Mudado para click_and_drag
+                egui::Sense::click_and_drag(),
             );
-            
+
+            // Fundo da topbar (mesma cor das abas inativas)
+            ui.painter().rect_filled(drag_rect, 0.0, inactive_bg);
+
             // Drag to move window
             if drag_response.drag_started() || drag_response.dragged() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
             }
-        }        
+        }
         let new_tab_bg = if new_tab_response.hovered() {
             hover_bg
         } else {
             inactive_bg
         };
-        
+
         ui.painter().rect_filled(
             new_tab_rect,
             CornerRadius {
@@ -303,11 +374,11 @@ pub fn render_tab_bar(
             },
             new_tab_bg,
         );
-        
+
         // + icon
         let plus_center = new_tab_rect.center();
         let plus_size = 10.0;
-        let plus_stroke = Stroke::new(2.0, text_color);
+        let plus_stroke = Stroke::new(1.0, text_color);
         ui.painter().line_segment(
             [
                 plus_center + Vec2::new(-plus_size / 2.0, 0.0),
@@ -322,21 +393,19 @@ pub fn render_tab_bar(
             ],
             plus_stroke,
         );
-        
-        // Push window controls to the right
-        ui.add_space(ui.available_width() - window_controls_width);
-        
-        // NOTE: Window controls (min/max/close) are now provided by native Windows decorations
-        // render_window_controls(ui, frame, window_btn_width, tab_height, &mut action);
+
+        // Render window controls (min/max/close) for borderless window
+        render_window_controls(ui, _frame, window_btn_width, tab_height, &mut action);
     });
-    
+
     action
 }
 
 /// Render window control buttons (Minimize, Maximize, Close)
+/// Used for borderless window mode where native decorations are disabled.
 fn render_window_controls(
     ui: &mut egui::Ui,
-    frame: &mut eframe::Frame,
+    _frame: &mut eframe::Frame,
     btn_width: f32,
     btn_height: f32,
     action: &mut TabBarAction,
@@ -347,32 +416,37 @@ fn render_window_controls(
     } else {
         Color32::from_rgb(30, 30, 30)
     };
-    let hover_bg = if is_dark {
-        Color32::from_rgb(60, 60, 60)
+    // Fundo normal (mesmo das abas inativas)
+    let normal_bg = if is_dark {
+        Color32::from_rgb(30, 30, 30)
     } else {
         Color32::from_rgb(230, 230, 230)
     };
+    // Hover um pouco mais claro
+    let hover_bg = if is_dark {
+        theme::color_dark_hover()
+    } else {
+        theme::color_hover()
+    };
     let close_hover_bg = Color32::from_rgb(232, 17, 35); // Windows red
-    
+
     ui.spacing_mut().item_spacing.x = 0.0;
-    
+
     // Check if maximized
     let is_maximized = ui.input(|i| i.viewport().maximized.unwrap_or(false));
-    
+
     // Minimize button
-    let (min_rect, min_response) = ui.allocate_exact_size(
-        Vec2::new(btn_width, btn_height),
-        egui::Sense::click(),
-    );
-    
+    let (min_rect, min_response) =
+        ui.allocate_exact_size(Vec2::new(btn_width, btn_height), egui::Sense::click());
+
     if min_response.clicked() {
         *action = TabBarAction::Minimize;
     }
-    
-    if min_response.hovered() {
-        ui.painter().rect_filled(min_rect, 0.0, hover_bg);
-    }
-    
+
+    // Fundo sempre visível, muda no hover
+    let min_bg = if min_response.hovered() { hover_bg } else { normal_bg };
+    ui.painter().rect_filled(min_rect, 0.0, min_bg);
+
     // Minimize icon (horizontal line)
     let min_center = min_rect.center();
     ui.painter().line_segment(
@@ -382,25 +456,23 @@ fn render_window_controls(
         ],
         Stroke::new(1.0, text_color),
     );
-    
+
     // Maximize/Restore button
-    let (max_rect, max_response) = ui.allocate_exact_size(
-        Vec2::new(btn_width, btn_height),
-        egui::Sense::click(),
-    );
-    
+    let (max_rect, max_response) =
+        ui.allocate_exact_size(Vec2::new(btn_width, btn_height), egui::Sense::click());
+
     if max_response.clicked() {
         *action = TabBarAction::ToggleMaximize;
     }
-    
-    if max_response.hovered() {
-        ui.painter().rect_filled(max_rect, 0.0, hover_bg);
-    }
-    
+
+    // Fundo sempre visível, muda no hover
+    let max_bg = if max_response.hovered() { hover_bg } else { normal_bg };
+    ui.painter().rect_filled(max_rect, 0.0, max_bg);
+
     // Maximize/Restore icon
     let max_center = max_rect.center();
     let icon_size = 10.0;
-    
+
     if is_maximized {
         // Restore icon (two overlapping squares)
         let offset = 2.0;
@@ -429,23 +501,23 @@ fn render_window_controls(
         ui.painter().rect_stroke(
             egui::Rect::from_center_size(max_center, Vec2::splat(icon_size)),
             0.0,
-            Stroke::new(1.0, text_color),            egui::StrokeKind::Inside,        );
+            Stroke::new(1.0, text_color),
+            egui::StrokeKind::Inside,
+        );
     }
-    
+
     // Close button
-    let (close_rect, close_response) = ui.allocate_exact_size(
-        Vec2::new(btn_width, btn_height),
-        egui::Sense::click(),
-    );
-    
+    let (close_rect, close_response) =
+        ui.allocate_exact_size(Vec2::new(btn_width, btn_height), egui::Sense::click());
+
     if close_response.clicked() {
         *action = TabBarAction::CloseApp;
     }
-    
-    if close_response.hovered() {
-        ui.painter().rect_filled(close_rect, 0.0, close_hover_bg);
-    }
-    
+
+    // Fundo cinza normal, vermelho no hover
+    let close_bg = if close_response.hovered() { close_hover_bg } else { normal_bg };
+    ui.painter().rect_filled(close_rect, 0.0, close_bg);
+
     // Close icon (X)
     let close_center = close_rect.center();
     let x_size = 10.0;
@@ -455,7 +527,7 @@ fn render_window_controls(
         text_color
     };
     let x_stroke = Stroke::new(1.0, x_color);
-    
+
     ui.painter().line_segment(
         [
             close_center + Vec2::new(-x_size / 2.0, -x_size / 2.0),

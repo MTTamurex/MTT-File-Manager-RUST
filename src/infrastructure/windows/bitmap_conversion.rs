@@ -13,7 +13,7 @@ pub fn hbitmap_to_rgba(
     unsafe {
         let mut bm = BITMAP::default();
         GetObjectW(
-            hbitmap,
+            hbitmap.into(),
             std::mem::size_of::<BITMAP>() as i32,
             Some(&mut bm as *mut _ as *mut _),
         );
@@ -77,7 +77,7 @@ pub fn hicon_to_rgba(
 
         let mut bm = BITMAP::default();
         GetObjectW(
-            hbm_color,
+            hbm_color.into(),
             std::mem::size_of::<BITMAP>() as i32,
             Some(&mut bm as *mut _ as *mut _),
         );
@@ -87,8 +87,8 @@ pub fn hicon_to_rgba(
 
         // Validate size (icons are usually small, but be defensive)
         if width > 256 || height > 256 {
-            let _ = DeleteObject(hbm_color);
-            let _ = DeleteObject(icon_info.hbmMask);
+            let _ = DeleteObject(hbm_color.into());
+            let _ = DeleteObject(icon_info.hbmMask.into());
             return Err("Icon too large".into());
         }
 
@@ -121,14 +121,14 @@ pub fn hicon_to_rgba(
         ReleaseDC(None, hdc);
 
         if result == 0 {
-            let _ = DeleteObject(hbm_color);
-            let _ = DeleteObject(icon_info.hbmMask);
+            let _ = DeleteObject(hbm_color.into());
+            let _ = DeleteObject(icon_info.hbmMask.into());
             return Err("GetDIBits failed".into());
         }
 
         // Cleanup bitmaps (but NOT the HICON - caller is responsible)
-        let _ = DeleteObject(hbm_color);
-        let _ = DeleteObject(icon_info.hbmMask);
+        let _ = DeleteObject(hbm_color.into());
+        let _ = DeleteObject(icon_info.hbmMask.into());
 
         // BGRA → RGBA conversion
         for pixel in buffer.chunks_exact_mut(4) {
