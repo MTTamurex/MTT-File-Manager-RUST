@@ -8,7 +8,7 @@ use lru::LruCache;
 
 use crate::domain::file_entry::FileEntry;
 
-const CACHE_CAPACITY: usize = 300; // 300 items (approx 50-100MB RAM)
+const CACHE_CAPACITY: usize = 500; // 500 items (approx 83-167MB RAM)
 const REVALIDATE_DEBOUNCE: Duration = Duration::from_millis(2000); // 2 seconds
 
 struct CachedFolder {
