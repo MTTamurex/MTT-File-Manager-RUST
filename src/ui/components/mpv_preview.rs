@@ -67,6 +67,8 @@ pub struct MpvPreview {
     pub last_mouse_pos: Option<egui::Pos2>,
     /// Tracks if app was minimized to force window restoration
     pub was_minimized: bool,
+    /// Initial volume to apply when MPV is ready
+    pub initial_volume: f32,
     /// Tracks if NVIDIA VSR is currently enabled
     pub is_vsr_enabled: bool,
     /// Tracks whether docked downscale is currently applied
@@ -138,6 +140,7 @@ impl MpvPreview {
             last_mouse_activity: None,
             last_mouse_pos: None,
             was_minimized: false,
+            initial_volume: 1.0,
             is_vsr_enabled: false,
             docked_downscale_applied: false,
             docked_prev_vf: None,
@@ -401,6 +404,9 @@ impl MpvPreview {
 
                     self.mpv = Some(m);
                     self.set_audio_normalizer(self.audio_normalizer_enabled);
+                    
+                    // Apply initial volume
+                    self.set_volume(self.initial_volume);
                 }
                 Err(e) => {
                     eprintln!("[MpvPreview] Failed to create MPV: {:?}", e);

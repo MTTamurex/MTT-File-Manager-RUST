@@ -77,5 +77,23 @@ impl ImageViewerApp {
             .set_preference("sidebar_left_width", &left_to_save.to_string());
         self.disk_cache
             .set_preference("sidebar_right_width", &right_to_save.to_string());
+
+        // Save last active folder from current tab
+        let last_folder = self.tab_manager.active().path.clone();
+        // Only save if it's a real path (not "Este Computador" or "Lixeira")
+        if !last_folder.is_empty()
+            && last_folder != "Este Computador"
+            && last_folder != "Lixeira"
+            && !last_folder.starts_with("shell:") {
+            self.disk_cache.set_preference("last_folder", &last_folder);
+        }
+
+        // Save media player volume if available
+        if let Some(preview) = &self.media_preview {
+            if let Some(volume) = preview.get_video_state().map(|s| s.volume) {
+                self.disk_cache
+                    .set_preference("media_volume", &volume.to_string());
+            }
+        }
     }
 }

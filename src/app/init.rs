@@ -30,8 +30,40 @@ use crate::ui::theme;
 
 use super::state::{ImageViewerApp, ItemsRebuildResult, LastInput};
 
-// These are referenced from main.rs and need to be accessible
-const PATH_PADRAO: &str = "C:\\";
+/// Determina o path inicial baseado na última pasta salva
+/// Retorna (path, is_computer_view) - se a pasta não estiver disponível, retorna "Este Computador"
+fn determine_initial_path(disk_cache: &ThumbnailDiskCache) -> (String, bool) {
+    // Try to load last folder from database
+    if let Some(last_folder) = disk_cache.get_preference("last_folder") {
+        if !last_folder.is_empty() {
+            // Check if path still exists and is accessible
+            let path_buf = PathBuf::from(&last_folder);
+            
+            // Validate path exists
+            if path_buf.exists() {
+                // Additional check: verify we can read the directory
+                match std::fs::read_dir(&path_buf) {
+                    Ok(_) => {
+                        eprintln!("[INIT] Restoring last folder: {}", last_folder);
+                        return (last_folder, false);
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[INIT] Last folder exists but not accessible ({}), using Este Computador",
+                            e
+                        );
+                    }
+                }
+            } else {
+                eprintln!("[INIT] Last folder no longer exists: {}, using Este Computador", last_folder);
+            }
+        }
+    }
+    
+    // Default to "Este Computador" if no valid last folder
+    eprintln!("[INIT] No valid last folder found, starting at Este Computador");
+    ("Este Computador".to_string(), true)
+}
 
 // Função auxiliar que também está em main.rs - pode ser movida para infrastructure se necessário
 // Function removed: using crate::infrastructure::windows::get_all_drives instead
@@ -260,6 +292,13 @@ impl ImageViewerApp {
             sidebar_left_width, sidebar_right_width
         );
 
+        // Load media player volume from SQLite
+        let saved_media_volume = disk_cache
+            .get_preference("media_volume")
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(1.0)
+            .clamp(0.0, 1.0);
+
         // 8 threads: equilíbrio ideal entre SSD e HDD USB
         use crate::workers::thumbnail_worker::spawn_thumbnail_workers;
         spawn_thumbnail_workers(
@@ -403,8 +442,18 @@ impl ImageViewerApp {
 
         // Initialize Audio Device (removed)
 
+        // Determine initial path based on last saved folder
+        let (initial_path, is_computer_view_initial) = determine_initial_path(&disk_cache);
+        
+        // Create tab manager with the initial path
+        let tab_manager = if is_computer_view_initial {
+            crate::tabs::TabManager::new()
+        } else {
+            crate::tabs::TabManager::new_at_path(&initial_path)
+        };
+
         let mut app = Self {
-            current_path: PATH_PADRAO.to_string(),
+            current_path: initial_path.clone(),
             loaded_path: String::new(), // Start empty - will be set when first folder loads
             thumbnail_queue,
             image_receiver: img_rx,
@@ -444,13 +493,13 @@ impl ImageViewerApp {
             media_preview_owner_tab_id: None,
             selected_metadata: None,
             show_preview_panel, // Loaded from SQLite
-            is_computer_view: false,
+            is_computer_view: is_computer_view_initial,
             computer_view_local_indices: Vec::new(),
             computer_view_network_indices: Vec::new(),
             is_recycle_bin_view: false,
             show_virtual_drive_settings: false,
-            navigation: NavigationHistory::new(PATH_PADRAO.to_string()),
-            path_input: PATH_PADRAO.to_string(),
+            navigation: NavigationHistory::new(initial_path.clone()),
+            path_input: initial_path.clone(),
             disks,
             last_drive_refresh: Instant::now(),
             thumbnail_size, // Loaded from SQLite
@@ -554,7 +603,7 @@ impl ImageViewerApp {
             last_input: LastInput::Mouse,
 
             // TAB SYSTEM
-            tab_manager: crate::tabs::TabManager::new(),
+            tab_manager,
 
             // FOLDER SIZE CALCULATOR
             folder_size_req_sender: folder_size_req_tx,
@@ -580,6 +629,8 @@ impl ImageViewerApp {
             fps_avg: 0.0,
             upload_budget_ms,
             last_upload_budget_update: Instant::now(),
+
+            saved_media_volume,
 
             scroll_request: crate::app::state::ScrollRequest::None,
 

@@ -244,6 +244,9 @@ pub struct ImageViewerApp {
     pub upload_budget_ms: f32,
     pub last_upload_budget_update: Instant,
 
+    // Media player volume persistence
+    pub saved_media_volume: f32,
+
     // Explicit scroll request for keyboard navigation
     pub scroll_request: ScrollRequest,
 
