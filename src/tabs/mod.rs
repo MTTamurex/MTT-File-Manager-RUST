@@ -212,6 +212,17 @@ impl TabManager {
         }
     }
 
+    /// Create a new TabManager with one tab at the specified path
+    pub fn new_at_path(path: &str) -> Self {
+        let initial_tab = TabState::new_at_path(0, path);
+        Self {
+            tabs: vec![initial_tab],
+            active_tab: 0,
+            next_id: 1,
+            closed_tabs: Vec::new(),
+        }
+    }
+
     /// Get the currently active tab
     pub fn active(&self) -> &TabState {
         &self.tabs[self.active_tab]

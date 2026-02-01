@@ -173,6 +173,10 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, fr
                                         let mut player = MpvPreview::new(path);
                                         player.play_on_init = true; // Start playing as soon as initialized
                                         player.show_player = true;  // Ensure player is visible immediately
+                                        
+                                        // Set initial volume (will be applied when MPV is ready)
+                                        player.initial_volume = app.saved_media_volume;
+                                        
                                         app.media_preview = Some(MediaPreview::Video(player));
                                         app.media_preview_owner_tab_id = Some(tab_id);
                                         
