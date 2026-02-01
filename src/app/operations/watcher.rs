@@ -13,19 +13,21 @@ impl ImageViewerApp {
     #[cfg(feature = "notify-watcher")]
     pub fn watch_current_folder(&mut self) {
         let current_path = self.current_path.clone();
+        eprintln!("[NOTIFY-WATCHER] Setting up watcher for: {}", current_path);
 
         // Canonicaliza o path para compatibilidade com Windows
         let path_to_watch = if let Ok(p) = Path::new(&current_path).canonicalize() {
+            eprintln!("[NOTIFY-WATCHER] Canonicalized path: {:?}", p);
             p
         } else {
+            eprintln!("[NOTIFY-WATCHER] Using original path (canonicalize failed)");
             PathBuf::from(&current_path)
         };
 
-        // Se o watcher já existe, apenas troca o path monitorado
-        if let Some(ref mut _watcher) = self.watcher {
-            // Para de monitorar todos os paths antigos (o watcher pode ter múltiplos)
-            // Como não temos referência ao path antigo, vamos recriar o watcher
-            // (notify não tem API para listar paths monitorados)
+        // Drop o watcher anterior se existir
+        if self.watcher.is_some() {
+            eprintln!("[NOTIFY-WATCHER] Dropping previous watcher");
+            self.watcher = None;
         }
 
         // Cria ou recria o watcher
@@ -34,31 +36,34 @@ impl ImageViewerApp {
 
         let watcher_result =
             notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+                match &res {
+                    Ok(event) => {
+                        eprintln!("[NOTIFY-WATCHER] Event received: kind={:?}, paths={:?}",
+                            event.kind, event.paths);
+                    }
+                    Err(e) => {
+                        eprintln!("[NOTIFY-WATCHER] Event error: {}", e);
+                    }
+                }
                 let _ = tx.send(res);
                 ctx_clone.request_repaint();
             });
 
-        if let Ok(mut watcher) = watcher_result {
-            if let Err(_e) = watcher.watch(&path_to_watch, RecursiveMode::NonRecursive) {
-                // Silently fail - watcher is optional
-            } else {
-                self.watcher = Some(watcher);
+        match watcher_result {
+            Ok(mut watcher) => {
+                match watcher.watch(&path_to_watch, RecursiveMode::NonRecursive) {
+                    Ok(_) => {
+                        eprintln!("[NOTIFY-WATCHER] Successfully watching: {:?}", path_to_watch);
+                        self.watcher = Some(watcher);
+                    }
+                    Err(e) => {
+                        eprintln!("[NOTIFY-WATCHER] Failed to watch path: {:?} - Error: {}", path_to_watch, e);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("[NOTIFY-WATCHER] Failed to create watcher: {}", e);
             }
         }
-    }
-}
-
-#[cfg(feature = "usn-watcher")]
-impl ImageViewerApp {
-    pub fn watch_current_folder(&mut self) {
-        let current_path = self.current_path.clone();
-
-        let path_to_watch = if let Ok(p) = Path::new(&current_path).canonicalize() {
-            p
-        } else {
-            PathBuf::from(&current_path)
-        };
-
-        self.usn_watcher_state.set_single_watch(path_to_watch);
     }
 }

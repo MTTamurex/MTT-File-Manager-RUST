@@ -294,8 +294,7 @@ Folder Navigation
     ↓
 app::operations::watcher::watch_current_folder()
     ↓
-[USN] workers::usn_watcher::spawn_usn_watcher()
-[Notify] notify::RecommendedWatcher::new()
+notify::RecommendedWatcher::new()
     ↓
 File System Change
     ↓
@@ -310,15 +309,13 @@ UI Refresh
 
 ### Arquivos Envolvidos
 - **`src/app/operations/watcher.rs`** - Configuração de watchers
-- **`src/workers/usn_watcher.rs`** - Watcher USN do NTFS
-- **`src/infrastructure/watcher.rs`** - Watcher genérico
 - **`src/app/operations/message_handler.rs`** - Handler de eventos
 
 ### Pontos de Bug Comuns
 1. **Watcher não detecta mudanças**
-   - **Causa**: USN não disponível (FAT32)
-   - **Debug**: Verificar `usn_watcher_state`
-   - **Solução**: Fallback para notify-watcher
+   - **Causa**: Path muito longo ou sem permissões
+   - **Debug**: Verificar logs `[NOTIFY-WATCHER]`
+   - **Solução**: Verificar se o path existe e é acessível
 
 2. **Múltiplos reloads**
    - **Causa**: Eventos em cascata do Windows
@@ -329,7 +326,6 @@ UI Refresh
 ```rust
 // Verificar estado do watcher
 println!("Watcher active: {}", app.watcher.is_some());
-println!("USN watcher state: {:?}", app.usn_watcher_state);
 
 // Adicionar logs de eventos
 eprintln!("[WATCHER] Event: {:?}", event);

@@ -32,8 +32,6 @@ use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::directory_index::DirectoryIndex;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::windows as windows_infra;
-#[cfg(feature = "usn-watcher")]
-use crate::workers::usn_watcher::{FsEvent, UsnWatcherState};
 // use crate::ui::cache::CacheManager;
 use crate::ui::components::media_preview::MediaPreview;
 use crate::ui::context_menu::ContextMenuState;
@@ -151,12 +149,6 @@ pub struct ImageViewerApp {
     pub fs_event_receiver: Receiver<notify::Result<notify::Event>>,
     #[cfg(feature = "notify-watcher")]
     pub fs_event_sender: Sender<notify::Result<notify::Event>>,
-    #[cfg(feature = "usn-watcher")]
-    pub usn_watcher_state: Arc<UsnWatcherState>,
-    #[cfg(feature = "usn-watcher")]
-    pub fs_event_receiver: Receiver<FsEvent>,
-    #[cfg(feature = "usn-watcher")]
-    pub fs_event_sender: Sender<FsEvent>,
     pub device_event_receiver: Receiver<()>,
     pub last_auto_reload: Instant,
     pub pending_auto_reload: bool,

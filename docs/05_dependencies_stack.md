@@ -33,8 +33,8 @@ walkdir = "2.5"
 notify = { version = "6.1.1", optional = true }
 ```
 - **Propósito**: Monitoramento de mudanças no filesystem
-- **Feature**: `notify-watcher` (opcional)
-- **Alternativa ao USN**: Para sistemas não-NTFS
+- **Feature**: `notify-watcher` (default)
+- **Nota**: Usa ReadDirectoryChangesW no Windows (não requer admin)
 
 ### Cache e Performance
 ```toml
@@ -238,20 +238,15 @@ criterion = "0.5"
 
 ```toml
 [features]
-default = ["usn-watcher"]
+default = ["notify-watcher"]
 notify-watcher = ["notify"]
-usn-watcher = []
 ```
 
-### Feature: `notify-watcher`
+### Feature: `notify-watcher` (padrão)
 - **Ativa**: `notify` crate
 - **Uso**: Monitoramento cross-platform de filesystem
-- **Alternativa**: `usn-watcher` (NTFS-specific)
-
-### Feature: `usn-watcher` (padrão)
-- **Ativa**: USN Journal monitoring
-- **Uso**: Monitoramento NTFS nativo, mais eficiente
-- **Limitação**: Apenas NTFS (não funciona em FAT32, exFAT)
+- **Implementação Windows**: Usa `ReadDirectoryChangesW` API
+- **Nota**: Não requer privilégios de administrador
 
 ## Profiles de Build
 
@@ -310,10 +305,12 @@ codegen-units = 1  # Compilação single-thread (melhor otimização)
 - **x86**: ❌ Não suportado
 
 ### Filesystems
-- **NTFS**: ✅ Completo (USN, etc)
-- **FAT32**: ✅ Básico (sem USN)
-- **exFAT**: ✅ Básico (sem USN)
+- **NTFS**: ✅ Suportado
+- **FAT32**: ✅ Suportado
+- **exFAT**: ✅ Suportado
 - **ReFS**: ⚠️ Parcial (não testado)
+
+**Nota**: O monitoramento de mudanças usa `notify` crate que funciona em qualquer filesystem suportado pelo Windows, sem requerer USN Journal.
 
 ## Notas de Segurança
 

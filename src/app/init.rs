@@ -12,8 +12,6 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::mpsc;
 use std::sync::Arc;
-#[cfg(feature = "usn-watcher")]
-use std::time::Duration;
 use std::time::Instant;
 
 use crate::application::navigation::NavigationHistory;
@@ -29,8 +27,6 @@ use crate::ui::context_menu::ContextMenuState;
 use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::theme;
-#[cfg(feature = "usn-watcher")]
-use crate::workers::usn_watcher::{FsEvent, UsnWatcherState};
 
 use super::state::{ImageViewerApp, ItemsRebuildResult, LastInput};
 
@@ -68,8 +64,6 @@ impl ImageViewerApp {
         let (cover_res_tx, cover_res_rx) = mpsc::channel(); // Worker → UI
         #[cfg(feature = "notify-watcher")]
         let (fs_tx, fs_rx) = mpsc::channel();
-        #[cfg(feature = "usn-watcher")]
-        let (fs_tx, fs_rx) = mpsc::channel::<FsEvent>();
         let (device_event_sender, device_event_receiver) = mpsc::channel();
 
         windows_infra::start_device_change_listener(device_event_sender, ctx.clone());
@@ -108,14 +102,6 @@ impl ImageViewerApp {
         onedrive::init_onedrive_paths();
 
         let directory_cache = Arc::new(DirectoryCache::new());
-        #[cfg(feature = "usn-watcher")]
-        let usn_watcher_state = Arc::new(UsnWatcherState::new());
-        #[cfg(feature = "usn-watcher")]
-        crate::workers::usn_watcher::spawn_usn_watcher(
-            usn_watcher_state.clone(),
-            fs_tx.clone(),
-            Duration::from_millis(500),
-        );
 
         // Load Preferences from SQLite
         let sort_mode = disk_cache
@@ -487,12 +473,6 @@ impl ImageViewerApp {
             #[cfg(feature = "notify-watcher")]
             fs_event_receiver: fs_rx,
             #[cfg(feature = "notify-watcher")]
-            fs_event_sender: fs_tx,
-            #[cfg(feature = "usn-watcher")]
-            usn_watcher_state: usn_watcher_state.clone(),
-            #[cfg(feature = "usn-watcher")]
-            fs_event_receiver: fs_rx,
-            #[cfg(feature = "usn-watcher")]
             fs_event_sender: fs_tx,
             device_event_receiver,
             last_auto_reload: Instant::now(),

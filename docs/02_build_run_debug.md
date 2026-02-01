@@ -64,11 +64,8 @@ cargo run --release
 
 ### Build com Features Específicas
 ```bash
-# Build com watcher de notificações (padrão)
-cargo build --features notify-watcher
-
-# Build com USN watcher (padrão)
-cargo build --features usn-watcher
+# Build padrão (com notify-watcher)
+cargo build
 
 # Build sem features opcionais
 cargo build --no-default-features
@@ -78,8 +75,9 @@ cargo build --no-default-features
 
 ### Features Disponíveis
 - **`notify-watcher`** - Usa notify crate para watcher de filesystem (cross-platform)
-- **`usn-watcher`** - Usa USN Journal do NTFS para monitoramento nativo (Windows)
-- **`default = ["usn-watcher"]`** - Feature padrão
+- **`default = ["notify-watcher"]`** - Feature padrão
+
+**Nota**: O monitoramento usa `notify` crate que implementa `ReadDirectoryChangesW` no Windows. Não requer privilégios de administrador.
 
 ### Profiles de Build
 

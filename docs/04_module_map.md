@@ -124,7 +124,6 @@ pub enum FoldersPosition { First, Last, Mixed }
 - **`filesystem_cache.rs`** - Cache de filesystem
 - **`io_priority.rs`** - Prioridade de I/O
 - **`ntfs_reader.rs`** - Leitor NTFS
-- **`usn_journal.rs`** - Journal USN do NTFS
 - **`virtual_drive_config.rs`** - Config de drives virtuais
 - **`watcher.rs`** - Watcher genérico
 - **`windows_clipboard.rs`** - Clipboard Windows
@@ -222,7 +221,6 @@ pub fn extract_media_metadata() -> MediaMetadata
 - **`prefetch_worker.rs`** - Worker de prefetch
 - **`thumbnail_loader.rs`** - Loader de thumbnails
 - **`thumbnail_worker.rs`** - Worker de thumbnails
-- **`usn_watcher.rs`** - Watcher USN
 
 **Principais structs**:
 ```rust

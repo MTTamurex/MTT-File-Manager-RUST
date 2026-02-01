@@ -11,7 +11,6 @@ pub mod io_priority;
 pub mod ntfs_reader;
 pub mod onedrive;
 pub mod security;
-pub mod usn_journal;
 pub mod virtual_drive_config;
 pub mod watcher;
 pub mod windows;
