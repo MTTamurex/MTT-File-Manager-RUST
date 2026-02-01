@@ -36,6 +36,7 @@ pub fn render_status_bar(
     frame_time_peak_ms: f32,
     fps_avg: f32,
     upload_budget_ms: f32,
+    is_computer_view: bool,
 ) -> StatusBarAction {
     let mut action = StatusBarAction::None;
 
@@ -108,11 +109,20 @@ pub fn render_status_bar(
         // === CENTER-RIGHT: Sort controls ===
         ui.label("Ordenar:");
 
-        let sort_modes = [
-            (SortMode::Name, "Nome"),
-            (SortMode::Date, "Data"),
-            (SortMode::Size, "Tamanho"),
-        ];
+        // Opções de ordenação diferentes para Computer View
+        let sort_modes: Vec<(SortMode, &str)> = if is_computer_view {
+            vec![
+                (SortMode::Name, "Nome"),
+                (SortMode::DriveTotalSpace, "Espaço Total"),
+                (SortMode::DriveFreeSpace, "Espaço Livre"),
+            ]
+        } else {
+            vec![
+                (SortMode::Name, "Nome"),
+                (SortMode::Date, "Data"),
+                (SortMode::Size, "Tamanho"),
+            ]
+        };
 
         for (mode, label) in sort_modes {
             if ui.selectable_label(*sort_mode == mode, label).clicked() {

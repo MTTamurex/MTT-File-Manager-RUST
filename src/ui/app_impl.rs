@@ -144,6 +144,7 @@ fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 app.frame_time_peak_ms,
                 app.fps_avg,
                 app.upload_budget_ms,
+                app.is_computer_view,
             );
             match action {
                 StatusBarAction::SortChanged => {
@@ -583,27 +584,46 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                             SortMode::Date => "Data",
                             SortMode::Size => "Tamanho",
                             SortMode::Type => "Tipo",
+                            SortMode::DriveTotalSpace => "Espaço Total",
+                            SortMode::DriveFreeSpace => "Espaço Livre",
                         })
                         .show_ui(ui, |ui| {
+                            // Opção Nome sempre disponível
                             if ui.selectable_value(&mut SortMode::Name, app.sort_mode, "Nome").clicked() {
                                 app.sort_mode = SortMode::Name;
                                 app.sort_items();
                                 app.save_preferences();
                             }
-                            if ui.selectable_value(&mut SortMode::Date, app.sort_mode, "Data").clicked() {
-                                app.sort_mode = SortMode::Date;
-                                app.sort_items();
-                                app.save_preferences();
-                            }
-                            if ui.selectable_value(&mut SortMode::Size, app.sort_mode, "Tamanho").clicked() {
-                                app.sort_mode = SortMode::Size;
-                                app.sort_items();
-                                app.save_preferences();
-                            }
-                            if ui.selectable_value(&mut SortMode::Type, app.sort_mode, "Tipo").clicked() {
-                                app.sort_mode = SortMode::Type;
-                                app.sort_items();
-                                app.save_preferences();
+                            
+                            // Opções específicas para Computer View
+                            if app.is_computer_view {
+                                if ui.selectable_value(&mut SortMode::DriveTotalSpace, app.sort_mode, "Espaço Total").clicked() {
+                                    app.sort_mode = SortMode::DriveTotalSpace;
+                                    app.sort_items();
+                                    app.save_preferences();
+                                }
+                                if ui.selectable_value(&mut SortMode::DriveFreeSpace, app.sort_mode, "Espaço Livre").clicked() {
+                                    app.sort_mode = SortMode::DriveFreeSpace;
+                                    app.sort_items();
+                                    app.save_preferences();
+                                }
+                            } else {
+                                // Opções para visualização normal (não Computer View)
+                                if ui.selectable_value(&mut SortMode::Date, app.sort_mode, "Data").clicked() {
+                                    app.sort_mode = SortMode::Date;
+                                    app.sort_items();
+                                    app.save_preferences();
+                                }
+                                if ui.selectable_value(&mut SortMode::Size, app.sort_mode, "Tamanho").clicked() {
+                                    app.sort_mode = SortMode::Size;
+                                    app.sort_items();
+                                    app.save_preferences();
+                                }
+                                if ui.selectable_value(&mut SortMode::Type, app.sort_mode, "Tipo").clicked() {
+                                    app.sort_mode = SortMode::Type;
+                                    app.sort_items();
+                                    app.save_preferences();
+                                }
                             }
                         });
                 });

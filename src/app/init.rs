@@ -110,6 +110,8 @@ impl ImageViewerApp {
                 "date" => SortMode::Date,
                 "size" => SortMode::Size,
                 "type" => SortMode::Type,
+                "drive_total" => SortMode::DriveTotalSpace,
+                "drive_free" => SortMode::DriveFreeSpace,
                 _ => SortMode::Name,
             })
             .unwrap_or(SortMode::Name);

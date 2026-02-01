@@ -85,6 +85,18 @@ pub fn sort_items(
                     other => other,
                 }
             }
+            SortMode::DriveTotalSpace => {
+                // Ordena por espaço total do drive (do maior para o menor por padrão)
+                let total_a = a.drive_info.as_ref().map(|d| d.total_space).unwrap_or(0);
+                let total_b = b.drive_info.as_ref().map(|d| d.total_space).unwrap_or(0);
+                total_a.cmp(&total_b)
+            }
+            SortMode::DriveFreeSpace => {
+                // Ordena por espaço livre do drive (do maior para o menor por padrão)
+                let free_a = a.drive_info.as_ref().map(|d| d.free_space).unwrap_or(0);
+                let free_b = b.drive_info.as_ref().map(|d| d.free_space).unwrap_or(0);
+                free_a.cmp(&free_b)
+            }
         };
 
         // 3. Apply Descending direction

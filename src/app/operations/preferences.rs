@@ -13,6 +13,8 @@ impl ImageViewerApp {
             SortMode::Date => "date",
             SortMode::Size => "size",
             SortMode::Type => "type",
+            SortMode::DriveTotalSpace => "drive_total",
+            SortMode::DriveFreeSpace => "drive_free",
         };
         self.disk_cache.set_preference("sort_mode", sort_mode_str);
 
