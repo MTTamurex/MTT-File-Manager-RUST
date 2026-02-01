@@ -820,15 +820,7 @@ fn render_list_item(
             }
         } else {
             // File: load native Windows icon using IconLoader (same as grid view)
-            if ctx.is_recycle_bin_view {
-                ui.painter().text(
-                    icon_rect.min,
-                    egui::Align2::LEFT_TOP,
-                    "📄",
-                    FontId::proportional(14.0),
-                    Color32::GRAY,
-                );
-            } else if let Some(file_icon) =
+            if let Some(file_icon) =
                 ctx.item_icon_loader
                     .get_or_load_icon(ui.ctx(), &item.path, item.is_dir, false)
             {
