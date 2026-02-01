@@ -433,6 +433,8 @@ pub fn render_preview_panel(
                 // PATH CHECK: Only show active player if the file is the one playing AND we are the owner
                 let paths_match = preview.path() == Some(&file.path);
 
+                // Agora o vídeo não é mais desligado em background - apenas a janela é ocultada
+
                 if is_player_visible && paths_match && is_owner {
                     // === ACTIVE PLAYER (OWNER) ===
                     let is_detached = preview.is_detached();
