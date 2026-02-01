@@ -17,6 +17,15 @@ const FILE_ATTRIBUTE_RECALL_ON_OPEN: u32 = 0x00040000; // File is being synced
 const FILE_ATTRIBUTE_PINNED: u32 = 0x00080000;
 const FILE_ATTRIBUTE_OFFLINE: u32 = 0x00001000;
 
+/// Returns true if the attribute set contains any Cloud Files flags (OneDrive, iCloud, etc).
+/// This acts as a fallback when the path-based detection fails (e.g., alternate mount points).
+pub fn has_cloud_attributes(attrs: u32) -> bool {
+    (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0
+        || (attrs & FILE_ATTRIBUTE_RECALL_ON_OPEN) != 0
+        || (attrs & FILE_ATTRIBUTE_PINNED) != 0
+        || (attrs & FILE_ATTRIBUTE_OFFLINE) != 0
+}
+
 /// Initialize OneDrive root paths from environment variables.
 /// Should be called once at application startup.
 pub fn init_onedrive_paths() {
@@ -42,6 +51,24 @@ pub fn is_onedrive_path(path: &Path) -> bool {
         .get()
         .map(|roots| roots.iter().any(|r| path_lower.starts_with(r)))
         .unwrap_or(false)
+}
+
+/// Fallback detection using file attributes for cases where the OneDrive root
+/// isn't covered by environment variables (e.g., secondary business accounts).
+pub fn path_has_cloud_attributes(path: &Path) -> bool {
+    use windows::Win32::Storage::FileSystem::{GetFileAttributesW, INVALID_FILE_ATTRIBUTES};
+
+    let path_wide: Vec<u16> = path
+        .to_string_lossy()
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let attrs = unsafe { GetFileAttributesW(windows::core::PCWSTR(path_wide.as_ptr())) };
+    if attrs == INVALID_FILE_ATTRIBUTES {
+        return false;
+    }
+    has_cloud_attributes(attrs)
 }
 
 /// Check if a file is currently open in any application.
@@ -77,9 +104,11 @@ pub fn is_file_open(path: &Path) -> bool {
 }
 
 /// Determine sync status from file attributes.
-/// Only meaningful when `is_onedrive` is true.
+/// Falls back to attribute-based detection if the path is not under a known OneDrive root.
 pub fn get_sync_status(attrs: u32, is_onedrive: bool) -> SyncStatus {
-    if !is_onedrive {
+    let is_cloud_file = is_onedrive || has_cloud_attributes(attrs);
+
+    if !is_cloud_file {
         return SyncStatus::None;
     }
 
@@ -134,10 +163,6 @@ mod tests {
     #[test]
     fn test_sync_status_none_when_not_onedrive() {
         assert_eq!(get_sync_status(0, false), SyncStatus::None);
-        assert_eq!(
-            get_sync_status(FILE_ATTRIBUTE_PINNED, false),
-            SyncStatus::None
-        );
     }
 
     #[test]
@@ -171,5 +196,17 @@ mod tests {
     #[test]
     fn test_sync_status_locally_available() {
         assert_eq!(get_sync_status(0, true), SyncStatus::LocallyAvailable);
+    }
+
+    #[test]
+    fn test_cloud_flags_without_known_root() {
+        assert_eq!(
+            get_sync_status(FILE_ATTRIBUTE_PINNED, false),
+            SyncStatus::Pinned
+        );
+        assert_eq!(
+            get_sync_status(FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS, false),
+            SyncStatus::CloudOnly
+        );
     }
 }

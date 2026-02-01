@@ -160,8 +160,11 @@ impl ImageViewerApp {
         let computer_icon = self.cache_manager.computer_icon.clone();
 
         // Check if current path is in OneDrive
-        let is_onedrive_folder =
-            crate::infrastructure::onedrive::is_onedrive_path(&PathBuf::from(&self.current_path));
+        let is_onedrive_folder = {
+            let p = PathBuf::from(&self.current_path);
+            crate::infrastructure::onedrive::is_onedrive_path(&p)
+                || crate::infrastructure::onedrive::path_has_cloud_attributes(&p)
+        };
 
         // Criar contexto com referências mutáveis separadas
         let scroll_to_selected = self.scroll_to_selected;
