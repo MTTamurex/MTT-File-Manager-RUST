@@ -71,6 +71,8 @@ impl ImageViewerApp {
         
         if needs_reload {
             eprintln!("[TAB] Detected cleared items cache, reloading folder: {}", self.current_path);
+            // Reset loaded_path to bypass the guard in load_folder
+            self.loaded_path.clear();
             self.load_folder(false);
         }
     }
