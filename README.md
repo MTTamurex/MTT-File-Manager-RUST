@@ -55,7 +55,7 @@ O MTT File Manager é um gerenciador de arquivos desktop que combina a performan
 - **Workers assíncronos** - Processamento em background sem travar UI
 - **Pré-carregamento inteligente** - Prefetch preditivo de pastas e arquivos
 - **Virtualização de UI** - Renderização eficiente de listas grandes
-- **Otimizações NTFS** - Aproveita USN Journal para monitoramento rápido
+- **Monitoramento de mudanças** - Atualização automática da UI via notify
 
 ## 🛠️ Tecnologias
 

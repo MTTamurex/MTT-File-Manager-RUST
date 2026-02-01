@@ -390,104 +390,6 @@ impl ImageViewerApp {
             }
         }
 
-        #[cfg(feature = "usn-watcher")]
-        while let Ok(event) = self.fs_event_receiver.try_recv() {
-            let mut meaningful_change_local = false;
-
-            let handle_remove = |path: &Path| -> bool {
-                if should_ignore(path) {
-                    return false;
-                }
-                let cleaned = clean_path(path);
-                if let Some(parent) = cleaned.parent() {
-                    self.directory_cache.invalidate(&parent.to_path_buf());
-                }
-                self.directory_cache.invalidate_children(&cleaned);
-                eprintln!(
-                    "[FS] Detected removal, clearing disk cache for: {:?}",
-                    cleaned
-                );
-                self.disk_cache.remove_cache_for_path(&cleaned);
-                true
-            };
-
-            let mut handle_modify = |path: &Path| -> bool {
-                if should_ignore(path) {
-                    return false;
-                }
-                if let Some(parent) = path.parent() {
-                    let parent_norm = normalize_for_match(parent);
-                    if parent_norm == current_path_norm {
-                        let cleaned = clean_path(path);
-                        if let Some(cache_parent) = cleaned.parent() {
-                            self.directory_cache.invalidate(&cache_parent.to_path_buf());
-                        }
-                        eprintln!("[FS] Direct subfolder modified: {:?}", cleaned.file_name());
-                        self.cache_manager.invalidate_folder_preview(&cleaned);
-                        self.disk_cache.remove_folder_cover(&cleaned);
-                    }
-                }
-
-                if let Some(parent) = path.parent() {
-                    if let Some(grandparent) = parent.parent() {
-                        let grandparent_norm = normalize_for_match(grandparent);
-                        if grandparent_norm == current_path_norm {
-                            let cleaned_parent = clean_path(parent);
-                            if let Some(cache_parent) = cleaned_parent.parent() {
-                                self.directory_cache.invalidate(&cache_parent.to_path_buf());
-                            }
-                            eprintln!(
-                                "[FS] File in subfolder modified, invalidating: {:?}",
-                                cleaned_parent.file_name()
-                            );
-                            self.cache_manager
-                                .invalidate_folder_preview(&cleaned_parent);
-                            self.disk_cache.remove_folder_cover(&cleaned_parent);
-                        }
-                    }
-                }
-
-                let cleaned = clean_path(path);
-                self.cache_manager.texture_cache.pop(&cleaned);
-                self.cache_manager.failed_thumbnails.pop(&cleaned);
-                crate::workers::thumbnail_worker::clear_failure_cache(&cleaned);
-                true
-            };
-
-            match event {
-                crate::workers::usn_watcher::FsEvent::Created(path) => {
-                    if handle_modify(&path) {
-                        meaningful_change_local = true;
-                    }
-                }
-                crate::workers::usn_watcher::FsEvent::Deleted(path) => {
-                    if handle_remove(&path) {
-                        meaningful_change_local = true;
-                    }
-                    if handle_modify(&path) {
-                        meaningful_change_local = true;
-                    }
-                }
-                crate::workers::usn_watcher::FsEvent::Modified(path) => {
-                    if handle_modify(&path) {
-                        meaningful_change_local = true;
-                    }
-                }
-                crate::workers::usn_watcher::FsEvent::Renamed(old_path, new_path) => {
-                    if handle_remove(&old_path) {
-                        meaningful_change_local = true;
-                    }
-                    if handle_modify(&new_path) {
-                        meaningful_change_local = true;
-                    }
-                }
-            }
-
-            if meaningful_change_local {
-                self.pending_auto_reload = true;
-            }
-        }
-
         // Executa reload apenas quando debounce permitir
         if self.pending_auto_reload {
             let elapsed = self.last_auto_reload.elapsed();
@@ -501,8 +403,11 @@ impl ImageViewerApp {
                 if self.is_recycle_bin_view || self.is_computer_view {
                     self.pending_auto_reload = false;
                 } else if Path::new(&self.current_path).exists() {
-                    eprintln!("[DEBUG] Path exists. Reloading.");
-                    self.load_folder(false); // false = don't clear entire cache, already cleared specific changed items
+                    eprintln!("[DEBUG] Path exists. Reloading with force_refresh=true to bypass cache.");
+                    // Force refresh to bypass stale-while-revalidate cache
+                    // This ensures USN events always show the latest data
+                    self.loaded_path.clear(); // Clear guard path to allow reload
+                    self.load_folder(true); // true = force refresh, bypass directory cache
                 } else {
                     eprintln!("[DEBUG] Path DOES NOT EXIST! Triggering go_up_one_level");
                     self.go_up_one_level();
