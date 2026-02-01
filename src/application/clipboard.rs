@@ -1,6 +1,5 @@
-//! Clipboard state management
-//! Follows .cursorrules: single responsibility, < 300 lines
-
+use crate::application::file_operations;
+use crate::infrastructure::windows_clipboard;
 use std::path::PathBuf;
 
 /// Clipboard operation type
@@ -10,49 +9,88 @@ pub enum ClipboardOp {
     Move,
 }
 
-/// Clipboard state
+/// Manages clipboard content and operations
 #[derive(Clone, Debug)]
-pub struct ClipboardState {
-    pub file: Option<PathBuf>,
-    pub operation: Option<ClipboardOp>,
+pub struct ClipboardManager {
+    /// Internal clipboard state (fallback/cache)
+    internal_files: Vec<PathBuf>,
+    internal_op: Option<ClipboardOp>,
 }
 
-impl Default for ClipboardState {
+impl Default for ClipboardManager {
     fn default() -> Self {
         Self {
-            file: None,
-            operation: None,
+            internal_files: Vec::new(),
+            internal_op: None,
         }
     }
 }
 
-impl ClipboardState {
-    /// Creates a new empty clipboard state
+impl ClipboardManager {
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Checks if clipboard has content
+    /// Helper to get internal state (read-only)
+    pub fn internal_state(&self) -> (&[PathBuf], Option<ClipboardOp>) {
+        (&self.internal_files, self.internal_op)
+    }
+
+    /// Checks if there is content to paste (System or Internal)
     pub fn has_content(&self) -> bool {
-        self.file.is_some() && self.operation.is_some()
+        windows_clipboard::has_files_in_clipboard() || !self.internal_files.is_empty()
     }
 
-    /// Gets clipboard state for paste operation
-    pub fn get_for_paste(&self) -> Option<(&PathBuf, ClipboardOp)> {
-        self.file
-            .as_ref()
-            .and_then(|file| self.operation.map(|op| (file, op)))
-    }
-
-    /// Clears the clipboard
+    /// Clears the internal clipboard state
     pub fn clear(&mut self) {
-        self.file = None;
-        self.operation = None;
+        self.internal_files.clear();
+        self.internal_op = None;
     }
 
-    /// Sets clipboard content
-    pub fn set(&mut self, file: PathBuf, operation: ClipboardOp) {
-        self.file = Some(file);
-        self.operation = Some(operation);
+    /// Copy files to clipboard (System + Internal)
+    pub fn copy(&mut self, paths: &[PathBuf]) {
+        if paths.is_empty() { return; }
+
+        // 1. System Clipboard (Just copy first path as text for now, should improve later)
+        if let Some(first) = paths.first() {
+            let _ = file_operations::copy_path_to_clipboard(first);
+        }
+
+        // 2. Internal State
+        self.internal_files = paths.to_vec();
+        self.internal_op = Some(ClipboardOp::Copy);
+    }
+
+    /// Cut files (System + Internal)
+    pub fn cut(&mut self, paths: &[PathBuf]) {
+        if paths.is_empty() { return; }
+
+        // 1. System Clipboard
+        if let Some(first) = paths.first() {
+            let _ = file_operations::copy_path_to_clipboard(first);
+        }
+
+        // 2. Internal State
+        self.internal_files = paths.to_vec();
+        self.internal_op = Some(ClipboardOp::Move);
+    }
+
+    /// Returns files and operation type (is_move) for pasting.
+    /// Does NOT perform the operation. Use this to prepare an async operation.
+    pub fn get_files_to_paste(&self) -> Option<(Vec<PathBuf>, bool)> {
+        // 1. Try System Clipboard first
+        if let Some(files) = windows_clipboard::get_files_from_clipboard() {
+            let op = windows_clipboard::get_clipboard_operation();
+            let is_move = matches!(op, Some(windows_clipboard::ClipboardFileOp::Move));
+            return Some((files, is_move));
+        }
+
+        // 2. Fallback to Internal
+        if !self.internal_files.is_empty() {
+            let is_move = matches!(self.internal_op, Some(ClipboardOp::Move));
+            return Some((self.internal_files.clone(), is_move));
+        }
+
+        None
     }
 }

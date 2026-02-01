@@ -4,8 +4,8 @@
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use windows::{
-    core::*, Win32::Foundation::*, Win32::System::Com::*, Win32::UI::Input::KeyboardAndMouse::*,
-    Win32::UI::Shell::Common::*, Win32::UI::Shell::*, Win32::UI::WindowsAndMessaging::*,
+    core::*, Win32::Foundation::*, Win32::System::Com::*, Win32::UI::Shell::Common::*,
+    Win32::UI::Shell::*, Win32::UI::WindowsAndMessaging::*,
 };
 
 /// Opens a file with its default application using ShellExecuteW.
@@ -16,10 +16,10 @@ pub fn open_with_shell(path: &Path) {
 
         let _ = ShellExecuteW(
             None,
-            PCWSTR(std::ptr::null()),
+            PCWSTR::default(),
             PCWSTR(path_wide.as_ptr()),
-            PCWSTR(std::ptr::null()),
-            PCWSTR(std::ptr::null()),
+            PCWSTR::default(),
+            PCWSTR::default(),
             SW_SHOW,
         );
     }
@@ -113,7 +113,9 @@ pub fn show_shell_context_menu(
         }
 
         // SAFETY: hmenu is a valid menu handle; command ids start at 1.
-        context_menu.QueryContextMenu(hmenu, 0, 1, 0x7FFF, CMF_NORMAL)?;
+        context_menu
+            .QueryContextMenu(hmenu, 0, 1, 0x7FFF, windows::Win32::UI::Shell::CMF_NORMAL)
+            .ok()?;
 
         let command_id = TrackPopupMenuEx(
             hmenu,
@@ -130,7 +132,7 @@ pub fn show_shell_context_menu(
         let _ = GetCursorPos(&mut cursor);
 
         // Check if any mouse button is pressed
-        let right_down = GetAsyncKeyState(0x02) < 0; // VK_RBUTTON = 0x02
+        let right_down = windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x02) < 0; // VK_RBUTTON = 0x02
 
         let was_cancelled = command_id == 0;
 
@@ -161,5 +163,209 @@ pub fn show_shell_context_menu(
             cursor_y: cursor.y,
             right_button_down: right_down,
         })
+    }
+}
+/// Helper to create a double-null-terminated wide string (required by SHFileOperation)
+fn to_double_null_terminated(s: &str) -> Vec<u16> {
+    s.encode_utf16()
+        .chain(std::iter::once(0))
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+/// Deletes a file or directory using Windows Shell (moves to Recycle Bin by default).
+/// Returns true if operation was successful (not cancelled).
+pub fn delete_item_with_shell(path: &Path, hwnd: HWND) -> bool {
+    let path_str = path.to_string_lossy();
+    let from_vec = to_double_null_terminated(&path_str);
+
+    let mut op = SHFILEOPSTRUCTW {
+        hwnd,
+        wFunc: FO_DELETE,
+        pFrom: PCWSTR(from_vec.as_ptr()),
+        pTo: PCWSTR::default(),
+        fFlags: (FOF_ALLOWUNDO | FOF_WANTNUKEWARNING).0 as u16,
+        ..Default::default()
+    };
+
+    // SAFETY: op is initialized with valid double-null terminated string
+    let result = unsafe { SHFileOperationW(&mut op) };
+
+    // Result 0 means success. fAnyOperationsAborted is set if user cancelled.
+    result == 0 && op.fAnyOperationsAborted.0 == 0
+}
+
+/// Helper to create a double-null-terminated wide string buffer from multiple paths
+fn paths_to_double_null_terminated(paths: &[std::path::PathBuf]) -> Vec<u16> {
+    let mut buffer = Vec::new();
+    for path in paths {
+        let path_str = path.to_string_lossy();
+        buffer.extend(path_str.encode_utf16());
+        buffer.push(0); // Null separator
+    }
+    buffer.push(0); // Double null terminator
+    buffer
+}
+
+/// Deletes multiple files or directories using Windows Shell (moves to Recycle Bin by default).
+/// Returns true if operation was successful (not cancelled).
+pub fn delete_items_with_shell(paths: &[std::path::PathBuf], hwnd: HWND) -> bool {
+    if paths.is_empty() {
+        return false;
+    }
+
+    let from_vec = paths_to_double_null_terminated(paths);
+
+    let mut op = SHFILEOPSTRUCTW {
+        hwnd,
+        wFunc: FO_DELETE,
+        pFrom: PCWSTR(from_vec.as_ptr()),
+        pTo: PCWSTR::default(),
+        fFlags: (FOF_ALLOWUNDO | FOF_WANTNUKEWARNING).0 as u16,
+        ..Default::default()
+    };
+
+    // SAFETY: op is initialized with valid double-null terminated string buffer
+    let result = unsafe { SHFileOperationW(&mut op) };
+
+    // Result 0 means success. fAnyOperationsAborted is set if user cancelled.
+    result == 0 && op.fAnyOperationsAborted.0 == 0
+}
+
+/// Renames a file or directory using Windows Shell.
+/// Returns true if operation was successful.
+pub fn rename_item_with_shell(path: &Path, new_name: &str, hwnd: HWND) -> bool {
+    let parent = match path.parent() {
+        Some(p) => p,
+        None => return false,
+    };
+
+    let new_path = parent.join(new_name);
+
+    // CRITICO: Verificação manual de colisão.
+    // Se o destino JÁ EXISTE, o SHFileOperation com FOF_RENAME pode tentar mesclar (pastas) ou substituir silenciosamente se FOF_NOCONFIRMATION estiver ativo.
+    // O usuário relatou que a pasta "sumiu" ao renomear para um nome existente.
+    // A melhor proteção é impedir o rename se o destino já existe.
+    if new_path.exists() {
+        return false;
+    }
+
+    let from_str = path.to_string_lossy();
+    let to_str = new_path.to_string_lossy();
+
+    let from_vec = to_double_null_terminated(&from_str);
+    let to_vec = to_double_null_terminated(&to_str);
+
+    let mut op = SHFILEOPSTRUCTW {
+        hwnd,
+        wFunc: FO_RENAME,
+        pFrom: PCWSTR(from_vec.as_ptr()),
+        pTo: PCWSTR(to_vec.as_ptr()),
+        // REMOVIDO FOF_NO_UI para permitir que o Windows mostre erros se algo der errado
+        // MANTIDO FOF_ALLOWUNDO para permitir Ctrl+Z
+        fFlags: (FOF_ALLOWUNDO).0 as u16,
+        ..Default::default()
+    };
+
+    // SAFETY: op is initialized with valid double-null terminated strings
+    let result = unsafe { SHFileOperationW(&mut op) };
+
+    result == 0 && op.fAnyOperationsAborted.0 == 0
+}
+
+/// Copies a file or directory using Windows Shell.
+/// Returns true if operation was successful.
+pub fn copy_item_with_shell(path: &Path, dest_folder: &Path, hwnd: HWND) -> bool {
+    let from_str = path.to_string_lossy();
+    let to_str = dest_folder.to_string_lossy();
+
+    let from_vec = to_double_null_terminated(&from_str);
+    let to_vec = to_double_null_terminated(&to_str);
+
+    let mut op = SHFILEOPSTRUCTW {
+        hwnd,
+        wFunc: FO_COPY,
+        pFrom: PCWSTR(from_vec.as_ptr()),
+        pTo: PCWSTR(to_vec.as_ptr()),
+        fFlags: (FOF_ALLOWUNDO).0 as u16,
+        ..Default::default()
+    };
+
+    // SAFETY: op is initialized with valid double-null terminated string
+    let result = unsafe { SHFileOperationW(&mut op) };
+    result == 0 && op.fAnyOperationsAborted.0 == 0
+}
+
+/// Moves a file or directory using Windows Shell.
+/// Returns true if operation was successful.
+pub fn move_item_with_shell(path: &Path, dest_folder: &Path, hwnd: HWND) -> bool {
+    // Skip if moving to same folder
+    if let Some(parent) = path.parent() {
+        if parent == dest_folder {
+            return false;
+        }
+    }
+
+    let from_str = path.to_string_lossy();
+    let to_str = dest_folder.to_string_lossy();
+
+    let from_vec = to_double_null_terminated(&from_str);
+    let to_vec = to_double_null_terminated(&to_str);
+
+    let mut op = SHFILEOPSTRUCTW {
+        hwnd,
+        wFunc: FO_MOVE,
+        pFrom: PCWSTR(from_vec.as_ptr()),
+        pTo: PCWSTR(to_vec.as_ptr()),
+        fFlags: (FOF_ALLOWUNDO).0 as u16,
+        ..Default::default()
+    };
+
+    // SAFETY: op is initialized with valid double-null terminated string
+    let result = unsafe { SHFileOperationW(&mut op) };
+    result == 0 && op.fAnyOperationsAborted.0 == 0
+}
+
+/// Robust Copy using IFileOperation (supports virtual paths like ZIP items)
+pub fn copy_item_with_file_op(path: &Path, dest_folder: &Path, hwnd: HWND) -> bool {
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+
+        // Use IFileOperation for modern Shell features (like ZIP extraction)
+        let file_op: IFileOperation = match CoCreateInstance(&FileOperation, None, CLSCTX_ALL) {
+            Ok(op) => op,
+            Err(_) => return copy_item_with_shell(path, dest_folder, hwnd),
+        };
+
+        let _ = file_op.SetOwnerWindow(hwnd);
+        let _ = file_op.SetOperationFlags(FOF_ALLOWUNDO | FOF_WANTNUKEWARNING);
+
+        let src_wide: Vec<u16> = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let src_item: IShellItem =
+            match SHCreateItemFromParsingName(PCWSTR(src_wide.as_ptr()), None) {
+                Ok(i) => i,
+                Err(_) => return copy_item_with_shell(path, dest_folder, hwnd),
+            };
+
+        let dest_wide: Vec<u16> = dest_folder
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let dest_item: IShellItem =
+            match SHCreateItemFromParsingName(PCWSTR(dest_wide.as_ptr()), None) {
+                Ok(i) => i,
+                Err(_) => return copy_item_with_shell(path, dest_folder, hwnd),
+            };
+
+        if file_op.CopyItem(&src_item, &dest_item, None, None).is_err() {
+            return copy_item_with_shell(path, dest_folder, hwnd);
+        }
+
+        file_op.PerformOperations().is_ok()
     }
 }

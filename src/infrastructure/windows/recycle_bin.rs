@@ -2,27 +2,15 @@
 //! Uses IShellItem2 to retrieve robust metadata (original path, deletion date)
 
 use std::path::PathBuf;
-use std::sync::mpsc::Sender;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
-use windows::{
-    core::*,
-    Win32::Foundation::*,
-    Win32::System::Com::*,
-    Win32::UI::Shell::PropertiesSystem::*,
-    Win32::System::Com::StructuredStorage::*,
-    Win32::UI::Shell::Common::*,
-    Win32::UI::Shell::*,
-};
-use windows::Win32::UI::Shell::{
-    IShellFolder, IShellFolder2, IEnumIDList, SHGetDesktopFolder, 
-    SHCONTF_FOLDERS, SHCONTF_NONFOLDERS, SHCONTF_INCLUDEHIDDEN, 
-    SHCreateShellItem, SHGetKnownFolderItem, KF_FLAG_DEFAULT,
-    IFileOperation, FileOperation, SHCreateItemFromParsingName,
-    FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_SILENT, FOF_NOERRORUI,
-    SHEmptyRecycleBinW, SHERB_NOCONFIRMATION, SHERB_NOPROGRESSUI,
-};
-use windows::core::{Interface, PCWSTR, GUID};
+use windows::core::*;
+use windows::core::Interface;
+use windows::Win32::UI::Shell::*;
+use windows::Win32::Foundation::*;
+use windows::Win32::System::Com::*;
+use windows::Win32::UI::Shell::Common::*;
 
 // Property keys for Recycle Bin items
 pub const PKEY_SIZE: PROPERTYKEY = PROPERTYKEY {
@@ -73,8 +61,8 @@ pub fn get_recycle_bin_info() -> Result<(u64, u64)> {
             cbSize: std::mem::size_of::<SHQUERYRBINFO>() as u32,
             ..Default::default()
         };
-        
-        SHQueryRecycleBinW(PCWSTR::null(), &mut info)?;
+
+        SHQueryRecycleBinW(PCWSTR::default(), &mut info)?;
         Ok((info.i64NumItems as u64, info.i64Size as u64))
     }
 }
@@ -102,12 +90,12 @@ pub fn enumerate_recycle_bin_streaming(
 
         // 2. Get Recycle Bin PIDL
         let recycle_bin_pidl = match SHGetKnownFolderIDList(&FOLDERID_RecycleBinFolder, 0, None) {
-             Ok(pidl) => pidl,
-             Err(e) => {
+            Ok(pidl) => pidl,
+            Err(e) => {
                 eprintln!("[Lixeira] Failed to get Recycle Bin PIDL: {:?}", e);
                 let _ = sender.send(Vec::new());
                 return;
-             }
+            }
         };
 
         // 3. Bind to Recycle Bin Folder (IShellFolder)
@@ -126,11 +114,14 @@ pub fn enumerate_recycle_bin_streaming(
         // Fix SHCONTF flags: cast to u32 because EnumObjects takes u32
         let flags = (SHCONTF_FOLDERS.0 | SHCONTF_NONFOLDERS.0 | SHCONTF_INCLUDEHIDDEN.0) as u32;
         let mut enum_list_opt: Option<IEnumIDList> = None;
-        
-        if recycle_bin_folder.EnumObjects(None, flags, &mut enum_list_opt).is_err() {
+
+        if recycle_bin_folder
+            .EnumObjects(windows::Win32::Foundation::HWND::default(), flags, &mut enum_list_opt)
+            .is_err()
+        {
             eprintln!("[Lixeira] Failed to get enumerator");
             let _ = sender.send(Vec::new());
-             return;
+            return;
         }
         let enum_list = enum_list_opt.unwrap();
 
@@ -147,28 +138,31 @@ pub fn enumerate_recycle_bin_streaming(
             let mut pidl_child: *mut ITEMIDLIST = std::ptr::null_mut();
 
             // Next expects a slice of pointers. We want 1 item.
-            if enum_list.Next(std::slice::from_mut(&mut pidl_child), Some(&mut fetched)).is_err() || fetched == 0 {
+            if enum_list
+                .Next(std::slice::from_mut(&mut pidl_child), Some(&mut fetched))
+                .is_err()
+                || fetched == 0
+            {
                 break;
             }
 
             // --- PROCESS SINGLE ITEM ---
-            // Create IShellItem from PIDL (child). 
+            // Create IShellItem from PIDL (child).
             // SHCreateShellItem logic: pidlParent=None, psfParent=Some(folder), pidl=child
             if let Ok(shell_item) = SHCreateShellItem(None, Some(&recycle_bin_folder), pidl_child) {
-
                 // Get deletion date using the Shell Folder API + PIDL
                 let date_deleted = get_date_deleted_from_pidl(&recycle_bin_folder, pidl_child);
-                
+
                 // Process other properties using existing helper
                 if let Some(mut item) = process_shell_item(&shell_item) {
-                     // Overwrite with the date obtained from column view
-                     item.date_deleted = date_deleted;
-                     
-                     batch.push(item);
-                     total_count += 1;
+                    // Overwrite with the date obtained from column view
+                    item.date_deleted = date_deleted;
+
+                    batch.push(item);
+                    total_count += 1;
                 }
             }
-            
+
             // Validate PIDL release
             CoTaskMemFree(Some(pidl_child as *mut _));
 
@@ -183,12 +177,15 @@ pub fn enumerate_recycle_bin_streaming(
         }
 
         if !batch.is_empty() && generation.load(Ordering::Relaxed) == my_gen {
-             let _ = sender.send(batch);
+            let _ = sender.send(batch);
         }
-        
+
         // Completion signal
         let _ = sender.send(Vec::new());
-        eprintln!("[Lixeira] Enumeration complete (Shell API). Total items: {}", total_count);
+        eprintln!(
+            "[Lixeira] Enumeration complete (Shell API). Total items: {}",
+            total_count
+        );
     }
 }
 
@@ -198,40 +195,41 @@ unsafe fn process_shell_item(shell_item: &IShellItem) -> Option<RecycleBinItem> 
 
     // Get display name - this should be the original filename
     let name = get_item_display_name(&shell_item2);
-    
+
     // Get parent folder (where item was deleted from)
     let parent_folder = get_shell_item_string_property(&shell_item2, &PKEY_RECYCLE_DELETED_FROM)
         .unwrap_or_default();
-    
+
     // Build full original path
     let original_path = if !parent_folder.is_empty() {
         PathBuf::from(&parent_folder).join(&name)
     } else {
         PathBuf::from(&name)
     };
-    
+
     // Get physical path (Parsing path) - this gives us the $R path in $Recycle.Bin
-    let physical_path = if let Ok(name_ptr) = shell_item.GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING) {
-        let path_str = name_ptr.to_string().unwrap_or_default();
-        CoTaskMemFree(Some(name_ptr.as_ptr() as *mut _));
-        PathBuf::from(path_str)
-    } else {
-        PathBuf::new()
-    };
-    
+    let physical_path =
+        if let Ok(name_ptr) = shell_item.GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING) {
+            let path_str = name_ptr.to_string().unwrap_or_default();
+            CoTaskMemFree(Some(name_ptr.as_ptr() as *mut _));
+            PathBuf::from(path_str)
+        } else {
+            PathBuf::new()
+        };
+
     // Get extension for icon lookup
     let extension = std::path::Path::new(&name)
         .extension()
         .map(|e| format!(".{}", e.to_string_lossy().to_lowercase()))
         .unwrap_or_default();
-    
+
     // Get date deleted (as FILETIME, then convert to formatted string)
     let date_deleted = get_shell_item_filetime_property(&shell_item2, &PKEY_RECYCLE_DATE_DELETED)
         .unwrap_or_else(|_| "Desconhecido".to_string());
-    
+
     // Get size
     let size = get_shell_item_u64_property(&shell_item2, &PKEY_SIZE).unwrap_or(0);
-    
+
     // Check if directory
     const PKEY_FILE_ATTRIBUTES: PROPERTYKEY = PROPERTYKEY {
         fmtid: GUID::from_u128(0xB725F130_47EF_101A_A5F1_02608C9EEBAC),
@@ -261,7 +259,7 @@ unsafe fn get_item_display_name(item: &IShellItem2) -> String {
             return name;
         }
     }
-    
+
     // Try SIGDN_NORMALDISPLAY
     if let Ok(name_ptr) = item.GetDisplayName(SIGDN_NORMALDISPLAY) {
         let name = name_ptr.to_string().unwrap_or_default();
@@ -270,7 +268,7 @@ unsafe fn get_item_display_name(item: &IShellItem2) -> String {
             return name;
         }
     }
-    
+
     // Try SIGDN_PARENTRELATIVEEDITING - sometimes has better name
     if let Ok(name_ptr) = item.GetDisplayName(SIGDN_PARENTRELATIVEEDITING) {
         let name = name_ptr.to_string().unwrap_or_default();
@@ -279,7 +277,7 @@ unsafe fn get_item_display_name(item: &IShellItem2) -> String {
             return name;
         }
     }
-    
+
     // Try SIGDN_PARENTRELATIVEFORADDRESSBAR as last resort
     if let Ok(name_ptr) = item.GetDisplayName(SIGDN_PARENTRELATIVEFORADDRESSBAR) {
         let name = name_ptr.to_string().unwrap_or_default();
@@ -293,54 +291,42 @@ unsafe fn get_item_display_name(item: &IShellItem2) -> String {
             }
         }
     }
-    
+
     "Item".to_string()
 }
 
 /// Get string property from IShellItem2
 unsafe fn get_shell_item_string_property(item: &IShellItem2, pkey: &PROPERTYKEY) -> Result<String> {
-    let prop_var = item.GetProperty(pkey)?;
-    let pv_ptr: *const PROPVARIANT = &prop_var as *const _ as *const _;
-    
-    let str_ptr = PropVariantToStringAlloc(pv_ptr)?;
+    let str_ptr = item.GetString(pkey)?;
     let result = str_ptr.to_string().map_err(|_| Error::from_win32())?;
-    CoTaskMemFree(Some(str_ptr.as_ptr() as *mut _));
-    
+    CoTaskMemFree(Some(str_ptr.0 as *mut _));
     Ok(result)
 }
 
 /// Get u64 property from IShellItem2
 unsafe fn get_shell_item_u64_property(item: &IShellItem2, pkey: &PROPERTYKEY) -> Result<u64> {
-    let prop_var = item.GetProperty(pkey)?;
-    let pv_ptr: *const PROPVARIANT = &prop_var as *const _ as *const _;
-    
-    let val = PropVariantToUInt64(pv_ptr)?;
-    Ok(val)
+    item.GetUInt64(pkey)
 }
 
 /// Get FILETIME property from IShellItem2 and format as date string
-unsafe fn get_shell_item_filetime_property(item: &IShellItem2, pkey: &PROPERTYKEY) -> Result<String> {
-    let prop_var = match item.GetProperty(pkey) {
-        Ok(p) => p,
-        Err(e) => {
-            return Err(e);
-        }
-    };
-    let pv_ptr: *const PROPVARIANT = &prop_var as *const _ as *const _;
-    
-    // First try PropVariantToStringAlloc - this works for FILETIME properties
-    if let Ok(str_ptr) = PropVariantToStringAlloc(pv_ptr) {
+unsafe fn get_shell_item_filetime_property(
+    item: &IShellItem2,
+    pkey: &PROPERTYKEY,
+) -> Result<String> {
+    if let Ok(str_ptr) = item.GetString(pkey) {
         let result = str_ptr.to_string().unwrap_or_default();
-        CoTaskMemFree(Some(str_ptr.as_ptr() as *mut _));
+        CoTaskMemFree(Some(str_ptr.0 as *mut _));
         if !result.is_empty() {
             // Format: '2026/01/12:19:21:00.000' -> '12/01/2026 19:21'
             let formatted = format_recycle_date(&result);
             return Ok(formatted);
         }
     }
-    
+
     // Fallback: Try PropVariantToUInt64 for raw FILETIME
-    if let Ok(ft_val) = PropVariantToUInt64(pv_ptr) {
+    if let Ok(ft) = item.GetFileTime(pkey) {
+        // Fallback: raw FILETIME
+        let ft_val = ((ft.dwHighDateTime as u64) << 32) | (ft.dwLowDateTime as u64);
         if ft_val > 0 {
             const FILETIME_TO_UNIX: u64 = 116444736000000000;
             if ft_val > FILETIME_TO_UNIX {
@@ -349,7 +335,7 @@ unsafe fn get_shell_item_filetime_property(item: &IShellItem2, pkey: &PROPERTYKE
             }
         }
     }
-    
+
     Err(Error::from_win32())
 }
 
@@ -365,9 +351,10 @@ fn format_recycle_date(raw: &str) -> String {
         let date_parts: Vec<&str> = parts[0].split('/').collect();
         if date_parts.len() == 3 {
             // date_parts = ["2026", "01", "12"]
-            return format!("{}/{}/{} {}:{}", 
+            return format!(
+                "{}/{}/{} {}:{}",
                 date_parts[2], // day
-                date_parts[1], // month  
+                date_parts[1], // month
                 date_parts[0], // year
                 parts[1],      // hour
                 parts[2]       // minute
@@ -382,23 +369,25 @@ fn format_recycle_date(raw: &str) -> String {
 pub fn enumerate_recycle_bin() -> Result<Vec<RecycleBinItem>> {
     unsafe {
         eprintln!("[Lixeira] Starting enumeration...");
-        
+
         let mut items = Vec::new();
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
 
-        let recycle_bin_folder: IShellItem = SHGetKnownFolderItem(
-            &FOLDERID_RecycleBinFolder,
-            KF_FLAG_DEFAULT,
-            None,
-        )?;
+        let recycle_bin_folder: IShellItem =
+            SHGetKnownFolderItem(&FOLDERID_RecycleBinFolder, KF_FLAG_DEFAULT, None)?;
 
-        let enum_items: IEnumShellItems = recycle_bin_folder.BindToHandler(None, &BHID_EnumItems)?;
+        let enum_items: IEnumShellItems =
+            recycle_bin_folder.BindToHandler(None, &BHID_EnumItems)?;
 
         loop {
             let mut shell_items: [Option<IShellItem>; 1] = [None];
             let mut fetched: u32 = 0;
-            
-            if enum_items.Next(&mut shell_items, Some(&mut fetched)).is_err() || fetched == 0 {
+
+            if enum_items
+                .Next(&mut shell_items, Some(&mut fetched))
+                .is_err()
+                || fetched == 0
+            {
                 break;
             }
 
@@ -409,7 +398,10 @@ pub fn enumerate_recycle_bin() -> Result<Vec<RecycleBinItem>> {
             }
         }
 
-        eprintln!("[Lixeira] Enumeration complete. Total items: {}", items.len());
+        eprintln!(
+            "[Lixeira] Enumeration complete. Total items: {}",
+            items.len()
+        );
         Ok(items)
     }
 }
@@ -428,20 +420,28 @@ unsafe fn get_date_deleted_from_pidl(folder: &IShellFolder, pidl: *const ITEMIDL
     };
 
     let mut sd = SHELLDETAILS::default();
-    
+
     // O índice 2 na Lixeira (Recycle Bin) é padrão para "Data de Exclusão" no Windows
     // GetDetailsOf espera *const ITEMIDLIST, não Option
     match folder2.GetDetailsOf(pidl, 2, &mut sd) {
         Ok(_) => {
             // Converter o formato STRRET (que é arcaico) para string Rust
             let mut buffer = [0u16; 260]; // MAX_PATH
-            if windows::Win32::UI::Shell::StrRetToBufW(std::ptr::addr_of_mut!(sd.str), Some(pidl), &mut buffer).is_ok() {
-                let date_str = PCWSTR::from_raw(buffer.as_ptr()).to_string().unwrap_or_default();
+            if windows::Win32::UI::Shell::StrRetToBufW(
+                std::ptr::addr_of_mut!(sd.str),
+                Some(pidl),
+                &mut buffer,
+            )
+            .is_ok()
+            {
+                let date_str = PCWSTR::from_raw(buffer.as_ptr())
+                    .to_string()
+                    .unwrap_or_default();
                 if !date_str.is_empty() {
                     // Remove caracteres de controle invisíveis LTR/RTL que o Windows às vezes insere
                     let cleaned = date_str
                         .chars()
-                        .filter(|c| !c.is_control())
+                        .filter(|c: &char| !c.is_control())
                         .collect::<String>()
                         .trim()
                         .to_string();
@@ -449,61 +449,78 @@ unsafe fn get_date_deleted_from_pidl(folder: &IShellFolder, pidl: *const ITEMIDL
                     return cleaned;
                 }
             }
-        },
+        }
         Err(e) => {
             eprintln!("[Lixeira] GetDetailsOf failed: {:?}", e);
         }
     }
-    
+
     // Try alternate column indices - sometimes column order differs
     for col_idx in [3, 4, 5] {
         let mut sd2 = SHELLDETAILS::default();
         if folder2.GetDetailsOf(pidl, col_idx, &mut sd2).is_ok() {
             let mut buffer = [0u16; 260];
-            if windows::Win32::UI::Shell::StrRetToBufW(std::ptr::addr_of_mut!(sd2.str), Some(pidl), &mut buffer).is_ok() {
-                let col_str = PCWSTR::from_raw(buffer.as_ptr()).to_string().unwrap_or_default();
+            if windows::Win32::UI::Shell::StrRetToBufW(
+                std::ptr::addr_of_mut!(sd2.str),
+                Some(pidl),
+                &mut buffer,
+            )
+            .is_ok()
+            {
+                let col_str = PCWSTR::from_raw(buffer.as_ptr())
+                    .to_string()
+                    .unwrap_or_default();
                 eprintln!("[Lixeira] Column {} value: '{}'", col_idx, col_str);
             }
         }
     }
-    
+
     "Desconhecido".to_string()
 }
 
 /// Restore a file from the Recycle Bin to its original location
-pub fn restore_from_recycle_bin(physical_path: &std::path::Path, original_path: &std::path::Path) -> Result<()> {
+pub fn restore_from_recycle_bin(
+    physical_path: &std::path::Path,
+    original_path: &std::path::Path,
+) -> Result<()> {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-        
+
         // Use IFileOperation for undo/restore
         let file_op: IFileOperation = CoCreateInstance(&FileOperation, None, CLSCTX_ALL)?;
-        
+
         // Set operation flags
-        file_op.SetOperationFlags(
-            FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT
-        )?;
-        
+        file_op.SetOperationFlags(FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT)?;
+
         // Create shell item for the physical path ($R file)
         let physical_str = physical_path.to_string_lossy();
         let physical_wide: Vec<u16> = physical_str.encode_utf16().chain(Some(0)).collect();
-        let source_item: IShellItem = SHCreateItemFromParsingName(PCWSTR::from_raw(physical_wide.as_ptr()), None)?;
-        
+        let source_item: IShellItem =
+            SHCreateItemFromParsingName(PCWSTR::from_raw(physical_wide.as_ptr()), None)?;
+
         // Create shell item for destination folder
         let dest_folder = original_path.parent().unwrap_or(original_path);
         let dest_str = dest_folder.to_string_lossy();
         let dest_wide: Vec<u16> = dest_str.encode_utf16().chain(Some(0)).collect();
-        let dest_folder_item: IShellItem = SHCreateItemFromParsingName(PCWSTR::from_raw(dest_wide.as_ptr()), None)?;
-        
+        let dest_folder_item: IShellItem =
+            SHCreateItemFromParsingName(PCWSTR::from_raw(dest_wide.as_ptr()), None)?;
+
         // Get original filename
-        let file_name = original_path.file_name()
+        let file_name = original_path
+            .file_name()
             .and_then(|n| n.to_str())
             .ok_or_else(|| Error::from_win32())?;
         let name_wide: Vec<u16> = file_name.encode_utf16().chain(Some(0)).collect();
-        
+
         // Move the item
-        file_op.MoveItem(&source_item, &dest_folder_item, PCWSTR::from_raw(name_wide.as_ptr()), None)?;
+        file_op.MoveItem(
+            &source_item,
+            &dest_folder_item,
+            PCWSTR::from_raw(name_wide.as_ptr()),
+            None,
+        )?;
         file_op.PerformOperations()?;
-        
+
         Ok(())
     }
 }
@@ -512,24 +529,23 @@ pub fn restore_from_recycle_bin(physical_path: &std::path::Path, original_path: 
 pub fn delete_permanently(physical_path: &std::path::Path) -> Result<()> {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-        
+
         // Use IFileOperation for permanent deletion
         let file_op: IFileOperation = CoCreateInstance(&FileOperation, None, CLSCTX_ALL)?;
-        
+
         // Set operation flags - NO FOF_ALLOWUNDO means permanent deletion
-        file_op.SetOperationFlags(
-            FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT
-        )?;
-        
+        file_op.SetOperationFlags(FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT)?;
+
         // Create shell item for the physical path
         let path_str = physical_path.to_string_lossy();
         let path_wide: Vec<u16> = path_str.encode_utf16().chain(Some(0)).collect();
-        let item: IShellItem = SHCreateItemFromParsingName(PCWSTR::from_raw(path_wide.as_ptr()), None)?;
-        
+        let item: IShellItem =
+            SHCreateItemFromParsingName(PCWSTR::from_raw(path_wide.as_ptr()), None)?;
+
         // Delete the item permanently
         file_op.DeleteItem(&item, None)?;
         file_op.PerformOperations()?;
-        
+
         Ok(())
     }
 }
@@ -538,7 +554,11 @@ pub fn delete_permanently(physical_path: &std::path::Path) -> Result<()> {
 pub fn empty_recycle_bin() -> Result<()> {
     unsafe {
         // SHEmptyRecycleBinW with NULL path empties all drives
-        SHEmptyRecycleBinW(None, PCWSTR::null(), SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI)?;
+        SHEmptyRecycleBinW(
+            Some(HWND::default()),
+            PCWSTR::default(),
+            SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI,
+        )?;
         Ok(())
     }
 }

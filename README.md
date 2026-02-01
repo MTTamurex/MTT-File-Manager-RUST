@@ -1,234 +1,317 @@
 # MTT File Manager
 
-<div align="center">
+**Gerenciador de arquivos nativo para Windows** desenvolvido em Rust com interface moderna, recursos avançados de visualização de mídia e integração profunda com o sistema Windows.
 
-![MTT File Manager](assets/icons/screenshot_placeholder.png)
+## 📋 Índice
 
-**Gerenciador de arquivos moderno e de alta performance para Windows, desenvolvido em Rust com interface Immediate Mode (egui).**
+- [O que é](#o-que-é)
+- [Principais Recursos](#principais-recursos)
+- [Tecnologias](#tecnologias)
+- [Requisitos](#requisitos)
+- [Instalação](#instalação)
+- [Como Usar](#como-usar)
+- [Documentação](#documentação)
+- [Desenvolvimento](#desenvolvimento)
+- [Solução de Problemas](#solução-de-problemas)
+- [Contribuição](#contribuição)
+- [Licença](#licença)
 
-[![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
-[![Windows](https://img.shields.io/badge/Platform-Windows%2010%2F11-blue.svg)](https://www.microsoft.com/windows)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+## 🎯 O que é
 
-</div>
+O MTT File Manager é um gerenciador de arquivos desktop que combina a performance e segurança de Rust com uma interface moderna e integração nativa com o Windows. Ele oferece uma experiência de usuário fluída com navegação em abas, preview integrado de arquivos e recursos avançados de gerenciamento.
 
----
+### Problemas que Resolve
+- **Visualização lenta** de imagens e vídeos em exploradores tradicionais
+- **Falta de preview integrado** para múltiplos formatos de arquivo
+- **Navegação ineficiente** sem suporte a abas e histórico
+- **Cache inadequado** que não aproveita recursos do sistema
+- **Integração limitada** com funcionalidades nativas do Windows
 
-## 📸 Screenshot
+## ✨ Principais Recursos
 
-![Screenshot da Interface](docs/screenshot.png)
+### 🖥️ Interface e Navegação
+- **Interface borderless customizada** - Janela moderna sem bordas tradicionais
+- **Navegação em abas** - Múltiplas abas com histórico independente
+- **Visualizações flexíveis** - Modo grade e lista com thumbnails ajustáveis
+- **Barra de endereços inteligente** - Navegação direta com autocomplete
+- **Sidebar com atalhos** - Acesso rápido a drives, bibliotecas e OneDrive
 
-> *Adicione uma captura de tela da aplicação em `docs/screenshot.png`*
+### 🎬 Preview e Mídia
+- **Preview integrado** - Visualização sem sair do aplicativo
+- **Reprodução de vídeo** - Player baseado em libmpv para formatos diversos
+- **Visualizador de PDF** - Integração com WebView2 (Edge)
+- **Thumbnails inteligentes** - Cache multi-nível com geração otimizada
+- **Suporte a GIFs animados** - Reprodução otimizada e fluída
 
----
+### 📁 Operações de Arquivo
+- **Operações completas** - Copiar, cortar, colar, renomear, deletar
+- **Menu de contexto nativo** - Integração completa com Windows Shell
+- **Lixeira integrada** - Operações com lixeira do Windows
+- **Suporte a OneDrive** - Detecção de status de sincronização
+- **Montagem de ISO** - Suporte para arquivos ISO como drives virtuais
 
-## ✨ Funcionalidades
-
-### 🖼️ Visualização de Mídia
-- **Thumbnails de Imagens**: PNG, JPG, WEBP, HEIC, AVIF, BMP, GIF, TIFF, ICO
-- **Thumbnails de Vídeos**: MP4, MKV, AVI, MOV, WMV, WEBM, M4V, 3GP, TS
-- **API Nativa do Windows**: `IShellItemImageFactory` + WIC + Media Foundation
-- **Preview Nativo de Pastas**: Efeito "sanduíche" como o Windows Explorer
-
-### ⚡ Performance
-- **Carregamento Assíncrono**: Interface nunca congela (60+ FPS garantidos)
-- **Lazy Loading**: Thumbnails carregados sob demanda (viewport visível)
-- **Worker Pool**: 4 workers de thumbnail com controle de concorrência
-- **Cache Inteligente**: LRU em memória + SQLite persistente (WebP comprimido)
-- **Ordenação Paralela**: Usa `rayon` para listas >5000 itens
-
-### 🎨 Interface
-- **Grid & List Views**: Alterna entre visualização em grade e lista
-- **Zoom Dinâmico**: 64px até 256px com slider
-- **Sistema de Abas**: Múltiplas pastas abertas simultaneamente
-- **Sidebar**: Acesso rápido a drives, OneDrive e Lixeira
-- **Breadcrumbs**: Navegação visual por caminho
-- **Barra de Detalhes**: Preview, metadados de mídia, informações de arquivo
-
-### 📂 Gerenciamento de Arquivos
-- **Operações Shell**: Copiar, Recortar, Colar, Renomear, Excluir (com Undo)
-- **Clipboard Windows**: Integração nativa CF_HDROP
-- **Menu de Contexto**: Extensões de shell do Windows (Open With, Properties, etc.)
-- **File Watcher**: Auto-refresh ao detectar mudanças no sistema de arquivos
-- **Lixeira**: Visualização e restauração de itens excluídos
-
-### 🔧 Integração Windows
-- **OneDrive**: Detecção de status de sincronização (Cloud/Local/Syncing)
-- **Drives de Rede**: Suporte completo a unidades mapeadas
-- **Ícones Nativos**: Extração via Shell API para todos os tipos de arquivo
-- **Metadados de Mídia**: Resolução, duração, bitrate, codec via Media Foundation
-
----
+### ⚡ Performance e Cache
+- **Cache multi-nível** - Memória, disco e GPU para performance máxima
+- **Workers assíncronos** - Processamento em background sem travar UI
+- **Pré-carregamento inteligente** - Prefetch preditivo de pastas e arquivos
+- **Virtualização de UI** - Renderização eficiente de listas grandes
+- **Otimizações NTFS** - Aproveita USN Journal para monitoramento rápido
 
 ## 🛠️ Tecnologias
 
-| Componente | Tecnologia |
-|------------|------------|
-| **Linguagem** | Rust 1.75+ |
-| **GUI Framework** | egui 0.31 + eframe |
-| **APIs Windows** | windows-rs 0.58 (Win32 Shell, COM, Media Foundation) |
-| **Cache** | SQLite (rusqlite) + LRU em memória |
-| **Processamento** | rayon (paralelo), image (codec), webp |
-| **File Watch** | notify 6.x |
+| Categoria | Tecnologia | Versão | Propósito |
+|-----------|------------|---------|-----------|
+| **Linguagem** | Rust | 2021 Edition | Performance e segurança |
+| **GUI** | eframe/egui | 0.31 | Interface gráfica moderna |
+| **Windows API** | windows-rs | 0.61 | Integração nativa com Windows |
+| **Vídeo** | libmpv2 | 5.0.3 | Reprodução de vídeo de alta performance |
+| **PDF** | WebView2 | - | Visualização de PDFs nativa |
+| **Cache** | SQLite (rusqlite) | 0.32 | Persistência confiável |
+| **Imagens** | image crate | 0.25 | Processamento de imagens |
+| **Paralelismo** | rayon | 1.10 | Processamento paralelo |
 
----
+## 📋 Requisitos
 
-## 📦 Instalação
+### Mínimos
+- **Sistema**: Windows 10 (Build 1903+) ou Windows 11
+- **Processador**: x64, 2 cores ou mais
+- **Memória**: 4GB RAM
+- **Espaço**: 100MB para instalação + espaço para cache
+- **GPU**: DirectX 11 compatível
 
-### Pré-requisitos
-- **Windows 10** (build 1809+) ou **Windows 11**
-- **Rust** (stable 1.75+): [rustup.rs](https://rustup.rs/)
-- **Visual Studio Build Tools** (para compilação)
+### Recomendados
+- **Sistema**: Windows 11 (última atualização)
+- **Processador**: x64, 4+ cores
+- **Memória**: 8GB RAM ou mais
+- **Armazenamento**: SSD para melhor performance de cache
+- **GPU**: Placa dedicada para preview de vídeos
 
-### Build de Desenvolvimento
+### Dependências Externas
+- **libmpv-2.dll** - Para reprodução de vídeo
+- **Microsoft Edge WebView2 Runtime** - Para visualização de PDFs
 
-```powershell
+## 🚀 Instalação
+
+### Opção 1: Download Direto (Recomendado)
+1. Baixe a última release de [releases](../../releases)
+2. Extraia o arquivo ZIP
+3. Execute `mtt-file-manager.exe`
+
+### Opção 2: Build do Código Fonte
+```bash
 # Clone o repositório
-git clone https://github.com/seu-usuario/mtt-file-manager.git
-cd mtt-file-manager
+git clone <url-do-repositorio>
+cd MTT-File-Manager-RUST
 
-# Compile e execute
-cargo run
-```
-
-### Build de Produção
-
-```powershell
-# Build otimizado com LTO
+# Build de produção
 cargo build --release
 
-# Executável gerado em:
+# Execute
 .\target\release\mtt-file-manager.exe
 ```
 
----
+### Instalação de Dependências
+```powershell
+# WebView2 Runtime (se necessário)
+winget install Microsoft.EdgeWebView2Runtime
 
-## ⚙️ Configuração de Build
-
-O projeto usa otimizações agressivas para produção (`Cargo.toml`):
-
-```toml
-[profile.release]
-opt-level = 3        # Máxima otimização
-lto = true           # Link-Time Optimization
-codegen-units = 1    # Melhor otimização cross-crate
+# libmpv (se não incluído na release)
+# Baixe de: https://sourceforge.net/projects/mpv-player-windows/files/libmpv/
+# Coloque libmpv-2.dll no mesmo diretório do executável
 ```
 
----
+## 🎮 Como Usar
 
-## 🎹 Atalhos de Teclado
+### Atalhos de Teclado Principais
+- **Ctrl+T** - Nova aba
+- **Ctrl+W** - Fechar aba
+- **Ctrl+C/V** - Copiar/Colar
+- **Delete** - Mover para lixeira
+- **Shift+Delete** - Deletar permanentemente
+- **F2** - Renomear
+- **Ctrl+R** - Recarregar pasta
+- **Alt+Enter** - Propriedades
+- **Ctrl+L** - Focar barra de endereços
+- **Ctrl+D** - Duplicar aba
 
-| Atalho | Ação |
-|--------|------|
-| `F5` | Atualizar pasta atual |
-| `Enter` | Abrir item selecionado |
-| `Delete` | Excluir item (vai para Lixeira) |
-| `Ctrl+C` | Copiar |
-| `Ctrl+X` | Recortar |
-| `Ctrl+V` | Colar |
-| `Ctrl+Shift+N` | Nova pasta |
-| `F2` | Renomear |
-| `←` `→` `↑` `↓` | Navegar entre itens |
-| `Backspace` | Voltar nível |
+### Dicas de Uso
+1. **Thumbnail Size**: Use Ctrl+Roda do mouse para ajustar tamanho dos thumbnails
+2. **Multi-seleção**: Segure Ctrl para selecionar múltiplos arquivos
+3. **Preview Rápido**: Selecione um arquivo e use espaço para preview
+4. **Navegação Rápida**: Use Backspace para voltar, Alt+Setas para histórico
+5. **Busca**: Comece a digitar para buscar arquivos na pasta atual
 
----
+### Visualização de Mídia
+- **Imagens**: JPG, PNG, GIF, WebP, BMP, TIFF, SVG
+- **Vídeos**: MP4, MKV, AVI, MOV, WebM (requer libmpv)
+- **PDFs**: Visualização completa com WebView2
+- **GIFs**: Reprodução automática com controle de velocidade
 
-## 🏗️ Arquitetura
+## 📚 Documentação
 
-### Estrutura de Módulos
+### 📖 Documentos Técnicos
+Acesse a pasta [`docs/`](docs/) para documentação completa:
 
+- **[Visão Geral](docs/01_overview.md)** - Introdução e arquitetura de alto nível
+- **[Build e Debug](docs/02_build_run_debug.md)** - Como compilar, executar e debugar
+- **[Arquitetura](docs/03_architecture.md)** - Detalhes da arquitetura e camadas
+- **[Mapa do Repositório](docs/04_module_map.md)** - Estrutura de arquivos e módulos
+- **[Dependências](docs/05_dependencies_stack.md)** - Stack tecnológico completo
+- **[Fluxos Principais](docs/06_key_flows.md)** - Como os principais fluxos funcionam
+- **[Storage e Config](docs/07_storage_config.md)** - Onde e como dados são armazenados
+- **[Logs e Erros](docs/08_logging_errors_telemetry.md)** - Sistema de logs e debugging
+- **[Playbook de Suporte](docs/09_support_playbook.md)** - Guia para suporte e troubleshooting
+
+### 🔗 Links Rápidos
+- [Documentação Principal](docs/INDEX.md) - Índice completo da documentação
+- [Fluxo de Navegação](docs/06_key_flows.md#1-navegação-para-pasta) - Como navegação funciona
+- [Sistema de Preview](docs/06_key_flows.md#2-preview-de-arquivo) - Como preview de arquivos funciona
+- [Cache e Performance](docs/07_storage_config.md#cache-de-thumbnails) - Otimizações de cache
+
+## 🔧 Desenvolvimento
+
+### Configuração do Ambiente
+```bash
+# Instalar Rust
+rustup toolchain install stable
+rustup default stable-msvc
+
+# Verificar instalação
+rustc --version
+cargo --version
+```
+
+### Build e Testes
+```bash
+# Build de desenvolvimento
+cargo build
+
+# Build otimizado
+cargo build --release
+
+# Executar com logs
+cargo run 2>&1 | Tee-Object "debug.log"
+
+# Executar benchmarks
+cargo bench
+```
+
+### Estrutura do Projeto
 ```
 src/
-├── main.rs                # Aplicação principal (~5000 linhas)
-├── lib.rs                 # Re-exports dos módulos
-├── domain/                # Entidades e regras de domínio
-│   ├── file_entry.rs      # FileEntry, SortMode, ViewMode
-│   └── thumbnail.rs       # ThumbnailData
-├── application/           # Orquestração e casos de uso
-│   ├── state.rs           # AppState (gestão de estado)
-│   ├── clipboard.rs       # Operações de clipboard
-│   ├── context_menu.rs    # Estado do menu de contexto
-│   ├── navigation.rs      # Histórico de navegação
-│   └── notification.rs    # Sistema de toasts
-├── infrastructure/        # Implementações de baixo nível
-│   ├── disk_cache.rs      # Cache SQLite persistente
-│   ├── onedrive.rs        # Integração OneDrive
-│   └── windows/           # APIs Win32
-│       ├── icons.rs       # Extração de ícones
-│       ├── shell_operations.rs
-│       └── media_foundation.rs
-├── workers/               # Background threads
-│   ├── thumbnail_worker.rs # Pool de workers (4 threads)
-│   └── folder_preview_worker.rs
-└── ui/                    # Componentes de interface
-    ├── views/             # Grid, List, Computer view
-    ├── components/        # Item slots, sidebar
-    └── cache.rs           # Cache de texturas LRU
+├── app/                    # Estado e lógica principal
+├── application/            # Serviços de negócio
+├── domain/                 # Modelos de dados
+├── infrastructure/         # Integrações com sistema
+├── pdf_viewer/            # Visualizador PDF
+├── tabs/                  # Sistema de abas
+├── ui/                    # Interface do usuário
+└── workers/               # Processamento em background
 ```
 
-### Diagrama de Fluxo
+### Debug e Profiling
+```bash
+# Executar com debugger
+cargo run
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         UI Thread (egui)                        │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────────────┐   │
-│  │ Sidebar │  │ Toolbar │  │ Grid/   │  │ Preview Panel   │   │
-│  │         │  │         │  │ List    │  │                 │   │
-│  └────┬────┘  └────┬────┘  └────┬────┘  └────────┬────────┘   │
-│       │            │            │                 │            │
-│       └────────────┴─────┬──────┴─────────────────┘            │
-│                          │                                      │
-│                    ┌─────▼─────┐                               │
-│                    │  State    │                               │
-│                    │  Manager  │                               │
-│                    └─────┬─────┘                               │
-└──────────────────────────┼─────────────────────────────────────┘
-                           │ mpsc channels
-          ┌────────────────┼────────────────┐
-          ▼                ▼                ▼
-    ┌──────────┐    ┌──────────┐    ┌──────────┐
-    │Thumbnail │    │  Folder  │    │ Metadata │
-    │ Workers  │    │  Scanner │    │  Worker  │
-    │  (4x)    │    │          │    │          │
-    └────┬─────┘    └────┬─────┘    └────┬─────┘
-         │               │               │
-         ▼               ▼               ▼
-    ┌─────────────────────────────────────────┐
-    │           Windows APIs                   │
-    │  Shell • WIC • Media Foundation • COM   │
-    └─────────────────────────────────────────┘
+# Profile com flamegraph
+cargo install flamegraph
+cargo flamegraph --bin mtt-file-manager
+
+# Verificar performance
+.\target\release\mtt-file-manager.exe 2>&1 | Select-String "frame_time|fps"
 ```
 
----
+## 🔧 Solução de Problemas
+
+### Problemas Comuns
+
+#### Aplicativo não inicia
+```powershell
+# Verificar dependências
+Get-Item "libmpv-2.dll" -ErrorAction SilentlyContinue
+winget install Microsoft.EdgeWebView2Runtime
+```
+
+#### Performance lenta
+```powershell
+# Verificar uso de recursos
+Get-Process mtt-file-manager | Select-Object CPU, WorkingSet
+
+# Limpar cache se necessário
+Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager" -Recurse -Force
+```
+
+#### Thumbnails não aparecem
+```powershell
+# Capturar logs de debug
+.\target\release\mtt-file-manager.exe 2>&1 | Select-String "THUMB|ERROR" | Tee-Object "thumb_debug.log"
+```
+
+### Logs e Debugging
+```powershell
+# Executar com logging completo
+.\target\release\mtt-file-manager.exe 2>&1 | Tee-Object "full_debug.log"
+
+# Filtrar por categoria
+.\target\release\mtt-file-manager.exe 2>&1 | Select-String "ERROR|WARN"
+
+# Ver Event Viewer se crashou
+Get-EventLog -LogName Application -Source "Application Error" | Where-Object { $_.Message -match "mtt-file-manager" }
+```
+
+### Reportando Bugs
+Use o [playbook de suporte](docs/09_support_playbook.md) para reportar issues:
+
+1. **Colete logs**: Execute com redirecionamento de stderr
+2. **Documente passos**: Como reproduzir o problema
+3. **Informe sistema**: Windows versão, hardware
+4. **Anexe arquivos**: Logs, screenshots se relevante
+
+## 🤝 Contribuição
+
+### Padrões de Código
+- Siga o estilo Rust padrão: `cargo fmt`
+- Resolva warnings: `cargo clippy`
+- Adicione testes para novas funcionalidades
+- Documente APIs públicas
+
+### Processo de Contribuição
+1. Fork o repositório
+2. Crie branch para sua feature (`git checkout -b feature/amazing-feature`)
+3. Commit suas mudanças (`git commit -m 'Add amazing feature'`)
+4. Push para branch (`git push origin feature/amazing-feature`)
+5. Abra um Pull Request
+
+### Áreas de Contribuição
+- **Performance**: Otimizações de algoritmos
+- **UI/UX**: Melhorias de interface
+- **Features**: Novas funcionalidades
+- **Bug fixes**: Correções de problemas
+- **Documentação**: Melhorias nos docs
 
 ## 📄 Licença
 
-MIT License - Veja [LICENSE](LICENSE) para detalhes.
+⚠️ **Licença não especificada no código atual**
 
----
+Este projeto atualmente não tem uma licença definida. Por favor, entre em contato com os mantenedores para informações sobre licenciamento.
 
 ## 🙏 Agradecimentos
 
-- **[egui](https://github.com/emilk/egui)** - Framework de UI Immediate Mode
-- **[windows-rs](https://github.com/microsoft/windows-rs)** - Bindings oficiais Microsoft
-- **[rayon](https://github.com/rayon-rs/rayon)** - Paralelismo data-parallel
-- **[rusqlite](https://github.com/rusqlite/rusqlite)** - SQLite bindings
+- **Rust Community** - Por uma linguagem incrível
+- **egui/eframe** - Framework de GUI excelente
+- **windows-rs** - Bindings seguros para Windows
+- **libmpv** - Player de vídeo de alta performance
+- **Contribuidores** - Todos que contribuem para o projeto
+
+## 📞 Suporte
+
+Para suporte:
+1. Consulte a [documentação](docs/) primeiro
+2. Use o [playbook de suporte](docs/09_support_playbook.md)
+3. Reporte issues com informações completas
+4. Inclua logs e detalhes de reprodução
 
 ---
 
-<div align="center">
-
-Feito com ❤️ em Rust
-
-</div>
-
-- **Bugs**: Abra uma [Issue no GitHub](https://github.com/seu-usuario/mtt-file-manager/issues)
-- **Features**: Consulte [ROADMAP_TECNICO.md](docs/ROADMAP_TECNICO.md) e vote/comente
-- **Discussões**: [GitHub Discussions](https://github.com/seu-usuario/mtt-file-manager/discussions)
-- **Segurança**: Reporte vulnerabilidades diretamente aos maintainers (NÃO abra issue pública)
-
----
-
-**Última Atualização**: 2025-12-27  
-**Versão**: 0.1.0  
-**Status**: ⚠️ Alpha (uso em produção não recomendado ainda)
+**MTT File Manager** - Um gerenciador de arquivos moderno, rápido e nativo para Windows.

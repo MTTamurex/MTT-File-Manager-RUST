@@ -74,23 +74,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_navigation_history() {
-        let mut history = NavigationHistory::new("C:\\".to_string());
-        assert_eq!(history.current_path(), Some(&"C:\\".to_string()));
-        assert!(!history.can_go_back());
+    fn test_navigation_history_truncation() {
+        let mut history = NavigationHistory::new("1".to_string());
+        history.navigate_to("2".to_string());
+        history.navigate_to("3".to_string());
+        
+        history.go_back(); // Now at "2"
+        assert_eq!(history.current_path(), Some(&"2".to_string()));
+        
+        // Navigate to "4" from "2" should truncate "3"
+        history.navigate_to("4".to_string());
+        assert_eq!(history.current_index, 2);
+        assert_eq!(history.paths.len(), 3);
+        assert_eq!(history.paths[2], "4");
         assert!(!history.can_go_forward());
+    }
 
-        history.navigate_to("C:\\Users".to_string());
-        assert_eq!(history.current_path(), Some(&"C:\\Users".to_string()));
-        assert!(history.can_go_back());
-        assert!(!history.can_go_forward());
-
+    #[test]
+    fn test_navigation_history_edge_cases() {
+        let mut history = NavigationHistory::new("1".to_string());
+        assert_eq!(history.go_back(), None);
+        assert_eq!(history.go_forward(), None);
+        
+        history.navigate_to("2".to_string());
         history.go_back();
-        assert_eq!(history.current_path(), Some(&"C:\\".to_string()));
-        assert!(!history.can_go_back());
-        assert!(history.can_go_forward());
-
+        assert_eq!(history.current_index, 0);
+        
         history.go_forward();
-        assert_eq!(history.current_path(), Some(&"C:\\Users".to_string()));
+        assert_eq!(history.current_index, 1);
     }
 }

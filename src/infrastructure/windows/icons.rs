@@ -1,10 +1,12 @@
 //! Windows icon extraction functions
 //! Follows .cursorrules: single responsibility, < 300 lines
 
+use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use windows::{
     core::*, Win32::Foundation::*, Win32::Graphics::Gdi::*, Win32::Storage::FileSystem::*,
-    Win32::System::Com::*, Win32::UI::Shell::*, Win32::UI::WindowsAndMessaging::*,
+    Win32::System::Com::*, Win32::UI::Shell::Common::*, Win32::UI::Shell::*,
+    Win32::UI::WindowsAndMessaging::*,
 };
 
 use crate::domain::file_entry::IconSize;
@@ -19,8 +21,7 @@ pub fn extract_computer_icon(
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     unsafe {
         // 1. Get PIDL for "My Computer" (CSIDL_DRIVES)
-        let pidl = match SHGetSpecialFolderLocation(HWND(std::ptr::null_mut()), CSIDL_DRIVES as i32)
-        {
+        let pidl = match SHGetSpecialFolderLocation(Some(HWND::default()), CSIDL_DRIVES as i32) {
             Ok(p) => p,
             Err(_) => {
                 return Err("Failed to get PIDL for My Computer".into());
@@ -84,7 +85,7 @@ pub fn extract_thumbnail(
 
         let (rgba_data, width, height) = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
 
-        let _ = DeleteObject(hbitmap);
+        let _ = DeleteObject(hbitmap.into());
 
         Ok((rgba_data, width, height))
     }
@@ -109,8 +110,7 @@ pub fn get_folder_preview(
             .chain(std::iter::once(0))
             .collect();
 
-        let shell_item: IShellItem =
-            SHCreateItemFromParsingName(PCWSTR(path_wide.as_ptr()), None)?;
+        let shell_item: IShellItem = SHCreateItemFromParsingName(PCWSTR(path_wide.as_ptr()), None)?;
         let image_factory: IShellItemImageFactory = shell_item.cast()?;
 
         // Request 256px with SIIGBF_THUMBNAILONLY to get the sandwich preview
@@ -120,20 +120,19 @@ pub fn get_folder_preview(
             Ok(hbitmap) => {
                 // SAFETY: hbitmap is valid, DeleteObject called after conversion
                 let result = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
-                let _ = DeleteObject(hbitmap);
+                let _ = DeleteObject(hbitmap.into());
                 Ok(result)
             }
             Err(_) => {
                 // Fallback: Get standard folder icon without preview content
                 let hbitmap = image_factory.GetImage(size, SIIGBF_ICONONLY)?;
                 let result = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
-                let _ = DeleteObject(hbitmap);
+                let _ = DeleteObject(hbitmap.into());
                 Ok(result)
             }
         }
     }
 }
-
 
 /// Forces extraction of a new thumbnail, bypassing the Windows thumbnail cache.
 ///
@@ -149,10 +148,10 @@ pub fn force_extract_thumbnail(
     path: &Path,
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     use windows::Win32::UI::Shell::{
-        IThumbnailCache, ISharedBitmap, LocalThumbnailCache,
-        WTS_FORCEEXTRACTION, WTS_SCALETOREQUESTEDSIZE, WTS_CACHEFLAGS,
+        ISharedBitmap, IThumbnailCache, LocalThumbnailCache, WTS_CACHEFLAGS, WTS_FORCEEXTRACTION,
+        WTS_SCALETOREQUESTEDSIZE,
     };
-    
+
     unsafe {
         // SAFETY: path_wide is valid for the duration of this call
         let path_wide: Vec<u16> = path
@@ -162,11 +161,10 @@ pub fn force_extract_thumbnail(
             .collect();
 
         // Create IShellItem for the file
-        let shell_item: IShellItem =
-            SHCreateItemFromParsingName(PCWSTR(path_wide.as_ptr()), None)?;
+        let shell_item: IShellItem = SHCreateItemFromParsingName(PCWSTR(path_wide.as_ptr()), None)?;
 
         // Create IThumbnailCache instance
-        let thumbnail_cache: IThumbnailCache = 
+        let thumbnail_cache: IThumbnailCache =
             CoCreateInstance(&LocalThumbnailCache, None, CLSCTX_INPROC_SERVER)?;
 
         // Request thumbnail with FORCE EXTRACTION (ignores cache)
@@ -174,12 +172,12 @@ pub fn force_extract_thumbnail(
         // WTS_SCALETOREQUESTEDSIZE = 0x100 - Scales to requested size
         let flags = WTS_FORCEEXTRACTION | WTS_SCALETOREQUESTEDSIZE;
         let requested_size: u32 = 512; // Good balance for preview panel
-        
+
         // Single attempt - no retries. Stage 5 (Media Foundation) handles failures.
         let mut shared_bitmap: Option<ISharedBitmap> = None;
         let mut _cache_flags: WTS_CACHEFLAGS = WTS_CACHEFLAGS::default();
         let mut _thumbnail_id = windows::Win32::UI::Shell::WTS_THUMBNAILID::default();
-        
+
         thumbnail_cache.GetThumbnail(
             &shell_item,
             requested_size,
@@ -188,20 +186,19 @@ pub fn force_extract_thumbnail(
             Some(&mut _cache_flags),
             Some(&mut _thumbnail_id),
         )?;
-        
+
         if let Some(bitmap) = shared_bitmap {
             // Get HBITMAP from ISharedBitmap
             let hbitmap = bitmap.GetSharedBitmap()?;
-            
+
             // Convert to RGBA
             let rgba_result = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
             return Ok(rgba_result);
         }
-        
+
         Err("No bitmap returned from IThumbnailCache".into())
     }
 }
-
 
 /// Extracts the native Windows icon for a file extension.
 ///
@@ -220,6 +217,10 @@ pub fn extract_file_icon(
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect();
+
+        // For Jumbo icons, use IShellItemImageFactory even with dummy path (if possible)
+        // Note: SHCreateItemFromParsingName with dummy path rarely works for Jumbo.
+        // We stick to SHGetFileInfo for dummy icons, but ensure we use Large if Jumbo requested.
 
         let mut shfi = SHFILEINFOW::default();
 
@@ -260,6 +261,30 @@ pub fn extract_folder_icon(
     size: IconSize,
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     unsafe {
+        if matches!(size, IconSize::Jumbo) {
+            // High quality folder icon using known folder ID if possible,
+            // or just a common path that is guaranteed to be a directory.
+            let windows_dir =
+                std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+            let path_wide: Vec<u16> = windows_dir
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+
+            if let Ok(shell_item) =
+                SHCreateItemFromParsingName::<_, _, IShellItem>(PCWSTR(path_wide.as_ptr()), None)
+            {
+                if let Ok(image_factory) = shell_item.cast::<IShellItemImageFactory>() {
+                    let size_factory = SIZE { cx: 256, cy: 256 };
+                    if let Ok(hbitmap) = image_factory.GetImage(size_factory, SIIGBF_ICONONLY) {
+                        let res = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
+                        let _ = DeleteObject(hbitmap.into());
+                        return Ok(res);
+                    }
+                }
+            }
+        }
+
         let dummy_path = "dummy_folder";
         let path_wide: Vec<u16> = dummy_path
             .encode_utf16()
@@ -308,6 +333,23 @@ pub fn extract_file_icon_by_path(
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect();
+
+        // For Jumbo icons, use IShellItemImageFactory (higher quality)
+        if matches!(size, IconSize::Jumbo) {
+            if let Ok(shell_item) =
+                SHCreateItemFromParsingName::<_, _, IShellItem>(PCWSTR(path_wide.as_ptr()), None)
+            {
+                if let Ok(image_factory) = shell_item.cast::<IShellItemImageFactory>() {
+                    let size_factory = SIZE { cx: 256, cy: 256 };
+                    // SIIGBF_ICONONLY to ensure we get the icon and not a thumbnail if it were a file
+                    if let Ok(hbitmap) = image_factory.GetImage(size_factory, SIIGBF_ICONONLY) {
+                        let res = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
+                        let _ = DeleteObject(hbitmap.into());
+                        return Ok(res);
+                    }
+                }
+            }
+        }
 
         let mut shfi = SHFILEINFOW::default();
 
@@ -366,7 +408,7 @@ pub fn extract_drive_icon(
             let hbitmap: HBITMAP = image_factory.GetImage(size_factory, SIIGBF_ICONONLY)?;
 
             let (rgba_data, width, height) = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
-            let _ = DeleteObject(hbitmap);
+            let _ = DeleteObject(hbitmap.into());
             return Ok((rgba_data, width, height));
         }
 
@@ -409,12 +451,12 @@ pub fn get_file_type_icon(
     extension: &str,
     size: IconSize,
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
+    use windows::core::PCWSTR;
     use windows::Win32::System::Com::CoInitialize;
     use windows::Win32::UI::Shell::{
-        SHGetFileInfoW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_LARGEICON, 
-        SHGFI_USEFILEATTRIBUTES, SHFILEINFOW
+        SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON, SHGFI_SMALLICON,
+        SHGFI_USEFILEATTRIBUTES,
     };
-    use windows::core::PCWSTR;
 
     // Debug: Verifique se a extensão está chegando limpa no console
     // println!("Buscando ícone para extensão: '{}', is_folder: {}", extension, is_folder);
@@ -423,13 +465,19 @@ pub fn get_file_type_icon(
         // Inicializa COM para garantir acesso ao Registro do Windows
         let _ = CoInitialize(None);
 
+        if matches!(size, IconSize::Jumbo) && is_folder {
+            if let Ok(res) = extract_folder_icon(IconSize::Jumbo) {
+                return Ok(res);
+            }
+        }
+
         let mut shfi = SHFILEINFOW::default();
-        
-        let flags = SHGFI_ICON 
-            | SHGFI_USEFILEATTRIBUTES 
+
+        let flags = SHGFI_ICON
+            | SHGFI_USEFILEATTRIBUTES
             | match size {
                 IconSize::Small => SHGFI_SMALLICON,
-                IconSize::Large | IconSize::Jumbo => SHGFI_LARGEICON, 
+                IconSize::Large | IconSize::Jumbo => SHGFI_LARGEICON,
             };
 
         let file_attributes = if is_folder {
@@ -440,15 +488,18 @@ pub fn get_file_type_icon(
 
         // ESTRATÉGIA CORRIGIDA:
         // Não use caminhos absolutos (C:\...). Use apenas um nome simples.
-        let dummy_name = if is_folder { 
-            "folder".to_string() 
+        let dummy_name = if is_folder {
+            "folder".to_string()
         } else {
             // Remove pontos extras e garante um único ponto
             let clean_ext = extension.trim_start_matches('.');
             format!("file.{}", clean_ext) // ex: "file.rar"
         };
-        
-        let wide_path: Vec<u16> = dummy_name.encode_utf16().chain(std::iter::once(0)).collect();
+
+        let wide_path: Vec<u16> = dummy_name
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
 
         let result = SHGetFileInfoW(
             PCWSTR(wide_path.as_ptr()),
@@ -463,12 +514,12 @@ pub fn get_file_type_icon(
         }
 
         let hicon = shfi.hIcon;
-        
+
         // Reutilize a função hicon_to_rgba que já implementamos e funciona
         let conversion_result = super::bitmap_conversion::hicon_to_rgba(hicon);
-        
+
         let _ = windows::Win32::UI::WindowsAndMessaging::DestroyIcon(hicon);
-        
+
         conversion_result
     }
 }
@@ -478,24 +529,23 @@ pub fn extract_recycle_bin_icon(
     size: IconSize,
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     use windows::Win32::UI::Shell::{
-        FOLDERID_RecycleBinFolder, SHGetKnownFolderIDList,
-        SHGetFileInfoW, SHGFI_PIDL, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_LARGEICON,
-        SHFILEINFOW,
+        FOLDERID_RecycleBinFolder, SHGetFileInfoW, SHGetKnownFolderIDList, SHFILEINFOW, SHGFI_ICON,
+        SHGFI_LARGEICON, SHGFI_PIDL, SHGFI_SMALLICON,
     };
-    
+
     unsafe {
         // Get the PIDL for the Recycle Bin
         let pidl = SHGetKnownFolderIDList(&FOLDERID_RecycleBinFolder, 0, None)?;
-        
+
         let mut shfi = SHFILEINFOW::default();
-        
+
         let flags = SHGFI_PIDL
             | SHGFI_ICON
             | match size {
                 IconSize::Small => SHGFI_SMALLICON,
                 IconSize::Large | IconSize::Jumbo => SHGFI_LARGEICON,
             };
-        
+
         let result = SHGetFileInfoW(
             PCWSTR(pidl as *const u16),
             windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES(0),
@@ -503,18 +553,73 @@ pub fn extract_recycle_bin_icon(
             std::mem::size_of::<SHFILEINFOW>() as u32,
             flags,
         );
-        
+
         // Free the PIDL
         windows::Win32::System::Com::CoTaskMemFree(Some(pidl as *mut _));
-        
+
         if result == 0 || shfi.hIcon.is_invalid() {
             return Err("Failed to get recycle bin icon".into());
         }
-        
+
         let hicon = shfi.hIcon;
         let conversion_result = super::bitmap_conversion::hicon_to_rgba(hicon);
         let _ = DestroyIcon(hicon);
-        
+
+        conversion_result
+    }
+}
+
+/// Extracts icon using Shell Namespace (PIDL), supporting virtual paths (ZIP contents).
+///
+/// This resolves the path to an ITEMIDLIST (PIDL) using standard Shell parsing,
+/// allowing icons to be retrieved for items inside ZIPs.
+pub fn extract_shell_icon(
+    path: &Path,
+    size: IconSize,
+) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
+    unsafe {
+        // 1. Parse Path to PIDL
+        let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
+        let path_wide: Vec<u16> = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        // SHParseDisplayName handles virtual paths like "C:\Archive.zip\Folder"
+        if SHParseDisplayName(PCWSTR(path_wide.as_ptr()), None, &mut pidl, 0, None).is_err() {
+            return Err("Failed to parse shell path".into());
+        }
+
+        let mut shfi = SHFILEINFOW::default();
+
+        // 2. Use SHGFI_PIDL flag to query by PIDL instead of path string
+        let flags = SHGFI_PIDL
+            | SHGFI_ICON
+            | match size {
+                IconSize::Small => SHGFI_SMALLICON,
+                IconSize::Large | IconSize::Jumbo => SHGFI_LARGEICON,
+            };
+
+        let result = SHGetFileInfoW(
+            PCWSTR(pidl as *const u16),
+            FILE_FLAGS_AND_ATTRIBUTES(0),
+            Some(&mut shfi),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            flags,
+        );
+
+        // 3. Always Free PIDL
+        CoTaskMemFree(Some(pidl as *const std::ffi::c_void));
+
+        if result == 0 || shfi.hIcon.is_invalid() {
+            return Err("Failed to get shell icon".into());
+        }
+
+        let hicon = shfi.hIcon;
+        let conversion_result = super::bitmap_conversion::hicon_to_rgba(hicon);
+        let _ = DestroyIcon(hicon);
+
         conversion_result
     }
 }
