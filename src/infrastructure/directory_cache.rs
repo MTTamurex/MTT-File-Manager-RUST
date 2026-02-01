@@ -1,66 +1,118 @@
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use lru::LruCache;
 
 use crate::domain::file_entry::FileEntry;
 
-const MAX_CACHED_DIRS: usize = 50;
-const MAX_CACHE_AGE: Duration = Duration::from_secs(300);
+const CACHE_CAPACITY: usize = 300; // 300 items (approx 50-100MB RAM)
+const REVALIDATE_DEBOUNCE: Duration = Duration::from_millis(2000); // 2 seconds
 
-struct CachedDirectory {
+struct CachedFolder {
     entries: Vec<FileEntry>,
-    cached_at: Instant,
-    item_count: usize,
+    last_check: Instant,        // When we last checked the disk for changes
+    last_modified: SystemTime,  // The folder's modification time on disk
 }
 
 pub struct DirectoryCache {
-    cache: Mutex<LruCache<PathBuf, CachedDirectory>>,
+    inner: Arc<Mutex<LruCache<PathBuf, CachedFolder>>>,
 }
 
 impl DirectoryCache {
     pub fn new() -> Self {
         Self {
-            cache: Mutex::new(LruCache::new(
-                NonZeroUsize::new(MAX_CACHED_DIRS).unwrap(),
-            )),
+            inner: Arc::new(Mutex::new(LruCache::new(
+                NonZeroUsize::new(CACHE_CAPACITY).unwrap(),
+            ))),
         }
     }
 
+    /// Phase 1: Instant Feedback (The Cache Hit)
+    /// Returns cached entries immediately if available
     pub fn get(&self, path: &PathBuf) -> Option<Vec<FileEntry>> {
-        let mut cache = self.cache.lock().ok()?;
-        if let Some(cached) = cache.get(path) {
-            if cached.cached_at.elapsed() < MAX_CACHE_AGE {
-                return Some(cached.entries.clone());
+        let mut cache = self.inner.lock().ok()?;
+        if let Some(cached) = cache.get_mut(path) {
+            return Some(cached.entries.clone());
+        }
+        None
+    }
+
+    /// Phase 2: The Debounce Check (Stale-While-Revalidate)
+    /// Checks if cache needs revalidation based on debounce time
+    pub fn needs_revalidation(&self, path: &PathBuf) -> bool {
+        if let Ok(mut cache) = self.inner.lock() {
+            if let Some(cached) = cache.get_mut(path) {
+                let elapsed = cached.last_check.elapsed();
+                let needs_reval = elapsed > REVALIDATE_DEBOUNCE;
+                eprintln!("[STALE-WHILE-REVALIDATE] Debounce check for {:?}: {}ms elapsed, needs_revalidation: {}", 
+                    path, elapsed.as_millis(), needs_reval);
+                return needs_reval;
+            }
+        }
+        false
+    }
+
+    /// Get current modification time of directory on disk
+    pub fn get_dir_mtime(&self, path: &PathBuf) -> Option<SystemTime> {
+        std::fs::metadata(path)
+            .and_then(|meta| meta.modified())
+            .ok()
+    }
+
+    /// Check if directory has been modified since last cache
+    pub fn has_directory_changed(&self, path: &PathBuf) -> Option<bool> {
+        if let Ok(mut cache) = self.inner.lock() {
+            if let Some(cached) = cache.get_mut(path) {
+                if let Some(current_mtime) = self.get_dir_mtime(path) {
+                    let has_changed = cached.last_modified != current_mtime;
+                    eprintln!("[STALE-WHILE-REVALIDATE] Directory change check for {:?}: cached_time={:?}, current_time={:?}, changed={}", 
+                        path, cached.last_modified, current_mtime, has_changed);
+                    return Some(has_changed);
+                }
             }
         }
         None
     }
 
+    /// Phase 3: Store/update cache with fresh data
+    /// Stores directory entries with current modification time
     pub fn put(&self, path: PathBuf, entries: Vec<FileEntry>) {
-        if let Ok(mut cache) = self.cache.lock() {
-            let item_count = entries.len();
+        if let Ok(mut cache) = self.inner.lock() {
+            let last_modified = self.get_dir_mtime(&path).unwrap_or_else(SystemTime::now);
+            eprintln!("[STALE-WHILE-REVALIDATE] Storing {} entries in cache for {:?} with mtime={:?}", 
+                entries.len(), path, last_modified);
             cache.put(
                 path,
-                CachedDirectory {
+                CachedFolder {
                     entries,
-                    cached_at: Instant::now(),
-                    item_count,
+                    last_check: Instant::now(),
+                    last_modified,
                 },
             );
         }
     }
 
+    /// Update last_check time without reloading entries
+    pub fn update_check_time(&self, path: &PathBuf) {
+        if let Ok(mut cache) = self.inner.lock() {
+            if let Some(cached) = cache.get_mut(path) {
+                cached.last_check = Instant::now();
+                eprintln!("[STALE-WHILE-REVALIDATE] Updated check time for {:?} - HDD silence maintained", path);
+            }
+        }
+    }
+
     pub fn invalidate(&self, path: &PathBuf) {
-        if let Ok(mut cache) = self.cache.lock() {
+        if let Ok(mut cache) = self.inner.lock() {
             let _ = cache.pop(path);
         }
     }
 
     pub fn invalidate_children(&self, parent: &PathBuf) {
-        if let Ok(mut cache) = self.cache.lock() {
+        if let Ok(mut cache) = self.inner.lock() {
             let keys_to_remove: Vec<PathBuf> = cache
                 .iter()
                 .filter(|(k, _)| k.starts_with(parent))
@@ -74,14 +126,14 @@ impl DirectoryCache {
     }
 
     pub fn clear(&self) {
-        if let Ok(mut cache) = self.cache.lock() {
+        if let Ok(mut cache) = self.inner.lock() {
             cache.clear();
         }
     }
 
     pub fn stats(&self) -> (usize, usize) {
-        if let Ok(cache) = self.cache.lock() {
-            let total_items: usize = cache.iter().map(|(_, v)| v.item_count).sum();
+        if let Ok(cache) = self.inner.lock() {
+            let total_items: usize = cache.iter().map(|(_, v)| v.entries.len()).sum();
             (cache.len(), total_items)
         } else {
             (0, 0)

@@ -138,6 +138,23 @@ impl ImageViewerApp {
     }
 
     pub fn load_folder(&mut self, force_refresh: bool) {
+        // GUARD CLAUSE: Prevent spam by checking if we're already on this path
+        eprintln!("[GUARD] Checking load_folder: current_path={:?}, loaded_path={:?}, force_refresh={}", 
+            self.current_path, self.loaded_path, force_refresh);
+        
+        if !force_refresh && self.current_path == self.loaded_path {
+            eprintln!("[GUARD] Skipping load_folder for {:?} - already loaded", self.current_path);
+            return;
+        }
+        
+        eprintln!("[GUARD] load_folder called for {:?} (force_refresh={}, loaded_path={:?})", 
+            self.current_path, force_refresh, self.loaded_path);
+        
+        // Mark as loaded immediately to prevent spam
+        self.loaded_path = self.current_path.clone();
+        
+        eprintln!("[GUARD] Starting folder loading process for {:?}", self.current_path);
+        
         self.generation += 1; // Incrementa a geração local
         self.current_generation
             .store(self.generation, AtomicOrdering::Relaxed); // Sincroniza com workers
@@ -221,38 +238,64 @@ impl ImageViewerApp {
             let mut batch_tracker = AdaptiveBatchTracker::new(config);
             let mut batch_size = batch_tracker.batch_size();
             
-            // CACHE-FIRST STRATEGY: Check directory cache first for instant navigation
+            // STALE-WHILE-REVALIDATE STRATEGY: Instant feedback with debounce
+            // NOTE: Only used for HDDs - SSDs bypass cache entirely for raw speed
             let base_path_buf = PathBuf::from(&base_path);
-            if let Some(cached_entries) = crate::infrastructure::cache_first::get_cached_directory(
-                &directory_cache, &base_path_buf
-            ) {
-                // INSTANT RETURN: Send cached entries immediately
-                let mut offset = 0;
-                while offset < cached_entries.len() {
-                    if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
+            
+            // Phase 1: Instant Feedback (The Cache Hit) - HDD ONLY
+            if !is_ssd {
+                if let Some(cached_entries) = directory_cache.get(&base_path_buf) {
+                    eprintln!("[FOLDER-LOADING] Phase 1: Cache hit for {:?} - {} entries, sending to UI immediately",
+                        base_path_buf, cached_entries.len());
+                    
+                    // INSTANT RETURN: Send cached entries immediately (0ms navigation)
+                    let mut offset = 0;
+                    while offset < cached_entries.len() {
+                        if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
+                            return;
+                        }
+                        let end = (offset + batch_size).min(cached_entries.len());
+                        let chunk = cached_entries[offset..end].to_vec();
+                        let _ = file_entry_sender.send((my_gen, chunk));
+                        ctx.request_repaint();
+                        batch_tracker.record_batch(std::time::Instant::now().elapsed(), end - offset);
+                        batch_size = batch_tracker.batch_size();
+                        offset = end;
+                    }
+                    let _ = file_entry_sender.send((my_gen, Vec::new()));
+                    ctx.request_repaint();
+                    
+                    // Phase 2: The Debounce Check (Stale-While-Revalidate)
+                    eprintln!("[FOLDER-LOADING] Phase 2: Starting debounce check for {:?}", base_path_buf);
+                    if directory_cache.needs_revalidation(&base_path_buf) {
+                        // Check if directory was modified since last cache
+                        if let Some(has_changed) = directory_cache.has_directory_changed(&base_path_buf) {
+                            if !has_changed {
+                                eprintln!("[FOLDER-LOADING] Phase 2: Directory unchanged, maintaining HDD silence");
+                                // HDD Silence: Directory unchanged, just update check time
+                                directory_cache.update_check_time(&base_path_buf);
+                                return;
+                            }
+                            eprintln!("[FOLDER-LOADING] Phase 2: Directory changed, proceeding to Phase 3");
+                            // Directory changed - continue to Phase 3 for full reload
+                        } else {
+                            eprintln!("[FOLDER-LOADING] Phase 2: Could not check modification time, proceeding to Phase 3");
+                            // Could not check modification time - continue to Phase 3
+                        }
+                    } else {
+                        eprintln!("[FOLDER-LOADING] Phase 2: Within debounce window (<2s), maintaining HDD silence");
+                        // HDD Silence: Navigation within 2 seconds, don't touch HDD
                         return;
                     }
-                    let end = (offset + batch_size).min(cached_entries.len());
-                    let chunk = cached_entries[offset..end].to_vec();
-                    let _ = file_entry_sender.send((my_gen, chunk));
-                    ctx.request_repaint();
-                    batch_tracker.record_batch(std::time::Instant::now().elapsed(), end - offset);
-                    batch_size = batch_tracker.batch_size();
-                    offset = end;
+                } else {
+                    eprintln!("[FOLDER-LOADING] Phase 1: Cache miss for {:?}, proceeding to Phase 3 (disk load)", base_path_buf);
                 }
-                let _ = file_entry_sender.send((my_gen, Vec::new()));
-                ctx.request_repaint();
-                
-                // BACKGROUND REVALIDATION: Check if directory changed
-                crate::infrastructure::cache_first::trigger_background_revalidation(
-                    &directory_cache, &base_path_buf
-                );
-                
-                return; // EXIT EARLY - No disk I/O needed!
+            } else {
+                eprintln!("[FOLDER-LOADING] SSD detected - bypassing cache for raw disk speed");
             }
             
             eprintln!(
-                "[PERF] Starting folder scan: {:?} (batch_size={}, is_ssd={})",
+                "[FOLDER-LOADING] Phase 3: Starting disk scan for {:?} (batch_size={}, is_ssd={})",
                 current_path, batch_size, is_ssd
             );
 
@@ -314,7 +357,10 @@ impl ImageViewerApp {
                                 }
                             }
 
-                            directory_cache.put(base.clone(), entries.clone());
+                            // Only cache for HDDs - SSDs bypass cache
+                            if !is_ssd {
+                                directory_cache.put(base.clone(), entries.clone());
+                            }
 
                             let mut offset = 0;
                             while offset < entries.len() {
@@ -348,7 +394,10 @@ impl ImageViewerApp {
                         }
                     }
                     if changed {
-                        directory_cache.put(PathBuf::from(&base_path), cached_entries.clone());
+                        // Only cache for HDDs - SSDs bypass cache
+                        if !is_ssd {
+                            directory_cache.put(PathBuf::from(&base_path), cached_entries.clone());
+                        }
                     }
                     let mut offset = 0;
                     while offset < cached_entries.len() {
@@ -550,7 +599,10 @@ impl ImageViewerApp {
                         ctx.request_repaint();
                     }
                     if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
-                        directory_cache.put(PathBuf::from(&base_path), all_entries_disk.clone());
+                        // Only cache for HDDs - SSDs bypass cache
+                        if !is_ssd {
+                            directory_cache.put(PathBuf::from(&base_path), all_entries_disk.clone());
+                        }
                         if let Some(di) = &directory_index_opt {
                             let indexed: Vec<IndexedFile> = all_entries_disk
                                 .iter()
@@ -787,8 +839,11 @@ impl ImageViewerApp {
             }
 
             if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
-                // CACHE STORAGE: Store in directory cache for instant future navigation
-                directory_cache.put(PathBuf::from(&base_path), all_entries_disk.clone());
+                // CACHE STORAGE: Store in directory cache for instant future navigation (HDD ONLY)
+                // SSDs bypass cache entirely - raw disk speed is faster than RAM cache
+                if !is_ssd {
+                    directory_cache.put(PathBuf::from(&base_path), all_entries_disk.clone());
+                }
                 
                 if let Some(di) = &directory_index_opt {
                     let indexed: Vec<IndexedFile> = all_entries_disk
@@ -829,6 +884,8 @@ impl ImageViewerApp {
         } else if self.is_recycle_bin_view {
             self.setup_recycle_bin_view();
         } else {
+            // Clear loaded_path to force reload even if path hasn't changed
+            self.loaded_path.clear();
             self.load_folder(true);
         }
     }

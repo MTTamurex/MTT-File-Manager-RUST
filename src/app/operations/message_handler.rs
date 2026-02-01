@@ -61,16 +61,23 @@ impl ImageViewerApp {
         }
 
         // Apply async rebuild results (filter/sort) from background thread
-        while let Ok(result) = self.items_rebuild_receiver.try_recv() {
-            if result.generation != self.generation {
-                continue;
+        // BLOCKING: Process all available results in batch
+        loop {
+            match self.items_rebuild_receiver.try_recv() {
+                Ok(result) => {
+                    if result.generation != self.generation {
+                        continue;
+                    }
+                    if result.request_id != self.items_rebuild_request_id {
+                        continue;
+                    }
+                    self.items = Arc::new(result.items);
+                    self.total_items = result.total_items;
+                    ctx.request_repaint();
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break, // No more messages
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
             }
-            if result.request_id != self.items_rebuild_request_id {
-                continue;
-            }
-            self.items = Arc::new(result.items);
-            self.total_items = result.total_items;
-            ctx.request_repaint();
         }
 
         fn normalize_for_match(p: &Path) -> String {
@@ -82,9 +89,12 @@ impl ImageViewerApp {
             }
         }
 
-        while let Ok(res) = self.file_op_res_receiver.try_recv() {
-            use crate::workers::file_operation_worker::FileOperationResult;
-            match res {
+        // BLOCKING: Process all available file operation results in batch
+        loop {
+            match self.file_op_res_receiver.try_recv() {
+                Ok(res) => {
+                    use crate::workers::file_operation_worker::FileOperationResult;
+                    match res {
                 FileOperationResult::RenameCompleted {
                     path,
                     new_name,
@@ -248,6 +258,18 @@ impl ImageViewerApp {
                     }
                 }
                 FileOperationResult::Finished => {}
+            }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+            }
+        }
+        
+        // Process any remaining messages
+        while let Ok(res) = self.file_op_res_receiver.try_recv() {
+            match res {
+                crate::workers::file_operation_worker::FileOperationResult::Finished => {}
+                _ => {} // Ignore other messages
             }
         }
 
@@ -491,20 +513,27 @@ impl ImageViewerApp {
         }
 
         // 1. STREAMING: Recebe lotes incrementais de FileEntry (Filtrado por geração)
+        // BLOCKING: Process all available file entries in batch
         let mut saw_end_of_load = false;
-        while let Ok((gen_id, new_batch)) = self.file_entry_receiver.try_recv() {
-            if gen_id != self.generation {
-                continue; // Descarta dados de uma navegação/refresh anterior
-            }
+        loop {
+            match self.file_entry_receiver.try_recv() {
+                Ok((gen_id, new_batch)) => {
+                    if gen_id != self.generation {
+                        continue; // Descarta dados de uma navegação/refresh anterior
+                    }
 
-            if new_batch.is_empty() {
-                // Lote vazio = Sinal de "Fim do Carregamento" da thread
-                saw_end_of_load = true;
-            } else {
-                // Chegou dados! Adiciona à lista mestre
-                self.pending_items_count = self.pending_items_count.saturating_add(new_batch.len());
-                self.pending_items_rebuild = true;
-                self.all_items.extend(new_batch);
+                    if new_batch.is_empty() {
+                        // Lote vazio = Sinal de "Fim do Carregamento" da thread
+                        saw_end_of_load = true;
+                    } else {
+                        // Chegou dados! Adiciona à lista mestre
+                        self.pending_items_count = self.pending_items_count.saturating_add(new_batch.len());
+                        self.pending_items_rebuild = true;
+                        self.all_items.extend(new_batch);
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break, // No more messages
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
             }
         }
 

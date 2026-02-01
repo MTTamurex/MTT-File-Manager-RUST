@@ -123,9 +123,60 @@ pub fn spawn_predictive_prefetcher(
         let mut prefetcher = PredictivePrefetcher::new();
 
         loop {
-            match receiver.recv_timeout(Duration::from_millis(100)) {
+            // BLOCKING: Wait for message instead of polling
+            match receiver.recv() {
                 Ok(PredictiveMessage::NavigatedTo(path)) => {
                     prefetcher.on_navigate(path);
+                    
+                    // Process predictions immediately after navigation
+                    if prefetcher.last_prefetch.elapsed() >= MIN_PREFETCH_INTERVAL {
+                        let predictions = prefetcher.predict();
+                        
+                        for prediction in predictions {
+                            if directory_cache.get(&prediction.path).is_some() {
+                                continue;
+                            }
+
+                            if let Some(ref index) = directory_index {
+                                if !index.might_have_changed(&prediction.path) {
+                                    continue;
+                                }
+                            }
+
+                            if let Some(entries) = ntfs_reader::read_directory_fast(&prediction.path) {
+                                let file_entries: Vec<crate::domain::file_entry::FileEntry> = entries
+                                    .into_iter()
+                                    .filter(|e| {
+                                        let is_hidden = (e.attributes & 0x02) != 0;
+                                        let is_system = (e.attributes & 0x04) != 0;
+                                        !is_hidden && !is_system && !e.name.starts_with('.')
+                                    })
+                                    .map(|e| crate::domain::file_entry::FileEntry {
+                                        path: prediction.path.join(&e.name),
+                                        name: e.name,
+                                        is_dir: e.is_dir,
+                                        size: if e.is_dir { 0 } else { e.size },
+                                        modified: e.modified,
+                                        folder_cover: None,
+                                        drive_info: None,
+                                        sync_status: crate::domain::file_entry::SyncStatus::None,
+                                        deletion_date: None,
+                                        recycle_original_path: None,
+                                    })
+                                    .collect();
+
+                                directory_cache.put(prediction.path.clone(), file_entries);
+
+                                eprintln!(
+                                    "[PERF] Prefetch cached: {:?} ({})",
+                                    prediction.path.file_name(),
+                                    prediction.reason
+                                );
+                            }
+                        }
+                        
+                        prefetcher.last_prefetch = Instant::now();
+                    }
                 }
                 Ok(PredictiveMessage::HistoryUpdated(history)) => {
                     prefetcher.history = history.into_iter().collect();
@@ -133,62 +184,10 @@ pub fn spawn_predictive_prefetcher(
                 Ok(PredictiveMessage::Shutdown) => {
                     break;
                 }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    break;
+                Err(_) => {
+                    break; // Channel closed
                 }
             }
-
-            if prefetcher.last_prefetch.elapsed() < MIN_PREFETCH_INTERVAL {
-                continue;
-            }
-
-            let predictions = prefetcher.predict();
-
-            for prediction in predictions {
-                if directory_cache.get(&prediction.path).is_some() {
-                    continue;
-                }
-
-                if let Some(ref index) = directory_index {
-                    if !index.might_have_changed(&prediction.path) {
-                        continue;
-                    }
-                }
-
-                if let Some(entries) = ntfs_reader::read_directory_fast(&prediction.path) {
-                    let file_entries: Vec<crate::domain::file_entry::FileEntry> = entries
-                        .into_iter()
-                        .filter(|e| {
-                            let is_hidden = (e.attributes & 0x02) != 0;
-                            let is_system = (e.attributes & 0x04) != 0;
-                            !is_hidden && !is_system && !e.name.starts_with('.')
-                        })
-                        .map(|e| crate::domain::file_entry::FileEntry {
-                            path: prediction.path.join(&e.name),
-                            name: e.name,
-                            is_dir: e.is_dir,
-                            size: if e.is_dir { 0 } else { e.size },
-                            modified: e.modified,
-                            folder_cover: None,
-                            drive_info: None,
-                            sync_status: crate::domain::file_entry::SyncStatus::None,
-                            deletion_date: None,
-                            recycle_original_path: None,
-                        })
-                        .collect();
-
-                    directory_cache.put(prediction.path.clone(), file_entries);
-
-                    eprintln!(
-                        "[PERF] Prefetch cached: {:?} ({})",
-                        prediction.path.file_name(),
-                        prediction.reason
-                    );
-                }
-            }
-
-            prefetcher.last_prefetch = Instant::now();
         }
     });
 }
