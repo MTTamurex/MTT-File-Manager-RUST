@@ -21,7 +21,7 @@ fn benchmark_shell_copy(c: &mut Criterion) {
             // Measure the blocking call
             let start = Instant::now();
             let _ = shell_operations::copy_item_with_shell(&src, &temp_dir, HWND(std::ptr::null_mut()));
-            let duration = start.elapsed();
+            let _duration = start.elapsed();
 
             // In a real scenario, we would assert duration < threshold if it was async,
             // but here we demonstrate it takes time (blocking).

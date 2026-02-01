@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -10,7 +9,8 @@ use crate::workers::prefetch_worker::PrefetchMessage;
 use crate::workers::thumbnail_worker::PriorityThumbnailQueue;
 
 const IDLE_THRESHOLD: Duration = Duration::from_secs(5);
-const WARMUP_INTERVAL: Duration = Duration::from_millis(200);
+#[allow(dead_code)]
+const _WARMUP_INTERVAL: Duration = Duration::from_millis(200);
 
 pub enum IdleWarmupMessage {
     UserActive,
@@ -19,6 +19,7 @@ pub enum IdleWarmupMessage {
     Shutdown,
 }
 
+#[allow(dead_code)]
 pub struct IdleWarmupWorker {
     last_activity: Instant,
     current_directory: Option<PathBuf>,
@@ -36,6 +37,7 @@ impl IdleWarmupWorker {
         }
     }
 
+    #[allow(dead_code)]
     pub fn is_idle(&self) -> bool {
         self.last_activity.elapsed() >= IDLE_THRESHOLD
     }
@@ -48,16 +50,15 @@ impl IdleWarmupWorker {
 
 pub fn spawn_idle_warmup_worker(
     receiver: Receiver<IdleWarmupMessage>,
-    thumbnail_queue: Arc<PriorityThumbnailQueue>,
-    directory_cache: Arc<DirectoryCache>,
-    current_generation: Arc<std::sync::atomic::AtomicUsize>,
-    prefetch_sender: std::sync::mpsc::Sender<PrefetchMessage>,
+    _thumbnail_queue: Arc<PriorityThumbnailQueue>,
+    _directory_cache: Arc<DirectoryCache>,
+    _current_generation: Arc<std::sync::atomic::AtomicUsize>,
+    _prefetch_sender: std::sync::mpsc::Sender<PrefetchMessage>,
 ) {
     std::thread::spawn(move || {
         io_priority::set_thread_priority(IOPriority::Background);
 
         let mut worker = IdleWarmupWorker::new();
-        let mut last_warmup = Instant::now();
 
         loop {
             // BLOCKING: Wait for message instead of polling
