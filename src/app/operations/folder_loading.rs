@@ -471,7 +471,6 @@ impl ImageViewerApp {
                             let batch_len = processed_batch.len();
                             let _ = file_entry_sender.send((my_gen, processed_batch));
                             batch_tracker.record_batch(batch_start.elapsed(), batch_len);
-                            batch_size = batch_tracker.batch_size();
                             batch_start = std::time::Instant::now();
                             ctx.request_repaint();
                         }
