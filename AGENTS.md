@@ -31,8 +31,11 @@ Este documento define um conjunto de regras, comportamentos e metodologias para 
 ║       - É um comando que deleta/limpa dados? (rm, clean, reset, etc)       ║
 ║       - → SE SIM: NUNCA execute sem permissão EXPLÍCITA do usuário         ║
 ║       - → Alerte sobre consequências ANTES de executar                      ║
-║                                                                              ║
-╠══════════════════════════════════════════════════════════════════════════════╣
+║  □ 5. ESSA ALTERAÇÃO IRÁ "QUEBRAR" A FUNCIONALIDADE DE OUTRAS FUNÇÕES?     ║
+║                                                                            ║
+║       - → SE SIM: NUNCA execute sem permissão EXPLÍCITA do usuário         ║
+║       - → Alerte sobre consequências ANTES de executar                     ║
+╠════════════════════════════════════════════════════════════════════════════╣
 ║  ⚠️  SE QUALQUER ITEM ACIMA FALHAR → PARE E PERGUNTE AO USUÁRIO            ║
 ║  ⚠️  ESTAS REGRAS TÊM PRIORIDADE SOBRE QUALQUER "INSTINTO" OU OTIMIZAÇÃO   ║
 ║  ⚠️  VELOCIDADE NÃO JUSTIFICA PULAR VERIFICAÇÕES                           ║
