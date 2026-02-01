@@ -165,13 +165,15 @@ pub fn spawn_predictive_prefetcher(
                                     })
                                     .collect();
 
-                                directory_cache.put(prediction.path.clone(), file_entries);
-
-                                eprintln!(
-                                    "[PERF] Prefetch cached: {:?} ({})",
-                                    prediction.path.file_name(),
-                                    prediction.reason
-                                );
+                                // Only cache for HDDs - SSDs bypass cache
+                                if !io_priority::is_ssd(&prediction.path) {
+                                    directory_cache.put(prediction.path.clone(), file_entries);
+                                    eprintln!(
+                                        "[PERF] Prefetch cached: {:?} ({})",
+                                        prediction.path.file_name(),
+                                        prediction.reason
+                                    );
+                                }
                             }
                         }
                         

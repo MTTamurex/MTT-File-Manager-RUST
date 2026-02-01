@@ -26,6 +26,11 @@ pub fn spawn_prefetch_worker(receiver: Receiver<PrefetchMessage>, directory_cach
                             continue;
                         }
 
+                        // Skip prefetch caching for SSDs - raw disk speed is sufficient
+                        if io_priority::is_ssd(&path) {
+                            continue;
+                        }
+
                         if let Some(entries) = ntfs_reader::read_directory_fast(&path) {
                             let file_entries: Vec<FileEntry> = entries
                                 .into_iter()
