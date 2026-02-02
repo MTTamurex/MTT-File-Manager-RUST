@@ -109,22 +109,22 @@ pub fn render_status_bar(
         // === CENTER-RIGHT: Sort controls ===
         ui.label("Ordenar:");
 
-        // Opções de ordenação diferentes para Computer View
-        let sort_modes: Vec<(SortMode, &str)> = if is_computer_view {
-            vec![
+        // PERFORMANCE: Static arrays instead of Vec allocation per frame
+        let sort_modes: &[(SortMode, &str)] = if is_computer_view {
+            &[
                 (SortMode::Name, "Nome"),
                 (SortMode::DriveTotalSpace, "Espaço Total"),
                 (SortMode::DriveFreeSpace, "Espaço Livre"),
             ]
         } else {
-            vec![
+            &[
                 (SortMode::Name, "Nome"),
                 (SortMode::Date, "Data"),
                 (SortMode::Size, "Tamanho"),
             ]
         };
 
-        for (mode, label) in sort_modes {
+        for &(mode, label) in sort_modes {
             if ui.selectable_label(*sort_mode == mode, label).clicked() {
                 if *sort_mode == mode {
                     *sort_descending = !*sort_descending;

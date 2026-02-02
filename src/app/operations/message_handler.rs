@@ -102,6 +102,8 @@ impl ImageViewerApp {
                 } => {
                     let current_str = normalize_for_match(Path::new(&self.current_path));
                     let parent_str = normalize_for_match(parent_folder.as_path());
+                    // PERFORMANCE: Cache path normalization to avoid redundant allocations
+                    let path_str = normalize_for_match(&path);
                     self.directory_cache.invalidate(&parent_folder);
                     if let Some(di) = &self.directory_index {
                         let _ = di.invalidate(&parent_folder);
@@ -111,7 +113,7 @@ impl ImageViewerApp {
                     // This prevents stale data in the Details Panel even before reload completes.
                     // Note: load_folder() does NOT clear selected_file, so this persists correctly.
                     if let Some(selected) = &mut self.selected_file {
-                        if normalize_for_match(&selected.path) == normalize_for_match(&path) {
+                        if normalize_for_match(&selected.path) == path_str {
                             let new_path = parent_folder.join(&new_name);
                             selected.path = new_path;
                             selected.name = new_name;

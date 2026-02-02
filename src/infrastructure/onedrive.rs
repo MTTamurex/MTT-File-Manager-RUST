@@ -4,22 +4,17 @@
 //! folder and to parse file attributes into sync status values.
 
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
-
-use rustc_hash::FxHashMap;
+use std::sync::OnceLock;
 
 use crate::domain::file_entry::SyncStatus;
 
 // Cached OneDrive root paths (initialized once at startup)
 static ONEDRIVE_ROOTS: OnceLock<Vec<String>> = OnceLock::new();
 
-// Cache of cloud attribute detection results per drive letter.
-// Avoids repeated GetFileAttributesW() syscalls on drives that are clearly not OneDrive.
-static CLOUD_ATTR_CACHE: OnceLock<Mutex<FxHashMap<char, bool>>> = OnceLock::new();
-
-fn get_cloud_attr_cache() -> &'static Mutex<FxHashMap<char, bool>> {
-    CLOUD_ATTR_CACHE.get_or_init(|| Mutex::new(FxHashMap::default()))
-}
+// NOTE: Cloud attribute detection is NOT cached per drive letter.
+// Different paths on the same drive can have different cloud attributes
+// (e.g., C:\Users\Docs = no cloud, C:\Users\OneDrive = cloud).
+// GetFileAttributesW is a fast cached filesystem call, no disk I/O.
 
 // Windows file attribute constants for cloud files (undocumented but well-known)
 const FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: u32 = 0x00400000;
@@ -66,35 +61,10 @@ pub fn is_onedrive_path(path: &Path) -> bool {
 /// Fallback detection using file attributes for cases where the OneDrive root
 /// isn't covered by environment variables (e.g., secondary business accounts).
 ///
-/// PERFORMANCE: Results are cached per drive letter to avoid repeated
-/// GetFileAttributesW() syscalls on drives that will never be OneDrive
-/// (e.g., external USB drives, secondary internal drives).
+/// Calls GetFileAttributesW directly (fast cached filesystem call, no disk I/O).
+/// NOT cached per drive letter — different paths on the same drive can have
+/// different cloud attributes (e.g., C:\Users\Docs vs C:\Users\OneDrive).
 pub fn path_has_cloud_attributes(path: &Path) -> bool {
-    // Extract drive letter for caching
-    if let Some(s) = path.to_str() {
-        if s.len() >= 2 && s.as_bytes().get(1) == Some(&b':') {
-            let drive_letter = s.chars().next().unwrap().to_ascii_uppercase();
-
-            // Check cache first — avoids GetFileAttributesW syscall on known non-cloud drives
-            if let Ok(cache) = get_cloud_attr_cache().lock() {
-                if let Some(&has_cloud) = cache.get(&drive_letter) {
-                    return has_cloud;
-                }
-            }
-
-            // Cache miss — perform the actual check
-            let result = check_cloud_attributes_uncached(path);
-
-            // Cache the result (cloud attributes don't change during a session)
-            if let Ok(mut cache) = get_cloud_attr_cache().lock() {
-                cache.insert(drive_letter, result);
-            }
-
-            return result;
-        }
-    }
-
-    // Fallback for non-standard paths (network, etc.)
     check_cloud_attributes_uncached(path)
 }
 

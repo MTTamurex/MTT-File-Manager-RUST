@@ -234,27 +234,8 @@ pub fn render_list_view(
                 // Truncate text to fit within column
                 let available_text_width = *width - 30.0; // Reserve space for arrow and padding
                 let font_id = FontId::proportional(12.0);
-                let full_text_galley = ui.fonts(|f| f.layout_no_wrap(text.to_string(), font_id.clone(), text_color));
-                
-                let display_text = if full_text_galley.rect.width() > available_text_width {
-                    // Truncate with ellipsis
-                    let mut truncated = text.to_string();
-                    while !truncated.is_empty() {
-                        let test_text = format!("{}...", truncated);
-                        let test_galley = ui.fonts(|f| f.layout_no_wrap(test_text.clone(), font_id.clone(), text_color));
-                        if test_galley.rect.width() <= available_text_width {
-                            break;
-                        }
-                        truncated.pop();
-                    }
-                    if truncated.is_empty() {
-                        "...".to_string()
-                    } else {
-                        format!("{}...", truncated)
-                    }
-                } else {
-                    text.to_string()
-                };
+                // PERFORMANCE: Reuse binary-search truncation instead of linear char-by-char loop
+                let display_text = truncate_text_for_column(text, available_text_width, &font_id, ui);
                 
                 ui.painter().text(
                     header_rect.min + egui::vec2(8.0, 4.0),
@@ -1019,8 +1000,9 @@ fn render_list_item(
             }
         } else if item.is_dir && !item.name.to_lowercase().ends_with(".zip") {
             // folder: Windows native icon
-            let is_virtual_zip = item.path.to_string_lossy().to_lowercase().contains(".zip\\")
-                || item.path.to_string_lossy().to_lowercase().contains(".zip/");
+            // PERFORMANCE: Single to_string_lossy() + to_lowercase() instead of two
+            let path_lower = item.path.to_string_lossy().to_lowercase();
+            let is_virtual_zip = path_lower.contains(".zip\\") || path_lower.contains(".zip/");
 
             if is_virtual_zip {
                 if let Some(folder_icon) = ctx
@@ -1245,19 +1227,73 @@ fn render_section_header(ui: &mut Ui, title: &str) {
     ui.add_space(4.0);
 }
 
-/// Helper function to get file type string
-fn get_file_type_string(item: &FileEntry) -> String {
-    // Check for Zip manually because is_dir might be true
-    if item.name.to_lowercase().ends_with(".zip") {
-        return "Arquivo ZIP".to_string();
+/// PERFORMANCE: Returns Cow<str> — static &str for common extensions, allocated only for rare ones.
+fn get_file_type_string(item: &FileEntry) -> std::borrow::Cow<'static, str> {
+    use std::borrow::Cow;
+
+    // Check for ZIP manually because is_dir might be true (ASCII byte check, no allocation)
+    if item.name.len() >= 4 {
+        let bytes = item.name.as_bytes();
+        let last4 = &bytes[bytes.len() - 4..];
+        if last4[0] == b'.'
+            && last4[1].to_ascii_lowercase() == b'z'
+            && last4[2].to_ascii_lowercase() == b'i'
+            && last4[3].to_ascii_lowercase() == b'p'
+        {
+            return Cow::Borrowed("Arquivo ZIP");
+        }
     }
     if item.is_dir {
-        return "Pasta".to_string();
+        return Cow::Borrowed("Pasta");
     }
+
     if let Some(ext) = item.path.extension() {
-        return format!("Arquivo {}", ext.to_string_lossy().to_uppercase());
+        let ext_lower = ext.to_ascii_lowercase();
+        let ext_str = ext_lower.to_string_lossy();
+
+        // Static strings for common file types (zero allocation)
+        match ext_str.as_ref() {
+            "txt" => return Cow::Borrowed("Arquivo TXT"),
+            "pdf" => return Cow::Borrowed("Arquivo PDF"),
+            "doc" | "docx" => return Cow::Borrowed("Arquivo Word"),
+            "xls" | "xlsx" => return Cow::Borrowed("Arquivo Excel"),
+            "ppt" | "pptx" => return Cow::Borrowed("Arquivo PowerPoint"),
+            "jpg" | "jpeg" => return Cow::Borrowed("Arquivo JPEG"),
+            "png" => return Cow::Borrowed("Arquivo PNG"),
+            "gif" => return Cow::Borrowed("Arquivo GIF"),
+            "bmp" => return Cow::Borrowed("Arquivo BMP"),
+            "webp" => return Cow::Borrowed("Arquivo WebP"),
+            "mp4" => return Cow::Borrowed("Arquivo MP4"),
+            "mkv" => return Cow::Borrowed("Arquivo MKV"),
+            "avi" => return Cow::Borrowed("Arquivo AVI"),
+            "mov" => return Cow::Borrowed("Arquivo MOV"),
+            "wmv" => return Cow::Borrowed("Arquivo WMV"),
+            "mp3" => return Cow::Borrowed("Arquivo MP3"),
+            "wav" => return Cow::Borrowed("Arquivo WAV"),
+            "flac" => return Cow::Borrowed("Arquivo FLAC"),
+            "exe" => return Cow::Borrowed("Arquivo Executável"),
+            "dll" => return Cow::Borrowed("Biblioteca DLL"),
+            "html" | "htm" => return Cow::Borrowed("Arquivo HTML"),
+            "css" => return Cow::Borrowed("Arquivo CSS"),
+            "js" => return Cow::Borrowed("Arquivo JavaScript"),
+            "json" => return Cow::Borrowed("Arquivo JSON"),
+            "xml" => return Cow::Borrowed("Arquivo XML"),
+            "rs" => return Cow::Borrowed("Arquivo Rust"),
+            "py" => return Cow::Borrowed("Arquivo Python"),
+            "java" => return Cow::Borrowed("Arquivo Java"),
+            "c" | "cpp" | "h" | "hpp" => return Cow::Borrowed("Arquivo C/C++"),
+            "lnk" => return Cow::Borrowed("Atalho"),
+            "iso" => return Cow::Borrowed("Imagem de Disco"),
+            _ => {
+                return Cow::Owned(format!(
+                    "Arquivo {}",
+                    ext.to_string_lossy().to_uppercase()
+                ));
+            }
+        }
     }
-    "Arquivo".to_string()
+
+    Cow::Borrowed("Arquivo")
 }
 
 /// Renders a sync status badge (OneDrive) in the status column
