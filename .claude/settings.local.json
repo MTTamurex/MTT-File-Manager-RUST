@@ -11,7 +11,8 @@
       "Bash(cargo build:*)",
       "Bash(dir:*)",
       "Bash(find:*)",
-      "Bash(git show:*)"
+      "Bash(git show:*)",
+      "Bash(cargo test:*)"
     ],
     "additionalDirectories": [
       "c:\\Users\\mtamu\\github\\MTT-File-Manager-RUST\\docs"

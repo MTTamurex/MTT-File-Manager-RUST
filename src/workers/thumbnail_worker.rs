@@ -1235,10 +1235,10 @@ mod tests {
             state.is_ssd = Some(false);
         }
 
-        queue.push_with_index(path_a.clone(), 1, 64, IOPriority::Prefetch, Some(2));
-        queue.push_with_index(path_b.clone(), 1, 64, IOPriority::Prefetch, Some(1));
+        queue.push_with_index(path_a.clone(), 1, 64, IOPriority::Prefetch, Some(2), 0);
+        queue.push_with_index(path_b.clone(), 1, 64, IOPriority::Prefetch, Some(1), 0);
 
-        let (path, _, _, _) = queue.pop().unwrap();
+        let (path, _, _, _, _) = queue.pop().unwrap();
         assert_eq!(path, path_b);
     }
 }
