@@ -2,6 +2,8 @@
 //! Follows .cursorrules: single responsibility, < 300 lines
 
 use eframe::egui::{self, Color32, FontId, Pos2, Rect, RichText, Sense, Ui};
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::domain::file_entry::{FileEntry, SortMode, SyncStatus};
@@ -10,21 +12,57 @@ use crate::infrastructure::windows::{format_date, format_size};
 use crate::ui::cache::FxHashSet;
 use crate::ui::views::ViewportTracker;
 
+// PERFORMANCE: Thread-local cache for font metrics to avoid redundant text layout calculations
+thread_local! {
+    static FONT_WIDTH_CACHE: RefCell<HashMap<(String, u32, Color32), f32>> = RefCell::new(HashMap::new());
+}
+
+/// Clear the font width cache periodically to prevent unbounded growth
+#[allow(dead_code)]
+pub fn clear_font_width_cache() {
+    FONT_WIDTH_CACHE.with(|cache| {
+        cache.borrow_mut().clear();
+    });
+}
+
+/// Get text width from cache or compute and cache it
+fn get_cached_text_width(text: &str, font_id: &FontId, color: Color32, ui: &Ui) -> f32 {
+    let key = (text.to_string(), font_id.size as u32, color);
+    
+    FONT_WIDTH_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        
+        if let Some(&width) = cache.get(&key) {
+            return width;
+        }
+        
+        // Limit cache size to prevent unbounded growth
+        if cache.len() > 5000 {
+            cache.clear();
+        }
+        
+        let width = ui.fonts(|f| f.layout_no_wrap(text.to_string(), font_id.clone(), color).rect.width());
+        cache.insert(key, width);
+        width
+    })
+}
+
 // PERFORMANCE: Tooltip debounce to avoid creation/destruction during scroll
 const TOOLTIP_DELAY_SECS: f32 = 0.3; // Only show tooltip after 300ms hover
 
 /// Helper to truncate text to fit within a column width
 /// PERFORMANCE: Uses byte-position slicing instead of chars().take().collect() to avoid
 /// String allocations on each binary search iteration. Only one String is created at the end.
+/// Also uses font width cache to avoid redundant text layout calculations.
 fn truncate_text_for_column(text: &str, max_width: f32, font_id: &FontId, ui: &Ui) -> String {
     // Quick check: does full text fit?
-    let full_width = ui.fonts(|f| f.layout_no_wrap(text.to_string(), font_id.clone(), Color32::WHITE).rect.width());
+    let full_width = get_cached_text_width(text, font_id, Color32::WHITE, ui);
     if full_width <= max_width {
         return text.to_string();
     }
 
     let ellipsis = "...";
-    let ellipsis_width = ui.fonts(|f| f.layout_no_wrap(ellipsis.to_string(), font_id.clone(), Color32::WHITE).rect.width());
+    let ellipsis_width = get_cached_text_width(ellipsis, font_id, Color32::WHITE, ui);
     let available_width = max_width - ellipsis_width;
 
     if available_width <= 0.0 {
@@ -47,7 +85,7 @@ fn truncate_text_for_column(text: &str, max_width: f32, font_id: &FontId, ui: &U
         let mid = (left + right + 1) / 2;
         let byte_end = if mid < char_count { char_boundaries[mid] } else { text.len() };
         let slice = &text[..byte_end];
-        let w = ui.fonts(|f| f.layout_no_wrap(slice.to_string(), font_id.clone(), Color32::WHITE).rect.width());
+        let w = get_cached_text_width(slice, font_id, Color32::WHITE, ui);
 
         if w <= available_width {
             left = mid;
@@ -606,7 +644,21 @@ pub fn render_list_view(
         let vis_max_row = (((current_scroll + viewport_h) / row_height).ceil() as usize) + overscan;
         let vis_max_row = vis_max_row.min(total_rows);
 
-        for i in vis_min_row..vis_max_row {
+        // PERFORMANCE: During fast scroll, reduce overscan to minimize rendering work
+        // This maintains responsiveness by doing less work per frame
+        const SCROLL_RENDER_OVERSCAN: usize = 1;
+        let effective_min_row = if is_scrolling { 
+            vis_min_row.saturating_add(overscan.saturating_sub(SCROLL_RENDER_OVERSCAN))
+        } else { 
+            vis_min_row 
+        };
+        let effective_max_row = if is_scrolling {
+            (vis_max_row.saturating_sub(overscan.saturating_sub(SCROLL_RENDER_OVERSCAN))).min(total_rows)
+        } else {
+            vis_max_row
+        };
+
+        for i in effective_min_row..effective_max_row {
             let item = &ctx.items[i];
             let item_rect = Rect::from_min_size(
                 egui::pos2(

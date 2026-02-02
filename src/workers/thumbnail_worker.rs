@@ -470,7 +470,7 @@ fn thumbnail_worker_loop(
                                 height: 0,
                                 generation: req_gen,
                             });
-                            throttle_repaint(&ctx, &mut last_repaint);
+                            throttle_repaint_with_priority(&ctx, &mut last_repaint, req_priority);
                             continue;
                         }
 
@@ -488,7 +488,7 @@ fn thumbnail_worker_loop(
                                 height: 0,
                                 generation: req_gen,
                             });
-                            throttle_repaint(&ctx, &mut last_repaint);
+                            throttle_repaint_with_priority(&ctx, &mut last_repaint, req_priority);
                             continue;
                         }
 
@@ -567,7 +567,7 @@ fn thumbnail_worker_loop(
                             height: h,
                             generation: req_gen,
                         });
-                        throttle_repaint(&ctx, &mut last_repaint);
+                        throttle_repaint_with_priority(&ctx, &mut last_repaint, req_priority);
                     }
                 }
             }
@@ -1166,12 +1166,27 @@ fn hbitmap_to_rgba(
     }
 }
 
-fn throttle_repaint(ctx: &egui::Context, last_repaint: &mut Instant) {
-    if last_repaint.elapsed().as_millis() >= 33 {
+/// PERFORMANCE: Adaptive repaint throttling based on priority
+/// Interactive requests get faster repaint (16ms ~ 60 FPS)
+/// Background/Prefetch use slower repaint (33ms ~ 30 FPS) to reduce CPU load
+fn throttle_repaint_with_priority(ctx: &egui::Context, last_repaint: &mut Instant, priority: IOPriority) {
+    const INTERACTIVE_INTERVAL_MS: u64 = 16; // ~60 FPS for interactive
+    const BACKGROUND_INTERVAL_MS: u64 = 33;  // ~30 FPS for background
+    
+    let interval_ms = match priority {
+        IOPriority::Interactive => INTERACTIVE_INTERVAL_MS,
+        _ => BACKGROUND_INTERVAL_MS,
+    };
+    
+    let elapsed = last_repaint.elapsed().as_millis() as u64;
+    
+    if elapsed >= interval_ms {
         ctx.request_repaint();
         *last_repaint = Instant::now();
     } else {
-        ctx.request_repaint_after(std::time::Duration::from_millis(33));
+        // Schedule repaint for when throttle expires
+        let remaining = interval_ms.saturating_sub(elapsed);
+        ctx.request_repaint_after(std::time::Duration::from_millis(remaining));
     }
 }
 

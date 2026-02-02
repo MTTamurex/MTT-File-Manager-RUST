@@ -635,7 +635,19 @@ impl ImageViewerApp {
         let is_scrolling = self.last_scroll_time.elapsed() < std::time::Duration::from_millis(100);
         let is_video_playing = self.is_video_playing_docked();
 
-        let base_max_uploads = if is_video_playing && is_scrolling {
+        // CRITICAL PERFORMANCE MODE: Skip all non-essential uploads when FPS is critically low
+        // This prevents compounding performance issues during heavy load
+        const CRITICAL_FRAME_TIME_MS: f32 = 33.33; // < 30 FPS
+        const SEVERE_FRAME_TIME_MS: f32 = 25.0;    // < 40 FPS
+        
+        let is_performance_critical = self.frame_time_peak_ms > CRITICAL_FRAME_TIME_MS;
+        let is_performance_severe = self.frame_time_peak_ms > SEVERE_FRAME_TIME_MS;
+
+        let base_max_uploads = if is_performance_critical {
+            1 // Minimal: only most essential uploads
+        } else if is_performance_severe {
+            2 // Reduced: critical performance mode
+        } else if is_video_playing && is_scrolling {
             4 // Balanced: still load during scroll+video
         } else if is_scrolling {
             6 // Generous during scroll — time budget is the real limiter
@@ -726,6 +738,22 @@ impl ImageViewerApp {
                     self.cache_manager
                         .finish_pending_upload(&thumbnail_data.path);
                     continue;
+                }
+
+                // PERFORMANCE: In critical mode, only process visible items
+                // Skip non-visible uploads entirely to maintain responsiveness
+                if is_performance_critical {
+                    if let Some(ref vis) = visible_paths {
+                        if !vis.contains(&thumbnail_data.path) {
+                            // Defer to back of queue - will retry later when performance recovers
+                            self.pending_thumbnails.push_back(thumbnail_data);
+                            deferred_count += 1;
+                            if deferred_count > max_uploads_per_frame * 2 {
+                                break;
+                            }
+                            continue;
+                        }
+                    }
                 }
 
                 // PERFORMANCE: During scroll, prioritize visible items
