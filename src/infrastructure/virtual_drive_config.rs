@@ -34,8 +34,16 @@ impl Default for VirtualDriveConfig {
 }
 
 impl VirtualDriveConfig {
-    /// Get the config file path (in current directory)
+    /// Get the config file path (next to the executable)
     fn config_path() -> PathBuf {
+        // Get the executable's directory
+        if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(exe_dir) = exe_path.parent() {
+                return exe_dir.join("virtual_drive_config.json");
+            }
+        }
+        
+        // Fallback to current directory if exe path detection fails
         PathBuf::from("virtual_drive_config.json")
     }
 
