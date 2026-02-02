@@ -18,6 +18,23 @@ impl ImageViewerApp {
         };
         self.disk_cache.set_preference("sort_mode", sort_mode_str);
 
+        let sort_mode_computer_str = match self.sort_mode_computer {
+            SortMode::Name => "name",
+            SortMode::DriveTotalSpace => "drive_total",
+            SortMode::DriveFreeSpace => "drive_free",
+            _ => "name", // Computer view only supports these 3
+        };
+        self.disk_cache.set_preference("sort_mode_computer", sort_mode_computer_str);
+
+        let sort_mode_normal_str = match self.sort_mode_normal {
+            SortMode::Name => "name",
+            SortMode::Date => "date",
+            SortMode::Size => "size",
+            SortMode::Type => "type",
+            _ => "name", // Normal folders don't use drive modes
+        };
+        self.disk_cache.set_preference("sort_mode_normal", sort_mode_normal_str);
+
         self.disk_cache.set_preference(
             "sort_descending",
             if self.sort_descending {
@@ -95,5 +112,21 @@ impl ImageViewerApp {
                     .set_preference("media_volume", &volume.to_string());
             }
         }
+
+        // Save list view column widths - Regular view
+        self.disk_cache.set_preference("list_col_name_width", &self.list_col_name_width.to_string());
+        self.disk_cache.set_preference("list_col_date_width", &self.list_col_date_width.to_string());
+        self.disk_cache.set_preference("list_col_type_width", &self.list_col_type_width.to_string());
+        self.disk_cache.set_preference("list_col_size_width", &self.list_col_size_width.to_string());
+        // Save list view column widths - OneDrive view
+        self.disk_cache.set_preference("list_col_onedrive_name_width", &self.list_col_onedrive_name_width.to_string());
+        self.disk_cache.set_preference("list_col_onedrive_date_width", &self.list_col_onedrive_date_width.to_string());
+        self.disk_cache.set_preference("list_col_onedrive_type_width", &self.list_col_onedrive_type_width.to_string());
+        self.disk_cache.set_preference("list_col_onedrive_size_width", &self.list_col_onedrive_size_width.to_string());
+        self.disk_cache.set_preference("list_col_onedrive_status_width", &self.list_col_onedrive_status_width.to_string());
+        // Save list view column widths - Computer view
+        self.disk_cache.set_preference("list_col_computer_name_width", &self.list_col_computer_name_width.to_string());
+        self.disk_cache.set_preference("list_col_computer_total_width", &self.list_col_computer_total_width.to_string());
+        self.disk_cache.set_preference("list_col_computer_free_width", &self.list_col_computer_free_width.to_string());
     }
 }
