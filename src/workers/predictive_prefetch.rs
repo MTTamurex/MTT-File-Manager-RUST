@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::infrastructure::directory_cache::DirectoryCache;
-use crate::infrastructure::directory_index::DirectoryIndex;
 use crate::infrastructure::io_priority::{self, IOPriority};
 use crate::infrastructure::ntfs_reader;
 
@@ -40,13 +39,17 @@ impl PredictivePrefetcher {
         }
     }
 
-    fn predict(&self) -> Vec<PrefetchPrediction> {
+    /// Predict directories the user is likely to navigate to next.
+    /// PERFORMANCE: Uses directory_cache data instead of std::fs::read_dir() to avoid HDD I/O.
+    /// If a directory isn't cached, we skip that prediction category entirely (zero disk access).
+    fn predict(&self, directory_cache: &DirectoryCache) -> Vec<PrefetchPrediction> {
         let mut predictions = Vec::new();
 
         let Some(current) = &self.current_path else {
             return predictions;
         };
 
+        // Parent directory (high confidence - user often goes back)
         if let Some(parent) = current.parent() {
             predictions.push(PrefetchPrediction {
                 path: parent.to_path_buf(),
@@ -55,34 +58,36 @@ impl PredictivePrefetcher {
             });
         }
 
+        // Sibling directories: use cached parent data instead of std::fs::read_dir(parent)
         if let Some(parent) = current.parent() {
-            if let Ok(entries) = std::fs::read_dir(parent) {
-                for entry in entries.filter_map(|e| e.ok()).take(5) {
-                    let path = entry.path();
-                    if path.is_dir() && path != *current {
+            let parent_buf = parent.to_path_buf();
+            if let Some(cached_entries) = directory_cache.get(&parent_buf) {
+                for entry in cached_entries.iter().filter(|e| e.is_dir).take(5) {
+                    if entry.path != *current {
                         predictions.push(PrefetchPrediction {
-                            path,
+                            path: entry.path.clone(),
                             confidence: 0.5,
                             reason: "sibling_directory",
                         });
                     }
                 }
             }
+            // If parent isn't cached, skip siblings (no HDD I/O)
         }
 
-        if let Ok(entries) = std::fs::read_dir(current) {
-            for entry in entries.filter_map(|e| e.ok()).take(3) {
-                let path = entry.path();
-                if path.is_dir() {
-                    predictions.push(PrefetchPrediction {
-                        path,
-                        confidence: 0.6,
-                        reason: "first_subdirectory",
-                    });
-                }
+        // Child subdirectories: use cached current data instead of std::fs::read_dir(current)
+        if let Some(cached_entries) = directory_cache.get(current) {
+            for entry in cached_entries.iter().filter(|e| e.is_dir).take(3) {
+                predictions.push(PrefetchPrediction {
+                    path: entry.path.clone(),
+                    confidence: 0.6,
+                    reason: "first_subdirectory",
+                });
             }
         }
+        // If current isn't cached, skip children (no HDD I/O)
 
+        // History-based predictions (no I/O needed - just memory)
         for (i, hist_path) in self.history.iter().enumerate() {
             if hist_path != current {
                 predictions.push(PrefetchPrediction {
@@ -115,7 +120,6 @@ impl PredictivePrefetcher {
 pub fn spawn_predictive_prefetcher(
     receiver: Receiver<PredictiveMessage>,
     directory_cache: Arc<DirectoryCache>,
-    directory_index: Option<Arc<DirectoryIndex>>,
 ) {
     std::thread::spawn(move || {
         io_priority::set_thread_priority(IOPriority::Background);
@@ -126,23 +130,27 @@ pub fn spawn_predictive_prefetcher(
             // BLOCKING: Wait for message instead of polling
             match receiver.recv() {
                 Ok(PredictiveMessage::NavigatedTo(path)) => {
+                    // Skip predictive prefetch entirely for SSDs - raw disk speed is sufficient
+                    if io_priority::is_ssd(&path) {
+                        prefetcher.on_navigate(path);
+                        continue;
+                    }
+
                     prefetcher.on_navigate(path);
-                    
+
                     // Process predictions immediately after navigation
                     if prefetcher.last_prefetch.elapsed() >= MIN_PREFETCH_INTERVAL {
-                        let predictions = prefetcher.predict();
-                        
+                        // PERFORMANCE: predict() uses directory_cache data, zero HDD I/O
+                        let predictions = prefetcher.predict(&directory_cache);
+
                         for prediction in predictions {
+                            // Already cached - skip
                             if directory_cache.get(&prediction.path).is_some() {
                                 continue;
                             }
 
-                            if let Some(ref index) = directory_index {
-                                if !index.might_have_changed(&prediction.path) {
-                                    continue;
-                                }
-                            }
-
+                            // Not cached - read from disk (this is the only HDD I/O, and only for
+                            // directories that haven't been visited yet)
                             if let Some(entries) = ntfs_reader::read_directory_fast(&prediction.path) {
                                 let file_entries: Vec<crate::domain::file_entry::FileEntry> = entries
                                     .into_iter()
@@ -165,18 +173,15 @@ pub fn spawn_predictive_prefetcher(
                                     })
                                     .collect();
 
-                                // Only cache for HDDs - SSDs bypass cache
-                                if !io_priority::is_ssd(&prediction.path) {
-                                    directory_cache.put(prediction.path.clone(), file_entries);
-                                    eprintln!(
-                                        "[PERF] Prefetch cached: {:?} ({})",
-                                        prediction.path.file_name(),
-                                        prediction.reason
-                                    );
-                                }
+                                directory_cache.put(prediction.path.clone(), file_entries);
+                                eprintln!(
+                                    "[PERF] Prefetch cached: {:?} ({})",
+                                    prediction.path.file_name(),
+                                    prediction.reason
+                                );
                             }
                         }
-                        
+
                         prefetcher.last_prefetch = Instant::now();
                     }
                 }
@@ -208,9 +213,10 @@ mod tests {
         create_dir(&root).unwrap();
         create_dir(&sub).unwrap();
 
+        let cache = DirectoryCache::new();
         let mut prefetcher = PredictivePrefetcher::new();
         prefetcher.on_navigate(sub.clone());
-        let predictions = prefetcher.predict();
+        let predictions = prefetcher.predict(&cache);
 
         assert!(predictions.iter().any(|p| p.path == root));
     }

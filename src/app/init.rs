@@ -437,7 +437,6 @@ impl ImageViewerApp {
         crate::workers::predictive_prefetch::spawn_predictive_prefetcher(
             predictive_rx,
             directory_cache.clone(),
-            directory_index.clone(),
         );
 
         let (idle_warmup_tx, idle_warmup_rx) = mpsc::channel();
