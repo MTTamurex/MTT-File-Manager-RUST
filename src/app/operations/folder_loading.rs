@@ -446,7 +446,6 @@ impl ImageViewerApp {
                         ctx.request_repaint();
                         batch_tracker.record_batch(std::time::Instant::now().elapsed(), end - offset);
                         batch_size = batch_tracker.batch_size();
-                        batch_start = std::time::Instant::now();
                         offset = end;
                     }
                     let _ = file_entry_sender.send((my_gen, Vec::new()));
