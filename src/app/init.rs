@@ -646,6 +646,22 @@ impl ImageViewerApp {
 
             // Media keyboard debounce
             last_media_key_press: std::time::Instant::now(),
+
+            // List view column widths (resizable) - Regular view
+            list_col_name_width: 300.0,
+            list_col_date_width: 170.0,
+            list_col_type_width: 120.0,
+            list_col_size_width: 100.0,
+            // List view column widths - OneDrive view
+            list_col_onedrive_name_width: 300.0,
+            list_col_onedrive_date_width: 170.0,
+            list_col_onedrive_type_width: 120.0,
+            list_col_onedrive_size_width: 100.0,
+            list_col_onedrive_status_width: 120.0,
+            // List view column widths - Computer view
+            list_col_computer_name_width: 300.0,
+            list_col_computer_total_width: 120.0,
+            list_col_computer_free_width: 120.0,
         };
 
         // Inicia monitoramento inicial
