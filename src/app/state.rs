@@ -84,6 +84,8 @@ pub struct ImageViewerApp {
 
     // Sorting state
     pub sort_mode: SortMode,
+    pub sort_mode_computer: SortMode,      // Sort mode for "Este Computador" view
+    pub sort_mode_normal: SortMode,        // Sort mode for normal folder views
     pub sort_descending: bool,             // true = Z-A, Mais Novo, Maior
     pub folders_position: FoldersPosition, // First, Last, Mixed
 

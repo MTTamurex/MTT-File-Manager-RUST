@@ -148,6 +148,12 @@ fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context) {
             );
             match action {
                 StatusBarAction::SortChanged => {
+                    // Save to the correct field based on context
+                    if app.is_computer_view {
+                        app.sort_mode_computer = app.sort_mode;
+                    } else {
+                        app.sort_mode_normal = app.sort_mode;
+                    }
                     app.sort_items();
                     app.save_preferences();
                 }
@@ -329,6 +335,11 @@ fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     }
                     ToolbarAction::ChangeSortMode(mode) => {
                         app.sort_mode = mode;
+                        if app.is_computer_view {
+                            app.sort_mode_computer = mode;
+                        } else {
+                            app.sort_mode_normal = mode;
+                        }
                         app.sort_items();
                         app.save_preferences();
                     }
@@ -594,6 +605,11 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                             // Opção Nome sempre disponível
                             if ui.selectable_value(&mut SortMode::Name, app.sort_mode, "Nome").clicked() {
                                 app.sort_mode = SortMode::Name;
+                                if app.is_computer_view {
+                                    app.sort_mode_computer = SortMode::Name;
+                                } else {
+                                    app.sort_mode_normal = SortMode::Name;
+                                }
                                 app.sort_items();
                                 app.save_preferences();
                             }
@@ -602,11 +618,13 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                             if app.is_computer_view {
                                 if ui.selectable_value(&mut SortMode::DriveTotalSpace, app.sort_mode, "Espaço Total").clicked() {
                                     app.sort_mode = SortMode::DriveTotalSpace;
+                                    app.sort_mode_computer = SortMode::DriveTotalSpace;
                                     app.sort_items();
                                     app.save_preferences();
                                 }
                                 if ui.selectable_value(&mut SortMode::DriveFreeSpace, app.sort_mode, "Espaço Livre").clicked() {
                                     app.sort_mode = SortMode::DriveFreeSpace;
+                                    app.sort_mode_computer = SortMode::DriveFreeSpace;
                                     app.sort_items();
                                     app.save_preferences();
                                 }
@@ -614,16 +632,19 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                                 // Opções para visualização normal (não Computer View)
                                 if ui.selectable_value(&mut SortMode::Date, app.sort_mode, "Data").clicked() {
                                     app.sort_mode = SortMode::Date;
+                                    app.sort_mode_normal = SortMode::Date;
                                     app.sort_items();
                                     app.save_preferences();
                                 }
                                 if ui.selectable_value(&mut SortMode::Size, app.sort_mode, "Tamanho").clicked() {
                                     app.sort_mode = SortMode::Size;
+                                    app.sort_mode_normal = SortMode::Size;
                                     app.sort_items();
                                     app.save_preferences();
                                 }
                                 if ui.selectable_value(&mut SortMode::Type, app.sort_mode, "Tipo").clicked() {
                                     app.sort_mode = SortMode::Type;
+                                    app.sort_mode_normal = SortMode::Type;
                                     app.sort_items();
                                     app.save_preferences();
                                 }

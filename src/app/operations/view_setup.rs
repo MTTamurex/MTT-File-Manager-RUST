@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use crate::app::state::ImageViewerApp;
 use crate::infrastructure::windows as windows_infra;
-use crate::domain::file_entry::{FileEntry, SortMode};
+use crate::domain::file_entry::FileEntry;
 
 const DRIVE_REFRESH_INTERVAL_MS: u64 = 2000;
 
@@ -118,15 +118,8 @@ impl ImageViewerApp {
         self.is_recycle_bin_view = false;
         self.path_input = "Este Computador".to_string();
 
-        // Reset sort mode if not compatible with Computer View
-        // Computer View only supports: Name, DriveTotalSpace, DriveFreeSpace
-        match self.sort_mode {
-            SortMode::Name | SortMode::DriveTotalSpace | SortMode::DriveFreeSpace => {}
-            _ => {
-                // Reset to Name if current mode is not valid for Computer View
-                self.sort_mode = SortMode::Name;
-            }
-        }
+        // Load Computer View sort mode
+        self.sort_mode = self.sort_mode_computer;
 
         // ALWAYS reload drives to ensure fresh data
         let _ = self.reload_drive_list();

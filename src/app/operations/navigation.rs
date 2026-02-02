@@ -3,7 +3,6 @@
 //! This module handles history based navigation and switching to special views.
 
 use crate::app::state::ImageViewerApp;
-use crate::domain::file_entry::SortMode;
 
 impl ImageViewerApp {
     pub fn navigate_to(&mut self, path: &str) {
@@ -40,13 +39,8 @@ impl ImageViewerApp {
         self.is_computer_view = false;
         self.is_recycle_bin_view = false; // Reset quando navega para qualquer pasta
 
-        // Reset sort mode if using Computer View specific modes
-        match self.sort_mode {
-            SortMode::DriveTotalSpace | SortMode::DriveFreeSpace => {
-                self.sort_mode = SortMode::Name;
-            }
-            _ => {}
-        }
+        // Restore normal folder sort mode
+        self.sort_mode = self.sort_mode_normal;
 
         // SYNC TAB STATE
         self.sync_to_tab();
@@ -93,6 +87,10 @@ impl ImageViewerApp {
                 self.path_input = self.current_path.clone();
                 self.is_computer_view = false;
                 self.is_recycle_bin_view = false;
+                
+                // Restore normal folder sort mode
+                self.sort_mode = self.sort_mode_normal;
+                
                 self.reset_selection_and_search();
                 self.watch_current_folder(); // Atualiza o watcher
                 self.load_folder(false);
@@ -135,6 +133,10 @@ impl ImageViewerApp {
                 self.path_input = self.current_path.clone();
                 self.is_computer_view = false;
                 self.is_recycle_bin_view = false;
+                
+                // Restore normal folder sort mode
+                self.sort_mode = self.sort_mode_normal;
+                
                 self.reset_selection_and_search();
                 self.watch_current_folder();
                 self.load_folder(false);

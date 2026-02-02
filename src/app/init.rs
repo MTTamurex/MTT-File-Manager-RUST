@@ -148,6 +148,25 @@ impl ImageViewerApp {
             })
             .unwrap_or(SortMode::Name);
 
+        let sort_mode_computer = disk_cache
+            .get_preference("sort_mode_computer")
+            .map(|s| match s.as_str() {
+                "drive_total" => SortMode::DriveTotalSpace,
+                "drive_free" => SortMode::DriveFreeSpace,
+                _ => SortMode::Name,
+            })
+            .unwrap_or(SortMode::Name);
+
+        let sort_mode_normal = disk_cache
+            .get_preference("sort_mode_normal")
+            .map(|s| match s.as_str() {
+                "date" => SortMode::Date,
+                "size" => SortMode::Size,
+                "type" => SortMode::Type,
+                _ => SortMode::Name,
+            })
+            .unwrap_or(SortMode::Name);
+
         let sort_descending = disk_cache
             .get_preference("sort_descending")
             .map(|s| s == "true")
@@ -478,6 +497,8 @@ impl ImageViewerApp {
             cache_manager: crate::ui::cache::CacheManager::new(),
             // Sorting - carregado do SQLite ou defaults
             sort_mode,
+            sort_mode_computer,
+            sort_mode_normal,
             sort_descending,
             folders_position,
             disk_cache: disk_cache.clone(),
@@ -648,20 +669,20 @@ impl ImageViewerApp {
             last_media_key_press: std::time::Instant::now(),
 
             // List view column widths (resizable) - Regular view
-            list_col_name_width: 300.0,
-            list_col_date_width: 170.0,
-            list_col_type_width: 120.0,
-            list_col_size_width: 100.0,
+            list_col_name_width: disk_cache.get_preference("list_col_name_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(300.0),
+            list_col_date_width: disk_cache.get_preference("list_col_date_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(170.0),
+            list_col_type_width: disk_cache.get_preference("list_col_type_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(120.0),
+            list_col_size_width: disk_cache.get_preference("list_col_size_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(100.0),
             // List view column widths - OneDrive view
-            list_col_onedrive_name_width: 300.0,
-            list_col_onedrive_date_width: 170.0,
-            list_col_onedrive_type_width: 120.0,
-            list_col_onedrive_size_width: 100.0,
-            list_col_onedrive_status_width: 120.0,
+            list_col_onedrive_name_width: disk_cache.get_preference("list_col_onedrive_name_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(300.0),
+            list_col_onedrive_date_width: disk_cache.get_preference("list_col_onedrive_date_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(170.0),
+            list_col_onedrive_type_width: disk_cache.get_preference("list_col_onedrive_type_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(120.0),
+            list_col_onedrive_size_width: disk_cache.get_preference("list_col_onedrive_size_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(100.0),
+            list_col_onedrive_status_width: disk_cache.get_preference("list_col_onedrive_status_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(120.0),
             // List view column widths - Computer view
-            list_col_computer_name_width: 300.0,
-            list_col_computer_total_width: 120.0,
-            list_col_computer_free_width: 120.0,
+            list_col_computer_name_width: disk_cache.get_preference("list_col_computer_name_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(300.0),
+            list_col_computer_total_width: disk_cache.get_preference("list_col_computer_total_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(120.0),
+            list_col_computer_free_width: disk_cache.get_preference("list_col_computer_free_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(120.0),
         };
 
         // Inicia monitoramento inicial
