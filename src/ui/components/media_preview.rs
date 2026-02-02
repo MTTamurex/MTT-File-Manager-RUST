@@ -248,13 +248,13 @@ impl MediaPreview {
         }
     }
 
-    pub fn set_audio_track(&self, id: i64) {
+    pub fn set_audio_track(&mut self, id: i64) {
         if let MediaPreview::Video(player) = self {
             player.set_audio_track(id);
         }
     }
 
-    pub fn set_subtitle_track(&self, id: i64) {
+    pub fn set_subtitle_track(&mut self, id: i64) {
         if let MediaPreview::Video(player) = self {
             player.set_subtitle_track(id);
         }
@@ -266,6 +266,13 @@ impl MediaPreview {
             player.controls_active()
         } else {
             false
+        }
+    }
+
+    /// Reset mouse activity timer to keep controls visible
+    pub fn reset_mouse_activity(&mut self) {
+        if let MediaPreview::Video(player) = self {
+            player.last_mouse_activity = Some(std::time::Instant::now());
         }
     }
 
@@ -457,6 +464,31 @@ impl MediaPreview {
             MediaPreview::AnimatedGif(_) => None, // GIF player doesn't currently store path, but we could add it
             MediaPreview::Video(player) => Some(&player.path),
             MediaPreview::Error(_) => None,
+        }
+    }
+
+    /// Check if audio normalizer is enabled
+    pub fn is_audio_normalizer_enabled(&self) -> bool {
+        if let MediaPreview::Video(player) = self {
+            player.is_audio_normalizer_enabled()
+        } else {
+            false
+        }
+    }
+
+    /// Toggle audio normalizer
+    pub fn toggle_audio_normalizer(&mut self) {
+        if let MediaPreview::Video(player) = self {
+            player.toggle_audio_normalizer();
+        }
+    }
+
+    /// Access to controls state (for inline menus)
+    pub fn controls_state_mut(&mut self) -> Option<&mut crate::ui::components::video_controls_state::VideoControlsState> {
+        if let MediaPreview::Video(player) = self {
+            Some(&mut player.controls_state)
+        } else {
+            None
         }
     }
 }

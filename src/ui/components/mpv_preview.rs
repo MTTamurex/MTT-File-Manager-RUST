@@ -111,7 +111,7 @@ pub struct MpvPreview {
     last_rect: egui::Rect,
     mpv: Option<Arc<mpv::Mpv>>,
     loaded_path: Option<PathBuf>,
-    pub video_menu: crate::ui::components::video_menu::VideoMenuState,
+    pub controls_state: crate::ui::components::video_controls_state::VideoControlsState,
 }
 
 impl MpvPreview {
@@ -166,7 +166,7 @@ impl MpvPreview {
             last_rect: egui::Rect::NAN,
             mpv: None,
             loaded_path: None,
-            video_menu: Default::default(),
+            controls_state: Default::default(),
         }
     }
 
@@ -300,15 +300,39 @@ impl MpvPreview {
         self.audio_normalizer_enabled = enabled;
     }
 
-    pub fn set_audio_track(&self, id: i64) {
+    pub fn set_audio_track(&mut self, id: i64) {
         if let Some(m) = &self.mpv {
             let _ = m.set_property("aid", id);
         }
+        // Update local state to reflect selection
+        if let Ok(mut state) = self.state.write() {
+            for track in &mut state.audio_tracks {
+                track.selected = track.id == id;
+            }
+        }
+        // Invalidate cache so it will be refreshed
+        if let Some((ref mut audio, _)) = self.cached_tracks {
+            for track in audio {
+                track.selected = track.id == id;
+            }
+        }
     }
 
-    pub fn set_subtitle_track(&self, id: i64) {
+    pub fn set_subtitle_track(&mut self, id: i64) {
         if let Some(m) = &self.mpv {
             let _ = m.set_property("sid", id);
+        }
+        // Update local state to reflect selection (id=0 means disabled)
+        if let Ok(mut state) = self.state.write() {
+            for track in &mut state.subtitle_tracks {
+                track.selected = track.id == id;
+            }
+        }
+        // Update cache
+        if let Some((_, ref mut subs)) = self.cached_tracks {
+            for track in subs {
+                track.selected = track.id == id;
+            }
         }
     }
 
@@ -576,88 +600,8 @@ impl MpvPreview {
             self.last_rect = rect;
         }
 
-        // Render Context Menu (native viewport, appears above MPV HWND)
-        // PERF: Clone tracks only if menu is actually open (avoids clone in 99% of frames)
-        let audio_normalizer_enabled = self.audio_normalizer_enabled;
-        let action = if self.video_menu.is_open {
-            let (audio_tracks, subtitle_tracks) = {
-                match self.state.read() {
-                    Ok(state) => {
-                        // Clone outside the render function to minimize lock duration
-                        (state.audio_tracks.clone(), state.subtitle_tracks.clone())
-                    }
-                    Err(_) => {
-                        eprintln!("[MpvPreview] Erro ao ler tracks para menu - RwLock poisonado");
-                        // Retorna listas vazias como fallback
-                        (Vec::new(), Vec::new())
-                    }
-                }
-            }; // Lock released here
-
-            crate::ui::components::video_menu::render_video_menu(
-                ui.ctx(),
-                &mut self.video_menu,
-                &audio_tracks,
-                &subtitle_tracks,
-                self.is_maximized,
-                audio_normalizer_enabled,
-            )
-        } else {
-            // Menu closed: skip rendering and avoid cloning
-            crate::ui::components::video_menu::VideoMenuAction::None
-        };
-
-        // Check for right-click context menu AFTER rendering
-        // Always allow right-click to open/reposition the menu
-        let right_click_pos = ui.ctx().input(|i| {
-            if i.pointer.button_clicked(egui::PointerButton::Secondary) {
-                i.pointer.latest_pos().or_else(|| i.pointer.hover_pos())
-            } else {
-                None
-            }
-        });
-
-        if let Some(pos) = right_click_pos {
-            if rect.contains(pos) {
-                self.video_menu.active_submenu = None;
-                self.video_menu.submenu_position = None;
-                self.video_menu.main_menu_rect = None;
-                self.video_menu.submenu_rect = None;
-                self.video_menu.is_open = true;
-                self.video_menu.position = pos;
-                self.video_menu.menu_opened_at = Some(std::time::Instant::now());
-            }
-        }
-
-        match action {
-            crate::ui::components::video_menu::VideoMenuAction::None => {}
-            crate::ui::components::video_menu::VideoMenuAction::TogglePlay => self.toggle_play(),
-            crate::ui::components::video_menu::VideoMenuAction::ToggleMute => self.toggle_mute(),
-            crate::ui::components::video_menu::VideoMenuAction::ToggleAudioNormalizer => {
-                self.toggle_audio_normalizer()
-            }
-            crate::ui::components::video_menu::VideoMenuAction::SetAudioTrack(id) => {
-                self.set_audio_track(id)
-            }
-            crate::ui::components::video_menu::VideoMenuAction::SetSubtitleTrack(id) => {
-                self.set_subtitle_track(id)
-            }
-            crate::ui::components::video_menu::VideoMenuAction::ToggleFullscreen => {
-                // Toggle is handled externally - just set the flag
-                self.is_maximized = !self.is_maximized;
-            }
-            crate::ui::components::video_menu::VideoMenuAction::Close => {
-                self.video_menu.is_open = false;
-                self.video_menu.active_submenu = None;
-                self.video_menu.submenu_position = None;
-            }
-            crate::ui::components::video_menu::VideoMenuAction::RightClickOutside(pos) => {
-                // Menu was closed, now reopen at the provided position
-                self.video_menu.is_open = true;
-                self.video_menu.position = pos;
-                self.video_menu.menu_opened_at = Some(std::time::Instant::now());
-            }
-        }
+        // Context menu removed - controls now in control bar
+        // Double-click to toggle fullscreen is handled in preview_panel.rs
 
         self.set_visibility(self.is_visible);
     }
