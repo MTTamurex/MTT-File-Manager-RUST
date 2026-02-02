@@ -11,11 +11,14 @@ use eframe::egui;
 /// Trait para operações necessárias para renderizar um item slot
 pub trait ItemSlotOperations {
     /// Requisita carregamento de thumbnail
+    /// `modified`: file modification time (seconds since epoch) from folder enumeration.
+    /// Pass 0 if unknown (worker will fall back to metadata syscall).
     fn request_thumbnail_load(
         &mut self,
         path: std::path::PathBuf,
         size: u32,
         directory_index: Option<usize>,
+        modified: u64,
     );
     /// Requisita scan de pasta
     fn request_folder_scan(&mut self, path: std::path::PathBuf);
@@ -242,7 +245,7 @@ fn render_directory_slot<O: ItemSlotOperations>(
                 && ctx.loading_set.len() < 200
             {
                 ctx.loading_set.insert(cover_path.clone());
-                ops.request_thumbnail_load(cover_path.clone(), ctx.thumbnail_size as u32, None);
+                ops.request_thumbnail_load(cover_path.clone(), ctx.thumbnail_size as u32, None, 0);
             }
         }
     }
@@ -470,6 +473,7 @@ fn render_file_slot<O: ItemSlotOperations>(
                 path_clone.clone(),
                 ctx.thumbnail_size as u32,
                 Some(ctx.idx),
+                ctx.item.modified,
             );
         }
     }

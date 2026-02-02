@@ -79,6 +79,10 @@ struct ThumbnailRequest {
     size: u32,
     priority: IOPriority,
     directory_index: Option<usize>,
+    /// File modification time (seconds since UNIX_EPOCH) from folder enumeration.
+    /// When > 0, avoids redundant std::fs::metadata() syscalls on HDD.
+    /// When 0, falls back to reading metadata from disk.
+    modified: u64,
 }
 
 /// Queue state with directory-grouped requests for HDD optimization
@@ -131,8 +135,8 @@ impl PriorityThumbnailQueue {
     }
 
     /// Push a thumbnail request with the new IOPriority system
-    pub fn push(&self, path: PathBuf, gen: usize, request_size: u32, priority: IOPriority) {
-        self.push_with_index(path, gen, request_size, priority, None);
+    pub fn push(&self, path: PathBuf, gen: usize, request_size: u32, priority: IOPriority, modified: u64) {
+        self.push_with_index(path, gen, request_size, priority, None, modified);
     }
 
     pub fn push_with_index(
@@ -142,6 +146,7 @@ impl PriorityThumbnailQueue {
         request_size: u32,
         priority: IOPriority,
         directory_index: Option<usize>,
+        modified: u64,
     ) {
         let mut state = self.state.lock().unwrap();
 
@@ -167,6 +172,7 @@ impl PriorityThumbnailQueue {
             size: request_size,
             priority,
             directory_index,
+            modified,
         };
 
         state.by_directory.entry(parent.clone()).or_default().push(request);
@@ -184,7 +190,7 @@ impl PriorityThumbnailQueue {
     }
 
     /// Pop the next request, optimizing for disk locality on HDDs
-    pub fn pop(&self) -> Option<(PathBuf, usize, u32, IOPriority)> {
+    pub fn pop(&self) -> Option<(PathBuf, usize, u32, IOPriority, u64)> {
         let mut state = self.state.lock().unwrap();
 
         loop {
@@ -204,6 +210,7 @@ impl PriorityThumbnailQueue {
                     request.generation,
                     request.size,
                     request.priority,
+                    request.modified,
                 ));
             }
 
@@ -441,7 +448,7 @@ fn thumbnail_worker_loop(
     // This applies to all 4 thumbnail worker threads
     io_priority::set_thread_priority(IOPriority::Background);
 
-    while let Some((path, req_gen, req_size, req_priority)) = queue.pop() {
+    while let Some((path, req_gen, req_size, req_priority, req_modified)) = queue.pop() {
         // ... loop content ...
         {
             // Block to scope the work variable was unused, flattened loop logic instead
@@ -467,21 +474,9 @@ fn thumbnail_worker_loop(
                             continue;
                         }
 
-                        // EARLY EXIT 1: Validate path exists before processing
-                        if !path.exists() {
-                            mark_as_failed(path.clone());
-                            let _ = tx.send(ThumbnailData {
-                                path,
-                                image_data: Vec::new(),
-                                width: 0,
-                                height: 0,
-                                generation: req_gen,
-                            });
-                            throttle_repaint(&ctx, &mut last_repaint);
-                            continue;
-                        }
-
                         // EARLY EXIT 2: Skip cloud-only OneDrive files (not downloaded)
+                        // Only check OneDrive attributes if the path is in a OneDrive folder
+                        // (string comparison is free, GetFileAttributesW is a syscall)
                         if crate::infrastructure::onedrive::is_onedrive_path(&path)
                             && !crate::infrastructure::onedrive::is_locally_available(&path)
                         {
@@ -497,9 +492,16 @@ fn thumbnail_worker_loop(
                             continue;
                         }
 
-                        let modified = std::fs::metadata(&path)
-                            .and_then(|m| m.modified())
-                            .unwrap_or(SystemTime::UNIX_EPOCH);
+                        // PERFORMANCE: Use modification time from folder enumeration when available.
+                        // This avoids a costly std::fs::metadata() syscall per file on HDD.
+                        // Falls back to disk read only when modified time was not provided (0).
+                        let modified = if req_modified > 0 {
+                            SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(req_modified)
+                        } else {
+                            std::fs::metadata(&path)
+                                .and_then(|m| m.modified())
+                                .unwrap_or(SystemTime::UNIX_EPOCH)
+                        };
 
                         let mut final_result = None;
 

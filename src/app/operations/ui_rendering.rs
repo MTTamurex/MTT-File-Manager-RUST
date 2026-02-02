@@ -253,11 +253,11 @@ impl ImageViewerApp {
         enum ListAction {
             NavigateTo(String),
             OpenWithShell(PathBuf),
-            RequestThumbnailLoad(PathBuf, u32, usize),
+            RequestThumbnailLoad(PathBuf, u32, usize, u64),
             RequestFolderScan(PathBuf),
             RequestFolderPreviewLoad(PathBuf),
             RenameWithShell(usize),
-            RequestThumbnailPrefetchWithIndex(PathBuf, u32, usize),
+            RequestThumbnailPrefetchWithIndex(PathBuf, u32, usize, u64),
             NotifyIdleVisibleItems(Vec<PathBuf>),
             RequestIconLoad(PathBuf),
         }
@@ -271,10 +271,10 @@ impl ImageViewerApp {
                 self.actions.push(ListAction::OpenWithShell(path.clone()));
             }
 
-            fn request_thumbnail_load(&mut self, path: PathBuf, directory_index: usize) {
+            fn request_thumbnail_load(&mut self, path: PathBuf, directory_index: usize, modified: u64) {
                 // List view always requests small thumbnails (64px)
                 self.actions
-                    .push(ListAction::RequestThumbnailLoad(path, 64, directory_index));
+                    .push(ListAction::RequestThumbnailLoad(path, 64, directory_index, modified));
             }
 
             fn request_folder_scan(&mut self, path: PathBuf) {
@@ -295,12 +295,14 @@ impl ImageViewerApp {
                 path: PathBuf,
                 size: u32,
                 directory_index: usize,
+                modified: u64,
             ) {
                 self.actions
                     .push(ListAction::RequestThumbnailPrefetchWithIndex(
                         path,
                         size,
                         directory_index,
+                        modified,
                     ));
             }
 
@@ -476,16 +478,16 @@ impl ImageViewerApp {
             match action {
                 ListAction::NavigateTo(path) => self.navigate_to(&path),
                 ListAction::OpenWithShell(path) => open_with_shell(&path),
-                ListAction::RequestThumbnailLoad(path, size, index) => {
-                    self.request_thumbnail_load_with_index(path, size, index)
+                ListAction::RequestThumbnailLoad(path, size, index, modified) => {
+                    self.request_thumbnail_load_with_index_and_modified(path, size, index, modified)
                 }
                 ListAction::RequestFolderScan(path) => self.request_folder_scan(path),
                 ListAction::RequestFolderPreviewLoad(path) => {
                     self.request_folder_preview_load(path)
                 }
                 ListAction::RenameWithShell(idx) => self.rename_with_shell(idx),
-                ListAction::RequestThumbnailPrefetchWithIndex(path, size, index) => {
-                    self.request_thumbnail_prefetch_with_index(path, size, index)
+                ListAction::RequestThumbnailPrefetchWithIndex(path, size, index, modified) => {
+                    self.request_thumbnail_prefetch_with_index_and_modified(path, size, index, modified)
                 }
                 ListAction::NotifyIdleVisibleItems(items) => {
                     let _ = self
@@ -705,12 +707,12 @@ impl ImageViewerApp {
         enum GridAction {
             NavigateTo(String),
             OpenWithShell(PathBuf),
-            RequestThumbnailLoad(PathBuf, u32),
-            RequestThumbnailLoadWithIndex(PathBuf, u32, usize),
+            RequestThumbnailLoad(PathBuf, u32, u64),
+            RequestThumbnailLoadWithIndex(PathBuf, u32, usize, u64),
             RequestFolderScan(PathBuf),
             RequestFolderPreviewLoad(PathBuf),
-            RequestThumbnailPrefetch(PathBuf, u32),
-            RequestThumbnailPrefetchWithIndex(PathBuf, u32, usize),
+            RequestThumbnailPrefetch(PathBuf, u32, u64),
+            RequestThumbnailPrefetchWithIndex(PathBuf, u32, usize, u64),
             RequestIconLoad(PathBuf),
             RenameWithShell(usize),
             NotifyIdleVisibleItems(Vec<PathBuf>),
@@ -725,9 +727,9 @@ impl ImageViewerApp {
                 self.actions.push(GridAction::OpenWithShell(path.clone()));
             }
 
-            fn request_thumbnail_load(&mut self, path: PathBuf, size: u32) {
+            fn request_thumbnail_load(&mut self, path: PathBuf, size: u32, modified: u64) {
                 self.actions
-                    .push(GridAction::RequestThumbnailLoad(path, size));
+                    .push(GridAction::RequestThumbnailLoad(path, size, modified));
             }
 
             fn request_thumbnail_load_with_index(
@@ -735,11 +737,13 @@ impl ImageViewerApp {
                 path: PathBuf,
                 size: u32,
                 directory_index: usize,
+                modified: u64,
             ) {
                 self.actions.push(GridAction::RequestThumbnailLoadWithIndex(
                     path,
                     size,
                     directory_index,
+                    modified,
                 ));
             }
 
@@ -751,9 +755,9 @@ impl ImageViewerApp {
                     .push(GridAction::RequestFolderPreviewLoad(path));
             }
 
-            fn request_thumbnail_prefetch(&mut self, path: PathBuf, size: u32) {
+            fn request_thumbnail_prefetch(&mut self, path: PathBuf, size: u32, modified: u64) {
                 self.actions
-                    .push(GridAction::RequestThumbnailPrefetch(path, size));
+                    .push(GridAction::RequestThumbnailPrefetch(path, size, modified));
             }
 
             fn request_thumbnail_prefetch_with_index(
@@ -761,12 +765,14 @@ impl ImageViewerApp {
                 path: PathBuf,
                 size: u32,
                 directory_index: usize,
+                modified: u64,
             ) {
                 self.actions
                     .push(GridAction::RequestThumbnailPrefetchWithIndex(
                         path,
                         size,
                         directory_index,
+                        modified,
                     ));
             }
 
@@ -920,21 +926,21 @@ impl ImageViewerApp {
             match action {
                 GridAction::NavigateTo(path) => self.navigate_to(&path),
                 GridAction::OpenWithShell(path) => open_with_shell(&path),
-                GridAction::RequestThumbnailLoad(path, size) => {
-                    self.request_thumbnail_load(path, size)
+                GridAction::RequestThumbnailLoad(path, size, modified) => {
+                    self.request_thumbnail_load_with_modified(path, size, modified)
                 }
-                GridAction::RequestThumbnailLoadWithIndex(path, size, index) => {
-                    self.request_thumbnail_load_with_index(path, size, index)
+                GridAction::RequestThumbnailLoadWithIndex(path, size, index, modified) => {
+                    self.request_thumbnail_load_with_index_and_modified(path, size, index, modified)
                 }
                 GridAction::RequestFolderScan(path) => self.request_folder_scan(path),
                 GridAction::RequestFolderPreviewLoad(path) => {
                     self.request_folder_preview_load(path)
                 }
-                GridAction::RequestThumbnailPrefetch(path, size) => {
-                    self.request_thumbnail_prefetch(path, size)
+                GridAction::RequestThumbnailPrefetch(path, size, modified) => {
+                    self.request_thumbnail_prefetch_with_index_and_modified(path, size, 0, modified)
                 }
-                GridAction::RequestThumbnailPrefetchWithIndex(path, size, index) => {
-                    self.request_thumbnail_prefetch_with_index(path, size, index)
+                GridAction::RequestThumbnailPrefetchWithIndex(path, size, index, modified) => {
+                    self.request_thumbnail_prefetch_with_index_and_modified(path, size, index, modified)
                 }
                 GridAction::RequestIconLoad(path) => self.request_icon_load(path),
                 GridAction::RenameWithShell(idx) => self.rename_with_shell(idx),
@@ -966,7 +972,7 @@ impl ImageViewerApp {
 
         // Para evitar conflitos de borrow, coletamos as operações pendentes
         // e executamos depois de renderizar
-        let mut pending_thumbnail_loads: Vec<(std::path::PathBuf, u32, Option<usize>)> = Vec::new();
+        let mut pending_thumbnail_loads: Vec<(std::path::PathBuf, u32, Option<usize>, u64)> = Vec::new();
         let mut pending_folder_scans: Vec<std::path::PathBuf> = Vec::new();
         let mut pending_folder_preview_loads: Vec<std::path::PathBuf> = Vec::new();
         let mut pending_icon_loads: Vec<std::path::PathBuf> = Vec::new();
@@ -1007,7 +1013,7 @@ impl ImageViewerApp {
 
             // Create simple ops struct that collects operations
             struct SimpleOps<'a> {
-                thumbnail_loads: &'a mut Vec<(std::path::PathBuf, u32, Option<usize>)>,
+                thumbnail_loads: &'a mut Vec<(std::path::PathBuf, u32, Option<usize>, u64)>,
                 folder_scans: &'a mut Vec<std::path::PathBuf>,
                 folder_preview_loads: &'a mut Vec<std::path::PathBuf>,
                 icon_loads: &'a mut Vec<std::path::PathBuf>,
@@ -1020,8 +1026,9 @@ impl ImageViewerApp {
                     path: std::path::PathBuf,
                     size: u32,
                     directory_index: Option<usize>,
+                    modified: u64,
                 ) {
-                    self.thumbnail_loads.push((path, size, directory_index));
+                    self.thumbnail_loads.push((path, size, directory_index, modified));
                 }
 
                 fn request_folder_scan(&mut self, path: std::path::PathBuf) {
@@ -1065,11 +1072,11 @@ impl ImageViewerApp {
         }
 
         // Execute pending operations
-        for (path, size, index) in pending_thumbnail_loads {
+        for (path, size, index, modified) in pending_thumbnail_loads {
             if let Some(index) = index {
-                self.request_thumbnail_load_with_index(path, size, index);
+                self.request_thumbnail_load_with_index_and_modified(path, size, index, modified);
             } else {
-                self.request_thumbnail_load(path, size);
+                self.request_thumbnail_load_with_modified(path, size, modified);
             }
         }
 

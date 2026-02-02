@@ -90,7 +90,7 @@ impl ScrollPredictor {
 /// Pre-allocated buffers for pending operations (PERFORMANCE: avoids per-item allocations)
 #[derive(Default)]
 pub struct PendingOperations {
-    pub thumbnail_loads: Vec<(PathBuf, u32, Option<usize>)>,
+    pub thumbnail_loads: Vec<(PathBuf, u32, Option<usize>, u64)>,
     pub folder_scans: Vec<PathBuf>,
     pub folder_preview_loads: Vec<PathBuf>,
     pub icon_loads: Vec<PathBuf>,
@@ -167,21 +167,23 @@ pub struct GridViewContext<'a> {
 pub trait GridViewOperations {
     fn navigate_to(&mut self, path: &str);
     fn open_with_shell(&mut self, path: &PathBuf);
-    fn request_thumbnail_load(&mut self, path: PathBuf, size: u32);
+    fn request_thumbnail_load(&mut self, path: PathBuf, size: u32, modified: u64);
     fn request_thumbnail_load_with_index(
         &mut self,
         path: PathBuf,
         size: u32,
         directory_index: usize,
+        modified: u64,
     );
     fn request_folder_scan(&mut self, path: PathBuf);
     fn request_folder_preview_load(&mut self, path: PathBuf);
-    fn request_thumbnail_prefetch(&mut self, path: PathBuf, size: u32);
+    fn request_thumbnail_prefetch(&mut self, path: PathBuf, size: u32, modified: u64);
     fn request_thumbnail_prefetch_with_index(
         &mut self,
         path: PathBuf,
         size: u32,
         directory_index: usize,
+        modified: u64,
     );
     fn request_icon_load(&mut self, path: PathBuf);
     fn rename_with_shell(&mut self, idx: usize);
@@ -725,11 +727,11 @@ pub fn render_grid_view(
     // BATCH PROCESSING: Flush all pending operations collected during render
     // This avoids context switching and virtual dispatch inside the render loop
     // Note: Thumbnail cache is on SSD, so we don't skip I/O even during video playback
-    for (path, size, index) in ctx.pending_ops.thumbnail_loads.drain(..) {
+    for (path, size, index, modified) in ctx.pending_ops.thumbnail_loads.drain(..) {
         if let Some(index) = index {
-            ops.request_thumbnail_load_with_index(path, size, index);
+            ops.request_thumbnail_load_with_index(path, size, index, modified);
         } else {
-            ops.request_thumbnail_load(path, size);
+            ops.request_thumbnail_load(path, size, modified);
         }
     }
     for path in ctx.pending_ops.folder_scans.drain(..) {
@@ -776,6 +778,7 @@ pub fn render_grid_view(
                             item.path.clone(),
                             ctx.thumbnail_size as u32,
                             index,
+                            item.modified,
                         );
                     }
                 }
@@ -881,10 +884,11 @@ fn render_item_slot_for_grid(
                 path: std::path::PathBuf,
                 size: u32,
                 directory_index: Option<usize>,
+                modified: u64,
             ) {
                 self.pending_ops
                     .thumbnail_loads
-                    .push((path, size, directory_index));
+                    .push((path, size, directory_index, modified));
             }
 
             fn request_folder_scan(&mut self, path: std::path::PathBuf) {
