@@ -507,25 +507,15 @@ pub fn render_grid_view(
         let keep_start_idx = keep_min_row * cols;
         let keep_end_idx = (keep_max_row * cols).min(count);
 
-        // Remove stale entries - compare by reference, no clones needed
-        ctx.loading_set.retain(|path| {
-            // Linear scan is faster than HashSet for ~50-100 items due to:
-            // 1. No allocation overhead
-            // 2. Cache-friendly sequential access
-            // 3. PathBuf comparison is cheaper than hash computation
-            for idx in keep_start_idx..keep_end_idx {
-                if &ctx.items[idx].path == path {
-                    return true;
-                }
-                // Also check folder covers
-                if let Some(ref cover) = ctx.items[idx].folder_cover {
-                    if cover == path {
-                        return true;
-                    }
-                }
-            }
-            false
-        });
+        // PERFORMANCE: Build O(1) lookup set from keep range (references only, no clones)
+        // This replaces an O(loading_set × keep_range) linear scan with O(keep_range + loading_set)
+        let keep_paths: FxHashSet<&PathBuf> = (keep_start_idx..keep_end_idx)
+            .flat_map(|idx| {
+                let item = &ctx.items[idx];
+                std::iter::once(&item.path).chain(item.folder_cover.iter())
+            })
+            .collect();
+        ctx.loading_set.retain(|path| keep_paths.contains(path));
     }
 
     // STABLE OVERSCAN: Fixed value, no velocity dependency

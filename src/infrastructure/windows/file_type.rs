@@ -35,6 +35,77 @@ pub enum PerceivedType {
 /// Cache for perceived types (extension -> type)
 static PERCEIVED_TYPE_CACHE: OnceLock<Mutex<HashMap<String, PerceivedType>>> = OnceLock::new();
 
+/// PERFORMANCE: Zero-allocation fast path for common media extensions.
+/// Avoids to_lowercase(), format!(), and Mutex lock for the most frequent extensions.
+/// Returns None for uncommon extensions → falls through to cached Windows API.
+#[inline]
+fn get_perceived_type_fast(ext: &str) -> Option<PerceivedType> {
+    let bytes = ext.as_bytes();
+    // Handle optional leading dot
+    let bytes = if bytes.first() == Some(&b'.') {
+        &bytes[1..]
+    } else {
+        bytes
+    };
+
+    match bytes.len() {
+        2 => {
+            let b = [
+                bytes[0].to_ascii_lowercase(),
+                bytes[1].to_ascii_lowercase(),
+            ];
+            match &b {
+                b"ts" => Some(PerceivedType::Video),
+                _ => None,
+            }
+        }
+        3 => {
+            let b = [
+                bytes[0].to_ascii_lowercase(),
+                bytes[1].to_ascii_lowercase(),
+                bytes[2].to_ascii_lowercase(),
+            ];
+            match &b {
+                // Image
+                b"jpg" | b"png" | b"gif" | b"bmp" | b"svg" | b"ico" | b"tga" | b"psd"
+                | b"raw" => Some(PerceivedType::Image),
+                // Video
+                b"mp4" | b"mkv" | b"avi" | b"wmv" | b"mov" | b"flv" | b"ogv" | b"ogm"
+                | b"m4v" | b"3gp" | b"vob" | b"mts" | b"asf" | b"m2v" | b"mpg" => {
+                    Some(PerceivedType::Video)
+                }
+                // Audio
+                b"mp3" | b"wav" | b"ogg" | b"wma" | b"aac" | b"m4a" | b"ape" | b"mid" => {
+                    Some(PerceivedType::Audio)
+                }
+                _ => None,
+            }
+        }
+        4 => {
+            let b = [
+                bytes[0].to_ascii_lowercase(),
+                bytes[1].to_ascii_lowercase(),
+                bytes[2].to_ascii_lowercase(),
+                bytes[3].to_ascii_lowercase(),
+            ];
+            match &b {
+                // Image
+                b"jpeg" | b"webp" | b"tiff" | b"avif" | b"heic" | b"heif" | b"jfif" => {
+                    Some(PerceivedType::Image)
+                }
+                // Video
+                b"webm" | b"mpeg" | b"m2ts" | b"divx" | b"rmvb" => {
+                    Some(PerceivedType::Video)
+                }
+                // Audio
+                b"flac" | b"alac" | b"opus" | b"aiff" | b"weba" => Some(PerceivedType::Audio),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Get the perceived type of a file based on its extension.
 ///
 /// Uses Windows `AssocGetPerceivedType` API to query the registry for the file type.
@@ -42,6 +113,11 @@ static PERCEIVED_TYPE_CACHE: OnceLock<Mutex<HashMap<String, PerceivedType>>> = O
 ///
 /// Results are cached for performance.
 pub fn get_perceived_type(extension: &str) -> PerceivedType {
+    // PERFORMANCE: Fast path for common extensions (zero allocation, no mutex)
+    if let Some(ptype) = get_perceived_type_fast(extension) {
+        return ptype;
+    }
+
     // Normalize extension (lowercase, ensure starts with dot)
     let ext_lower = extension.to_lowercase();
     let ext_with_dot = if ext_lower.starts_with('.') {

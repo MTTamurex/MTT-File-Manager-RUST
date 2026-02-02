@@ -14,45 +14,57 @@ use crate::ui::views::ViewportTracker;
 const TOOLTIP_DELAY_SECS: f32 = 0.3; // Only show tooltip after 300ms hover
 
 /// Helper to truncate text to fit within a column width
+/// PERFORMANCE: Uses byte-position slicing instead of chars().take().collect() to avoid
+/// String allocations on each binary search iteration. Only one String is created at the end.
 fn truncate_text_for_column(text: &str, max_width: f32, font_id: &FontId, ui: &Ui) -> String {
-    let fonts = ui.fonts(|f| f.clone());
-    let galley = fonts.layout_no_wrap(text.to_string(), font_id.clone(), Color32::WHITE);
-    
-    if galley.rect.width() <= max_width {
+    // Quick check: does full text fit?
+    let full_width = ui.fonts(|f| f.layout_no_wrap(text.to_string(), font_id.clone(), Color32::WHITE).rect.width());
+    if full_width <= max_width {
         return text.to_string();
     }
-    
-    // Binary search for optimal length
+
     let ellipsis = "...";
-    let ellipsis_galley = fonts.layout_no_wrap(ellipsis.to_string(), font_id.clone(), Color32::WHITE);
-    let ellipsis_width = ellipsis_galley.rect.width();
+    let ellipsis_width = ui.fonts(|f| f.layout_no_wrap(ellipsis.to_string(), font_id.clone(), Color32::WHITE).rect.width());
     let available_width = max_width - ellipsis_width;
-    
+
     if available_width <= 0.0 {
         return ellipsis.to_string();
     }
-    
-    let mut left = 0;
-    let mut right = text.chars().count();
-    
+
+    // Build char boundary table once (byte positions of each char boundary)
+    let char_boundaries: Vec<usize> = text.char_indices().map(|(i, _)| i).collect();
+    let char_count = char_boundaries.len();
+
+    if char_count == 0 {
+        return ellipsis.to_string();
+    }
+
+    // Binary search on char index, using &str slices (no allocation per iteration)
+    let mut left = 0usize;
+    let mut right = char_count;
+
     while left < right {
         let mid = (left + right + 1) / 2;
-        let truncated: String = text.chars().take(mid).collect();
-        let test_galley = fonts.layout_no_wrap(truncated.clone(), font_id.clone(), Color32::WHITE);
-        
-        if test_galley.rect.width() <= available_width {
+        let byte_end = if mid < char_count { char_boundaries[mid] } else { text.len() };
+        let slice = &text[..byte_end];
+        let w = ui.fonts(|f| f.layout_no_wrap(slice.to_string(), font_id.clone(), Color32::WHITE).rect.width());
+
+        if w <= available_width {
             left = mid;
         } else {
             right = mid - 1;
         }
     }
-    
+
     if left == 0 {
         return ellipsis.to_string();
     }
-    
-    let truncated: String = text.chars().take(left).collect();
-    format!("{}{}", truncated, ellipsis)
+
+    let byte_end = if left < char_count { char_boundaries[left] } else { text.len() };
+    let mut result = String::with_capacity(byte_end + 3);
+    result.push_str(&text[..byte_end]);
+    result.push_str(ellipsis);
+    result
 }
 
 /// Context for list view rendering
