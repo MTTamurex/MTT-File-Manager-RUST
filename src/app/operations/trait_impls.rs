@@ -12,11 +12,12 @@ impl ItemSlotOperations for ImageViewerApp {
         path: std::path::PathBuf,
         size: u32,
         directory_index: Option<usize>,
+        modified: u64,
     ) {
         if let Some(index) = directory_index {
-            ImageViewerApp::request_thumbnail_load_with_index(self, path, size, index);
+            ImageViewerApp::request_thumbnail_load_with_index_and_modified(self, path, size, index, modified);
         } else {
-            ImageViewerApp::request_thumbnail_load(self, path, size);
+            ImageViewerApp::request_thumbnail_load_with_modified(self, path, size, modified);
         }
     }
 

@@ -203,14 +203,18 @@ impl DirectoryIndex {
             None => return true,
         };
 
-        if let Some(entries) = crate::infrastructure::ntfs_reader::read_directory_fast(dir_path) {
-            if entries.len() != stored.file_count {
-                return true;
-            }
-            false
-        } else {
-            true
-        }
+        // PERFORMANCE: Use directory modification time instead of re-enumerating
+        // the entire directory just to compare file counts.
+        // A single metadata() call on the directory is ~0.1ms vs full enumeration.
+        let current_mtime = std::fs::metadata(dir_path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // If the directory mtime is newer than our last scan, it has changed
+        current_mtime > stored.last_scan
     }
 
     pub fn stats(&self) -> Option<(usize, usize)> {

@@ -115,7 +115,7 @@ pub enum ListViewAction {
 pub trait ListViewOperations {
     fn navigate_to(&mut self, path: &str);
     fn open_with_shell(&mut self, path: &PathBuf);
-    fn request_thumbnail_load(&mut self, path: PathBuf, directory_index: usize);
+    fn request_thumbnail_load(&mut self, path: PathBuf, directory_index: usize, modified: u64);
     fn request_folder_scan(&mut self, path: PathBuf);
     fn request_folder_preview_load(&mut self, path: PathBuf);
     fn rename_with_shell(&mut self, idx: usize);
@@ -124,6 +124,7 @@ pub trait ListViewOperations {
         path: PathBuf,
         size: u32,
         directory_index: usize,
+        modified: u64,
     );
     fn request_icon_load(&mut self, path: PathBuf);
     fn notify_idle_visible_items(&mut self, items: Vec<PathBuf>);
@@ -721,7 +722,7 @@ pub fn render_list_view(
                     && !ctx.pending_upload_set.contains(&item.path)
                 {
                     ctx.loading_set.insert(item.path.clone());
-                    ops.request_thumbnail_prefetch_with_index(item.path.clone(), 64, index);
+                    ops.request_thumbnail_prefetch_with_index(item.path.clone(), 64, index, item.modified);
                 }
             }
         }
@@ -816,7 +817,7 @@ fn render_list_item(
             && ctx.loading_set.len() < 200
         {
             ctx.loading_set.insert(item.path.clone());
-            ops.request_thumbnail_load(item.path.clone(), i);
+            ops.request_thumbnail_load(item.path.clone(), i, item.modified);
         }
     }
 

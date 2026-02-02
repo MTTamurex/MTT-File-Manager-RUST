@@ -10,7 +10,11 @@ use crate::workers::thumbnail_worker::ThumbnailPriority;
 impl ImageViewerApp {
 
     pub fn request_thumbnail_load(&mut self, path: PathBuf, size_px: u32) {
-        self.request_thumbnail_load_internal(path, size_px, None, ThumbnailPriority::Interactive);
+        self.request_thumbnail_load_internal(path, size_px, None, ThumbnailPriority::Interactive, 0);
+    }
+
+    pub fn request_thumbnail_load_with_modified(&mut self, path: PathBuf, size_px: u32, modified: u64) {
+        self.request_thumbnail_load_internal(path, size_px, None, ThumbnailPriority::Interactive, modified);
     }
 
     pub fn request_thumbnail_load_with_index(
@@ -24,11 +28,28 @@ impl ImageViewerApp {
             size_px,
             Some(directory_index),
             ThumbnailPriority::Interactive,
+            0,
+        );
+    }
+
+    pub fn request_thumbnail_load_with_index_and_modified(
+        &mut self,
+        path: PathBuf,
+        size_px: u32,
+        directory_index: usize,
+        modified: u64,
+    ) {
+        self.request_thumbnail_load_internal(
+            path,
+            size_px,
+            Some(directory_index),
+            ThumbnailPriority::Interactive,
+            modified,
         );
     }
 
     pub fn request_thumbnail_prefetch(&mut self, path: PathBuf, size_px: u32) {
-        self.request_thumbnail_load_internal(path, size_px, None, ThumbnailPriority::Prefetch);
+        self.request_thumbnail_load_internal(path, size_px, None, ThumbnailPriority::Prefetch, 0);
     }
 
     pub fn request_thumbnail_prefetch_with_index(
@@ -42,6 +63,23 @@ impl ImageViewerApp {
             size_px,
             Some(directory_index),
             ThumbnailPriority::Prefetch,
+            0,
+        );
+    }
+
+    pub fn request_thumbnail_prefetch_with_index_and_modified(
+        &mut self,
+        path: PathBuf,
+        size_px: u32,
+        directory_index: usize,
+        modified: u64,
+    ) {
+        self.request_thumbnail_load_internal(
+            path,
+            size_px,
+            Some(directory_index),
+            ThumbnailPriority::Prefetch,
+            modified,
         );
     }
 
@@ -51,6 +89,7 @@ impl ImageViewerApp {
         size_px: u32,
         directory_index: Option<usize>,
         priority: ThumbnailPriority,
+        modified: u64,
     ) {
         // PERFORMANCE: Check RAM cache first before sending to worker
         // This avoids disk I/O entirely if the RGBA data is already in RAM
@@ -83,10 +122,10 @@ impl ImageViewerApp {
         // Not in RAM cache - send to worker (will read from disk cache or generate)
         if let Some(index) = directory_index {
             self.thumbnail_queue
-                .push_with_index(path, self.generation, size_px, priority, Some(index));
+                .push_with_index(path, self.generation, size_px, priority, Some(index), modified);
         } else {
             self.thumbnail_queue
-                .push(path, self.generation, size_px, priority);
+                .push(path, self.generation, size_px, priority, modified);
         }
     }
 
