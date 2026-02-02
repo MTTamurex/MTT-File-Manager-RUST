@@ -161,6 +161,8 @@ pub struct GridViewContext<'a> {
     pub pending_upload_set: &'a mut FxHashSet<PathBuf>,
     pub is_video_docked_visible: bool,
     pub prefetch_rows: usize,
+    /// Output: visible item index range for GPU upload prioritization
+    pub visible_index_range: &'a mut Option<(usize, usize)>,
 }
 
 /// Operations that can be performed from grid view
@@ -752,6 +754,9 @@ pub fn render_grid_view(
         if count > 0 {
             let first_visible_index = (vis_min * cols).min(count.saturating_sub(1));
             let last_visible_index = (vis_max * cols).min(count).saturating_sub(1);
+
+            // Export visible range for GPU upload prioritization
+            *ctx.visible_index_range = Some((first_visible_index, last_visible_index));
             let tracker = ViewportTracker {
                 first_visible_index,
                 last_visible_index,

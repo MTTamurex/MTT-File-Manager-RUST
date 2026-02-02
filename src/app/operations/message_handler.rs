@@ -634,13 +634,13 @@ impl ImageViewerApp {
         let is_video_playing = self.is_video_playing_docked();
 
         let base_max_uploads = if is_video_playing && is_scrolling {
-            2 // Restore loading during scroll+video (balanced)
+            4 // Balanced: still load during scroll+video
         } else if is_scrolling {
-            3 // Moderate limit during scroll
+            6 // Generous during scroll — time budget is the real limiter
         } else if is_video_playing {
-            3 // Moderate limit during video
+            5 // Moderate limit during video
         } else {
-            6 // Standard idle speed
+            12 // Aggressive idle speed — fill visible area fast
         };
         let perf_scale = if self.frame_time_avg_ms <= 0.0 {
             1.0
@@ -655,7 +655,7 @@ impl ImageViewerApp {
         };
         let max_uploads_per_frame = ((base_max_uploads as f32) * perf_scale)
             .round()
-            .clamp(1.0, 10.0) as usize;
+            .clamp(1.0, 16.0) as usize;
 
         let mut uploads_this_frame = 0;
         let upload_start = Instant::now();
@@ -692,6 +692,26 @@ impl ImageViewerApp {
         let upload_budget_ms = (base_budget_ms * perf_scale).clamp(2.0, 10.0);
         let upload_budget = Duration::from_millis(upload_budget_ms.round() as u64);
 
+        // PERFORMANCE: Build set of visible item paths for upload prioritization
+        // During scroll, visible items get uploaded first; off-screen items are deferred
+        let visible_paths: Option<crate::ui::cache::FxHashSet<PathBuf>> = if is_scrolling {
+            self.visible_index_range.and_then(|(min_idx, max_idx)| {
+                let items = &self.items;
+                if items.is_empty() {
+                    return None;
+                }
+                let max_idx = max_idx.min(items.len().saturating_sub(1));
+                Some(
+                    (min_idx..=max_idx)
+                        .map(|i| items[i].path.clone())
+                        .collect(),
+                )
+            })
+        } else {
+            None
+        };
+        let mut deferred_count = 0;
+
         // Process thumbnails from the buffer up to the per-frame limit
         while uploads_this_frame < max_uploads_per_frame {
             if let Some(thumbnail_data) = self.pending_thumbnails.pop_front() {
@@ -704,6 +724,20 @@ impl ImageViewerApp {
                     self.cache_manager
                         .finish_pending_upload(&thumbnail_data.path);
                     continue;
+                }
+
+                // PERFORMANCE: During scroll, prioritize visible items
+                // Off-screen thumbnails are deferred to the back of the queue
+                if let Some(ref vis) = visible_paths {
+                    if !vis.contains(&thumbnail_data.path) {
+                        self.pending_thumbnails.push_back(thumbnail_data);
+                        deferred_count += 1;
+                        // Safety limit: don't loop through entire queue
+                        if deferred_count > max_uploads_per_frame * 3 {
+                            break;
+                        }
+                        continue;
+                    }
                 }
 
                 // PERFORMANCE: Store RGBA data in RAM cache before GPU upload
@@ -749,14 +783,14 @@ impl ImageViewerApp {
 
                 uploads_this_frame += 1;
                 received_any = true;
-
-                // If we still have more thumbnails in buffer, request another frame to keep processing
-                if !self.pending_thumbnails.is_empty() {
-                    ctx.request_repaint();
-                }
             } else {
                 break; // Buffer is empty
             }
+        }
+
+        // PERFORMANCE: Single repaint request after upload loop (not per-upload)
+        if !self.pending_thumbnails.is_empty() {
+            ctx.request_repaint();
         }
 
         // 6. Folder Previews (Native Sandwich effect)

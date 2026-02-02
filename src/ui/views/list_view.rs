@@ -94,6 +94,8 @@ pub struct ListViewContext<'a> {
     pub pending_upload_set: &'a mut FxHashSet<PathBuf>,
     pub is_video_docked_visible: bool,
     pub prefetch_rows: usize,
+    /// Output: visible item index range for GPU upload prioritization
+    pub visible_index_range: &'a mut Option<(usize, usize)>,
     // Resizable column widths
     pub col_name_width: &'a mut f32,
     pub col_date_width: &'a mut f32,
@@ -699,6 +701,9 @@ pub fn render_list_view(
         let last_visible_index = ((current_scroll + viewport_h) / row_height).ceil() as usize;
         let first_visible_index = first_visible_index.min(total_rows.saturating_sub(1));
         let last_visible_index = last_visible_index.min(total_rows).saturating_sub(1);
+
+        // Export visible range for GPU upload prioritization
+        *ctx.visible_index_range = Some((first_visible_index, last_visible_index));
 
         let tracker = ViewportTracker {
             first_visible_index,

@@ -236,6 +236,7 @@ impl ImageViewerApp {
             pending_upload_set: &mut self.cache_manager.pending_upload_set,
             is_video_docked_visible,
             prefetch_rows,
+            visible_index_range: &mut self.visible_index_range,
             col_name_width,
             col_date_width,
             col_type_width,
@@ -695,6 +696,7 @@ impl ImageViewerApp {
             pending_upload_set: &mut self.cache_manager.pending_upload_set,
             is_video_docked_visible,
             prefetch_rows,
+            visible_index_range: &mut self.visible_index_range,
         };
 
         // Usar uma abordagem diferente: coletar ações em vetores
