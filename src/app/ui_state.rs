@@ -26,6 +26,21 @@ pub struct UIState {
     pub drag_start_pos: Option<egui::Pos2>,
     pub is_dragging: bool,
     pub drag_threshold: f32,
+    // List view column widths (resizable) - Regular view
+    pub list_col_name_width: f32,
+    pub list_col_date_width: f32,
+    pub list_col_type_width: f32,
+    pub list_col_size_width: f32,
+    // List view column widths - OneDrive view
+    pub list_col_onedrive_name_width: f32,
+    pub list_col_onedrive_date_width: f32,
+    pub list_col_onedrive_type_width: f32,
+    pub list_col_onedrive_size_width: f32,
+    pub list_col_onedrive_status_width: f32,
+    // List view column widths - Computer view
+    pub list_col_computer_name_width: f32,
+    pub list_col_computer_total_width: f32,
+    pub list_col_computer_free_width: f32,
 }
 
 impl UIState {
@@ -54,6 +69,21 @@ impl UIState {
             drag_start_pos: None,
             is_dragging: false,
             drag_threshold: 5.0,
+            // Default column widths for list view - Regular
+            list_col_name_width: 300.0,
+            list_col_date_width: 170.0,
+            list_col_type_width: 120.0,
+            list_col_size_width: 100.0,
+            // Default column widths for list view - OneDrive
+            list_col_onedrive_name_width: 300.0,
+            list_col_onedrive_date_width: 170.0,
+            list_col_onedrive_type_width: 120.0,
+            list_col_onedrive_size_width: 100.0,
+            list_col_onedrive_status_width: 120.0,
+            // Default column widths for list view - Computer
+            list_col_computer_name_width: 300.0,
+            list_col_computer_total_width: 120.0,
+            list_col_computer_free_width: 120.0,
         }
     }
     

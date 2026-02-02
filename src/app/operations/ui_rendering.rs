@@ -172,6 +172,38 @@ impl ImageViewerApp {
         let multi_selection = &self.multi_selection;
         let is_ssd = io_priority::is_ssd(&PathBuf::from(&self.current_path));
         let prefetch_rows = if is_ssd { 1 } else { 3 };
+        
+        // Select appropriate column width references based on context
+        let (col_name_width, col_date_width, col_type_width, col_size_width, col_status_width) = 
+            if self.is_computer_view {
+                // Computer view uses its own set of columns
+                (
+                    &mut self.list_col_computer_name_width,
+                    &mut self.list_col_computer_total_width,
+                    &mut self.list_col_type_width, // Not used in computer view
+                    &mut self.list_col_computer_free_width,
+                    &mut self.list_col_onedrive_status_width, // Not used in computer view
+                )
+            } else if is_onedrive_folder {
+                // OneDrive view uses its own set with status column
+                (
+                    &mut self.list_col_onedrive_name_width,
+                    &mut self.list_col_onedrive_date_width,
+                    &mut self.list_col_onedrive_type_width,
+                    &mut self.list_col_onedrive_size_width,
+                    &mut self.list_col_onedrive_status_width,
+                )
+            } else {
+                // Regular view uses standard columns
+                (
+                    &mut self.list_col_name_width,
+                    &mut self.list_col_date_width,
+                    &mut self.list_col_type_width,
+                    &mut self.list_col_size_width,
+                    &mut self.list_col_onedrive_status_width, // Not used in regular view
+                )
+            };
+        
         let mut ctx = ListViewContext {
             items: &items,
             selected_item,
@@ -204,6 +236,11 @@ impl ImageViewerApp {
             pending_upload_set: &mut self.cache_manager.pending_upload_set,
             is_video_docked_visible,
             prefetch_rows,
+            col_name_width,
+            col_date_width,
+            col_type_width,
+            col_size_width,
+            col_status_width,
         };
 
         // Usar uma abordagem diferente: coletar ações em vetores

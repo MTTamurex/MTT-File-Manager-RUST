@@ -13,6 +13,48 @@ use crate::ui::views::ViewportTracker;
 // PERFORMANCE: Tooltip debounce to avoid creation/destruction during scroll
 const TOOLTIP_DELAY_SECS: f32 = 0.3; // Only show tooltip after 300ms hover
 
+/// Helper to truncate text to fit within a column width
+fn truncate_text_for_column(text: &str, max_width: f32, font_id: &FontId, ui: &Ui) -> String {
+    let fonts = ui.fonts(|f| f.clone());
+    let galley = fonts.layout_no_wrap(text.to_string(), font_id.clone(), Color32::WHITE);
+    
+    if galley.rect.width() <= max_width {
+        return text.to_string();
+    }
+    
+    // Binary search for optimal length
+    let ellipsis = "...";
+    let ellipsis_galley = fonts.layout_no_wrap(ellipsis.to_string(), font_id.clone(), Color32::WHITE);
+    let ellipsis_width = ellipsis_galley.rect.width();
+    let available_width = max_width - ellipsis_width;
+    
+    if available_width <= 0.0 {
+        return ellipsis.to_string();
+    }
+    
+    let mut left = 0;
+    let mut right = text.chars().count();
+    
+    while left < right {
+        let mid = (left + right + 1) / 2;
+        let truncated: String = text.chars().take(mid).collect();
+        let test_galley = fonts.layout_no_wrap(truncated.clone(), font_id.clone(), Color32::WHITE);
+        
+        if test_galley.rect.width() <= available_width {
+            left = mid;
+        } else {
+            right = mid - 1;
+        }
+    }
+    
+    if left == 0 {
+        return ellipsis.to_string();
+    }
+    
+    let truncated: String = text.chars().take(left).collect();
+    format!("{}{}", truncated, ellipsis)
+}
+
 /// Context for list view rendering
 pub struct ListViewContext<'a> {
     pub items: &'a [FileEntry],
@@ -52,6 +94,12 @@ pub struct ListViewContext<'a> {
     pub pending_upload_set: &'a mut FxHashSet<PathBuf>,
     pub is_video_docked_visible: bool,
     pub prefetch_rows: usize,
+    // Resizable column widths
+    pub col_name_width: &'a mut f32,
+    pub col_date_width: &'a mut f32,
+    pub col_type_width: &'a mut f32,
+    pub col_size_width: &'a mut f32,
+    pub col_status_width: &'a mut f32, // OneDrive only
 }
 
 /// Action returned by list view
@@ -90,17 +138,51 @@ pub fn render_list_view(
     let row_height = 24.0;
     let available_w = ui.available_width();
 
-    // Column widths - add status column when in OneDrive folder
+    // Use status column width from context when in OneDrive folder
     let w_status = if ctx.is_onedrive_folder && !ctx.is_computer_view {
-        120.0
+        *ctx.col_status_width
     } else {
         0.0
     };
-    let base_cols = 410.0 + w_status;
-    let w_name = (available_w - base_cols).max(200.0);
-    let w_date = 170.0;
-    let w_type = 120.0;
-    let w_size = 100.0;
+    
+    // Ensure total column width doesn't exceed available space
+    // Reserve 8px for scrollbar
+    let max_total_width = available_w - 8.0;
+    
+    // Use mutable column widths from context
+    let w_name = *ctx.col_name_width;
+    let w_date = *ctx.col_date_width;
+    let w_type = *ctx.col_type_width;
+    let w_size = *ctx.col_size_width;
+    
+    // Calculate total based on which columns are actually visible
+    let current_total = if ctx.is_computer_view {
+        // Computer View: Name + Date (as "Espaço Total") + Size (as "Espaço Livre")
+        w_name + w_date + w_size
+    } else if ctx.is_onedrive_folder {
+        // OneDrive View: Name + Date + Type + Size + Status
+        w_name + w_date + w_type + w_size + w_status
+    } else {
+        // Regular View: Name + Date + Type + Size
+        w_name + w_date + w_type + w_size
+    };
+    
+    if current_total > max_total_width {
+        // Proportionally reduce visible columns to fit
+        let scale = max_total_width / current_total;
+        *ctx.col_name_width = (w_name * scale).max(100.0);
+        *ctx.col_date_width = (w_date * scale).max(80.0);
+        if ctx.is_computer_view {
+            *ctx.col_size_width = (w_size * scale).max(80.0);
+        } else if ctx.is_onedrive_folder {
+            *ctx.col_type_width = (w_type * scale).max(80.0);
+            *ctx.col_size_width = (w_size * scale).max(80.0);
+            *ctx.col_status_width = (w_status * scale).max(80.0);
+        } else {
+            *ctx.col_type_width = (w_type * scale).max(80.0);
+            *ctx.col_size_width = (w_size * scale).max(80.0);
+        }
+    }
 
     // Table header - capture sort mode change
     let mut sort_action: Option<SortMode> = None;
@@ -108,30 +190,69 @@ pub fn render_list_view(
     ui.horizontal(|ui| {
         ui.style_mut().spacing.item_spacing.x = 0.0;
 
-        let draw_header = |ui: &mut Ui, text: &str, width: f32, mode: SortMode| {
-            let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 22.0), Sense::click());
+        // Calculate available space for columns (total - scrollbar - status column)
+        let available_for_columns = available_w - 8.0 - w_status;
+
+        // Draw header with resize handle
+        let draw_header_resizable = |ui: &mut Ui, text: &str, width: &mut f32, mode: SortMode, min_width: f32, other_widths: f32| {
+            let header_rect = egui::Rect::from_min_size(
+                ui.cursor().min,
+                egui::vec2(*width, 22.0)
+            );
+            
+            // Header clickable area (for sorting)
+            let header_id = ui.id().with(format!("header_{}", text));
+            let header_response = ui.interact(header_rect, header_id, Sense::click());
+            
             let is_active = ctx.sort_mode == mode;
 
-            if ui.is_rect_visible(rect) {
+            if ui.is_rect_visible(header_rect) {
                 if is_active {
-                    ui.painter().rect_filled(rect, 2.0, Color32::from_gray(230));
+                    ui.painter().rect_filled(header_rect, 2.0, Color32::from_gray(230));
                 }
                 let text_color = if is_active {
                     Color32::BLACK
                 } else {
                     Color32::from_gray(100)
                 };
+                
+                // Truncate text to fit within column
+                let available_text_width = *width - 30.0; // Reserve space for arrow and padding
+                let font_id = FontId::proportional(12.0);
+                let full_text_galley = ui.fonts(|f| f.layout_no_wrap(text.to_string(), font_id.clone(), text_color));
+                
+                let display_text = if full_text_galley.rect.width() > available_text_width {
+                    // Truncate with ellipsis
+                    let mut truncated = text.to_string();
+                    while !truncated.is_empty() {
+                        let test_text = format!("{}...", truncated);
+                        let test_galley = ui.fonts(|f| f.layout_no_wrap(test_text.clone(), font_id.clone(), text_color));
+                        if test_galley.rect.width() <= available_text_width {
+                            break;
+                        }
+                        truncated.pop();
+                    }
+                    if truncated.is_empty() {
+                        "...".to_string()
+                    } else {
+                        format!("{}...", truncated)
+                    }
+                } else {
+                    text.to_string()
+                };
+                
                 ui.painter().text(
-                    rect.min + egui::vec2(8.0, 4.0),
+                    header_rect.min + egui::vec2(8.0, 4.0),
                     egui::Align2::LEFT_TOP,
-                    text,
-                    FontId::proportional(12.0),
+                    display_text,
+                    font_id,
                     text_color,
                 );
+                
                 if is_active {
-                    let arrow = if ctx.sort_descending { "v" } else { "^" };
+                    let arrow = if ctx.sort_descending { "▼" } else { "▲" };
                     ui.painter().text(
-                        rect.max - egui::vec2(15.0, 8.0),
+                        header_rect.max - egui::vec2(15.0, 8.0),
                         egui::Align2::CENTER_CENTER,
                         arrow,
                         FontId::proportional(10.0),
@@ -139,60 +260,172 @@ pub fn render_list_view(
                     );
                 }
             }
-
-            (response.clicked(), mode)
+            
+            // Resize handle (right edge of column)
+            let handle_width = 8.0;
+            let handle_rect = egui::Rect::from_min_size(
+                egui::pos2(header_rect.max.x - handle_width / 2.0, header_rect.min.y),
+                egui::vec2(handle_width, 22.0)
+            );
+            
+            let handle_id = ui.id().with(format!("resize_{}", text));
+            let handle_response = ui.interact(handle_rect, handle_id, Sense::click_and_drag());
+            
+            // Change cursor on hover
+            if handle_response.hovered() || handle_response.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+            }
+            
+            // Handle resize drag with max constraint
+            if handle_response.dragged() {
+                let delta = handle_response.drag_delta().x;
+                let max_width = available_for_columns - other_widths;
+                // Prevent panic: ensure max_width is never less than min_width
+                if max_width >= min_width {
+                    *width = (*width + delta).clamp(min_width, max_width);
+                } else {
+                    // If there's not enough space, just enforce min_width
+                    *width = min_width;
+                }
+            }
+            
+            // Draw resize handle indicator on hover
+            if handle_response.hovered() || handle_response.dragged() {
+                ui.painter().rect_filled(
+                    handle_rect.shrink2(egui::vec2(2.0, 4.0)),
+                    0.0,
+                    Color32::from_rgb(100, 150, 200)
+                );
+            }
+            
+            // Advance cursor
+            ui.allocate_exact_size(egui::vec2(*width, 22.0), Sense::hover());
+            
+            header_response.clicked()
         };
 
-        let (clicked_name, _) = draw_header(ui, "Nome", w_name, SortMode::Name);
-        if clicked_name {
+        // Calculate current widths for constraint checks
+        let current_date = *ctx.col_date_width;
+        let current_size = *ctx.col_size_width;
+
+        if draw_header_resizable(ui, "Nome", ctx.col_name_width, SortMode::Name, 100.0, current_date + current_size) {
             return Some(SortMode::Name);
         }
 
         if ctx.is_computer_view {
             // Computer View: apenas Nome, Espaço Total e Espaço Livre (sem Tipo)
-            let (clicked_total, _) = draw_header(ui, "Espaço Total", w_date, SortMode::DriveTotalSpace);
-            if clicked_total {
+            // Recalculate after potential Name resize
+            let current_name = *ctx.col_name_width;
+            let current_size = *ctx.col_size_width;
+            
+            if draw_header_resizable(ui, "Espaço Total", ctx.col_date_width, SortMode::DriveTotalSpace, 80.0, current_name + current_size) {
                 return Some(SortMode::DriveTotalSpace);
             }
 
-            let (clicked_free, _) = draw_header(ui, "Espaço Livre", w_size, SortMode::DriveFreeSpace);
-            if clicked_free {
+            // Recalculate after potential Date resize
+            let current_name = *ctx.col_name_width;
+            let current_date = *ctx.col_date_width;
+            
+            if draw_header_resizable(ui, "Espaço Livre", ctx.col_size_width, SortMode::DriveFreeSpace, 80.0, current_name + current_date) {
                 return Some(SortMode::DriveFreeSpace);
             }
         } else {
+            // Regular view: Nome, Data, Tipo, Tamanho (+ Status se OneDrive)
+            // Recalculate after potential Name resize
+            let current_name = *ctx.col_name_width;
+            let current_type = *ctx.col_type_width;
+            let current_size = *ctx.col_size_width;
+            
             let date_label = if ctx.is_recycle_bin_view {
                 "Data de Exclusão"
             } else {
                 "Última modificação"
             };
-            let (clicked_date, _) = draw_header(ui, date_label, w_date, SortMode::Date);
-            if clicked_date {
+            if draw_header_resizable(ui, date_label, ctx.col_date_width, SortMode::Date, 120.0, current_name + current_type + current_size) {
                 return Some(SortMode::Date);
             }
 
-            let (clicked_type, _) = draw_header(ui, "Tipo", w_type, SortMode::Type);
-            if clicked_type {
+            // Recalculate after potential Date resize
+            let current_name = *ctx.col_name_width;
+            let current_date = *ctx.col_date_width;
+            let current_size = *ctx.col_size_width;
+            
+            if draw_header_resizable(ui, "Tipo", ctx.col_type_width, SortMode::Type, 80.0, current_name + current_date + current_size) {
                 return Some(SortMode::Type);
             }
 
-            let (clicked_size, _) = draw_header(ui, "Tamanho", w_size, SortMode::Size);
-            if clicked_size {
+            // Recalculate after potential Type resize
+            let current_name = *ctx.col_name_width;
+            let current_date = *ctx.col_date_width;
+            let current_type = *ctx.col_type_width;
+            
+            if draw_header_resizable(ui, "Tamanho", ctx.col_size_width, SortMode::Size, 80.0, current_name + current_date + current_type) {
                 return Some(SortMode::Size);
             }
 
-            // Status column (OneDrive only)
+            // Status column (OneDrive only) - now resizable
             if ctx.is_onedrive_folder {
-                let (rect, _response) =
-                    ui.allocate_exact_size(egui::vec2(w_status, 22.0), Sense::hover());
-                if ui.is_rect_visible(rect) {
+                let current_name = *ctx.col_name_width;
+                let current_date = *ctx.col_date_width;
+                let current_type = *ctx.col_type_width;
+                let current_size = *ctx.col_size_width;
+                
+                // Draw status header with resize capability (no sorting)
+                let header_rect = egui::Rect::from_min_size(
+                    ui.cursor().min,
+                    egui::vec2(*ctx.col_status_width, 22.0)
+                );
+                
+                let header_id = ui.id().with("header_status");
+                let _header_response = ui.interact(header_rect, header_id, Sense::hover());
+                
+                if ui.is_rect_visible(header_rect) {
                     ui.painter().text(
-                        rect.min + egui::vec2(8.0, 4.0),
+                        header_rect.min + egui::vec2(8.0, 4.0),
                         egui::Align2::LEFT_TOP,
                         "Status",
                         FontId::proportional(12.0),
                         Color32::from_gray(100),
                     );
                 }
+                
+                // Resize handle for Status column
+                let handle_width = 8.0;
+                let handle_rect = egui::Rect::from_min_size(
+                    egui::pos2(header_rect.max.x - handle_width / 2.0, header_rect.min.y),
+                    egui::vec2(handle_width, 22.0)
+                );
+                
+                let handle_id = ui.id().with("resize_status");
+                let handle_response = ui.interact(handle_rect, handle_id, Sense::click_and_drag());
+                
+                if handle_response.hovered() || handle_response.dragged() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                }
+                
+                if handle_response.dragged() {
+                    let delta = handle_response.drag_delta().x;
+                    let available_for_columns = available_w - 8.0;
+                    let other_widths = current_name + current_date + current_type + current_size;
+                    let max_width = available_for_columns - other_widths;
+                    let min_width = 80.0;
+                    
+                    if max_width >= min_width {
+                        *ctx.col_status_width = (*ctx.col_status_width + delta).clamp(min_width, max_width);
+                    } else {
+                        *ctx.col_status_width = min_width;
+                    }
+                }
+                
+                if handle_response.hovered() || handle_response.dragged() {
+                    ui.painter().rect_filled(
+                        handle_rect.shrink2(egui::vec2(2.0, 4.0)),
+                        0.0,
+                        Color32::from_rgb(100, 150, 200)
+                    );
+                }
+                
+                ui.allocate_exact_size(egui::vec2(*ctx.col_status_width, 22.0), Sense::hover());
             }
         }
 
@@ -873,73 +1106,53 @@ fn render_list_item(
                 }
             });
         } else {
-            // Name (truncated to fit column - safe UTF-8)
-            let max_name_chars = ((w_name - 30.0) / 7.0) as usize;
-            let display_name: String =
-                if item.name.chars().count() > max_name_chars && max_name_chars > 3 {
-                    let truncated: String = item
-                        .name
-                        .chars()
-                        .take(max_name_chars.saturating_sub(3))
-                        .collect();
-                    format!("{}...", truncated)
-                } else {
-                    item.name.clone()
-                };
+            // Name (truncated to fit column precisely)
+            let font_id = FontId::proportional(12.0);
+            let available_name_width = w_name - 30.0; // Space for icon + padding
+            let display_name = truncate_text_for_column(&item.name, available_name_width, &font_id, ui);
+            
             ui.painter().text(
                 rect.min + egui::vec2(24.0, 5.0),
                 egui::Align2::LEFT_TOP,
                 display_name,
-                FontId::proportional(12.0),
+                font_id,
                 text_color,
             );
         }
 
         if ctx.is_computer_view {
-            // 2. Type
-            let drive_type = if let Some(di) = &item.drive_info {
-                di.drive_type.label().to_string()
-            } else {
-                "Unidade".to_string()
-            };
-
-            ui.painter().text(
-                Pos2::new(rect.min.x + w_name, rect.min.y + 5.0),
-                egui::Align2::LEFT_TOP,
-                drive_type,
-                FontId::proportional(12.0),
-                secondary_color,
-            );
-
-            // 3. Total Size
+            // Computer View: Name, Espaço Total (w_date), Espaço Livre (w_size)
+            // NO Type column should be displayed
+            
+            // 2. Total Size (Espaço Total) - positioned at w_name
             let total_str = if let Some(di) = &item.drive_info {
                 format_size(di.total_space)
             } else {
                 "-".to_string()
             };
             ui.painter().text(
-                Pos2::new(rect.min.x + w_name + w_type, rect.min.y + 5.0),
+                Pos2::new(rect.min.x + w_name, rect.min.y + 5.0),
                 egui::Align2::LEFT_TOP,
                 total_str,
                 FontId::proportional(12.0),
                 secondary_color,
             );
 
-            // 4. Free Space
+            // 3. Free Space (Espaço Livre) - positioned at w_name + w_date
             let free_str = if let Some(di) = &item.drive_info {
                 format_size(di.free_space)
             } else {
                 "-".to_string()
             };
             ui.painter().text(
-                Pos2::new(rect.min.x + w_name + w_type + w_date, rect.min.y + 5.0),
+                Pos2::new(rect.min.x + w_name + w_date, rect.min.y + 5.0),
                 egui::Align2::LEFT_TOP,
                 free_str,
                 FontId::proportional(12.0),
                 secondary_color,
             );
         } else {
-            // 2. Date
+            // 2. Date (truncated)
             let date_str = if ctx.is_recycle_bin_view {
                 item.deletion_date
                     .clone()
@@ -947,31 +1160,28 @@ fn render_list_item(
             } else {
                 format_date(item.modified)
             };
+            let font_id = FontId::proportional(12.0);
+            let available_date_width = w_date - 8.0; // Padding
+            let display_date = truncate_text_for_column(&date_str, available_date_width, &font_id, ui);
+            
             ui.painter().text(
                 Pos2::new(rect.min.x + w_name, rect.min.y + 5.0),
                 egui::Align2::LEFT_TOP,
-                date_str,
-                FontId::proportional(12.0),
+                display_date,
+                font_id.clone(),
                 secondary_color,
             );
 
-            // 3. Type (truncated)
+            // 3. Type (truncated precisely)
             let type_str = get_file_type_string(item);
-            let max_type_chars = 14;
-            let display_type: String = if type_str.chars().count() > max_type_chars {
-                type_str
-                    .chars()
-                    .take(max_type_chars - 2)
-                    .collect::<String>()
-                    + ".."
-            } else {
-                type_str
-            };
+            let available_type_width = w_type - 8.0; // Padding
+            let display_type = truncate_text_for_column(&type_str, available_type_width, &font_id, ui);
+            
             ui.painter().text(
                 Pos2::new(rect.min.x + w_name + w_date, rect.min.y + 5.0),
                 egui::Align2::LEFT_TOP,
                 display_type,
-                FontId::proportional(12.0),
+                font_id.clone(),
                 secondary_color,
             );
 

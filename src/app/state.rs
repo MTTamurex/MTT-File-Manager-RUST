@@ -262,6 +262,22 @@ pub struct ImageViewerApp {
 
     // Media keyboard debounce
     pub last_media_key_press: Instant,
+
+    // List view column widths (resizable) - Regular view
+    pub list_col_name_width: f32,
+    pub list_col_date_width: f32,
+    pub list_col_type_width: f32,
+    pub list_col_size_width: f32,
+    // List view column widths - OneDrive view
+    pub list_col_onedrive_name_width: f32,
+    pub list_col_onedrive_date_width: f32,
+    pub list_col_onedrive_type_width: f32,
+    pub list_col_onedrive_size_width: f32,
+    pub list_col_onedrive_status_width: f32,
+    // List view column widths - Computer view
+    pub list_col_computer_name_width: f32,
+    pub list_col_computer_total_width: f32,
+    pub list_col_computer_free_width: f32,
 }
 
 impl ImageViewerApp {
