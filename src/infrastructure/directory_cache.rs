@@ -80,9 +80,15 @@ impl DirectoryCache {
     /// Phase 3: Store/update cache with fresh data
     /// Stores directory entries with current modification time
     pub fn put(&self, path: PathBuf, entries: Vec<FileEntry>) {
+        // Read mtime from disk (used when caller doesn't have it)
+        let last_modified = self.get_dir_mtime(&path).unwrap_or_else(SystemTime::now);
+        self.put_with_mtime(path, entries, last_modified);
+    }
+
+    /// Store cache entries with a known modification time (avoids extra metadata syscall)
+    pub fn put_with_mtime(&self, path: PathBuf, entries: Vec<FileEntry>, last_modified: SystemTime) {
         if let Ok(mut cache) = self.inner.lock() {
-            let last_modified = self.get_dir_mtime(&path).unwrap_or_else(SystemTime::now);
-            eprintln!("[STALE-WHILE-REVALIDATE] Storing {} entries in cache for {:?} with mtime={:?}", 
+            eprintln!("[STALE-WHILE-REVALIDATE] Storing {} entries in cache for {:?} with mtime={:?}",
                 entries.len(), path, last_modified);
             cache.put(
                 path,

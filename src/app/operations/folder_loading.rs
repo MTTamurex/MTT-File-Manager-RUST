@@ -267,28 +267,13 @@ impl ImageViewerApp {
                     let _ = file_entry_sender.send((my_gen, Vec::new()));
                     ctx.request_repaint();
                     
-                    // Phase 2: The Debounce Check (Stale-While-Revalidate)
-                    eprintln!("[FOLDER-LOADING] Phase 2: Starting debounce check for {:?}", base_path_buf);
-                    if directory_cache.needs_revalidation(&base_path_buf) {
-                        // Check if directory was modified since last cache
-                        if let Some(has_changed) = directory_cache.has_directory_changed(&base_path_buf) {
-                            if !has_changed {
-                                eprintln!("[FOLDER-LOADING] Phase 2: Directory unchanged, maintaining HDD silence");
-                                // HDD Silence: Directory unchanged, just update check time
-                                directory_cache.update_check_time(&base_path_buf);
-                                return;
-                            }
-                            eprintln!("[FOLDER-LOADING] Phase 2: Directory changed, proceeding to Phase 3");
-                            // Directory changed - continue to Phase 3 for full reload
-                        } else {
-                            eprintln!("[FOLDER-LOADING] Phase 2: Could not check modification time, proceeding to Phase 3");
-                            // Could not check modification time - continue to Phase 3
-                        }
-                    } else {
-                        eprintln!("[FOLDER-LOADING] Phase 2: Within debounce window (<2s), maintaining HDD silence");
-                        // HDD Silence: Navigation within 2 seconds, don't touch HDD
-                        return;
-                    }
+                    // Phase 2: HDD SILENCE - Trust cache + file watcher
+                    // The file watcher (ReadDirectoryChangesW) passively monitors the current
+                    // directory and invalidates the cache on changes. We don't need to poll
+                    // the filesystem to check for modifications — the watcher handles this.
+                    // This eliminates std::fs::metadata() syscalls on HDD per navigation.
+                    eprintln!("[FOLDER-LOADING] Phase 2: Cache valid, trusting watcher for {:?} - HDD silence maintained", base_path_buf);
+                    return;
                 } else {
                     eprintln!("[FOLDER-LOADING] Phase 1: Cache miss for {:?}, proceeding to Phase 3 (disk load)", base_path_buf);
                 }
@@ -418,17 +403,10 @@ impl ImageViewerApp {
                     let _ = file_entry_sender.send((my_gen, Vec::new()));
                     ctx.request_repaint();
 
-                    if !is_ssd && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
-                        let subdirs: Vec<PathBuf> = cached_entries
-                            .iter()
-                            .filter(|e| e.is_dir)
-                            .take(5)
-                            .map(|e| e.path.clone())
-                            .collect();
-                        if !subdirs.is_empty() {
-                            let _ = prefetch_sender.send(PrefetchMessage::Prefetch(subdirs));
-                        }
-                    }
+                    // PERFORMANCE: Don't prefetch when serving from cache.
+                    // Prefetch only runs after actual disk enumeration (first visit).
+                    // Subdirectories are likely already cached from previous visits.
+                    // This eliminates 5x background directory enumerations on HDD.
                     return;
                 }
             }
