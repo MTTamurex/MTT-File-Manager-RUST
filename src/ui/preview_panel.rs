@@ -599,6 +599,205 @@ pub fn render_preview_panel(
                                     egui::RichText::new(time_text).size(12.0).color(time_color),
                                 );
 
+                                ui.add_space(8.0);
+
+                                // === AUDIO TRACK WHEEL PICKER ===
+                                let audio_tracks = preview.get_video_state()
+                                    .map(|s| s.audio_tracks.clone())
+                                    .unwrap_or_default();
+                                
+                                if !audio_tracks.is_empty() {
+                                    let current_idx = audio_tracks.iter()
+                                        .position(|t| t.selected)
+                                        .unwrap_or(0);
+                                    
+                                    let current_track = &audio_tracks[current_idx];
+                                    let title = current_track.title.as_deref().unwrap_or("Audio");
+                                    let lang = current_track.lang.as_deref().unwrap_or("unk");
+                                    let display_text = format!("🎵 {} ({})", title, lang);
+                                    
+                                    // Wheel picker frame
+                                    let picker_width = 140.0;
+                                    let picker_height = 22.0;
+                                    let (rect, response) = ui.allocate_exact_size(
+                                        egui::vec2(picker_width, picker_height),
+                                        egui::Sense::click_and_drag()
+                                    );
+                                    
+                                    // Keep controls visible when interacting
+                                    if response.hovered() || response.has_focus() {
+                                        preview.reset_mouse_activity();
+                                    }
+                                    
+                                    // Background with subtle border
+                                    let bg_color = if ui.visuals().dark_mode {
+                                        egui::Color32::from_rgb(50, 50, 55)
+                                    } else {
+                                        egui::Color32::from_rgb(235, 235, 240)
+                                    };
+                                    let border_color = if response.hovered() {
+                                        egui::Color32::from_rgb(100, 150, 200)
+                                    } else if ui.visuals().dark_mode {
+                                        egui::Color32::from_rgb(70, 70, 75)
+                                    } else {
+                                        egui::Color32::from_rgb(200, 200, 205)
+                                    };
+                                    
+                                    ui.painter().rect_filled(rect, 4.0, bg_color);
+                                    ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(1.0, border_color), egui::StrokeKind::Inside);
+                                    
+                                    // Center text
+                                    let text_color = if ui.visuals().dark_mode {
+                                        egui::Color32::from_gray(220)
+                                    } else {
+                                        egui::Color32::from_gray(40)
+                                    };
+                                    ui.painter().text(
+                                        rect.center(),
+                                        egui::Align2::CENTER_CENTER,
+                                        &display_text,
+                                        egui::FontId::proportional(11.0),
+                                        text_color
+                                    );
+                                    
+                                    // Handle scroll wheel
+                                    if response.hovered() {
+                                        let scroll = ui.input(|i| i.raw_scroll_delta.y);
+                                        if scroll != 0.0 {
+                                            let new_idx = if scroll > 0.0 {
+                                                if current_idx > 0 { current_idx - 1 } else { audio_tracks.len() - 1 }
+                                            } else {
+                                                (current_idx + 1) % audio_tracks.len()
+                                            };
+                                            if let Some(track) = audio_tracks.get(new_idx) {
+                                                preview.set_audio_track(track.id);
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Tooltip
+                                    response.on_hover_text(format!(
+                                        "Faixa {}/{} - Use scroll para trocar",
+                                        current_idx + 1, audio_tracks.len()
+                                    ));
+                                    
+                                    ui.add_space(4.0);
+                                }
+
+                                // === SUBTITLE WHEEL PICKER ===
+                                let subtitle_tracks = preview.get_video_state()
+                                    .map(|s| s.subtitle_tracks.clone())
+                                    .unwrap_or_default();
+                                
+                                // Build options: [Off, Sub1, Sub2, ...]
+                                let mut sub_options: Vec<(Option<i64>, String)> = vec![(None, "CC: Off".to_string())];
+                                for track in &subtitle_tracks {
+                                    let title = track.title.as_deref().unwrap_or("Legenda");
+                                    let lang = track.lang.as_deref().unwrap_or("unk");
+                                    sub_options.push((Some(track.id), format!("CC: {} ({})", title, lang)));
+                                }
+                                
+                                let current_sub_idx = subtitle_tracks.iter()
+                                    .position(|t| t.selected)
+                                    .map(|i| i + 1) // +1 because 0 is "Off"
+                                    .unwrap_or(0);
+                                
+                                let display_text = &sub_options[current_sub_idx].1;
+                                
+                                // Wheel picker frame
+                                let picker_width = 140.0;
+                                let picker_height = 22.0;
+                                let (rect, response) = ui.allocate_exact_size(
+                                    egui::vec2(picker_width, picker_height),
+                                    egui::Sense::click_and_drag()
+                                );
+                                
+                                // Keep controls visible when interacting
+                                if response.hovered() || response.has_focus() {
+                                    preview.reset_mouse_activity();
+                                }
+                                
+                                // Background with subtle border
+                                let bg_color = if ui.visuals().dark_mode {
+                                    egui::Color32::from_rgb(50, 50, 55)
+                                } else {
+                                    egui::Color32::from_rgb(235, 235, 240)
+                                };
+                                let border_color = if response.hovered() {
+                                    egui::Color32::from_rgb(100, 150, 200)
+                                } else if ui.visuals().dark_mode {
+                                    egui::Color32::from_rgb(70, 70, 75)
+                                } else {
+                                    egui::Color32::from_rgb(200, 200, 205)
+                                };
+                                
+                                ui.painter().rect_filled(rect, 4.0, bg_color);
+                                ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(1.0, border_color), egui::StrokeKind::Inside);
+                                
+                                // Center text
+                                let text_color = if ui.visuals().dark_mode {
+                                    egui::Color32::from_gray(220)
+                                } else {
+                                    egui::Color32::from_gray(40)
+                                };
+                                ui.painter().text(
+                                    rect.center(),
+                                    egui::Align2::CENTER_CENTER,
+                                    display_text,
+                                    egui::FontId::proportional(11.0),
+                                    text_color
+                                );
+                                
+                                // Handle scroll wheel
+                                if response.hovered() {
+                                    let scroll = ui.input(|i| i.raw_scroll_delta.y);
+                                    if scroll != 0.0 {
+                                        let new_idx = if scroll > 0.0 {
+                                            if current_sub_idx > 0 { current_sub_idx - 1 } else { sub_options.len() - 1 }
+                                        } else {
+                                            (current_sub_idx + 1) % sub_options.len()
+                                        };
+                                        let new_id = sub_options[new_idx].0.unwrap_or(0);
+                                        preview.set_subtitle_track(new_id);
+                                    }
+                                }
+                                
+                                // Tooltip
+                                response.on_hover_text(format!(
+                                    "Legenda {}/{} - Use scroll para trocar",
+                                    current_sub_idx + 1, sub_options.len()
+                                ));
+
+                                ui.add_space(2.0);
+
+                                // Audio Normalizer Button (toggle)
+                                let normalizer_enabled = preview.is_audio_normalizer_enabled();
+                                let normalizer_color = if normalizer_enabled {
+                                    [118, 185, 0, 255] // Green when enabled
+                                } else {
+                                    icon_color
+                                };
+                                if let Some(tex) =
+                                    svg_manager.get_icon(ui.ctx(), "headphones", 48, normalizer_color)
+                                {
+                                    let tooltip = if normalizer_enabled {
+                                        "Normalizador: Ativo"
+                                    } else {
+                                        "Normalizador: Inativo"
+                                    };
+                                    if add_icon_button(ui, &tex, tooltip) {
+                                        preview.toggle_audio_normalizer();
+                                    }
+                                } else {
+                                    // Fallback: text button if icon doesn't load
+                                    let label = if normalizer_enabled { "N+" } else { "N" };
+                                    if ui.small_button(label).clicked() {
+                                        preview.toggle_audio_normalizer();
+                                    }
+                                }
+
+                                ui.add_space(4.0);
+
                                 // Right-aligned buttons (only in detached mode)
                                 if is_detached {
                                     ui.with_layout(
@@ -832,6 +1031,27 @@ pub fn render_preview_panel(
 
                                     let total_size = screen_rect.size();
 
+                                    // Control area rect (always calculate for hover detection)
+                                    let control_height_base = 75.0;
+                                    let control_rect_hover = egui::Rect::from_min_size(
+                                        egui::pos2(
+                                            screen_rect.min.x,
+                                            screen_rect.max.y - control_height_base,
+                                        ),
+                                        egui::vec2(total_size.x, control_height_base),
+                                    );
+
+                                    // Check if mouse is over control area and keep visible
+                                    let mouse_over_controls = ui.input(|i| {
+                                        i.pointer.hover_pos()
+                                            .map(|p| control_rect_hover.contains(p))
+                                            .unwrap_or(false)
+                                    });
+                                    
+                                    if mouse_over_controls {
+                                        preview.reset_mouse_activity();
+                                    }
+
                                     // Autohide logic
                                     let show_controls = preview.controls_active();
                                     let control_height = if show_controls { 75.0 } else { 0.0 };
@@ -842,9 +1062,23 @@ pub fn render_preview_panel(
                                         egui::vec2(total_size.x, video_height),
                                     );
 
-                                    // Allocate the full area
-                                    let _ =
+                                    // Allocate the full area with click detection
+                                    let video_response =
                                         ui.allocate_exact_size(total_size, egui::Sense::click());
+
+                                    // Double-click on video area to exit fullscreen
+                                    if video_response.1.double_clicked() {
+                                        preview.toggle_maximized();
+                                        preview.set_fullscreen_applied(false);
+                                        ui.ctx().send_viewport_cmd(
+                                            egui::ViewportCommand::Fullscreen(false),
+                                        );
+                                        if preview.prev_app_maximized() {
+                                            ui.ctx().send_viewport_cmd(
+                                                egui::ViewportCommand::Maximized(true),
+                                            );
+                                        }
+                                    }
 
                                     // Render Video
                                     let mut video_ui =
@@ -925,24 +1159,34 @@ pub fn render_preview_panel(
                             }
 
                             // Condition Window Builder
+                            // Minimum width to fit all controls properly
+                            let min_window_width = 700.0;
+                            let min_window_height = 450.0;
+                            let default_window_width = 800.0;
+                            let default_window_height = 500.0;
+                            
                             let mut window_builder = egui::Window::new(&file.name)
                                 .open(&mut open)
                                 .collapsible(false)
                                 .title_bar(true)
                                 // Fix Z-Order overlap with Resize Handles (which are Foreground)
-                                .order(egui::Order::Foreground);
+                                .order(egui::Order::Foreground)
+                                .min_size([min_window_width, min_window_height]);
 
                             if should_restore {
                                 // Force restoration to previous size for one frame
                                 if let Some(rect) = last_known_rect {
+                                    // Ensure restored size respects minimum
+                                    let w = rect.width().max(min_window_width);
+                                    let h = rect.height().max(min_window_height);
                                     window_builder = window_builder
                                         .current_pos(rect.min)
-                                        .fixed_size(rect.size());
+                                        .fixed_size([w, h]);
                                 } else {
                                     let screen = ui.ctx().screen_rect();
                                     let center = screen.center();
-                                    let w = 640.0;
-                                    let h = 480.0;
+                                    let w = default_window_width;
+                                    let h = default_window_height;
                                     let rect = egui::Rect::from_min_size(
                                         egui::pos2(center.x - w / 2.0, center.y - h / 2.0),
                                         egui::vec2(w, h),
@@ -954,13 +1198,16 @@ pub fn render_preview_panel(
                             } else {
                                 // Normal Floating State - use last known position if available
                                 if let Some(rect) = last_known_rect {
+                                    // Ensure restored size respects minimum
+                                    let w = rect.width().max(min_window_width);
+                                    let h = rect.height().max(min_window_height);
                                     window_builder = window_builder
                                         .default_pos(rect.min)
-                                        .default_size(rect.size())
+                                        .default_size([w, h])
                                         .resizable(true);
                                 } else {
                                     window_builder =
-                                        window_builder.default_size([640.0, 480.0]).resizable(true);
+                                        window_builder.default_size([default_window_width, default_window_height]).resizable(true);
                                 }
                             }
 
@@ -970,6 +1217,27 @@ pub fn render_preview_panel(
 
                                 let total_rect = ui.available_rect_before_wrap();
                                 let total_size = total_rect.size();
+
+                                // Control area rect (always calculate for hover detection)
+                                let control_height_base = 75.0;
+                                let control_rect_hover = egui::Rect::from_min_size(
+                                    egui::pos2(
+                                        total_rect.min.x,
+                                        total_rect.max.y - control_height_base,
+                                    ),
+                                    egui::vec2(total_size.x, control_height_base),
+                                );
+
+                                // Check if mouse is over control area and keep visible
+                                let mouse_over_controls = ui.input(|i| {
+                                    i.pointer.hover_pos()
+                                        .map(|p| control_rect_hover.contains(p))
+                                        .unwrap_or(false)
+                                });
+                                
+                                if mouse_over_controls {
+                                    preview.reset_mouse_activity();
+                                }
 
                                 // Determine if controls should be visible
                                 // Primary: MPV area reports mouse activity
@@ -986,8 +1254,19 @@ pub fn render_preview_panel(
                                     egui::vec2(total_size.x, video_height),
                                 );
 
-                                // Allocate the total space (locks window size)
-                                let _ = ui.allocate_exact_size(total_size, egui::Sense::hover());
+                                // Allocate the total space with click detection
+                                let video_response = ui.allocate_exact_size(total_size, egui::Sense::click());
+
+                                // Double-click on video area to enter fullscreen
+                                // (same logic as fullscreen button in control bar)
+                                if video_response.1.double_clicked() {
+                                    let was_maximized = ui.ctx().input(|i| {
+                                        i.viewport().maximized.unwrap_or(false)
+                                    });
+                                    preview.set_prev_app_maximized(was_maximized);
+                                    preview.set_fullscreen_applied(false);
+                                    preview.toggle_maximized();
+                                }
 
                                 // 1. Render Video (full height when controls hidden)
                                 let mut video_ui =
@@ -1076,10 +1355,135 @@ pub fn render_preview_panel(
                         // === ATTACHED MODE (Standard) ===
                         preview.show(ui, frame);
 
-                        // Controls bar BELOW the video
+                        // Controls bar BELOW the video (SIMPLIFIED - no extra buttons)
                         ui.add_space(8.0);
                         ui.vertical(|ui| {
-                            draw_controls(ui, preview, max_preview_width, svg_manager);
+                            ui.set_width(max_preview_width);
+
+                            // Seek Bar
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().slider_width = max_preview_width;
+                                ui.visuals_mut().selection.bg_fill = crate::ui::theme::COLOR_ACCENT;
+
+                                let mut seek_value = current_time;
+                                if ui
+                                    .add(
+                                        egui::Slider::new(&mut seek_value, 0.0..=duration.max(0.1))
+                                            .show_value(false)
+                                            .trailing_fill(true),
+                                    )
+                                    .changed()
+                                {
+                                    preview.seek(seek_value);
+                                }
+                            });
+
+                            ui.add_space(6.0);
+
+                            // Simple controls without extra buttons
+                            ui.horizontal(|ui| {
+                                let icon_color = if ui.visuals().dark_mode {
+                                    [240, 240, 240, 255]
+                                } else {
+                                    [60, 60, 60, 255]
+                                };
+                                let btn_size = 18.0;
+
+                                let add_icon_button = |ui: &mut egui::Ui,
+                                                       tex: &egui::TextureHandle,
+                                                       tooltip: &str|
+                                 -> bool {
+                                    let desired_size = egui::vec2(btn_size + 8.0, btn_size + 8.0);
+                                    let (rect, response) =
+                                        ui.allocate_exact_size(desired_size, egui::Sense::click());
+                                    if response.hovered() {
+                                        let hover_color = if ui.visuals().dark_mode {
+                                            egui::Color32::from_white_alpha(25)
+                                        } else {
+                                            egui::Color32::from_black_alpha(15)
+                                        };
+                                        ui.painter().rect_filled(rect, 4.0, hover_color);
+                                    }
+                                    let icon_rect = egui::Rect::from_center_size(
+                                        rect.center(),
+                                        egui::vec2(btn_size, btn_size),
+                                    );
+                                    ui.painter().image(
+                                        tex.id(),
+                                        icon_rect,
+                                        egui::Rect::from_min_max(
+                                            egui::pos2(0.0, 0.0),
+                                            egui::pos2(1.0, 1.0),
+                                        ),
+                                        egui::Color32::WHITE,
+                                    );
+                                    response.on_hover_text(tooltip).clicked()
+                                };
+
+                                // Play/Pause
+                                let play_icon = if is_playing { "pause" } else { "play" };
+                                if let Some(tex) =
+                                    svg_manager.get_icon(ui.ctx(), play_icon, 48, icon_color)
+                                {
+                                    let tooltip = if is_playing { "Pausar" } else { "Reproduzir" };
+                                    if add_icon_button(ui, &tex, tooltip) {
+                                        preview.toggle_play();
+                                    }
+                                }
+
+                                ui.add_space(2.0);
+
+                                // Detach Button
+                                if let Some(tex) =
+                                    svg_manager.get_icon(ui.ctx(), "external-link", 48, icon_color)
+                                {
+                                    if add_icon_button(ui, &tex, "Desacoplar vídeo") {
+                                        preview.toggle_detached();
+                                    }
+                                }
+
+                                ui.add_space(2.0);
+
+                                // Volume
+                                let vol_icon = if is_muted { "vol_mute" } else { "vol_high" };
+                                if let Some(tex) =
+                                    svg_manager.get_icon(ui.ctx(), vol_icon, 48, icon_color)
+                                {
+                                    let vol_tooltip = if is_muted { "Ativar som" } else { "Mudo" };
+                                    if add_icon_button(ui, &tex, vol_tooltip) {
+                                        preview.toggle_mute();
+                                    }
+                                }
+
+                                // Volume Slider
+                                let mut vol = volume;
+                                ui.add_space(4.0);
+                                ui.spacing_mut().slider_width = 70.0;
+                                ui.visuals_mut().selection.bg_fill = crate::ui::theme::COLOR_ACCENT;
+                                if ui
+                                    .add(egui::Slider::new(&mut vol, 0.0..=1.0).show_value(false))
+                                    .changed()
+                                {
+                                    preview.set_volume(vol);
+                                }
+
+                                ui.add_space(10.0);
+
+                                // Time
+                                let time_text = format!(
+                                    "{} / {}",
+                                    crate::ui::components::media_preview::format_time(current_time),
+                                    crate::ui::components::media_preview::format_time(duration)
+                                );
+                                let time_color = if ui.visuals().dark_mode {
+                                    egui::Color32::LIGHT_GRAY
+                                } else {
+                                    egui::Color32::DARK_GRAY
+                                };
+                                ui.label(
+                                    egui::RichText::new(time_text).size(12.0).color(time_color),
+                                );
+                            });
                         });
                     }
                 } else {
