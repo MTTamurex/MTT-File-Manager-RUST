@@ -1207,8 +1207,8 @@ pub fn render_preview_panel(
                             }
 
                             // Condition Window Builder
-                            // Minimum width to fit all controls properly
-                            let min_window_width = 700.0;
+                            // Minimum width to fit all controls properly (increased to prevent overlap)
+                            let min_window_width = 780.0;
                             let min_window_height = 450.0;
                             let default_window_width = 800.0;
                             let default_window_height = 500.0;
