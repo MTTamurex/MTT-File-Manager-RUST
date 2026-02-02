@@ -641,6 +641,9 @@ impl ImageViewerApp {
             // Scroll offset for manual grid virtualization
             scroll_offset_y: 0.0,
 
+            // PERFORMANCE: Visible item range for GPU upload prioritization
+            visible_index_range: None,
+
             // PERFORMANCE: Scroll state tracking for adaptive GPU upload throttling
             last_scroll_time: Instant::now(),
             last_scroll_offset: 0.0,
