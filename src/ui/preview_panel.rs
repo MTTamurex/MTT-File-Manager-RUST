@@ -15,6 +15,48 @@ pub enum PreviewPanelAction {
 
 const PREVIEW_MAX_HEIGHT: f32 = 240.0;
 
+// Helper function to truncate text to fit within a given width
+fn truncate_text_to_fit(
+    text: &str,
+    max_width: f32,
+    font_id: &egui::FontId,
+    ui: &egui::Ui,
+) -> String {
+    let fonts = ui.fonts(|f| f.clone());
+    let galley = fonts.layout_no_wrap(text.to_string(), font_id.clone(), egui::Color32::WHITE);
+    
+    if galley.rect.width() <= max_width {
+        return text.to_string();
+    }
+    
+    // Binary search for the right length
+    let mut left = 0;
+    let mut right = text.chars().count();
+    let ellipsis = "...";
+    let ellipsis_galley = fonts.layout_no_wrap(ellipsis.to_string(), font_id.clone(), egui::Color32::WHITE);
+    let ellipsis_width = ellipsis_galley.rect.width();
+    let available_width = max_width - ellipsis_width;
+    
+    while left < right {
+        let mid = (left + right + 1) / 2;
+        let truncated: String = text.chars().take(mid).collect();
+        let test_galley = fonts.layout_no_wrap(truncated.clone(), font_id.clone(), egui::Color32::WHITE);
+        
+        if test_galley.rect.width() <= available_width {
+            left = mid;
+        } else {
+            right = mid - 1;
+        }
+    }
+    
+    if left == 0 {
+        return ellipsis.to_string();
+    }
+    
+    let truncated: String = text.chars().take(left).collect();
+    format!("{}{}", truncated, ellipsis)
+}
+
 pub fn render_preview_panel(
     ui: &mut egui::Ui,
     file: &FileEntry,
@@ -614,11 +656,14 @@ pub fn render_preview_panel(
                                     let current_track = &audio_tracks[current_idx];
                                     let title = current_track.title.as_deref().unwrap_or("Audio");
                                     let lang = current_track.lang.as_deref().unwrap_or("unk");
-                                    let display_text = format!("🎵 {} ({})", title, lang);
+                                    let full_text = format!("🎵 {} ({})", title, lang);
                                     
                                     // Wheel picker frame
                                     let picker_width = 140.0;
                                     let picker_height = 22.0;
+                                    let font_id = egui::FontId::proportional(11.0);
+                                    // Reserve padding (8px on each side for the emoji and spacing)
+                                    let display_text = truncate_text_to_fit(&full_text, picker_width - 16.0, &font_id, ui);
                                     let (rect, response) = ui.allocate_exact_size(
                                         egui::vec2(picker_width, picker_height),
                                         egui::Sense::click_and_drag()
@@ -655,8 +700,8 @@ pub fn render_preview_panel(
                                     ui.painter().text(
                                         rect.center(),
                                         egui::Align2::CENTER_CENTER,
-                                        &display_text,
-                                        egui::FontId::proportional(11.0),
+                                        display_text,
+                                        font_id,
                                         text_color
                                     );
                                     
@@ -702,11 +747,14 @@ pub fn render_preview_panel(
                                     .map(|i| i + 1) // +1 because 0 is "Off"
                                     .unwrap_or(0);
                                 
-                                let display_text = &sub_options[current_sub_idx].1;
+                                let full_sub_text = &sub_options[current_sub_idx].1;
                                 
                                 // Wheel picker frame
                                 let picker_width = 140.0;
                                 let picker_height = 22.0;
+                                let font_id = egui::FontId::proportional(11.0);
+                                // Reserve padding (8px on each side)
+                                let display_text = truncate_text_to_fit(full_sub_text, picker_width - 16.0, &font_id, ui);
                                 let (rect, response) = ui.allocate_exact_size(
                                     egui::vec2(picker_width, picker_height),
                                     egui::Sense::click_and_drag()
@@ -743,8 +791,8 @@ pub fn render_preview_panel(
                                 ui.painter().text(
                                     rect.center(),
                                     egui::Align2::CENTER_CENTER,
-                                    display_text,
-                                    egui::FontId::proportional(11.0),
+                                    &display_text,
+                                    font_id,
                                     text_color
                                 );
                                 
