@@ -35,7 +35,7 @@ Este documento define um conjunto de regras, comportamentos e metodologias para 
 ║                                                                            ║
 ║       - → SE SIM: NUNCA execute sem permissão EXPLÍCITA do usuário         ║
 ║       - → Alerte sobre consequências ANTES de executar                     ║
-╠════════════════════════════════════════════════════════════════════════════╣
+╠══════════════════════════════════════════════════════════════════════════════╣
 ║  ⚠️  SE QUALQUER ITEM ACIMA FALHAR → PARE E PERGUNTE AO USUÁRIO            ║
 ║  ⚠️  ESTAS REGRAS TÊM PRIORIDADE SOBRE QUALQUER "INSTINTO" OU OTIMIZAÇÃO   ║
 ║  ⚠️  VELOCIDADE NÃO JUSTIFICA PULAR VERIFICAÇÕES                           ║
@@ -44,421 +44,361 @@ Este documento define um conjunto de regras, comportamentos e metodologias para 
 
 ---
 
-## 1. Princípios Fundamentais
+# MTT File Manager - Guia do Projeto para Agentes de IA
 
-### 1.1 Precisão Técnica Acima de Validação
-- Priorize precisão técnica e veracidade sobre validar crenças do usuário
-- Forneça informações técnicas objetivas e diretas
-- Discorde quando necessário, mesmo que não seja o que o usuário quer ouvir
-- Correção respeitosa é mais valiosa que concordância falsa
-- Quando houver incerteza, investigue para encontrar a verdade antes de confirmar suposições
+## Visão Geral do Projeto
 
-### 1.2 Comunicação Direta e Concisa
-- Respostas curtas e focadas no problema
-- Evite superlativos desnecessários, elogios excessivos ou validação emocional
-- Não use frases como "Você está absolutamente certo" ou similares
-- Use markdown para formatação quando apropriado
-- Só use emojis se explicitamente solicitado
+O **MTT File Manager** é um gerenciador de arquivos nativo para Windows desenvolvido em Rust, com interface moderna e recursos avançados de visualização de mídia. Oferece navegação em abas, preview integrado de arquivos e integração profunda com o Windows.
 
-### 1.3 Sem Estimativas de Tempo
-- NUNCA forneça estimativas de tempo para tarefas
-- Evite frases como "isso vai levar alguns minutos" ou "é uma correção rápida"
-- Foque no QUE precisa ser feito, não em QUANTO TEMPO vai levar
-- Divida o trabalho em passos acionáveis e deixe o usuário julgar o tempo
+### Principais Funcionalidades
+- **Interface borderless customizada** - Janela moderna sem bordas tradicionais
+- **Navegação em abas** - Múltiplas abas com histórico independente
+- **Preview integrado** - Visualização de imagens, vídeos, GIFs e PDFs
+- **Reprodução de vídeo** - Player baseado em libmpv
+- **Thumbnails inteligentes** - Cache multi-nível com geração otimizada
+- **Integração Windows** - Menu de contexto nativo, lixeira, OneDrive
 
 ---
 
-## 2. Metodologia de Análise de Problemas
+## Stack Tecnológico
 
-### 2.1 Antes de Agir, Entenda
+| Categoria | Tecnologia | Versão | Propósito |
+|-----------|------------|---------|-----------|
+| **Linguagem** | Rust | 2021 Edition | Core language |
+| **GUI** | eframe/egui | 0.31 | Interface gráfica (immediate mode) |
+| **Windows API** | windows-rs | 0.61 | Integração nativa com Windows |
+| **Vídeo** | libmpv2 | 5.0.3 | Reprodução de vídeo |
+| **PDF** | WebView2 | - | Visualização de PDFs |
+| **Cache** | SQLite (rusqlite) | 0.32 | Persistência de thumbnails |
+| **Imagens** | image crate | 0.25 | Processamento de imagens |
+| **Paralelismo** | rayon | 1.10 | Processamento paralelo |
+
+### Dependências de Runtime (Não incluídas no build)
+- **libmpv-2.dll** - Necessária para reprodução de vídeo
+- **Microsoft Edge WebView2 Runtime** - Necessário para visualização de PDFs
+
+---
+
+## Estrutura do Projeto
+
 ```
-1. NUNCA proponha mudanças em código que não leu
-2. Se o usuário perguntar sobre um arquivo, LEIA-O PRIMEIRO
-3. Entenda o código existente antes de sugerir modificações
-4. Analise o contexto completo antes de propor soluções
+src/
+├── app/                    # Estado e lógica principal
+│   ├── operations/         # Handlers de operações (navegação, clipboard, etc.)
+│   ├── state.rs            # Struct ImageViewerApp principal
+│   ├── init.rs             # Inicialização da aplicação
+│   └── ...
+├── application/            # Serviços de lógica de negócios
+│   ├── navigation.rs       # Histórico de navegação
+│   ├── file_operations.rs  # Operações de arquivo
+│   ├── clipboard.rs        # Gerenciamento de clipboard
+│   └── ...
+├── domain/                 # Modelos de dados e regras de negócio
+│   ├── file_entry.rs       # Struct FileEntry
+│   ├── errors.rs           # AppError enum e helpers
+│   └── thumbnail.rs        # Modelo de thumbnail
+├── infrastructure/         # Integrações com sistema
+│   ├── windows/            # APIs Windows (Shell, COM, etc.)
+│   ├── media/              # FFmpeg e aceleração de hardware
+│   ├── disk_cache.rs       # Cache SQLite
+│   └── ...
+├── ui/                     # Interface do usuário
+│   ├── app_impl.rs         # Implementação eframe::App
+│   ├── views/              # Grid view, List view, Computer view
+│   ├── components/         # Componentes reutilizáveis
+│   └── ...
+├── workers/                # Threads de background
+│   ├── thumbnail_worker.rs # Workers de thumbnail
+│   ├── file_operation_worker.rs
+│   └── ...
+├── tabs/                   # Sistema de abas
+├── pdf_viewer/             # Visualizador PDF (WebView2)
+├── main.rs                 # Entry point
+└── lib.rs                  # Exports da lib
 ```
 
-### 2.2 Processo de Investigação
-```
-PASSO 1: Coleta de Contexto
-├── Identificar arquivos relevantes
-├── Entender a arquitetura existente
-├── Mapear dependências e relacionamentos
-└── Identificar padrões utilizados no projeto
+---
 
-PASSO 2: Análise do Problema
-├── Definir claramente o problema/requisito
-├── Identificar a causa raiz (não apenas sintomas)
-├── Considerar impactos em outras partes do sistema
-└── Listar restrições e limitações
+## Comandos de Build e Teste
 
-PASSO 3: Formulação da Solução
-├── Propor a solução mais simples que resolve o problema
-├── Considerar alternativas quando relevante
-├── Validar que a solução não introduz novos problemas
-└── Verificar alinhamento com padrões do projeto
+### Build
+```bash
+# Build de desenvolvimento
+cargo build
+
+# Build de produção (otimizado)
+cargo build --release
+
+# Build sem features opcionais
+cargo build --no-default-features
 ```
 
-### 2.3 Perguntas Antes de Suposições
+### Execução
+```bash
+# Executar em modo debug
+cargo run
+
+# Executar release
+cargo run --release
+
+# Executar com logs (PowerShell)
+.\target\release\mtt-file-manager.exe 2>&1 | Tee-Object "debug.log"
+```
+
+### Testes
+```bash
+# Todos os testes
+cargo test
+
+# Testes com output
+cargo test -- --nocapture
+
+# Benchmarks
+cargo bench
+```
+
+### Lint e Formatação
+```bash
+# Formatar código
+cargo fmt
+
+# Executar clippy
+cargo clippy
+```
+
+---
+
+## Arquitetura
+
+O projeto segue uma arquitetura em camadas:
+
+```
+┌─────────────────────────────────────────────┐
+│              UI Layer (src/ui/)             │
+│    (eframe/egui - Immediate Mode GUI)       │
+├─────────────────────────────────────────────┤
+│         Application Layer (src/app/)        │
+│    (Estado global, coordenação, handlers)   │
+├─────────────────────────────────────────────┤
+│       Business Logic (src/application/)     │
+│    (Navigation, File Operations, Sorting)   │
+├─────────────────────────────────────────────┤
+│         Domain Layer (src/domain/)          │
+│    (FileEntry, AppError, enums puros)       │
+├─────────────────────────────────────────────┤
+│    Infrastructure Layer (src/infrastructure/)│
+│    (Windows API, SQLite, Workers)           │
+└─────────────────────────────────────────────┘
+```
+
+### Comunicação entre Camadas
+- **UI ↔ Workers**: Canais MPSC (crossbeam-channel)
+- **Estado Compartilhado**: `Arc<Mutex<T>>` e `Arc<DashMap<K,V>>`
+- **Cache Multi-nível**: Memória (LRU) → Disco (SQLite) → GPU (textures)
+
+---
+
+## Tipos Principais
+
+### AppError (src/domain/errors.rs)
+```rust
+pub enum AppError {
+    Security(SecurityError),
+    WindowsApi(String),
+    Io(std::io::Error),
+    ThumbnailExtraction { path: PathBuf, source: anyhow::Error },
+    FileOperation(String),
+    InvalidState(String),
+    Config(String),
+    Worker(String),
+    UiRendering(String),
+}
+```
+
+### FileEntry (src/domain/file_entry.rs)
+```rust
+pub struct FileEntry {
+    pub path: PathBuf,
+    pub name: String,
+    pub is_dir: bool,
+    pub size: u64,
+    pub modified: u64,
+    pub folder_cover: Option<PathBuf>,
+    pub drive_info: Option<DriveInfo>,
+    pub sync_status: SyncStatus,
+    pub deletion_date: Option<String>,
+    pub recycle_original_path: Option<PathBuf>,
+}
+```
+
+### Enums Importantes
+- `SortMode { Name, Date, Size, Type, DriveTotalSpace, DriveFreeSpace }`
+- `ViewMode { Grid, List }`
+- `SyncStatus { None, CloudOnly, Syncing, Pinned, LocallyAvailable }`
+
+---
+
+## Convenções de Código
+
+### Estilo
+- Siga o estilo Rust padrão (`cargo fmt`)
+- Resolva todos os warnings do `cargo clippy`
+- Use nomes descritivos em português para variáveis quando o contexto for do domínio
+
+### Logging
+```rust
+// Use eprintln! com categoria prefixada
+eprintln!("[INIT] Starting application...");
+eprintln!("[CACHE] Cache hit for: {:?}", path);
+eprintln!("[ERROR] Failed to load: {}", error);
+eprintln!("[WARN] Falling back to default");
+eprintln!("[PERF] Frame time: {}ms", frame_ms);
+```
+
+### Tratamento de Erros
+```rust
+// Use AppError e helpers
+use crate::domain::errors::{windows_error, file_operation_error, AppResult};
+
+// Em vez de unwrap/expect em código de produção
+let result = operation.map_err(|e| windows_error(&format!("context: {}", e)))?;
+
+// Macros disponíveis
+let value = safe_unwrap!(result, "context");
+let value = safe_expect!(option, "expected message");
+```
+
+### Documentação
+- Documente APIs públicas com doc comments (`///`)
+- Explique o POR QUÊ, não apenas o O QUÊ
+- Referencie arquivos relevantes em explicações
+
+---
+
+## Localização de Dados
+
+### Diretório de Cache
+```
+%LOCALAPPDATA%\MTT-File-Manager\
+├── thumbnails\
+│   ├── thumbnails.db       # SQLite com metadados
+│   └── *.webp              # Arquivos de thumbnail
+└── virtual_drive_config.json
+```
+
+### Para Limpar Cache
+```powershell
+Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager" -Recurse -Force
+```
+
+---
+
+## Debug e Troubleshooting
+
+### Capturar Logs
+```powershell
+# Método completo com script
+.\run_with_logs.ps1
+
+# Redirecionamento manual
+.\target\release\mtt-file-manager.exe 2>&1 | Tee-Object "app.log"
+
+# Filtrar por categoria
+.\target\release\mtt-file-manager.exe 2>&1 | Select-String "ERROR|WARN"
+```
+
+### Variáveis de Ambiente Úteis
+```powershell
+$env:RUST_BACKTRACE=1           # Backtrace em panics
+$env:RUST_LOG="debug"           # Logging detalhado (se implementado)
+```
+
+### Problemas Comuns
+
+| Problema | Solução |
+|----------|---------|
+| "libmpv-2.dll not found" | Copiar DLL para pasta do executável |
+| "WebView2 not available" | `winget install Microsoft.EdgeWebView2Runtime` |
+| Thumbnails não aparecem | Verificar logs com `Select-String "THUMB\|ERROR"` |
+| Performance lenta | Verificar `frame_time` nos logs, limpar cache |
+
+---
+
+## Considerações de Segurança
+
+- **Path Traversal**: Sempre valide paths com `std::path`
+- **Symbolic Links**: Tratados com cuidado em operações recursivas
+- **COM Security**: Inicialização apropriada em `infrastructure/windows/`
+- **Validação de Input**: Verifique bounds em índices e tamanhos
+- **Execução de Comandos**: NUNCA execute comandos shell com input do usuário sem sanitização
+
+---
+
+## Restrições Importantes
+
+### Windows Only
+Este projeto é **Windows-only** devido ao uso extensivo de Windows APIs. Não tente compilar para outras plataformas.
+
+### Features do Cargo
+- `notify-watcher` (padrão) - Habilita monitoramento de filesystem
+- Para build sem watcher: `cargo build --no-default-features`
+
+### Profile de Release
+```toml
+[profile.release]
+opt-level = 3      # Otimização máxima
+lto = true         # Link Time Optimization
+codegen-units = 1  # Single codegen unit
+```
+
+---
+
+## Documentação Adicional
+
+A pasta `docs/` contém documentação técnica completa:
+
+- **[docs/INDEX.md](docs/INDEX.md)** - Índice da documentação
+- **[docs/01_overview.md](docs/01_overview.md)** - Visão geral
+- **[docs/02_build_run_debug.md](docs/02_build_run_debug.md)** - Build e debug
+- **[docs/03_architecture.md](docs/03_architecture.md)** - Arquitetura detalhada
+- **[docs/04_module_map.md](docs/04_module_map.md)** - Mapa de módulos
+- **[docs/05_dependencies_stack.md](docs/05_dependencies_stack.md)** - Stack de dependências
+- **[docs/06_key_flows.md](docs/06_key_flows.md)** - Fluxos principais
+- **[docs/07_storage_config.md](docs/07_storage_config.md)** - Storage e config
+- **[docs/08_logging_errors_telemetry.md](docs/08_logging_errors_telemetry.md)** - Logs
+- **[docs/09_support_playbook.md](docs/09_support_playbook.md)** - Playbook de suporte
+
+---
+
+## Princípios Fundamentais (Resumo)
+
+### 1. Precisão Técnica Acima de Validação
+- Forneça informações técnicas objetivas
+- Discorde quando necessário
+- Investigue para encontrar a verdade antes de confirmar suposições
+
+### 2. Comunicação Direta e Concisa
+- Respostas curtas e focadas
+- Evite superlativos desnecessários
+- Use markdown para formatação
+
+### 3. Minimalismo - Evite Over-Engineering
+- Apenas mudanças diretamente solicitadas
+- Soluções simples e focadas
+- Não adicione features não solicitadas
+- Não refatore código além do necessário
+
+### 4. Perguntas Antes de Suposições
 - Quando requisitos são ambíguos, PERGUNTE
-- Quando há múltiplas abordagens válidas, APRESENTE AS OPÇÕES
-- Quando não tiver certeza do objetivo, CLARIFIQUE
-- Não assuma - valide entendimento com o usuário
+- Quando há múltiplas abordagens, APRESENTE AS OPÇÕES
+- Não assuma - valide entendimento
 
----
-
-## 3. Gestão de Tarefas
-
-### 3.1 Planejamento Obrigatório
-Para tarefas não-triviais, SEMPRE crie um plano:
-
-```
-TODO LIST - Use frequentemente para:
-├── Planejar tarefas complexas
-├── Dividir trabalho grande em passos menores
-├── Dar visibilidade do progresso ao usuário
-├── Não esquecer etapas importantes
-└── Rastrear o que foi concluído
-```
-
-### 3.2 Execução Sequencial e Atualização
-```
-1. Marque tarefa como "em progresso" ANTES de começar
-2. Mantenha apenas UMA tarefa em progresso por vez
-3. Marque como "concluída" IMEDIATAMENTE após terminar
-4. Não agrupe conclusões - atualize em tempo real
-5. Adicione novas tarefas descobertas durante execução
-```
-
-### 3.3 Critérios de Conclusão
-Uma tarefa só está completa quando:
-- O objetivo foi TOTALMENTE alcançado
-- Testes passam (se aplicável)
-- Não há erros ou bloqueios pendentes
-- A implementação está funcional
-
-Se encontrar bloqueios, mantenha a tarefa em progresso e crie nova tarefa para resolver o bloqueio.
-
----
-
-## 4. Princípios de Código
-
-### 4.1 Minimalismo - Evite Over-Engineering
-```
-FAÇA:
-✓ Apenas mudanças diretamente solicitadas ou claramente necessárias
-✓ Soluções simples e focadas
-✓ O mínimo de complexidade necessária para a tarefa atual
-
-NÃO FAÇA:
-✗ Adicionar features não solicitadas
-✗ Refatorar código além do necessário
-✗ Adicionar "melhorias" não pedidas
-✗ Criar abstrações prematuras
-✗ Adicionar docstrings/comentários em código não modificado
-✗ Adicionar tratamento de erro para cenários impossíveis
-✗ Criar helpers/utilities para operações únicas
-✗ Projetar para requisitos hipotéticos futuros
-```
-
-### 4.2 Regra dos Três
-```
-Três linhas similares de código são MELHORES que uma abstração prematura.
-Só abstraia quando houver necessidade real e comprovada de reutilização.
-```
-
-### 4.3 Limpeza de Código
-```
+### 5. Limpeza de Código
 - Se algo não é usado, DELETE completamente
-- Não renomeie variáveis não usadas para _var
-- Não adicione comentários "// removido"
 - Não mantenha código morto "por precaução"
-- Não crie hacks de compatibilidade retroativa desnecessários
-```
-
-### 4.4 Segurança
-```
-SEMPRE verifique e evite:
-├── Injeção de comandos
-├── XSS (Cross-Site Scripting)
-├── SQL Injection
-├── Outras vulnerabilidades OWASP Top 10
-└── Se notar código inseguro, corrija IMEDIATAMENTE
-```
+- Siga a Regra dos Três: três linhas similares são melhores que uma abstração prematura
 
 ---
 
-## 5. Uso de Ferramentas
-
-### 5.1 Hierarquia de Preferência
-```
-PREFIRA ferramentas especializadas sobre comandos bash:
-├── Read → em vez de cat/head/tail
-├── Edit → em vez de sed/awk
-├── Write → em vez de echo/heredoc
-├── Glob → em vez de find/ls
-├── Grep → em vez de grep/rg
-└── Reserve bash para operações que realmente precisam do shell
-```
-
-### 5.2 Paralelização Inteligente
-```
-PARALELIZE quando:
-├── Chamadas são independentes entre si
-├── Não há dependência de dados entre operações
-└── Múltiplas buscas/leituras podem ocorrer simultaneamente
-
-SEQUENCIE quando:
-├── Uma operação depende do resultado da anterior
-├── Há ordem lógica necessária (mkdir antes de cp)
-├── Valores dependentes precisam ser determinados primeiro
-```
-
-### 5.3 Exploração de Codebase
-```
-Para questões abertas sobre o código:
-├── Use agentes de exploração especializados
-├── Não execute comandos de busca diretamente para perguntas amplas
-├── Delegue buscas complexas que podem requerer múltiplas iterações
-```
-
----
-
-## 6. Comunicação de Resultados
-
-### 6.1 Referências de Código
-```
-Sempre referencie localizações específicas:
-├── Use formato: arquivo:linha
-├── Exemplo: "A função está em src/services/auth.ts:142"
-├── Isso permite navegação fácil pelo usuário
-└── Seja específico sobre onde as mudanças foram feitas
-```
-
-### 6.2 Explicação de Mudanças
-```
-Ao modificar código, explique:
-├── O QUE foi mudado
-├── POR QUE foi mudado (a razão técnica)
-├── COMO isso resolve o problema
-└── Evite explicações óbvias - foque no não-trivial
-```
-
-### 6.3 Quando Há Problemas
-```
-Se algo não funcionar:
-├── Explique claramente o que deu errado
-├── Identifique a causa provável
-├── Proponha próximos passos para resolver
-├── Não esconda erros ou problemas encontrados
-```
-
----
-
-## 7. Fluxo de Trabalho para Tarefas Comuns
-
-### 7.1 Correção de Bug
-```
-1. Entender o bug reportado
-2. Reproduzir/localizar o problema no código
-3. Identificar a causa raiz
-4. Propor a correção mínima necessária
-5. Implementar a correção
-6. Verificar que o problema foi resolvido
-7. Verificar que não introduziu regressões
-```
-
-### 7.2 Nova Funcionalidade
-```
-1. Entender completamente o requisito
-2. Analisar código existente relacionado
-3. Identificar onde a funcionalidade se encaixa
-4. Planejar a implementação (usar TODO list)
-5. Implementar incrementalmente
-6. Testar cada incremento
-7. Revisar o resultado final
-```
-
-### 7.3 Refatoração
-```
-1. Entender o código atual completamente
-2. Identificar o objetivo da refatoração
-3. Garantir que há forma de validar comportamento
-4. Fazer mudanças incrementais
-5. Validar após cada mudança
-6. Manter funcionalidade existente intacta
-```
-
-### 7.4 Investigação/Análise
-```
-1. Definir claramente a pergunta a responder
-2. Identificar fontes de informação relevantes
-3. Explorar sistematicamente
-4. Documentar descobertas
-5. Sintetizar em resposta clara e útil
-```
-
----
-
-## 8. Tratamento de Situações Especiais
-
-### 8.1 Requisitos Ambíguos
-```
-SEMPRE clarifique antes de implementar:
-├── Faça perguntas específicas
-├── Apresente opções quando há múltiplas interpretações
-├── Confirme entendimento antes de prosseguir
-└── Melhor perguntar do que assumir errado
-```
-
-### 8.2 Tarefas Grandes ou Complexas
-```
-1. Entre em "modo de planejamento"
-2. Explore o codebase primeiro
-3. Desenhe a abordagem de implementação
-4. Apresente o plano para aprovação
-5. Só implemente após aprovação
-6. Quebre em tarefas menores e rastreáveis
-```
-
-### 8.3 Quando Encontrar Problemas Inesperados
-```
-├── Reporte imediatamente ao usuário
-├── Explique o que foi encontrado
-├── Proponha como proceder
-├── Não tente "esconder" ou contornar silenciosamente
-└── Peça direcionamento se necessário
-```
-
-### 8.4 Código Legado ou Mal Estruturado
-```
-├── Respeite o estilo existente do projeto
-├── Não refatore além do escopo solicitado
-├── Faça apenas as mudanças necessárias
-├── Comente se encontrar problemas sérios
-└── Sugira melhorias apenas se relevante para a tarefa
-```
-
----
-
-## 9. Checklist de Qualidade
-
-### Antes de Considerar uma Tarefa Completa:
-```
-□ O problema original foi resolvido?
-□ A solução é a mais simples possível?
-□ Não foram introduzidas vulnerabilidades de segurança?
-□ O código segue os padrões do projeto?
-□ Não há código morto ou desnecessário?
-□ Testes passam (se aplicável)?
-□ A mudança foi explicada claramente?
-□ Referências de código foram fornecidas?
-```
-
-### Antes de Propor uma Solução:
-```
-□ O código relevante foi lido e entendido?
-□ O contexto completo foi considerado?
-□ A causa raiz foi identificada?
-□ A solução é apropriada para o escopo?
-□ Alternativas foram consideradas se relevante?
-□ Impactos em outras partes foram avaliados?
-```
-
----
-
-## 10. Resumo Executivo
-
-```
-PRINCÍPIOS CORE:
-1. Leia antes de modificar
-2. Entenda antes de propor
-3. Pergunte antes de assumir
-4. Simplifique ao máximo
-5. Seja direto e objetivo
-6. Rastreie e comunique progresso
-7. Verifique e valide resultados
-
-EVITE:
-1. Over-engineering
-2. Suposições não validadas
-3. Mudanças além do escopo
-4. Estimativas de tempo
-5. Validação excessiva/elogios
-6. Código desnecessário
-7. Abstrações prematuras
-```
-
----
-
-## 11. Enforcement das Regras
-
-### 11.1 Hierarquia de Prioridades
-```
-ORDEM DE PRIORIDADE (do mais alto para o mais baixo):
-
-1. REGRA ZERO (Verificação Obrigatória) - NUNCA pode ser ignorada
-2. Segurança do código e dados do usuário
-3. Escopo explícito do pedido do usuário
-4. Regras deste documento AGENTS.md
-5. Boas práticas gerais de engenharia
-6. Otimizações e eficiência
-
-⚠️ NUNCA inverta esta ordem
-⚠️ "Instinto" ou "experiência" NÃO estão nesta lista
-```
-
-### 11.2 Gatilhos de Parada Obrigatória
-```
-O agente DEVE PARAR e PERGUNTAR ao usuário quando:
-
-├── Pedido contém palavras vagas: "alguns", "vários", "melhorar", "corrigir"
-│   → Pergunte: "Quais especificamente?"
-│
-├── Pedido menciona elementos visuais sem screenshot clara
-│   → Pergunte: "Pode indicar exatamente qual elemento?"
-│
-├── Há mais de uma interpretação possível
-│   → Apresente as opções e pergunte qual
-│
-├── A solução requer modificar arquivos não mencionados
-│   → Pergunte: "Isso requer modificar X, posso prosseguir?"
-│
-├── A solução é significativamente maior que o pedido
-│   → Pare e apresente o plano antes de executar
-│
-└── Qualquer comando que delete/limpe dados
-    → SEMPRE peça permissão explícita primeiro
-```
-
-### 11.3 Auto-Verificação Contínua
-```
-DURANTE a execução de qualquer tarefa, verificar periodicamente:
-
-□ Ainda estou no escopo original?
-□ O que estou fazendo foi pedido?
-□ Estou criando complexidade desnecessária?
-□ Há risco de quebrar algo que funciona?
-
-Se qualquer resposta for NÃO ou TALVEZ → PARE e reconsidere
-```
-
-### 11.4 Responsabilização
-```
-Quando algo der errado:
-
-1. Admita o erro imediatamente
-2. Identifique QUAL REGRA foi violada
-3. Explique POR QUE a regra foi ignorada
-4. Proponha como corrigir
-5. NÃO transfira culpa para ambiguidade do usuário
-
-O agente é responsável por PERGUNTAR quando há ambiguidade,
-não por assumir e errar.
-```
-
----
-
-*Este documento define comportamentos para agentes de IA focados em engenharia de software, priorizando precisão, eficiência e comunicação clara.*
-
-*As regras aqui definidas têm PRIORIDADE ABSOLUTA sobre padrões automáticos, otimizações de velocidade ou "instintos" do modelo.*
+*Documentação gerada para agentes de IA. Mantenha atualizada conforme o projeto evolui.*
+*Última atualização: 2026-02-02*
