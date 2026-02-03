@@ -14,4 +14,7 @@ pub mod state;
 pub mod ui_state;
 pub mod worker_state;
 
+// Re-export navigation module for easy access
+pub use operations::navigation;
+
 pub use state::ImageViewerApp;
