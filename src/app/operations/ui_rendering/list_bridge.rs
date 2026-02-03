@@ -272,6 +272,7 @@ impl ImageViewerApp {
             last_scroll_offset: &mut self.last_scroll_offset,
             pending_upload_set: &mut self.cache_manager.pending_upload_set,
             is_video_docked_visible,
+            is_on_hdd: !is_ssd,
             prefetch_rows,
             visible_index_range: &mut self.visible_index_range,
             col_name_width,

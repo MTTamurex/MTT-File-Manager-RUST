@@ -286,30 +286,22 @@ impl ImageViewerApp {
         }
 
         let current_path_norm = normalize_for_match(Path::new(&self.current_path));
+        // PERFORMANCE: Filter by file name only - no filesystem I/O.
+        // Hidden/system attribute filtering is already done in load_folder().
+        // Previously called std::fs::metadata() here which caused synchronous
+        // HDD reads on the UI thread for every watcher event.
         let should_ignore = |p: &Path| -> bool {
             let name = p
                 .file_name()
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_lowercase();
-            if name.starts_with("dumpstack.log")
+            name.starts_with("dumpstack.log")
                 || name.starts_with("hiberfil.sys")
                 || name.starts_with("pagefile.sys")
                 || name.starts_with("swapfile.sys")
                 || name == "desktop.ini"
                 || name == "thumbs.db"
-            {
-                return true;
-            }
-
-            if let Ok(metadata) = std::fs::metadata(p) {
-                use std::os::windows::fs::MetadataExt;
-                let attrs = metadata.file_attributes();
-                if (attrs & 0x02) != 0 || (attrs & 0x04) != 0 {
-                    return true;
-                }
-            }
-            false
         };
 
         #[cfg(feature = "notify-watcher")]
@@ -400,19 +392,16 @@ impl ImageViewerApp {
                     "[DEBUG] Checking auto-reload for path: '{}'",
                     self.current_path
                 );
-                // VALIDA SE O PATH ATUAL AINDA EXISTE (pode ter sido renomeado/deletado)
                 // SKIP for special views (Recycle Bin/Computer) which are managed manually via events
                 if self.is_recycle_bin_view || self.is_computer_view {
                     self.pending_auto_reload = false;
-                } else if Path::new(&self.current_path).exists() {
-                    eprintln!("[DEBUG] Path exists. Reloading with force_refresh=true to bypass cache.");
-                    // Force refresh to bypass stale-while-revalidate cache
-                    // This ensures USN events always show the latest data
-                    self.loaded_path.clear(); // Clear guard path to allow reload
-                    self.load_folder(true); // true = force refresh, bypass directory cache
                 } else {
-                    eprintln!("[DEBUG] Path DOES NOT EXIST! Triggering go_up_one_level");
-                    self.go_up_one_level();
+                    eprintln!("[DEBUG] Auto-reloading with force_refresh=true to bypass cache.");
+                    // PERFORMANCE: Removed Path::exists() check to avoid synchronous HDD read on UI thread.
+                    // load_folder() handles non-existent paths internally (returns empty or errors gracefully).
+                    // If the path was deleted, load_folder will fail and we navigate up on the next watcher event.
+                    self.loaded_path.clear();
+                    self.load_folder(true);
                 }
                 self.last_auto_reload = Instant::now();
                 self.pending_auto_reload = false;

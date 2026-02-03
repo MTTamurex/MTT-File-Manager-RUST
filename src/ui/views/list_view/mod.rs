@@ -151,6 +151,8 @@ pub struct ListViewContext<'a> {
     /// Conjunto de itens aguardando upload GPU
     pub pending_upload_set: &'a mut FxHashSet<PathBuf>,
     pub is_video_docked_visible: bool,
+    /// PERFORMANCE: True when current path is on HDD (not SSD)
+    pub is_on_hdd: bool,
     pub prefetch_rows: usize,
     /// Output: visible item index range for GPU upload prioritization
     pub visible_index_range: &'a mut Option<(usize, usize)>,
