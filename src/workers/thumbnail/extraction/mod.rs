@@ -28,19 +28,31 @@ pub fn generate_thumbnail_hybrid(
     path: &Path,
     priority: IOPriority,
 ) -> Option<(Vec<u8>, u32, u32)> {
+    eprintln!("[Thumbnail] Starting extraction pipeline for: {:?}", path.file_name());
+    
     // Stage 1: image crate (Fast Path)
+    eprintln!("[Thumbnail] Trying Stage 1 (image crate)...");
     if let Some(result) = stage1_image_crate::extract(path, priority) {
+        eprintln!("[Thumbnail] Stage 1 SUCCESS for: {:?}", path.file_name());
         return Some(result);
     }
+    eprintln!("[Thumbnail] Stage 1 failed, trying Stage 2...");
 
     // Stage 2: WIC (Robust Fallback for JPEGs/CMYK)
+    eprintln!("[Thumbnail] Trying Stage 2 (WIC)...");
     if let Some(result) = stage2_wic::extract(path) {
+        eprintln!("[Thumbnail] Stage 2 SUCCESS for: {:?}", path.file_name());
         return Some(result);
     }
+    eprintln!("[Thumbnail] Stage 2 failed, trying Stage 3...");
 
     // Stage 3: Shell API (Universal/Video)
+    eprintln!("[Thumbnail] Trying Stage 3 (Shell API)...");
     match stage3_shell_api::extract(path) {
-        Ok(result) => return Some(result),
+        Ok(result) => {
+            eprintln!("[Thumbnail] Stage 3 SUCCESS for: {:?}", path.file_name());
+            return Some(result);
+        }
         Err(e) => {
             let err_str = e.to_string();
             // Don't log "File Not Found" errors as they are expected for recently deleted files
@@ -57,8 +69,12 @@ pub fn generate_thumbnail_hybrid(
     // Stage 4: IThumbnailCache with WTS_FORCEEXTRACTION (bypassa cache do Windows)
     // Útil quando o cache do Windows retornou um ícone em vez do thumbnail real
     // Single attempt - if fails, Stage 5 takes over
+    eprintln!("[Thumbnail] Trying Stage 4 (Force Extract)...");
     match stage4_force_extract::extract(path) {
-        Ok(result) => return Some(result),
+        Ok(result) => {
+            eprintln!("[Thumbnail] Stage 4 SUCCESS for: {:?}", path.file_name());
+            return Some(result);
+        }
         Err(e) => {
             let err_str = e.to_string();
             // Don't log "File Not Found" errors as they are expected for recently deleted files
@@ -74,5 +90,12 @@ pub fn generate_thumbnail_hybrid(
 
     // Stage 5: Media Foundation direct frame extraction (bypasses Windows thumbnail service)
     // This is the nuclear option - extracts a raw video frame when all else fails
-    stage5_media_foundation::extract(path)
+    eprintln!("[Thumbnail] Trying Stage 5 (Media Foundation)...");
+    let result = stage5_media_foundation::extract(path);
+    if result.is_some() {
+        eprintln!("[Thumbnail] Stage 5 SUCCESS for: {:?}", path.file_name());
+    } else {
+        eprintln!("[Thumbnail] ALL STAGES FAILED for: {:?}", path.file_name());
+    }
+    result
 }
