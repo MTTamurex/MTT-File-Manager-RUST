@@ -13,7 +13,8 @@
       "Bash(find:*)",
       "Bash(git show:*)",
       "Bash(cargo test:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(git ls-tree:*)"
     ],
     "additionalDirectories": [
       "c:\\Users\\mtamu\\github\\MTT-File-Manager-RUST\\docs"

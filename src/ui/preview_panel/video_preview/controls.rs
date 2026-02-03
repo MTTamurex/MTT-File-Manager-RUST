@@ -105,6 +105,8 @@ fn draw_basic_controls(
         if add_icon_button(ui, &tex, btn_size, detach_tooltip, ui.visuals().dark_mode) {
             if is_detached && preview.is_maximized() {
                 preview.set_fullscreen_applied(false);
+                preview.set_forced_size(None); // Clear forced size when exiting fullscreen
+                preview.reset_last_rect(); // Force MPV window resize
                 ui.ctx()
                     .send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
                 if preview.prev_app_maximized() {
@@ -370,12 +372,20 @@ fn draw_detached_buttons(ui: &mut egui::Ui, preview: &mut MediaPreview, svg_mana
         if let Some(tex) = svg_manager.get_icon(ui.ctx(), fs_icon_name, 48, icon_color_val) {
             if add_icon_button(ui, &tex, 18.0, fs_tooltip, ui.visuals().dark_mode) {
                 if !is_fullscreen {
+                    // Entering fullscreen — only set flags here.
+                    // The actual ViewportCommand::Fullscreen(true) is sent
+                    // from render_fullscreen_video() on the next frame.
                     let was_maximized =
                         ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
                     preview.set_prev_app_maximized(was_maximized);
                     preview.set_fullscreen_applied(false);
+                    preview.toggle_maximized();
                 } else {
+                    // Exiting fullscreen
                     preview.set_fullscreen_applied(false);
+                    preview.set_forced_size(None); // Clear forced size when exiting fullscreen
+                    preview.reset_last_rect(); // Force MPV window resize
+                    preview.toggle_maximized();
                     ui.ctx()
                         .send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
                     if preview.prev_app_maximized() {
@@ -383,7 +393,6 @@ fn draw_detached_buttons(ui: &mut egui::Ui, preview: &mut MediaPreview, svg_mana
                             .send_viewport_cmd(egui::ViewportCommand::Maximized(true));
                     }
                 }
-                preview.toggle_maximized();
             }
         }
 
