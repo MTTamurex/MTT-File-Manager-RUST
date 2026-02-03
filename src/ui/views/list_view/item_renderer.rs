@@ -152,6 +152,24 @@ pub(super) fn render_list_item(
 
                 if ctx.focus_rename {
                     response.request_focus();
+
+                    // Select name without extension (Windows Explorer behavior)
+                    if let Some(mut state) = egui::widgets::text_edit::TextEditState::load(ui.ctx(), response.id) {
+                        let char_count = text.chars().count();
+                        let select_end = if item.is_dir {
+                            char_count
+                        } else {
+                            text.rfind('.')
+                                .map(|byte_pos| text[..byte_pos].chars().count())
+                                .filter(|&pos| pos > 0)
+                                .unwrap_or(char_count)
+                        };
+                        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                            egui::text::CCursor::new(0),
+                            egui::text::CCursor::new(select_end),
+                        )));
+                        state.store(ui.ctx(), response.id);
+                    }
                 }
 
                 // Confirma renomeação com Enter (enquanto tem foco)

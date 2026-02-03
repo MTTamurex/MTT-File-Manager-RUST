@@ -295,7 +295,8 @@ impl ImageViewerApp {
         self.sort_mode = ctx.sort_mode;
         self.sort_descending = ctx.sort_descending;
         self.renaming_state = ctx.renaming_state;
-        self.focus_rename = ctx.focus_rename;
+        // Always consume focus_rename after one frame (cursor selection applied once)
+        self.focus_rename = false;
 
         // Process actions (blocked during renaming)
         let is_renaming = self.renaming_state.is_some();

@@ -82,23 +82,23 @@ impl ImageViewerApp {
         // 1. Get files and operation from clipboard via Manager
         // Optimized to use the manager's logic which checks system then internal.
         if let Some((files_to_op, is_move)) = self.clipboard.get_files_to_paste() {
-            // 2. Dispatch to worker for EACH file
-            for src_path in files_to_op {
-                let req = if is_move {
-                    crate::workers::file_operation_worker::FileOperationRequest::file_move(
-                        src_path,
-                        dest_folder.clone(),
-                        self.native_hwnd.unwrap_or_default(),
-                    )
-                } else {
-                    crate::workers::file_operation_worker::FileOperationRequest::copy(
-                        src_path,
-                        dest_folder.clone(),
-                        self.native_hwnd.unwrap_or_default(),
-                    )
-                };
-                let _ = self.file_op_sender.send(req);
-            }
+            let hwnd = self.native_hwnd.unwrap_or_default();
+
+            // 2. Dispatch as a single batch operation (single Windows progress dialog)
+            let req = if is_move {
+                crate::workers::file_operation_worker::FileOperationRequest::move_batch(
+                    files_to_op,
+                    dest_folder,
+                    hwnd,
+                )
+            } else {
+                crate::workers::file_operation_worker::FileOperationRequest::copy_batch(
+                    files_to_op,
+                    dest_folder,
+                    hwnd,
+                )
+            };
+            let _ = self.file_op_sender.send(req);
 
             // Clear internal state if it was a move (Shell does this for us for system clipboard)
             if is_move {

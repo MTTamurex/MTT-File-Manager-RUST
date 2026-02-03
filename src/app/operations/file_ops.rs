@@ -106,6 +106,7 @@ impl ImageViewerApp {
                     self.selected_file = Some(self.items[idx].clone());
                     self.renaming_state = Some((idx, new_folder_name));
                     self.focus_rename = true;
+                    self.scroll_to_selected = true;
                 }
 
                 if let Some(parent) = full_path.parent() {

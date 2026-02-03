@@ -191,6 +191,9 @@ pub struct ImageViewerApp {
     pub scroll_to_selected: bool,
     pub selection_anchor: Option<usize>,
 
+    /// Path to select and scroll to after folder reload completes (e.g., after rename)
+    pub pending_select_path: Option<PathBuf>,
+
     // Throttle for keyboard navigation (prevents scroll desync when holding arrow keys)
     pub last_keyboard_nav: Instant,
 
