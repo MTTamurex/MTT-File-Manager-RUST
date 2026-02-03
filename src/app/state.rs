@@ -266,6 +266,9 @@ pub struct ImageViewerApp {
     pub predictive_sender: Sender<crate::workers::predictive_prefetch::PredictiveMessage>,
     pub idle_warmup_sender: Sender<crate::workers::idle_warmup::IdleWarmupMessage>,
 
+    // FILE OPERATION TRACKING (suppresses watcher auto-reload during copy/move/delete)
+    pub file_ops_in_progress: usize,
+
     // ISO MOUNTING
     pub pending_iso_mount: Option<PathBuf>,
 

@@ -17,6 +17,7 @@ impl ImageViewerApp {
         if paths.is_empty() { return; }
 
         // Send request to background worker (BATCH)
+        self.file_ops_in_progress += 1;
         let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::delete(
             paths.to_vec(),
             self.native_hwnd.unwrap_or_default(),
@@ -129,6 +130,7 @@ impl ImageViewerApp {
         if let Some((_, new_name)) = self.renaming_state.take() {
             if let Some(item) = self.items.get(idx) {
                 // Send request to background worker
+                self.file_ops_in_progress += 1;
                 let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::rename(
                     item.path.clone(),
                     new_name,
