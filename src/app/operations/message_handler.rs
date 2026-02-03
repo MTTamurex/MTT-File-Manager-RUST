@@ -396,12 +396,15 @@ impl ImageViewerApp {
                 if self.is_recycle_bin_view || self.is_computer_view {
                     self.pending_auto_reload = false;
                 } else {
-                    eprintln!("[DEBUG] Auto-reloading with force_refresh=true to bypass cache.");
-                    // PERFORMANCE: Removed Path::exists() check to avoid synchronous HDD read on UI thread.
-                    // load_folder() handles non-existent paths internally (returns empty or errors gracefully).
-                    // If the path was deleted, load_folder will fail and we navigate up on the next watcher event.
+                    eprintln!("[DEBUG] Auto-reloading with force_refresh=false (watcher-triggered).");
+                    // PERFORMANCE: Use force_refresh=false for watcher-triggered reloads.
+                    // force_refresh=true clears ALL caches (textures, thumbnails, folder covers),
+                    // empties the items list, and causes a white screen on HDD while rescanning.
+                    // With false: directory_cache was already invalidated by watcher events above,
+                    // so fresh data is loaded from disk, but texture/thumbnail caches are preserved.
+                    // force_refresh=true is reserved for manual refresh (F5) only.
                     self.loaded_path.clear();
-                    self.load_folder(true);
+                    self.load_folder(false);
                 }
                 self.last_auto_reload = Instant::now();
                 self.pending_auto_reload = false;
