@@ -11,7 +11,10 @@ use crate::app::state::ImageViewerApp;
 use crate::infrastructure::windows as windows_infra;
 use crate::domain::file_entry::FileEntry;
 
-const DRIVE_REFRESH_INTERVAL_MS: u64 = 2000;
+// PERFORMANCE: Increased from 2s to 30s to avoid periodic HDD access.
+// Device insertion/removal is detected instantly via RegisterDeviceNotificationW
+// (device_event_receiver in message_handler.rs). This timer is only a safety fallback.
+const DRIVE_REFRESH_INTERVAL_MS: u64 = 30000;
 
 impl ImageViewerApp {
     pub fn setup_recycle_bin_view(&mut self) {

@@ -125,28 +125,14 @@ impl IconLoader {
                         }
                     }
 
-                    // Not in cache - if blocking allowed, try to load now (for preview panel)
-                    if allow_blocking && path.exists() {
-                        if let Ok((pixels, width, height)) =
-                            windows::extract_file_icon_by_path(path, size)
-                        {
-                            let texture = ctx.load_texture(
-                                cache_key.clone(),
-                                egui::ColorImage::from_rgba_unmultiplied(
-                                    [width as usize, height as usize],
-                                    &pixels,
-                                ),
-                                egui::TextureOptions::LINEAR,
-                            );
-                            let cloned = texture.clone();
-                            self.icon_cache.put(cache_key, texture);
-                            return Some(cloned);
-                        }
-                    }
+                    // PERFORMANCE: Detect virtual paths (inside ZIPs) via string check
+                    // instead of path.exists() which causes synchronous HDD reads on UI thread.
+                    let path_lower = path.to_string_lossy().to_lowercase();
+                    let is_virtual_path = path_lower.contains(".zip\\")
+                        || path_lower.contains(".zip/");
 
-                    // FIX: If path doesn't exist (e.g. inside ZIP), try to extract using Shell Namespace (PIDL)
-                    // This creates the correct icon for EXEs, LNKs etc inside ZIPs.
-                    if !path.exists() {
+                    if is_virtual_path {
+                        // Virtual path (inside ZIP): try Shell Namespace (PIDL) for correct icon
                         if let Ok((pixels, width, height)) = windows::extract_shell_icon(path, size)
                         {
                             let texture = ctx.load_texture(
@@ -162,9 +148,25 @@ impl IconLoader {
                             return Some(cloned);
                         }
                         // If PIDL extraction fails, fallback to Generic Extension Logic below...
+                    } else if allow_blocking {
+                        // Preview panel: blocking extraction allowed (not in scroll render loop)
+                        if let Ok((pixels, width, height)) =
+                            windows::extract_file_icon_by_path(path, size)
+                        {
+                            let texture = ctx.load_texture(
+                                cache_key.clone(),
+                                egui::ColorImage::from_rgba_unmultiplied(
+                                    [width as usize, height as usize],
+                                    &pixels,
+                                ),
+                                egui::TextureOptions::LINEAR,
+                            );
+                            let cloned = texture.clone();
+                            self.icon_cache.put(cache_key, texture);
+                            return Some(cloned);
+                        }
                     } else {
-                        // For REAL files on disk: Return None to allow Async Loader to handle it
-                        // (prevents blocking UI for large EXEs on slow drives)
+                        // Real file on disk, non-blocking: let Async Loader handle it
                         return None;
                     }
                 }

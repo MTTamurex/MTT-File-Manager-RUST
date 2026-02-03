@@ -344,6 +344,18 @@ fn handle_prefetch(
     // Export visible range for GPU upload prioritization
     *ctx.visible_index_range = Some((first_visible_index, last_visible_index));
 
+    // PERFORMANCE: On HDD, skip prefetch during active scroll to avoid competing
+    // for disk I/O with visible item rendering. Prefetch only when scroll stops.
+    if ctx.is_on_hdd {
+        let is_scrolling = std::time::Instant::now()
+            .duration_since(*ctx.last_scroll_time)
+            .as_millis()
+            < 150;
+        if is_scrolling {
+            return;
+        }
+    }
+
     let tracker = ViewportTracker {
         first_visible_index,
         last_visible_index,
