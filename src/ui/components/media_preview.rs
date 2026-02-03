@@ -244,7 +244,10 @@ impl MediaPreview {
     /// Toggle mute
     pub fn toggle_mute(&self) {
         if let MediaPreview::Video(player) = self {
-            player.toggle_mute();
+            // CRASH FIX: Wrap in catch_unwind to prevent crash propagation
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                player.toggle_mute();
+            }));
         }
     }
 

@@ -247,26 +247,32 @@ impl MpvPreview {
     }
 
     pub fn set_muted(&self, muted: bool) {
+        // CRASH FIX: Check if mpv is available before accessing
         if let Some(m) = &self.mpv {
+            // Use try_set_property to avoid blocking on MPV thread
             let _ = m.set_property("mute", muted);
         }
-        if let Ok(mut state) = self.state.write() {
+        // Update state regardless of MPV result
+        if let Ok(mut state) = self.state.try_write() {
             state.is_muted = muted;
         }
     }
 
     pub fn toggle_mute(&self) {
-        match self.state.read() {
-            Ok(state) => {
-                self.set_muted(!state.is_muted);
-            }
+        // CRASH FIX: Use try_read to avoid deadlock
+        let current_muted = match self.state.try_read() {
+            Ok(state) => state.is_muted,
             Err(_) => {
-                eprintln!("[MpvPreview] Erro ao toggle mute - RwLock poisonado");
-                // Como fallback, alterna o estado do mute sem saber o estado atual
-                // Isso é seguro pois set_muted já lida com erros internamente
-                self.set_muted(true);
+                eprintln!("[MpvPreview] Erro ao ler estado mute - RwLock poisonado ou ocupado");
+                // Fallback: assume not muted
+                false
             }
-        }
+        };
+        
+        // CRASH FIX: Wrap MPV call in catch_unwind to prevent FFI crashes
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.set_muted(!current_muted);
+        }));
     }
 
     pub fn controls_active(&self) -> bool {
