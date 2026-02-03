@@ -407,18 +407,27 @@ fn render_directory_slot<O: ItemSlotOperations>(
 
         if ctx.is_renaming {
             if let Some(text) = &mut ctx.renaming_text {
-                ui.put(
+                let response = ui.put(
                     text_rect,
                     egui::TextEdit::singleline(&mut **text)
                         .frame(true)
                         .horizontal_align(egui::Align::Center)
                         .id_source("rename_input_dir"),
-                )
-                .request_focus(); // Ensure it requests focus
+                );
+                response.request_focus();
 
-                // Note: Handle Enter key somewhere else or here?
-                // We're inside render, so events are tricky if not using Ui::add response
-                // But we are using ui.put which returns response. So we can check.
+                // On first focus: select all text (directories have no extension)
+                if ctx.focus_rename {
+                    if let Some(mut state) = egui::widgets::text_edit::TextEditState::load(ui.ctx(), response.id) {
+                        let char_count = text.chars().count();
+                        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                            egui::text::CCursor::new(0),
+                            egui::text::CCursor::new(char_count),
+                        )));
+                        state.store(ui.ctx(), response.id);
+                    }
+                }
+
                 if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     ops.rename_item(ctx.idx);
                 }
@@ -588,14 +597,30 @@ fn render_file_slot<O: ItemSlotOperations>(
 
         if ctx.is_renaming {
             if let Some(text) = &mut ctx.renaming_text {
-                ui.put(
+                let response = ui.put(
                     text_rect,
                     egui::TextEdit::singleline(&mut **text)
                         .frame(true)
                         .horizontal_align(egui::Align::Center)
                         .id_source("rename_input_file"),
-                )
-                .request_focus();
+                );
+                response.request_focus();
+
+                // On first focus: select name without extension (Windows Explorer behavior)
+                if ctx.focus_rename {
+                    if let Some(mut state) = egui::widgets::text_edit::TextEditState::load(ui.ctx(), response.id) {
+                        let char_count = text.chars().count();
+                        let select_end = text.rfind('.')
+                            .map(|byte_pos| text[..byte_pos].chars().count())
+                            .filter(|&pos| pos > 0)
+                            .unwrap_or(char_count);
+                        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                            egui::text::CCursor::new(0),
+                            egui::text::CCursor::new(select_end),
+                        )));
+                        state.store(ui.ctx(), response.id);
+                    }
+                }
 
                 if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     ops.rename_item(ctx.idx);

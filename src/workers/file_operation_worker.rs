@@ -25,6 +25,11 @@ pub enum FileOperationResult {
         source_folder: PathBuf,
         dest_folder: PathBuf,
     },
+    /// Batch move completed - multiple source folders need refresh
+    MoveBatchCompleted {
+        source_folders: Vec<PathBuf>,
+        dest_folder: PathBuf,
+    },
     /// Copy operation completed - dest folder needs reload if active
     CopyCompleted { dest_folder: PathBuf },
     RenameCompleted {
@@ -58,6 +63,18 @@ pub enum FileOperationRequest {
     },
     Move {
         path: PathBuf,
+        dest_folder: PathBuf,
+        hwnd: SendHwnd,
+    },
+    /// Batch copy: all files in a single Shell operation (single progress dialog)
+    CopyBatch {
+        paths: Vec<PathBuf>,
+        dest_folder: PathBuf,
+        hwnd: SendHwnd,
+    },
+    /// Batch move: all files in a single Shell operation (single progress dialog)
+    MoveBatch {
+        paths: Vec<PathBuf>,
         dest_folder: PathBuf,
         hwnd: SendHwnd,
     },
@@ -98,6 +115,20 @@ impl FileOperationRequest {
     pub fn file_move(path: PathBuf, dest_folder: PathBuf, hwnd: HWND) -> Self {
         Self::Move {
             path,
+            dest_folder,
+            hwnd: SendHwnd(hwnd),
+        }
+    }
+    pub fn copy_batch(paths: Vec<PathBuf>, dest_folder: PathBuf, hwnd: HWND) -> Self {
+        Self::CopyBatch {
+            paths,
+            dest_folder,
+            hwnd: SendHwnd(hwnd),
+        }
+    }
+    pub fn move_batch(paths: Vec<PathBuf>, dest_folder: PathBuf, hwnd: HWND) -> Self {
+        Self::MoveBatch {
+            paths,
             dest_folder,
             hwnd: SendHwnd(hwnd),
         }
@@ -180,6 +211,35 @@ pub fn start_file_operation_worker(
                                 dest_folder,
                             });
                         }
+                    }
+                }
+                FileOperationRequest::CopyBatch {
+                    paths,
+                    dest_folder,
+                    hwnd,
+                } => {
+                    let _ = shell_operations::copy_items_with_shell(&paths, &dest_folder, hwnd.0);
+                    let _ = result_sender.send(FileOperationResult::CopyCompleted { dest_folder });
+                }
+                FileOperationRequest::MoveBatch {
+                    paths,
+                    dest_folder,
+                    hwnd,
+                } => {
+                    // Collect unique source folders before move
+                    let mut source_folders = HashSet::new();
+                    for path in &paths {
+                        if let Some(parent) = path.parent() {
+                            source_folders.insert(parent.to_path_buf());
+                        }
+                    }
+                    let success =
+                        shell_operations::move_items_with_shell(&paths, &dest_folder, hwnd.0);
+                    if success && !source_folders.is_empty() {
+                        let _ = result_sender.send(FileOperationResult::MoveBatchCompleted {
+                            source_folders: source_folders.into_iter().collect(),
+                            dest_folder,
+                        });
                     }
                 }
                 FileOperationRequest::RestoreFromRecycleBin { items } => {

@@ -273,6 +273,60 @@ pub fn rename_item_with_shell(path: &Path, new_name: &str, hwnd: HWND) -> bool {
     result == 0 && op.fAnyOperationsAborted.0 == 0
 }
 
+/// Copies multiple files/directories to a destination using a single Windows Shell operation.
+/// This produces a single progress dialog for all files (batch behavior).
+pub fn copy_items_with_shell(paths: &[std::path::PathBuf], dest_folder: &Path, hwnd: HWND) -> bool {
+    if paths.is_empty() {
+        return false;
+    }
+    if paths.len() == 1 {
+        return copy_item_with_shell(&paths[0], dest_folder, hwnd);
+    }
+
+    let from_vec = paths_to_double_null_terminated(paths);
+    let to_str = dest_folder.to_string_lossy();
+    let to_vec = to_double_null_terminated(&to_str);
+
+    let mut op = SHFILEOPSTRUCTW {
+        hwnd,
+        wFunc: FO_COPY,
+        pFrom: PCWSTR(from_vec.as_ptr()),
+        pTo: PCWSTR(to_vec.as_ptr()),
+        fFlags: (FOF_ALLOWUNDO).0 as u16,
+        ..Default::default()
+    };
+
+    let result = unsafe { SHFileOperationW(&mut op) };
+    result == 0 && op.fAnyOperationsAborted.0 == 0
+}
+
+/// Moves multiple files/directories to a destination using a single Windows Shell operation.
+/// This produces a single progress dialog for all files (batch behavior).
+pub fn move_items_with_shell(paths: &[std::path::PathBuf], dest_folder: &Path, hwnd: HWND) -> bool {
+    if paths.is_empty() {
+        return false;
+    }
+    if paths.len() == 1 {
+        return move_item_with_shell(&paths[0], dest_folder, hwnd);
+    }
+
+    let from_vec = paths_to_double_null_terminated(paths);
+    let to_str = dest_folder.to_string_lossy();
+    let to_vec = to_double_null_terminated(&to_str);
+
+    let mut op = SHFILEOPSTRUCTW {
+        hwnd,
+        wFunc: FO_MOVE,
+        pFrom: PCWSTR(from_vec.as_ptr()),
+        pTo: PCWSTR(to_vec.as_ptr()),
+        fFlags: (FOF_ALLOWUNDO).0 as u16,
+        ..Default::default()
+    };
+
+    let result = unsafe { SHFileOperationW(&mut op) };
+    result == 0 && op.fAnyOperationsAborted.0 == 0
+}
+
 /// Copies a file or directory using Windows Shell.
 /// Returns true if operation was successful.
 pub fn copy_item_with_shell(path: &Path, dest_folder: &Path, hwnd: HWND) -> bool {

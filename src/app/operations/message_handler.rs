@@ -76,6 +76,17 @@ impl ImageViewerApp {
                     }
                     self.items = Arc::new(result.items);
                     self.total_items = result.total_items;
+
+                    // After rebuild: if a pending selection was requested (e.g., after rename),
+                    // find the item and select + scroll to it.
+                    if let Some(target_path) = self.pending_select_path.take() {
+                        if let Some(idx) = self.items.iter().position(|i| i.path == target_path) {
+                            self.selected_item = Some(idx);
+                            self.selected_file = Some(self.items[idx].clone());
+                            self.scroll_to_selected = true;
+                        }
+                    }
+
                     ctx.request_repaint();
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => break, // No more messages
@@ -142,6 +153,10 @@ impl ImageViewerApp {
                         }
                     }
                     if parent_str == current_str {
+                        // After reload + re-sort, select and scroll to the renamed item
+                        let new_path = parent_folder.join(&new_name);
+                        self.pending_select_path = Some(new_path);
+                        self.loaded_path.clear();
                         self.load_folder(false);
                     }
                 }
@@ -272,6 +287,66 @@ impl ImageViewerApp {
                     if current_str == dest_str {
                         eprintln!(
                             "[MOVE] Dest folder matches current view, reloading: {}",
+                            self.current_path
+                        );
+                        self.loaded_path.clear();
+                        self.load_folder(false);
+                    }
+                }
+                FileOperationResult::MoveBatchCompleted {
+                    source_folders,
+                    dest_folder,
+                } => {
+                    let dest_str = normalize_for_match(dest_folder.as_path());
+                    let current_str = normalize_for_match(Path::new(&self.current_path));
+
+                    // Invalidate all source folders and destination
+                    for source_folder in &source_folders {
+                        self.directory_cache.invalidate(source_folder);
+                        if let Some(di) = &self.directory_index {
+                            let _ = di.invalidate(source_folder);
+                        }
+                    }
+                    self.directory_cache.invalidate(&dest_folder);
+                    if let Some(di) = &self.directory_index {
+                        let _ = di.invalidate(&dest_folder);
+                    }
+
+                    // Check if current view matches any source folder
+                    let mut should_reload = false;
+                    for source_folder in &source_folders {
+                        let source_str = normalize_for_match(source_folder.as_path());
+                        if current_str == source_str {
+                            should_reload = true;
+                        }
+                        // Clear tab caches for source folders
+                        for tab in self.tab_manager.tabs.iter_mut() {
+                            let tab_path = normalize_for_match(Path::new(&tab.path));
+                            if tab_path == source_str {
+                                tab.items = std::sync::Arc::new(Vec::new());
+                                tab.all_items.clear();
+                            }
+                        }
+                    }
+
+                    // Clear tab caches for destination
+                    for tab in self.tab_manager.tabs.iter_mut() {
+                        let tab_path = normalize_for_match(Path::new(&tab.path));
+                        if tab_path == dest_str {
+                            tab.items = std::sync::Arc::new(Vec::new());
+                            tab.all_items.clear();
+                        }
+                    }
+
+                    if should_reload {
+                        self.loaded_path.clear();
+                        self.load_folder(false);
+                    }
+
+                    // Destination logic
+                    if current_str == dest_str {
+                        eprintln!(
+                            "[MOVE-BATCH] Dest folder matches current view, reloading: {}",
                             self.current_path
                         );
                         self.loaded_path.clear();

@@ -275,7 +275,8 @@ impl ImageViewerApp {
         // Update state from context
         self.last_grid_cols = ctx.last_grid_cols;
         self.renaming_state = ctx.renaming_state;
-        self.focus_rename = ctx.focus_rename;
+        // Always consume focus_rename after one frame (cursor selection applied once)
+        self.focus_rename = false;
 
         // Process actions (blocked during renaming, except click on item itself)
         let is_renaming = self.renaming_state.is_some();
