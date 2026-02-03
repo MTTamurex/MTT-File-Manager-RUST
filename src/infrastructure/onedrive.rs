@@ -118,11 +118,13 @@ pub fn is_file_open(path: &Path) -> bool {
 }
 
 /// Determine sync status from file attributes.
-/// Falls back to attribute-based detection if the path is not under a known OneDrive root.
+/// Only assigns sync status when `is_onedrive` is true (path confirmed to be under a cloud root).
+/// Note: `is_onedrive` should already account for alternate mount points via
+/// `path_has_cloud_attributes()` at the directory level. We intentionally do NOT
+/// fall back to per-file cloud attributes here, because files copied FROM OneDrive
+/// retain their cloud attributes even in non-OneDrive locations.
 pub fn get_sync_status(attrs: u32, is_onedrive: bool) -> SyncStatus {
-    let is_cloud_file = is_onedrive || has_cloud_attributes(attrs);
-
-    if !is_cloud_file {
+    if !is_onedrive {
         return SyncStatus::None;
     }
 
@@ -213,14 +215,16 @@ mod tests {
     }
 
     #[test]
-    fn test_cloud_flags_without_known_root() {
+    fn test_cloud_flags_without_known_root_returns_none() {
+        // Files with cloud attributes outside OneDrive paths should NOT get sync status.
+        // This prevents false positives for files copied from OneDrive to other locations.
         assert_eq!(
             get_sync_status(FILE_ATTRIBUTE_PINNED, false),
-            SyncStatus::Pinned
+            SyncStatus::None
         );
         assert_eq!(
             get_sync_status(FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS, false),
-            SyncStatus::CloudOnly
+            SyncStatus::None
         );
     }
 }
