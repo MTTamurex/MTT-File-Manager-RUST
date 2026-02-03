@@ -19,7 +19,9 @@ use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITH
 use windows::Win32::Media::MediaFoundation::{MFStartup, MFShutdown, MFSTARTUP_NOSOCKET};
 
 /// Maximum concurrent decode operations (RAM limiter)
-const MAX_CONCURRENT_DECODES: usize = 5;
+/// Reduced from 5 to 3 to prevent RAM spikes on HDD folders
+/// Each decode can use ~50-100MB for large images
+const MAX_CONCURRENT_DECODES: usize = 3;
 
 /// Semaphore to limit concurrent resource usage
 pub struct Semaphore {

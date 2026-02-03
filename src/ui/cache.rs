@@ -21,8 +21,8 @@ pub struct TextureCacheConfig {
 impl Default for TextureCacheConfig {
     fn default() -> Self {
         Self {
-            max_size: 500, // ~125-250MB VRAM - balanced between performance and memory
-            max_concurrent_loads: 200, // High limit - stale entries cleaned by grid_view during scroll
+            max_size: 300, // ~75-150MB VRAM - reduced to prevent RAM spikes on HDD folders
+            max_concurrent_loads: 100, // Reduced limit to prevent memory pressure during scroll
         }
     }
 }
@@ -55,20 +55,22 @@ impl CacheManager {
     /// Creates a new cache manager with default configuration
     pub fn new() -> Self {
         Self {
-            // PERFORMANCE: 500 items - balanced between memory usage and cache hits
-            texture_cache: LruCache::new(NonZeroUsize::new(500).unwrap()),
+            // PERFORMANCE: 300 items - reduced to prevent RAM spikes on HDD folders
+            // Each texture ≈ 256KB-1MB, so 300 ≈ 75-300MB VRAM
+            texture_cache: LruCache::new(NonZeroUsize::new(300).unwrap()),
             icon_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
             loading_set: FxHashSet::default(),
             folder_icon_texture: None,
             computer_icon: None,
             drive_icon_cache: LruCache::new(NonZeroUsize::new(10).unwrap()),
-            folder_preview_cache: LruCache::new(NonZeroUsize::new(150).unwrap()),
+            folder_preview_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
             folder_preview_loading: FxHashSet::default(),
             failed_thumbnails: LruCache::new(NonZeroUsize::new(1000).unwrap()),
             pending_upload_set: FxHashSet::default(),
-            // PERFORMANCE: RAM cache for RGBA data - helps avoid disk I/O on re-scroll
-            // 800 items ≈ 200-400MB RAM for 512x512 thumbnails
-            rgba_data_cache: LruCache::new(NonZeroUsize::new(800).unwrap()),
+            // PERFORMANCE: RAM cache for RGBA data - reduced to prevent memory spikes
+            // 400 items ≈ 100-200MB RAM for 512x512 thumbnails
+            // This prevents the ~1GB RAM spike when loading folders from HDD
+            rgba_data_cache: LruCache::new(NonZeroUsize::new(400).unwrap()),
 
             config: TextureCacheConfig::default(),
         }
@@ -83,12 +85,13 @@ impl CacheManager {
             folder_icon_texture: None,
             computer_icon: None,
             drive_icon_cache: LruCache::new(NonZeroUsize::new(10).unwrap()),
-            folder_preview_cache: LruCache::new(NonZeroUsize::new(150).unwrap()),
+            folder_preview_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
             folder_preview_loading: FxHashSet::default(),
             failed_thumbnails: LruCache::new(NonZeroUsize::new(1000).unwrap()),
             pending_upload_set: FxHashSet::default(),
-            // PERFORMANCE: RAM cache - 1.6x the VRAM cache size, minimum 800
-            rgba_data_cache: LruCache::new(NonZeroUsize::new((config.max_size * 8 / 5).max(800)).unwrap()),
+            // PERFORMANCE: RAM cache - 1.3x the VRAM cache size, minimum 400
+            // Reduced multiplier to prevent memory spikes while maintaining cache benefits
+            rgba_data_cache: LruCache::new(NonZeroUsize::new((config.max_size * 4 / 3).max(400)).unwrap()),
 
             config,
         }

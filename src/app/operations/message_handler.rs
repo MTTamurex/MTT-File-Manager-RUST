@@ -607,6 +607,10 @@ impl ImageViewerApp {
 
         // PERFORMANCE: Drain ALL pending thumbnails from worker into a persistent buffer
         // This ensures no data is lost when throttling GPU uploads.
+        // PERFORMANCE: Limit pending_thumbnails buffer to prevent RAM spikes
+        // Each thumbnail data can be ~1MB, so limit to ~100MB worth of pending data
+        const MAX_PENDING_THUMBNAILS: usize = 100;
+        
         while let Ok(thumbnail_data) = self.image_receiver.try_recv() {
             // Se a imagem pertence a uma geração anterior (outra folder), descarta.
             if thumbnail_data.generation != self.generation {
@@ -621,6 +625,14 @@ impl ImageViewerApp {
                 self.cache_manager
                     .mark_as_failed(thumbnail_data.path.clone());
                 continue;
+            }
+
+            // PERFORMANCE: Drop oldest thumbnails if buffer is full
+            // This prevents RAM spikes when workers produce faster than GPU upload
+            while self.pending_thumbnails.len() >= MAX_PENDING_THUMBNAILS {
+                if let Some(old) = self.pending_thumbnails.pop_front() {
+                    self.cache_manager.finish_pending_upload(&old.path);
+                }
             }
 
             // Adiciona ao buffer persistente para upload posterior
