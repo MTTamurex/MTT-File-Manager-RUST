@@ -1,6 +1,7 @@
 pub mod item_slot;
 pub mod media_preview;
 pub mod mpv_preview;
+pub mod mpv;
 pub mod gif_manager;
 pub mod virtual_drive_settings;
 pub mod video_controls_state;

@@ -15,39 +15,13 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WINDOW_EX_STYLE, WS_CHILD, WS_CLIPSIBLINGS, WS_VISIBLE,
 };
 
-// Downscale filter applied only in docked mode (preview in sidebar)
-const DOCKED_DOWNSCALE_FILTER: &str =
-    "scale=w='min(iw,854)':h='min(ih,480)':force_original_aspect_ratio=decrease";
-const DOCKED_DOWNSCALE_MARKER: &str = "min(ih,480)";
-// FPS limit filter applied only in docked mode (preview in sidebar)
-const DOCKED_FPS_FILTER: &str = "fps=fps=30";
-const DOCKED_FPS_MARKER: &str = "fps=fps=30";
-const DEINTERLACE_FILTER: &str = "bwdif=mode=auto:parity=auto:deint=all";
-const DEINTERLACE_MARKER: &str = "bwdif=";
-const AUDIO_NORMALIZER_FILTER: &str = "dynaudnorm=f=75";
-const AUDIO_NORMALIZER_MARKER: &str = "dynaudnorm";
+// Re-export from sub-modules for backward compatibility
+pub use crate::ui::components::mpv::state::{MpvState, TrackInfo};
+pub use crate::ui::components::mpv::utils::format_time;
+use crate::ui::components::mpv::filters as mpv_filters;
+use crate::ui::components::mpv::playback as mpv_playback;
+use crate::ui::components::mpv::event_loop as mpv_event_loop;
 
-/// Track information for audio/subtitles.
-#[derive(Clone, Debug, Default)]
-pub struct TrackInfo {
-    pub id: i64,
-    pub track_type: String, // "audio", "video", "sub"
-    pub title: Option<String>,
-    pub lang: Option<String>,
-    pub selected: bool,
-}
-
-/// Shared state for MPV playback.
-#[derive(Clone, Default)]
-pub struct MpvState {
-    pub is_playing: bool,
-    pub current_time: f64,
-    pub duration: f64,
-    pub volume: f32,
-    pub is_muted: bool,
-    pub audio_tracks: Vec<TrackInfo>,
-    pub subtitle_tracks: Vec<TrackInfo>,
-}
 
 /// MPV video preview (WIP). This is a scaffold for the migration.
 pub struct MpvPreview {
@@ -173,7 +147,7 @@ impl MpvPreview {
     /// Retorna o estado atual de forma segura, com valor padrão em caso de erro
     pub fn get_state(&self) -> MpvState {
         match self.state.read() {
-            Ok(state) => state.clone(),
+            Ok(state) => MpvState::clone(&state),
             Err(_) => {
                 // Em caso de poison do RwLock, retorna estado padrão
                 eprintln!("[MpvPreview] Erro ao ler estado - RwLock poisonado");
@@ -185,20 +159,16 @@ impl MpvPreview {
     /// Tenta obter o estado com tratamento de erro explícito
     pub fn try_get_state(&self) -> Result<MpvState, String> {
         self.state.read()
-            .map(|state| state.clone())
+            .map(|state: std::sync::RwLockReadGuard<'_, MpvState>| MpvState::clone(&state))
             .map_err(|e| format!("[MpvPreview] RwLock poisonado: {}", e))
     }
 
     pub fn play(&self) {
-        if let Some(m) = &self.mpv {
-            let _ = m.set_property("pause", false);
-        }
+        mpv_playback::play(&self.mpv);
     }
 
     pub fn pause(&self) {
-        if let Some(m) = &self.mpv {
-            let _ = m.set_property("pause", true);
-        }
+        mpv_playback::pause(&self.mpv);
     }
 
     pub fn toggle_play(&mut self) {
@@ -219,29 +189,23 @@ impl MpvPreview {
     }
 
     pub fn seek(&self, time: f64) {
-        if let Some(m) = &self.mpv {
-            let _ = m.set_property("time-pos", time.max(0.0));
-        }
+        mpv_playback::seek(&self.mpv, time);
     }
 
     pub fn seek_relative(&self, delta_seconds: f64) {
-        if let Some(m) = &self.mpv {
-            if let Ok(current) = m.get_property::<f64>("time-pos") {
-                if let Ok(duration) = m.get_property::<f64>("duration") {
-                    let new_time = (current + delta_seconds).clamp(0.0, duration);
-                    let _ = m.set_property("time-pos", new_time);
-                }
-            }
-        }
+        mpv_playback::seek_relative(&self.mpv, delta_seconds);
     }
 
     pub fn set_volume(&self, volume: f32) {
+        // Need to use unsafe transmute or redesign - for now keep direct implementation
+        // This is a limitation of the extraction - we need mutable access to state
+        let clamped = volume.clamp(0.0, 1.0);
         if let Some(m) = &self.mpv {
-            let _ = m.set_property("volume", (volume.clamp(0.0, 1.0) * 100.0) as f64);
+            let _ = m.set_property("volume", (clamped * 100.0) as f64);
             let _ = m.set_property("mute", false);
         }
         if let Ok(mut state) = self.state.write() {
-            state.volume = volume.clamp(0.0, 1.0);
+            state.volume = clamped;
             state.is_muted = false;
         }
     }
@@ -293,11 +257,11 @@ impl MpvPreview {
     fn set_audio_normalizer(&mut self, enabled: bool) {
         if let Some(m) = &self.mpv {
             let current_af = m.get_property::<String>("af").unwrap_or_default();
-            let has_normalizer = current_af.contains(AUDIO_NORMALIZER_MARKER);
+            let has_normalizer = current_af.contains(mpv_filters::AUDIO_NORMALIZER_MARKER);
             let next_af = if enabled && !has_normalizer {
-                Self::append_af_filter(&current_af, AUDIO_NORMALIZER_FILTER)
+                mpv_filters::append_af_filter(&current_af, mpv_filters::AUDIO_NORMALIZER_FILTER)
             } else if !enabled && has_normalizer {
-                Self::remove_af_filter(&current_af, AUDIO_NORMALIZER_MARKER)
+                mpv_filters::remove_af_filter(&current_af, mpv_filters::AUDIO_NORMALIZER_MARKER)
             } else {
                 current_af
             };
@@ -307,39 +271,11 @@ impl MpvPreview {
     }
 
     pub fn set_audio_track(&mut self, id: i64) {
-        if let Some(m) = &self.mpv {
-            let _ = m.set_property("aid", id);
-        }
-        // Update local state to reflect selection
-        if let Ok(mut state) = self.state.write() {
-            for track in &mut state.audio_tracks {
-                track.selected = track.id == id;
-            }
-        }
-        // Invalidate cache so it will be refreshed
-        if let Some((ref mut audio, _)) = self.cached_tracks {
-            for track in audio {
-                track.selected = track.id == id;
-            }
-        }
+        mpv_playback::set_audio_track(&self.mpv, &self.state, &mut self.cached_tracks, id);
     }
 
     pub fn set_subtitle_track(&mut self, id: i64) {
-        if let Some(m) = &self.mpv {
-            let _ = m.set_property("sid", id);
-        }
-        // Update local state to reflect selection (id=0 means disabled)
-        if let Ok(mut state) = self.state.write() {
-            for track in &mut state.subtitle_tracks {
-                track.selected = track.id == id;
-            }
-        }
-        // Update cache
-        if let Some((_, ref mut subs)) = self.cached_tracks {
-            for track in subs {
-                track.selected = track.id == id;
-            }
-        }
+        mpv_playback::set_subtitle_track(&self.mpv, &self.state, &mut self.cached_tracks, id);
     }
 
     #[cfg(target_os = "windows")]
@@ -435,7 +371,7 @@ impl MpvPreview {
 
                     // PERF FASE 2: Start async event loop for push-based state updates
                     // This eliminates all FFI polling overhead (40 calls/sec → 0)
-                    self.start_event_loop(m.clone(), ui.ctx().clone());
+                    self.start_event_loop_internal(m.clone(), ui.ctx().clone());
 
                     self.mpv = Some(m);
                     self.set_audio_normalizer(self.audio_normalizer_enabled);
@@ -525,47 +461,11 @@ impl MpvPreview {
         // NOTE: We must wait for file to be loaded before querying tracks, otherwise we get empty list
         if let Some(m) = &self.mpv {
             // Check if file is ready by checking if duration is available
-            let file_ready = m
-                .get_property::<f64>("duration")
-                .map(|d| d > 0.0)
-                .unwrap_or(false);
+            let file_ready = mpv_playback::is_file_ready(m);
 
             // CACHE: Track list (read once file is ready, then cache until file change)
             if self.cached_tracks.is_none() && file_ready {
-                let mut audio_tracks = Vec::new();
-                let mut sub_tracks = Vec::new();
-
-                // Query mpv array properties via track-list/N/*
-                if let Ok(count) = m.get_property::<i64>("track-list/count") {
-                    if count > 0 {
-                        for i in 0..count {
-                            let base = format!("track-list/{}/", i);
-                            let t_type = m
-                                .get_property::<String>(&(base.clone() + "type"))
-                                .unwrap_or_default();
-                            let id = m.get_property::<i64>(&(base.clone() + "id")).unwrap_or(0);
-                            let selected = m
-                                .get_property::<bool>(&(base.clone() + "selected"))
-                                .unwrap_or(false);
-                            let title = m.get_property::<String>(&(base.clone() + "title")).ok();
-                            let lang = m.get_property::<String>(&(base + "lang")).ok();
-
-                            let info = TrackInfo {
-                                id,
-                                track_type: t_type.clone(),
-                                title,
-                                lang,
-                                selected,
-                            };
-
-                            if t_type == "audio" {
-                                audio_tracks.push(info);
-                            } else if t_type == "sub" {
-                                sub_tracks.push(info);
-                            }
-                        }
-                    }
-                }
+                let (audio_tracks, sub_tracks): (Vec<TrackInfo>, Vec<TrackInfo>) = mpv_playback::query_tracks(m);
 
                 // Cache the tracks (even if empty, file is loaded so this is final)
                 self.cached_tracks = Some((audio_tracks.clone(), sub_tracks.clone()));
@@ -650,8 +550,8 @@ impl MpvPreview {
         };
 
         let current_vf = m.get_property::<String>("vf").unwrap_or_default();
-        let has_downscale = current_vf.contains(DOCKED_DOWNSCALE_MARKER);
-        let has_fps_limit = current_vf.contains(DOCKED_FPS_MARKER);
+        let has_downscale = current_vf.contains(mpv_filters::DOCKED_DOWNSCALE_MARKER);
+        let has_fps_limit = current_vf.contains(mpv_filters::DOCKED_FPS_MARKER);
 
         if should_limit {
             if force_reapply || !has_downscale || !has_fps_limit {
@@ -663,16 +563,16 @@ impl MpvPreview {
                 let mut new_vf = current_vf.clone();
                 if !has_downscale {
                     new_vf = if new_vf.trim().is_empty() {
-                        DOCKED_DOWNSCALE_FILTER.to_string()
+                        mpv_filters::DOCKED_DOWNSCALE_FILTER.to_string()
                     } else {
-                        format!("{},{}", new_vf, DOCKED_DOWNSCALE_FILTER)
+                        format!("{},{}", new_vf, mpv_filters::DOCKED_DOWNSCALE_FILTER)
                     };
                 }
                 if !has_fps_limit {
                     new_vf = if new_vf.trim().is_empty() {
-                        DOCKED_FPS_FILTER.to_string()
+                        mpv_filters::DOCKED_FPS_FILTER.to_string()
                     } else {
-                        format!("{},{}", new_vf, DOCKED_FPS_FILTER)
+                        format!("{},{}", new_vf, mpv_filters::DOCKED_FPS_FILTER)
                     };
                 }
                 let _ = m.set_property("vf", new_vf);
@@ -770,16 +670,16 @@ impl MpvPreview {
             }
         };
         let current_vf = m.get_property::<String>("vf").unwrap_or_default();
-        let has_deinterlace = current_vf.contains(DEINTERLACE_MARKER);
+        let has_deinterlace = current_vf.contains(mpv_filters::DEINTERLACE_MARKER);
 
         if interlaced && !has_deinterlace {
             let _ = m.set_property("deinterlace", "yes");
-            let new_vf = Self::append_vf_filter(&current_vf, DEINTERLACE_FILTER);
+            let new_vf = mpv_filters::append_vf_filter(&current_vf, mpv_filters::DEINTERLACE_FILTER);
             let _ = m.set_property("vf", new_vf);
             self.update_prev_vf_deinterlace(true);
         } else if !interlaced && has_deinterlace {
             let _ = m.set_property("deinterlace", "no");
-            let new_vf = Self::remove_vf_filter(&current_vf, DEINTERLACE_MARKER);
+            let new_vf = mpv_filters::remove_vf_filter(&current_vf, mpv_filters::DEINTERLACE_MARKER);
             let _ = m.set_property("vf", new_vf);
             self.update_prev_vf_deinterlace(false);
         } else if !interlaced {
@@ -820,136 +720,35 @@ impl MpvPreview {
             return;
         };
         let updated = if apply {
-            if prev.contains(DEINTERLACE_MARKER) {
+            if prev.contains(mpv_filters::DEINTERLACE_MARKER) {
                 prev
             } else {
-                Self::append_vf_filter(&prev, DEINTERLACE_FILTER)
+                mpv_filters::append_vf_filter(&prev, mpv_filters::DEINTERLACE_FILTER)
             }
-        } else if prev.contains(DEINTERLACE_MARKER) {
-            Self::remove_vf_filter(&prev, DEINTERLACE_MARKER)
+        } else if prev.contains(mpv_filters::DEINTERLACE_MARKER) {
+            mpv_filters::remove_vf_filter(&prev, mpv_filters::DEINTERLACE_MARKER)
         } else {
             prev
         };
         self.docked_prev_vf = Some(updated);
     }
 
-    fn append_vf_filter(current_vf: &str, filter: &str) -> String {
-        if current_vf.trim().is_empty() {
-            filter.to_string()
-        } else {
-            format!("{},{}", current_vf, filter)
-        }
-    }
-
-    fn remove_vf_filter(current_vf: &str, marker: &str) -> String {
-        let mut parts: Vec<&str> = current_vf
-            .split(',')
-            .map(|part| part.trim())
-            .filter(|part| !part.is_empty())
-            .collect();
-        parts.retain(|part| !part.contains(marker));
-        parts.join(",")
-    }
-
-    fn append_af_filter(current_af: &str, filter: &str) -> String {
-        if current_af.trim().is_empty() {
-            filter.to_string()
-        } else {
-            format!("{},{}", current_af, filter)
-        }
-    }
-
-    fn remove_af_filter(current_af: &str, marker: &str) -> String {
-        let mut parts: Vec<&str> = current_af
-            .split(',')
-            .map(|part| part.trim())
-            .filter(|part| !part.is_empty())
-            .collect();
-        parts.retain(|part| !part.contains(marker));
-        parts.join(",")
-    }
-
     /// PERF FASE 2: Starts async polling thread for offloading FFI calls from main thread
     ///
     /// This moves the polling to a background thread, preventing main thread blocking.
     /// Polls at 4 FPS (250ms) but from a separate thread, keeping UI responsive.
-    fn start_event_loop(&mut self, mpv: Arc<mpv::Mpv>, ctx: egui::Context) {
+    fn start_event_loop_internal(&mut self, mpv: Arc<mpv::Mpv>, ctx: egui::Context) {
         // Don't start if already running
         if self.event_thread_running.load(Ordering::Relaxed) {
             return;
         }
 
-        let state = self.state.clone();
-        let running = self.event_thread_running.clone();
-        running.store(true, Ordering::Release);
-
-        // Spawn background polling thread
-        let handle = thread::spawn(move || {
-            eprintln!("[MpvPreview] Async polling thread started");
-
-            loop {
-                // Check shutdown flag
-                if !running.load(Ordering::Acquire) {
-                    eprintln!("[MpvPreview] Async polling thread stopping...");
-                    break;
-                }
-
-                // Poll properties (moved to background thread - zero impact on main thread!)
-                let mut state_updated = false;
-
-                // Poll time position
-                if let Ok(pos) = mpv.get_property::<f64>("time-pos") {
-                    if let Ok(mut state) = state.write() {
-                        state.current_time = pos;
-                        state_updated = true;
-                    }
-                }
-
-                // Poll pause state
-                if let Ok(paused) = mpv.get_property::<bool>("pause") {
-                    if let Ok(mut state) = state.write() {
-                        state.is_playing = !paused;
-                        state_updated = true;
-                    }
-                }
-
-                // Poll volume
-                if let Ok(vol) = mpv.get_property::<f64>("volume") {
-                    if let Ok(mut state) = state.write() {
-                        state.volume = (vol / 100.0).clamp(0.0, 1.0) as f32;
-                        state_updated = true;
-                    }
-                }
-
-                // Poll mute state
-                if let Ok(muted) = mpv.get_property::<bool>("mute") {
-                    if let Ok(mut state) = state.write() {
-                        state.is_muted = muted;
-                        state_updated = true;
-                    }
-                }
-
-                // Poll duration (only once until it's available)
-                if let Ok(dur) = mpv.get_property::<f64>("duration") {
-                    if let Ok(mut state) = state.write() {
-                        if state.duration == 0.0 || state.duration != dur {
-                            state.duration = dur;
-                            state_updated = true;
-                        }
-                    }
-                }
-
-                // Request UI repaint only if state changed
-                if state_updated {
-                    ctx.request_repaint();
-                }
-
-                // Sleep 250ms between polls (4 FPS)
-                thread::sleep(Duration::from_millis(250));
-            }
-
-            eprintln!("[MpvPreview] Async polling thread exited");
-        });
+        let handle = mpv_event_loop::start_event_loop(
+            mpv,
+            self.state.clone(),
+            self.event_thread_running.clone(),
+            ctx,
+        );
 
         self.event_thread_handle = Some(handle);
     }
@@ -993,42 +792,13 @@ impl MpvPreview {
     }
 }
 
-pub fn format_time(seconds: f64) -> String {
-    let total = seconds.max(0.0).floor() as i64;
-    let h = total / 3600;
-    let m = (total % 3600) / 60;
-    let s = total % 60;
-    if h > 0 {
-        format!("{:01}:{:02}:{:02}", h, m, s)
-    } else {
-        format!("{:02}:{:02}", m, s)
-    }
-}
-
 impl Drop for MpvPreview {
     fn drop(&mut self) {
         // PERF FASE 2: Gracefully shutdown event loop thread
-        if self.event_thread_running.load(Ordering::Relaxed) {
-            eprintln!("[MpvPreview] Shutting down event loop thread...");
-
-            // Signal thread to stop
-            self.event_thread_running.store(false, Ordering::Release);
-
-            // Wait for thread to exit (with timeout to prevent hanging)
-            if let Some(handle) = self.event_thread_handle.take() {
-                // Give thread up to 2 seconds to exit gracefully
-                let start = Instant::now();
-                while !handle.is_finished() && start.elapsed() < Duration::from_secs(2) {
-                    std::thread::sleep(Duration::from_millis(50));
-                }
-
-                // Join or warn if still running
-                match handle.join() {
-                    Ok(_) => eprintln!("[MpvPreview] Event loop thread joined successfully"),
-                    Err(_) => eprintln!("[MpvPreview] Warning: Event loop thread panicked"),
-                }
-            }
-        }
+        mpv_event_loop::stop_event_loop(
+            self.event_thread_running.clone(),
+            self.event_thread_handle.take(),
+        );
 
         #[cfg(target_os = "windows")]
         if let Some(hwnd) = self.mpv_hwnd.take() {
