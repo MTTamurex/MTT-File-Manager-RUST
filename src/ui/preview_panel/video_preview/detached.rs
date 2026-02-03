@@ -146,7 +146,8 @@ pub fn render_detached_video(
         let video_response = ui.allocate_exact_size(total_size, egui::Sense::click());
 
         // Double-click on video area to enter fullscreen
-        // (same logic as fullscreen button in control bar)
+        // Only set flags here — the actual ViewportCommand::Fullscreen(true)
+        // is sent from render_fullscreen_video() on the next frame
         if video_response.1.double_clicked() {
             let was_maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
             preview.set_prev_app_maximized(was_maximized);
@@ -219,6 +220,8 @@ pub fn render_detached_video(
     if !open {
         if preview.is_maximized() {
             preview.set_fullscreen_applied(false);
+            preview.set_forced_size(None); // Clear forced size when exiting fullscreen
+            preview.reset_last_rect(); // Force MPV window resize
             ui.ctx()
                 .send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
             if preview.prev_app_maximized() {

@@ -14,6 +14,19 @@ pub fn render_fullscreen_video(
     is_muted: bool,
     is_playing: bool,
 ) {
+    // Send fullscreen viewport command if not yet applied
+    // (must be done here in the render loop, not in the button handler,
+    // to ensure correct viewport transition — matches original working logic)
+    if !preview.fullscreen_applied() {
+        if preview.prev_app_maximized() {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Maximized(false));
+        }
+        ui.ctx()
+            .send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+        preview.set_fullscreen_applied(true);
+    }
+
     // Use viewport inner rect (actual drawable area)
     let screen_rect = ui
         .ctx()
@@ -64,6 +77,8 @@ pub fn render_fullscreen_video(
             if video_response.1.double_clicked() {
                 preview.toggle_maximized();
                 preview.set_fullscreen_applied(false);
+                preview.set_forced_size(None); // Clear forced size when exiting fullscreen
+                preview.reset_last_rect(); // Force MPV window resize
                 ui.ctx()
                     .send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
                 if preview.prev_app_maximized() {
@@ -113,6 +128,8 @@ pub fn render_fullscreen_video(
             if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 preview.toggle_maximized();
                 preview.set_fullscreen_applied(false);
+                preview.set_forced_size(None); // Clear forced size when exiting fullscreen
+                preview.reset_last_rect(); // Force MPV window resize
                 ui.ctx()
                     .send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
                 if preview.prev_app_maximized() {

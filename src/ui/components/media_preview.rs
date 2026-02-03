@@ -436,6 +436,13 @@ impl MediaPreview {
         }
     }
 
+    /// Reset the last rect to force MPV window resize on next frame
+    pub fn reset_last_rect(&mut self) {
+        if let MediaPreview::Video(player) = self {
+            player.reset_last_rect();
+        }
+    }
+
     /// Check if VSR is enabled
     pub fn is_vsr_enabled(&self) -> bool {
         if let MediaPreview::Video(player) = self {

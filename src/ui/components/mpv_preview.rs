@@ -362,6 +362,11 @@ impl MpvPreview {
         self.mpv_hwnd
     }
 
+    /// Reset the last rect to force window resize on next frame
+    pub fn reset_last_rect(&mut self) {
+        self.last_rect = egui::Rect::NAN;
+    }
+
     pub fn update(&mut self, _ui: &mut egui::Ui, _frame: Option<&eframe::Frame>) {
         if !self.show_player {
             self.set_visibility(false);
