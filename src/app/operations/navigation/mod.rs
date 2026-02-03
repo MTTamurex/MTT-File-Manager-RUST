@@ -2,6 +2,9 @@
 //!
 //! This module handles history based navigation and switching to special views.
 
+pub mod keyboard;
+pub mod selection;
+
 use crate::app::state::ImageViewerApp;
 
 impl ImageViewerApp {
@@ -205,3 +208,7 @@ impl ImageViewerApp {
         self.navigation.can_go_forward()
     }
 }
+
+// Re-export commonly used types from submodules
+pub use keyboard::*;
+pub use selection::*;
