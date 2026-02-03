@@ -379,8 +379,16 @@ impl IconLoader {
     pub fn clear(&mut self) {
         self.icon_cache.clear();
         self.drive_icon_cache.clear();
+        self.failed_drive_icons.clear();
         self.folder_icon_texture = None;
         self.computer_icon_texture = None;
+    }
+
+    /// Clears drive icon caches (both successful and failed), allowing fresh extraction.
+    /// Called when device events indicate drive insertion/removal.
+    pub fn clear_drive_icons(&mut self) {
+        self.drive_icon_cache.clear();
+        self.failed_drive_icons.clear();
     }
 
     /// Gets or loads a native icon for a specific folder path (like OneDrive)

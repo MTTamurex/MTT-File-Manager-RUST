@@ -24,6 +24,9 @@ impl ImageViewerApp {
         }
 
         if saw_device_event {
+            // Drive was inserted/removed: clear all drive icon caches so icons are re-extracted
+            self.item_icon_loader.clear_drive_icons();
+
             let old_disks = self.disks.clone();
             if self.reload_drive_list() {
                 self.last_drive_refresh = Instant::now();
