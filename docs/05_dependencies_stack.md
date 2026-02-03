@@ -19,7 +19,7 @@ eframe = { version = "0.31", features = ["persistence"] }
 rayon = "1.10"
 ```
 - **Propósito**: Paralelização de dados (data parallelism)
-- **Uso**: Processamento de thumbnails, leitura de diretórios
+- **Uso**: Processamento de thumbnails, leitura de diretórios, ordenação
 - **Exemplo**: `par_iter()` em coleções de arquivos
 
 ### File System
@@ -47,18 +47,18 @@ lru = "0.12"
 dashmap = "5.5"
 ```
 - **Propósito**: HashMap concorrente
-- **Uso**: Cache thread-safe de texturas
+- **Uso**: Cache thread-safe de texturas (TextureCache)
 
 ```toml
 rustc-hash = "2.0"
 ```
-- **Propósito**: Hash mais rápida para PathBuf
-- **Uso**: FxHashSet/FxHashMap para chaves de path
+- **Propósito**: Hash mais rápida para PathBuf (FxHashSet/FxHashMap)
+- **Uso**: Sets e maps com chaves de path
 
 ```toml
 fxhash = "0.2.1"
 ```
-- **Propósito**: Hash rápida (alternativa ao rustc-hash)
+- **Propósito**: Hash rápida (alternativa)
 - **Uso**: Conjuntos de paths em memória
 
 ### Processamento de Imagem
@@ -66,20 +66,20 @@ fxhash = "0.2.1"
 image = { version = "0.25", features = ["webp", "gif"] }
 ```
 - **Propósito**: Decodificação/encodificação de imagens
-- **Features**: Suporte a WebP e GIF
-- **Uso**: Geração de thumbnails, processamento de imagens
+- **Features**: Suporte a WebP e GIF animado
+- **Uso**: Geração de thumbnails, processamento de imagens (Stage 1)
 
 ```toml
 webp = "0.3"
 ```
 - **Propósito**: Compressão WebP com controle de qualidade
-- **Uso**: Thumbnails com compressão lossy
+- **Uso**: Thumbnails com compressão lossy para cache em disco
 
 ```toml
 kamadak-exif = "0.5"
 ```
 - **Propósito**: Leitura direta de EXIF de JPEGs
-- **Uso**: Metadados de imagens fotográficas
+- **Uso**: Metadados de imagens fotográficas (orientação, data, câmera)
 
 ### SVG e Vetores
 ```toml
@@ -105,8 +105,8 @@ tiny-skia = "0.11"
 rusqlite = { version = "0.32", features = ["bundled"] }
 ```
 - **Propósito**: SQLite embutido
-- **Feature**: `bundled` - SQLite estático
-- **Uso**: Cache persistente de thumbnails
+- **Feature**: `bundled` - SQLite estático (sem dependência externa)
+- **Uso**: Cache persistente de thumbnails e preferências
 
 ### Vídeo e Mídia
 ```toml
@@ -114,21 +114,27 @@ mpv = { package = "libmpv2", version = "5.0.3" }
 ```
 - **Propósito**: Bindings para libmpv
 - **Uso**: Reprodução de vídeo
-- **Runtime**: Requer `libmpv-2.dll`
+- **Runtime**: Requer `libmpv-2.dll` no PATH ou diretório do executável
+
+```toml
+raw-window-handle = "0.6"
+```
+- **Propósito**: Acesso raw a handles de janela
+- **Uso**: Integração com mpv (necessário para embedding do player)
 
 ### Serialização
 ```toml
 serde_json = "1.0"
 ```
 - **Propósito**: JSON parsing/serialization
-- **Uso**: Configurações, metadados
+- **Uso**: Configurações, metadados, virtual_drive_config.json
 
 ### Comunicação entre Threads
 ```toml
 crossbeam-channel = "0.5.15"
 ```
 - **Propósito**: Canais MPSC de alta performance
-- **Uso**: Comunicação UI ↔ Workers
+- **Uso**: Comunicação UI ↔ Workers (thumbnails, ícones, metadados, operações)
 
 ### Diretórios e Paths
 ```toml
@@ -143,7 +149,7 @@ clipboard-win = "5.4"
 ```
 - **Propósito**: Integração com clipboard Windows
 - **Formato**: CF_HDROP para arquivos
-- **Uso**: Copiar/colar arquivos
+- **Uso**: Copiar/colar arquivos nativamente
 
 ### Diálogos de Arquivo
 ```toml
@@ -157,7 +163,7 @@ rfd = "0.15"
 natord = "1.0"
 ```
 - **Propósito**: Ordenação natural de strings
-- **Uso**: Ordenação de nomes de arquivo (File1, File2, File10)
+- **Uso**: Ordenação de nomes de arquivo (File1, File2, File10 em vez de File1, File10, File2)
 
 ### Temporários
 ```toml
@@ -171,14 +177,7 @@ tempfile = "3.10"
 thiserror = "2.0"
 ```
 - **Propósito**: Derivação de tipos de erro
-- **Uso**: `AppError` e tipos de erro customizados
-
-### Raw Window Handle
-```toml
-raw-window-handle = "0.6"
-```
-- **Propósito**: Acesso raw a handles de janela
-- **Uso**: Integração com mpv (necessário para embedding)
+- **Uso**: `AppError` e tipos de erro customizados com `#[derive(Error)]`
 
 ## Windows API Dependencies
 
@@ -195,44 +194,40 @@ features = [
     "Win32_System_Memory",               # Gerenciamento de memória
     "Win32_System_Registry",             # Registry access
     "Win32_Graphics_Gdi",                # GDI (Graphics Device Interface)
-    "Win32_Foundation",                   # Tipos básicos
+    "Win32_Foundation",                   # Tipos básicos (HANDLE, HWND, etc)
     "Win32_Storage_FileSystem",          # File system APIs
     "Win32_UI_WindowsAndMessaging",     # Janelas e mensagens
-    "Win32_System_ProcessStatus",         # Informações de processo
-    "Win32_System_Threading",           # Threads
-    "Win32_Graphics_Imaging",             # WIC (Windows Imaging Component)
-    "Win32_Graphics_Dwm",               # Desktop Window Manager
-    "Win32_Media_MediaFoundation",      # Media Foundation
-    "Win32_Devices_DeviceAndDriverInstallation", # Devices
+    "Win32_System_ProcessStatus",        # Informações de processo
+    "Win32_System_Threading",            # Threads
+    "Win32_Graphics_Imaging",            # WIC (Windows Imaging Component)
+    "Win32_Graphics_Dwm",                # Desktop Window Manager
+    "Win32_Media_MediaFoundation",       # Media Foundation
+    "Win32_Devices_DeviceAndDriverInstallation", # Dispositivos
     "Win32_System_LibraryLoader",        # Carregamento de DLLs
-    "Win32_System_Ioctl",                # I/O Control
-    "Win32_UI_Input_KeyboardAndMouse",  # Input
-    "Win32_System_Variant",              # Variants COM
-    "Win32_System_Search_Common",       # Search APIs
-    "Win32_Storage_Vhd",                # Virtual Hard Disks
+    "Win32_System_Ioctl",                # I/O control
+    "Win32_UI_Input_KeyboardAndMouse",   # Input
+    "Win32_System_Variant",              # VARIANT para COM
+    "Win32_System_Search_Common",        # Search
+    "Win32_Storage_Vhd",                 # Virtual Hard Disk (ISO)
     "Win32_Security",                    # Segurança
-    "Win32_System_IO",                  # I/O operations
-    "Win32_System_WindowsProgramming",  # Programação Windows
+    "Win32_System_IO",                   # I/O APIs
+    "Win32_System_WindowsProgramming",   # APIs gerais do Windows
 ]
 ```
 
-## Build Dependencies
+### Features Windows Detalhadas
 
-```toml
-[build-dependencies]
-winresource = "0.1"
-```
-- **Propósito**: Embed de recursos Windows (ícones, versão)
-- **Uso**: `build.rs` - Adiciona ícone ao executável
-
-## Dev Dependencies
-
-```toml
-[dev-dependencies]
-criterion = "0.5"
-```
-- **Propósito**: Framework de benchmarking
-- **Uso**: Benchmarks de performance (ex: `benches/shell_ops_blocking.rs`)
+| Feature | Propósito |
+|---------|-----------|
+| `Win32_UI_Shell` | Integração com Explorer (IShellItem, IFileOperation) |
+| `Win32_UI_Shell_PropertiesSystem` | Propriedades de arquivos (metadados) |
+| `Win32_System_Com` | COM para APIs Windows |
+| `Win32_Graphics_Gdi` | Bitmaps, device contexts |
+| `Win32_Graphics_Imaging` | WIC para thumbnails |
+| `Win32_Media_MediaFoundation` | Extração de frames de vídeo |
+| `Win32_Storage_FileSystem` | Operações de arquivo nativas |
+| `Win32_UI_WindowsAndMessaging` | Janelas, mensagens, subclassing |
+| `Win32_Storage_Vhd` | Montagem de ISOs |
 
 ## Features do Cargo
 
@@ -242,85 +237,120 @@ default = ["notify-watcher"]
 notify-watcher = ["notify"]
 ```
 
-### Feature: `notify-watcher` (padrão)
-- **Ativa**: `notify` crate
-- **Uso**: Monitoramento cross-platform de filesystem
-- **Implementação Windows**: Usa `ReadDirectoryChangesW` API
-- **Nota**: Não requer privilégios de administrador
+### `notify-watcher` (Default)
+- Habilita monitoramento de filesystem via `notify` crate
+- Implementa `ReadDirectoryChangesW` no Windows
+- Não requer privilégios de administrador
+- Pode ser desabilitado com: `cargo build --no-default-features`
 
-## Profiles de Build
+## Build Dependencies
+
+```toml
+[build-dependencies]
+winresource = "0.1"
+```
+- **Propósito**: Incluir recursos Windows no executável
+- **Uso**: Ícone do aplicativo, manifest
+
+## Dev Dependencies
+
+```toml
+[dev-dependencies]
+criterion = "0.5"
+```
+- **Propósito**: Framework de benchmarks
+- **Uso**: Benchmarks de performance (`cargo bench`)
+
+## Profile de Release
 
 ```toml
 [profile.release]
 opt-level = 3      # Otimização máxima
 lto = true         # Link Time Optimization
-codegen-units = 1  # Compilação single-thread (melhor otimização)
+codegen-units = 1  # Single codegen unit (melhor otimização)
 ```
 
-### Impacto no Binário
-- **Tamanho**: ~15-20MB (release)
-- **Memória**: ~50-100MB em uso
-- **Startup**: <1s em SSD
-- **Performance**: 60 FPS estável
+### Impacto no Build
+- **Build time**: Mais lento (LTO + single codegen unit)
+- **Binary size**: Menor (LTO remove código não usado)
+- **Performance**: Máxima (opt-level 3)
 
-## Integrações Externas Necessárias
+## Dependências de Runtime
 
-### Runtime Dependencies
-1. **libmpv-2.dll**
-   - Download: https://sourceforge.net/projects/mpv-player-windows/
-   - Local: Mesmo diretório do executável ou PATH
+### Obrigatórias
+| Dependência | Versão | Onde Obter |
+|-------------|--------|------------|
+| libmpv-2.dll | Latest | https://sourceforge.net/projects/mpv-player-windows/files/libmpv/ |
 
-2. **Microsoft Edge WebView2 Runtime**
-   - Download: https://developer.microsoft.com/microsoft-edge/webview2/
-   - Instalação: Winglet ou manual
-   - Uso: Visualização de PDFs
+### Opcionais (mas recomendadas)
+| Dependência | Versão | Onde Obter |
+|-------------|--------|------------|
+| WebView2 Runtime | Latest | `winget install Microsoft.EdgeWebView2Runtime` |
 
-### Fontes do Sistema
-- **Segoe UI**: Fonte principal (Windows)
-- **Segoe UI Symbol**: Símbolos
-- **Arial Unicode**: Fallback Unicode (opcional, 22MB)
-- **Remix Icon**: Fonte de ícones (embarcada)
+## Árvore de Dependências Simplificada
 
-## Alternativas Consideradas
+```
+mtt-file-manager
+├── eframe 0.31
+│   ├── egui
+│   ├── winit
+│   └── ...
+├── windows 0.61.0
+├── rusqlite 0.32
+│   └── libsqlite3-sys (bundled)
+├── image 0.25
+│   ├── webp
+│   └── gif
+├── libmpv2 5.0.3
+├── rayon 1.10
+├── crossbeam-channel 0.5.15
+└── ... (outras)
+```
 
-| Funcionalidade | Escolhida | Alternativas | Razão da Escolha |
-|----------------|-----------|--------------|------------------|
-| GUI | eframe/egui | iced, druid | Immediate mode, performance |
-| Vídeo | libmpv | ffmpeg-next | Simplicidade, performance |
-| PDF | WebView2 | pdfium, poppler | Integração Windows |
-| Cache | SQLite | sled, rocksdb | Confiabilidade, tooling |
-| Windows API | windows-rs | winapi | Bindings seguros, ativo |
+## Atualização de Dependências
 
-## Compatibilidade
+### Verificar Updates
+```bash
+# Instalar cargo-outdated
+cargo install cargo-outdated
 
-### Sistemas Operacionais
-- **Windows 10**: ✅ Suportado
-- **Windows 11**: ✅ Suportado
-- **Windows 7/8**: ❌ Não testado (APIs modernas)
-- **Linux/macOS**: ❌ Não suportado (Windows APIs)
+# Verificar updates disponíveis
+cargo outdated
+```
 
-### Arquiteturas
-- **x86_64**: ✅ Suportado
-- **ARM64**: ❌ Não testado
-- **x86**: ❌ Não suportado
+### Atualizar
+```bash
+# Atualizar todas as dependências
+cargo update
 
-### Filesystems
-- **NTFS**: ✅ Suportado
-- **FAT32**: ✅ Suportado
-- **exFAT**: ✅ Suportado
-- **ReFS**: ⚠️ Parcial (não testado)
+# Atualizar crate específico
+cargo update -p eframe
+```
 
-**Nota**: O monitoramento de mudanças usa `notify` crate que funciona em qualquer filesystem suportado pelo Windows, sem requerer USN Journal.
+### Segurança
+```bash
+# Verificar vulnerabilidades
+cargo install cargo-audit
+cargo audit
+```
 
-## Notas de Segurança
+## Notas de Compatibilidade
 
-### Verificações Implementadas
-- **Path traversal**: Prevenido via `std::path` validation
-- **Symbolic links**: Seguidos com cuidado
-- **File permissions**: Respeitados via Windows APIs
-- **COM security**: Inicialização apropriada
+### Windows-rs 0.61
+- Crate estável com bindings atualizados
+- Requer Windows 10/11 SDK durante build
+- Features selecionadas manualmente para reduzir tempo de compilação
 
-### Dependências Vulneráveis
-- **Nenhuma conhecida**: Todas as deps atualizadas
-- **Auditoria**: `cargo audit` limpo
-- **Licenças**: Compatíveis (MIT/Apache-2.0 predominantemente)
+### Eframe/Egui 0.31
+- Versão estáclia com API consistente
+- Persistence feature para salvar estado da janela
+- Suporte a wgpu/opengl backends
+
+### Libmpv2
+- Requer DLL no runtime
+- Versão da DLL deve ser compatível com bindings
+- Testar reprodução de vídeo após atualização
+
+---
+
+*Última atualização: 2026-02-03 (pós-refatoração)*

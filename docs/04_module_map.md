@@ -11,11 +11,11 @@ src/
 ├── application/            # Serviços de lógica de negócios
 ├── domain/                 # Modelos de dados e regras de negócio
 ├── infrastructure/         # Integrações com sistema e recursos externos
-├── pdf_viewer/            # Visualizador de PDF externo
+├── pdf_viewer/            # Visualizador de PDF externo (WebView2)
 ├── tabs/                  # Sistema de abas
 ├── ui/                    # Interface do usuário
 ├── workers/               # Threads de background
-├── embedded_assets.rs     # Recursos embarcados
+├── embedded_assets.rs     # Recursos embarcados (fontes)
 ├── lib.rs                 # Entry point da lib
 └── main.rs                # Entry point do binário
 ```
@@ -23,40 +23,53 @@ src/
 ## Módulos Detalhados
 
 ### 1. `src/app/` - Estado e Lógica Principal
-**Propósito**: Gerenciamento de estado global e inicialização da aplicação
+**Propósito**: Gerenciamento de estado global, inicialização e operações da aplicação
 
-**Arquivos principais**:
-- **`state.rs`** - Struct `ImageViewerApp` com estado completo da aplicação
+**Arquivos de estado**:
+- **`state.rs`** - Struct `ImageViewerApp` com estado completo da aplicação (principal)
+- **`state_new.rs`** - Nova implementação de estado (em transição)
 - **`init.rs`** - Inicialização e criação de workers/canais
-- **`cache_state.rs`** - Gerenciamento de cache
+- **`cache_state.rs`** - Gerenciamento de estado do cache
 - **`navigation_state.rs`** - Estado de navegação
 - **`ui_state.rs`** - Estado da interface
 - **`worker_state.rs`** - Estado dos workers
+- **`mod.rs`** - Re-exports do módulo
 
 **Operações** (`src/app/operations/`):
-- **`clipboard_ops.rs`** - Operações de clipboard
+- **`mod.rs`** - Re-exports e traits
+- **`clipboard_ops.rs`** - Operações de clipboard (copiar, cortar, colar)
 - **`context_menu.rs`** - Menu de contexto
-- **`file_ops.rs`** - Operações de arquivo
+- **`file_ops.rs`** - Operações de arquivo (deletar, renomear)
 - **`folder_loading.rs`** - Carregamento de pastas
 - **`icons.rs`** - Gerenciamento de ícones
-- **`message_handler.rs`** - Handler de mensagens
-- **`metadata.rs`** - Metadados de arquivos
-- **`navigation.rs`** - Navegação
-- **`preferences.rs`** - Preferências
+- **`message_handler.rs`** - Handler de mensagens entre threads
+- **`metadata.rs`** - Solicitação de metadados
+- **`preferences.rs`** - Preferências do usuário
 - **`recycle_bin_ops.rs`** - Operações da lixeira
 - **`selection.rs`** - Seleção de arquivos
 - **`tabs.rs`** - Gerenciamento de abas
-- **`thumbnails.rs`** - Thumbnails
-- **`ui_rendering.rs`** - Renderização UI
+- **`thumbnails.rs`** - Solicitação de thumbnails
+- **`trait_impls.rs`** - Implementações de traits
 - **`view_setup.rs`** - Configuração de views
 - **`watcher.rs`** - Monitoramento de mudanças
 - **`window.rs`** - Gerenciamento de janela
+
+**Navegação** (`src/app/operations/navigation/`):
+- **`mod.rs`** - Lógica principal de navegação
+- **`keyboard.rs`** - Navegação por teclado
+- **`selection.rs`** - Seleção via navegação
+
+**UI Rendering** (`src/app/operations/ui_rendering/`):
+- **`mod.rs`** - Coordenação de renderização
+- **`grid_bridge.rs`** - Bridge para grid view
+- **`item_slot_bridge.rs`** - Bridge para item slots
+- **`list_bridge.rs`** - Bridge para list view
 
 **Principais structs/enums**:
 ```rust
 pub struct ImageViewerApp { /* estado completo */ }
 pub enum LastInput { Mouse, Keyboard }
-pub enum ScrollRequest { None, EnsureVisible(usize) }
+pub struct ItemsRebuildResult { generation, request_id, items, total_items }
 ```
 
 **Dependências**: Todos os outros módulos
@@ -64,25 +77,34 @@ pub enum ScrollRequest { None, EnsureVisible(usize) }
 ---
 
 ### 2. `src/application/` - Serviços de Negócio
-**Propósito**: Lógica de negócios e serviços da aplicação
+**Propósito**: Lógica de negócios pura, sem dependência de UI
 
 **Arquivos principais**:
-- **`clipboard.rs`** - Gerenciamento de clipboard
-- **`context_menu.rs`** - Menu de contexto
-- **`file_operations.rs`** - Operações de arquivo
-- **`navigation.rs`** - Histórico de navegação
-- **`notification.rs`** - Sistema de notificações
-- **`renaming.rs`** - Renomeação de arquivos
+- **`mod.rs`** - Re-exports do módulo
+- **`clipboard.rs`** - Gerenciamento de clipboard (ClipboardManager)
+- **`context_menu.rs`** - Lógica do menu de contexto
+- **`file_operations.rs`** - Operações de arquivo de alto nível
+- **`navigation.rs`** - Histórico de navegação (NavigationHistory)
+- **`notification.rs`** - Sistema de notificações/toasts (NotificationManager)
+- **`renaming.rs`** - Lógica de renomeação
 - **`sorting.rs`** - Ordenação básica
-- **`sorting_optimized.rs`** - Ordenação otimizada
-- **`state.rs`** - Estado da aplicação
-- **`watcher.rs`** - Monitoramento
+- **`sorting_optimized.rs`** - Ordenação otimizada com paralelismo
+- **`state.rs`** - Estado da aplicação (ApplicationState)
+- **`watcher.rs`** - Watcher de filesystem
 
 **Principais structs**:
 ```rust
-pub struct NavigationHistory { /* histórico */ }
+pub struct NavigationHistory { /* histórico linear */ }
 pub struct ClipboardManager { /* clipboard */ }
-pub struct NotificationManager { /* notificações */ }
+pub struct NotificationManager { /* notificações toast */ }
+pub struct ApplicationState { /* estado persistente */ }
+```
+
+**Funções otimizadas exportadas**:
+```rust
+pub fn sort_items(items: &mut [FileEntry], mode: SortMode, descending: bool, folders_first: bool)
+pub fn filter_items(items: &[FileEntry], query: &str) -> Vec<FileEntry>
+pub fn filter_items_cow<'a>(items: &'a [FileEntry], query: &str) -> Cow<'a, [FileEntry]>
 ```
 
 **Dependências**: `domain`, `infrastructure`
@@ -90,21 +112,53 @@ pub struct NotificationManager { /* notificações */ }
 ---
 
 ### 3. `src/domain/` - Modelos de Dados
-**Propósito**: Modelos de dados e regras de negócio centrais
+**Propósito**: Modelos de dados e regras de negócio centrais (domínio puro)
 
 **Arquivos principais**:
-- **`errors.rs`** - Tipos de erro da aplicação
-- **`file_entry.rs`** - Modelo FileEntry
-- **`thumbnail.rs`** - Modelo de thumbnail
+- **`mod.rs`** - Re-exports do módulo
+- **`errors.rs`** - Tipos de erro da aplicação (AppError)
+- **`file_entry.rs`** - Modelo FileEntry e enums relacionados
+- **`thumbnail.rs`** - Modelo de thumbnail (ThumbnailData)
 
 **Principais structs/enums**:
 ```rust
-pub struct FileEntry { /* arquivo/diretório */ }
-pub struct ThumbnailData { /* thumbnail */ }
-pub enum AppError { /* erros */ }
-pub enum SortMode { Name, Date, Size, Type }
+pub struct FileEntry {
+    pub path: PathBuf,
+    pub name: String,
+    pub is_dir: bool,
+    pub size: u64,
+    pub modified: u64,
+    pub folder_cover: Option<PathBuf>,
+    pub drive_info: Option<DriveInfo>,
+    pub sync_status: SyncStatus,
+    pub deletion_date: Option<String>,
+    pub recycle_original_path: Option<PathBuf>,
+}
+
+pub struct DriveInfo {
+    pub file_system: String,
+    pub total_space: u64,
+    pub free_space: u64,
+    pub drive_type: DriveType,
+}
+
+pub enum SortMode { Name, Date, Size, Type, DriveTotalSpace, DriveFreeSpace }
 pub enum ViewMode { Grid, List }
 pub enum FoldersPosition { First, Last, Mixed }
+pub enum SyncStatus { None, CloudOnly, Syncing, Pinned, LocallyAvailable }
+pub enum IconSize { Small, Large, Jumbo }
+
+pub enum AppError {
+    Security(SecurityError),
+    WindowsApi(String),
+    Io(std::io::Error),
+    ThumbnailExtraction { path: PathBuf, source: anyhow::Error },
+    FileOperation(String),
+    InvalidState(String),
+    Config(String),
+    Worker(String),
+    UiRendering(String),
+}
 ```
 
 **Dependências**: Apenas crates externos (std, etc)
@@ -115,50 +169,66 @@ pub enum FoldersPosition { First, Last, Mixed }
 **Propósito**: Acesso a recursos externos e integrações de sistema
 
 **Cache e Storage**:
-- **`adaptive_batch.rs`** - Batch adaptativo
-- **`cache.rs`** - Cache genérico
-- **`cache_first.rs`** - Cache-first strategy
+- **`mod.rs`** - Re-exports
+- **`adaptive_batch.rs`** - Batch adaptativo para operações
+- **`cache.rs`** - Cache genérico em memória
+- **`cache_first.rs`** - Estratégia cache-first
 - **`directory_cache.rs`** - Cache de diretórios
 - **`directory_index.rs`** - Índice de diretórios
-- **`disk_cache.rs`** - Cache em disco (SQLite)
+- **`disk_cache.rs`** - Cache em disco (SQLite) - ThumbnailDiskCache
 - **`filesystem_cache.rs`** - Cache de filesystem
 - **`io_priority.rs`** - Prioridade de I/O
-- **`ntfs_reader.rs`** - Leitor NTFS
-- **`virtual_drive_config.rs`** - Config de drives virtuais
-- **`watcher.rs`** - Watcher genérico
-- **`windows_clipboard.rs`** - Clipboard Windows
+- **`ntfs_reader.rs`** - Leitor NTFS otimizado
+- **`onedrive.rs`** - Detecção de status OneDrive
+- **`security.rs`** - Validações de segurança
+- **`virtual_drive_config.rs`** - Configuração de drives virtuais
+- **`watcher.rs`** - Watcher genérico de filesystem
+- **`windows_clipboard.rs`** - Clipboard Windows (CF_HDROP)
 
 **Integrações Windows** (`src/infrastructure/windows/`):
-- **`bitmap_conversion.rs`** - Conversão de bitmaps
-- **`codec_registry.rs`** - Registro de codecs
+- **`mod.rs`** - Re-exports e funções principais
+- **`bitmap_conversion.rs`** - Conversão HBITMAP → RGBA
+- **`codec_registry.rs`** - Registro de codecs de mídia
 - **`device_change.rs`** - Monitoramento de dispositivos
-- **`drives.rs`** - Gerenciamento de drives
-- **`file_flags.rs`** - Flags de arquivo
-- **`file_system.rs`** - Sistema de arquivos
-- **`file_type.rs`** - Tipos de arquivo
-- **`formatting.rs`** - Formatação
-- **`hdd_directory_reader.rs`** - Leitor de diretórios HDD
-- **`icons.rs`** - Extração de ícones
-- **`iso_mount.rs`** - Montagem de ISO
-- **`media_foundation.rs`** - Media Foundation
-- **`metadata/`** - Metadados (imagem, vídeo, áudio)
-- **`native_menu.rs`** - Menu nativo
-- **`recycle_bin.rs`** - Lixeira do Windows
-- **`shell_folder.rs`** - Pastas do Shell
-- **`shell_operations.rs`** - Operações do Shell
+- **`drives.rs`** - Enumeração de drives
+- **`file_flags.rs`** - Flags de arquivo Windows
+- **`file_system.rs`** - Operações de filesystem
+- **`file_type.rs`** - Detecção de tipos MIME
+- **`formatting.rs`** - Formatação de bytes, datas
+- **`hdd_directory_reader.rs`** - Leitor otimizado de diretórios
+- **`icons.rs`** - Extração de ícones (IImageList, IShellItemImageFactory)
+- **`iso_mount.rs`** - Montagem de ISOs
+- **`media_foundation.rs`** - Integração Media Foundation
+- **`native_menu.rs`** - Menu de contexto nativo (IContextMenu)
+- **`recycle_bin.rs`** - Operações da lixeira
+- **`shell_folder.rs`** - Pastas especiais do Shell
+- **`shell_operations.rs`** - Operações do Shell (IFileOperation)
 - **`system_info.rs`** - Informações do sistema
 - **`window_subclass.rs`** - Subclasse de janela
 
+**Metadata** (`src/infrastructure/windows/metadata/`):
+- **`mod.rs`** - Re-exports
+- **`audio_sniffing.rs`** - Detecção de metadados de áudio
+- **`image.rs`** - Metadados de imagem
+- **`property_keys.rs`** - Constantes de propriedades Windows
+- **`utils.rs`** - Utilitários de metadata
+- **`video_sniffing.rs`** - Detecção de metadados de vídeo
+- **`video.rs`** - Metadados de vídeo
+
 **Media** (`src/infrastructure/media/`):
-- **`ffmpeg_session.rs`** - Sessão FFmpeg
-- **`hardware_acceleration.rs`** - Aceleração por hardware
+- **`mod.rs`** - Re-exports
+- **`ffmpeg_session.rs`** - Sessão FFmpeg para extração
+- **`hardware_acceleration.rs`** - Detecção de aceleração por hardware
 - **`tests_hw.rs`** - Testes de hardware
 
 **Principais funções**:
 ```rust
 pub fn get_all_drives() -> Vec<(String, String)>
-pub fn extract_file_icon_by_path() -> Result<(Vec<u8>, u32, u32)>
-pub fn extract_media_metadata() -> MediaMetadata
+pub fn extract_file_icon_by_path(path: &Path, size: i32) -> Result<(Vec<u8>, u32, u32)>
+pub fn extract_thumbnail_with_media_foundation(path: &Path) -> Result<DynamicImage>
+pub fn copy_items_via_shell(src: &[PathBuf], dest: &Path) -> Result<()>
+pub fn move_items_via_shell(src: &[PathBuf], dest: &Path) -> Result<()>
+pub fn delete_items_via_shell(paths: &[PathBuf]) -> Result<()>
 ```
 
 **Dependências**: Crates externos (windows, rusqlite, etc)
@@ -169,172 +239,191 @@ pub fn extract_media_metadata() -> MediaMetadata
 **Propósito**: Componentes de interface e renderização
 
 **App** (`src/ui/app/`):
-- **`input.rs`** - Handler de input
+- **`mod.rs`** - Re-exports
+- **`input.rs`** - Handler de input (teclado, mouse)
 - **`lifecycle.rs`** - Ciclo de vida da aplicação
 - **`menu_handler.rs`** - Handler de menu
 - **`notifications.rs`** - Notificações UI
-- **`panels.rs`** - Painéis
+- **`panels.rs`** - Gerenciamento de painéis
 
 **Componentes** (`src/ui/components/`):
-- **`gif_manager.rs`** - Gerenciador de GIFs
-- **`item_slot.rs`** - Slot de item
-- **`media_preview.rs`** - Preview de mídia
-- **`mpv_preview.rs`** - Preview MPV
+- **`mod.rs`** - Re-exports
+- **`gif_manager.rs`** - Gerenciador de GIFs animados
+- **`item_slot.rs`** - Slot de item para grid
+- **`media_preview.rs`** - Preview genérico de mídia
+- **`mpv_preview.rs`** - Preview de vídeo com mpv
+- **`video_controls_state.rs`** - Estado de controles de vídeo
 - **`video_menu.rs`** - Menu de vídeo
-- **`virtual_drive_settings.rs`** - Config de drives virtuais
+- **`virtual_drive_settings.rs`** - Configuração de drives virtuais
+
+**MPV Sub-módulo** (`src/ui/components/mpv/`):
+- **`mod.rs`** - Re-exports
+- **`event_loop.rs`** - Event loop do mpv
+- **`filters.rs`** - Filtros de vídeo
+- **`playback.rs`** - Controle de playback
+- **`state.rs`** - Estado do player
+- **`utils.rs`** - Utilitários
 
 **Views** (`src/ui/views/`):
-- **`common.rs`** - Funções comuns
+- **`mod.rs`** - Re-exports
+- **`common.rs`** - Funções comuns às views
 - **`computer_view.rs`** - View "Este Computador"
-- **`grid_view.rs`** - View em grade
-- **`list_view.rs`** - View em lista
+- **`grid_view.rs`** - Visualização em grade
+- **`list_view/`** - Visualização em lista (sub-módulo)
+  - **`mod.rs`** - Entry point
+  - **`header.rs`** - Cabeçalho da lista
+  - **`helpers.rs`** - Funções auxiliares
+  - **`item_renderer.rs`** - Renderização de itens
+  - **`virtualization.rs`** - Virtualização de lista
+
+**Preview Panel** (`src/ui/preview_panel/`):
+- **`mod.rs`** - Entry point do preview panel
+- **`actions.rs`** - Ações do preview
+- **`fallback_renderer.rs`** - Renderização de fallback
+- **`file_info_table.rs`** - Tabela de informações
+- **`image_preview.rs`** - Preview de imagens
+- **`utils.rs`** - Utilitários
+- **`video_preview/`** - Preview de vídeo
+  - **`mod.rs`** - Coordenação
+  - **`controls.rs`** - Controles
+  - **`detached.rs`** - Janela destacada
+  - **`docked.rs`** - Painel docked
+  - **`fullscreen.rs`** - Tela cheia
 
 **Arquivos principais**:
 - **`app_impl.rs`** - Implementação eframe::App
-- **`cache.rs`** - Cache UI
+- **`cache.rs`** - CacheManager para texturas
 - **`context_menu.rs`** - Menu de contexto UI
 - **`icon_loader.rs`** - Loader de ícones
 - **`navigation.rs`** - Navegação UI
-- **`preview_panel.rs`** - Painel de preview
-- **`sidebar.rs`** - Sidebar
+- **`sidebar.rs`** - Sidebar com atalhos
 - **`status_bar.rs`** - Barra de status
-- **`svg_icons.rs`** - Ícones SVG
-- **`tab_bar.rs`** - Barra de abas
-- **`theme.rs`** - Tema da aplicação
-- **`toolbar.rs`** - Toolbar
+- **`svg_icons.rs`** - Gerenciador de ícones SVG
+- **`tab_bar.rs`** - Sistema de abas
+- **`theme.rs`** - Tema e cores
+- **`toolbar.rs`** - Barra de ferramentas
 - **`widgets.rs`** - Widgets customizados
-
-**Dependências**: `app`, `application`, `domain`, `infrastructure`
 
 ---
 
-### 6. `src/workers/` - Workers de Background
-**Propósito**: Processamento assíncrono em threads separadas
+### 6. `src/workers/` - Threads de Background
+**Propósito**: Processamento assíncrono para manter UI responsiva
 
-**Arquivos principais**:
-- **`batch_thumbnail_loader.rs`** - Loader de thumbnails em batch
-- **`file_operation_worker.rs`** - Worker de operações de arquivo
-- **`folder_preview_worker.rs`** - Worker de preview de pastas
+**Thumbnail System** (`src/workers/thumbnail/`):
+- **`mod.rs`** - Coordenação do sistema de thumbnails
+- **`extraction/`** - Extraction stages
+  - **`mod.rs`** - Re-exports
+  - **`stage1_image_crate.rs`** - Stage 1: image crate (PNG, JPG, GIF, WebP)
+  - **`stage2_wic.rs`** - Stage 2: Windows Imaging Component
+  - **`stage3_shell_api.rs`** - Stage 3: Shell API (IShellItemImageFactory)
+  - **`stage4_force_extract.rs`** - Stage 4: Extração forçada
+  - **`stage5_media_foundation.rs`** - Stage 5: Media Foundation
+
+**Workers individuais**:
+- **`batch_thumbnail_loader.rs`** - Loader em batch (não usado atualmente)
+- **`file_operation_worker.rs`** - Operações de arquivo (copiar, mover, deletar)
+- **`folder_preview_worker.rs`** - Geração de previews de pastas
 - **`folder_scanner.rs`** - Scanner de pastas
-- **`idle_warmup.rs`** - Warmup em idle
+- **`idle_warmup.rs`** - Warmup de cache em idle
 - **`predictive_prefetch.rs`** - Prefetch preditivo
-- **`prefetch_worker.rs`** - Worker de prefetch
+- **`prefetch_worker.rs`** - Worker de pré-carregamento
 - **`thumbnail_loader.rs`** - Loader de thumbnails
-- **`thumbnail_worker.rs`** - Worker de thumbnails
-
-**Principais structs**:
-```rust
-pub struct PriorityThumbnailQueue { /* fila de thumbnails */ }
-pub struct FileOperationRequest { /* requisição de operação */ }
-```
-
-**Dependências**: `infrastructure`, `domain`
+- **`mod.rs`** - Re-exports
 
 ---
 
 ### 7. `src/tabs/` - Sistema de Abas
 **Propósito**: Gerenciamento de múltiplas abas
 
-**Arquivos principais**:
+**Arquivos**:
 - **`mod.rs`** - Implementação do sistema de abas
 
-**Principais structs**:
-```rust
-pub struct TabManager { /* gerenciador de abas */ }
-pub struct Tab { /* aba individual */ }
-```
-
-**Dependências**: `app`, `application`
+**Funcionalidades**:
+- Histório independente por aba
+- Estado de view por aba
+- Preview independente por aba
 
 ---
 
-### 8. `src/pdf_viewer/` - Visualizador PDF
-**Propósito**: Visualização de PDFs usando WebView2
+### 8. `src/pdf_viewer/` - Visualizador de PDF
+**Propósito**: Visualização de PDFs via WebView2
 
-**Arquivos principais**:
-- **`mod.rs`** - Módulo principal
-- **`thread.rs`** - Thread do visualizador
-- **`webview.rs`** - WebView2 integration
-- **`window.rs`** - Janela do visualizador
-
-**Principais funções**:
-```rust
-pub fn warmup() // Pré-inicialização
-pub fn show_pdf_window() // Mostrar janela PDF
-```
-
-**Dependências**: Crates externos (webview2-com)
+**Arquivos**:
+- **`mod.rs`** - Re-exports
+- **`thread.rs`** - Thread dedicada para WebView2
+- **`webview.rs`** - Interface com WebView2
+- **`window.rs`** - Gerenciamento de janela PDF
 
 ---
+
+### 9. Arquivos Raiz
+
+**`src/main.rs`**:
+- Entry point do binário
+- Carrega ícone do aplicativo
+- Configura viewport (borderless window)
+- Inicializa codec registry
+- Chama `eframe::run_native()`
+
+**`src/lib.rs`**:
+- Entry point da biblioteca
+- Declara todos os módulos públicos
+- Re-exporta `ImageViewerApp`
+
+**`src/embedded_assets.rs`**:
+- Fontes embarcadas (remixicon.ttf)
+- Recursos para executável portátil
 
 ## Fluxo de Dados Principal
 
-### 1. Navegação para Pasta
 ```
-User Input → app::operations::navigation → application::navigation → 
-infrastructure::windows::file_system → UI Update
-```
-
-### 2. Carregamento de Thumbnail
-```
-UI Request → workers::thumbnail_worker → infrastructure::windows::icons → 
-ThumbnailData → app::state → UI Render
-```
-
-### 3. Operação de Arquivo
-```
-User Action → app::operations::file_ops → workers::file_operation_worker → 
-Windows Shell → Result → Notification
+User Input
+    ↓
+src/ui/app/input.rs
+    ↓
+src/app/operations/
+    ↓
+src/application/ (lógica de negócio)
+    ↓
+src/infrastructure/ (Windows API, I/O)
+    ↓
+src/workers/ (processamento assíncrono)
+    ↓
+Channels → src/ui/app_impl.rs (atualização UI)
 ```
 
-## Pontos de Entrada Principais
+## Dependências entre Módulos
 
-### Entry Point do Binário
-- **`src/main.rs`** - Função main(), configuração eframe
+```
+main.rs
+    ↓
+lib.rs
+    ├── app/ ────────┬──► application/
+    │   │            ├──► domain/
+    │   └──► workers/    ├──► infrastructure/
+    ├── ui/ ◄────────────┘
+    ├── tabs/
+    └── pdf_viewer/
+```
 
-### Entry Point da Lib
-- **`src/lib.rs`** - Re-exports principais
+**Regras de Dependência**:
+1. `domain` não depende de nenhum outro módulo local
+2. `application` depende apenas de `domain` e `infrastructure`
+3. `infrastructure` não depende de `ui` ou `app`
+4. `workers` dependem de `infrastructure` e `domain`
+5. `app` depende de todos os outros módulos
+6. `ui` depende de `app`, `domain`, `application`, `infrastructure`
 
-### Entry Points de Workers
-- **`workers::thumbnail_worker::spawn_thumbnail_workers()`**
-- **`workers::file_operation_worker::start_file_operation_worker()`**
+## Arquivos de Configuração do Projeto
 
-### Entry Points de UI
-- **`ui::app_impl::ImageViewerApp::update()`** - Main loop
-- **`app::init::ImageViewerApp::new()`** - Inicialização
+**`Cargo.toml`**:
+- Dependências do projeto
+- Features (notify-watcher)
+- Profile de release (LTO, opt-level 3)
 
-## Dependências Críticas por Módulo
+**`build.rs`**:
+- Configuração de recursos Windows (ícone)
 
-| Módulo | Dependências Críticas | Descrição |
-|--------|----------------------|-----------|
-| app | all | Coordena todos os módulos |
-| ui | app, application, infrastructure | Renderização e input |
-| application | domain, infrastructure | Lógica de negócio |
-| infrastructure | windows, rusqlite, image | Integrações externas |
-| workers | infrastructure, domain | Processamento assíncrono |
-| domain | std, thiserror | Modelos puros |
+---
 
-## Caminho Feliz das Features Críticas
-
-### Navegação de Pasta
-1. **`ui::app::input::handle_input()`** - Captura input
-2. **`app::operations::navigation::navigate_to_path()`** - Processa navegação
-3. **`app::operations::folder_loading::load_folder_contents()`** - Carrega conteúdo
-4. **`infrastructure::windows::hdd_directory_reader::read_directory()`** - Lê do disco
-5. **`app::operations::thumbnails::request_thumbnails()`** - Solicita thumbnails
-6. **`workers::thumbnail_worker`** - Processa thumbnails
-7. **`ui::views::grid_view::render()`** - Renderiza resultado
-
-### Preview de Arquivo
-1. **`ui::preview_panel::render_preview_panel()`** - Renderiza panel
-2. **`app::operations::metadata::request_metadata()`** - Solicita metadados
-3. **`infrastructure::windows::metadata::extract_media_metadata()`** - Extrai metadados
-4. **`ui::components::media_preview::MediaPreview`** - Renderiza preview
-5. **`workers::thumbnail_worker`** - Gera thumbnail se necessário
-
-### Operação de Arquivo
-1. **`ui::context_menu::show_context_menu()`** - Mostra menu
-2. **`app::operations::file_ops::handle_file_operation()`** - Processa operação
-3. **`workers::file_operation_worker::process_operation()`** - Executa em background
-4. **`infrastructure::windows::shell_operations`** - Integração Windows
-5. **`application::notification::NotificationManager`** - Notifica resultado
+*Última atualização: 2026-02-03 (pós-refatoração)*

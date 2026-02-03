@@ -13,28 +13,35 @@ O MTT File Manager é um gerenciador de arquivos nativo para Windows desenvolvid
 - **Interface borderless customizada** - Janela sem bordas tradicionais com suporte nativo para redimensionamento
 - **Navegação em abas** - Sistema de abas com histórico independente por aba
 - **Visualizações múltiplas** - Modo grade e lista com thumbnails ajustáveis
-- **Barra de endereços editável** - Navegação direta por caminhos
-- **Sidebar com atalhos** - Acesso rápido a drives, bibliotecas e OneDrive
+- **Barra de endereços editável** - Navegação direta por caminhos com breadcrumbs
+- **Sidebar com atalhos** - Acesso rápido a drives, bibliotecas, OneDrive e Lixeira
+- **Suporte a navegação por teclado** - Atalhos completos para navegação sem mouse
+- **Busca em tempo real** - Filtro de arquivos por nome
 
 ### Preview e Mídia
 - **Preview integrado** - Visualização de imagens, vídeos, GIFs e PDFs sem sair do aplicativo
-- **Reprodução de vídeo** - Player baseado em libmpv para formatos de vídeo diversos
+- **Reprodução de vídeo** - Player baseado em libmpv para formatos de vídeo diversos com suporte a controles, tela cheia e janela destacada
 - **Visualizador de PDF** - Integração com WebView2 (Edge) para PDFs
-- **Thumbnails inteligentes** - Geração e cache de thumbnails com múltiplos backends
-- **Suporte a GIFs animados** - Reprodução otimizada de GIFs
+- **Thumbnails inteligentes** - Geração e cache de thumbnails com múltiplos backends (image crate, WIC, Shell API, Media Foundation)
+- **Suporte a GIFs animados** - Reprodução otimizada de GIFs com controles de play/pause
+- **Extração de metadados** - EXIF de imagens, metadados de vídeo e áudio
 
 ### Operações de Arquivo
 - **Operações básicas** - Copiar, cortar, colar, renomear, deletar
 - **Menu de contexto nativo** - Integração com o menu de contexto do Windows Shell
-- **Lixeira do Windows** - Integração completa com a lixeira do sistema
-- **Suporte a OneDrive** - Detecção de status de sincronização
+- **Lixeira do Windows** - Integração completa com a lixeira do sistema (navegação, restauração, exclusão permanente)
+- **Suporte a OneDrive** - Detecção de status de sincronização (cloud-only, syncing, pinned, locally available)
 - **Montagem de ISO** - Suporte para montar arquivos ISO como drives virtuais
+- **Renomeação inline** - Renomeação de arquivos diretamente na lista
 
 ### Sistema de Cache e Performance
 - **Cache em disco** - SQLite para thumbnails e metadados
 - **Cache em memória** - LRU cache para acesso rápido
 - **Workers assíncronos** - Processamento em background para manter UI responsiva
 - **Pré-carregamento inteligente** - Prefetch de pastas e thumbnails
+- **Indexação de diretórios** - Cache de estrutura de diretórios para navegação rápida
+- **Virtualização de listas** - Renderização eficiente para pastas com muitos arquivos
+- **Geração de thumbnails em estágios** - Fallback progressivo: image crate → WIC → Shell API → Media Foundation
 
 ## Arquitetura de Alto Nível
 
@@ -43,12 +50,10 @@ O MTT File Manager é um gerenciador de arquivos nativo para Windows desenvolvid
 │                        UI Layer                            │
 │  ┌─────────────┬──────────────┬───────────────────────┐   │
 │  │   Toolbar   │   Tab Bar     │    Preview Panel    │   │
+│  │  Sidebar    │   File List   │    Status Bar       │   │
 │  └─────────────┴──────────────┴───────────────────────┘   │
-│  ┌─────────────┬──────────────────────┬─────────────────┐   │
-│  │  Sidebar    │   File List/Grid     │  Status Bar     │   │
-│  └─────────────┴──────────────────────┴─────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
-                              │
+                               │
 ┌─────────────────────────────────────────────────────────────┐
 │                    Application Layer                       │
 │  ┌─────────────┬──────────────┬───────────────────────┐   │
@@ -56,20 +61,20 @@ O MTT File Manager é um gerenciador de arquivos nativo para Windows desenvolvid
 │  │History      │ Sorting      │  Notification System │   │
 │  └─────────────┴──────────────┴───────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
-                              │
+                               │
 ┌─────────────────────────────────────────────────────────────┐
 │                   Domain Layer                             │
 │  ┌─────────────┬──────────────┬───────────────────────┐   │
 │  │FileEntry    │ Thumbnail    │  Error Types         │   │
-│  │Sorting      │ Metadata     │  App State           │   │
+│  │Enums        │ Metadata     │  App State           │   │
 │  └─────────────┴──────────────┴───────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
-                              │
+                               │
 ┌─────────────────────────────────────────────────────────────┐
 │                 Infrastructure Layer                         │
 │  ┌─────────────┬──────────────┬───────────────────────┐   │
 │  │Windows API  │ Disk Cache   │  Media Foundation    │   │
-│  │Shell Integration│ SQLite   │  Thumbnail Workers   │   │
+│  │Shell Integ. │ SQLite       │  Thumbnail Workers   │   │
 │  └─────────────┴──────────────┴───────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -79,13 +84,26 @@ O MTT File Manager é um gerenciador de arquivos nativo para Windows desenvolvid
 | Categoria | Tecnologia | Versão | Propósito |
 |-----------|------------|---------|-----------|
 | Linguagem | Rust | 2021 Edition | Core language |
-| GUI Framework | eframe/egui | 0.31 | Interface gráfica |
-| Windows API | windows-rs | 0.61 | Integração Windows |
+| GUI Framework | eframe/egui | 0.31 | Interface gráfica (immediate mode) |
+| Windows API | windows-rs | 0.61.0 | Integração Windows |
 | Cache | SQLite (rusqlite) | 0.32 | Persistência de thumbnails |
 | Vídeo | libmpv2 | 5.0.3 | Reprodução de vídeo |
 | PDF | WebView2 | - | Visualização de PDFs |
-| Imagens | image crate | 0.25 | Processamento de imagens |
+| Imagens | image crate | 0.25 | Processamento de imagens (WebP, GIF) |
+| SVG | resvg/usvg | 0.44 | Renderização de SVG |
 | Paralelismo | rayon | 1.10 | Processamento paralelo |
+| Comunicação | crossbeam-channel | 0.5.15 | Canais MPSC de alta performance |
+| Hashing | rustc-hash/fxhash | 2.0/0.2.1 | Hash rápida para PathBuf |
+| EXIF | kamadak-exif | 0.5 | Leitura de metadados JPEG |
+| Compressão | webp | 0.3 | Compressão WebP para thumbnails |
+| Clipboard | clipboard-win | 5.4 | Integração clipboard Windows |
+| File Dialogs | rfd | 0.15 | Diálogos de arquivo nativos |
+| Watcher | notify | 6.1.1 | Monitoramento de filesystem (opcional) |
+
+## Dependências de Runtime
+
+- **libmpv-2.dll** - Necessária para reprodução de vídeo
+- **Microsoft Edge WebView2 Runtime** - Necessário para visualização de PDFs
 
 ## Limitações Conhecidas
 
@@ -118,3 +136,7 @@ O MTT File Manager é um gerenciador de arquivos nativo para Windows desenvolvid
 - [07_storage_config.md](07_storage_config.md) - Configurações e storage
 - [08_logging_errors_telemetry.md](08_logging_errors_telemetry.md) - Logs e erros
 - [09_support_playbook.md](09_support_playbook.md) - Playbook de suporte
+
+---
+
+*Última atualização: 2026-02-03 (pós-refatoração)*

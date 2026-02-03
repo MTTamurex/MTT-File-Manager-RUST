@@ -9,6 +9,7 @@ Este documento descreve onde e como o MTT File Manager armazena configurações,
 ```
 %LOCALAPPDATA%\MTT-File-Manager\
 ```
+
 Exemplo típico:
 ```
 C:\Users\Username\AppData\Local\MTT-File-Manager\
@@ -30,7 +31,7 @@ MTT-File-Manager/
 
 **Tabelas**:
 ```sql
--- Thumbnails
+-- Thumbnails (Cache de thumbnails)
 CREATE TABLE thumbnails (
     path_hash INTEGER PRIMARY KEY,
     file_path TEXT NOT NULL,
@@ -42,14 +43,14 @@ CREATE TABLE thumbnails (
     created_at INTEGER DEFAULT CURRENT_TIMESTAMP
 );
 
--- Preferences
+-- Preferences (Preferências do usuário)
 CREATE TABLE preferences (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
     updated_at INTEGER DEFAULT CURRENT_TIMESTAMP
 );
 
--- Directory cache
+-- Directory cache (Cache de diretórios)
 CREATE TABLE directory_cache (
     path TEXT PRIMARY KEY,
     file_count INTEGER,
@@ -65,32 +66,47 @@ CREATE TABLE directory_cache (
 pub struct ThumbnailDiskCache {
     writer: Arc<Mutex<Connection>>,
     reader: Arc<Mutex<Connection>>,
+    cache_dir: PathBuf,
 }
 ```
 
 ### Operações Principais
 ```rust
+// Inicializar cache
+let disk_cache = Arc::new(ThumbnailDiskCache::new()?);
+
 // Salvar thumbnail
-disk_cache.set_thumbnail(path, thumbnail_data, width, height);
+disk_cache.set_thumbnail(path, thumbnail_data, width, height)?;
 
 // Recuperar thumbnail
-disk_cache.get_thumbnail(path);
+let thumbnail = disk_cache.get_thumbnail(path)?;
 
 // Salvar preferência
-disk_cache.set_preference(key, value);
+disk_cache.set_preference("sort_mode", "name")?;
 
 // Recuperar preferência
-disk_cache.get_preference(key);
+let value = disk_cache.get_preference("sort_mode");
 ```
 
 ## Configurações (Preferences)
 
 ### Preferências Armazenadas
+
+**Local de carregamento**: `src/app/init.rs` - `ImageViewerApp::new()`
+
 ```rust
-// src/app/init.rs - Carregamento
+// Carrega preferências do SQLite
 let sort_mode = disk_cache
     .get_preference("sort_mode")
-    .unwrap_or("name".to_string());
+    .map(|s| match s.as_str() {
+        "date" => SortMode::Date,
+        "size" => SortMode::Size,
+        "type" => SortMode::Type,
+        "drive_total" => SortMode::DriveTotalSpace,
+        "drive_free" => SortMode::DriveFreeSpace,
+        _ => SortMode::Name,
+    })
+    .unwrap_or(SortMode::Name);
 
 let thumbnail_size = disk_cache
     .get_preference("thumbnail_size")
@@ -107,42 +123,44 @@ let show_preview_panel = disk_cache
 
 | Chave | Tipo | Padrão | Descrição |
 |-------|------|--------|-----------|
-| `sort_mode` | String | "name" | Modo de ordenação (name, date, size, type) |
+| `sort_mode` | String | "name" | Modo de ordenação (name, date, size, type, drive_total, drive_free) |
 | `sort_descending` | Bool | false | Ordenação descendente |
+| `sort_mode_computer` | String | "name" | Sort mode para view "Este Computador" |
+| `sort_mode_normal` | String | "name" | Sort mode para views normais |
 | `folders_position` | String | "first" | Posição de pastas (first, last, mixed) |
 | `thumbnail_size` | Float | 128.0 | Tamanho dos thumbnails (64-512) |
 | `view_mode` | String | "grid" | Modo de visualização (grid, list) |
 | `show_preview_panel` | Bool | true | Mostrar painel de preview |
 | `window_width` | Float | 1280.0 | Largura da janela |
 | `window_height` | Float | 720.0 | Altura da janela |
-| `window_is_maximized` | Bool | true | Janela maximizada |
+| `window_is_maximized` | Bool | false | Janela maximizada |
 | `sidebar_left_width` | Float | 200.0 | Largura sidebar esquerda |
-| `sidebar_right_width` | Float | 300.0 | Largura sidebar direita |
-| `upload_budget_ms` | Float | 6.0 | Budget de upload GPU (2-10) |
+| `sidebar_right_width` | Float | 300.0 | Largura sidebar direita (preview panel) |
 
-### Código de Carregamento
-**Local**: `src/app/init.rs` - `ImageViewerApp::new()`
+### Código de Salvamento
+**Local**: `src/app/operations/preferences.rs`
 
 ```rust
-// Load Preferences from SQLite
-let sort_mode = disk_cache
-    .get_preference("sort_mode")
-    .map(|s| match s.as_str() {
-        "date" => SortMode::Date,
-        "size" => SortMode::Size,
-        "type" => SortMode::Type,
-        _ => SortMode::Name,
-    })
-    .unwrap_or(SortMode::Name);
+// Salvar preferência
+pub fn save_preference(&self, key: &str, value: &str) {
+    if let Err(e) = self.disk_cache.set_preference(key, value) {
+        eprintln!("[PREFS] Failed to save {}: {}", key, e);
+    }
+}
+
+// Exemplo de uso
+app.save_preference("sort_mode", "date");
+app.save_preference("thumbnail_size", "256.0");
 ```
 
 ## Cache de Thumbnails
 
 ### Formato dos Arquivos
-- **Formato**: WebP (compressão lossy)
-- **Qualidade**: Configurável (padrão: 75%)
-- **Tamanho**: Baseado em `thumbnail_size` setting
+- **Formato**: WebP (compressão lossy com qualidade configurável)
+- **Qualidade**: Padrão 75%
+- **Tamanho**: Baseado em `thumbnail_size` setting (64-512px)
 - **Local**: `thumbnails/*.webp`
+- **Hash**: Nome do arquivo é hash do path (FxHash)
 
 ### Estrutura de Cache
 ```rust
@@ -162,9 +180,14 @@ pub fn set_thumbnail(
     let thumbnail_path = self.cache_dir.join(&thumbnail_filename);
     
     // Salva com compressão WebP
-    webp::Encoder::from_image(&img)
-        .encode(quality)
-        .as_bytes()
+    let encoder = webp::Encoder::from_image(&img)?;
+    let encoded = encoder.encode(quality);
+    fs::write(&thumbnail_path, encoded.as_bytes())?;
+    
+    // Atualiza registro no SQLite
+    self.update_thumbnail_record(path, path_hash, &thumbnail_path, ...)?;
+    
+    Ok(thumbnail_path)
 }
 ```
 
@@ -175,10 +198,55 @@ pub fn is_thumbnail_stale(
     &self,
     path: &Path,
     current_size: u64,
-    current_modified: SystemTime,
+    current_modified: u64,
 ) -> bool {
     // Compara com dados armazenados no SQLite
-    stored_size != current_size || stored_modified != current_modified
+    if let Some((stored_size, stored_modified)) = self.get_thumbnail_info(path) {
+        stored_size != current_size || stored_modified != current_modified
+    } else {
+        true // Não existe no cache
+    }
+}
+```
+
+## Cache em Memória
+
+### Texture Cache
+**Local**: `src/ui/cache.rs`
+
+```rust
+pub struct CacheManager {
+    pub texture_cache: DashMap<PathBuf, egui::TextureHandle>,
+    pub icon_cache: DashMap<PathBuf, egui::TextureHandle>,
+    pub loading_thumbnails: FxHashSet<PathBuf>,
+    pub failed_thumbnails: FxHashSet<PathBuf>,
+    pub loading_icons: FxHashSet<PathBuf>,
+    pub failed_icons: FxHashSet<PathBuf>,
+}
+```
+
+### Directory Cache
+**Local**: `src/infrastructure/directory_cache.rs`
+
+```rust
+pub struct DirectoryCache {
+    cache: DashMap<PathBuf, CachedDirectory>,
+}
+
+struct CachedDirectory {
+    entries: Vec<FileEntry>,
+    cached_at: Instant,
+}
+```
+
+### Directory Index
+**Local**: `src/infrastructure/directory_index.rs`
+
+```rust
+pub struct DirectoryIndex {
+    // Índice de arquivos para busca rápida
+    path_to_index: HashMap<PathBuf, usize>,
+    all_files: Vec<FileEntry>,
 }
 ```
 
@@ -214,221 +282,72 @@ pub struct VirtualDrive {
 }
 ```
 
-## Cache de Diretórios
+## Como Limpar/Resetar Dados
 
-### Implementação
-**Código**: `src/infrastructure/directory_cache.rs`
-
-```rust
-pub struct DirectoryCache {
-    cache: Arc<DashMap<PathBuf, CachedDirectory>>,
-}
-
-pub struct CachedDirectory {
-    pub entries: Vec<FileEntry>,
-    pub file_count: usize,
-    pub total_size: u64,
-    pub cached_at: Instant,
-}
-```
-
-### TTL (Time To Live)
-```rust
-const CACHE_TTL: Duration = Duration::from_secs(30);
-
-impl DirectoryCache {
-    pub fn is_expired(&self, path: &Path) -> bool {
-        if let Some(cached) = self.cache.get(path) {
-            cached.cached_at.elapsed() > CACHE_TTL
-        } else {
-            true
-        }
-    }
-}
-```
-
-## Cache de Índice
-
-### Implementação
-**Código**: `src/infrastructure/directory_index.rs`
-
-```rust
-pub struct DirectoryIndex {
-    conn: Connection,
-}
-
-// Índice para acelerar buscas por path
-CREATE INDEX idx_thumbnails_path ON thumbnails(file_path);
-CREATE INDEX idx_thumbnails_hash ON thumbnails(path_hash);
-```
-
-## Migrações e Versionamento
-
-### Migração de Legacy
-```rust
-// src/infrastructure/disk_cache.rs
-fn cleanup_legacy(cache_dir: &Path) {
-    // Remove arquivos antigos de cache (se existirem)
-    let legacy_files = ["thumbnails.cache", "icons.cache"];
-    for file in &legacy_files {
-        let path = cache_dir.join(file);
-        if path.exists() {
-            let _ = fs::remove_file(path);
-        }
-    }
-}
-```
-
-### Schema Versioning
-```rust
-const CURRENT_SCHEMA_VERSION: i32 = 1;
-
-fn check_schema_version(conn: &Connection) -> Result<i32> {
-    // Verifica versão atual do schema
-    // Aplica migrações se necessário
-}
-```
-
-## Gerenciamento de Storage
-
-### Tamanho do Cache
-```rust
-impl ThumbnailDiskCache {
-    pub fn get_cache_size(&self) -> Result<u64> {
-        // Calcula tamanho total dos arquivos .webp
-        let mut total_size = 0u64;
-        for entry in fs::read_dir(&self.cache_dir)? {
-            let entry = entry?;
-            if entry.path().extension().and_then(|s| s.to_str()) == Some("webp") {
-                total_size += entry.metadata()?.len();
-            }
-        }
-        Ok(total_size)
-    }
-}
-```
-
-### Garbage Collection
-```rust
-pub fn garbage_collect(&self) -> Result<usize> {
-    // Remove thumbnails órfãos
-    // Remove preferências inválidas
-    // Vacuum do banco de dados
-}
-```
-
-## Como Resetar/Limpar Dados
-
-### Método 1: Via Interface (quando implementado)
-```rust
-// Futuro: menu de configurações
-app.clear_cache();
-app.reset_preferences();
-```
-
-### Método 2: Manual
+### Limpar Cache de Thumbnails
 ```powershell
-# Parar o aplicativo
-# Deletar diretório de cache completo
-Remove-Item -Path "$env:LOCALAPPDATA\MTT-File-Manager" -Recurse -Force
+# Remove todo o diretório de cache
+Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager" -Recurse -Force
 
-# Ou apenas partes específicas
-Remove-Item -Path "$env:LOCALAPPDATA\MTT-File-Manager\thumbnails\*.webp"
-Remove-Item -Path "$env:LOCALAPPDATA\MTT-File-Manager\thumbnails\thumbnails.db"
-```
-
-### Método 3: Backup e Restore
-```powershell
-# Backup
-Copy-Item "$env:LOCALAPPDATA\MTT-File-Manager" "C:\Backup\MTT-File-Manager-Backup"
-
-# Restore
-Copy-Item "C:\Backup\MTT-File-Manager-Backup" "$env:LOCALAPPDATA\MTT-File-Manager" -Recurse -Force
-```
-
-## Debugging de Storage
-
-### Verificar Integridade do Banco
-```powershell
-# Instalar SQLite CLI (se não tiver)
-# Verificar integridade do banco
-sqlite3 "$env:LOCALAPPDATA\MTT-File-Manager\thumbnails\thumbnails.db" "PRAGMA integrity_check;"
-
-# Ver tabelas
-sqlite3 "$env:LOCALAPPDATA\MTT-File-Manager\thumbnails\thumbnails.db" ".tables"
-
-# Ver preferências
-sqlite3 "$env:LOCALAPPDATA\MTT-File-Manager\thumbnails\thumbnails.db" "SELECT * FROM preferences;"
-```
-
-### Logs de Cache
-```rust
-// Adicionar logs para debug
-eprintln!("[CACHE] Getting thumbnail for: {:?}", path);
-eprintln!("[CACHE] Cache hit: {}", cache_hit);
-eprintln!("[CACHE] Cache size: {} MB", size_bytes / 1024 / 1024);
-```
-
-## Performance Considerations
-
-### Cache Size Limits
-- **Padrão**: Sem limite hardcoded
-- **Recomendação**: Monitorar crescimento
-- **Cleanup**: Garbage collection automático a cada 3 segundos após startup
-
-### I/O Optimization
-```rust
-// Writer/Reader separados para evitar lock contention
-writer: Arc<Mutex<Connection>>, // Para writes
-reader: Arc<Mutex<Connection>>,  // Para reads
-```
-
-### Index Optimization
-```sql
--- Índices para queries comuns
-CREATE INDEX idx_thumbnails_path ON thumbnails(file_path);
-CREATE INDEX idx_thumbnails_modified ON thumbnails(modified_time);
-CREATE INDEX idx_preferences_key ON preferences(key);
-```
-
-## Segurança e Privacidade
-
-### Path Sanitization
-```rust
-fn sanitize_path(path: &Path) -> Result<PathBuf> {
-    // Remove .. e outros elementos perigosos
-    // Garante path está dentro do cache directory
-}
-```
-
-### Permissions
-- **Cache**: Acesso apenas ao usuário atual
-- **Config**: Armazenado em LOCALAPPDATA (user-specific)
-- **No dados sensíveis**: Apenas paths e metadados de arquivos
-
-## Troubleshooting Comum
-
-### "Database is locked"
-```powershell
-# Causa: Aplicativo ainda rodando ou crash anterior
-# Solução: Finalizar processo e deletar .db-journal
-Stop-Process -Name "mtt-file-manager" -Force
-Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager\thumbnails\*.db-journal"
-```
-
-### "Failed to open database"
-```powershell
-# Causa: Database corrompido
-# Solução: Deletar e recriar
-Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager\thumbnails\thumbnails.db"
-# O app recriará automaticamente
-```
-
-### Cache muito grande
-```powershell
-# Verificar tamanho
-dir "$env:LOCALAPPDATA\MTT-File-Manager\thumbnails" | Measure-Object -Property Length -Sum
-
-# Limpar thumbnails antigos (mantém DB)
+# Ou apenas os arquivos WebP (mantém preferências)
 Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager\thumbnails\*.webp"
 ```
+
+### Limpar Banco de Dados
+```powershell
+# Remove apenas o banco (mantém arquivos WebP, mas invalida)
+Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager\thumbnails\thumbnails.db"
+```
+
+### Resetar Preferências
+```powershell
+# Abre o banco SQLite e remove preferências
+# Ou delete o arquivo .db (recria com defaults)
+Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager\thumbnails\thumbnails.db"
+```
+
+### Limpar Tudo (Fresh Start)
+```powershell
+# Remove cache e preferências
+Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager" -Recurse -Force
+
+# Remove config de drives virtuais
+Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager\virtual_drive_config.json"
+```
+
+## Migração de Dados
+
+### Backup de Configurações
+```powershell
+# Backup completo
+$source = "$env:LOCALAPPDATA\MTT-File-Manager"
+$dest = "$env:USERPROFILE\Desktop\MTT-Backup"
+Copy-Item $source $dest -Recurse
+```
+
+### Restaurar Configurações
+```powershell
+# Restaurar
+$source = "$env:USERPROFILE\Desktop\MTT-Backup\MTT-File-Manager"
+$dest = "$env:LOCALAPPDATA\MTT-File-Manager"
+Copy-Item $source $dest -Recurse -Force
+```
+
+## Troubleshooting de Storage
+
+### Erro "Database is locked"
+- **Causa**: Múltiplas instâncias tentando acessar o SQLite
+- **Solução**: Fechar outras instâncias, ou usar modo WAL (já implementado)
+
+### Cache não persiste
+- **Causa**: Sem permissão de escrita em %LOCALAPPDATA%
+- **Debug**: Verificar se diretório existe e é gravável
+- **Solução**: Executar como administrador uma vez para criar diretório
+
+### Thumbnails duplicados
+- **Causa**: Hash collision ou path normalizado diferente
+- **Solução**: Limpar cache, verificar normalização de paths
+
+---
+
+*Última atualização: 2026-02-03 (pós-refatoração)*

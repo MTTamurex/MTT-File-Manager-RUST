@@ -22,10 +22,11 @@ Este índice fornece navegação para todos os documentos técnicos do MTT File 
 
 ### [03_architecture.md](03_architecture.md)
 **Arquitetura do Sistema**
-- Camadas e responsabilidades
+- Camadas e responsabilidades (UI, Application, Domain, Infrastructure)
 - Principais boundaries
 - Ciclo de vida da aplicação
 - Estado global e gerenciamento
+- Workers e comunicação entre threads
 - Pontos de extensão
 
 ### [04_module_map.md](04_module_map.md)
@@ -41,31 +42,36 @@ Este índice fornece navegação para todos os documentos técnicos do MTT File 
 - Dependências do Cargo.toml
 - Features e versionamento
 - Integrações com Windows
+- Dependências de runtime
 - Alternativas consideradas
-- Compatibilidade
 
 ### [06_key_flows.md](06_key_flows.md)
 **Fluxos Principais**
 - Navegação para pasta
-- Preview de arquivo
-- Operações de arquivo
-- Geração de thumbnail
+- Preview de arquivo (imagem, vídeo, PDF, GIF)
+- Operações de arquivo (copiar, mover, deletar)
+- Geração de thumbnail (multi-estágio)
 - Menu de contexto
+- Lixeira
+- Navegação por teclado
 - Debugging por fluxo
 
 ### [07_storage_config.md](07_storage_config.md)
 **Configuração e Storage**
-- Localização dos arquivos
-- Banco de dados SQLite
+- Localização dos arquivos (%LOCALAPPDATA%)
+- Banco de dados SQLite (schema, operações)
 - Configurações e preferências
-- Cache de thumbnails
+- Cache de thumbnails (WebP)
+- Cache em memória (LRU, DashMap)
 - Como resetar/limpar dados
 
 ### [08_logging_errors_telemetry.md](08_logging_errors_telemetry.md)
 **Logs, Erros e Telemetria**
-- Sistema de logs atual
-- Como capturar logs
+- Sistema de logs atual (eprintln!)
+- Categorias de logs
+- Como capturar logs (PowerShell scripts)
 - Sistema de erros AppError
+- Helpers e macros de erro
 - Stack traces e backtraces
 - Debugging avançado
 
@@ -75,7 +81,7 @@ Este índice fornece navegação para todos os documentos técnicos do MTT File 
 - Problemas comuns e soluções
 - Perguntas padrão para tickets
 - Scripts de diagnóstico
-- Procedimentos de suporte
+- Procedimentos de escalação
 
 ## Navegação Rápida por Tópico
 
@@ -105,18 +111,27 @@ Este índice fornece navegação para todos os documentos técnicos do MTT File 
 ### Entry Points
 - `src/main.rs` - Ponto de entrada do aplicativo
 - `src/lib.rs` - Ponto de entrada da biblioteca
-- `src/app/state.rs` - Estado principal da aplicação
+- `src/app/state.rs` - Estado principal da aplicação (ImageViewerApp)
+- `src/app/init.rs` - Inicialização da aplicação
 
 ### Fluxos Principais
-- `src/app/operations/navigation.rs` - Navegação
+- `src/app/operations/navigation/` - Navegação (mod.rs, keyboard.rs, selection.rs)
 - `src/app/operations/folder_loading.rs` - Carregamento de pastas
-- `src/app/operations/thumbnails.rs` - Thumbnails
-- `src/workers/thumbnail_worker.rs` - Workers de thumbnail
+- `src/app/operations/thumbnails.rs` - Solicitação de thumbnails
+- `src/workers/thumbnail/` - Workers de thumbnail (multi-estágio)
+- `src/ui/app_impl.rs` - Main loop da UI
 
 ### Integrações Críticas
-- `src/infrastructure/windows/` - Integrações Windows
-- `src/infrastructure/disk_cache.rs` - Cache em disco
-- `src/ui/app_impl.rs` - Main loop da UI
+- `src/infrastructure/windows/` - Integrações Windows (Shell, COM, Media Foundation)
+- `src/infrastructure/disk_cache.rs` - Cache em disco (SQLite)
+- `src/ui/cache.rs` - Cache de texturas GPU
+- `src/workers/` - Workers assíncronos
+
+### Sistema de Preview
+- `src/ui/preview_panel/` - Painel de preview
+- `src/ui/components/media_preview.rs` - Preview de mídia
+- `src/ui/components/mpv_preview.rs` - Preview de vídeo
+- `src/pdf_viewer/` - Visualizador de PDF
 
 ## Comandos Úteis
 
@@ -130,8 +145,11 @@ cargo run
 cargo build --release
 cargo run --release
 
-# Com logs
+# Com logs (PowerShell)
 .\target\release\mtt-file-manager.exe 2>&1 | Tee-Object "debug.log"
+
+# Sem watcher
+cargo build --no-default-features
 ```
 
 ### Debug e Testes
@@ -163,9 +181,60 @@ cargo clean
 Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager" -Recurse -Force
 ```
 
-## Status do Projeto
+## Estrutura de Diretórios do Projeto
 
-✅ **Documentação Completa** - Todos os documentos principais criados  
+```
+src/
+├── app/                          # Estado e lógica principal
+│   ├── operations/               # Handlers de operações
+│   │   ├── navigation/           # Navegação
+│   │   ├── ui_rendering/         # Renderização UI
+│   │   └── *.rs                  # Outros handlers
+│   ├── state.rs                  # ImageViewerApp principal
+│   ├── init.rs                   # Inicialização
+│   └── *_state.rs                # Sub-estados
+├── application/                  # Lógica de negócios
+│   ├── clipboard.rs              # Gerenciamento de clipboard
+│   ├── file_operations.rs        # Operações de arquivo
+│   ├── navigation.rs             # Histórico de navegação
+│   ├── notification.rs           # Sistema de notificações
+│   ├── sorting_optimized.rs      # Ordenação otimizada
+│   └── ...
+├── domain/                       # Modelos de dados
+│   ├── errors.rs                 # AppError
+│   ├── file_entry.rs             # FileEntry, enums
+│   └── thumbnail.rs              # ThumbnailData
+├── infrastructure/               # Integrações Windows
+│   ├── windows/                  # APIs Windows
+│   │   ├── metadata/             # Metadados
+│   │   └── ...
+│   ├── media/                    # FFmpeg, hardware accel
+│   ├── disk_cache.rs             # Cache SQLite
+│   └── ...
+├── ui/                           # Interface do usuário
+│   ├── app_impl.rs               # eframe::App
+│   ├── app/                      # Input, lifecycle
+│   ├── components/               # Componentes reutilizáveis
+│   │   └── mpv/                  # Sub-sistema MPV
+│   ├── preview_panel/            # Painel de preview
+│   │   └── video_preview/        # Preview de vídeo
+│   ├── views/                    # Views (grid, list, computer)
+│   └── ...
+├── workers/                      # Threads de background
+│   ├── thumbnail/                # Sistema de thumbnails
+│   │   └── extraction/           # Estágios 1-5
+│   ├── folder_scanner.rs
+│   ├── file_operation_worker.rs
+│   └── ...
+├── pdf_viewer/                   # Visualizador PDF
+├── tabs/                         # Sistema de abas
+├── lib.rs                        # Entry point lib
+└── main.rs                       # Entry point bin
+```
+
+## Status da Documentação
+
+✅ **Documentação Completa** - Todos os documentos principais atualizados  
 ✅ **Arquitetura Documentada** - Camadas e fluxos descritos  
 ✅ **Dependências Mapeadas** - Stack completa documentada  
 ✅ **Fluxos Detalhados** - Principais fluxos documentados  
@@ -198,9 +267,9 @@ Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager" -Recurse -Force
 - [Media Foundation](https://docs.microsoft.com/windows/win32/medfound/)
 
 ### Dependências Externas
-- [libmpv Documentation](https://mpv.io/manual/master/)
-- [WebView2 Documentation](https://docs.microsoft.com/microsoft-edge/webview2/)
+- [mpv/libmpv](https://mpv.io/)
+- [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)
 
 ---
 
-*Esta documentação foi gerada automaticamente baseada na análise do código atual. Mantenha atualizada conforme o projeto evolui.*
+*Última atualização: 2026-02-03 (pós-refatoração)*
