@@ -89,13 +89,13 @@ pub fn restore_from_recycle_bin(physical_path: &Path, original_path: &Path) -> O
 }
 
 /// Deletes file permanently (no Recycle Bin).
-pub fn delete_permanently(physical_path: &Path) -> OpResult<()> {
-    recycle_bin::delete_permanently(physical_path).map_err(|e| e.to_string())
+pub fn delete_permanently(physical_path: &Path, hwnd: windows::Win32::Foundation::HWND) -> OpResult<()> {
+    recycle_bin::delete_permanently(physical_path, hwnd).map_err(|e| e.to_string())
 }
 
 /// Empties Recycle Bin.
-pub fn empty_recycle_bin() -> OpResult<()> {
-    recycle_bin::empty_recycle_bin().map_err(|e| e.to_string())
+pub fn empty_recycle_bin(hwnd: windows::Win32::Foundation::HWND) -> OpResult<()> {
+    recycle_bin::empty_recycle_bin(hwnd).map_err(|e| e.to_string())
 }
 
 /// Creates a Windows shortcut (.lnk).

@@ -430,9 +430,10 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                 
                 // --- Logic for Enablement ---
                 // Calculated BEFORE the mutable borrow of svg_icon_manager
-                let has_selection = app.selected_file.is_some() || !app.multi_selection.is_empty();
-                let is_single_selection = app.multi_selection.len() <= 1 && (app.multi_selection.len() == 1 || app.selected_file.is_some());
-                let can_paste = app.clipboard.has_content();
+                let is_drive_selected = app.selected_file.as_ref().map_or(false, |f| f.drive_info.is_some());
+                let has_selection = (app.selected_file.is_some() || !app.multi_selection.is_empty()) && !is_drive_selected;
+                let can_rename = app.multi_selection.len() <= 1 && (app.multi_selection.len() == 1 || app.selected_file.is_some());
+                let can_paste = app.clipboard.has_content() && !is_drive_selected;
                 let can_create_folder = !app.is_computer_view && !app.is_recycle_bin_view;
 
                 // Colors
@@ -519,8 +520,8 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                         action = SecAction::Paste;
                     }
 
-                    // 4. Rename
-                    if render_btn("rename", is_single_selection, "Renomear (F2)") {
+                    // 4. Rename (allowed for drives too — renames volume label)
+                    if render_btn("rename", can_rename, "Renomear (F2)") {
                         action = SecAction::Rename;
                     }
 
