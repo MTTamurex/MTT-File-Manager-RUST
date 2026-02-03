@@ -238,6 +238,11 @@ impl ImageViewerApp {
                         }
                     }
 
+                    // Clear thumbnail failure caches so files that failed extraction
+                    // during copy (locked by Windows) get retried now that copy is done
+                    self.cache_manager.clear_failed();
+                    crate::workers::thumbnail::clear_all_failures();
+
                     if dest_str == current_str {
                         eprintln!(
                             "[COPY] Dest folder matches current view, reloading: {}",
@@ -264,6 +269,10 @@ impl ImageViewerApp {
                     if let Some(di) = &self.directory_index {
                         let _ = di.invalidate(&dest_folder);
                     }
+
+                    // Clear thumbnail failure caches for retry after move completes
+                    self.cache_manager.clear_failed();
+                    crate::workers::thumbnail::clear_all_failures();
 
                     if current_str == source_str {
                         eprintln!(
@@ -299,6 +308,10 @@ impl ImageViewerApp {
                 } => {
                     let dest_str = normalize_for_match(dest_folder.as_path());
                     let current_str = normalize_for_match(Path::new(&self.current_path));
+
+                    // Clear thumbnail failure caches for retry after move completes
+                    self.cache_manager.clear_failed();
+                    crate::workers::thumbnail::clear_all_failures();
 
                     // Invalidate all source folders and destination
                     for source_folder in &source_folders {
@@ -353,19 +366,18 @@ impl ImageViewerApp {
                         self.load_folder(false);
                     }
                 }
-                FileOperationResult::Finished => {}
+                FileOperationResult::Finished => {
+                    self.file_ops_in_progress = self.file_ops_in_progress.saturating_sub(1);
+                    if self.file_ops_in_progress == 0 {
+                        // Operations done — completion handlers already triggered reload,
+                        // so discard any watcher-accumulated auto-reload to avoid double refresh
+                        self.pending_auto_reload = false;
+                    }
+                }
             }
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => break,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
-            }
-        }
-        
-        // Process any remaining messages
-        while let Ok(res) = self.file_op_res_receiver.try_recv() {
-            match res {
-                crate::workers::file_operation_worker::FileOperationResult::Finished => {}
-                _ => {} // Ignore other messages
             }
         }
 
@@ -479,7 +491,9 @@ impl ImageViewerApp {
         }
 
         // Executa reload apenas quando debounce permitir
-        if self.pending_auto_reload {
+        // SUPPRESS auto-reload while file operations are in progress to prevent
+        // screen flashing (watcher fires repeatedly as files grow during copy)
+        if self.pending_auto_reload && self.file_ops_in_progress == 0 {
             let elapsed = self.last_auto_reload.elapsed();
             if elapsed > Duration::from_millis(theme::AUTO_RELOAD_MS) {
                 eprintln!(

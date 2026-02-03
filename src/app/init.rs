@@ -667,6 +667,9 @@ impl ImageViewerApp {
             predictive_sender: predictive_tx,
             idle_warmup_sender: idle_warmup_tx,
 
+            // FILE OPERATION TRACKING
+            file_ops_in_progress: 0,
+
             // ISO MOUNTING
             pending_iso_mount: None,
 
