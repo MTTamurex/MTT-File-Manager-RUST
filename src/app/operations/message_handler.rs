@@ -178,6 +178,7 @@ impl ImageViewerApp {
                     }
 
                     if should_reload_current {
+                        self.loaded_path.clear();
                         self.load_folder(false);
                     }
                 }
@@ -202,6 +203,7 @@ impl ImageViewerApp {
                         }
                     }
                     if should_reload_current {
+                        self.loaded_path.clear();
                         self.load_folder(false);
                     }
                 }
@@ -226,6 +228,7 @@ impl ImageViewerApp {
                             "[COPY] Dest folder matches current view, reloading: {}",
                             self.current_path
                         );
+                        self.loaded_path.clear();
                         self.load_folder(false);
                     }
                 }
@@ -252,6 +255,7 @@ impl ImageViewerApp {
                             "[MOVE] Source folder matches current view, reloading: {}",
                             self.current_path
                         );
+                        self.loaded_path.clear();
                         self.load_folder(false);
                     }
 
@@ -270,6 +274,7 @@ impl ImageViewerApp {
                             "[MOVE] Dest folder matches current view, reloading: {}",
                             self.current_path
                         );
+                        self.loaded_path.clear();
                         self.load_folder(false);
                     }
                 }
