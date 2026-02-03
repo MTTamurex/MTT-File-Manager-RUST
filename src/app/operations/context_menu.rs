@@ -76,17 +76,25 @@ impl ImageViewerApp {
             return;
         }
 
+        // Check if the target item is a drive (drives don't support file operations)
+        let is_drive = _item_index
+            .and_then(|idx| self.items.get(idx))
+            .map(|item| item.drive_info.is_some())
+            .unwrap_or(false);
+
         // ========== PRIMARY ITEMS (Header bar) - matching Files ==========
         // These appear as icon buttons in the header
         items.push(
             ContextMenuItem::primary(-3, "Recortar")
                 .with_command("cut")
-                .with_shortcut("Ctrl+X"),
+                .with_shortcut("Ctrl+X")
+                .enabled(!is_drive),
         );
         items.push(
             ContextMenuItem::primary(-2, "Copiar")
                 .with_command("copy")
-                .with_shortcut("Ctrl+C"),
+                .with_shortcut("Ctrl+C")
+                .enabled(!is_drive),
         );
 
         let can_paste = self.clipboard.has_content();
@@ -94,7 +102,7 @@ impl ImageViewerApp {
             ContextMenuItem::primary(-4, "Colar")
                 .with_command("paste")
                 .with_shortcut("Ctrl+V")
-                .enabled(can_paste),
+                .enabled(can_paste && !is_drive),
         );
 
         if !is_empty_area {
@@ -106,7 +114,8 @@ impl ImageViewerApp {
             items.push(
                 ContextMenuItem::primary(-6, "Excluir")
                     .with_command("delete")
-                    .with_shortcut("Del"),
+                    .with_shortcut("Del")
+                    .enabled(!is_drive),
             );
         }
 
@@ -135,18 +144,20 @@ impl ImageViewerApp {
             items.push(
                 ContextMenuItem::new(-30, "Recortar")
                     .with_command("cut")
-                    .with_shortcut("Ctrl+X"),
+                    .with_shortcut("Ctrl+X")
+                    .enabled(!is_drive),
             );
             items.push(
                 ContextMenuItem::new(-31, "Copiar")
                     .with_command("copy")
-                    .with_shortcut("Ctrl+C"),
+                    .with_shortcut("Ctrl+C")
+                    .enabled(!is_drive),
             );
             items.push(
                 ContextMenuItem::new(-32, "Colar")
                     .with_command("paste")
                     .with_shortcut("Ctrl+V")
-                    .enabled(can_paste),
+                    .enabled(can_paste && !is_drive),
             );
             items.push(
                 ContextMenuItem::new(-33, "Renomear")
@@ -156,7 +167,8 @@ impl ImageViewerApp {
             items.push(
                 ContextMenuItem::new(-34, "Excluir")
                     .with_command("delete")
-                    .with_shortcut("Del"),
+                    .with_shortcut("Del")
+                    .enabled(!is_drive),
             );
             items.push(ContextMenuItem::separator());
             items.push(ContextMenuItem::new(-24, "Copiar caminho").with_shortcut("Ctrl+Shift+C"));

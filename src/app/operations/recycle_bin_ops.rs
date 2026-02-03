@@ -72,30 +72,26 @@ impl ImageViewerApp {
         }
 
         // Send request to background worker (BATCH)
-        if !paths.is_empty() {
-             self.notifications.push(crate::application::AppNotification::info(format!(
-                "Excluindo {} itens permanentemente...",
-                paths.len()
-            )));
-            let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::DeletePermanently {
-                physical_paths: paths.to_vec(),
-            });
+        // Windows will show a native confirmation dialog before deleting.
+        let hwnd = self.native_hwnd.unwrap_or_default();
+        let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::DeletePermanently {
+            physical_paths: paths.to_vec(),
+            hwnd: crate::workers::file_operation_worker::SendHwnd(hwnd),
+        });
 
-            // Clear selection after delete batch is sent
-            self.reset_selection_and_search();
-        }
+        // Clear selection after delete batch is sent
+        self.reset_selection_and_search();
     }
 
     pub fn empty_recycle_bin(&mut self) {
         // Clear selection first so details panel resets immediately
         self.reset_selection_and_search();
 
-        // Send request to background worker
-        let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::EmptyRecycleBin);
-
-        self.notifications
-            .push(crate::application::AppNotification::info(
-                "Esvaziando lixeira em background...".to_string(),
-            ));
+        // Send request to background worker.
+        // Windows will show a native confirmation dialog before emptying.
+        let hwnd = self.native_hwnd.unwrap_or_default();
+        let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::EmptyRecycleBin {
+            hwnd: crate::workers::file_operation_worker::SendHwnd(hwnd),
+        });
     }
 }

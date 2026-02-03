@@ -66,8 +66,11 @@ pub enum FileOperationRequest {
     },
     DeletePermanently {
         physical_paths: Vec<PathBuf>,
+        hwnd: SendHwnd,
     },
-    EmptyRecycleBin,
+    EmptyRecycleBin {
+        hwnd: SendHwnd,
+    },
 }
 
 impl FileOperationRequest {
@@ -195,14 +198,16 @@ pub fn start_file_operation_worker(
                     }
                     let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
                 }
-                FileOperationRequest::DeletePermanently { physical_paths } => {
-                    for path in physical_paths {
-                        let _ = recycle_bin::delete_permanently(&path);
+                FileOperationRequest::DeletePermanently { physical_paths, hwnd } => {
+                    for path in &physical_paths {
+                        if recycle_bin::delete_permanently(path, hwnd.0).is_err() {
+                            break; // User cancelled or error — stop batch
+                        }
                     }
                     let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
                 }
-                FileOperationRequest::EmptyRecycleBin => {
-                    let _ = recycle_bin::empty_recycle_bin();
+                FileOperationRequest::EmptyRecycleBin { hwnd } => {
+                    let _ = recycle_bin::empty_recycle_bin(hwnd.0);
                     let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
                 }
             }
