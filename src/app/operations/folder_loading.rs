@@ -187,7 +187,7 @@ impl ImageViewerApp {
             self.cache_manager.texture_cache.clear();
             self.cache_manager.folder_preview_cache.clear();
             self.cache_manager.failed_thumbnails.clear();
-            crate::workers::thumbnail_worker::clear_all_failures();
+            crate::workers::thumbnail::clear_all_failures();
             self.directory_cache.clear();
         }
 

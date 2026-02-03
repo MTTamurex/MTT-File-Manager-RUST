@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use crate::app::state::ImageViewerApp;
 use crate::domain::thumbnail::ThumbnailData;
-use crate::workers::thumbnail_worker::ThumbnailPriority;
+use crate::workers::thumbnail::ThumbnailPriority;
 
 impl ImageViewerApp {
 

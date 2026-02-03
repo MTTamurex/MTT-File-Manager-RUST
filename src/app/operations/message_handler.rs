@@ -381,7 +381,7 @@ impl ImageViewerApp {
                         let cleaned = clean_path(path);
                         self.cache_manager.texture_cache.pop(&cleaned);
                         self.cache_manager.failed_thumbnails.pop(&cleaned);
-                        crate::workers::thumbnail_worker::clear_failure_cache(&cleaned);
+                        crate::workers::thumbnail::clear_failure_cache(&cleaned);
                     }
 
                     if meaningful_change {
