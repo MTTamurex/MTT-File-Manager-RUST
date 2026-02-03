@@ -126,7 +126,7 @@ impl ImageViewerApp {
 
         // --- SISTEMA DE THUMBNAILS (WORKER POOL OTIMIZADO) ---
         let (img_tx, img_rx) = mpsc::channel();
-        use crate::workers::thumbnail_worker::PriorityThumbnailQueue;
+        use crate::workers::thumbnail::PriorityThumbnailQueue;
         let thumbnail_queue = Arc::new(PriorityThumbnailQueue::new());
         let shared_gen = Arc::new(AtomicUsize::new(0));
 
@@ -319,7 +319,7 @@ impl ImageViewerApp {
             .clamp(0.0, 1.0);
 
         // 8 threads: equilíbrio ideal entre SSD e HDD USB
-        use crate::workers::thumbnail_worker::spawn_thumbnail_workers;
+        use crate::workers::thumbnail::spawn_thumbnail_workers;
         spawn_thumbnail_workers(
             thumbnail_queue.clone(),
             img_tx,

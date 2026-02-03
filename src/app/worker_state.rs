@@ -1,5 +1,5 @@
 use crate::domain::thumbnail::ThumbnailData;
-use crate::workers::thumbnail_worker::PriorityThumbnailQueue;
+use crate::workers::thumbnail::PriorityThumbnailQueue;
 use crate::app::state::ItemsRebuildResult;
 use crate::domain::file_entry::FileEntry;
 use crate::ui::cache::FxHashSet;

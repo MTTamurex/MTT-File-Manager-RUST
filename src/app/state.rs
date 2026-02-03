@@ -37,7 +37,7 @@ use crate::ui::components::media_preview::MediaPreview;
 use crate::ui::context_menu::ContextMenuState;
 use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
-use crate::workers::thumbnail_worker::PriorityThumbnailQueue;
+use crate::workers::thumbnail::PriorityThumbnailQueue;
 
 use windows::Win32::Foundation::HWND;
 

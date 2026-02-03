@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::io_priority::{self, IOPriority};
 use crate::workers::prefetch_worker::PrefetchMessage;
-use crate::workers::thumbnail_worker::PriorityThumbnailQueue;
+use crate::workers::thumbnail::PriorityThumbnailQueue;
 
 const IDLE_THRESHOLD: Duration = Duration::from_secs(5);
 #[allow(dead_code)]
