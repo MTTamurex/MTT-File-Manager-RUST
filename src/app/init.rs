@@ -464,11 +464,13 @@ impl ImageViewerApp {
         let (initial_path, is_computer_view_initial) = determine_initial_path(&disk_cache);
         
         // Create tab manager with the initial path
-        let tab_manager = if is_computer_view_initial {
+        let mut tab_manager = if is_computer_view_initial {
             crate::tabs::TabManager::new()
         } else {
             crate::tabs::TabManager::new_at_path(&initial_path)
         };
+        // Set the initial tab's view mode from saved preference
+        tab_manager.active_mut().view_mode = view_mode;
 
         let mut app = Self {
             current_path: initial_path.clone(),

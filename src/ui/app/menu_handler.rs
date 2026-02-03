@@ -76,8 +76,10 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                                 .unwrap_or_else(|| PathBuf::from(&app.current_path))
                         };
 
+                        let prev_view_mode = app.view_mode;
                         app.sync_to_tab();
                         app.tab_manager.new_tab_at(&target.to_string_lossy());
+                        app.tab_manager.active_mut().view_mode = prev_view_mode;
                         app.sync_from_tab();
 
                         if app.is_computer_view {

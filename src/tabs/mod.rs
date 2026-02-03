@@ -7,7 +7,7 @@
 //! - Sort preferences
 
 use crate::application::navigation::NavigationHistory;
-use crate::domain::file_entry::FileEntry;
+use crate::domain::file_entry::{FileEntry, ViewMode};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -50,6 +50,8 @@ pub struct TabState {
     pub scroll_offset_y: f32,
     /// Total items in the folder (status bar)
     pub total_items: usize,
+    /// View mode for this tab (Grid or List)
+    pub view_mode: ViewMode,
 }
 
 impl TabState {
@@ -74,6 +76,7 @@ impl TabState {
             selected_gif: None,
             scroll_offset_y: 0.0,
             total_items: 0,
+            view_mode: ViewMode::Grid,
         }
     }
 
@@ -103,6 +106,7 @@ impl TabState {
             selected_gif: None,
             scroll_offset_y: 0.0,
             total_items: 0,
+            view_mode: ViewMode::Grid,
         }
     }
 
@@ -264,6 +268,7 @@ impl TabManager {
         new_tab.selected_gif = current.selected_gif.clone();
         new_tab.search_query = current.search_query.clone();
         new_tab.total_items = current.total_items;
+        new_tab.view_mode = current.view_mode;
 
         self.next_id += 1;
 
@@ -341,6 +346,7 @@ impl TabManager {
             reopened.selected_gif = tab.selected_gif;
             reopened.search_query = tab.search_query;
             reopened.total_items = tab.total_items;
+            reopened.view_mode = tab.view_mode;
 
             self.next_id += 1;
 

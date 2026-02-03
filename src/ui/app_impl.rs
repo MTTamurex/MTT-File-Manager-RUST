@@ -214,9 +214,11 @@ fn render_tab_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context, frame: &m
                     app.update_video_visibility();
                 }
                 TabBarAction::NewTab => {
+                    let prev_view_mode = app.view_mode;
                     app.sync_to_tab();
                     let current_path = app.tab_manager.active().path.clone();
                     app.tab_manager.new_tab_at(&current_path);
+                    app.tab_manager.active_mut().view_mode = prev_view_mode;
                     app.sync_from_tab();
                     if current_path == "Este Computador" {
                         app.setup_computer_view();

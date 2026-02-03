@@ -57,8 +57,10 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
                                 egui::Key::V => do_paste = true,
                                 // TAB MANAGEMENT SHORTCUTS
                                 egui::Key::T => {
+                                    let prev_view_mode = app.view_mode;
                                     app.sync_to_tab();
                                     app.tab_manager.new_tab();
+                                    app.tab_manager.active_mut().view_mode = prev_view_mode;
                                     app.sync_from_tab();
                                     app.setup_computer_view();
                                     app.sync_to_tab();
