@@ -6,6 +6,16 @@ use crate::ui::theme;
 use crate::ui::widgets;
 use crate::infrastructure::windows::window_subclass::is_in_size_move;
 
+#[cfg(debug_assertions)]
+macro_rules! debug_log {
+    ($($arg:tt)*) => { eprintln!($($arg)*) }
+}
+
+#[cfg(not(debug_assertions))]
+macro_rules! debug_log {
+    ($($arg:tt)*) => {}
+}
+
 impl eframe::App for ImageViewerApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         // Check if window is being resized/dragged (for UI optimization)
@@ -337,7 +347,7 @@ fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         } else {
                             app.view_mode = ViewMode::List;
                         }
-                        eprintln!("[VIEW-MODE] Toolbar toggle -> {:?} (tab={})", app.view_mode, app.tab_manager.active_tab);
+                        debug_log!("[VIEW-MODE] Toolbar toggle -> {:?} (tab={})", app.view_mode, app.tab_manager.active_tab);
                     }
                     ToolbarAction::TogglePreviewPanel => {
                         app.show_preview_panel = !app.show_preview_panel;
