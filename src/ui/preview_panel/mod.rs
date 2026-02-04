@@ -80,9 +80,8 @@ pub fn render_preview_panel(
     ui.vertical_centered(|ui| {
         ui.add_space(20.0);
 
-        // Only show thumbnails for images, videos or audio files.
-        let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        let is_media = crate::infrastructure::windows::is_media_extension(extension);
+        // PERFORMANCE: Use is_media() method to avoid registry lookups
+        let is_media = file.is_media();
 
         let texture = if is_failed || !is_media {
             None

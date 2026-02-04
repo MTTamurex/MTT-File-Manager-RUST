@@ -37,13 +37,8 @@ pub(super) fn render_list_item(
 
     // GATILHO LAZY LOAD PARA ARQUIVOS DE MÍDIA: Carrega thumbnail proativamente
     if !item.is_dir && !ctx.is_recycle_bin_view {
-        let is_media_file = item
-            .path
-            .extension()
-            .map(|ext| crate::infrastructure::windows::is_media_extension(&ext.to_string_lossy()))
-            .unwrap_or(false);
-
-        if is_media_file
+        // PERFORMANCE: Use is_media() method to avoid registry lookups
+        if item.is_media()
             && !ctx.texture_cache.contains(&item.path)
             && !ctx.loading_set.contains(&item.path)
             && !ctx.failed_thumbnails.contains(&item.path)

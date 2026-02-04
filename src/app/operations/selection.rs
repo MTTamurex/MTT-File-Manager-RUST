@@ -35,8 +35,16 @@ impl ImageViewerApp {
             }
 
             // AUTO-RELOAD HIGH RES: If selected and it's a media file, request 512px for detail panel
-            let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if crate::infrastructure::windows::is_media_extension(extension) {
+            // PERFORMANCE: Use is_media() method
+            let is_media = if let Some(ref entry) = self.selected_file {
+                entry.is_media()
+            } else {
+                path.extension()
+                    .and_then(|e| e.to_str())
+                    .map(|ext| crate::infrastructure::windows::is_media_extension(ext))
+                    .unwrap_or(false)
+            };
+            if is_media {
                 self.request_thumbnail_load(path.clone(), 512);
             }
 
