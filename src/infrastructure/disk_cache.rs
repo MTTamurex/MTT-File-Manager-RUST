@@ -305,6 +305,7 @@ impl ThumbnailDiskCache {
 
     /// Gets covers (thumbnails) for multiple folders at once
     /// [READER]
+    /// PERFORMANCE: Uses chunking to stay within SQLite's parameter limit (999)
     pub fn get_folder_covers(
         &self,
         folder_paths: &[PathBuf],
@@ -314,23 +315,23 @@ impl ThumbnailDiskCache {
             return results;
         }
 
-        let mut raw_results = Vec::new();
+        // SQLite parameter limit is 999, use 500 for safety margin
+        const BATCH_SIZE: usize = 500;
 
-        {
-            let db = match self.reader.lock() {
-                Ok(db) => db,
-                Err(_) => return results,
-            };
+        let db = match self.reader.lock() {
+            Ok(db) => db,
+            Err(_) => return results,
+        };
 
-            // SQLite parameter limit is usually 999, so 250 (batch size) is safe
-            let placeholders: Vec<&str> = folder_paths.iter().map(|_| "?").collect();
+        for chunk in folder_paths.chunks(BATCH_SIZE) {
+            let placeholders: Vec<&str> = chunk.iter().map(|_| "?").collect();
             let query = format!(
                 "SELECT folder_path, cover_path FROM folder_covers WHERE folder_path IN ({})",
                 placeholders.join(",")
             );
 
             if let Ok(mut stmt) = db.prepare(&query) {
-                let path_strs: Vec<String> = folder_paths
+                let path_strs: Vec<String> = chunk
                     .iter()
                     .map(|p| p.to_string_lossy().to_string())
                     .collect();
@@ -343,14 +344,10 @@ impl ThumbnailDiskCache {
                     })
                 {
                     for row in rows.flatten() {
-                        raw_results.push((row.0, row.1));
+                        results.insert(PathBuf::from(row.0), PathBuf::from(row.1));
                     }
                 }
-            };
-        }
-
-        for (f_path, c_path) in raw_results {
-            results.insert(PathBuf::from(f_path), PathBuf::from(c_path));
+            }
         }
 
         results
