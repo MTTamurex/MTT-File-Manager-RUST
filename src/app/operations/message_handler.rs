@@ -11,6 +11,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+#[cfg(debug_assertions)]
+macro_rules! debug_log {
+    ($($arg:tt)*) => {{ eprintln!($($arg)*); }}
+}
+
+#[cfg(not(debug_assertions))]
+macro_rules! debug_log {
+    ($($arg:tt)*) => {{ () }}
+}
+
 impl ImageViewerApp {
     pub fn process_incoming_messages(&mut self, ctx: &egui::Context) {
         // 1. CHECK DE REFRESH MANUAL (F5)
@@ -162,7 +172,7 @@ impl ImageViewerApp {
                 }
                 FileOperationResult::RecycleBinChanged => {
                     if self.is_recycle_bin_view {
-                        eprintln!("[RECYCLE] Operation finished, refreshing view.");
+                        debug_log!("[RECYCLE] Operation finished, refreshing view.");
                         self.setup_recycle_bin_view();
                         // CRITICAL: Sync back to tab so tab_manager knows we are still in Lixeira
                         self.sync_to_tab();
@@ -244,7 +254,7 @@ impl ImageViewerApp {
                     crate::workers::thumbnail::clear_all_failures();
 
                     if dest_str == current_str {
-                        eprintln!(
+                        debug_log!(
                             "[COPY] Dest folder matches current view, reloading: {}",
                             self.current_path
                         );
@@ -275,7 +285,7 @@ impl ImageViewerApp {
                     crate::workers::thumbnail::clear_all_failures();
 
                     if current_str == source_str {
-                        eprintln!(
+                        debug_log!(
                             "[MOVE] Source folder matches current view, reloading: {}",
                             self.current_path
                         );
@@ -294,7 +304,7 @@ impl ImageViewerApp {
 
                     // 2. Destination Logic (Item Added)
                     if current_str == dest_str {
-                        eprintln!(
+                        debug_log!(
                             "[MOVE] Dest folder matches current view, reloading: {}",
                             self.current_path
                         );
@@ -358,7 +368,7 @@ impl ImageViewerApp {
 
                     // Destination logic
                     if current_str == dest_str {
-                        eprintln!(
+                        debug_log!(
                             "[MOVE-BATCH] Dest folder matches current view, reloading: {}",
                             self.current_path
                         );
@@ -433,7 +443,7 @@ impl ImageViewerApp {
                     if let Some(parent) = path.parent() {
                         let parent_norm = normalize_for_match(parent);
                         if parent_norm == current_path_norm {
-                            eprintln!("[FS-WATCH] CREATE: {:?}", path.file_name().unwrap_or_default());
+                            debug_log!("[FS-WATCH] CREATE: {:?}", path.file_name().unwrap_or_default());
                             self.pending_auto_reload = true;
                         }
                     }
@@ -450,7 +460,7 @@ impl ImageViewerApp {
                     if let Some(parent) = path.parent() {
                         let parent_norm = normalize_for_match(parent);
                         if parent_norm == current_path_norm {
-                            eprintln!("[FS-WATCH] DELETE: {:?}", path.file_name().unwrap_or_default());
+                            debug_log!("[FS-WATCH] DELETE: {:?}", path.file_name().unwrap_or_default());
                             
                             // SMART DELETE: Remove da UI sem reload completo
                             let path_to_remove = cleaned.clone();
@@ -470,7 +480,7 @@ impl ImageViewerApp {
                                     .collect();
                                 self.items = Arc::new(filtered);
                                 self.total_items = self.items.len();
-                                eprintln!("[FS-WATCH] SMART DELETE: Removed from UI without reload");
+                                debug_log!("[FS-WATCH] SMART DELETE: Removed from UI without reload");
                                 
                                 // Ajusta seleção se necessário
                                 if let Some(selected) = self.selected_item {
@@ -501,7 +511,7 @@ impl ImageViewerApp {
                     if let Some(parent) = path.parent() {
                         let parent_norm = normalize_for_match(parent);
                         if parent_norm == current_path_norm {
-                            eprintln!("[FS-WATCH] MODIFY: {:?}", path.file_name().unwrap_or_default());
+                            debug_log!("[FS-WATCH] MODIFY: {:?}", path.file_name().unwrap_or_default());
                             self.pending_auto_reload = true;
                         }
                     }
@@ -553,7 +563,7 @@ impl ImageViewerApp {
                                 self.directory_cache.invalidate(&parent.to_path_buf());
                             }
                             self.directory_cache.invalidate_children(&cleaned);
-                            eprintln!(
+                            debug_log!(
                                 "[FS-WATCH-LEGACY] REMOVE: {:?}",
                                 path.file_name().unwrap_or_default()
                             );
@@ -574,7 +584,7 @@ impl ImageViewerApp {
                                 if let Some(cache_parent) = cleaned.parent() {
                                     self.directory_cache.invalidate(&cache_parent.to_path_buf());
                                 }
-                                eprintln!(
+                                debug_log!(
                                     "[FS] Direct subfolder modified: {:?}",
                                     cleaned.file_name()
                                 );
@@ -591,7 +601,7 @@ impl ImageViewerApp {
                                         self.directory_cache
                                             .invalidate(&cache_parent.to_path_buf());
                                     }
-                                    eprintln!(
+                                        debug_log!(
                                         "[FS] File in subfolder modified, invalidating: {:?}",
                                         cleaned_parent.file_name()
                                     );
@@ -611,7 +621,7 @@ impl ImageViewerApp {
                         self.pending_auto_reload = true;
                     }
                 }
-                Err(e) => eprintln!("Erro de watch: {:?}", e),
+                Err(e) => debug_log!("Erro de watch: {:?}", e),
             }
         }
         } // Fecha o if !drive_watcher_active
@@ -623,13 +633,13 @@ impl ImageViewerApp {
         if self.skip_next_auto_reload {
             self.skip_next_auto_reload = false;
             self.pending_auto_reload = false;
-            eprintln!("[DEBUG] Skipping auto-reload - UI already updated by smart delete");
+            debug_log!("[DEBUG] Skipping auto-reload - UI already updated by smart delete");
         }
         
         if self.pending_auto_reload && self.file_ops_in_progress == 0 {
             let elapsed = self.last_auto_reload.elapsed();
             if elapsed > Duration::from_millis(theme::AUTO_RELOAD_MS) {
-                eprintln!(
+                debug_log!(
                     "[DEBUG] Checking auto-reload for path: '{}'",
                     self.current_path
                 );
@@ -637,7 +647,7 @@ impl ImageViewerApp {
                 if self.is_recycle_bin_view || self.is_computer_view {
                     self.pending_auto_reload = false;
                 } else {
-                    eprintln!("[DEBUG] Auto-reloading with force_refresh=false (watcher-triggered).");
+                    debug_log!("[DEBUG] Auto-reloading with force_refresh=false (watcher-triggered).");
                     // PERFORMANCE: Use force_refresh=false for watcher-triggered reloads.
                     // force_refresh=true clears ALL caches (textures, thumbnails, folder covers),
                     // empties the items list, and causes a white screen on HDD while rescanning.
