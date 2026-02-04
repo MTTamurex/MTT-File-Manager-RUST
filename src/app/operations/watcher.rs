@@ -21,15 +21,33 @@ impl ImageViewerApp {
         let current_path = self.current_path.clone();
         eprintln!("[WATCHER] Setting up for: {}", current_path);
         
-        // NOVO: Ativa drive-wide watcher (File Pilot optimization)
-        // Isso monitora o drive inteiro e filtra eventos pelo prefixo atual
+        // Tenta usar drive-wide watcher primeiro (File Pilot optimization)
         let path_buf = PathBuf::from(&current_path);
-        eprintln!("[WATCHER] Calling drive_watcher.watch_path({:?})", path_buf);
-        self.drive_watcher.watch_path(path_buf);
-        eprintln!("[WATCHER] drive_watcher active drives: {:?}",
-            if self.drive_watcher.is_active() { "active" } else { "inactive" });
         
-        // LEGACY: Mantém notify-watcher como fallback para compatibilidade
+        // Drive watcher só funciona para drives locais (C:\, D:\, etc.)
+        // NÃO funciona para UNC paths (\\server\share) ou drives de rede
+        let is_local_drive = path_buf.to_string_lossy().chars().nth(1) == Some(':');
+        
+        if is_local_drive {
+            eprintln!("[WATCHER] Using DRIVE-WATCHER for local drive: {:?}", path_buf);
+            self.drive_watcher.watch_path(path_buf);
+            
+            // Se drive watcher está ativo, NÃO usa notify (evita duplicados)
+            if self.drive_watcher.is_active() {
+                eprintln!("[WATCHER] Drive watcher is active - skipping notify-watcher");
+                // Drop notify watcher se existir para economizar recursos
+                #[cfg(feature = "notify-watcher")]
+                if self.watcher.is_some() {
+                    eprintln!("[WATCHER] Dropping notify-watcher to save resources");
+                    self.watcher = None;
+                }
+                return;
+            }
+        } else {
+            eprintln!("[WATCHER] UNC/Network path detected - using notify-watcher only");
+        }
+        
+        // FALLBACK: Usa notify-watcher para UNC paths ou se drive watcher falhou
         #[cfg(feature = "notify-watcher")]
         self.setup_notify_watcher();
     }
