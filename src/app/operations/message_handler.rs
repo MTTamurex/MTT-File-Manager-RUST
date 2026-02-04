@@ -724,6 +724,21 @@ impl ImageViewerApp {
             if thumbnail_data.image_data.is_empty() {
                 self.cache_manager
                     .mark_as_failed(thumbnail_data.path.clone());
+
+                // Stale folder cover cleanup: file was deleted from disk
+                // Remove stale DB entry and re-discover a new cover asynchronously
+                if thumbnail_data.not_found {
+                    let failed = &thumbnail_data.path;
+                    for item in self.all_items.iter_mut() {
+                        if item.folder_cover.as_ref() == Some(failed) {
+                            let folder = item.path.clone();
+                            item.folder_cover = None;
+                            self.disk_cache.remove_folder_cover(&folder);
+                            let _ = self.cover_worker_sender.send(folder);
+                        }
+                    }
+                }
+
                 continue;
             }
 

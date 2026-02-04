@@ -428,6 +428,12 @@ impl ThumbnailDiskCache {
                 "DELETE FROM folder_covers WHERE folder_path LIKE ?",
                 [&pattern],
             );
+            // Exact match: this file IS a folder cover
+            let _ = db.execute(
+                "DELETE FROM folder_covers WHERE cover_path = ?",
+                [&path_str],
+            );
+            // Children match: covers inside a deleted folder
             let _ = db.execute(
                 "DELETE FROM folder_covers WHERE cover_path LIKE ?",
                 [&pattern],
