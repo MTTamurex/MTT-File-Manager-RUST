@@ -104,6 +104,7 @@ impl ImageViewerApp {
             }
         }
 
+        // PERFORMANCE: Helper function for case-insensitive path comparison
         fn normalize_for_match(p: &Path) -> String {
             let s = p.to_string_lossy().to_string().to_lowercase();
             if let Some(stripped) = s.strip_prefix(r"\\?\") {
@@ -112,6 +113,9 @@ impl ImageViewerApp {
                 s
             }
         }
+
+        // PERFORMANCE: Precompute normalized current path once for all comparisons
+        let current_path_norm = normalize_for_match(Path::new(&self.current_path));
 
         // BLOCKING: Process all available file operation results in batch
         loop {
@@ -124,7 +128,6 @@ impl ImageViewerApp {
                     new_name,
                     parent_folder,
                 } => {
-                    let current_str = normalize_for_match(Path::new(&self.current_path));
                     let parent_str = normalize_for_match(parent_folder.as_path());
                     // PERFORMANCE: Cache path normalization to avoid redundant allocations
                     let path_str = normalize_for_match(&path);
@@ -162,7 +165,7 @@ impl ImageViewerApp {
                             tab.all_items.clear();
                         }
                     }
-                    if parent_str == current_str {
+                    if parent_str == current_path_norm {
                         // After reload + re-sort, select and scroll to the renamed item
                         let new_path = parent_folder.join(&new_name);
                         self.pending_select_path = Some(new_path);
@@ -179,7 +182,6 @@ impl ImageViewerApp {
                     }
                 }
                 FileOperationResult::RestoreCompleted { parent_folders } => {
-                    let current_str = normalize_for_match(Path::new(&self.current_path));
                     let mut should_reload_current = false;
 
                     for parent in parent_folders {
@@ -189,7 +191,7 @@ impl ImageViewerApp {
                         }
 
                         let parent_str = normalize_for_match(parent.as_path());
-                        if parent_str == current_str {
+                        if parent_str == current_path_norm {
                             should_reload_current = true;
                         }
 
@@ -208,7 +210,6 @@ impl ImageViewerApp {
                     }
                 }
                 FileOperationResult::DeleteCompleted { parent_folders } => {
-                    let current_str = normalize_for_match(Path::new(&self.current_path));
                     let mut should_reload_current = false;
                     for parent in parent_folders {
                         self.directory_cache.invalidate(&parent);
@@ -216,7 +217,7 @@ impl ImageViewerApp {
                             let _ = di.invalidate(&parent);
                         }
                         let parent_str = normalize_for_match(parent.as_path());
-                        if parent_str == current_str {
+                        if parent_str == current_path_norm {
                             should_reload_current = true;
                         }
                         for tab in self.tab_manager.tabs.iter_mut() {
@@ -234,7 +235,6 @@ impl ImageViewerApp {
                 }
                 FileOperationResult::CopyCompleted { dest_folder } => {
                     let dest_str = normalize_for_match(dest_folder.as_path());
-                    let current_str = normalize_for_match(Path::new(&self.current_path));
 
                     self.directory_cache.invalidate(&dest_folder);
                     if let Some(di) = &self.directory_index {
@@ -253,7 +253,7 @@ impl ImageViewerApp {
                     self.cache_manager.clear_failed();
                     crate::workers::thumbnail::clear_all_failures();
 
-                    if dest_str == current_str {
+                    if dest_str == current_path_norm {
                         debug_log!(
                             "[COPY] Dest folder matches current view, reloading: {}",
                             self.current_path
@@ -268,7 +268,6 @@ impl ImageViewerApp {
                 } => {
                     let source_str = normalize_for_match(source_folder.as_path());
                     let dest_str = normalize_for_match(dest_folder.as_path());
-                    let current_str = normalize_for_match(Path::new(&self.current_path));
 
                     // 1. Source Logic (Item Removed)
                     self.directory_cache.invalidate(&source_folder);
@@ -284,7 +283,7 @@ impl ImageViewerApp {
                     self.cache_manager.clear_failed();
                     crate::workers::thumbnail::clear_all_failures();
 
-                    if current_str == source_str {
+                    if current_path_norm == source_str {
                         debug_log!(
                             "[MOVE] Source folder matches current view, reloading: {}",
                             self.current_path
@@ -303,7 +302,7 @@ impl ImageViewerApp {
                     }
 
                     // 2. Destination Logic (Item Added)
-                    if current_str == dest_str {
+                    if current_path_norm == dest_str {
                         debug_log!(
                             "[MOVE] Dest folder matches current view, reloading: {}",
                             self.current_path
@@ -317,7 +316,6 @@ impl ImageViewerApp {
                     dest_folder,
                 } => {
                     let dest_str = normalize_for_match(dest_folder.as_path());
-                    let current_str = normalize_for_match(Path::new(&self.current_path));
 
                     // Clear thumbnail failure caches for retry after move completes
                     self.cache_manager.clear_failed();
@@ -339,7 +337,7 @@ impl ImageViewerApp {
                     let mut should_reload = false;
                     for source_folder in &source_folders {
                         let source_str = normalize_for_match(source_folder.as_path());
-                        if current_str == source_str {
+                        if current_path_norm == source_str {
                             should_reload = true;
                         }
                         // Clear tab caches for source folders
@@ -367,7 +365,7 @@ impl ImageViewerApp {
                     }
 
                     // Destination logic
-                    if current_str == dest_str {
+                    if current_path_norm == dest_str {
                         debug_log!(
                             "[MOVE-BATCH] Dest folder matches current view, reloading: {}",
                             self.current_path
@@ -410,7 +408,6 @@ impl ImageViewerApp {
             }
         }
 
-        let current_path_norm = normalize_for_match(Path::new(&self.current_path));
         // PERFORMANCE: Filter by file name only - no filesystem I/O.
         // Hidden/system attribute filtering is already done in load_folder().
         // Previously called std::fs::metadata() here which caused synchronous
