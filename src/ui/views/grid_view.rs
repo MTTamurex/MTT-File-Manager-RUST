@@ -437,8 +437,10 @@ pub fn render_grid_view(
         state.visual_scroll_y
     });
 
-    // Request repaint if we are still animating towards target
-    if visual_scroll != scroll_target {
+    // PERFORMANCE: Request repaint only if animation delta exceeds 0.5px threshold
+    // This prevents infinite repaints due to floating-point precision issues
+    let scroll_delta = (visual_scroll - scroll_target).abs();
+    if scroll_delta > 0.5 {
         ui.ctx().request_repaint_after(Duration::from_millis(16));
     }
 
@@ -450,8 +452,8 @@ pub fn render_grid_view(
         *ctx.last_scroll_time = std::time::Instant::now();
         *ctx.last_scroll_offset = *ctx.mut_scroll_offset_y;
     }
-    // Is scrolling if visual position is changing
-    let is_scrolling = visual_scroll != scroll_target;
+    // Is scrolling if visual position is changing (using same threshold)
+    let is_scrolling = scroll_delta > 0.5;
 
     // 2.5 KEYBOARD SCROLL SYNC: Ensure selected item is visible
     if ctx.scroll_to_selected {
@@ -518,8 +520,13 @@ pub fn render_grid_view(
         ctx.loading_set.retain(|path| keep_paths.contains(path));
     }
 
-    // STABLE OVERSCAN: Fixed value, no velocity dependency
-    let overscan = 2;
+    // PERFORMANCE: Adaptive overscan based on scroll velocity
+    // Higher velocity = more overscan to prevent white areas during fast scroll
+    let overscan = if is_scrolling {
+        if ctx.scroll_predictor.velocity > 5.0 { 3 } else { 2 }
+    } else {
+        4 // More overscan when idle for smoother experience
+    };
 
     let pre_clamp_min_row = vis_min_row.saturating_sub(overscan);
     let pre_clamp_max_row = (vis_max_row + overscan).min(total_rows);

@@ -655,6 +655,10 @@ impl ImageViewerApp {
             // PERFORMANCE: Visible item range for GPU upload prioritization
             visible_index_range: None,
 
+            // PERFORMANCE: Cached visible paths set to avoid per-frame allocation during scroll
+            visible_paths_cache: FxHashSet::default(),
+            visible_range_cached: None,
+
             // PERFORMANCE: Scroll state tracking for adaptive GPU upload throttling
             last_scroll_time: Instant::now(),
             last_scroll_offset: 0.0,
