@@ -249,6 +249,11 @@ pub struct ImageViewerApp {
     // Set by grid/list view each frame; used by upload loop to prioritize on-screen items
     pub visible_index_range: Option<(usize, usize)>,
 
+    // PERFORMANCE: Cached visible paths set to avoid per-frame allocation during scroll
+    // Stores the last computed visible paths and the range that generated them
+    pub visible_paths_cache: FxHashSet<PathBuf>,
+    pub visible_range_cached: Option<(usize, usize)>,
+
     // PERFORMANCE: Scroll state tracking for adaptive GPU upload throttling
     pub last_scroll_time: Instant,
     pub last_scroll_offset: f32,

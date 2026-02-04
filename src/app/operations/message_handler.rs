@@ -816,7 +816,7 @@ impl ImageViewerApp {
                             [width as usize, height as usize],
                             &pixels,
                         ),
-                        egui::TextureOptions::NEAREST,
+                        egui::TextureOptions::LINEAR,
                     );
                     self.item_icon_loader.icon_cache.put(cache_key, texture);
                 }
@@ -978,20 +978,28 @@ impl ImageViewerApp {
         let upload_budget = Duration::from_millis(upload_budget_ms.round() as u64);
 
         // PERFORMANCE: Build set of visible item paths for upload prioritization
-        // During scroll, visible items get uploaded first; off-screen items are deferred
-        let visible_paths: Option<crate::ui::cache::FxHashSet<PathBuf>> = if is_scrolling {
-            self.visible_index_range.and_then(|(min_idx, max_idx)| {
-                let items = &self.items;
-                if items.is_empty() {
-                    return None;
+        // Uses cached set to avoid per-frame allocation during scroll
+        // Only rebuilds when visible_index_range changes
+        let visible_paths: Option<&crate::ui::cache::FxHashSet<PathBuf>> = if is_scrolling {
+            // Check if we need to rebuild the cache
+            if self.visible_range_cached != self.visible_index_range {
+                self.visible_paths_cache.clear();
+                if let Some((min_idx, max_idx)) = self.visible_index_range {
+                    let items = &self.items;
+                    if !items.is_empty() {
+                        let max_idx = max_idx.min(items.len().saturating_sub(1));
+                        for i in min_idx..=max_idx {
+                            self.visible_paths_cache.insert(items[i].path.clone());
+                        }
+                    }
                 }
-                let max_idx = max_idx.min(items.len().saturating_sub(1));
-                Some(
-                    (min_idx..=max_idx)
-                        .map(|i| items[i].path.clone())
-                        .collect(),
-                )
-            })
+                self.visible_range_cached = self.visible_index_range;
+            }
+            if self.visible_paths_cache.is_empty() {
+                None
+            } else {
+                Some(&self.visible_paths_cache)
+            }
         } else {
             None
         };
@@ -1041,33 +1049,31 @@ impl ImageViewerApp {
                     }
                 }
 
-                // PERFORMANCE: Store RGBA data in RAM cache before GPU upload
-                // This allows fast re-upload if texture is evicted from VRAM without disk I/O
+                // PERFORMANCE: Extract RGBA data BEFORE moving to cache to avoid round-trip
+                // Use local reference for GPU upload, then store in cache for future re-uploads
                 let path = thumbnail_data.path.clone();
                 let width = thumbnail_data.width;
                 let height = thumbnail_data.height;
+                let rgba_data = thumbnail_data.image_data; // Extract data before move
+
+                // Carrega textura no GPU using local data (no cache lookup needed)
+                let texture = ctx.load_texture(
+                    path.to_string_lossy().to_string(),
+                    egui::ColorImage::from_rgba_unmultiplied(
+                        [width as usize, height as usize],
+                        &rgba_data,
+                    ),
+                    egui::TextureOptions::LINEAR,
+                );
+
+                // Store RGBA data in RAM cache AFTER GPU upload for future re-uploads
+                // This allows fast re-upload if texture is evicted from VRAM without disk I/O
                 self.cache_manager.put_rgba_data(
                     path.clone(),
-                    thumbnail_data.image_data,
+                    rgba_data,
                     width,
                     height,
                 );
-
-                // Carrega textura no GPU
-                let texture =
-                    if let Some((rgba_data, _, _)) = self.cache_manager.get_rgba_data(&path) {
-                        ctx.load_texture(
-                            path.to_string_lossy().to_string(),
-                            egui::ColorImage::from_rgba_unmultiplied(
-                                [width as usize, height as usize],
-                                rgba_data,
-                            ),
-                            egui::TextureOptions::NEAREST,
-                        )
-                    } else {
-                        self.cache_manager.finish_pending_upload(&path);
-                        continue;
-                    };
 
                 self.cache_manager
                     .put_thumbnail(path.clone(), texture.clone());
@@ -1109,7 +1115,7 @@ impl ImageViewerApp {
                             [data.width as usize, data.height as usize],
                             &data.rgba_data,
                         ),
-                        egui::TextureOptions::NEAREST,
+                        egui::TextureOptions::LINEAR,
                     );
 
                     self.cache_manager.put_folder_preview(data.path, texture);

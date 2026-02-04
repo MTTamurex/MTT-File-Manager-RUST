@@ -7,17 +7,45 @@ mod item_renderer;
 mod virtualization;
 
 use eframe::egui::{self, Color32, FontId, Ui};
+use lru::LruCache;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 
 use crate::domain::file_entry::{FileEntry, SortMode};
 // PERFORMANCE: Use FxHashSet for PathBuf keys - faster hashing than std::collections::HashSet
 use crate::ui::cache::FxHashSet;
 
-// PERFORMANCE: Thread-local cache for font metrics to avoid redundant text layout calculations
+// PERFORMANCE: Thread-local cache for font metrics using u64 hash key with LRU eviction
+// Uses LruCache instead of HashMap to avoid full clear when limit is reached
+// Capacity: 5000 entries - least recently used entries are evicted automatically
 thread_local! {
-    static FONT_WIDTH_CACHE: RefCell<HashMap<(String, u32, Color32), f32>> = RefCell::new(HashMap::new());
+    static FONT_WIDTH_CACHE: RefCell<LruCache<u64, f32>> = RefCell::new(LruCache::new(NonZeroUsize::new(5000).unwrap()));
+}
+
+// PERFORMANCE: Thread-local cache for text truncation results to avoid redundant binary search
+// Key is hash of (text, max_width as bits), value is the truncated string
+thread_local! {
+    static TRUNCATION_CACHE: RefCell<HashMap<u64, String>> = RefCell::new(HashMap::with_capacity(2000));
+}
+
+/// Clear the truncation cache (call when column widths change)
+#[allow(dead_code)]
+pub fn clear_truncation_cache() {
+    TRUNCATION_CACHE.with(|cache| {
+        cache.borrow_mut().clear();
+    });
+}
+
+/// Compute hash key for (text, max_width) pair
+#[inline]
+fn truncation_cache_key(text: &str, max_width: f32) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    max_width.to_bits().hash(&mut hasher);
+    hasher.finish()
 }
 
 /// Clear the font width cache periodically to prevent unbounded growth
@@ -28,9 +56,20 @@ pub fn clear_font_width_cache() {
     });
 }
 
+/// Compute hash key for (text, font_size) pair
+/// PERFORMANCE: Uses precomputed hash to avoid String allocation for cache key
+#[inline]
+fn font_width_cache_key(text: &str, font_size: u32) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.as_bytes().hash(&mut hasher);
+    font_size.hash(&mut hasher);
+    hasher.finish()
+}
+
 /// Get text width from cache or compute and cache it
-fn get_cached_text_width(text: &str, font_id: &FontId, color: Color32, ui: &Ui) -> f32 {
-    let key = (text.to_string(), font_id.size as u32, color);
+/// PERFORMANCE: Uses u64 hash key instead of (String, u32, Color32) to avoid String allocation
+fn get_cached_text_width(text: &str, font_id: &FontId, _color: Color32, ui: &Ui) -> f32 {
+    let key = font_width_cache_key(text, font_id.size as u32);
 
     FONT_WIDTH_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
@@ -39,13 +78,10 @@ fn get_cached_text_width(text: &str, font_id: &FontId, color: Color32, ui: &Ui) 
             return width;
         }
 
-        // Limit cache size to prevent unbounded growth
-        if cache.len() > 5000 {
-            cache.clear();
-        }
-
-        let width = ui.fonts(|f| f.layout_no_wrap(text.to_string(), font_id.clone(), color).rect.width());
-        cache.insert(key, width);
+        // PERFORMANCE: Use provided Color32 for layout (API requirement), but don't include in key
+        // since text width is independent of color
+        let width = ui.fonts(|f| f.layout_no_wrap(text.to_string(), font_id.clone(), _color).rect.width());
+        cache.put(key, width);
         width
     })
 }
@@ -54,11 +90,30 @@ fn get_cached_text_width(text: &str, font_id: &FontId, color: Color32, ui: &Ui) 
 /// PERFORMANCE: Uses byte-position slicing instead of chars().take().collect() to avoid
 /// String allocations on each binary search iteration. Only one String is created at the end.
 /// Also uses font width cache to avoid redundant text layout calculations.
+/// Cache: Uses thread-local cache keyed by (text, max_width) to avoid recomputation.
 pub(crate) fn truncate_text_for_column(text: &str, max_width: f32, font_id: &FontId, ui: &Ui) -> String {
+    // PERFORMANCE: Check cache first using hash of (text, max_width)
+    let cache_key = truncation_cache_key(text, max_width);
+    let cached_result = TRUNCATION_CACHE.with(|cache| {
+        cache.borrow().get(&cache_key).cloned()
+    });
+    if let Some(result) = cached_result {
+        return result;
+    }
+
     // Quick check: does full text fit?
     let full_width = get_cached_text_width(text, font_id, Color32::WHITE, ui);
     if full_width <= max_width {
-        return text.to_string();
+        let result = text.to_string();
+        // Cache the result
+        TRUNCATION_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if cache.len() > 2000 {
+                cache.clear();
+            }
+            cache.insert(cache_key, result.clone());
+        });
+        return result;
     }
 
     let ellipsis = "...";
@@ -66,7 +121,16 @@ pub(crate) fn truncate_text_for_column(text: &str, max_width: f32, font_id: &Fon
     let available_width = max_width - ellipsis_width;
 
     if available_width <= 0.0 {
-        return ellipsis.to_string();
+        let result = ellipsis.to_string();
+        // Cache the result
+        TRUNCATION_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if cache.len() > 2000 {
+                cache.clear();
+            }
+            cache.insert(cache_key, result.clone());
+        });
+        return result;
     }
 
     // Build char boundary table once (byte positions of each char boundary)
@@ -74,7 +138,16 @@ pub(crate) fn truncate_text_for_column(text: &str, max_width: f32, font_id: &Fon
     let char_count = char_boundaries.len();
 
     if char_count == 0 {
-        return ellipsis.to_string();
+        let result = ellipsis.to_string();
+        // Cache the result
+        TRUNCATION_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if cache.len() > 2000 {
+                cache.clear();
+            }
+            cache.insert(cache_key, result.clone());
+        });
+        return result;
     }
 
     // Binary search on char index, using &str slices (no allocation per iteration)
@@ -95,13 +168,32 @@ pub(crate) fn truncate_text_for_column(text: &str, max_width: f32, font_id: &Fon
     }
 
     if left == 0 {
-        return ellipsis.to_string();
+        let result = ellipsis.to_string();
+        // Cache the result
+        TRUNCATION_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if cache.len() > 2000 {
+                cache.clear();
+            }
+            cache.insert(cache_key, result.clone());
+        });
+        return result;
     }
 
     let byte_end = if left < char_count { char_boundaries[left] } else { text.len() };
     let mut result = String::with_capacity(byte_end + 3);
     result.push_str(&text[..byte_end]);
     result.push_str(ellipsis);
+    
+    // Cache the result before returning
+    TRUNCATION_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.len() > 2000 {
+            cache.clear();
+        }
+        cache.insert(cache_key, result.clone());
+    });
+    
     result
 }
 
