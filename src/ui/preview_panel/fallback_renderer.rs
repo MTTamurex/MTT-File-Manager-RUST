@@ -41,7 +41,7 @@ pub fn render_fallback(
         } else {
             ui.label(egui::RichText::new("🗑").size(icon_size * 0.6));
         }
-    } else if file.is_dir && !file.name.to_lowercase().ends_with(".zip") {
+    } else if file.is_dir && !file.is_zip() {
         // PASTA (Exceto Zip)
         if is_recycle_bin_view {
             item_icon_loader.ensure_folder_icon(ui.ctx());
@@ -113,7 +113,7 @@ pub fn render_fallback(
     } else {
         // IS FILE (or Zip Archive)
         // Force is_folder=false for Zip archives to get the Zip Icon
-        let is_zip_archive = file.name.to_lowercase().ends_with(".zip");
+        let is_zip_archive = file.is_zip();
         let treat_as_folder = file.is_dir && !is_zip_archive;
 
         if let Some(icon) = item_icon_loader.get_or_load_icon_sized(

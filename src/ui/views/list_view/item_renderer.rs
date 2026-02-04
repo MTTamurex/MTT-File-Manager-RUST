@@ -265,7 +265,7 @@ fn render_item_tooltip(
                         ui.label(RichText::new(&item.name).strong());
                         ui.separator();
                         ui.label(format!("Tipo: {}", get_file_type_string(item)));
-                        let is_zip = item.name.to_lowercase().ends_with(".zip");
+                        let is_zip = item.is_zip();
                         if !item.is_dir || is_zip {
                             ui.label(format!("Tamanho: {}", format_size(item.size)));
                         }
@@ -328,7 +328,7 @@ fn render_item_icon(
                 Color32::GRAY,
             );
         }
-    } else if item.is_dir && !item.name.to_lowercase().ends_with(".zip") {
+    } else if item.is_dir && !item.is_zip() {
         // folder: Windows native icon
         // PERFORMANCE: Single to_string_lossy() + to_lowercase() instead of two
         let path_lower = item.path.to_string_lossy().to_lowercase();
@@ -492,7 +492,7 @@ fn render_regular_columns(
     );
 
     // 4. Size
-    let is_zip = item.name.to_lowercase().ends_with(".zip");
+    let is_zip = item.is_zip();
     let size_str = if item.is_dir && !is_zip {
         "".to_string()
     } else {
