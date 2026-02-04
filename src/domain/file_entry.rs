@@ -67,6 +67,18 @@ impl FileEntry {
         }
     }
 
+    /// PERFORMANCE: Check if this file is a media file (video, audio, or image)
+    /// This method computes the value on-demand to avoid storing it in FileEntry
+    pub fn is_media(&self) -> bool {
+        if self.is_dir {
+            return false;
+        }
+        self.path
+            .extension()
+            .map(|ext| crate::infrastructure::windows::is_media_extension(&ext.to_string_lossy()))
+            .unwrap_or(false)
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
     }

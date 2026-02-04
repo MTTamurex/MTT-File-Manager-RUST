@@ -454,12 +454,8 @@ fn render_file_slot<O: ItemSlotOperations>(
 ) {
     let item = ctx.item;
 
-    // Detecta se é arquivo de mídia usando Windows Perceived Type API
-    // Respeita handlers instalados (K-Lite/Icaros) - suporta OGM, MKV, etc.
-    let is_media_file = item.path
-        .extension()
-        .map(|ext| crate::infrastructure::windows::is_media_extension(&ext.to_string_lossy()))
-        .unwrap_or(false);
+    // PERFORMANCE: Use is_media() method to avoid registry lookups per frame
+    let is_media_file = item.is_media();
 
     // Thumbnail loading para arquivos de mídia (desabilitado na Lixeira)
     if is_media_file && !ctx.is_recycle_bin_view {

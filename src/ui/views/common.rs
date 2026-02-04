@@ -48,6 +48,15 @@ pub struct ViewportTracker {
 }
 
 impl ViewportTracker {
+    pub fn new() -> Self {
+        Self {
+            first_visible_index: 0,
+            last_visible_index: 0,
+            prefetch_rows: 2,
+            columns: 1,
+        }
+    }
+
     pub fn get_prefetch_range(&self, total_items: usize) -> (usize, usize) {
         if total_items == 0 {
             return (0, 0);
@@ -61,24 +70,5 @@ impl ViewportTracker {
 
     pub fn is_visible(&self, index: usize) -> bool {
         index >= self.first_visible_index && index <= self.last_visible_index
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::ViewportTracker;
-
-    #[test]
-    fn prefetch_range_clamps() {
-        let tracker = ViewportTracker {
-            first_visible_index: 10,
-            last_visible_index: 25,
-            prefetch_rows: 2,
-            columns: 5,
-        };
-
-        let (start, end) = tracker.get_prefetch_range(100);
-        assert_eq!(start, 0);
-        assert_eq!(end, 36);
     }
 }

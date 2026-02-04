@@ -44,8 +44,8 @@ pub fn render_file_info_table(
 
                 // 2. Refresh Button (Right aligned)
                 if has_button {
-                    let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                    let is_media = crate::infrastructure::windows::is_media_extension(extension);
+                    // PERFORMANCE: Use is_media() method
+                    let is_media = file.is_media();
 
                     if is_media {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
