@@ -340,8 +340,34 @@ $env:RUST_LOG="debug"           # Logging detalhado (se implementado)
 Este projeto é **Windows-only** devido ao uso extensivo de Windows APIs. Não tente compilar para outras plataformas.
 
 ### Features do Cargo
-- `notify-watcher` (padrão) - Habilita monitoramento de filesystem
+- `notify-watcher` (padrão) - Habilita monitoramento de filesystem via notify crate
+- Drive Watcher (sempre ativo) - Monitoramento otimizado via ReadDirectoryChangesW (Windows nativo)
 - Para build sem watcher: `cargo build --no-default-features`
+
+### File System Watching
+O projeto usa duas implementações de file watching:
+
+1. **Drive Watcher (File Pilot optimization)** - Sistema primário
+   - Usa `ReadDirectoryChangesW` diretamente no drive raiz (ex: `C:\`)
+   - Monitora drive inteiro, filtra eventos por pasta atual
+   - Zero overhead na navegação (não recria watchers)
+   - Arquivos: `src/infrastructure/drive_watcher.rs`, `drive_watcher_integration.rs`
+   - Documentação: `docs/10_file_pilot_optimizations.md`
+
+2. **Notify Watcher** - Sistema legacy (fallback)
+   - Usa crate `notify` para monitorar pasta individual
+   - Recria watcher a cada navegação (overhead)
+   - Mantido como fallback para UNC paths (`\\server\share`)
+   - Arquivo: `src/infrastructure/watcher.rs`
+
+### Seleção Automática
+```rust
+if is_local_drive(path) {
+    use drive_watcher;  // Preferido
+} else {
+    use notify_watcher; // UNC paths
+}
+```
 
 ### Profile de Release
 ```toml
