@@ -10,10 +10,34 @@ use crate::app::state::ImageViewerApp;
 
 impl ImageViewerApp {
     /// Configura o monitoramento da pasta atual
-    #[cfg(feature = "notify-watcher")]
+    ///
+    /// USO DUAL:
+    /// 1. Novo: Drive-wide watcher (monitora drive inteiro, filtra por prefixo)
+    /// 2. Legacy: notify-watcher (monitora pasta específica)
+    ///
+    /// O drive watcher é mais eficiente para navegação rápida pois não precisa
+    /// recriar o watcher a cada mudança de pasta no mesmo drive.
     pub fn watch_current_folder(&mut self) {
         let current_path = self.current_path.clone();
-        eprintln!("[NOTIFY-WATCHER] Setting up watcher for: {}", current_path);
+        eprintln!("[WATCHER] Setting up for: {}", current_path);
+        
+        // NOVO: Ativa drive-wide watcher (File Pilot optimization)
+        // Isso monitora o drive inteiro e filtra eventos pelo prefixo atual
+        let path_buf = PathBuf::from(&current_path);
+        eprintln!("[WATCHER] Calling drive_watcher.watch_path({:?})", path_buf);
+        self.drive_watcher.watch_path(path_buf);
+        eprintln!("[WATCHER] drive_watcher active drives: {:?}",
+            if self.drive_watcher.is_active() { "active" } else { "inactive" });
+        
+        // LEGACY: Mantém notify-watcher como fallback para compatibilidade
+        #[cfg(feature = "notify-watcher")]
+        self.setup_notify_watcher();
+    }
+    
+    /// Setup legacy notify-based watcher (fallback)
+    #[cfg(feature = "notify-watcher")]
+    fn setup_notify_watcher(&mut self) {
+        let current_path = self.current_path.clone();
 
         // Canonicaliza o path para compatibilidade com Windows
         let path_to_watch = if let Ok(p) = Path::new(&current_path).canonicalize() {

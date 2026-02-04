@@ -145,6 +145,10 @@ pub struct ImageViewerApp {
     pub focus_rename: bool,                      // Trigger para focar no input
 
     // SISTEMA DE WATCHER (AUTO-REFRESH)
+    // Drive-wide watcher (novo - monitora drive inteiro)
+    pub drive_watcher: crate::infrastructure::drive_watcher_integration::DriveWatcherManager,
+    
+    // Legacy notify-based watcher (fallback)
     #[cfg(feature = "notify-watcher")]
     pub watcher: Option<RecommendedWatcher>,
     #[cfg(feature = "notify-watcher")]
