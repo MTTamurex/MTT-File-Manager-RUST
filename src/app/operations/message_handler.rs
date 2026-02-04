@@ -420,6 +420,9 @@ impl ImageViewerApp {
         };
 
         // Drive-wide watcher (File Pilot optimization)
+        // Check for pending watcher activation after startup delay
+        self.drive_watcher.check_pending_activation();
+        
         let drive_events = self.drive_watcher.poll_events();
         let drive_watcher_active = !drive_events.is_empty();
         for event in drive_events {
