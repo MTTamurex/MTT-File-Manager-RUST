@@ -436,9 +436,9 @@ impl ThumbnailDiskCache {
                 [&pattern],
             );
 
-            // Se deletou algo, roda VACUUM
+            // Log cleanup (VACUUM is not called here to avoid UI thread blocking;
+            // it runs during garbage_collect() which is called at controlled times)
             if deleted > 0 {
-                let _ = db.execute("VACUUM", []);
                 eprintln!("[Cache] Cleaned {} entries for: {}", deleted, path_str);
             }
         }
