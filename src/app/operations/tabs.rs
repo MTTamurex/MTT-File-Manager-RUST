@@ -7,6 +7,8 @@ use crate::app::state::ImageViewerApp;
 
 impl ImageViewerApp {
     pub fn sync_to_tab(&mut self) {
+        eprintln!("[TAB-SYNC] sync_to_tab: saving app.view_mode={:?} to tab[{}] (id={})",
+            self.view_mode, self.tab_manager.active_tab, self.tab_manager.active().id);
         let active = self.tab_manager.active_mut();
         active.path = self.current_path.clone();
         active.path_input = self.path_input.clone();
@@ -27,6 +29,11 @@ impl ImageViewerApp {
         active.scroll_offset_y = self.scroll_offset_y;
         active.total_items = self.total_items;
         active.view_mode = self.view_mode;
+        // PERF: Move instead of clone for multi_selection (same pattern as all_items)
+        active.multi_selection = std::mem::take(&mut self.multi_selection);
+        active.sort_mode = self.sort_mode;
+        active.sort_descending = self.sort_descending;
+        active.folders_position = self.folders_position;
 
         // No Windows, Path::new("Este Computador").file_name() é None
         if active.is_computer_view {
@@ -41,6 +48,9 @@ impl ImageViewerApp {
 
     /// Sincroniza o estado da aba ativa para o app
     pub fn sync_from_tab(&mut self) {
+        eprintln!("[TAB-SYNC] sync_from_tab: loading tab[{}] (id={}) view_mode={:?} into app (current app.view_mode={:?})",
+            self.tab_manager.active_tab, self.tab_manager.active().id,
+            self.tab_manager.active().view_mode, self.view_mode);
         {
             let active = self.tab_manager.active_mut();
             self.current_path = active.path.clone();
@@ -60,6 +70,10 @@ impl ImageViewerApp {
             self.scroll_offset_y = active.scroll_offset_y;
             self.total_items = active.total_items;
             self.view_mode = active.view_mode;
+            self.multi_selection = std::mem::take(&mut active.multi_selection);
+            self.sort_mode = active.sort_mode;
+            self.sort_descending = active.sort_descending;
+            self.folders_position = active.folders_position;
         }
 
         self.watch_current_folder();

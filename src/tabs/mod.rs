@@ -7,7 +7,8 @@
 //! - Sort preferences
 
 use crate::application::navigation::NavigationHistory;
-use crate::domain::file_entry::{FileEntry, ViewMode};
+use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
+use rustc_hash::FxHashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -52,6 +53,14 @@ pub struct TabState {
     pub total_items: usize,
     /// View mode for this tab (Grid or List)
     pub view_mode: ViewMode,
+    /// Multi-selection set for this tab
+    pub multi_selection: FxHashSet<PathBuf>,
+    /// Sort mode for this tab
+    pub sort_mode: SortMode,
+    /// Sort direction for this tab
+    pub sort_descending: bool,
+    /// Folders position for this tab
+    pub folders_position: FoldersPosition,
 }
 
 impl TabState {
@@ -77,6 +86,10 @@ impl TabState {
             scroll_offset_y: 0.0,
             total_items: 0,
             view_mode: ViewMode::Grid,
+            multi_selection: FxHashSet::default(),
+            sort_mode: SortMode::Name,
+            sort_descending: false,
+            folders_position: FoldersPosition::First,
         }
     }
 
@@ -107,6 +120,10 @@ impl TabState {
             scroll_offset_y: 0.0,
             total_items: 0,
             view_mode: ViewMode::Grid,
+            multi_selection: FxHashSet::default(),
+            sort_mode: SortMode::Name,
+            sort_descending: false,
+            folders_position: FoldersPosition::First,
         }
     }
 
@@ -269,6 +286,10 @@ impl TabManager {
         new_tab.search_query = current.search_query.clone();
         new_tab.total_items = current.total_items;
         new_tab.view_mode = current.view_mode;
+        new_tab.multi_selection = current.multi_selection.clone();
+        new_tab.sort_mode = current.sort_mode;
+        new_tab.sort_descending = current.sort_descending;
+        new_tab.folders_position = current.folders_position;
 
         self.next_id += 1;
 
@@ -347,6 +368,10 @@ impl TabManager {
             reopened.search_query = tab.search_query;
             reopened.total_items = tab.total_items;
             reopened.view_mode = tab.view_mode;
+            reopened.multi_selection = tab.multi_selection;
+            reopened.sort_mode = tab.sort_mode;
+            reopened.sort_descending = tab.sort_descending;
+            reopened.folders_position = tab.folders_position;
 
             self.next_id += 1;
 

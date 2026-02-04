@@ -77,9 +77,16 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         };
 
                         let prev_view_mode = app.view_mode;
+                        let prev_sort_mode = app.sort_mode;
+                        let prev_sort_descending = app.sort_descending;
+                        let prev_folders_position = app.folders_position;
                         app.sync_to_tab();
                         app.tab_manager.new_tab_at(&target.to_string_lossy());
-                        app.tab_manager.active_mut().view_mode = prev_view_mode;
+                        let active = app.tab_manager.active_mut();
+                        active.view_mode = prev_view_mode;
+                        active.sort_mode = prev_sort_mode;
+                        active.sort_descending = prev_sort_descending;
+                        active.folders_position = prev_folders_position;
                         app.sync_from_tab();
 
                         if app.is_computer_view {

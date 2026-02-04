@@ -215,10 +215,17 @@ fn render_tab_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context, frame: &m
                 }
                 TabBarAction::NewTab => {
                     let prev_view_mode = app.view_mode;
+                    let prev_sort_mode = app.sort_mode;
+                    let prev_sort_descending = app.sort_descending;
+                    let prev_folders_position = app.folders_position;
                     app.sync_to_tab();
                     let current_path = app.tab_manager.active().path.clone();
                     app.tab_manager.new_tab_at(&current_path);
-                    app.tab_manager.active_mut().view_mode = prev_view_mode;
+                    let active = app.tab_manager.active_mut();
+                    active.view_mode = prev_view_mode;
+                    active.sort_mode = prev_sort_mode;
+                    active.sort_descending = prev_sort_descending;
+                    active.folders_position = prev_folders_position;
                     app.sync_from_tab();
                     if current_path == "Este Computador" {
                         app.setup_computer_view();
@@ -330,6 +337,7 @@ fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         } else {
                             app.view_mode = ViewMode::List;
                         }
+                        eprintln!("[VIEW-MODE] Toolbar toggle -> {:?} (tab={})", app.view_mode, app.tab_manager.active_tab);
                     }
                     ToolbarAction::TogglePreviewPanel => {
                         app.show_preview_panel = !app.show_preview_panel;
