@@ -109,7 +109,7 @@ pub fn render_file_info_table(
             } else if let Some(drive) = &file.drive_info {
                 add_detail(ui, "Tipo:", format!("{:?}", drive.drive_type));
             } else if file.is_dir {
-                if file.name.to_lowercase().ends_with(".zip") {
+                if file.is_zip() {
                     add_detail(ui, "Tipo:", "Arquivo ZIP".to_string());
                 } else {
                     add_detail(ui, "Tipo:", "Pasta de Arquivos".to_string());

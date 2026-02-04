@@ -74,6 +74,21 @@ impl FileEntry {
     pub fn name(&self) -> &str {
         &self.name
     }
+
+    pub fn is_zip(&self) -> bool {
+        ends_with_ignore_case(&self.name, ".zip")
+    }
+}
+
+pub fn ends_with_ignore_case(s: &str, suffix: &str) -> bool {
+    if s.len() < suffix.len() {
+        return false;
+    }
+    let start = s.len() - suffix.len();
+    s.as_bytes()[start..]
+        .iter()
+        .zip(suffix.as_bytes())
+        .all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
 }
 
 /// Helper para exibir tipo do arquivo na Lista
