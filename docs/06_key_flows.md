@@ -418,10 +418,91 @@ eprintln!("[WORKERS] thumbnails_pending={}, icons_loading={}",
     Tee-Object "debug.log"
 
 # Com timestamp
-.\target\release\mtt-file-manager.exe 2>&1 | 
+.\target\release\mtt-file-manager.exe 2>&1 |
     ForEach-Object { "[{0}] {1}" -f (Get-Date -Format "HH:mm:ss"), $_ }
 ```
 
 ---
 
-*Última atualização: 2026-02-03 (pós-refatoração)*
+## 8. Drive Watcher (File System Events)
+
+### Sequência de Chamadas
+```
+User navigates to folder (e.g., "C:\Users\Name")
+    ↓
+src/app/operations/watcher.rs - watch_current_folder()
+    ↓
+src/infrastructure/drive_watcher_integration.rs - watch_path()
+    ↓
+src/infrastructure/drive_watcher.rs - DriveWatcher::new()
+    ↓
+[Thread] watcher_thread_main() - ReadDirectoryChangesW(handle, "C:\")
+    ↓
+File system change detected (CREATE/DELETE/MODIFY)
+    ↓
+Parse FILE_NOTIFY_INFORMATION buffer
+    ↓
+Send events via channel to UI thread
+    ↓
+src/app/operations/message_handler.rs - poll_events()
+    ↓
+Process events: Smart DELETE / CREATE handling
+    ↓
+Update UI without full reload
+```
+
+### Arquivos Envolvidos
+- **`src/infrastructure/drive_watcher.rs`** - Core implementation with ReadDirectoryChangesW
+- **`src/infrastructure/drive_watcher_integration.rs`** - Manager for multiple drives
+- **`src/app/operations/watcher.rs`** - Setup and lifecycle management
+- **`src/app/operations/message_handler.rs`** - Event processing and UI updates
+
+### Smart DELETE Handling
+```
+Drive Watcher detects DELETE event
+    ↓
+Check if path is in current folder
+    ↓
+Remove from all_items (source of truth)
+    ↓
+Filter items Arc to exclude deleted file
+    ↓
+Update UI immediately (no reload!)
+    ↓
+Set skip_next_auto_reload = true
+```
+
+### Pontos de Bug Comuns
+1. **Events not detected**
+   - **Causa**: Path mismatch in prefix filtering
+   - **Debug**: Check `[DRIVE-WATCHER] Prefix MATCH` logs
+   - **Solução**: Verify drive root extraction logic
+
+2. **Double reload on delete**
+   - **Causa**: Both drive watcher and notify-watcher active
+   - **Debug**: Check `[WATCHER]` logs for watcher selection
+   - **Solução**: skip_next_auto_reload flag handles this
+
+3. **UNC paths not working**
+   - **Causa**: Drive watcher only works on local drives (C:\, D:\)
+   - **Debug**: Check `[WATCHER] UNC/Network path detected`
+   - **Solução**: Fallback to notify-watcher for UNC
+
+### Como Debugar
+```rust
+// Verificar se drive watcher está ativo
+eprintln!("[DRIVE-WATCHER] Active: {:?}", self.drive_watcher.is_active());
+
+// Verificar eventos recebidos
+for event in self.drive_watcher.poll_events() {
+    eprintln!("[DRIVE-WATCHER] Event: {:?}", event);
+}
+
+// Verificar smart delete
+eprintln!("[FS-WATCH] DELETE: {:?}", path.file_name());
+eprintln!("[FS-WATCH] SMART DELETE: Removed from UI without reload");
+```
+
+---
+
+*Última atualização: 2026-02-04 (Drive Watcher implementation)*

@@ -165,6 +165,15 @@ Fornece acesso a recursos externos e serviços de sistema.
 - **`bitmap_conversion.rs`** - Conversão de bitmaps Windows
 - **`codec_registry.rs`** - Registro de codecs de mídia
 - **`device_change.rs`** - Monitoramento de mudanças de dispositivo
+
+**Drive Watcher** (`src/infrastructure/`):
+- **`drive_watcher.rs`** - Drive-wide file system watcher (ReadDirectoryChangesW)
+  - Monitora drive inteiro (ex: `C:\`) ao invés de pasta individual
+  - Async I/O com OVERLAPPED para não bloquear
+  - Filtro de eventos por prefixo de pasta
+- **`drive_watcher_integration.rs`** - Manager para múltiplos drives
+  - Um watcher por drive (C:\, D:\, etc.)
+  - Fallback para notify-watcher em UNC paths
 - **`drives.rs`** - Gerenciamento de drives
 - **`file_flags.rs`** - Flags de arquivo Windows
 - **`file_system.rs`** - Operações de sistema de arquivos

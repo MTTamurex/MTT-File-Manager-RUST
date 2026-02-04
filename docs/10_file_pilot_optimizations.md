@@ -123,43 +123,59 @@ Exatamente o que implementamos: monitorar o drive inteiro e filtrar eventos.
 
 ---
 
-## Próximos Passos para Integração Completa
+## Smart DELETE Handling (Otimização Adicional)
 
-### 1. Substituir notify-watcher (Opcional)
-O sistema atual com `notify` crate ainda funciona. Para migrar completamente:
+Além das otimizações do File Pilot, implementamos um **Smart DELETE handling** que elimina reloads desnecessários da pasta quando arquivos são deletados.
+
+### Problema
+Quando um arquivo era deletado, o sistema:
+1. Detectava o evento DELETE
+2. Invalidava caches
+3. **Disparava um reload completo da pasta** (caro!)
+4. Re-extrai thumbnails de arquivos existentes (desnecessário)
+
+### Solução
+Em vez de reload, removemos o item diretamente da UI:
 
 ```rust
-// Em app/state.rs
-// Substituir:
-#[cfg(feature = "notify-watcher")]
-pub watcher: Option<RecommendedWatcher>,
+// Em message_handler.rs - DriveWatcherEvent::Deleted
+let filtered: Vec<_> = self.items.iter()
+    .filter(|item| item.path != path_to_remove)
+    .cloned()
+    .collect();
+self.items = Arc::new(filtered);
+self.total_items = self.items.len();
 
-// Por:
-pub drive_watcher: DriveWatcherManager,
+// Previne reload automático
+self.skip_next_auto_reload = true;
 ```
 
-### 2. Integrar ao message_handler.rs
-```rust
-// Em handle_fs_events()
-pub fn handle_fs_events(&mut self) {
-    // Novo: usar drive watcher
-    for event in self.drive_watcher.poll_events() {
-        self.process_drive_event(event);
-    }
-    
-    // Legacy: manter compatibilidade com notify
-    #[cfg(feature = "notify-watcher")]
-    self.handle_notify_events();
-}
-```
+### Benefícios
+- **Zero I/O**: Não re-scaneia a pasta
+- **Instantâneo**: UI atualizada imediatamente
+- **Sem flicker**: Não limpa e recria a lista
 
-### 3. Feature flag
-```toml
-# Cargo.toml
-[features]
-default = ["notify-watcher"]
-notify-watcher = ["dep:notify"]
-drive-watcher = []  # Nova feature
+---
+
+## Integração Completa
+
+O Drive Watcher está totalmente integrado e em uso ativo:
+
+### Estado Atual
+- ✅ Drive-wide monitoring com `ReadDirectoryChangesW`
+- ✅ Prefix filtering para reportar apenas eventos relevantes
+- ✅ Multi-drive support (C:\, D:\, etc.)
+- ✅ Zero-overhead navigation (sem recriar watchers)
+- ✅ Async I/O com OVERLAPPED para não bloquear
+- ✅ Smart DELETE handling (sem reload)
+- ✅ Fallback para notify-watcher em UNC paths
+
+### Arquivos Principais
+```
+src/infrastructure/drive_watcher.rs              # Core implementation
+src/infrastructure/drive_watcher_integration.rs  # Manager
+src/app/operations/message_handler.rs            # Event handling
+src/app/operations/watcher.rs                    # Watch setup
 ```
 
 ---

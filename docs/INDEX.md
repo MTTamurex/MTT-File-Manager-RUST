@@ -78,6 +78,13 @@ Este índice fornece navegação para todos os documentos técnicos do MTT File 
 ### [09_support_playbook.md](09_support_playbook.md)
 **Playbook de Suporte**
 - Checklist de triagem
+
+### [10_file_pilot_optimizations.md](10_file_pilot_optimizations.md)
+**Otimizações do File Pilot**
+- NtQueryDirectoryFile para indexação rápida
+- Drive-wide file watching (ReadDirectoryChangesW)
+- Smart DELETE handling
+- Arquitetura e integração
 - Problemas comuns e soluções
 - Perguntas padrão para tickets
 - Scripts de diagnóstico

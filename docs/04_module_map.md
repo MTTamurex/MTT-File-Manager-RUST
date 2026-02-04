@@ -179,6 +179,8 @@ pub enum AppError {
 - **`filesystem_cache.rs`** - Cache de filesystem
 - **`io_priority.rs`** - Prioridade de I/O
 - **`ntfs_reader.rs`** - Leitor NTFS otimizado
+- **`drive_watcher.rs`** - Drive-wide file watcher (ReadDirectoryChangesW)
+- **`drive_watcher_integration.rs`** - Manager para múltiplos drive watchers
 - **`onedrive.rs`** - Detecção de status OneDrive
 - **`security.rs`** - Validações de segurança
 - **`virtual_drive_config.rs`** - Configuração de drives virtuais
@@ -229,6 +231,12 @@ pub fn extract_thumbnail_with_media_foundation(path: &Path) -> Result<DynamicIma
 pub fn copy_items_via_shell(src: &[PathBuf], dest: &Path) -> Result<()>
 pub fn move_items_via_shell(src: &[PathBuf], dest: &Path) -> Result<()>
 pub fn delete_items_via_shell(paths: &[PathBuf]) -> Result<()>
+
+// Drive Watcher (File Pilot optimization)
+pub struct DriveWatcherManager
+pub fn watch_path(&mut self, path: PathBuf)
+pub fn poll_events(&self) -> Vec<DriveWatcherEvent>
+pub fn is_active(&self) -> bool
 ```
 
 **Dependências**: Crates externos (windows, rusqlite, etc)
