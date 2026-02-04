@@ -190,6 +190,8 @@ impl DriveWatcher {
             .collect();
         
         unsafe {
+            // NOTE: FILE_FLAG_BACKUP_SEMANTICS is required for directory handles
+            // Removing it breaks ReadDirectoryChangesW functionality
             let handle = CreateFileW(
                 PCWSTR(wide_path.as_ptr()),
                 FILE_LIST_DIRECTORY.0,

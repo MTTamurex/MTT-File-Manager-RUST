@@ -25,6 +25,12 @@ pub struct DriveWatcherManager {
     current_prefix: PathBuf,
     /// Current drive root being watched
     current_drive: Option<PathBuf>,
+    /// Delayed initialization: path to watch after startup delay
+    pending_watch: Option<PathBuf>,
+    /// Startup time to calculate delay
+    startup_time: std::time::Instant,
+    /// Delay before creating first watcher (to avoid antivirus false positive)
+    startup_delay_ms: u64,
 }
 
 impl DriveWatcherManager {
@@ -34,6 +40,9 @@ impl DriveWatcherManager {
             watchers: HashMap::new(),
             current_prefix: PathBuf::new(),
             current_drive: None,
+            pending_watch: None,
+            startup_time: std::time::Instant::now(),
+            startup_delay_ms: 5000, // 5 second delay to avoid burst I/O on startup
         }
     }
     
@@ -41,12 +50,27 @@ impl DriveWatcherManager {
     ///
     /// This is called when the user navigates to a new folder.
     /// If the path is on a different drive, we ensure that drive is being watched.
+    ///
+    /// NOTE: During startup, watchers are delayed to avoid burst I/O that triggers antivirus.
     pub fn watch_path(&mut self, path: PathBuf) {
+        // Check if we're still in startup delay period
+        let elapsed = self.startup_time.elapsed().as_millis() as u64;
+        if elapsed < self.startup_delay_ms && self.watchers.is_empty() {
+            // Store path for later activation
+            eprintln!("[DRIVE-WATCHER-MGR] Startup delay active ({}ms / {}ms), deferring watcher creation for: {:?}",
+                elapsed, self.startup_delay_ms, path);
+            self.pending_watch = Some(path);
+            return;
+        }
+        
+        // Process any pending watch from startup delay
+        let path_to_watch = self.pending_watch.take().unwrap_or(path);
+        
         // Extract drive root from path
-        let drive_root = match DriveWatcher::extract_drive_root(&path) {
+        let drive_root = match DriveWatcher::extract_drive_root(&path_to_watch) {
             Some(root) => root,
             None => {
-                eprintln!("[DRIVE-WATCHER-MGR] Could not extract drive root from: {:?}", path);
+                eprintln!("[DRIVE-WATCHER-MGR] Could not extract drive root from: {:?}", path_to_watch);
                 return;
             }
         };
@@ -54,7 +78,7 @@ impl DriveWatcherManager {
         // Create watcher for this drive if not exists
         if !self.watchers.contains_key(&drive_root) {
             eprintln!("[DRIVE-WATCHER-MGR] Creating new watcher for drive: {:?}", drive_root);
-            match DriveWatcher::new(drive_root.clone(), path.clone()) {
+            match DriveWatcher::new(drive_root.clone(), path_to_watch.clone()) {
                 Some(watcher) => {
                     self.watchers.insert(drive_root.clone(), watcher);
                 }
@@ -66,14 +90,30 @@ impl DriveWatcherManager {
         } else {
             // Update prefix on existing watcher
             if let Some(watcher) = self.watchers.get(&drive_root) {
-                eprintln!("[DRIVE-WATCHER-MGR] Updating prefix for drive {:?} to: {:?}", 
-                    drive_root, path);
-                watcher.update_prefix(path.clone());
+                eprintln!("[DRIVE-WATCHER-MGR] Updating prefix for drive {:?} to: {:?}",
+                    drive_root, path_to_watch);
+                watcher.update_prefix(path_to_watch.clone());
             }
         }
         
-        self.current_prefix = path;
+        self.current_prefix = path_to_watch;
         self.current_drive = Some(drive_root);
+    }
+    
+    /// Check and activate any pending watcher after startup delay
+    /// Call this regularly (e.g., in the update loop) to activate delayed watchers
+    pub fn check_pending_activation(&mut self) {
+        if let Some(pending) = self.pending_watch.take() {
+            let elapsed = self.startup_time.elapsed().as_millis() as u64;
+            if elapsed >= self.startup_delay_ms {
+                eprintln!("[DRIVE-WATCHER-MGR] Startup delay complete ({}ms), activating watcher for: {:?}",
+                    elapsed, pending);
+                self.watch_path(pending);
+            } else {
+                // Put it back, not ready yet
+                self.pending_watch = Some(pending);
+            }
+        }
     }
     
     /// Poll for file system events
