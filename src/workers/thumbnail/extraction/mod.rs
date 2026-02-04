@@ -24,11 +24,20 @@ use std::path::Path;
 /// - Stage 3: Universal fallback
 /// - Stage 4: Force bypass Windows cache
 /// - Stage 5: Direct video frame extraction
+///
+/// `pending_deletions` is checked between stages to abort early if the file
+/// was marked for deletion while extraction was in progress.
 pub fn generate_thumbnail_hybrid(
     path: &Path,
     priority: IOPriority,
+    pending_deletions: &dashmap::DashMap<std::path::PathBuf, ()>,
 ) -> Option<(Vec<u8>, u32, u32)> {
     eprintln!("[Thumbnail] Starting extraction pipeline for: {:?}", path.file_name());
+    
+    // Skip if file is pending deletion or no longer exists
+    if pending_deletions.contains_key(path) || !path.exists() {
+        return None;
+    }
     
     // Stage 1: image crate (Fast Path)
     eprintln!("[Thumbnail] Trying Stage 1 (image crate)...");
@@ -38,6 +47,11 @@ pub fn generate_thumbnail_hybrid(
     }
     eprintln!("[Thumbnail] Stage 1 failed, trying Stage 2...");
 
+    // Abort if file was deleted or marked for deletion during Stage 1
+    if pending_deletions.contains_key(path) || !path.exists() {
+        return None;
+    }
+
     // Stage 2: WIC (Robust Fallback for JPEGs/CMYK)
     eprintln!("[Thumbnail] Trying Stage 2 (WIC)...");
     if let Some(result) = stage2_wic::extract(path) {
@@ -45,6 +59,11 @@ pub fn generate_thumbnail_hybrid(
         return Some(result);
     }
     eprintln!("[Thumbnail] Stage 2 failed, trying Stage 3...");
+
+    // Abort if file was deleted or marked for deletion during Stage 2
+    if pending_deletions.contains_key(path) || !path.exists() {
+        return None;
+    }
 
     // Stage 3: Shell API (Universal/Video)
     eprintln!("[Thumbnail] Trying Stage 3 (Shell API)...");

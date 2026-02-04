@@ -14,7 +14,10 @@
       "Bash(git show:*)",
       "Bash(cargo test:*)",
       "Bash(grep:*)",
-      "Bash(git ls-tree:*)"
+      "Bash(git ls-tree:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(findstr:*)",
+      "Bash(Select-String \"error\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\mtamu\\github\\MTT-File-Manager-RUST\\docs"

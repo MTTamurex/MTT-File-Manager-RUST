@@ -158,6 +158,7 @@ pub struct ImageViewerApp {
     pub device_event_receiver: Receiver<()>,
     pub last_auto_reload: Instant,
     pub pending_auto_reload: bool,
+    pub skip_next_auto_reload: bool, // SMART DELETE: Prevent reload after direct UI update
 
     // CLIPBOARD (Copiar/Recortar/Colar)
     // CLIPBOARD (Copiar/Recortar/Colar)
@@ -272,6 +273,8 @@ pub struct ImageViewerApp {
 
     // FILE OPERATION TRACKING (suppresses watcher auto-reload during copy/move/delete)
     pub file_ops_in_progress: usize,
+    /// Paths currently being deleted — shared with worker threads to cancel in-flight extractions
+    pub pending_deletions: Arc<dashmap::DashMap<PathBuf, ()>>,
 
     // ISO MOUNTING
     pub pending_iso_mount: Option<PathBuf>,

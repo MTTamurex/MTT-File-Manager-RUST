@@ -63,6 +63,7 @@ pub fn spawn_thumbnail_workers(
     ctx: egui::Context,
     gen_tracker: Arc<AtomicUsize>,
     disk_cache: Arc<ThumbnailDiskCache>,
+    pending_deletions: Arc<dashmap::DashMap<std::path::PathBuf, ()>>,
 ) {
     // Semaphore for RAM limiter
     let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_DECODES));
@@ -75,9 +76,10 @@ pub fn spawn_thumbnail_workers(
         let ctx = ctx.clone();
         let disk_cache = disk_cache.clone();
         let semaphore = semaphore.clone();
+        let pending_deletions = pending_deletions.clone();
 
         std::thread::spawn(move || {
-            thumbnail_worker_loop(queue, tx, ctx, gen_tracker, disk_cache, semaphore);
+            thumbnail_worker_loop(queue, tx, ctx, gen_tracker, disk_cache, semaphore, pending_deletions);
         });
     }
 }
@@ -90,6 +92,7 @@ fn thumbnail_worker_loop(
     gen_tracker: Arc<AtomicUsize>,
     disk_cache: Arc<ThumbnailDiskCache>,
     semaphore: Arc<Semaphore>,
+    pending_deletions: Arc<dashmap::DashMap<std::path::PathBuf, ()>>,
 ) {
     let mut last_repaint = Instant::now();
     
@@ -129,6 +132,7 @@ fn thumbnail_worker_loop(
             &ctx,
             &disk_cache,
             &semaphore,
+            &pending_deletions,
             &mut last_repaint,
         );
     }
@@ -151,6 +155,7 @@ fn process_thumbnail_request(
     ctx: &egui::Context,
     disk_cache: &ThumbnailDiskCache,
     semaphore: &Semaphore,
+    pending_deletions: &dashmap::DashMap<std::path::PathBuf, ()>,
     last_repaint: &mut Instant,
 ) {
     use crate::workers::thumbnail::{is_known_failure, mark_as_failed};
@@ -234,11 +239,16 @@ fn process_thumbnail_request(
 
     // STEP 1: Se não está em cache, decodifica com limite de concorrência
     if final_result.is_none() {
+        // CANCELLATION: Skip extraction if file is pending deletion
+        if pending_deletions.contains_key(path) {
+            return;
+        }
+
         // Aguarda até ter um slot disponível (max 4 decodes simultâneos)
         semaphore.acquire();
 
         // HYBRID PIPELINE com resize imediato
-        if let Some((raw_data, w, h)) = generate_thumbnail_hybrid(path, req_priority) {
+        if let Some((raw_data, w, h)) = generate_thumbnail_hybrid(path, req_priority, pending_deletions) {
             // STEP 2: Resize to bucket (libera RAM e otimiza upload GPU)
             let bucket_size = get_bucket_size(req_size);
             let resized = resize_to_bucket(raw_data, w, h, bucket_size);
