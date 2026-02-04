@@ -94,12 +94,11 @@ fn render_drive_slot(
     drive_info: &crate::domain::file_entry::DriveInfo,
 ) {
     let item = ctx.item;
-    let path_clone = item.path.clone();
 
     // Carrega ícone real do drive
     let drive_icon = ctx
         .icon_loader
-        .get_or_load_drive_icon(ui.ctx(), &path_clone.to_string_lossy());
+        .get_or_load_drive_icon(ui.ctx(), &item.path.to_string_lossy());
 
     // GEOMETRIA
     let available_h = rect.height();
@@ -454,21 +453,20 @@ fn render_file_slot<O: ItemSlotOperations>(
     ops: &mut O,
 ) {
     let item = ctx.item;
-    let path_clone = item.path.clone();
 
     // Detecta se é arquivo de mídia usando Windows Perceived Type API
     // Respeita handlers instalados (K-Lite/Icaros) - suporta OGM, MKV, etc.
-    let is_media_file = path_clone
+    let is_media_file = item.path
         .extension()
         .map(|ext| crate::infrastructure::windows::is_media_extension(&ext.to_string_lossy()))
         .unwrap_or(false);
 
     // Thumbnail loading para arquivos de mídia (desabilitado na Lixeira)
     if is_media_file && !ctx.is_recycle_bin_view {
-        let has_texture = ctx.texture_cache.contains(&path_clone);
-        let is_loading = ctx.loading_set.contains(&path_clone);
-        let is_failed = ctx.failed_thumbnails.contains(&path_clone);
-        let is_pending_upload = ctx.pending_upload_set.contains(&path_clone);
+        let has_texture = ctx.texture_cache.contains(&item.path);
+        let is_loading = ctx.loading_set.contains(&item.path);
+        let is_failed = ctx.failed_thumbnails.contains(&item.path);
+        let is_pending_upload = ctx.pending_upload_set.contains(&item.path);
 
         if !has_texture
             && !is_loading
@@ -477,9 +475,9 @@ fn render_file_slot<O: ItemSlotOperations>(
             && ctx.loading_set.len() < 200
         {
             // MAX_CONCURRENT_LOADS (increased for performance - stale entries are cleaned by grid_view)
-            ctx.loading_set.insert(path_clone.clone());
+            ctx.loading_set.insert(item.path.clone());
             ops.request_thumbnail_load(
-                path_clone.clone(),
+                item.path.clone(),
                 ctx.thumbnail_size as u32,
                 Some(ctx.idx),
                 ctx.item.modified,
@@ -492,7 +490,7 @@ fn render_file_slot<O: ItemSlotOperations>(
     // PERFORMANCE: allow_blocking=false prevents UI stutter on slow icons (exe/lnk)
     let file_icon = ctx
         .icon_loader
-        .get_or_load_icon(ui.ctx(), &path_clone, false, false);
+        .get_or_load_icon(ui.ctx(), &item.path, false, false);
 
     // Se ícone não está cacheado E não está carregando E não falhou:
     // Dispara carregamento assíncrono (apenas para casos lentos onde allow_blocking=false retornou None)
@@ -500,8 +498,8 @@ fn render_file_slot<O: ItemSlotOperations>(
     // Inserting here would cause the deferred request_icon_load to skip (already in set).
     // NOTE: Also works for Recycle Bin - physical_path ($R files) contain embedded icons.
     if file_icon.is_none() {
-        if !ctx.loading_icons.contains(&path_clone) && !ctx.failed_icons.contains(&path_clone) {
-            ops.request_icon_load(path_clone.clone());
+        if !ctx.loading_icons.contains(&item.path) && !ctx.failed_icons.contains(&item.path) {
+            ops.request_icon_load(item.path.clone());
         }
     }
 
@@ -521,7 +519,7 @@ fn render_file_slot<O: ItemSlotOperations>(
     // Desenha thumbnail ou ícone
     let mut drew_something = false;
     if is_media_file {
-        if let Some(texture) = ctx.texture_cache.get(&path_clone) {
+        if let Some(texture) = ctx.texture_cache.get(&item.path) {
             // Thumbnail carregado - mantém aspect ratio
             let tex_size = texture.size_vec2();
             let aspect = tex_size.x / tex_size.y;
