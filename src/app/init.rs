@@ -541,6 +541,9 @@ impl ImageViewerApp {
             renaming_state: None,
             focus_rename: false,
 
+            // Drive-wide file system watcher (File Pilot optimization)
+            drive_watcher: crate::infrastructure::drive_watcher_integration::DriveWatcherManager::new(),
+            
             #[cfg(feature = "notify-watcher")]
             watcher: None,
             #[cfg(feature = "notify-watcher")]

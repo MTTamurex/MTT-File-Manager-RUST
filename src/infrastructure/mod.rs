@@ -6,6 +6,8 @@ pub mod cache_first;
 pub mod directory_cache;
 pub mod directory_index;
 pub mod disk_cache;
+pub mod drive_watcher;
+pub mod drive_watcher_integration;
 pub mod filesystem_cache;
 pub mod io_priority;
 pub mod ntfs_reader;

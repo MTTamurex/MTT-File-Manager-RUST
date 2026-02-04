@@ -410,7 +410,84 @@ impl ImageViewerApp {
                 || name == "thumbs.db"
         };
 
+        // Drive-wide watcher (File Pilot optimization)
+        let drive_events = self.drive_watcher.poll_events();
+        let drive_watcher_active = !drive_events.is_empty();
+        for event in drive_events {
+            
+            match &event {
+                crate::infrastructure::drive_watcher::DriveWatcherEvent::Created(path) => {
+                    if should_ignore(path) { continue; }
+                    if let Some(parent) = path.parent() {
+                        let parent_norm = normalize_for_match(parent);
+                        if parent_norm == current_path_norm {
+                            eprintln!("[FS-WATCH] CREATE: {:?}", path.file_name().unwrap_or_default());
+                            self.pending_auto_reload = true;
+                        }
+                    }
+                }
+                crate::infrastructure::drive_watcher::DriveWatcherEvent::Deleted(path) => {
+                    if should_ignore(path) { continue; }
+                    let cleaned = clean_path(path);
+                    if let Some(parent) = cleaned.parent() {
+                        self.directory_cache.invalidate(&parent.to_path_buf());
+                    }
+                    self.directory_cache.invalidate_children(&cleaned);
+                    self.disk_cache.remove_cache_for_path(&cleaned);
+                    
+                    if let Some(parent) = path.parent() {
+                        let parent_norm = normalize_for_match(parent);
+                        if parent_norm == current_path_norm {
+                            eprintln!("[FS-WATCH] DELETE: {:?}", path.file_name().unwrap_or_default());
+                            self.pending_auto_reload = true;
+                        }
+                    }
+                }
+                crate::infrastructure::drive_watcher::DriveWatcherEvent::Modified(path) => {
+                    if should_ignore(path) { continue; }
+                    let cleaned = clean_path(path);
+                    self.cache_manager.texture_cache.pop(&cleaned);
+                    self.cache_manager.failed_thumbnails.pop(&cleaned);
+                    crate::workers::thumbnail::clear_failure_cache(&cleaned);
+                    
+                    if let Some(parent) = path.parent() {
+                        let parent_norm = normalize_for_match(parent);
+                        if parent_norm == current_path_norm {
+                            eprintln!("[FS-WATCH] MODIFY: {:?}", path.file_name().unwrap_or_default());
+                            self.pending_auto_reload = true;
+                        }
+                    }
+                }
+                crate::infrastructure::drive_watcher::DriveWatcherEvent::Renamed(old_path, new_path) => {
+                    if !should_ignore(old_path) || !should_ignore(new_path) {
+                        let cleaned_old = clean_path(old_path);
+                        let cleaned_new = clean_path(new_path);
+                        
+                        // Invalidate caches for both paths
+                        self.cache_manager.texture_cache.pop(&cleaned_old);
+                        self.cache_manager.texture_cache.pop(&cleaned_new);
+                        self.cache_manager.failed_thumbnails.pop(&cleaned_old);
+                        self.cache_manager.failed_thumbnails.pop(&cleaned_new);
+                        
+                        if let Some(parent) = cleaned_old.parent() {
+                            self.directory_cache.invalidate(&parent.to_path_buf());
+                        }
+                        if let Some(parent) = cleaned_new.parent() {
+                            let parent_norm = normalize_for_match(parent);
+                            if parent_norm == current_path_norm {
+                                self.pending_auto_reload = true;
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        
+        // LEGACY: Processa eventos do notify-watcher (mantido para compatibilidade)
+        // Se drive-watcher já detectou eventos, skip notify-watcher para evitar duplicados
         #[cfg(feature = "notify-watcher")]
+        if !drive_watcher_active {
         while let Ok(event) = self.fs_event_receiver.try_recv() {
             match event {
                 Ok(evt) => {
@@ -429,8 +506,8 @@ impl ImageViewerApp {
                             }
                             self.directory_cache.invalidate_children(&cleaned);
                             eprintln!(
-                                "[FS] Detected removal, clearing disk cache for: {:?}",
-                                cleaned
+                                "[FS-WATCH-LEGACY] REMOVE: {:?}",
+                                path.file_name().unwrap_or_default()
                             );
                             self.disk_cache.remove_cache_for_path(&cleaned);
                         }
@@ -489,6 +566,7 @@ impl ImageViewerApp {
                 Err(e) => eprintln!("Erro de watch: {:?}", e),
             }
         }
+        } // Fecha o if !drive_watcher_active
 
         // Executa reload apenas quando debounce permitir
         // SUPPRESS auto-reload while file operations are in progress to prevent
