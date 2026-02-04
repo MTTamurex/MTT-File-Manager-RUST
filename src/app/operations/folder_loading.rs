@@ -23,9 +23,10 @@ use crate::infrastructure::onedrive;
 use crate::infrastructure::windows::{
     is_image_extension, is_shell_navigation_path, is_video_extension, list_shell_folder,
 };
-use crate::workers::idle_warmup::IdleWarmupMessage;
-use crate::workers::predictive_prefetch::PredictiveMessage;
-use crate::workers::prefetch_worker::PrefetchMessage;
+// DISABLED: Prefetch imports (testing HDD I/O impact)
+// use crate::workers::idle_warmup::IdleWarmupMessage;
+// use crate::workers::predictive_prefetch::PredictiveMessage;
+// use crate::workers::prefetch_worker::PrefetchMessage;
 
 impl ImageViewerApp {
     /// Filtra e ordena itens baseado na query de busca atual.
@@ -160,27 +161,28 @@ impl ImageViewerApp {
         self.current_generation
             .store(self.generation, AtomicOrdering::Relaxed); // Sincroniza com workers
 
-        let current_path_buf = PathBuf::from(&self.current_path);
-        let _ = self
-            .predictive_sender
-            .send(PredictiveMessage::NavigatedTo(current_path_buf.clone()));
-        let history_paths: Vec<PathBuf> = self
-            .navigation
-            .paths
-            .iter()
-            .rev()
-            .take(5)
-            .filter(|p| p.len() >= 2 && p.chars().nth(1) == Some(':'))
-            .map(PathBuf::from)
-            .collect();
-        if !history_paths.is_empty() {
-            let _ = self
-                .predictive_sender
-                .send(PredictiveMessage::HistoryUpdated(history_paths));
-        }
-        let _ = self
-            .idle_warmup_sender
-            .send(IdleWarmupMessage::CurrentDirectory(current_path_buf));
+        let _current_path_buf = PathBuf::from(&self.current_path);
+        // DISABLED: Predictive prefetch and idle warmup (testing HDD I/O impact)
+        // let _ = self
+        //     .predictive_sender
+        //     .send(PredictiveMessage::NavigatedTo(current_path_buf.clone()));
+        // let history_paths: Vec<PathBuf> = self
+        //     .navigation
+        //     .paths
+        //     .iter()
+        //     .rev()
+        //     .take(5)
+        //     .filter(|p| p.len() >= 2 && p.chars().nth(1) == Some(':'))
+        //     .map(PathBuf::from)
+        //     .collect();
+        // if !history_paths.is_empty() {
+        //     let _ = self
+        //         .predictive_sender
+        //         .send(PredictiveMessage::HistoryUpdated(history_paths));
+        // }
+        // let _ = self
+        //     .idle_warmup_sender
+        //     .send(IdleWarmupMessage::CurrentDirectory(current_path_buf));
 
         // 1. Limpeza de Estado (UI Thread)
         if force_refresh {
@@ -215,7 +217,7 @@ impl ImageViewerApp {
         let directory_cache = self.directory_cache.clone();
         // Use existing directory_cache for cache-first strategy
         let directory_index_opt = self.directory_index.clone();
-        let prefetch_sender = self.prefetch_sender.clone();
+        let _prefetch_sender = self.prefetch_sender.clone();
         let force_refresh = force_refresh;
 
         // STREAMING BATCH LOADING: Adaptive batch size based on disk type
@@ -658,17 +660,18 @@ impl ImageViewerApp {
                             );
                         }
                     }
-                    if !is_ssd && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
-                        let subdirs: Vec<PathBuf> = all_entries_disk
-                            .iter()
-                            .filter(|e| e.is_dir)
-                            .take(5)
-                            .map(|e| e.path.clone())
-                            .collect();
-                        if !subdirs.is_empty() {
-                            let _ = prefetch_sender.send(PrefetchMessage::Prefetch(subdirs));
-                        }
-                    }
+                    // DISABLED: Direct subdirectory prefetch (testing HDD I/O impact)
+                    // if !is_ssd && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+                    //     let subdirs: Vec<PathBuf> = all_entries_disk
+                    //         .iter()
+                    //         .filter(|e| e.is_dir)
+                    //         .take(5)
+                    //         .map(|e| e.path.clone())
+                    //         .collect();
+                    //     if !subdirs.is_empty() {
+                    //         let _ = prefetch_sender.send(PrefetchMessage::Prefetch(subdirs));
+                    //     }
+                    // }
                     return;
                 }
             }
@@ -900,17 +903,18 @@ impl ImageViewerApp {
                     );
                 }
             }
-            if !is_ssd && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
-                let subdirs: Vec<PathBuf> = all_entries_disk
-                    .iter()
-                    .filter(|e| e.is_dir)
-                    .take(5)
-                    .map(|e| e.path.clone())
-                    .collect();
-                if !subdirs.is_empty() {
-                    let _ = prefetch_sender.send(PrefetchMessage::Prefetch(subdirs));
-                }
-            }
+            // DISABLED: Direct subdirectory prefetch (testing HDD I/O impact)
+            // if !is_ssd && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+            //     let subdirs: Vec<PathBuf> = all_entries_disk
+            //         .iter()
+            //         .filter(|e| e.is_dir)
+            //         .take(5)
+            //         .map(|e| e.path.clone())
+            //         .collect();
+            //     if !subdirs.is_empty() {
+            //         let _ = prefetch_sender.send(PrefetchMessage::Prefetch(subdirs));
+            //     }
+            // }
         });
     }
 
