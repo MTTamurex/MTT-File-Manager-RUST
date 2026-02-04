@@ -318,6 +318,9 @@ impl ImageViewerApp {
             .unwrap_or(1.0)
             .clamp(0.0, 1.0);
 
+        // Shared pending_deletions for worker cancellation
+        let pending_deletions: Arc<dashmap::DashMap<PathBuf, ()>> = Arc::new(dashmap::DashMap::new());
+
         // 8 threads: equilíbrio ideal entre SSD e HDD USB
         use crate::workers::thumbnail::spawn_thumbnail_workers;
         spawn_thumbnail_workers(
@@ -326,6 +329,7 @@ impl ImageViewerApp {
             ctx.clone(),
             shared_gen.clone(),
             disk_cache.clone(),
+            pending_deletions.clone(),
         );
 
         // --- ASYNC ICON WORKER (single thread, evita I/O bloqueante) ---
@@ -553,6 +557,7 @@ impl ImageViewerApp {
             device_event_receiver,
             last_auto_reload: Instant::now(),
             pending_auto_reload: false,
+            skip_next_auto_reload: false,
 
             // CLIPBOARD
             clipboard: ClipboardManager::new(),
@@ -672,6 +677,7 @@ impl ImageViewerApp {
 
             // FILE OPERATION TRACKING
             file_ops_in_progress: 0,
+            pending_deletions,
 
             // ISO MOUNTING
             pending_iso_mount: None,

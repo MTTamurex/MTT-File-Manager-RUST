@@ -91,6 +91,11 @@ impl ImageViewerApp {
         priority: ThumbnailPriority,
         modified: u64,
     ) {
+        // Skip files pending deletion to avoid wasteful extraction
+        if self.pending_deletions.contains_key(&path) {
+            return;
+        }
+
         // PERFORMANCE: Check RAM cache first before sending to worker
         // This avoids disk I/O entirely if the RGBA data is already in RAM
         if let Some((rgba_data, width, height)) = self

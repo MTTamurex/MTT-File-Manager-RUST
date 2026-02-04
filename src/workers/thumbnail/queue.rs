@@ -112,6 +112,25 @@ impl PriorityThumbnailQueue {
         self.condvar.notify_one();
     }
 
+    /// Remove specific paths from the queue (e.g., files being deleted)
+    pub fn remove_paths(&self, paths: &[PathBuf]) {
+        let mut state = self.state.lock().unwrap();
+        for path in paths {
+            if state.pending.remove(path) {
+                // Remove from the directory-grouped map
+                if let Some(parent) = path.parent() {
+                    let parent_buf = parent.to_path_buf();
+                    if let Some(items) = state.by_directory.get_mut(&parent_buf) {
+                        items.retain(|req| req.path != *path);
+                        if items.is_empty() {
+                            state.by_directory.remove(&parent_buf);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Pop the next request, optimizing for disk locality on HDDs
     pub fn pop(&self) -> Option<(PathBuf, usize, u32, IOPriority, u64)> {
         let mut state = self.state.lock().unwrap();

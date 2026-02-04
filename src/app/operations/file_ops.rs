@@ -23,6 +23,12 @@ impl ImageViewerApp {
             self.native_hwnd.unwrap_or_default(),
         ));
 
+        // Track pending deletions to suppress thumbnail extraction for these files
+        for path in paths {
+            self.pending_deletions.insert(path.clone(), ());
+        }
+        self.thumbnail_queue.remove_paths(paths);
+
         for path in paths {
             // Clear cache and selection proactively
             self.disk_cache.remove_cache_for_path(path);

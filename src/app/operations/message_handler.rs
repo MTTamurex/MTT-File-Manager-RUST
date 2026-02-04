@@ -372,6 +372,15 @@ impl ImageViewerApp {
                         // Operations done — completion handlers already triggered reload,
                         // so discard any watcher-accumulated auto-reload to avoid double refresh
                         self.pending_auto_reload = false;
+                        // NOTE: pending_deletions is NOT cleared here because Finished and
+                        // DeleteCompleted are processed in the same loop iteration. The folder
+                        // reload triggered by DeleteCompleted hasn't completed yet — clearing
+                        // now would allow thumbnail re-extraction for the deleted file during
+                        // the reload. Instead, pending_deletions is cleared when folder loading
+                        // finishes (saw_end_of_load) or on user cancel (no active load).
+                        if !self.is_loading_folder {
+                            self.pending_deletions.clear();
+                        }
                     }
                 }
             }
@@ -439,7 +448,43 @@ impl ImageViewerApp {
                         let parent_norm = normalize_for_match(parent);
                         if parent_norm == current_path_norm {
                             eprintln!("[FS-WATCH] DELETE: {:?}", path.file_name().unwrap_or_default());
-                            self.pending_auto_reload = true;
+                            
+                            // SMART DELETE: Remove da UI sem reload completo
+                            let path_to_remove = cleaned.clone();
+                            let removed_from_all = self.all_items.iter()
+                                .position(|item| item.path == path_to_remove)
+                                .map(|idx| {
+                                    self.all_items.remove(idx);
+                                    true
+                                })
+                                .unwrap_or(false);
+                            
+                            if removed_from_all {
+                                // Atualiza items (Arc) - recria sem o item deletado
+                                let filtered: Vec<_> = self.items.iter()
+                                    .filter(|item| item.path != path_to_remove)
+                                    .cloned()
+                                    .collect();
+                                self.items = Arc::new(filtered);
+                                self.total_items = self.items.len();
+                                eprintln!("[FS-WATCH] SMART DELETE: Removed from UI without reload");
+                                
+                                // Ajusta seleção se necessário
+                                if let Some(selected) = self.selected_item {
+                                    if selected >= self.items.len() && !self.items.is_empty() {
+                                        self.selected_item = Some(self.items.len() - 1);
+                                    } else if self.items.is_empty() {
+                                        self.selected_item = None;
+                                        self.selected_file = None;
+                                    }
+                                }
+                                
+                                // Previne reload desnecessário - UI já foi atualizada
+                                self.skip_next_auto_reload = true;
+                            }
+                            
+                            // Não triggera auto-reload - UI já foi atualizada
+                            // self.pending_auto_reload = true;
                         }
                     }
                 }
@@ -571,6 +616,13 @@ impl ImageViewerApp {
         // Executa reload apenas quando debounce permitir
         // SUPPRESS auto-reload while file operations are in progress to prevent
         // screen flashing (watcher fires repeatedly as files grow during copy)
+        // Skip auto-reload if smart delete already updated the UI
+        if self.skip_next_auto_reload {
+            self.skip_next_auto_reload = false;
+            self.pending_auto_reload = false;
+            eprintln!("[DEBUG] Skipping auto-reload - UI already updated by smart delete");
+        }
+        
         if self.pending_auto_reload && self.file_ops_in_progress == 0 {
             let elapsed = self.last_auto_reload.elapsed();
             if elapsed > Duration::from_millis(theme::AUTO_RELOAD_MS) {
@@ -624,6 +676,7 @@ impl ImageViewerApp {
 
         if saw_end_of_load {
             self.is_loading_folder = false;
+            self.pending_deletions.clear();
             self.pending_items_rebuild = false;
             self.pending_items_count = 0;
             // Ordenação final em background (evita stutter no UI thread)
