@@ -164,12 +164,28 @@ fn process_thumbnail_request(
             width: 0,
             height: 0,
             generation: req_gen,
+            not_found: false,
         });
         throttle_repaint_with_priority(ctx, last_repaint, req_priority);
         return;
     }
 
-    // EARLY EXIT 2: Skip cloud-only OneDrive files (not downloaded)
+    // EARLY EXIT 2: Skip files that no longer exist (e.g., stale folder covers)
+    if !path.exists() {
+        mark_as_failed(path.clone());
+        let _ = tx.send(ThumbnailData {
+            path: path.clone(),
+            image_data: Vec::new(),
+            width: 0,
+            height: 0,
+            generation: req_gen,
+            not_found: true,
+        });
+        throttle_repaint_with_priority(ctx, last_repaint, req_priority);
+        return;
+    }
+
+    // EARLY EXIT 3: Skip cloud-only OneDrive files (not downloaded)
     // Only check OneDrive attributes if the path is in a OneDrive folder
     if onedrive::is_onedrive_path(path) && !onedrive::is_locally_available(path) {
         mark_as_failed(path.clone());
@@ -179,6 +195,7 @@ fn process_thumbnail_request(
             width: 0,
             height: 0,
             generation: req_gen,
+            not_found: false,
         });
         throttle_repaint_with_priority(ctx, last_repaint, req_priority);
         return;
@@ -249,6 +266,7 @@ fn process_thumbnail_request(
         width: w,
         height: h,
         generation: req_gen,
+        not_found: false,
     });
     throttle_repaint_with_priority(ctx, last_repaint, req_priority);
 }

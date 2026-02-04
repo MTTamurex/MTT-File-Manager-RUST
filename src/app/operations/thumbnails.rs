@@ -111,6 +111,7 @@ impl ImageViewerApp {
                     width,
                     height,
                     generation: self.generation,
+                    not_found: false,
                 });
                 return;
             }

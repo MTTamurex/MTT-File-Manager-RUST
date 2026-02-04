@@ -8,4 +8,5 @@ pub struct ThumbnailData {
     pub width: u32,
     pub height: u32,
     pub generation: usize, // Rastreia a validade da extração
+    pub not_found: bool,   // Arquivo não existe mais no disco
 }

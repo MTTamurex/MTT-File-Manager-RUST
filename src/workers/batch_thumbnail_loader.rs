@@ -158,6 +158,7 @@ impl BatchThumbnailLoader {
             width,
             height,
             generation,
+            not_found: false,
         };
         
         let _ = self.result_sender.send(thumbnail_data);
