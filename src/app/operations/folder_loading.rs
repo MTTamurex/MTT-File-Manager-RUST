@@ -141,22 +141,32 @@ impl ImageViewerApp {
 
     pub fn load_folder(&mut self, force_refresh: bool) {
         // GUARD CLAUSE: Prevent spam by checking if we're already on this path
-        eprintln!("[GUARD] Checking load_folder: current_path={:?}, loaded_path={:?}, force_refresh={}", 
-            self.current_path, self.loaded_path, force_refresh);
-        
+        eprintln!(
+            "[GUARD] Checking load_folder: current_path={:?}, loaded_path={:?}, force_refresh={}",
+            self.current_path, self.loaded_path, force_refresh
+        );
+
         if !force_refresh && self.current_path == self.loaded_path {
-            eprintln!("[GUARD] Skipping load_folder for {:?} - already loaded", self.current_path);
+            eprintln!(
+                "[GUARD] Skipping load_folder for {:?} - already loaded",
+                self.current_path
+            );
             return;
         }
-        
-        eprintln!("[GUARD] load_folder called for {:?} (force_refresh={}, loaded_path={:?})", 
-            self.current_path, force_refresh, self.loaded_path);
-        
+
+        eprintln!(
+            "[GUARD] load_folder called for {:?} (force_refresh={}, loaded_path={:?})",
+            self.current_path, force_refresh, self.loaded_path
+        );
+
         // Mark as loaded immediately to prevent spam
         self.loaded_path = self.current_path.clone();
-        
-        eprintln!("[GUARD] Starting folder loading process for {:?}", self.current_path);
-        
+
+        eprintln!(
+            "[GUARD] Starting folder loading process for {:?}",
+            self.current_path
+        );
+
         self.generation += 1; // Incrementa a geração local
         self.current_generation
             .store(self.generation, AtomicOrdering::Relaxed); // Sincroniza com workers
@@ -240,13 +250,13 @@ impl ImageViewerApp {
             };
             let mut batch_tracker = AdaptiveBatchTracker::new(config);
             let mut batch_size = batch_tracker.batch_size();
-            
+
             // STALE-WHILE-REVALIDATE STRATEGY: Instant feedback with debounce
             // NOTE: Only used for HDDs - SSDs bypass cache entirely for raw speed
             let base_path_buf = PathBuf::from(&base_path);
             let is_onedrive_base = onedrive::is_onedrive_path(&base_path_buf)
                 || onedrive::path_has_cloud_attributes(&base_path_buf);
-            
+
             // Phase 1: Instant Feedback (The Cache Hit) - HDD ONLY
             if !is_ssd {
                 // Validate cache: one metadata syscall on the directory itself (~0.1ms).
@@ -260,7 +270,7 @@ impl ImageViewerApp {
                 if let Some(cached_entries) = directory_cache.get(&base_path_buf) {
                     eprintln!("[FOLDER-LOADING] Phase 1: Cache hit for {:?} - {} entries, sending to UI immediately",
                         base_path_buf, cached_entries.len());
-                    
+
                     // BUG FIX: When in OneDrive folder, recalculate sync_status from cached attributes
                     // The cache may have been populated when is_onedrive_base was false, resulting
                     // in sync_status = None for all items. We need to recalculate based on current
@@ -276,7 +286,8 @@ impl ImageViewerApp {
                                     // Try to get actual attributes from disk for accurate status
                                     if let Ok(metadata) = std::fs::metadata(&entry.path) {
                                         let attrs = metadata.file_attributes();
-                                        updated_entry.sync_status = onedrive::get_sync_status(attrs, true);
+                                        updated_entry.sync_status =
+                                            onedrive::get_sync_status(attrs, true);
                                     } else {
                                         // Fallback: assume locally available
                                         updated_entry.sync_status = SyncStatus::LocallyAvailable;
@@ -288,7 +299,7 @@ impl ImageViewerApp {
                     } else {
                         cached_entries
                     };
-                    
+
                     // INSTANT RETURN: Send cached entries immediately (0ms navigation)
                     let mut offset = 0;
                     while offset < entries_to_send.len() {
@@ -299,13 +310,14 @@ impl ImageViewerApp {
                         let chunk = entries_to_send[offset..end].to_vec();
                         let _ = file_entry_sender.send((my_gen, chunk));
                         ctx.request_repaint();
-                        batch_tracker.record_batch(std::time::Instant::now().elapsed(), end - offset);
+                        batch_tracker
+                            .record_batch(std::time::Instant::now().elapsed(), end - offset);
                         batch_size = batch_tracker.batch_size();
                         offset = end;
                     }
                     let _ = file_entry_sender.send((my_gen, Vec::new()));
                     ctx.request_repaint();
-                    
+
                     // Phase 2: HDD SILENCE - Trust cache + file watcher
                     // The file watcher (ReadDirectoryChangesW) passively monitors the current
                     // directory and invalidates the cache on changes. We don't need to poll
@@ -319,7 +331,7 @@ impl ImageViewerApp {
             } else {
                 eprintln!("[FOLDER-LOADING] SSD detected - bypassing cache for raw disk speed");
             }
-            
+
             eprintln!(
                 "[FOLDER-LOADING] Phase 3: Starting disk scan for {:?} (batch_size={}, is_ssd={})",
                 current_path, batch_size, is_ssd
@@ -344,68 +356,71 @@ impl ImageViewerApp {
             if !force_refresh && !is_onedrive_base {
                 if let Some(di) = &directory_index_opt {
                     let base = PathBuf::from(&base_path);
-                    if !di.might_have_changed(&base) {
-                        if let Some((_meta, indexed_files)) = di.get_directory(&base) {
-                            let mut entries: Vec<FileEntry> = indexed_files
-                                .into_iter()
-                                .filter(|f| !f.name.starts_with('.'))
-                                .map(|f| {
-                                    let is_zip = f.name.to_lowercase().ends_with(".zip");
-                                    let is_dir = f.is_dir || is_zip;
-                                    FileEntry {
-                                        path: base.join(&f.name),
-                                        name: f.name,
-                                        is_dir,
-                                        size: if is_dir && !is_zip { 0 } else { f.size },
-                                        modified: f.modified,
-                                        folder_cover: None,
-                                        drive_info: None,
-                                        sync_status: SyncStatus::None,
-                                        deletion_date: None,
-                                        recycle_original_path: None,
-                                    }
-                                })
-                                .collect();
+                    // OPTIMIZATION: Trust DriveWatcher to invalidate the index on changes.
+                    // No fs::metadata() call needed - if the index has data, it's valid.
+                    // Watcher events (Created, Deleted, Modified, Renamed) now invalidate
+                    // both DirectoryCache AND DirectoryIndex in message_handler.rs.
+                    if let Some((_meta, indexed_files)) = di.get_directory(&base) {
+                        eprintln!("[FOLDER-LOADING] Using DirectoryIndex (pre-built index) for {:?}", base);
+                        let mut entries: Vec<FileEntry> = indexed_files
+                            .into_iter()
+                            .filter(|f| !f.name.starts_with('.'))
+                            .map(|f| {
+                                let is_zip = f.name.to_lowercase().ends_with(".zip");
+                                let is_dir = f.is_dir || is_zip;
+                                FileEntry {
+                                    path: base.join(&f.name),
+                                    name: f.name,
+                                    is_dir,
+                                    size: if is_dir && !is_zip { 0 } else { f.size },
+                                    modified: f.modified,
+                                    folder_cover: None,
+                                    drive_info: None,
+                                    sync_status: SyncStatus::None,
+                                    deletion_date: None,
+                                    recycle_original_path: None,
+                                }
+                            })
+                            .collect();
 
-                            let folders: Vec<PathBuf> = entries
-                                .iter()
-                                .filter(|e| e.is_dir)
-                                .map(|e| e.path.clone())
-                                .collect();
-                            if !folders.is_empty() {
-                                let covers = disk_cache.get_folder_covers(&folders);
-                                for entry in entries.iter_mut() {
-                                    if entry.is_dir {
-                                        if let Some(cover) = covers.get(&entry.path) {
-                                            entry.folder_cover = Some(cover.clone());
-                                        }
+                        let folders: Vec<PathBuf> = entries
+                            .iter()
+                            .filter(|e| e.is_dir)
+                            .map(|e| e.path.clone())
+                            .collect();
+                        if !folders.is_empty() {
+                            let covers = disk_cache.get_folder_covers(&folders);
+                            for entry in entries.iter_mut() {
+                                if entry.is_dir {
+                                    if let Some(cover) = covers.get(&entry.path) {
+                                        entry.folder_cover = Some(cover.clone());
                                     }
                                 }
                             }
-
-                            // Only cache for HDDs - SSDs bypass cache
-                            if !is_ssd {
-                                directory_cache.put(base.clone(), entries.clone());
-                            }
-
-                            let mut offset = 0;
-                            while offset < entries.len() {
-                                if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
-                                    return;
-                                }
-                                let end = (offset + batch_size).min(entries.len());
-                                let chunk = entries[offset..end].to_vec();
-                                let _ = file_entry_sender.send((my_gen, chunk));
-                                ctx.request_repaint();
-                                batch_tracker.record_batch(batch_start.elapsed(), end - offset);
-                                let _ = batch_tracker.batch_size(); // Update internal state but don't use result
-                                batch_start = std::time::Instant::now();
-                                offset = end;
-                            }
-                            let _ = file_entry_sender.send((my_gen, Vec::new()));
-                            ctx.request_repaint();
-                            return;
                         }
+
+                        // Only cache for HDDs - SSDs bypass cache
+                        if !is_ssd {
+                            directory_cache.put(base.clone(), entries.clone());
+                        }
+
+                        let mut offset = 0;
+                        while offset < entries.len() {
+                            if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
+                                return;
+                            }
+                            let end = (offset + batch_size).min(entries.len());
+                            let chunk = entries[offset..end].to_vec();
+                            let _ = file_entry_sender.send((my_gen, chunk));
+                            ctx.request_repaint();
+                            batch_tracker.record_batch(batch_start.elapsed(), end - offset);
+                            let _ = batch_tracker.batch_size();
+                            batch_start = std::time::Instant::now();
+                            offset = end;
+                        }
+                        let _ = file_entry_sender.send((my_gen, Vec::new()));
+                        ctx.request_repaint();
+                        return;
                     }
                 }
             }
@@ -417,6 +432,7 @@ impl ImageViewerApp {
                 }
 
                 if let Some(mut cached_entries) = directory_cache.get(&PathBuf::from(&base_path)) {
+                    eprintln!("[FOLDER-LOADING] Using secondary DirectoryCache for {:?}", base_path);
                     let mut changed = false;
                     for entry in cached_entries.iter_mut() {
                         if !entry.is_dir && entry.name.to_lowercase().ends_with(".zip") {
@@ -424,7 +440,7 @@ impl ImageViewerApp {
                             changed = true;
                         }
                     }
-                    
+
                     // BUG FIX: When in OneDrive folder, recalculate sync_status from cached entries
                     // The cache may have been populated when is_onedrive_base was false, resulting
                     // in sync_status = None for all items.
@@ -443,7 +459,7 @@ impl ImageViewerApp {
                             }
                         }
                     }
-                    
+
                     if changed {
                         // Only cache for HDDs - SSDs bypass cache
                         if !is_ssd {
@@ -459,7 +475,8 @@ impl ImageViewerApp {
                         let chunk = cached_entries[offset..end].to_vec();
                         let _ = file_entry_sender.send((my_gen, chunk));
                         ctx.request_repaint();
-                        batch_tracker.record_batch(std::time::Instant::now().elapsed(), end - offset);
+                        batch_tracker
+                            .record_batch(std::time::Instant::now().elapsed(), end - offset);
                         batch_size = batch_tracker.batch_size();
                         offset = end;
                     }
@@ -474,78 +491,17 @@ impl ImageViewerApp {
                 }
             }
 
-            // OPTIMIZATION: Use HDD-optimized Win32 APIs for mechanical drives
-            let use_hdd_optimized = is_ssd == false;  // Explicitly check for HDD
-            let use_fast_reader = !is_ssd && ntfs_reader::is_available();
+            // OPTIMIZATION: Tiered disk reading strategy
+            // Priority: 1) NTFS native API, 2) HDD-optimized FindFirstFileExW, 3) Standard FindFirstFileW
+            let is_hdd = !is_ssd;
+            let ntfs_api_available = ntfs_reader::is_available();
 
-            if use_hdd_optimized && !use_fast_reader {
-                // HDD-optimized path using FindFirstFileExW with LARGE_FETCH
-                match crate::infrastructure::windows::hdd_directory_reader::read_directory_hdd_batched(
-                    &PathBuf::from(&base_path),
-                    is_onedrive_base,
-                ) {
-                    Ok(batches) => {
-                        for batch_entries in batches {
-                            if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
-                                break;
-                            }
-                            
-                            // Process batch with folder covers
-                            let folders: Vec<PathBuf> = batch_entries
-                                .iter()
-                                .filter(|e| e.is_dir)
-                                .map(|e| e.path.clone())
-                                .collect();
-                            
-                            let mut processed_batch = batch_entries;
-                            if !folders.is_empty() {
-                                let covers = disk_cache.get_folder_covers(&folders);
-                                for item in processed_batch.iter_mut() {
-                                    if item.is_dir {
-                                        if let Some(cover) = covers.get(&item.path) {
-                                            item.folder_cover = Some(cover.clone());
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            let batch_len = processed_batch.len();
-                            let _ = file_entry_sender.send((my_gen, processed_batch));
-                            batch_tracker.record_batch(batch_start.elapsed(), batch_len);
-                            batch_start = std::time::Instant::now();
-                            ctx.request_repaint();
-                        }
-                        
-                        // Send empty batch to signal completion
-                        if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
-                            let _ = file_entry_sender.send((my_gen, Vec::new()));
-                            ctx.request_repaint();
-                        }
-                        
-                        // Cache results and trigger prefetch for subdirectories
-                        if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
-                            // Results are already cached in batches, no need for full cache here
-                            if let Some(_di) = &directory_index_opt {
-                                // Note: Index update would require collecting all entries
-                                // For now, rely on the existing caching mechanism
-                            }
-                        }
-                        
-                        if !is_ssd && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
-                            // Note: Subdirectory prefetch would require collecting all entries
-                            // For now, skip prefetch for HDD-optimized path to maintain performance
-                        }
-                        
-                        return;
-                    }
-                    Err(e) => {
-                        eprintln!("[HDD] Optimized path failed: {}, falling back to standard Win32", e);
-                        // Continue to standard Win32 path
-                    }
-                }
-            }
+            // Track if we successfully used an optimized path
+            let used_optimized_path = false;
 
-            if use_fast_reader {
+            // TIER 1: Try NTFS native API first (fastest for NTFS drives)
+            if is_hdd && ntfs_api_available {
+                eprintln!("[FOLDER-LOADING] TIER 1: Trying NTFS native API (NtQueryDirectoryFile) for {:?}", base_path);
                 if let Some(entries) = ntfs_reader::read_directory_fast(&PathBuf::from(&base_path))
                 {
                     for dir_entry in entries {
@@ -641,7 +597,8 @@ impl ImageViewerApp {
                     if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                         // Only cache for HDDs - SSDs bypass cache
                         if !is_ssd {
-                            directory_cache.put(PathBuf::from(&base_path), all_entries_disk.clone());
+                            directory_cache
+                                .put(PathBuf::from(&base_path), all_entries_disk.clone());
                         }
                         if let Some(di) = &directory_index_opt {
                             let indexed: Vec<IndexedFile> = all_entries_disk
@@ -674,9 +631,88 @@ impl ImageViewerApp {
                     // }
                     return;
                 }
+                // NTFS API returned None - filesystem may not be NTFS (e.g., exFAT)
+                eprintln!("[FOLDER-LOADING] NTFS API returned None for {:?}, trying HDD-optimized path", base_path);
             }
 
-            // Prepara busca Win32
+            // TIER 2: Try HDD-optimized FindFirstFileExW (for exFAT, FAT32, or when NTFS fails)
+            if is_hdd && !used_optimized_path {
+                match crate::infrastructure::windows::hdd_directory_reader::read_directory_hdd_batched(
+                    &PathBuf::from(&base_path),
+                    is_onedrive_base,
+                ) {
+                    Ok(batches) => {
+                        eprintln!("[FOLDER-LOADING] TIER 2: Using HDD-optimized FindFirstFileExW for {:?}", base_path);
+                        for batch_entries in batches {
+                            if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
+                                break;
+                            }
+                            
+                            // Process batch with folder covers
+                            let folders: Vec<PathBuf> = batch_entries
+                                .iter()
+                                .filter(|e| e.is_dir)
+                                .map(|e| e.path.clone())
+                                .collect();
+                            
+                            let mut processed_batch = batch_entries;
+                            if !folders.is_empty() {
+                                let covers = disk_cache.get_folder_covers(&folders);
+                                for item in processed_batch.iter_mut() {
+                                    if item.is_dir {
+                                        if let Some(cover) = covers.get(&item.path) {
+                                            item.folder_cover = Some(cover.clone());
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            all_entries_disk.extend(processed_batch.clone());
+                            let batch_len = processed_batch.len();
+                            let _ = file_entry_sender.send((my_gen, processed_batch));
+                            batch_tracker.record_batch(batch_start.elapsed(), batch_len);
+                            batch_start = std::time::Instant::now();
+                            ctx.request_repaint();
+                        }
+                        
+                        // Send empty batch to signal completion
+                        if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+                            let _ = file_entry_sender.send((my_gen, Vec::new()));
+                            ctx.request_repaint();
+                        }
+                        
+                        // Cache results for future navigations
+                        if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+                            directory_cache.put(PathBuf::from(&base_path), all_entries_disk.clone());
+                            
+                            if let Some(di) = &directory_index_opt {
+                                let indexed: Vec<IndexedFile> = all_entries_disk
+                                    .iter()
+                                    .map(|e| IndexedFile {
+                                        name: e.name.clone(),
+                                        size: e.size,
+                                        modified: e.modified,
+                                        is_dir: e.is_dir,
+                                    })
+                                    .collect();
+                                let _ = di.put_directory(
+                                    &PathBuf::from(&base_path),
+                                    &indexed,
+                                    scan_start.elapsed().as_millis() as u64,
+                                );
+                            }
+                        }
+                        
+                        return;
+                    }
+                    Err(e) => {
+                        eprintln!("[FOLDER-LOADING] TIER 2 failed: {}, falling back to standard Win32", e);
+                        // Continue to TIER 3 (standard Win32)
+                    }
+                }
+            }
+
+            // TIER 3: Standard FindFirstFileW fallback (last resort)
             let search_path = if base_path.ends_with('\\') {
                 format!("{}*", base_path)
             } else {
@@ -885,7 +921,7 @@ impl ImageViewerApp {
                 if !is_ssd {
                     directory_cache.put(PathBuf::from(&base_path), all_entries_disk.clone());
                 }
-                
+
                 if let Some(di) = &directory_index_opt {
                     let indexed: Vec<IndexedFile> = all_entries_disk
                         .iter()
