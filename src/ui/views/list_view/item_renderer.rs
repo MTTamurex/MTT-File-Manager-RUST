@@ -2,10 +2,10 @@
 
 use eframe::egui::{self, Color32, FontId, Pos2, Rect, RichText, Sense, Ui};
 
+use super::helpers::{get_file_type_string, render_status_badge};
+use super::{truncate_text_for_column, ColumnWidths, ListViewContext, ListViewOperations};
 use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::windows::{format_date, format_size};
-use super::{truncate_text_for_column, ColumnWidths, ListViewContext, ListViewOperations};
-use super::helpers::{get_file_type_string, render_status_badge};
 
 // PERFORMANCE: Tooltip debounce to avoid creation/destruction during scroll
 const TOOLTIP_DELAY_SECS: f32 = 0.3;
@@ -29,9 +29,9 @@ pub(super) fn render_list_item(
         && !ctx.is_computer_view
         && !ctx.is_recycle_bin_view
         && item.folder_cover.is_none()
-        && !ctx.scanned_folders.contains(&item.path)
+        && ctx.scanned_folders.peek(&item.path).is_none()
     {
-        ctx.scanned_folders.insert(item.path.clone());
+        ctx.scanned_folders.put(item.path.clone(), ());
         ops.request_folder_scan(item.path.clone());
     }
 
@@ -149,7 +149,9 @@ pub(super) fn render_list_item(
                     response.request_focus();
 
                     // Select name without extension (Windows Explorer behavior)
-                    if let Some(mut state) = egui::widgets::text_edit::TextEditState::load(ui.ctx(), response.id) {
+                    if let Some(mut state) =
+                        egui::widgets::text_edit::TextEditState::load(ui.ctx(), response.id)
+                    {
                         let char_count = text.chars().count();
                         let select_end = if item.is_dir {
                             char_count
@@ -159,10 +161,12 @@ pub(super) fn render_list_item(
                                 .filter(|&pos| pos > 0)
                                 .unwrap_or(char_count)
                         };
-                        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
-                            egui::text::CCursor::new(0),
-                            egui::text::CCursor::new(select_end),
-                        )));
+                        state
+                            .cursor
+                            .set_char_range(Some(egui::text::CCursorRange::two(
+                                egui::text::CCursor::new(0),
+                                egui::text::CCursor::new(select_end),
+                            )));
                         state.store(ui.ctx(), response.id);
                     }
                 }
@@ -176,7 +180,8 @@ pub(super) fn render_list_item(
             // Name (truncated to fit column precisely)
             let font_id = FontId::proportional(12.0);
             let available_name_width = w_name - 30.0; // Space for icon + padding
-            let display_name = truncate_text_for_column(&item.name, available_name_width, &font_id, ui);
+            let display_name =
+                truncate_text_for_column(&item.name, available_name_width, &font_id, ui);
 
             ui.painter().text(
                 rect.min + egui::vec2(24.0, 5.0),
@@ -192,8 +197,16 @@ pub(super) fn render_list_item(
             render_computer_view_columns(ui, item, rect, w_name, w_date, secondary_color);
         } else {
             render_regular_columns(
-                ui, item, ctx, rect, w_name, w_date, w_type, w_size,
-                secondary_color, is_recycle_bin,
+                ui,
+                item,
+                ctx,
+                rect,
+                w_name,
+                w_date,
+                w_type,
+                w_size,
+                secondary_color,
+                is_recycle_bin,
             );
         }
     });
@@ -330,9 +343,9 @@ fn render_item_icon(
         let is_virtual_zip = path_lower.contains(".zip\\") || path_lower.contains(".zip/");
 
         if is_virtual_zip {
-            if let Some(folder_icon) = ctx
-                .item_icon_loader
-                .get_or_load_icon(ui.ctx(), &item.path, true, false)
+            if let Some(folder_icon) =
+                ctx.item_icon_loader
+                    .get_or_load_icon(ui.ctx(), &item.path, true, false)
             {
                 ui.painter().image(
                     folder_icon.id(),
@@ -386,7 +399,8 @@ fn render_item_icon(
             );
         } else {
             // If icon not in cache and not loading, request it (async)
-            if !ctx.loading_icons.contains(&item.path) && !ctx.failed_icons.contains(&item.path)
+            if !ctx.loading_icons.contains(&item.path)
+                && ctx.failed_icons.peek(&item.path).is_none()
             {
                 ops.request_icon_load(item.path.clone());
             }

@@ -47,8 +47,12 @@ impl<'a> ListViewOperations for ListOps<'a> {
 
     fn request_thumbnail_load(&mut self, path: PathBuf, directory_index: usize, modified: u64) {
         // List view always requests small thumbnails (64px)
-        self.actions
-            .push(ListAction::RequestThumbnailLoad(path, 64, directory_index, modified));
+        self.actions.push(ListAction::RequestThumbnailLoad(
+            path,
+            64,
+            directory_index,
+            modified,
+        ));
     }
 
     fn request_folder_scan(&mut self, path: PathBuf) {
@@ -93,7 +97,11 @@ impl ImageViewerApp {
     /// Render list view with extracted navigation logic
     pub fn render_list_view(&mut self, ui: &mut egui::Ui) {
         // Keyboard navigation (ONLY when not renaming and media is NOT focused)
-        if should_handle_navigation(ui, self.renaming_state.is_some(), self.is_media_keyboard_focused()) {
+        if should_handle_navigation(
+            ui,
+            self.renaming_state.is_some(),
+            self.is_media_keyboard_focused(),
+        ) {
             let current_index = self.items.iter().position(|x| {
                 self.selected_file
                     .as_ref()
@@ -120,6 +128,7 @@ impl ImageViewerApp {
                 if let Some(item) = self.items.get(clamped) {
                     let item_path = item.path.clone();
                     let is_dir = item.is_dir;
+                    let is_media = item.is_media(); // Extract before mutable borrow
 
                     // UPDATED: Decoupled Focus (selected_item) from Selection (multi_selection)
                     let old_focus = self.selected_item;
@@ -162,7 +171,7 @@ impl ImageViewerApp {
 
                     ui.ctx().request_repaint();
 
-                    if !is_dir {
+                    if !is_dir && is_media {
                         if !self.cache_manager.has_thumbnail(&item_path)
                             && !self.cache_manager.is_loading(&item_path)
                         {
@@ -209,9 +218,9 @@ impl ImageViewerApp {
         let multi_selection = &self.multi_selection;
         let is_ssd = io_priority::is_ssd(&PathBuf::from(&self.current_path));
         let prefetch_rows = if is_ssd { 1 } else { 3 };
-        
+
         // Select appropriate column width references based on context
-        let (col_name_width, col_date_width, col_type_width, col_size_width, col_status_width) = 
+        let (col_name_width, col_date_width, col_type_width, col_size_width, col_status_width) =
             if self.is_computer_view {
                 // Computer view uses its own set of columns
                 (
@@ -240,7 +249,7 @@ impl ImageViewerApp {
                     &mut self.list_col_onedrive_status_width, // Not used in regular view
                 )
             };
-        
+
         let mut ctx = ListViewContext {
             items: &items,
             selected_item,
@@ -351,10 +360,11 @@ impl ImageViewerApp {
                     // Common updates
                     let item_path = item.path.clone();
                     let is_dir = item.is_dir;
+                    let is_media = item.is_media(); // Extract before mutable borrow
                     self.update_selected_thumbnail();
 
                     // Trigger thumbnail load for sidebar preview
-                    if !is_dir {
+                    if !is_dir && is_media {
                         if !self.cache_manager.has_thumbnail(&item_path)
                             && !self.cache_manager.is_loading(&item_path)
                         {
@@ -457,9 +467,10 @@ impl ImageViewerApp {
                     self.request_folder_preview_load(path)
                 }
                 ListAction::RenameWithShell(idx) => self.rename_with_shell(idx),
-                ListAction::RequestThumbnailPrefetchWithIndex(path, size, index, modified) => {
-                    self.request_thumbnail_prefetch_with_index_and_modified(path, size, index, modified)
-                }
+                ListAction::RequestThumbnailPrefetchWithIndex(path, size, index, modified) => self
+                    .request_thumbnail_prefetch_with_index_and_modified(
+                        path, size, index, modified,
+                    ),
                 ListAction::NotifyIdleVisibleItems(items) => {
                     let _ = self
                         .idle_warmup_sender

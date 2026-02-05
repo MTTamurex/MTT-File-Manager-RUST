@@ -136,8 +136,8 @@ pub struct GridViewContext<'a> {
     /// Set of icons currently loading (async)
     pub loading_icons: &'a mut FxHashSet<PathBuf>,
     /// Set of icons that failed extraction (prevents infinite retry)
-    pub failed_icons: &'a FxHashSet<PathBuf>,
-    pub scanned_folders: &'a mut FxHashSet<PathBuf>,
+    pub failed_icons: &'a lru::LruCache<PathBuf, ()>,
+    pub scanned_folders: &'a mut lru::LruCache<PathBuf, ()>,
     pub folder_icon_texture: Option<&'a egui::TextureHandle>,
     pub computer_icon: Option<&'a egui::TextureHandle>,
     pub drive_icon_cache: &'a mut lru::LruCache<String, egui::TextureHandle>,
@@ -523,7 +523,11 @@ pub fn render_grid_view(
     // PERFORMANCE: Adaptive overscan based on scroll velocity
     // Higher velocity = more overscan to prevent white areas during fast scroll
     let overscan = if is_scrolling {
-        if ctx.scroll_predictor.velocity > 5.0 { 3 } else { 2 }
+        if ctx.scroll_predictor.velocity > 5.0 {
+            3
+        } else {
+            2
+        }
     } else {
         4 // More overscan when idle for smoother experience
     };

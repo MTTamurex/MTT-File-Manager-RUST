@@ -73,7 +73,7 @@ pub struct ImageViewerApp {
     // COVER WORKER: Sistema de capas de pasta (Single Thread Worker)
     pub cover_worker_sender: Sender<PathBuf>, // UI → Worker: Envia pasta para processar
     pub cover_worker_receiver: Receiver<(PathBuf, Option<PathBuf>)>, // Worker → UI: Resultado
-    pub scanned_folders: FxHashSet<PathBuf>,  // Cache: evita re-scan
+    pub scanned_folders: LruCache<PathBuf, ()>, // Cache: evita re-scan (LRU bounded)
 
     // FOLDER PREVIEW WORKER: Native Windows Shell folder previews (sandwich effect)
     pub folder_preview_sender: Sender<PathBuf>,
@@ -84,9 +84,9 @@ pub struct ImageViewerApp {
 
     // Sorting state
     pub sort_mode: SortMode,
-    pub sort_mode_computer: SortMode,      // Sort mode for "Este Computador" view
-    pub sort_mode_normal: SortMode,        // Sort mode for normal folder views
-    pub sort_descending: bool,             // true = Z-A, Mais Novo, Maior
+    pub sort_mode_computer: SortMode, // Sort mode for "Este Computador" view
+    pub sort_mode_normal: SortMode,   // Sort mode for normal folder views
+    pub sort_descending: bool,        // true = Z-A, Mais Novo, Maior
     pub folders_position: FoldersPosition, // First, Last, Mixed
 
     // Persistence Layer
@@ -147,7 +147,7 @@ pub struct ImageViewerApp {
     // SISTEMA DE WATCHER (AUTO-REFRESH)
     // Drive-wide watcher (novo - monitora drive inteiro)
     pub drive_watcher: crate::infrastructure::drive_watcher_integration::DriveWatcherManager,
-    
+
     // Legacy notify-based watcher (fallback)
     #[cfg(feature = "notify-watcher")]
     pub watcher: Option<RecommendedWatcher>,
@@ -177,7 +177,7 @@ pub struct ImageViewerApp {
     pub icon_req_sender: Sender<PathBuf>, // UI → Worker
     pub icon_res_receiver: Receiver<(PathBuf, Vec<u8>, u32, u32)>, // Worker → UI
     pub loading_icons: FxHashSet<PathBuf>, // Tracking in-progress
-    pub failed_icons: FxHashSet<PathBuf>, // Icons that failed extraction (prevents infinite retry)
+    pub failed_icons: LruCache<PathBuf, ()>, // Icons that failed extraction (LRU bounded)
 
     // NOTIFICATION SYSTEM (toast messages)
     pub notifications: crate::application::NotificationManager,
@@ -232,7 +232,7 @@ pub struct ImageViewerApp {
     // FOLDER SIZE CALCULATOR (async for details panel)
     pub folder_size_req_sender: Sender<PathBuf>, // UI → Worker
     pub folder_size_res_receiver: Receiver<(PathBuf, u64)>, // Worker → UI
-    pub folder_size_cache: std::collections::HashMap<PathBuf, u64>, // Calculated sizes
+    pub folder_size_cache: LruCache<PathBuf, u64>, // Calculated sizes (LRU bounded)
     pub folder_size_loading: FxHashSet<PathBuf>, // Currently calculating
 
     // RECYCLE BIN CACHE

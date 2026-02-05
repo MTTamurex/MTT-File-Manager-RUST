@@ -1,8 +1,8 @@
-use eframe::egui;
-use std::path::PathBuf;
+use crate::app::ImageViewerApp;
 use crate::domain::file_entry::{FileEntry, SyncStatus, ViewMode};
 use crate::infrastructure::windows as windows_infra;
-use crate::app::ImageViewerApp;
+use eframe::egui;
+use std::path::PathBuf;
 
 // Sidebar width constraints
 const LEFT_SIDEBAR_MIN: f32 = 150.0;
@@ -23,13 +23,13 @@ pub fn render_panels(app: &mut ImageViewerApp, ctx: &egui::Context, _frame: &mut
 
     // 4. Central Panel
     render_central_panel_layout(app, ctx);
-    
+
     // 5. Focus release: When user clicks anywhere outside the video player,
     // release focus back to the main window (MPV no-op, kept for parity)
     #[cfg(target_os = "windows")]
     {
         use crate::ui::components::MediaPreview;
-        
+
         if ctx.input(|i| i.pointer.any_pressed()) {
             // User clicked somewhere - release player focus
             if let Some(MediaPreview::Video(ref player)) = app.media_preview {
@@ -41,13 +41,15 @@ pub fn render_panels(app: &mut ImageViewerApp, ctx: &egui::Context, _frame: &mut
 
 fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) {
     // Clamp width to valid range BEFORE using it
-    let target_width = app.sidebar_left_width.clamp(LEFT_SIDEBAR_MIN, LEFT_SIDEBAR_MAX);
-    
+    let target_width = app
+        .sidebar_left_width
+        .clamp(LEFT_SIDEBAR_MIN, LEFT_SIDEBAR_MAX);
+
     // Use exact_width + resizable(false) to FORCE the width from app state
     // Resize is handled via manual drag handles rendered separately
     let sidebar_response = egui::SidePanel::left("sidebar")
         .exact_width(target_width)
-        .resizable(false)  // Resize handled manually via drag handles
+        .resizable(false) // Resize handled manually via drag handles
         .frame(egui::Frame::NONE.fill(if ctx.style().visuals.dark_mode {
             egui::Color32::from_rgb(45, 45, 45)
         } else {
@@ -86,25 +88,36 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) {
     }
 }
 
-fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, frame: &eframe::Frame) {
+fn render_preview_panel_layout(
+    app: &mut ImageViewerApp,
+    ctx: &egui::Context,
+    frame: &eframe::Frame,
+) {
     if app.show_preview_panel {
         app.refresh_selected_metadata();
 
         // Clamp width to valid range BEFORE using it
-        let target_width = app.sidebar_right_width.clamp(RIGHT_SIDEBAR_MIN, RIGHT_SIDEBAR_MAX);
+        let target_width = app
+            .sidebar_right_width
+            .clamp(RIGHT_SIDEBAR_MIN, RIGHT_SIDEBAR_MAX);
 
         // Use exact_width + resizable(false) to FORCE the width from app state
         // Resize is handled via manual drag handles rendered separately
         let _right_panel_response = egui::SidePanel::right("preview_panel")
             .exact_width(target_width)
-            .resizable(false)  // Resize handled manually via drag handles
+            .resizable(false) // Resize handled manually via drag handles
             .frame(egui::Frame {
                 fill: if ctx.style().visuals.dark_mode {
                     egui::Color32::from_rgb(45, 45, 45)
                 } else {
                     egui::Color32::WHITE
                 },
-                inner_margin: egui::Margin { left: 12, right: 12, top: 8, bottom: 8 },
+                inner_margin: egui::Margin {
+                    left: 12,
+                    right: 12,
+                    top: 8,
+                    bottom: 8,
+                },
                 ..Default::default()
             })
             .show(ctx, |ui| {
@@ -121,11 +134,15 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, fr
                             let tab_id = app.tab_manager.active().id;
                             let selected_metadata =
                                 app.selected_metadata.as_ref().and_then(|(p, meta)| {
-                                    if p == &file.path { Some(meta) } else { None }
+                                    if p == &file.path {
+                                        Some(meta)
+                                    } else {
+                                        None
+                                    }
                                 });
 
                             let folder_size = if file.is_dir {
-                                app.folder_size_cache.get(&file.path).copied()
+                                app.folder_size_cache.peek(&file.path).copied()
                             } else {
                                 None
                             };
@@ -143,8 +160,13 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, fr
                                 app.media_preview.as_mut(), // Always pass mut if it exists, visibility is controlled by HWND
                                 selected_metadata,
                                 app.cache_manager.texture_cache.peek(&file.path).cloned(),
-                                app.cache_manager.folder_preview_cache.get(&file.path).cloned(),
-                                app.cache_manager.folder_preview_loading.contains(&file.path),
+                                app.cache_manager
+                                    .folder_preview_cache
+                                    .get(&file.path)
+                                    .cloned(),
+                                app.cache_manager
+                                    .folder_preview_loading
+                                    .contains(&file.path),
                                 app.metadata_loading.contains(&file.path),
                                 folder_size,
                                 is_folder_size_loading,
@@ -161,9 +183,11 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, fr
                                     PreviewPanelAction::RequestPlay(path) => {
                                         use crate::ui::components::media_preview::MediaPreview;
                                         use crate::ui::components::MpvPreview;
-                                        
+
                                         // TAKE OVER: Stop and drop existing player if any
-                                        if let Some(MediaPreview::Video(ref mut old_player)) = app.media_preview {
+                                        if let Some(MediaPreview::Video(ref mut old_player)) =
+                                            app.media_preview
+                                        {
                                             old_player.pause();
                                             // Dropping app.media_preview will stop the previous player
                                         }
@@ -172,19 +196,22 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, fr
                                         // Take ownership and start new player
                                         let mut player = MpvPreview::new(path);
                                         player.play_on_init = true; // Start playing as soon as initialized
-                                        player.show_player = true;  // Ensure player is visible immediately
-                                        
+                                        player.show_player = true; // Ensure player is visible immediately
+
                                         // Set initial volume (will be applied when MPV is ready)
                                         player.initial_volume = app.saved_media_volume;
-                                        
+
                                         app.media_preview = Some(MediaPreview::Video(player));
                                         app.media_preview_owner_tab_id = Some(tab_id);
-                                        
+
                                         // Final sync: hide/show correctly
                                         app.update_video_visibility();
                                     }
                                     PreviewPanelAction::RefreshThumbnail(path) => {
-                                        eprintln!("[REFRESH THUMBNAIL] Starting refresh for: {:?}", path);
+                                        eprintln!(
+                                            "[REFRESH THUMBNAIL] Starting refresh for: {:?}",
+                                            path
+                                        );
                                         // Clear all caches to allow retry
                                         app.disk_cache.remove_cache_for_path(&path);
                                         eprintln!("[REFRESH THUMBNAIL] Disk cache cleared");
@@ -200,15 +227,26 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, fr
                                         crate::workers::thumbnail::clear_failure_cache(&path);
                                         eprintln!("[REFRESH THUMBNAIL] Failure cache cleared");
                                         // Force regeneration by passing modified=0 (will trigger new extraction)
-                                        app.request_thumbnail_load_with_modified(path.clone(), 512, 0);
-                                        eprintln!("[REFRESH THUMBNAIL] Request sent to worker for: {:?}", path);
+                                        app.request_thumbnail_load_with_modified(
+                                            path.clone(),
+                                            512,
+                                            0,
+                                        );
+                                        eprintln!(
+                                            "[REFRESH THUMBNAIL] Request sent to worker for: {:?}",
+                                            path
+                                        );
                                         app.notifications.push(
-                                            crate::application::AppNotification::info("Recarregando thumbnail...".to_string()),
+                                            crate::application::AppNotification::info(
+                                                "Recarregando thumbnail...".to_string(),
+                                            ),
                                         );
                                     }
                                     PreviewPanelAction::LoadFolderPreview(path) => {
                                         if app.cache_manager.folder_preview_loading.len() < 30 {
-                                            app.cache_manager.folder_preview_loading.insert(path.clone());
+                                            app.cache_manager
+                                                .folder_preview_loading
+                                                .insert(path.clone());
                                             let _ = app.folder_preview_sender.send(path);
                                         }
                                     }
@@ -235,59 +273,57 @@ fn render_preview_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context, fr
 fn render_resize_handles(app: &mut ImageViewerApp, ctx: &egui::Context) {
     let screen = ctx.screen_rect();
     let tab_bar_height = 35.0; // Approximate tab bar height
-    
+
     // Left sidebar resize handle (right edge of left sidebar)
-    let left_width = app.sidebar_left_width.clamp(LEFT_SIDEBAR_MIN, LEFT_SIDEBAR_MAX);
+    let left_width = app
+        .sidebar_left_width
+        .clamp(LEFT_SIDEBAR_MIN, LEFT_SIDEBAR_MAX);
     let left_handle_rect = egui::Rect::from_min_size(
         egui::pos2(left_width - RESIZE_HANDLE_WIDTH / 2.0, tab_bar_height),
         egui::vec2(RESIZE_HANDLE_WIDTH, screen.height() - tab_bar_height),
     );
-    
+
     egui::Area::new(egui::Id::new("left_sidebar_resize"))
         .fixed_pos(left_handle_rect.min)
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
-            let response = ui.allocate_rect(
-                left_handle_rect,
-                egui::Sense::drag(),
-            );
-            
+            let response = ui.allocate_rect(left_handle_rect, egui::Sense::drag());
+
             // Set cursor on hover/drag
             if response.hovered() || response.dragged() {
                 ctx.set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
             }
-            
+
             // Update width on drag
             if response.dragged() {
                 let delta = response.drag_delta().x;
-                app.sidebar_left_width = (app.sidebar_left_width + delta)
-                    .clamp(LEFT_SIDEBAR_MIN, LEFT_SIDEBAR_MAX);
+                app.sidebar_left_width =
+                    (app.sidebar_left_width + delta).clamp(LEFT_SIDEBAR_MIN, LEFT_SIDEBAR_MAX);
             }
         });
-    
+
     // Right sidebar resize handle (left edge of right sidebar) - only if panel is visible
     if app.show_preview_panel {
-        let right_width = app.sidebar_right_width.clamp(RIGHT_SIDEBAR_MIN, RIGHT_SIDEBAR_MAX);
+        let right_width = app
+            .sidebar_right_width
+            .clamp(RIGHT_SIDEBAR_MIN, RIGHT_SIDEBAR_MAX);
         let right_handle_x = screen.width() - right_width - RESIZE_HANDLE_WIDTH / 2.0;
         let right_handle_rect = egui::Rect::from_min_size(
             egui::pos2(right_handle_x, tab_bar_height),
             egui::vec2(RESIZE_HANDLE_WIDTH, screen.height() - tab_bar_height),
         );
-        
+
         egui::Area::new(egui::Id::new("right_sidebar_resize"))
             .fixed_pos(right_handle_rect.min)
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
-                let response = ui.allocate_rect(
-                    right_handle_rect,
-                    egui::Sense::drag(),
-                );
-                
+                let response = ui.allocate_rect(right_handle_rect, egui::Sense::drag());
+
                 // Set cursor on hover/drag
                 if response.hovered() || response.dragged() {
                     ctx.set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
                 }
-                
+
                 // Update width on drag (note: dragging LEFT increases right panel width)
                 if response.dragged() {
                     let delta = -response.drag_delta().x; // Inverted for right panel
@@ -341,9 +377,12 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             use crate::infrastructure::windows::get_volume_info;
             let vol = get_volume_info(&app.current_path);
             let drive_type = windows_infra::detect_drive_type(&app.current_path);
-            let label = app.disks.iter().find(|(p, _)| {
-                p.starts_with(&app.current_path) || app.current_path.starts_with(p)
-            }).map(|(_, l)| l.clone()).unwrap_or_else(|| app.current_path.clone());
+            let label = app
+                .disks
+                .iter()
+                .find(|(p, _)| p.starts_with(&app.current_path) || app.current_path.starts_with(p))
+                .map(|(_, l)| l.clone())
+                .unwrap_or_else(|| app.current_path.clone());
             entry.name = label;
             entry.drive_info = Some(crate::domain::file_entry::DriveInfo {
                 file_system: vol.file_system,
@@ -352,7 +391,9 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
                 drive_type,
             });
         } else {
-            entry.name = path.file_name().map(|n| n.to_string_lossy().to_string())
+            entry.name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| app.current_path.clone());
         }
         Some(entry)
@@ -367,66 +408,74 @@ fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
             egui::Color32::WHITE
         }))
         .show(ctx, |ui| {
-        if app.is_loading_folder && app.items.is_empty() {
-            ui.centered_and_justified(|ui| {
-                ui.spinner();
-                ui.label("Carregando...");
-            });
-        } else if app.items.is_empty() {
-            let response = ui.centered_and_justified(|ui| {
-                ui.label("Pasta vazia");
-            }).response.on_hover_cursor(egui::CursorIcon::Default);
+            if app.is_loading_folder && app.items.is_empty() {
+                ui.centered_and_justified(|ui| {
+                    ui.spinner();
+                    ui.label("Carregando...");
+                });
+            } else if app.items.is_empty() {
+                let response = ui
+                    .centered_and_justified(|ui| {
+                        ui.label("Pasta vazia");
+                    })
+                    .response
+                    .on_hover_cursor(egui::CursorIcon::Default);
 
-            // Handle context menu on empty area
-            let interact_response = ui.interact(response.rect, ui.id().with("empty_bg"), egui::Sense::click())
-                .on_hover_cursor(egui::CursorIcon::Default); // Force cursor on the interaction rect
-            
-            if interact_response.secondary_clicked() {
-                app.context_menu.target_paths.clear(); 
-                
-                // Use current path for shell menu
-                let paths = if app.is_recycle_bin_view {
-                    vec![]
-                } else {
-                    vec![std::path::PathBuf::from(&app.current_path)] 
-                };
-                
-                // Prepare state
-                let pos = ui.input(|i| i.pointer.hover_pos().unwrap_or_default());
-                let right_bound = ui.available_rect_before_wrap().right();
-                
-                // Set state first
-                app.context_menu.open(pos, right_bound, None, paths.clone(), true);
-                
-                // Then populate items
-                app.populate_context_menu(ui.ctx(), &paths, true, None);
-            }
-        } else {
-            match app.view_mode {
-                ViewMode::Grid => app.render_grid_view(ui),
-                ViewMode::List => app.render_list_view(ui),
-            }
+                // Handle context menu on empty area
+                let interact_response = ui
+                    .interact(
+                        response.rect,
+                        ui.id().with("empty_bg"),
+                        egui::Sense::click(),
+                    )
+                    .on_hover_cursor(egui::CursorIcon::Default); // Force cursor on the interaction rect
 
-            if ui.input(|i| i.key_pressed(egui::Key::F2)) {
-                if let Some(idx) = app.selected_item {
-                    if let Some(item) = app.items.get(idx) {
-                        app.renaming_state = Some((idx, item.name.clone()));
-                        app.focus_rename = true;
+                if interact_response.secondary_clicked() {
+                    app.context_menu.target_paths.clear();
+
+                    // Use current path for shell menu
+                    let paths = if app.is_recycle_bin_view {
+                        vec![]
+                    } else {
+                        vec![std::path::PathBuf::from(&app.current_path)]
+                    };
+
+                    // Prepare state
+                    let pos = ui.input(|i| i.pointer.hover_pos().unwrap_or_default());
+                    let right_bound = ui.available_rect_before_wrap().right();
+
+                    // Set state first
+                    app.context_menu
+                        .open(pos, right_bound, None, paths.clone(), true);
+
+                    // Then populate items
+                    app.populate_context_menu(ui.ctx(), &paths, true, None);
+                }
+            } else {
+                match app.view_mode {
+                    ViewMode::Grid => app.render_grid_view(ui),
+                    ViewMode::List => app.render_list_view(ui),
+                }
+
+                if ui.input(|i| i.key_pressed(egui::Key::F2)) {
+                    if let Some(idx) = app.selected_item {
+                        if let Some(item) = app.items.get(idx) {
+                            app.renaming_state = Some((idx, item.name.clone()));
+                            app.focus_rename = true;
+                        }
                     }
                 }
-            }
 
-            if app.is_loading_folder {
-                let rect = ui.max_rect();
-                let spinner_rect = egui::Rect::from_min_size(
-                    rect.right_bottom() - egui::vec2(24.0, 24.0),
-                    egui::vec2(16.0, 16.0),
-                );
-                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(spinner_rect), |ui| {
-                    ui.spinner();
-                });
+                if app.is_loading_folder {
+                    let rect = ui.max_rect();
+                    let spinner_rect = egui::Rect::from_min_size(
+                        rect.right_bottom() - egui::vec2(24.0, 24.0),
+                        egui::vec2(16.0, 16.0),
+                    );
+                    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(spinner_rect), |ui| {
+                        ui.spinner();
+                    });
+                }
             }
-        }
         });
 }
-

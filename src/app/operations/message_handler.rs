@@ -876,7 +876,7 @@ impl ImageViewerApp {
                 // Skip texture creation if extraction failed (empty data)
                 // Track failed icons to prevent infinite retry loops
                 if pixels.is_empty() || width == 0 || height == 0 {
-                    self.failed_icons.insert(path);
+                    self.failed_icons.put(path, ());
                     icon_uploads += 1;
                     continue;
                 }
@@ -1204,7 +1204,7 @@ impl ImageViewerApp {
         // 9. FOLDER SIZE RESULTS
         while let Ok((folder_path, total_size)) = self.folder_size_res_receiver.try_recv() {
             self.folder_size_loading.remove(&folder_path);
-            self.folder_size_cache.insert(folder_path, total_size);
+            self.folder_size_cache.put(folder_path, total_size);
             received_any = true;
         }
 

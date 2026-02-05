@@ -51,13 +51,13 @@ pub struct ItemSlotContext<'a> {
     /// Carregador de ícones (PERSISTENTE - não crie novo a cada chamada!)
     pub icon_loader: &'a mut IconLoader,
     /// Conjunto de pastas escaneadas
-    pub scanned_folders: &'a mut FxHashSet<std::path::PathBuf>,
+    pub scanned_folders: &'a mut lru::LruCache<std::path::PathBuf, ()>,
     /// Conjunto de itens carregando (thumbnails de arquivos)
     pub loading_set: &'a mut FxHashSet<std::path::PathBuf>,
     /// Conjunto de itens carregando ícones (ex: .exe)
     pub loading_icons: &'a mut FxHashSet<std::path::PathBuf>,
     /// Conjunto de ícones que falharam (evita retry infinito)
-    pub failed_icons: &'a FxHashSet<std::path::PathBuf>,
+    pub failed_icons: &'a lru::LruCache<std::path::PathBuf, ()>,
     /// Cache de previews de pastas (Native Sandwich)
     pub folder_preview_cache: &'a mut lru::LruCache<std::path::PathBuf, egui::TextureHandle>,
     /// Conjunto de pastas carregando preview nativo
@@ -232,8 +232,8 @@ fn render_directory_slot<O: ItemSlotOperations>(
     if !ctx.is_recycle_bin_view {
         // --- GATILHO LAZY LOAD ---
         // Se não tem capa E ainda não foi escaneado: Dispara Scan.
-        if item.folder_cover.is_none() && !ctx.scanned_folders.contains(&item.path) {
-            ctx.scanned_folders.insert(item.path.clone());
+        if item.folder_cover.is_none() && ctx.scanned_folders.peek(&item.path).is_none() {
+            ctx.scanned_folders.put(item.path.clone(), ());
             ops.request_folder_scan(item.path.clone());
         }
 
@@ -417,12 +417,16 @@ fn render_directory_slot<O: ItemSlotOperations>(
 
                 // On first focus: select all text (directories have no extension)
                 if ctx.focus_rename {
-                    if let Some(mut state) = egui::widgets::text_edit::TextEditState::load(ui.ctx(), response.id) {
+                    if let Some(mut state) =
+                        egui::widgets::text_edit::TextEditState::load(ui.ctx(), response.id)
+                    {
                         let char_count = text.chars().count();
-                        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
-                            egui::text::CCursor::new(0),
-                            egui::text::CCursor::new(char_count),
-                        )));
+                        state
+                            .cursor
+                            .set_char_range(Some(egui::text::CCursorRange::two(
+                                egui::text::CCursor::new(0),
+                                egui::text::CCursor::new(char_count),
+                            )));
                         state.store(ui.ctx(), response.id);
                     }
                 }
@@ -494,7 +498,7 @@ fn render_file_slot<O: ItemSlotOperations>(
     // Inserting here would cause the deferred request_icon_load to skip (already in set).
     // NOTE: Also works for Recycle Bin - physical_path ($R files) contain embedded icons.
     if file_icon.is_none() {
-        if !ctx.loading_icons.contains(&item.path) && !ctx.failed_icons.contains(&item.path) {
+        if !ctx.loading_icons.contains(&item.path) && ctx.failed_icons.peek(&item.path).is_none() {
             ops.request_icon_load(item.path.clone());
         }
     }
@@ -602,16 +606,21 @@ fn render_file_slot<O: ItemSlotOperations>(
 
                 // On first focus: select name without extension (Windows Explorer behavior)
                 if ctx.focus_rename {
-                    if let Some(mut state) = egui::widgets::text_edit::TextEditState::load(ui.ctx(), response.id) {
+                    if let Some(mut state) =
+                        egui::widgets::text_edit::TextEditState::load(ui.ctx(), response.id)
+                    {
                         let char_count = text.chars().count();
-                        let select_end = text.rfind('.')
+                        let select_end = text
+                            .rfind('.')
                             .map(|byte_pos| text[..byte_pos].chars().count())
                             .filter(|&pos| pos > 0)
                             .unwrap_or(char_count);
-                        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
-                            egui::text::CCursor::new(0),
-                            egui::text::CCursor::new(select_end),
-                        )));
+                        state
+                            .cursor
+                            .set_char_range(Some(egui::text::CCursorRange::two(
+                                egui::text::CCursor::new(0),
+                                egui::text::CCursor::new(select_end),
+                            )));
                         state.store(ui.ctx(), response.id);
                     }
                 }
