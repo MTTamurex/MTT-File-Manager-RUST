@@ -309,8 +309,12 @@ fn perform_quick_search(app: &mut ImageViewerApp) {
         app.selected_item = Some(index);
         app.selected_file = Some(app.items[index].clone());
         
-        // Clear multi-selection
+        // Clear multi-selection and add selected item (shows dark blue border)
         app.multi_selection.clear();
+        app.multi_selection.insert(app.items[index].path.clone());
+        
+        // Update selection anchor for shift+click support
+        app.selection_anchor = Some(index);
         
         // Trigger scroll to selected item
         app.scroll_to_selected = true;
