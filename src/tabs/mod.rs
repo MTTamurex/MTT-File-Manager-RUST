@@ -61,6 +61,10 @@ pub struct TabState {
     pub sort_descending: bool,
     /// Folders position for this tab
     pub folders_position: FoldersPosition,
+    /// Quick search buffer (type-to-search like Explorer)
+    pub quick_search_buffer: String,
+    /// Last keystroke time for quick search timeout
+    pub quick_search_last_input: std::time::Instant,
 }
 
 impl TabState {
@@ -90,6 +94,8 @@ impl TabState {
             sort_mode: SortMode::Name,
             sort_descending: false,
             folders_position: FoldersPosition::First,
+            quick_search_buffer: String::new(),
+            quick_search_last_input: std::time::Instant::now(),
         }
     }
 
@@ -124,6 +130,8 @@ impl TabState {
             sort_mode: SortMode::Name,
             sort_descending: false,
             folders_position: FoldersPosition::First,
+            quick_search_buffer: String::new(),
+            quick_search_last_input: std::time::Instant::now(),
         }
     }
 
