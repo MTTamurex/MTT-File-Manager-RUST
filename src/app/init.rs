@@ -490,6 +490,7 @@ impl ImageViewerApp {
             file_entry_receiver,
             file_entry_sender,
             is_loading_folder: false,
+            loading_started_at: Instant::now(),
             items_rebuild_sender,
             items_rebuild_receiver,
             items_rebuild_request_id: 0,

@@ -64,6 +64,7 @@ pub struct ImageViewerApp {
     pub file_entry_receiver: Receiver<(usize, Vec<FileEntry>)>,
     pub file_entry_sender: Sender<(usize, Vec<FileEntry>)>,
     pub is_loading_folder: bool,
+    pub loading_started_at: Instant, // Track when loading started for timeout safety
 
     // Async rebuild (filter/sort) to keep UI smooth during heavy loads
     pub items_rebuild_sender: Sender<ItemsRebuildResult>,
