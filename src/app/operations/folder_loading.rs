@@ -710,6 +710,92 @@ impl ImageViewerApp {
             }
 
             // TIER 3: Standard FindFirstFileW fallback (last resort)
+            // CRITICAL FIX: For OneDrive folders, use timeout-protected enumeration
+            // to prevent 30-60s blocking on folders with cloud-only files
+            let is_onedrive = is_onedrive_base;
+            
+            if is_onedrive {
+                // Use timeout-protected directory reading for OneDrive
+                eprintln!("[FOLDER-LOADING] Using timeout-protected directory enumeration for OneDrive: {:?}", base_path);
+                match onedrive::onedrive_read_directory(&PathBuf::from(&base_path)) {
+                    onedrive::IoTimeoutResult::Ok(entries) => {
+                        let mut batch: Vec<FileEntry> = Vec::with_capacity(entries.len().min(1000));
+                        for (filename, attrs, size, modified) in entries {
+                            if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
+                                break;
+                            }
+                            
+                            let is_hidden = (attrs & FILE_ATTRIBUTE_HIDDEN.0) != 0;
+                            let is_system = (attrs & FILE_ATTRIBUTE_SYSTEM.0) != 0;
+                            let is_special = matches!(
+                                filename.to_lowercase().as_str(),
+                                "desktop.ini"
+                                    | "thumbs.db"
+                                    | "$recycle.bin"
+                                    | "system volume information"
+                            );
+                            
+                            if !is_hidden && !is_system && !is_special && !filename.starts_with('.') {
+                                let mut is_dir = (attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
+                                let full_path = PathBuf::from(&base_path).join(&filename);
+                                
+                                if !is_dir && filename.to_lowercase().ends_with(".zip") {
+                                    is_dir = true;
+                                }
+                                
+                                let is_zip = filename.to_lowercase().ends_with(".zip");
+                                let file_size = if is_dir && !is_zip { 0 } else { size };
+                                
+                                let sync_status = onedrive::get_sync_status(attrs, true);
+                                
+                                let entry = FileEntry {
+                                    path: full_path.clone(),
+                                    name: filename.clone(),
+                                    is_dir,
+                                    size: file_size,
+                                    modified,
+                                    folder_cover: None,
+                                    drive_info: None,
+                                    sync_status,
+                                    deletion_date: None,
+                                    recycle_original_path: None,
+                                };
+                                
+                                batch.push(entry);
+                                
+                                // Send batch when it reaches threshold
+                                if batch.len() >= 1000 {
+                                    let batch_len = batch.len();
+                                    let _ = file_entry_sender.send((my_gen, std::mem::take(&mut batch)));
+                                    batch.clear();
+                                    batch.reserve(1000);
+                                }
+                            }
+                        }
+                        
+                        // Send remaining entries
+                        if !batch.is_empty() {
+                            let _ = file_entry_sender.send((my_gen, batch));
+                        }
+                        
+                        // Signal completion
+                        let _ = file_entry_sender.send((my_gen, Vec::new()));
+                        ctx.request_repaint();
+                        
+                        eprintln!("[FOLDER-LOADING] OneDrive directory enumeration completed successfully");
+                        return;
+                    }
+                    onedrive::IoTimeoutResult::Timeout => {
+                        eprintln!("[FOLDER-LOADING] CRITICAL: OneDrive directory enumeration timed out after 5s for {:?}", base_path);
+                        // Continue to standard fallback - but this might also block
+                    }
+                    onedrive::IoTimeoutResult::Err(_) => {
+                        eprintln!("[FOLDER-LOADING] Error in OneDrive directory enumeration, falling back to standard");
+                    }
+                }
+            }
+
+            // Standard FindFirstFileW (for non-OneDrive or fallback)
             let search_path = if base_path.ends_with('\\') {
                 format!("{}*", base_path)
             } else {
@@ -720,9 +806,6 @@ impl ImageViewerApp {
                 .chain(std::iter::once(0))
                 .collect();
             let mut find_data = WIN32_FIND_DATAW::default();
-
-            // Check if we're in a OneDrive folder (for sync status)
-            let is_onedrive = is_onedrive_base;
 
             unsafe {
                 // SAFETY: `wide_path` is a null-terminated UTF-16 string buffer.
