@@ -1,11 +1,14 @@
 //! Thumbnail worker thread management
 //!
 //! Spawns worker threads and manages the thumbnail extraction lifecycle.
+//!
+//! PERFORMANCE CRITICAL: Uses timeout-protected I/O for OneDrive files to prevent
+//! worker thread blocking on cloud-only files.
 
 use crate::domain::thumbnail::ThumbnailData;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::io_priority::{self, IOPriority};
-use crate::infrastructure::onedrive;
+use crate::infrastructure::onedrive::{self, IoTimeoutResult};
 use crate::workers::thumbnail::extraction::generate_thumbnail_hybrid;
 use crate::workers::thumbnail::processing::resize::{get_bucket_size, resize_to_bucket};
 use crate::workers::thumbnail::queue::PriorityThumbnailQueue;
@@ -176,23 +179,41 @@ fn process_thumbnail_request(
     }
 
     // EARLY EXIT 2: Skip files that no longer exist (e.g., stale folder covers)
-    if !path.exists() {
-        mark_as_failed(path.clone());
-        let _ = tx.send(ThumbnailData {
-            path: path.clone(),
-            image_data: Vec::new(),
-            width: 0,
-            height: 0,
-            generation: req_gen,
-            not_found: true,
-        });
-        throttle_repaint_with_priority(ctx, last_repaint, req_priority);
-        return;
+    // CRITICAL: Use timeout-protected exists() to prevent blocking on OneDrive
+    match onedrive::onedrive_exists(path) {
+        IoTimeoutResult::Ok(false) => {
+            // File definitely doesn't exist
+            mark_as_failed(path.clone());
+            let _ = tx.send(ThumbnailData {
+                path: path.clone(),
+                image_data: Vec::new(),
+                width: 0,
+                height: 0,
+                generation: req_gen,
+                not_found: true,
+            });
+            throttle_repaint_with_priority(ctx, last_repaint, req_priority);
+            return;
+        }
+        IoTimeoutResult::Timeout => {
+            // Timeout - assume file exists but might be cloud-only
+            // Let EARLY EXIT 3 handle the cloud-only check
+            eprintln!("[THUMB WORKER] exists() timeout for {:?}", path);
+        }
+        IoTimeoutResult::Ok(true) => {
+            // File exists, continue processing
+        }
+        IoTimeoutResult::Err(_) => {
+            // Error checking existence - skip this file
+            mark_as_failed(path.clone());
+            throttle_repaint_with_priority(ctx, last_repaint, req_priority);
+            return;
+        }
     }
 
     // EARLY EXIT 3: Skip cloud-only OneDrive files (not downloaded)
-    // Only check OneDrive attributes if the path is in a OneDrive folder
-    if onedrive::is_onedrive_path(path) && !onedrive::is_locally_available(path) {
+    // Use safe version with timeout to prevent race condition blocking
+    if onedrive::is_onedrive_path(path) && !onedrive::is_locally_available_safe(path) {
         mark_as_failed(path.clone());
         let _ = tx.send(ThumbnailData {
             path: path.clone(),
@@ -211,9 +232,19 @@ fn process_thumbnail_request(
     let modified = if req_modified > 0 {
         SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(req_modified)
     } else {
-        std::fs::metadata(path)
-            .and_then(|m| m.modified())
-            .unwrap_or(SystemTime::UNIX_EPOCH)
+        // CRITICAL FIX: Use timeout-protected metadata for OneDrive
+        // std::fs::metadata() can block indefinitely on cloud-only files
+        match onedrive::onedrive_metadata(path) {
+            IoTimeoutResult::Ok(metadata) => {
+                metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH)
+            }
+            IoTimeoutResult::Timeout => {
+                // Timeout - use epoch time (forces cache miss but prevents blocking)
+                eprintln!("[THUMB WORKER] metadata() timeout for {:?}", path);
+                SystemTime::UNIX_EPOCH
+            }
+            IoTimeoutResult::Err(_) => SystemTime::UNIX_EPOCH,
+        }
     };
 
     let mut final_result = None;

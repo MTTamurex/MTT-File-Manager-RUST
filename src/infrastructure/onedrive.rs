@@ -2,9 +2,13 @@
 //!
 //! This module provides functions to detect if a path is within a OneDrive
 //! folder and to parse file attributes into sync status values.
+//!
+//! PERFORMANCE CRITICAL: All I/O operations on OneDrive files use timeout-based
+//! wrappers to prevent indefinite blocking on cloud-only files.
 
 use std::path::Path;
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use crate::domain::file_entry::SyncStatus;
 
@@ -21,6 +25,11 @@ const FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: u32 = 0x00400000;
 const FILE_ATTRIBUTE_RECALL_ON_OPEN: u32 = 0x00040000; // File is being synced
 const FILE_ATTRIBUTE_PINNED: u32 = 0x00080000;
 const FILE_ATTRIBUTE_OFFLINE: u32 = 0x00001000;
+
+/// Timeout for metadata operations on OneDrive files (milliseconds)
+const ONEDRIVE_METADATA_TIMEOUT_MS: u64 = 100;
+/// Timeout for exists check on OneDrive files (milliseconds)
+const ONEDRIVE_EXISTS_TIMEOUT_MS: u64 = 50;
 
 /// Returns true if the attribute set contains any Cloud Files flags (OneDrive, iCloud, etc).
 /// This acts as a fallback when the path-based detection fails (e.g., alternate mount points).
@@ -170,6 +179,172 @@ pub fn is_locally_available(path: &Path) -> bool {
         || (attrs & FILE_ATTRIBUTE_OFFLINE) != 0;
 
     !is_cloud_only
+}
+
+/// Result of a timeout-protected I/O operation
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IoTimeoutResult<T> {
+    /// Operation completed successfully within timeout
+    Ok(T),
+    /// Operation timed out - file is likely cloud-only or network is slow
+    Timeout,
+    /// Operation failed with an error
+    Err(std::io::ErrorKind),
+}
+
+impl<T> IoTimeoutResult<T> {
+    /// Convert to Option, treating Timeout as None
+    pub fn ok(self) -> Option<T> {
+        match self {
+            IoTimeoutResult::Ok(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    /// Returns true if the operation timed out
+    pub fn is_timeout(&self) -> bool {
+        matches!(self, IoTimeoutResult::Timeout)
+    }
+
+    /// Returns true if the operation succeeded
+    pub fn is_ok(&self) -> bool {
+        matches!(self, IoTimeoutResult::Ok(_))
+    }
+}
+
+/// Get file metadata with timeout protection.
+/// CRITICAL for OneDrive: prevents indefinite blocking on cloud-only files.
+///
+/// Returns:
+/// - `Ok(metadata)` if successful within timeout
+/// - `Timeout` if operation takes longer than timeout_ms
+/// - `Err(kind)` if operation fails
+pub fn metadata_with_timeout(
+    path: &Path,
+    timeout_ms: u64,
+) -> IoTimeoutResult<std::fs::Metadata> {
+    // Fast path: check if it's even a OneDrive path
+    if !is_onedrive_path(path) {
+        // Not OneDrive - use regular metadata (should be fast)
+        match std::fs::metadata(path) {
+            Ok(m) => return IoTimeoutResult::Ok(m),
+            Err(e) => return IoTimeoutResult::Err(e.kind()),
+        }
+    }
+
+    // OneDrive path: use timeout protection
+    let path_buf = path.to_path_buf();
+    let path_for_log = path_buf.clone();
+    let timeout = Duration::from_millis(timeout_ms);
+    let start = Instant::now();
+
+    // Spawn a thread to do the blocking I/O
+    let handle = std::thread::spawn(move || std::fs::metadata(&path_buf));
+
+    // Poll with timeout
+    loop {
+        if start.elapsed() >= timeout {
+            // Timeout reached - detach thread (it will eventually complete or fail)
+            eprintln!(
+                "[ONEDRIVE TIMEOUT] metadata() exceeded {}ms for {:?}",
+                timeout_ms,
+                path_for_log
+            );
+            return IoTimeoutResult::Timeout;
+        }
+
+        // Check if thread is done (non-blocking)
+        if handle.is_finished() {
+            match handle.join() {
+                Ok(Ok(metadata)) => return IoTimeoutResult::Ok(metadata),
+                Ok(Err(e)) => return IoTimeoutResult::Err(e.kind()),
+                Err(_) => return IoTimeoutResult::Err(std::io::ErrorKind::Other),
+            }
+        }
+
+        // Small sleep to prevent busy-waiting
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// Check if path exists with timeout protection.
+/// CRITICAL for OneDrive: `path.exists()` can trigger download of cloud-only files.
+///
+/// Returns:
+/// - `Ok(true/false)` if successful within timeout
+/// - `Timeout` if operation takes longer than timeout_ms
+pub fn exists_with_timeout(path: &Path, timeout_ms: u64) -> IoTimeoutResult<bool> {
+    // Fast path: check if it's even a OneDrive path
+    if !is_onedrive_path(path) {
+        // Not OneDrive - use regular exists (should be fast)
+        return IoTimeoutResult::Ok(path.exists());
+    }
+
+    // OneDrive path: use timeout protection
+    let path_buf = path.to_path_buf();
+    let path_for_log = path_buf.clone();
+    let timeout = Duration::from_millis(timeout_ms);
+    let start = Instant::now();
+
+    // Spawn a thread to do the blocking I/O
+    let handle = std::thread::spawn(move || path_buf.exists());
+
+    // Poll with timeout
+    loop {
+        if start.elapsed() >= timeout {
+            eprintln!(
+                "[ONEDRIVE TIMEOUT] exists() exceeded {}ms for {:?}",
+                timeout_ms,
+                path_for_log
+            );
+            return IoTimeoutResult::Timeout;
+        }
+
+        if handle.is_finished() {
+            match handle.join() {
+                Ok(exists) => return IoTimeoutResult::Ok(exists),
+                Err(_) => return IoTimeoutResult::Err(std::io::ErrorKind::Other),
+            }
+        }
+
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// Convenience function: Get metadata with default OneDrive timeout (100ms)
+pub fn onedrive_metadata(path: &Path) -> IoTimeoutResult<std::fs::Metadata> {
+    metadata_with_timeout(path, ONEDRIVE_METADATA_TIMEOUT_MS)
+}
+
+/// Convenience function: Check exists with default OneDrive timeout (50ms)
+pub fn onedrive_exists(path: &Path) -> IoTimeoutResult<bool> {
+    exists_with_timeout(path, ONEDRIVE_EXISTS_TIMEOUT_MS)
+}
+
+/// Safely check if a file is locally available with timeout.
+/// Returns `false` (not available) on timeout - safe default for cloud files.
+pub fn is_locally_available_safe(path: &Path) -> bool {
+    // First check using fast attributes (no I/O)
+    let is_available = is_locally_available(path);
+    
+    // If attributes say it's cloud-only, trust that
+    if !is_available {
+        return false;
+    }
+
+    // Attributes say it's available, but double-check with timeout
+    // This catches the race condition where file was evicted after attribute check
+    match onedrive_metadata(path) {
+        IoTimeoutResult::Ok(_) => true,
+        IoTimeoutResult::Timeout => {
+            eprintln!(
+                "[ONEDRIVE SAFE] File attributes say available but metadata timed out: {:?}",
+                path
+            );
+            false // Safe default: assume not available on timeout
+        }
+        IoTimeoutResult::Err(_) => false,
+    }
 }
 
 #[cfg(test)]

@@ -1,9 +1,13 @@
 //! Media metadata handling
 //!
 //! This module handles requesting and formatting metadata for selected files.
+//!
+//! PERFORMANCE CRITICAL: Uses timeout-protected I/O for OneDrive files to prevent
+//! UI freezing on cloud-only files.
 
 use std::time::UNIX_EPOCH;
 use crate::app::state::ImageViewerApp;
+use crate::infrastructure::onedrive::{self, IoTimeoutResult};
 
 impl ImageViewerApp {
     pub fn refresh_selected_metadata(&mut self) {
@@ -29,12 +33,27 @@ impl ImageViewerApp {
                 self.last_metadata_path = Some(path.clone());
                 self.last_metadata_refresh = std::time::Instant::now();
 
-                let mtime = std::fs::metadata(&path)
-                    .and_then(|m| m.modified())
-                    .ok()
-                    .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
+                // CRITICAL FIX: Use timeout-protected metadata for OneDrive
+                // std::fs::metadata() can block indefinitely on cloud-only files
+                let mtime = match onedrive::onedrive_metadata(&path) {
+                    IoTimeoutResult::Ok(metadata) => {
+                        metadata.modified()
+                            .ok()
+                            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0)
+                    }
+                    IoTimeoutResult::Timeout => {
+                        eprintln!("[METADATA] Timeout reading metadata for {:?}, using cached", path);
+                        // On timeout, use 0 to force cache miss and skip worker request
+                        // This prevents blocking the UI thread
+                        0
+                    }
+                    IoTimeoutResult::Err(_) => {
+                        // Error reading metadata - use 0
+                        0
+                    }
+                };
 
                 if let Some((cached_mtime, meta)) = self.metadata_cache.get(&path) {
                     if *cached_mtime == mtime {

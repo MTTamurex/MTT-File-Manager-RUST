@@ -12,6 +12,8 @@ pub use video::read_video_metadata;
 pub use video_sniffing::sniff_video_codec;
 pub use audio_sniffing::{sniff_audio_codec, AudioCodec};
 
+use crate::infrastructure::onedrive;
+
 /// Generic media metadata used by the preview panel.
 #[derive(Clone, Debug, Default)]
 pub struct MediaMetadata {
@@ -50,7 +52,17 @@ pub struct MediaMetadata {
 
 /// Extracts metadata for common media types (images/videos).
 /// Returns an empty struct when the file type is unsupported or metadata cannot be read.
+///
+/// PERFORMANCE CRITICAL: For OneDrive files, checks local availability before reading
+/// to prevent blocking on cloud-only files.
 pub fn extract_media_metadata(path: &Path) -> MediaMetadata {
+    // CRITICAL FIX: Skip metadata extraction for cloud-only OneDrive files
+    // Reading metadata requires file I/O which can block indefinitely on cloud-only files
+    if onedrive::is_onedrive_path(path) && !onedrive::is_locally_available(path) {
+        eprintln!("[METADATA] Skipping cloud-only OneDrive file: {:?}", path);
+        return MediaMetadata::default();
+    }
+
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
