@@ -90,7 +90,6 @@ impl DriveWatcher {
         let prefix = Arc::new(Mutex::new(initial_prefix));
         let shutdown = Arc::new(AtomicBool::new(false));
 
-        let prefix_clone = Arc::clone(&prefix);
         let shutdown_clone = Arc::clone(&shutdown);
 
         // Open the drive handle in the main thread to validate early
@@ -110,7 +109,6 @@ impl DriveWatcher {
             watcher_thread_main(
                 handle,
                 drive_root_clone,
-                prefix_clone,
                 cmd_rx,
                 event_tx,
                 shutdown_clone,
@@ -245,7 +243,6 @@ impl Drop for DriveWatcher {
 fn watcher_thread_main(
     handle: HANDLE,
     drive_root: PathBuf,
-    prefix: Arc<Mutex<PathBuf>>,
     command_rx: std::sync::mpsc::Receiver<WatcherCommand>,
     event_tx: std::sync::mpsc::Sender<Vec<DriveWatcherEvent>>,
     shutdown: Arc<AtomicBool>,
@@ -330,15 +327,11 @@ fn watcher_thread_main(
                     let events =
                         parse_notify_buffer(&buffer[..bytes_returned as usize], &drive_root);
 
-                    // Filter events by current prefix
-                    let current_prefix = prefix.lock().map(|p| p.clone()).unwrap_or_default();
-                    let filtered_events: Vec<_> = events
-                        .into_iter()
-                        .filter(|e| event_matches_prefix(e, &current_prefix))
-                        .collect();
-
-                    if !filtered_events.is_empty() {
-                        pending_events.extend(filtered_events);
+                    // Send ALL events unfiltered — cache invalidation for any change
+                    // on the drive is handled by message_handler. Only auto-reload
+                    // is gated to the current prefix (done in message_handler).
+                    if !events.is_empty() {
+                        pending_events.extend(events);
                     }
 
                     // Send batched events if we have enough
@@ -430,6 +423,7 @@ fn parse_notify_buffer(buffer: &[u8], drive_root: &Path) -> Vec<DriveWatcherEven
 }
 
 /// Check if an event matches the current prefix
+#[cfg(test)]
 fn event_matches_prefix(event: &DriveWatcherEvent, prefix: &Path) -> bool {
     let path = match event {
         DriveWatcherEvent::Created(p) => p,
