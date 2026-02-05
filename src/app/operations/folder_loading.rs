@@ -259,14 +259,9 @@ impl ImageViewerApp {
 
             // Phase 1: Instant Feedback (The Cache Hit) - HDD ONLY
             if !is_ssd {
-                // Validate cache: one metadata syscall on the directory itself (~0.1ms).
-                // Needed because the watcher only monitors the current folder (NonRecursive),
-                // so external changes to folders we navigated away from go undetected.
-                if directory_cache.has_directory_changed(&base_path_buf) == Some(true) {
-                    eprintln!("[FOLDER-LOADING] Phase 1: Cache stale for {:?} (mtime changed), invalidating", base_path_buf);
-                    directory_cache.invalidate(&base_path_buf);
-                }
-
+                // DriveWatcher monitors the ENTIRE drive and proactively invalidates
+                // both DirectoryCache and DirectoryIndex for ANY change on the drive.
+                // No fs::metadata() mtime check needed — if the cache has data, it's valid.
                 if let Some(cached_entries) = directory_cache.get(&base_path_buf) {
                     eprintln!("[FOLDER-LOADING] Phase 1: Cache hit for {:?} - {} entries, sending to UI immediately",
                         base_path_buf, cached_entries.len());
@@ -426,11 +421,7 @@ impl ImageViewerApp {
             }
 
             if !force_refresh {
-                // Validate cache mtime before using (same check as Phase 1)
-                if directory_cache.has_directory_changed(&base_path_buf) == Some(true) {
-                    directory_cache.invalidate(&base_path_buf);
-                }
-
+                // DriveWatcher pre-invalidates cache — no mtime check needed
                 if let Some(mut cached_entries) = directory_cache.get(&PathBuf::from(&base_path)) {
                     eprintln!("[FOLDER-LOADING] Using secondary DirectoryCache for {:?}", base_path);
                     let mut changed = false;

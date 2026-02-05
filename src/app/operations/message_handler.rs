@@ -538,6 +538,14 @@ impl ImageViewerApp {
                     self.cache_manager.failed_thumbnails.pop(&cleaned);
                     crate::workers::thumbnail::clear_failure_cache(&cleaned);
 
+                    // Invalidate metadata cache if modified file is currently selected
+                    if let Some(ref selected) = self.selected_file {
+                        if selected.path == cleaned {
+                            self.metadata_cache.pop(&cleaned);
+                            self.last_metadata_path = None;
+                        }
+                    }
+
                     if let Some(parent) = path.parent() {
                         // Invalidate both caches for consistency
                         self.directory_cache.invalidate(&parent.to_path_buf());
@@ -671,7 +679,7 @@ impl ImageViewerApp {
                             self.pending_auto_reload = true;
                         }
                     }
-                    Err(e) => debug_log!("Erro de watch: {:?}", e),
+                    Err(_e) => debug_log!("Erro de watch: {:?}", _e),
                 }
             }
         } // Fecha o if !drive_watcher_active

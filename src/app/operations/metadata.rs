@@ -15,12 +15,17 @@ impl ImageViewerApp {
 
         match current_file {
             Some(path) => {
-                // Throttle metadata checks to avoid per-frame IO on large/remote files
-                if self.last_metadata_path.as_ref() == Some(&path)
-                    && self.last_metadata_refresh.elapsed() < std::time::Duration::from_millis(250)
-                {
+                // EVENT-DRIVEN: If same file and already loaded, trust the cache.
+                // DriveWatcher clears last_metadata_path when the file changes,
+                // which triggers a re-fetch on the next frame. No polling needed.
+                if self.last_metadata_path.as_ref() == Some(&path) {
+                    if let Some((_, meta)) = self.metadata_cache.get(&path) {
+                        self.selected_metadata = Some((path, meta.clone()));
+                    }
                     return;
                 }
+
+                // New file selected or DriveWatcher signaled change — initial load
                 self.last_metadata_path = Some(path.clone());
                 self.last_metadata_refresh = std::time::Instant::now();
 
