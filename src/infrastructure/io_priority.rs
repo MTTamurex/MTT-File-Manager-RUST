@@ -131,8 +131,13 @@ pub fn is_ssd(path: &Path) -> bool {
 /// Determine disk type for a drive letter (not cached)
 fn determine_disk_type(drive_letter: char) -> bool {
     // Check user configuration first (manual overrides)
-    if let Some(override_type) = crate::infrastructure::virtual_drive_config::get_drive_override(drive_letter) {
-        return matches!(override_type, crate::infrastructure::virtual_drive_config::DiskTypeOverride::SSD);
+    if let Some(override_type) =
+        crate::infrastructure::virtual_drive_config::get_drive_override(drive_letter)
+    {
+        return matches!(
+            override_type,
+            crate::infrastructure::virtual_drive_config::DiskTypeOverride::SSD
+        );
     }
 
     // Check if it's a virtual drive
@@ -164,7 +169,10 @@ fn query_disk_seek_penalty(drive_letter: char) -> bool {
 
     // Construct path like "\\.\C:"
     let device_path = format!("\\\\.\\{}:", drive_letter);
-    let wide_path: Vec<u16> = device_path.encode_utf16().chain(std::iter::once(0)).collect();
+    let wide_path: Vec<u16> = device_path
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
 
     unsafe {
         // Open handle to the physical drive
@@ -232,10 +240,22 @@ fn query_disk_seek_penalty(drive_letter: char) -> bool {
         if success.is_ok() && bytes_returned > 0 {
             // incurs_seek_penalty == 0 means SSD (no seek penalty)
             // incurs_seek_penalty == 1 means HDD (has seek penalty)
-            result.incurs_seek_penalty == 0
+            let is_ssd = result.incurs_seek_penalty == 0;
+            eprintln!(
+                "[DISK-DETECT] Drive {}: DeviceIoControl succeeded, is_ssd={}",
+                drive_letter, is_ssd
+            );
+            is_ssd
         } else {
-            // Assume SSD on query failure (safer default)
-            true
+            // Query failed - this typically happens with:
+            // 1. USB drives (controller doesn't support the query)
+            // 2. External drives
+            // 3. Some RAID configurations
+            //
+            // IMPORTANT: Modern SSDs almost always respond to this query correctly.
+            // If the query fails, it's much more likely to be an HDD (especially USB HDDs)
+            // than an SSD. Therefore, we default to HDD (false) on failure.
+            false // Assume HDD when query fails (safer default for performance)
         }
     }
 }
@@ -353,7 +373,13 @@ impl<T> DirectoryGroupedQueue<T> {
             .by_directory
             .iter()
             .filter(|(_, items)| !items.is_empty())
-            .min_by_key(|(_, items)| items.iter().map(|(p, _)| *p).min().unwrap_or(IOPriority::Background))
+            .min_by_key(|(_, items)| {
+                items
+                    .iter()
+                    .map(|(p, _)| *p)
+                    .min()
+                    .unwrap_or(IOPriority::Background)
+            })
             .map(|(dir, _)| dir.clone())?;
 
         self.pop_from_directory(&best_dir)
@@ -375,7 +401,13 @@ impl<T> DirectoryGroupedQueue<T> {
             .by_directory
             .iter()
             .filter(|(_, items)| !items.is_empty())
-            .min_by_key(|(_, items)| items.iter().map(|(p, _)| *p).min().unwrap_or(IOPriority::Background))
+            .min_by_key(|(_, items)| {
+                items
+                    .iter()
+                    .map(|(p, _)| *p)
+                    .min()
+                    .unwrap_or(IOPriority::Background)
+            })
             .map(|(dir, _)| dir.clone())?;
 
         self.current_directory = Some(best_dir.clone());

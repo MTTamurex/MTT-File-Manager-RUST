@@ -18,7 +18,9 @@ macro_rules! debug_log {
 
 #[cfg(not(debug_assertions))]
 macro_rules! debug_log {
-    ($($arg:tt)*) => {{ () }}
+    ($($arg:tt)*) => {{
+        ()
+    }};
 }
 
 impl ImageViewerApp {
@@ -123,275 +125,280 @@ impl ImageViewerApp {
                 Ok(res) => {
                     use crate::workers::file_operation_worker::FileOperationResult;
                     match res {
-                FileOperationResult::RenameCompleted {
-                    path,
-                    new_name,
-                    parent_folder,
-                } => {
-                    let parent_str = normalize_for_match(parent_folder.as_path());
-                    // PERFORMANCE: Cache path normalization to avoid redundant allocations
-                    let path_str = normalize_for_match(&path);
-                    self.directory_cache.invalidate(&parent_folder);
-                    if let Some(di) = &self.directory_index {
-                        let _ = di.invalidate(&parent_folder);
-                    }
+                        FileOperationResult::RenameCompleted {
+                            path,
+                            new_name,
+                            parent_folder,
+                        } => {
+                            let parent_str = normalize_for_match(parent_folder.as_path());
+                            // PERFORMANCE: Cache path normalization to avoid redundant allocations
+                            let path_str = normalize_for_match(&path);
+                            self.directory_cache.invalidate(&parent_folder);
+                            if let Some(di) = &self.directory_index {
+                                let _ = di.invalidate(&parent_folder);
+                            }
 
-                    // FIX: If the renamed item is currently selected, update the selection state
-                    // This prevents stale data in the Details Panel even before reload completes.
-                    // Note: load_folder() does NOT clear selected_file, so this persists correctly.
-                    if let Some(selected) = &mut self.selected_file {
-                        if normalize_for_match(&selected.path) == path_str {
-                            let new_path = parent_folder.join(&new_name);
-                            selected.path = new_path;
-                            selected.name = new_name.clone();
+                            // FIX: If the renamed item is currently selected, update the selection state
+                            // This prevents stale data in the Details Panel even before reload completes.
+                            // Note: load_folder() does NOT clear selected_file, so this persists correctly.
+                            if let Some(selected) = &mut self.selected_file {
+                                if normalize_for_match(&selected.path) == path_str {
+                                    let new_path = parent_folder.join(&new_name);
+                                    selected.path = new_path;
+                                    selected.name = new_name.clone();
+                                }
+                            }
+
+                            // FIX: Stop media player if the renamed file is currently playing.
+                            // The player holds the OLD path, so the preview panel would show a
+                            // broken state (thumbnail over playing video, no controls).
+                            if let Some(
+                                crate::ui::components::media_preview::MediaPreview::Video(
+                                    ref mut player,
+                                ),
+                            ) = self.media_preview
+                            {
+                                if normalize_for_match(&player.path) == path_str {
+                                    player.pause();
+                                    self.media_preview = None;
+                                    self.media_preview_owner_tab_id = None;
+                                }
+                            }
+
+                            for tab in self.tab_manager.tabs.iter_mut() {
+                                let tab_path = normalize_for_match(Path::new(&tab.path));
+                                if tab_path == parent_str {
+                                    tab.items = std::sync::Arc::new(Vec::new());
+                                    tab.all_items.clear();
+                                }
+                            }
+                            if parent_str == current_path_norm {
+                                // After reload + re-sort, select and scroll to the renamed item
+                                let new_path = parent_folder.join(&new_name);
+                                self.pending_select_path = Some(new_path);
+                                self.loaded_path.clear();
+                                self.load_folder(false);
+                            }
                         }
-                    }
-
-                    // FIX: Stop media player if the renamed file is currently playing.
-                    // The player holds the OLD path, so the preview panel would show a
-                    // broken state (thumbnail over playing video, no controls).
-                    if let Some(crate::ui::components::media_preview::MediaPreview::Video(ref mut player)) = self.media_preview {
-                        if normalize_for_match(&player.path) == path_str {
-                            player.pause();
-                            self.media_preview = None;
-                            self.media_preview_owner_tab_id = None;
+                        FileOperationResult::RecycleBinChanged => {
+                            if self.is_recycle_bin_view {
+                                debug_log!("[RECYCLE] Operation finished, refreshing view.");
+                                self.setup_recycle_bin_view();
+                                // CRITICAL: Sync back to tab so tab_manager knows we are still in Lixeira
+                                self.sync_to_tab();
+                            }
                         }
-                    }
+                        FileOperationResult::RestoreCompleted { parent_folders } => {
+                            let mut should_reload_current = false;
 
-                    for tab in self.tab_manager.tabs.iter_mut() {
-                        let tab_path = normalize_for_match(Path::new(&tab.path));
-                        if tab_path == parent_str {
-                            tab.items = std::sync::Arc::new(Vec::new());
-                            tab.all_items.clear();
+                            for parent in parent_folders {
+                                self.directory_cache.invalidate(&parent);
+                                if let Some(di) = &self.directory_index {
+                                    let _ = di.invalidate(&parent);
+                                }
+
+                                let parent_str = normalize_for_match(parent.as_path());
+                                if parent_str == current_path_norm {
+                                    should_reload_current = true;
+                                }
+
+                                for tab in self.tab_manager.tabs.iter_mut() {
+                                    let tab_path = normalize_for_match(Path::new(&tab.path));
+                                    if tab_path == parent_str {
+                                        tab.items = std::sync::Arc::new(Vec::new());
+                                        tab.all_items.clear();
+                                    }
+                                }
+                            }
+
+                            if should_reload_current {
+                                self.loaded_path.clear();
+                                self.load_folder(false);
+                            }
                         }
-                    }
-                    if parent_str == current_path_norm {
-                        // After reload + re-sort, select and scroll to the renamed item
-                        let new_path = parent_folder.join(&new_name);
-                        self.pending_select_path = Some(new_path);
-                        self.loaded_path.clear();
-                        self.load_folder(false);
-                    }
-                }
-                FileOperationResult::RecycleBinChanged => {
-                    if self.is_recycle_bin_view {
-                        debug_log!("[RECYCLE] Operation finished, refreshing view.");
-                        self.setup_recycle_bin_view();
-                        // CRITICAL: Sync back to tab so tab_manager knows we are still in Lixeira
-                        self.sync_to_tab();
-                    }
-                }
-                FileOperationResult::RestoreCompleted { parent_folders } => {
-                    let mut should_reload_current = false;
-
-                    for parent in parent_folders {
-                        self.directory_cache.invalidate(&parent);
-                        if let Some(di) = &self.directory_index {
-                            let _ = di.invalidate(&parent);
+                        FileOperationResult::DeleteCompleted { parent_folders } => {
+                            let mut should_reload_current = false;
+                            for parent in parent_folders {
+                                self.directory_cache.invalidate(&parent);
+                                if let Some(di) = &self.directory_index {
+                                    let _ = di.invalidate(&parent);
+                                }
+                                let parent_str = normalize_for_match(parent.as_path());
+                                if parent_str == current_path_norm {
+                                    should_reload_current = true;
+                                }
+                                for tab in self.tab_manager.tabs.iter_mut() {
+                                    let tab_path = normalize_for_match(Path::new(&tab.path));
+                                    if tab_path == parent_str {
+                                        tab.items = std::sync::Arc::new(Vec::new());
+                                        tab.all_items.clear();
+                                    }
+                                }
+                            }
+                            if should_reload_current {
+                                self.loaded_path.clear();
+                                self.load_folder(false);
+                            }
                         }
+                        FileOperationResult::CopyCompleted { dest_folder } => {
+                            let dest_str = normalize_for_match(dest_folder.as_path());
 
-                        let parent_str = normalize_for_match(parent.as_path());
-                        if parent_str == current_path_norm {
-                            should_reload_current = true;
+                            self.directory_cache.invalidate(&dest_folder);
+                            if let Some(di) = &self.directory_index {
+                                let _ = di.invalidate(&dest_folder);
+                            }
+                            for tab in self.tab_manager.tabs.iter_mut() {
+                                let tab_path = normalize_for_match(Path::new(&tab.path));
+                                if tab_path == dest_str {
+                                    tab.items = std::sync::Arc::new(Vec::new());
+                                    tab.all_items.clear();
+                                }
+                            }
+
+                            // Clear thumbnail failure caches so files that failed extraction
+                            // during copy (locked by Windows) get retried now that copy is done
+                            self.cache_manager.clear_failed();
+                            crate::workers::thumbnail::clear_all_failures();
+
+                            if dest_str == current_path_norm {
+                                debug_log!(
+                                    "[COPY] Dest folder matches current view, reloading: {}",
+                                    self.current_path
+                                );
+                                self.loaded_path.clear();
+                                self.load_folder(false);
+                            }
                         }
+                        FileOperationResult::MoveCompleted {
+                            source_folder,
+                            dest_folder,
+                        } => {
+                            let source_str = normalize_for_match(source_folder.as_path());
+                            let dest_str = normalize_for_match(dest_folder.as_path());
 
-                        for tab in self.tab_manager.tabs.iter_mut() {
-                            let tab_path = normalize_for_match(Path::new(&tab.path));
-                            if tab_path == parent_str {
-                                tab.items = std::sync::Arc::new(Vec::new());
-                                tab.all_items.clear();
+                            // 1. Source Logic (Item Removed)
+                            self.directory_cache.invalidate(&source_folder);
+                            if let Some(di) = &self.directory_index {
+                                let _ = di.invalidate(&source_folder);
+                            }
+                            self.directory_cache.invalidate(&dest_folder);
+                            if let Some(di) = &self.directory_index {
+                                let _ = di.invalidate(&dest_folder);
+                            }
+
+                            // Clear thumbnail failure caches for retry after move completes
+                            self.cache_manager.clear_failed();
+                            crate::workers::thumbnail::clear_all_failures();
+
+                            if current_path_norm == source_str {
+                                debug_log!(
+                                    "[MOVE] Source folder matches current view, reloading: {}",
+                                    self.current_path
+                                );
+                                self.loaded_path.clear();
+                                self.load_folder(false);
+                            }
+
+                            // Also update cached items in other tabs pointing to this folder
+                            for tab in self.tab_manager.tabs.iter_mut() {
+                                let tab_path = normalize_for_match(Path::new(&tab.path));
+                                if tab_path == source_str || tab_path == dest_str {
+                                    tab.items = std::sync::Arc::new(Vec::new());
+                                    tab.all_items.clear();
+                                }
+                            }
+
+                            // 2. Destination Logic (Item Added)
+                            if current_path_norm == dest_str {
+                                debug_log!(
+                                    "[MOVE] Dest folder matches current view, reloading: {}",
+                                    self.current_path
+                                );
+                                self.loaded_path.clear();
+                                self.load_folder(false);
+                            }
+                        }
+                        FileOperationResult::MoveBatchCompleted {
+                            source_folders,
+                            dest_folder,
+                        } => {
+                            let dest_str = normalize_for_match(dest_folder.as_path());
+
+                            // Clear thumbnail failure caches for retry after move completes
+                            self.cache_manager.clear_failed();
+                            crate::workers::thumbnail::clear_all_failures();
+
+                            // Invalidate all source folders and destination
+                            for source_folder in &source_folders {
+                                self.directory_cache.invalidate(source_folder);
+                                if let Some(di) = &self.directory_index {
+                                    let _ = di.invalidate(source_folder);
+                                }
+                            }
+                            self.directory_cache.invalidate(&dest_folder);
+                            if let Some(di) = &self.directory_index {
+                                let _ = di.invalidate(&dest_folder);
+                            }
+
+                            // Check if current view matches any source folder
+                            let mut should_reload = false;
+                            for source_folder in &source_folders {
+                                let source_str = normalize_for_match(source_folder.as_path());
+                                if current_path_norm == source_str {
+                                    should_reload = true;
+                                }
+                                // Clear tab caches for source folders
+                                for tab in self.tab_manager.tabs.iter_mut() {
+                                    let tab_path = normalize_for_match(Path::new(&tab.path));
+                                    if tab_path == source_str {
+                                        tab.items = std::sync::Arc::new(Vec::new());
+                                        tab.all_items.clear();
+                                    }
+                                }
+                            }
+
+                            // Clear tab caches for destination
+                            for tab in self.tab_manager.tabs.iter_mut() {
+                                let tab_path = normalize_for_match(Path::new(&tab.path));
+                                if tab_path == dest_str {
+                                    tab.items = std::sync::Arc::new(Vec::new());
+                                    tab.all_items.clear();
+                                }
+                            }
+
+                            if should_reload {
+                                self.loaded_path.clear();
+                                self.load_folder(false);
+                            }
+
+                            // Destination logic
+                            if current_path_norm == dest_str {
+                                debug_log!(
+                                    "[MOVE-BATCH] Dest folder matches current view, reloading: {}",
+                                    self.current_path
+                                );
+                                self.loaded_path.clear();
+                                self.load_folder(false);
+                            }
+                        }
+                        FileOperationResult::Finished => {
+                            self.file_ops_in_progress = self.file_ops_in_progress.saturating_sub(1);
+                            if self.file_ops_in_progress == 0 {
+                                // Operations done — completion handlers already triggered reload,
+                                // so discard any watcher-accumulated auto-reload to avoid double refresh
+                                self.pending_auto_reload = false;
+                                // NOTE: pending_deletions is NOT cleared here because Finished and
+                                // DeleteCompleted are processed in the same loop iteration. The folder
+                                // reload triggered by DeleteCompleted hasn't completed yet — clearing
+                                // now would allow thumbnail re-extraction for the deleted file during
+                                // the reload. Instead, pending_deletions is cleared when folder loading
+                                // finishes (saw_end_of_load) or on user cancel (no active load).
+                                if !self.is_loading_folder {
+                                    self.pending_deletions.clear();
+                                }
                             }
                         }
                     }
-
-                    if should_reload_current {
-                        self.loaded_path.clear();
-                        self.load_folder(false);
-                    }
-                }
-                FileOperationResult::DeleteCompleted { parent_folders } => {
-                    let mut should_reload_current = false;
-                    for parent in parent_folders {
-                        self.directory_cache.invalidate(&parent);
-                        if let Some(di) = &self.directory_index {
-                            let _ = di.invalidate(&parent);
-                        }
-                        let parent_str = normalize_for_match(parent.as_path());
-                        if parent_str == current_path_norm {
-                            should_reload_current = true;
-                        }
-                        for tab in self.tab_manager.tabs.iter_mut() {
-                            let tab_path = normalize_for_match(Path::new(&tab.path));
-                            if tab_path == parent_str {
-                                tab.items = std::sync::Arc::new(Vec::new());
-                                tab.all_items.clear();
-                            }
-                        }
-                    }
-                    if should_reload_current {
-                        self.loaded_path.clear();
-                        self.load_folder(false);
-                    }
-                }
-                FileOperationResult::CopyCompleted { dest_folder } => {
-                    let dest_str = normalize_for_match(dest_folder.as_path());
-
-                    self.directory_cache.invalidate(&dest_folder);
-                    if let Some(di) = &self.directory_index {
-                        let _ = di.invalidate(&dest_folder);
-                    }
-                    for tab in self.tab_manager.tabs.iter_mut() {
-                        let tab_path = normalize_for_match(Path::new(&tab.path));
-                        if tab_path == dest_str {
-                            tab.items = std::sync::Arc::new(Vec::new());
-                            tab.all_items.clear();
-                        }
-                    }
-
-                    // Clear thumbnail failure caches so files that failed extraction
-                    // during copy (locked by Windows) get retried now that copy is done
-                    self.cache_manager.clear_failed();
-                    crate::workers::thumbnail::clear_all_failures();
-
-                    if dest_str == current_path_norm {
-                        debug_log!(
-                            "[COPY] Dest folder matches current view, reloading: {}",
-                            self.current_path
-                        );
-                        self.loaded_path.clear();
-                        self.load_folder(false);
-                    }
-                }
-                FileOperationResult::MoveCompleted {
-                    source_folder,
-                    dest_folder,
-                } => {
-                    let source_str = normalize_for_match(source_folder.as_path());
-                    let dest_str = normalize_for_match(dest_folder.as_path());
-
-                    // 1. Source Logic (Item Removed)
-                    self.directory_cache.invalidate(&source_folder);
-                    if let Some(di) = &self.directory_index {
-                        let _ = di.invalidate(&source_folder);
-                    }
-                    self.directory_cache.invalidate(&dest_folder);
-                    if let Some(di) = &self.directory_index {
-                        let _ = di.invalidate(&dest_folder);
-                    }
-
-                    // Clear thumbnail failure caches for retry after move completes
-                    self.cache_manager.clear_failed();
-                    crate::workers::thumbnail::clear_all_failures();
-
-                    if current_path_norm == source_str {
-                        debug_log!(
-                            "[MOVE] Source folder matches current view, reloading: {}",
-                            self.current_path
-                        );
-                        self.loaded_path.clear();
-                        self.load_folder(false);
-                    }
-
-                    // Also update cached items in other tabs pointing to this folder
-                    for tab in self.tab_manager.tabs.iter_mut() {
-                        let tab_path = normalize_for_match(Path::new(&tab.path));
-                        if tab_path == source_str || tab_path == dest_str {
-                            tab.items = std::sync::Arc::new(Vec::new());
-                            tab.all_items.clear();
-                        }
-                    }
-
-                    // 2. Destination Logic (Item Added)
-                    if current_path_norm == dest_str {
-                        debug_log!(
-                            "[MOVE] Dest folder matches current view, reloading: {}",
-                            self.current_path
-                        );
-                        self.loaded_path.clear();
-                        self.load_folder(false);
-                    }
-                }
-                FileOperationResult::MoveBatchCompleted {
-                    source_folders,
-                    dest_folder,
-                } => {
-                    let dest_str = normalize_for_match(dest_folder.as_path());
-
-                    // Clear thumbnail failure caches for retry after move completes
-                    self.cache_manager.clear_failed();
-                    crate::workers::thumbnail::clear_all_failures();
-
-                    // Invalidate all source folders and destination
-                    for source_folder in &source_folders {
-                        self.directory_cache.invalidate(source_folder);
-                        if let Some(di) = &self.directory_index {
-                            let _ = di.invalidate(source_folder);
-                        }
-                    }
-                    self.directory_cache.invalidate(&dest_folder);
-                    if let Some(di) = &self.directory_index {
-                        let _ = di.invalidate(&dest_folder);
-                    }
-
-                    // Check if current view matches any source folder
-                    let mut should_reload = false;
-                    for source_folder in &source_folders {
-                        let source_str = normalize_for_match(source_folder.as_path());
-                        if current_path_norm == source_str {
-                            should_reload = true;
-                        }
-                        // Clear tab caches for source folders
-                        for tab in self.tab_manager.tabs.iter_mut() {
-                            let tab_path = normalize_for_match(Path::new(&tab.path));
-                            if tab_path == source_str {
-                                tab.items = std::sync::Arc::new(Vec::new());
-                                tab.all_items.clear();
-                            }
-                        }
-                    }
-
-                    // Clear tab caches for destination
-                    for tab in self.tab_manager.tabs.iter_mut() {
-                        let tab_path = normalize_for_match(Path::new(&tab.path));
-                        if tab_path == dest_str {
-                            tab.items = std::sync::Arc::new(Vec::new());
-                            tab.all_items.clear();
-                        }
-                    }
-
-                    if should_reload {
-                        self.loaded_path.clear();
-                        self.load_folder(false);
-                    }
-
-                    // Destination logic
-                    if current_path_norm == dest_str {
-                        debug_log!(
-                            "[MOVE-BATCH] Dest folder matches current view, reloading: {}",
-                            self.current_path
-                        );
-                        self.loaded_path.clear();
-                        self.load_folder(false);
-                    }
-                }
-                FileOperationResult::Finished => {
-                    self.file_ops_in_progress = self.file_ops_in_progress.saturating_sub(1);
-                    if self.file_ops_in_progress == 0 {
-                        // Operations done — completion handlers already triggered reload,
-                        // so discard any watcher-accumulated auto-reload to avoid double refresh
-                        self.pending_auto_reload = false;
-                        // NOTE: pending_deletions is NOT cleared here because Finished and
-                        // DeleteCompleted are processed in the same loop iteration. The folder
-                        // reload triggered by DeleteCompleted hasn't completed yet — clearing
-                        // now would allow thumbnail re-extraction for the deleted file during
-                        // the reload. Instead, pending_deletions is cleared when folder loading
-                        // finishes (saw_end_of_load) or on user cancel (no active load).
-                        if !self.is_loading_folder {
-                            self.pending_deletions.clear();
-                        }
-                    }
-                }
-            }
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => break,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
@@ -429,56 +436,80 @@ impl ImageViewerApp {
         // Drive-wide watcher (File Pilot optimization)
         // Check for pending watcher activation after startup delay
         self.drive_watcher.check_pending_activation();
-        
+
         let drive_events = self.drive_watcher.poll_events();
         let drive_watcher_active = !drive_events.is_empty();
         for event in drive_events {
-            
             match &event {
                 crate::infrastructure::drive_watcher::DriveWatcherEvent::Created(path) => {
-                    if should_ignore(path) { continue; }
+                    if should_ignore(path) {
+                        continue;
+                    }
                     if let Some(parent) = path.parent() {
+                        // Invalidate both caches so DirectoryIndex doesn't require mtime check
+                        self.directory_cache.invalidate(&parent.to_path_buf());
+                        if let Some(di) = &self.directory_index {
+                            let _ = di.invalidate(&parent.to_path_buf());
+                        }
                         let parent_norm = normalize_for_match(parent);
                         if parent_norm == current_path_norm {
-                            debug_log!("[FS-WATCH] CREATE: {:?}", path.file_name().unwrap_or_default());
+                            debug_log!(
+                                "[FS-WATCH] CREATE: {:?}",
+                                path.file_name().unwrap_or_default()
+                            );
                             self.pending_auto_reload = true;
                         }
                     }
                 }
                 crate::infrastructure::drive_watcher::DriveWatcherEvent::Deleted(path) => {
-                    if should_ignore(path) { continue; }
+                    if should_ignore(path) {
+                        continue;
+                    }
                     let cleaned = clean_path(path);
                     if let Some(parent) = cleaned.parent() {
                         self.directory_cache.invalidate(&parent.to_path_buf());
+                        // Invalidate DirectoryIndex so mtime check is not needed
+                        if let Some(di) = &self.directory_index {
+                            let _ = di.invalidate(&parent.to_path_buf());
+                        }
                     }
                     self.directory_cache.invalidate_children(&cleaned);
                     self.disk_cache.remove_cache_for_path(&cleaned);
-                    
+
                     if let Some(parent) = path.parent() {
                         let parent_norm = normalize_for_match(parent);
                         if parent_norm == current_path_norm {
-                            debug_log!("[FS-WATCH] DELETE: {:?}", path.file_name().unwrap_or_default());
-                            
+                            debug_log!(
+                                "[FS-WATCH] DELETE: {:?}",
+                                path.file_name().unwrap_or_default()
+                            );
+
                             // SMART DELETE: Remove da UI sem reload completo
                             let path_to_remove = cleaned.clone();
-                            let removed_from_all = self.all_items.iter()
+                            let removed_from_all = self
+                                .all_items
+                                .iter()
                                 .position(|item| item.path == path_to_remove)
                                 .map(|idx| {
                                     self.all_items.remove(idx);
                                     true
                                 })
                                 .unwrap_or(false);
-                            
+
                             if removed_from_all {
                                 // Atualiza items (Arc) - recria sem o item deletado
-                                let filtered: Vec<_> = self.items.iter()
+                                let filtered: Vec<_> = self
+                                    .items
+                                    .iter()
                                     .filter(|item| item.path != path_to_remove)
                                     .cloned()
                                     .collect();
                                 self.items = Arc::new(filtered);
                                 self.total_items = self.items.len();
-                                debug_log!("[FS-WATCH] SMART DELETE: Removed from UI without reload");
-                                
+                                debug_log!(
+                                    "[FS-WATCH] SMART DELETE: Removed from UI without reload"
+                                );
+
                                 // Ajusta seleção se necessário
                                 if let Some(selected) = self.selected_item {
                                     if selected >= self.items.len() && !self.items.is_empty() {
@@ -488,46 +519,67 @@ impl ImageViewerApp {
                                         self.selected_file = None;
                                     }
                                 }
-                                
+
                                 // Previne reload desnecessário - UI já foi atualizada
                                 self.skip_next_auto_reload = true;
                             }
-                            
+
                             // Não triggera auto-reload - UI já foi atualizada
                             // self.pending_auto_reload = true;
                         }
                     }
                 }
                 crate::infrastructure::drive_watcher::DriveWatcherEvent::Modified(path) => {
-                    if should_ignore(path) { continue; }
+                    if should_ignore(path) {
+                        continue;
+                    }
                     let cleaned = clean_path(path);
                     self.cache_manager.texture_cache.pop(&cleaned);
                     self.cache_manager.failed_thumbnails.pop(&cleaned);
                     crate::workers::thumbnail::clear_failure_cache(&cleaned);
-                    
+
                     if let Some(parent) = path.parent() {
+                        // Invalidate both caches for consistency
+                        self.directory_cache.invalidate(&parent.to_path_buf());
+                        if let Some(di) = &self.directory_index {
+                            let _ = di.invalidate(&parent.to_path_buf());
+                        }
                         let parent_norm = normalize_for_match(parent);
                         if parent_norm == current_path_norm {
-                            debug_log!("[FS-WATCH] MODIFY: {:?}", path.file_name().unwrap_or_default());
+                            debug_log!(
+                                "[FS-WATCH] MODIFY: {:?}",
+                                path.file_name().unwrap_or_default()
+                            );
                             self.pending_auto_reload = true;
                         }
                     }
                 }
-                crate::infrastructure::drive_watcher::DriveWatcherEvent::Renamed(old_path, new_path) => {
+                crate::infrastructure::drive_watcher::DriveWatcherEvent::Renamed(
+                    old_path,
+                    new_path,
+                ) => {
                     if !should_ignore(old_path) || !should_ignore(new_path) {
                         let cleaned_old = clean_path(old_path);
                         let cleaned_new = clean_path(new_path);
-                        
+
                         // Invalidate caches for both paths
                         self.cache_manager.texture_cache.pop(&cleaned_old);
                         self.cache_manager.texture_cache.pop(&cleaned_new);
                         self.cache_manager.failed_thumbnails.pop(&cleaned_old);
                         self.cache_manager.failed_thumbnails.pop(&cleaned_new);
-                        
+
                         if let Some(parent) = cleaned_old.parent() {
                             self.directory_cache.invalidate(&parent.to_path_buf());
+                            // Invalidate DirectoryIndex for both old and new parent
+                            if let Some(di) = &self.directory_index {
+                                let _ = di.invalidate(&parent.to_path_buf());
+                            }
                         }
                         if let Some(parent) = cleaned_new.parent() {
+                            self.directory_cache.invalidate(&parent.to_path_buf());
+                            if let Some(di) = &self.directory_index {
+                                let _ = di.invalidate(&parent.to_path_buf());
+                            }
                             let parent_norm = normalize_for_match(parent);
                             if parent_norm == current_path_norm {
                                 self.pending_auto_reload = true;
@@ -538,89 +590,90 @@ impl ImageViewerApp {
                 _ => {}
             }
         }
-        
+
         // LEGACY: Processa eventos do notify-watcher (mantido para compatibilidade)
         // Se drive-watcher já detectou eventos, skip notify-watcher para evitar duplicados
         #[cfg(feature = "notify-watcher")]
         if !drive_watcher_active {
-        while let Ok(event) = self.fs_event_receiver.try_recv() {
-            match event {
-                Ok(evt) => {
-                    let mut meaningful_change = false;
+            while let Ok(event) = self.fs_event_receiver.try_recv() {
+                match event {
+                    Ok(evt) => {
+                        let mut meaningful_change = false;
 
-                    if matches!(evt.kind, notify::EventKind::Remove(_)) {
+                        if matches!(evt.kind, notify::EventKind::Remove(_)) {
+                            for path in &evt.paths {
+                                if should_ignore(path) {
+                                    continue;
+                                }
+                                meaningful_change = true;
+
+                                let cleaned = clean_path(path);
+                                if let Some(parent) = cleaned.parent() {
+                                    self.directory_cache.invalidate(&parent.to_path_buf());
+                                }
+                                self.directory_cache.invalidate_children(&cleaned);
+                                debug_log!(
+                                    "[FS-WATCH-LEGACY] REMOVE: {:?}",
+                                    path.file_name().unwrap_or_default()
+                                );
+                                self.disk_cache.remove_cache_for_path(&cleaned);
+                            }
+                        }
+
                         for path in &evt.paths {
                             if should_ignore(path) {
                                 continue;
                             }
                             meaningful_change = true;
 
-                            let cleaned = clean_path(path);
-                            if let Some(parent) = cleaned.parent() {
-                                self.directory_cache.invalidate(&parent.to_path_buf());
-                            }
-                            self.directory_cache.invalidate_children(&cleaned);
-                            debug_log!(
-                                "[FS-WATCH-LEGACY] REMOVE: {:?}",
-                                path.file_name().unwrap_or_default()
-                            );
-                            self.disk_cache.remove_cache_for_path(&cleaned);
-                        }
-                    }
-
-                    for path in &evt.paths {
-                        if should_ignore(path) {
-                            continue;
-                        }
-                        meaningful_change = true;
-
-                        if let Some(parent) = path.parent() {
-                            let parent_norm = normalize_for_match(parent);
-                            if parent_norm == current_path_norm {
-                                let cleaned = clean_path(path);
-                                if let Some(cache_parent) = cleaned.parent() {
-                                    self.directory_cache.invalidate(&cache_parent.to_path_buf());
-                                }
-                                debug_log!(
-                                    "[FS] Direct subfolder modified: {:?}",
-                                    cleaned.file_name()
-                                );
-                                self.cache_manager.invalidate_folder_preview(&cleaned);
-                            }
-                        }
-
-                        if let Some(parent) = path.parent() {
-                            if let Some(grandparent) = parent.parent() {
-                                let grandparent_norm = normalize_for_match(grandparent);
-                                if grandparent_norm == current_path_norm {
-                                    let cleaned_parent = clean_path(parent);
-                                    if let Some(cache_parent) = cleaned_parent.parent() {
+                            if let Some(parent) = path.parent() {
+                                let parent_norm = normalize_for_match(parent);
+                                if parent_norm == current_path_norm {
+                                    let cleaned = clean_path(path);
+                                    if let Some(cache_parent) = cleaned.parent() {
                                         self.directory_cache
                                             .invalidate(&cache_parent.to_path_buf());
                                     }
-                                        debug_log!(
-                                        "[FS] File in subfolder modified, invalidating: {:?}",
-                                        cleaned_parent.file_name()
+                                    debug_log!(
+                                        "[FS] Direct subfolder modified: {:?}",
+                                        cleaned.file_name()
                                     );
-                                    self.cache_manager
-                                        .invalidate_folder_preview(&cleaned_parent);
+                                    self.cache_manager.invalidate_folder_preview(&cleaned);
                                 }
                             }
+
+                            if let Some(parent) = path.parent() {
+                                if let Some(grandparent) = parent.parent() {
+                                    let grandparent_norm = normalize_for_match(grandparent);
+                                    if grandparent_norm == current_path_norm {
+                                        let cleaned_parent = clean_path(parent);
+                                        if let Some(cache_parent) = cleaned_parent.parent() {
+                                            self.directory_cache
+                                                .invalidate(&cache_parent.to_path_buf());
+                                        }
+                                        debug_log!(
+                                            "[FS] File in subfolder modified, invalidating: {:?}",
+                                            cleaned_parent.file_name()
+                                        );
+                                        self.cache_manager
+                                            .invalidate_folder_preview(&cleaned_parent);
+                                    }
+                                }
+                            }
+
+                            let cleaned = clean_path(path);
+                            self.cache_manager.texture_cache.pop(&cleaned);
+                            self.cache_manager.failed_thumbnails.pop(&cleaned);
+                            crate::workers::thumbnail::clear_failure_cache(&cleaned);
                         }
 
-                        let cleaned = clean_path(path);
-                        self.cache_manager.texture_cache.pop(&cleaned);
-                        self.cache_manager.failed_thumbnails.pop(&cleaned);
-                        crate::workers::thumbnail::clear_failure_cache(&cleaned);
+                        if meaningful_change {
+                            self.pending_auto_reload = true;
+                        }
                     }
-
-                    if meaningful_change {
-                        self.pending_auto_reload = true;
-                    }
+                    Err(e) => debug_log!("Erro de watch: {:?}", e),
                 }
-                Err(e) => debug_log!("Erro de watch: {:?}", e),
             }
-        }
         } // Fecha o if !drive_watcher_active
 
         // Executa reload apenas quando debounce permitir
@@ -632,7 +685,7 @@ impl ImageViewerApp {
             self.pending_auto_reload = false;
             debug_log!("[DEBUG] Skipping auto-reload - UI already updated by smart delete");
         }
-        
+
         if self.pending_auto_reload && self.file_ops_in_progress == 0 {
             let elapsed = self.last_auto_reload.elapsed();
             if elapsed > Duration::from_millis(theme::AUTO_RELOAD_MS) {
@@ -644,7 +697,9 @@ impl ImageViewerApp {
                 if self.is_recycle_bin_view || self.is_computer_view {
                     self.pending_auto_reload = false;
                 } else {
-                    debug_log!("[DEBUG] Auto-reloading with force_refresh=false (watcher-triggered).");
+                    debug_log!(
+                        "[DEBUG] Auto-reloading with force_refresh=false (watcher-triggered)."
+                    );
                     // PERFORMANCE: Use force_refresh=false for watcher-triggered reloads.
                     // force_refresh=true clears ALL caches (textures, thumbnails, folder covers),
                     // empties the items list, and causes a white screen on HDD while rescanning.
@@ -674,7 +729,8 @@ impl ImageViewerApp {
                         saw_end_of_load = true;
                     } else {
                         // Chegou dados! Adiciona à lista mestre
-                        self.pending_items_count = self.pending_items_count.saturating_add(new_batch.len());
+                        self.pending_items_count =
+                            self.pending_items_count.saturating_add(new_batch.len());
                         self.pending_items_rebuild = true;
                         self.all_items.extend(new_batch);
                     }
@@ -709,7 +765,12 @@ impl ImageViewerApp {
                     }
                 };
                 if !query.is_empty() {
-                    sorting::sort_items(&mut result_items, sort_mode, sort_descending, folders_position);
+                    sorting::sort_items(
+                        &mut result_items,
+                        sort_mode,
+                        sort_descending,
+                        folders_position,
+                    );
                 }
                 let total = result_items.len();
                 let _ = sender.send(ItemsRebuildResult {
@@ -739,12 +800,22 @@ impl ImageViewerApp {
                         Some(filtered) => filtered,
                         None => {
                             let mut all = items;
-                            sorting::sort_items(&mut all, sort_mode, sort_descending, folders_position);
+                            sorting::sort_items(
+                                &mut all,
+                                sort_mode,
+                                sort_descending,
+                                folders_position,
+                            );
                             all
                         }
                     };
                     if !query.is_empty() {
-                        sorting::sort_items(&mut result_items, sort_mode, sort_descending, folders_position);
+                        sorting::sort_items(
+                            &mut result_items,
+                            sort_mode,
+                            sort_descending,
+                            folders_position,
+                        );
                     }
                     let total = result_items.len();
                     let _ = sender.send(ItemsRebuildResult {
@@ -851,7 +922,7 @@ impl ImageViewerApp {
         // PERFORMANCE: Limit pending_thumbnails buffer to prevent RAM spikes
         // Each thumbnail data can be ~1MB, so limit to ~100MB worth of pending data
         const MAX_PENDING_THUMBNAILS: usize = 100;
-        
+
         while let Ok(thumbnail_data) = self.image_receiver.try_recv() {
             // Se a imagem pertence a uma geração anterior (outra folder), descarta.
             if thumbnail_data.generation != self.generation {
@@ -906,8 +977,8 @@ impl ImageViewerApp {
         // CRITICAL PERFORMANCE MODE: Skip all non-essential uploads when FPS is critically low
         // This prevents compounding performance issues during heavy load
         const CRITICAL_FRAME_TIME_MS: f32 = 33.33; // < 30 FPS
-        const SEVERE_FRAME_TIME_MS: f32 = 25.0;    // < 40 FPS
-        
+        const SEVERE_FRAME_TIME_MS: f32 = 25.0; // < 40 FPS
+
         let is_performance_critical = self.frame_time_peak_ms > CRITICAL_FRAME_TIME_MS;
         let is_performance_severe = self.frame_time_peak_ms > SEVERE_FRAME_TIME_MS;
 
@@ -1065,12 +1136,8 @@ impl ImageViewerApp {
 
                 // Store RGBA data in RAM cache AFTER GPU upload for future re-uploads
                 // This allows fast re-upload if texture is evicted from VRAM without disk I/O
-                self.cache_manager.put_rgba_data(
-                    path.clone(),
-                    rgba_data,
-                    width,
-                    height,
-                );
+                self.cache_manager
+                    .put_rgba_data(path.clone(), rgba_data, width, height);
 
                 self.cache_manager
                     .put_thumbnail(path.clone(), texture.clone());

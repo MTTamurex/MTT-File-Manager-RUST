@@ -216,10 +216,17 @@ impl DriveWatcher {
     /// Extract the drive root from a full path
     ///
     /// Example: "C:\Users\Name" -> "C:\"
+    ///
+    /// NOTE: On Windows, `Path::components().next()` returns `"C:"` (without backslash),
+    /// which means "current directory on drive C" — NOT the root. We must append `\`
+    /// so that `CreateFileW` opens the actual drive root for `ReadDirectoryChangesW`.
     pub fn extract_drive_root(path: &Path) -> Option<PathBuf> {
-        path.components()
-            .next()
-            .map(|c| PathBuf::from(c.as_os_str()))
+        let s = path.to_string_lossy();
+        if s.len() >= 2 && s.as_bytes()[1] == b':' {
+            Some(PathBuf::from(format!("{}\\", &s[..2])))
+        } else {
+            None
+        }
     }
 }
 

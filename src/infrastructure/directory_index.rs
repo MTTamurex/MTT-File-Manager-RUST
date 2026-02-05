@@ -191,30 +191,46 @@ impl DirectoryIndex {
 
         let parent_str = format!("{}%", parent.to_string_lossy());
 
-        conn.execute("DELETE FROM file_index WHERE dir_path LIKE ?", [&parent_str])?;
-        conn.execute("DELETE FROM directory_index WHERE dir_path LIKE ?", [&parent_str])?;
+        conn.execute(
+            "DELETE FROM file_index WHERE dir_path LIKE ?",
+            [&parent_str],
+        )?;
+        conn.execute(
+            "DELETE FROM directory_index WHERE dir_path LIKE ?",
+            [&parent_str],
+        )?;
 
         Ok(())
     }
 
-    pub fn might_have_changed(&self, dir_path: &Path) -> bool {
+    /// Check if directory might have changed since last index scan
+    /// Returns (has_changed, current_mtime) to avoid redundant fs::metadata() calls
+    pub fn might_have_changed_with_mtime(
+        &self,
+        dir_path: &Path,
+    ) -> (bool, Option<std::time::SystemTime>) {
         let stored = match self.get_directory(dir_path) {
             Some((meta, _)) => meta,
-            None => return true,
+            None => return (true, None),
         };
 
         // PERFORMANCE: Use directory modification time instead of re-enumerating
         // the entire directory just to compare file counts.
         // A single metadata() call on the directory is ~0.1ms vs full enumeration.
-        let current_mtime = std::fs::metadata(dir_path)
-            .and_then(|m| m.modified())
-            .ok()
+        let current_mtime = std::fs::metadata(dir_path).and_then(|m| m.modified()).ok();
+
+        let current_mtime_secs = current_mtime
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
         // If the directory mtime is newer than our last scan, it has changed
-        current_mtime > stored.last_scan
+        (current_mtime_secs > stored.last_scan, current_mtime)
+    }
+
+    /// Legacy wrapper for backwards compatibility
+    pub fn might_have_changed(&self, dir_path: &Path) -> bool {
+        self.might_have_changed_with_mtime(dir_path).0
     }
 
     pub fn stats(&self) -> Option<(usize, usize)> {
