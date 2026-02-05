@@ -255,8 +255,10 @@ impl ImageViewerApp {
             // STALE-WHILE-REVALIDATE STRATEGY: Instant feedback with debounce
             // NOTE: Only used for HDDs - SSDs bypass cache entirely for raw speed
             let base_path_buf = PathBuf::from(&base_path);
-            let is_onedrive_base = onedrive::is_onedrive_path(&base_path_buf)
-                || onedrive::path_has_cloud_attributes(&base_path_buf);
+            // PERFORMANCE: Only use is_onedrive_path() which is string-based (no I/O)
+            // path_has_cloud_attributes() was removed because GetFileAttributesW can BLOCK
+            // indefinitely on cloud-only OneDrive folders
+            let is_onedrive_base = onedrive::is_onedrive_path(&base_path_buf);
 
             // Phase 1: Instant Feedback (The Cache Hit) - HDD ONLY
             if !is_ssd {
