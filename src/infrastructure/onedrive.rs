@@ -30,6 +30,9 @@ const FILE_ATTRIBUTE_OFFLINE: u32 = 0x00001000;
 const ONEDRIVE_METADATA_TIMEOUT_MS: u64 = 100;
 /// Timeout for exists check on OneDrive files (milliseconds)
 const ONEDRIVE_EXISTS_TIMEOUT_MS: u64 = 50;
+/// Timeout for directory enumeration on OneDrive (milliseconds) - CRITICAL
+/// FindFirstFileW can block for 30-60s on OneDrive folders with cloud-only files
+const ONEDRIVE_DIR_ENUM_TIMEOUT_MS: u64 = 5000;
 
 /// Returns true if the attribute set contains any Cloud Files flags (OneDrive, iCloud, etc).
 /// This acts as a fallback when the path-based detection fails (e.g., alternate mount points).
@@ -345,6 +348,129 @@ pub fn is_locally_available_safe(path: &Path) -> bool {
         }
         IoTimeoutResult::Err(_) => false,
     }
+}
+
+/// Result type for directory enumeration with timeout
+pub type DirectoryEntries = Vec<(String, u32, u64, u64)>; // (name, attributes, size, modified)
+
+/// Reads a directory with timeout protection for OneDrive.
+/// This is CRITICAL because FindFirstFileW can block for 30-60 seconds on OneDrive folders.
+///
+/// Returns:
+/// - `Ok(entries)` if successful within timeout
+/// - `Timeout` if enumeration takes longer than timeout_ms
+pub fn read_directory_with_timeout(
+    path: &Path,
+    timeout_ms: u64,
+) -> IoTimeoutResult<DirectoryEntries> {
+    // Fast path: not OneDrive - use regular reading (should be fast)
+    if !is_onedrive_path(path) {
+        return match read_directory_internal(path) {
+            Ok(entries) => IoTimeoutResult::Ok(entries),
+            Err(_) => IoTimeoutResult::Err(std::io::ErrorKind::Other),
+        };
+    }
+
+    // OneDrive path: use timeout protection
+    let path_buf = path.to_path_buf();
+    let path_for_log = path_buf.clone();
+    let timeout = Duration::from_millis(timeout_ms);
+    let start = Instant::now();
+
+    // Spawn a thread to do the blocking directory enumeration
+    let handle = std::thread::spawn(move || read_directory_internal(&path_buf));
+
+    // Poll with timeout
+    loop {
+        if start.elapsed() >= timeout {
+            eprintln!(
+                "[ONEDRIVE TIMEOUT] read_directory() exceeded {}ms for {:?}",
+                timeout_ms,
+                path_for_log
+            );
+            return IoTimeoutResult::Timeout;
+        }
+
+        if handle.is_finished() {
+            match handle.join() {
+                Ok(Ok(entries)) => return IoTimeoutResult::Ok(entries),
+                Ok(Err(_)) => return IoTimeoutResult::Err(std::io::ErrorKind::Other),
+                Err(_) => return IoTimeoutResult::Err(std::io::ErrorKind::Other),
+            }
+        }
+
+        std::thread::sleep(Duration::from_millis(5)); // 5ms polling interval
+    }
+}
+
+/// Internal directory reading function using Win32 APIs
+fn read_directory_internal(path: &Path) -> Result<DirectoryEntries, std::io::Error> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::{
+        FindClose, FindFirstFileW, FindNextFileW, WIN32_FIND_DATAW,
+    };
+
+    let search_path = if path.to_string_lossy().ends_with('\\') {
+        format!("{}*", path.display())
+    } else {
+        format!("{}\\*", path.display())
+    };
+
+    let wide_path: Vec<u16> = search_path.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut find_data = WIN32_FIND_DATAW::default();
+    let mut entries = Vec::new();
+
+    unsafe {
+        let handle = FindFirstFileW(PCWSTR(wide_path.as_ptr()), &mut find_data)?;
+
+        loop {
+            // Extract filename
+            let len = find_data
+                .cFileName
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(find_data.cFileName.len());
+            let filename = OsString::from_wide(&find_data.cFileName[0..len])
+                .to_string_lossy()
+                .into_owned();
+
+            if filename != "." && filename != ".." {
+                let attrs = find_data.dwFileAttributes;
+                let is_dir = (attrs & 0x10) != 0;
+
+                let size = if is_dir {
+                    0
+                } else {
+                    ((find_data.nFileSizeHigh as u64) << 32) | (find_data.nFileSizeLow as u64)
+                };
+
+                let ft = find_data.ftLastWriteTime;
+                let windows_ticks = ((ft.dwHighDateTime as u64) << 32) | (ft.dwLowDateTime as u64);
+                let modified = if windows_ticks > 116444736000000000 {
+                    (windows_ticks - 116444736000000000) / 10_000_000
+                } else {
+                    0
+                };
+
+                entries.push((filename, attrs, size, modified));
+            }
+
+            if FindNextFileW(handle, &mut find_data).is_err() {
+                break;
+            }
+        }
+
+        let _ = FindClose(handle);
+    }
+
+    Ok(entries)
+}
+
+/// Convenience function: Read directory with default OneDrive timeout (5s)
+pub fn onedrive_read_directory(path: &Path) -> IoTimeoutResult<DirectoryEntries> {
+    read_directory_with_timeout(path, ONEDRIVE_DIR_ENUM_TIMEOUT_MS)
 }
 
 #[cfg(test)]
