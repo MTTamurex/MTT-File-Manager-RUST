@@ -774,7 +774,8 @@ pub fn render_grid_view(
                     continue;
                 }
                 let item = &ctx.items[index];
-                if !item.is_dir {
+                // FIX: Only prefetch thumbnails for media files (prevents .exe/.dll extraction)
+                if !item.is_dir && item.is_media() {
                     if !ctx.texture_cache.contains(&item.path)
                         && !ctx.loading_set.contains(&item.path)
                         && !ctx.pending_upload_set.contains(&item.path)
