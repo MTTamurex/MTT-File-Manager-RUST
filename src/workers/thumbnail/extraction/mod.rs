@@ -32,13 +32,31 @@ pub fn generate_thumbnail_hybrid(
     priority: IOPriority,
     pending_deletions: &dashmap::DashMap<std::path::PathBuf, ()>,
 ) -> Option<(Vec<u8>, u32, u32)> {
-    eprintln!("[Thumbnail] Starting extraction pipeline for: {:?}", path.file_name());
-    
+    // DEFENSE IN DEPTH: Early exit for non-media files
+    // This catches any requests that slipped through UI-level filtering (e.g., .exe, .dll)
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        if !crate::infrastructure::windows::is_media_extension(ext) {
+            eprintln!(
+                "[Thumbnail] Skipping non-media file: {:?}",
+                path.file_name()
+            );
+            return None;
+        }
+    } else {
+        // No extension = skip
+        return None;
+    }
+
+    eprintln!(
+        "[Thumbnail] Starting extraction pipeline for: {:?}",
+        path.file_name()
+    );
+
     // Skip if file is pending deletion or no longer exists
     if pending_deletions.contains_key(path) || !path.exists() {
         return None;
     }
-    
+
     // Stage 1: image crate (Fast Path)
     eprintln!("[Thumbnail] Trying Stage 1 (image crate)...");
     if let Some(result) = stage1_image_crate::extract(path, priority) {

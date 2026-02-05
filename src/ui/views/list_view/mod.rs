@@ -80,7 +80,11 @@ fn get_cached_text_width(text: &str, font_id: &FontId, _color: Color32, ui: &Ui)
 
         // PERFORMANCE: Use provided Color32 for layout (API requirement), but don't include in key
         // since text width is independent of color
-        let width = ui.fonts(|f| f.layout_no_wrap(text.to_string(), font_id.clone(), _color).rect.width());
+        let width = ui.fonts(|f| {
+            f.layout_no_wrap(text.to_string(), font_id.clone(), _color)
+                .rect
+                .width()
+        });
         cache.put(key, width);
         width
     })
@@ -91,12 +95,15 @@ fn get_cached_text_width(text: &str, font_id: &FontId, _color: Color32, ui: &Ui)
 /// String allocations on each binary search iteration. Only one String is created at the end.
 /// Also uses font width cache to avoid redundant text layout calculations.
 /// Cache: Uses thread-local cache keyed by (text, max_width) to avoid recomputation.
-pub(crate) fn truncate_text_for_column(text: &str, max_width: f32, font_id: &FontId, ui: &Ui) -> String {
+pub(crate) fn truncate_text_for_column(
+    text: &str,
+    max_width: f32,
+    font_id: &FontId,
+    ui: &Ui,
+) -> String {
     // PERFORMANCE: Check cache first using hash of (text, max_width)
     let cache_key = truncation_cache_key(text, max_width);
-    let cached_result = TRUNCATION_CACHE.with(|cache| {
-        cache.borrow().get(&cache_key).cloned()
-    });
+    let cached_result = TRUNCATION_CACHE.with(|cache| cache.borrow().get(&cache_key).cloned());
     if let Some(result) = cached_result {
         return result;
     }
@@ -156,7 +163,11 @@ pub(crate) fn truncate_text_for_column(text: &str, max_width: f32, font_id: &Fon
 
     while left < right {
         let mid = (left + right + 1) / 2;
-        let byte_end = if mid < char_count { char_boundaries[mid] } else { text.len() };
+        let byte_end = if mid < char_count {
+            char_boundaries[mid]
+        } else {
+            text.len()
+        };
         let slice = &text[..byte_end];
         let w = get_cached_text_width(slice, font_id, Color32::WHITE, ui);
 
@@ -180,11 +191,15 @@ pub(crate) fn truncate_text_for_column(text: &str, max_width: f32, font_id: &Fon
         return result;
     }
 
-    let byte_end = if left < char_count { char_boundaries[left] } else { text.len() };
+    let byte_end = if left < char_count {
+        char_boundaries[left]
+    } else {
+        text.len()
+    };
     let mut result = String::with_capacity(byte_end + 3);
     result.push_str(&text[..byte_end]);
     result.push_str(ellipsis);
-    
+
     // Cache the result before returning
     TRUNCATION_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
@@ -193,7 +208,7 @@ pub(crate) fn truncate_text_for_column(text: &str, max_width: f32, font_id: &Fon
         }
         cache.insert(cache_key, result.clone());
     });
-    
+
     result
 }
 
@@ -223,8 +238,8 @@ pub struct ListViewContext<'a> {
     pub loading_set: &'a mut FxHashSet<PathBuf>,
     pub loading_icons: &'a mut FxHashSet<PathBuf>,
     /// Set of icons that failed extraction (prevents infinite retry)
-    pub failed_icons: &'a FxHashSet<PathBuf>,
-    pub scanned_folders: &'a mut FxHashSet<PathBuf>,
+    pub failed_icons: &'a lru::LruCache<PathBuf, ()>,
+    pub scanned_folders: &'a mut lru::LruCache<PathBuf, ()>,
     pub folder_icon_texture: Option<&'a egui::TextureHandle>,
     pub computer_icon: Option<&'a egui::TextureHandle>,
     pub drive_icon_cache: &'a mut lru::LruCache<String, egui::TextureHandle>,
@@ -322,7 +337,12 @@ pub fn render_list_view(
 
     // Render virtualized content
     let interaction = virtualization::render_virtualized_content(
-        ui, ctx, ops, available_w, row_height, &col_widths,
+        ui,
+        ctx,
+        ops,
+        available_w,
+        row_height,
+        &col_widths,
     );
 
     // Handle actions after rendering - ORDER MATTERS!

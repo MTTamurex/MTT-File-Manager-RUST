@@ -38,7 +38,7 @@ fn determine_initial_path(disk_cache: &ThumbnailDiskCache) -> (String, bool) {
         if !last_folder.is_empty() {
             // Check if path still exists and is accessible
             let path_buf = PathBuf::from(&last_folder);
-            
+
             // Validate path exists
             if path_buf.exists() {
                 // Additional check: verify we can read the directory
@@ -55,11 +55,14 @@ fn determine_initial_path(disk_cache: &ThumbnailDiskCache) -> (String, bool) {
                     }
                 }
             } else {
-                eprintln!("[INIT] Last folder no longer exists: {}, using Este Computador", last_folder);
+                eprintln!(
+                    "[INIT] Last folder no longer exists: {}, using Este Computador",
+                    last_folder
+                );
             }
         }
     }
-    
+
     // Default to "Este Computador" if no valid last folder
     eprintln!("[INIT] No valid last folder found, starting at Este Computador");
     ("Este Computador".to_string(), true)
@@ -74,8 +77,7 @@ impl ImageViewerApp {
 
         // 1. Canais para comunicação Workers → UI
         let (file_entry_sender, file_entry_receiver) = mpsc::channel::<(usize, Vec<FileEntry>)>();
-        let (items_rebuild_sender, items_rebuild_receiver) =
-            mpsc::channel::<ItemsRebuildResult>();
+        let (items_rebuild_sender, items_rebuild_receiver) = mpsc::channel::<ItemsRebuildResult>();
 
         // Initialize disk cache (MOVED UP for Cover Worker access)
         let cache_dir = dirs::data_local_dir()
@@ -319,7 +321,8 @@ impl ImageViewerApp {
             .clamp(0.0, 1.0);
 
         // Shared pending_deletions for worker cancellation
-        let pending_deletions: Arc<dashmap::DashMap<PathBuf, ()>> = Arc::new(dashmap::DashMap::new());
+        let pending_deletions: Arc<dashmap::DashMap<PathBuf, ()>> =
+            Arc::new(dashmap::DashMap::new());
 
         // 8 threads: equilíbrio ideal entre SSD e HDD USB
         use crate::workers::thumbnail::spawn_thumbnail_workers;
@@ -466,7 +469,7 @@ impl ImageViewerApp {
 
         // Determine initial path based on last saved folder
         let (initial_path, is_computer_view_initial) = determine_initial_path(&disk_cache);
-        
+
         // Create tab manager with the initial path
         let mut tab_manager = if is_computer_view_initial {
             crate::tabs::TabManager::new()
@@ -493,7 +496,7 @@ impl ImageViewerApp {
             // Cover Worker
             cover_worker_sender: cover_req_tx,
             cover_worker_receiver: cover_res_rx,
-            scanned_folders: FxHashSet::default(),
+            scanned_folders: LruCache::new(NonZeroUsize::new(200).unwrap()),
             // audio_device, // Removed
             // Folder Preview Worker (Native Windows Shell)
             folder_preview_sender: folder_preview_tx,
@@ -546,8 +549,9 @@ impl ImageViewerApp {
             focus_rename: false,
 
             // Drive-wide file system watcher (File Pilot optimization)
-            drive_watcher: crate::infrastructure::drive_watcher_integration::DriveWatcherManager::new(),
-            
+            drive_watcher:
+                crate::infrastructure::drive_watcher_integration::DriveWatcherManager::new(),
+
             #[cfg(feature = "notify-watcher")]
             watcher: None,
             #[cfg(feature = "notify-watcher")]
@@ -572,7 +576,7 @@ impl ImageViewerApp {
             icon_req_sender: icon_req_tx,
             icon_res_receiver: icon_res_rx,
             loading_icons: FxHashSet::default(),
-            failed_icons: FxHashSet::default(),
+            failed_icons: LruCache::new(NonZeroUsize::new(1000).unwrap()),
 
             // NOTIFICATION SYSTEM
             notifications: crate::application::NotificationManager::new(),
@@ -639,7 +643,7 @@ impl ImageViewerApp {
             // FOLDER SIZE CALCULATOR
             folder_size_req_sender: folder_size_req_tx,
             folder_size_res_receiver: folder_size_res_rx,
-            folder_size_cache: std::collections::HashMap::new(),
+            folder_size_cache: LruCache::new(NonZeroUsize::new(500).unwrap()),
             folder_size_loading: FxHashSet::default(),
 
             // RECYCLE BIN CACHE
@@ -690,20 +694,56 @@ impl ImageViewerApp {
             last_media_key_press: std::time::Instant::now(),
 
             // List view column widths (resizable) - Regular view
-            list_col_name_width: disk_cache.get_preference("list_col_name_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(300.0),
-            list_col_date_width: disk_cache.get_preference("list_col_date_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(170.0),
-            list_col_type_width: disk_cache.get_preference("list_col_type_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(120.0),
-            list_col_size_width: disk_cache.get_preference("list_col_size_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(100.0),
+            list_col_name_width: disk_cache
+                .get_preference("list_col_name_width")
+                .and_then(|s| s.parse::<f32>().ok())
+                .unwrap_or(300.0),
+            list_col_date_width: disk_cache
+                .get_preference("list_col_date_width")
+                .and_then(|s| s.parse::<f32>().ok())
+                .unwrap_or(170.0),
+            list_col_type_width: disk_cache
+                .get_preference("list_col_type_width")
+                .and_then(|s| s.parse::<f32>().ok())
+                .unwrap_or(120.0),
+            list_col_size_width: disk_cache
+                .get_preference("list_col_size_width")
+                .and_then(|s| s.parse::<f32>().ok())
+                .unwrap_or(100.0),
             // List view column widths - OneDrive view
-            list_col_onedrive_name_width: disk_cache.get_preference("list_col_onedrive_name_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(300.0),
-            list_col_onedrive_date_width: disk_cache.get_preference("list_col_onedrive_date_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(170.0),
-            list_col_onedrive_type_width: disk_cache.get_preference("list_col_onedrive_type_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(120.0),
-            list_col_onedrive_size_width: disk_cache.get_preference("list_col_onedrive_size_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(100.0),
-            list_col_onedrive_status_width: disk_cache.get_preference("list_col_onedrive_status_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(120.0),
+            list_col_onedrive_name_width: disk_cache
+                .get_preference("list_col_onedrive_name_width")
+                .and_then(|s| s.parse::<f32>().ok())
+                .unwrap_or(300.0),
+            list_col_onedrive_date_width: disk_cache
+                .get_preference("list_col_onedrive_date_width")
+                .and_then(|s| s.parse::<f32>().ok())
+                .unwrap_or(170.0),
+            list_col_onedrive_type_width: disk_cache
+                .get_preference("list_col_onedrive_type_width")
+                .and_then(|s| s.parse::<f32>().ok())
+                .unwrap_or(120.0),
+            list_col_onedrive_size_width: disk_cache
+                .get_preference("list_col_onedrive_size_width")
+                .and_then(|s| s.parse::<f32>().ok())
+                .unwrap_or(100.0),
+            list_col_onedrive_status_width: disk_cache
+                .get_preference("list_col_onedrive_status_width")
+                .and_then(|s| s.parse::<f32>().ok())
+                .unwrap_or(120.0),
             // List view column widths - Computer view
-            list_col_computer_name_width: disk_cache.get_preference("list_col_computer_name_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(300.0),
-            list_col_computer_total_width: disk_cache.get_preference("list_col_computer_total_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(120.0),
-            list_col_computer_free_width: disk_cache.get_preference("list_col_computer_free_width").and_then(|s| s.parse::<f32>().ok()).unwrap_or(120.0),
+            list_col_computer_name_width: disk_cache
+                .get_preference("list_col_computer_name_width")
+                .and_then(|s| s.parse::<f32>().ok())
+                .unwrap_or(300.0),
+            list_col_computer_total_width: disk_cache
+                .get_preference("list_col_computer_total_width")
+                .and_then(|s| s.parse::<f32>().ok())
+                .unwrap_or(120.0),
+            list_col_computer_free_width: disk_cache
+                .get_preference("list_col_computer_free_width")
+                .and_then(|s| s.parse::<f32>().ok())
+                .unwrap_or(120.0),
         };
 
         // Inicia monitoramento inicial

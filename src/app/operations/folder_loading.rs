@@ -351,74 +351,90 @@ impl ImageViewerApp {
             if !force_refresh && !is_onedrive_base {
                 if let Some(di) = &directory_index_opt {
                     let base = PathBuf::from(&base_path);
-                    // OPTIMIZATION: Trust DriveWatcher to invalidate the index on changes.
-                    // No fs::metadata() call needed - if the index has data, it's valid.
-                    // Watcher events (Created, Deleted, Modified, Renamed) now invalidate
-                    // both DirectoryCache AND DirectoryIndex in message_handler.rs.
-                    if let Some((_meta, indexed_files)) = di.get_directory(&base) {
-                        eprintln!("[FOLDER-LOADING] Using DirectoryIndex (pre-built index) for {:?}", base);
-                        let mut entries: Vec<FileEntry> = indexed_files
-                            .into_iter()
-                            .filter(|f| !f.name.starts_with('.'))
-                            .map(|f| {
-                                let is_zip = f.name.to_lowercase().ends_with(".zip");
-                                let is_dir = f.is_dir || is_zip;
-                                FileEntry {
-                                    path: base.join(&f.name),
-                                    name: f.name,
-                                    is_dir,
-                                    size: if is_dir && !is_zip { 0 } else { f.size },
-                                    modified: f.modified,
-                                    folder_cover: None,
-                                    drive_info: None,
-                                    sync_status: SyncStatus::None,
-                                    deletion_date: None,
-                                    recycle_original_path: None,
-                                }
-                            })
-                            .collect();
+                    // SAFETY CHECK: Verify directory mtime before trusting cached index
+                    // The DriveWatcher may not have been active when files were added
+                    // (e.g., during startup delay or when the app was closed).
+                    // A single metadata() call is cheap compared to serving stale data.
+                    if let Some((meta, indexed_files)) = di.get_directory(&base) {
+                        // Validate: Check if directory mtime is newer than last_scan
+                        let dir_modified = std::fs::metadata(&base)
+                            .ok()
+                            .and_then(|m| m.modified().ok())
+                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+                        
+                        if dir_modified > meta.last_scan {
+                            // Index is stale - directory was modified after last scan
+                            eprintln!("[FOLDER-LOADING] DirectoryIndex stale for {:?} (dir_mtime={} > index_time={}), invalidating",
+                                base, dir_modified, meta.last_scan);
+                            let _ = di.invalidate(&base);
+                            // Fall through to disk scan below
+                        } else {
+                            eprintln!("[FOLDER-LOADING] Using DirectoryIndex (pre-built index) for {:?}", base);
+                            let mut entries: Vec<FileEntry> = indexed_files
+                                .into_iter()
+                                .filter(|f| !f.name.starts_with('.'))
+                                .map(|f| {
+                                    let is_zip = f.name.to_lowercase().ends_with(".zip");
+                                    let is_dir = f.is_dir || is_zip;
+                                    FileEntry {
+                                        path: base.join(&f.name),
+                                        name: f.name,
+                                        is_dir,
+                                        size: if is_dir && !is_zip { 0 } else { f.size },
+                                        modified: f.modified,
+                                        folder_cover: None,
+                                        drive_info: None,
+                                        sync_status: SyncStatus::None,
+                                        deletion_date: None,
+                                        recycle_original_path: None,
+                                    }
+                                })
+                                .collect();
 
-                        let folders: Vec<PathBuf> = entries
-                            .iter()
-                            .filter(|e| e.is_dir)
-                            .map(|e| e.path.clone())
-                            .collect();
-                        if !folders.is_empty() {
-                            let covers = disk_cache.get_folder_covers(&folders);
-                            for entry in entries.iter_mut() {
-                                if entry.is_dir {
-                                    if let Some(cover) = covers.get(&entry.path) {
-                                        entry.folder_cover = Some(cover.clone());
+                            let folders: Vec<PathBuf> = entries
+                                .iter()
+                                .filter(|e| e.is_dir)
+                                .map(|e| e.path.clone())
+                                .collect();
+                            if !folders.is_empty() {
+                                let covers = disk_cache.get_folder_covers(&folders);
+                                for entry in entries.iter_mut() {
+                                    if entry.is_dir {
+                                        if let Some(cover) = covers.get(&entry.path) {
+                                            entry.folder_cover = Some(cover.clone());
+                                        }
                                     }
                                 }
                             }
-                        }
 
-                        // Only cache for HDDs - SSDs bypass cache
-                        if !is_ssd {
-                            directory_cache.put(base.clone(), entries.clone());
-                        }
-
-                        let mut offset = 0;
-                        while offset < entries.len() {
-                            if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
-                                return;
+                            // Only cache for HDDs - SSDs bypass cache
+                            if !is_ssd {
+                                directory_cache.put(base.clone(), entries.clone());
                             }
-                            let end = (offset + batch_size).min(entries.len());
-                            let chunk = entries[offset..end].to_vec();
-                            let _ = file_entry_sender.send((my_gen, chunk));
+
+                            let mut offset = 0;
+                            while offset < entries.len() {
+                                if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
+                                    return;
+                                }
+                                let end = (offset + batch_size).min(entries.len());
+                                let chunk = entries[offset..end].to_vec();
+                                let _ = file_entry_sender.send((my_gen, chunk));
+                                ctx.request_repaint();
+                                batch_tracker.record_batch(batch_start.elapsed(), end - offset);
+                                let _ = batch_tracker.batch_size();
+                                batch_start = std::time::Instant::now();
+                                offset = end;
+                            }
+                            let _ = file_entry_sender.send((my_gen, Vec::new()));
                             ctx.request_repaint();
-                            batch_tracker.record_batch(batch_start.elapsed(), end - offset);
-                            let _ = batch_tracker.batch_size();
-                            batch_start = std::time::Instant::now();
-                            offset = end;
-                        }
-                        let _ = file_entry_sender.send((my_gen, Vec::new()));
-                        ctx.request_repaint();
-                        return;
-                    }
-                }
-            }
+                            return;
+                        } // end else (index not stale)
+                    } // end if let Some((meta, indexed_files))
+                } // end if let Some(di)
+            } // end if !force_refresh && !is_onedrive_base
 
             if !force_refresh {
                 // DriveWatcher pre-invalidates cache — no mtime check needed
