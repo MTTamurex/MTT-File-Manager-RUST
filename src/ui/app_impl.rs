@@ -32,15 +32,10 @@ impl eframe::App for ImageViewerApp {
                 }
             }
 
-            if let Some(ref file) = self.selected_file {
-                if !file.path.exists() {
-                    self.selected_file = None;
-                    self.selected_thumbnail = None;
-                    self.media_preview = None;
-                    self.media_preview_owner_tab_id = None;
-                    self.selected_metadata = None;
-                }
-            }
+            // NOTE: Removed path.exists() check here because it can BLOCK indefinitely
+            // on OneDrive cloud-only files, causing UI freeze. The file selection will
+            // be cleared naturally when the user navigates away or refreshes the folder.
+            // If we need this check, it should be done asynchronously in a worker thread.
         }
 
         // 2. Lifecycle: Startup sequence & window state tracking
