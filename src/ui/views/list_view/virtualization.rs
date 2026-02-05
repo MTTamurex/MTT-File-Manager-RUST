@@ -2,10 +2,10 @@
 
 use eframe::egui::{self, Color32, Rect, Sense, Ui};
 
-use crate::ui::views::ViewportTracker;
-use super::{ColumnWidths, ListViewContext, ListViewOperations};
 use super::helpers::render_section_header;
 use super::item_renderer::render_list_item;
+use super::{ColumnWidths, ListViewContext, ListViewOperations};
+use crate::ui::views::ViewportTracker;
 
 /// Result of user interactions during rendering
 pub(super) struct InteractionResult {
@@ -84,23 +84,46 @@ pub(super) fn render_virtualized_content(
 
     if ctx.is_computer_view {
         render_computer_view_grouped(
-            &mut child_ui, ctx, ops, content_min, current_scroll,
-            available_w, row_height, col_widths,
-            &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item,
+            &mut child_ui,
+            ctx,
+            ops,
+            content_min,
+            current_scroll,
+            available_w,
+            row_height,
+            col_widths,
+            &mut clicked_item,
+            &mut double_clicked_item,
+            &mut secondary_clicked_item,
         );
     } else {
         render_regular_virtualized(
-            &mut child_ui, ctx, ops, content_min, current_scroll,
-            viewport_h, total_rows, available_w, row_height, col_widths,
-            &mut clicked_item, &mut double_clicked_item, &mut secondary_clicked_item,
+            &mut child_ui,
+            ctx,
+            ops,
+            content_min,
+            current_scroll,
+            viewport_h,
+            total_rows,
+            available_w,
+            row_height,
+            col_widths,
+            &mut clicked_item,
+            &mut double_clicked_item,
+            &mut secondary_clicked_item,
         );
     }
 
     // 4. Custom Scrollbar with Track-Click
     if total_content_height > viewport_h {
         render_scrollbar(
-            ui, viewport_rect, viewport_h, total_content_height,
-            max_scroll, current_scroll, ctx,
+            ui,
+            viewport_rect,
+            viewport_h,
+            total_content_height,
+            max_scroll,
+            current_scroll,
+            ctx,
         );
     }
     // --- MANUAL VIRTUALIZATION END ---
@@ -140,9 +163,10 @@ fn render_computer_view_grouped(
     let mut network = Vec::new();
 
     for (i, item) in ctx.items.iter().enumerate() {
-        let is_remote = item.drive_info.as_ref().is_some_and(|di| {
-            di.drive_type == crate::infrastructure::windows::DriveType::Remote
-        });
+        let is_remote = item
+            .drive_info
+            .as_ref()
+            .is_some_and(|di| di.drive_type == crate::infrastructure::windows::DriveType::Remote);
         if is_remote {
             network.push((i, item));
         } else {
@@ -159,8 +183,7 @@ fn render_computer_view_grouped(
             egui::vec2(available_w, header_h),
         );
         if child_ui.is_rect_visible(header_rect) {
-            let mut header_ui =
-                child_ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
+            let mut header_ui = child_ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
             render_section_header(&mut header_ui, "Discos locais");
         }
         current_y += header_h;
@@ -172,9 +195,17 @@ fn render_computer_view_grouped(
             );
             if child_ui.is_rect_visible(item_rect) {
                 render_list_item(
-                    child_ui, i, item, item_rect, ctx, ops,
-                    clicked_item, double_clicked_item, secondary_clicked_item,
-                    col_widths, row_height,
+                    child_ui,
+                    i,
+                    item,
+                    item_rect,
+                    ctx,
+                    ops,
+                    clicked_item,
+                    double_clicked_item,
+                    secondary_clicked_item,
+                    col_widths,
+                    row_height,
                 );
             }
             current_y += row_height;
@@ -189,8 +220,7 @@ fn render_computer_view_grouped(
             egui::vec2(available_w, header_h),
         );
         if child_ui.is_rect_visible(header_rect) {
-            let mut header_ui =
-                child_ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
+            let mut header_ui = child_ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
             render_section_header(&mut header_ui, "Unidades de rede");
         }
         current_y += header_h;
@@ -202,9 +232,17 @@ fn render_computer_view_grouped(
             );
             if child_ui.is_rect_visible(item_rect) {
                 render_list_item(
-                    child_ui, i, item, item_rect, ctx, ops,
-                    clicked_item, double_clicked_item, secondary_clicked_item,
-                    col_widths, row_height,
+                    child_ui,
+                    i,
+                    item,
+                    item_rect,
+                    ctx,
+                    ops,
+                    clicked_item,
+                    double_clicked_item,
+                    secondary_clicked_item,
+                    col_widths,
+                    row_height,
                 );
             }
             current_y += row_height;
@@ -245,7 +283,8 @@ fn render_regular_virtualized(
         vis_min_row
     };
     let effective_max_row = if is_scrolling {
-        (vis_max_row.saturating_sub(overscan.saturating_sub(SCROLL_RENDER_OVERSCAN))).min(total_rows)
+        (vis_max_row.saturating_sub(overscan.saturating_sub(SCROLL_RENDER_OVERSCAN)))
+            .min(total_rows)
     } else {
         vis_max_row
     };
@@ -261,9 +300,17 @@ fn render_regular_virtualized(
         );
 
         render_list_item(
-            child_ui, i, item, item_rect, ctx, ops,
-            clicked_item, double_clicked_item, secondary_clicked_item,
-            col_widths, row_height,
+            child_ui,
+            i,
+            item,
+            item_rect,
+            ctx,
+            ops,
+            clicked_item,
+            double_clicked_item,
+            secondary_clicked_item,
+            col_widths,
+            row_height,
         );
     }
 }
@@ -372,13 +419,19 @@ fn handle_prefetch(
             continue;
         }
         let item = &ctx.items[index];
-        if !item.is_dir {
+        // FIX: Only prefetch thumbnails for media files (prevents .exe/.dll extraction)
+        if !item.is_dir && item.is_media() {
             if !ctx.texture_cache.contains(&item.path)
                 && !ctx.loading_set.contains(&item.path)
                 && !ctx.pending_upload_set.contains(&item.path)
             {
                 ctx.loading_set.insert(item.path.clone());
-                ops.request_thumbnail_prefetch_with_index(item.path.clone(), 64, index, item.modified);
+                ops.request_thumbnail_prefetch_with_index(
+                    item.path.clone(),
+                    64,
+                    index,
+                    item.modified,
+                );
             }
         }
     }
