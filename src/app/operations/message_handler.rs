@@ -724,6 +724,14 @@ impl ImageViewerApp {
 
         // 1. STREAMING: Recebe lotes incrementais de FileEntry (Filtrado por geração)
         // BLOCKING: Process all available file entries in batch
+
+        // SAFETY TIMEOUT: Clear is_loading_folder if stuck for more than 30 seconds
+        // This prevents infinite spinner if the loading thread fails silently
+        if self.is_loading_folder && self.loading_started_at.elapsed().as_secs() > 30 {
+            eprintln!("[FOLDER-LOADING] TIMEOUT: Loading took more than 30 seconds, clearing loading state");
+            self.is_loading_folder = false;
+        }
+
         let mut saw_end_of_load = false;
         loop {
             match self.file_entry_receiver.try_recv() {

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use std::os::windows::ffi::OsStringExt;
-use std::os::windows::fs::MetadataExt;
+
 use windows::core::PCWSTR;
 use windows::Win32::Storage::FileSystem::*;
 
@@ -213,6 +213,7 @@ impl ImageViewerApp {
         self.scanned_folders.clear();
         self.selected_item = None;
         self.is_loading_folder = true;
+        self.loading_started_at = Instant::now(); // Track loading start for timeout
         self.total_items = 0;
         self.pending_items_rebuild = false;
         self.pending_items_count = 0;
@@ -266,27 +267,20 @@ impl ImageViewerApp {
                     eprintln!("[FOLDER-LOADING] Phase 1: Cache hit for {:?} - {} entries, sending to UI immediately",
                         base_path_buf, cached_entries.len());
 
-                    // BUG FIX: When in OneDrive folder, recalculate sync_status from cached attributes
-                    // The cache may have been populated when is_onedrive_base was false, resulting
-                    // in sync_status = None for all items. We need to recalculate based on current
-                    // is_onedrive_base value and the cached file attributes.
+                    // BUG FIX: When in OneDrive folder, set sync_status for cached entries
+                    // PERFORMANCE: We avoid std::fs::metadata() here because it can BLOCK
+                    // indefinitely on cloud-only OneDrive files, causing UI freeze.
+                    // Instead, we assume LocallyAvailable for cached entries (they were readable
+                    // when cached) and let the fresh disk scan get accurate status.
                     let entries_to_send = if is_onedrive_base {
                         cached_entries
                             .iter()
                             .map(|entry| {
-                                // Recalculate sync_status for OneDrive items
-                                // If sync_status is None but we're in OneDrive, try to get actual status
                                 let mut updated_entry = entry.clone();
                                 if entry.sync_status == SyncStatus::None {
-                                    // Try to get actual attributes from disk for accurate status
-                                    if let Ok(metadata) = std::fs::metadata(&entry.path) {
-                                        let attrs = metadata.file_attributes();
-                                        updated_entry.sync_status =
-                                            onedrive::get_sync_status(attrs, true);
-                                    } else {
-                                        // Fallback: assume locally available
-                                        updated_entry.sync_status = SyncStatus::LocallyAvailable;
-                                    }
+                                    // Assume locally available for cached entries
+                                    // Fresh disk scan will get accurate status
+                                    updated_entry.sync_status = SyncStatus::LocallyAvailable;
                                 }
                                 updated_entry
                             })
@@ -448,20 +442,14 @@ impl ImageViewerApp {
                         }
                     }
 
-                    // BUG FIX: When in OneDrive folder, recalculate sync_status from cached entries
-                    // The cache may have been populated when is_onedrive_base was false, resulting
-                    // in sync_status = None for all items.
+                    // BUG FIX: When in OneDrive folder, set sync_status for cached entries
+                    // PERFORMANCE: Avoid std::fs::metadata() - it can BLOCK indefinitely
+                    // on cloud-only OneDrive files, causing UI freeze.
                     if is_onedrive_base {
                         for entry in cached_entries.iter_mut() {
                             if entry.sync_status == SyncStatus::None {
-                                // Try to get actual attributes from disk for accurate status
-                                if let Ok(metadata) = std::fs::metadata(&entry.path) {
-                                    let attrs = metadata.file_attributes();
-                                    entry.sync_status = onedrive::get_sync_status(attrs, true);
-                                } else {
-                                    // Fallback: assume locally available
-                                    entry.sync_status = SyncStatus::LocallyAvailable;
-                                }
+                                // Assume locally available for cached entries
+                                entry.sync_status = SyncStatus::LocallyAvailable;
                                 changed = true;
                             }
                         }

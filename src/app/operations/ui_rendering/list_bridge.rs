@@ -206,10 +206,12 @@ impl ImageViewerApp {
         let computer_icon = self.cache_manager.computer_icon.clone();
 
         // Check if current path is in OneDrive
+        // PERFORMANCE: Only use is_onedrive_path() which is string-based (no I/O)
+        // path_has_cloud_attributes() was removed because GetFileAttributesW can BLOCK
+        // indefinitely on cloud-only OneDrive files, causing UI freeze and crash
         let is_onedrive_folder = {
             let p = PathBuf::from(&self.current_path);
             crate::infrastructure::onedrive::is_onedrive_path(&p)
-                || crate::infrastructure::onedrive::path_has_cloud_attributes(&p)
         };
 
         // Create context with separate mutable references
