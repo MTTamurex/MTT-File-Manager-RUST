@@ -2,13 +2,17 @@
 //!
 //! This module handles syncing state between the active tab and the main application state.
 
-use std::path::Path;
 use crate::app::state::ImageViewerApp;
+use std::path::Path;
 
 impl ImageViewerApp {
     pub fn sync_to_tab(&mut self) {
-        eprintln!("[TAB-SYNC] sync_to_tab: saving app.view_mode={:?} to tab[{}] (id={})",
-            self.view_mode, self.tab_manager.active_tab, self.tab_manager.active().id);
+        eprintln!(
+            "[TAB-SYNC] sync_to_tab: saving app.view_mode={:?} to tab[{}] (id={})",
+            self.view_mode,
+            self.tab_manager.active_tab,
+            self.tab_manager.active().id
+        );
         let active = self.tab_manager.active_mut();
         active.path = self.current_path.clone();
         active.path_input = self.path_input.clone();
@@ -62,6 +66,26 @@ impl ImageViewerApp {
             self.all_items = std::mem::take(&mut active.all_items);
             self.selected_item = active.selected_item;
             self.selected_file = active.selected_file.clone();
+
+            // FIX: Validate that selected_file still exists in items
+            // If the file was moved/deleted while on another tab, clear selection
+            // so preview panel shows current folder info instead of stale data.
+            // This is a pure in-memory check (no filesystem I/O).
+            if let Some(ref selected) = self.selected_file {
+                let still_exists = self.items.iter().any(|item| item.path == selected.path);
+                if !still_exists {
+                    self.selected_file = None;
+                    self.selected_item = None;
+                    self.selected_thumbnail = None;
+                    self.selected_metadata = None;
+                    // Also clear from tab so it doesn't come back on next sync
+                    active.selected_file = None;
+                    active.selected_item = None;
+                    active.selected_thumbnail = None;
+                    active.selected_metadata = None;
+                }
+            }
+
             self.selected_thumbnail = active.selected_thumbnail.clone();
             self.selected_gif = active.selected_gif.clone();
             self.selected_metadata = active.selected_metadata.clone();
@@ -77,20 +101,22 @@ impl ImageViewerApp {
         }
 
         self.watch_current_folder();
-        
+
         // If items were cleared (by MoveCompleted event) and this is a regular folder view,
         // trigger a reload to fetch fresh content
-        let needs_reload = self.items.is_empty() 
-            && !self.is_computer_view 
+        let needs_reload = self.items.is_empty()
+            && !self.is_computer_view
             && !self.is_recycle_bin_view
             && !self.current_path.is_empty();
-        
+
         if needs_reload {
-            eprintln!("[TAB] Detected cleared items cache, reloading folder: {}", self.current_path);
+            eprintln!(
+                "[TAB] Detected cleared items cache, reloading folder: {}",
+                self.current_path
+            );
             // Reset loaded_path to bypass the guard in load_folder
             self.loaded_path.clear();
             self.load_folder(false);
         }
     }
-
 }
