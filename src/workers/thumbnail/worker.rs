@@ -178,11 +178,95 @@ fn process_thumbnail_request(
         return;
     }
 
+    // PERFORMANCE FIX: Check SQLite disk cache BEFORE any source file I/O.
+    // Previously, the worker called onedrive_exists() and onedrive_metadata()
+    // on the source file BEFORE checking the DB — causing unnecessary disk I/O
+    // on USB HDDs even when all thumbnails were already cached in SQLite on NVMe.
+    //
+    // When req_modified > 0 (common case — provided by FileEntry from directory
+    // enumeration), we can check the DB immediately without touching the source drive.
+    let mut final_result = None;
+
+    if req_modified > 0 {
+        let modified = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(req_modified);
+        if let Some((cached_bytes, cached_w, cached_h)) = disk_cache.get(path, modified) {
+            let cached_max_dim = cached_w.max(cached_h);
+            if cached_max_dim >= req_size && cached_max_dim > 0 {
+                // Cache hit — serve from SQLite DB, ZERO I/O on source drive
+                if let Ok(img) = image::load_from_memory_with_format(
+                    &cached_bytes,
+                    ImageFormat::WebP,
+                ) {
+                    let rgba = img.to_rgba8();
+                    final_result = Some((rgba.to_vec(), rgba.width(), rgba.height()));
+                }
+            }
+        }
+
+        // If DB cache hit, send result and return — no source drive I/O needed
+        if final_result.is_some() {
+            let (data, w, h) = final_result.unwrap();
+            let _ = tx.send(ThumbnailData {
+                path: path.clone(),
+                image_data: data,
+                width: w,
+                height: h,
+                generation: req_gen,
+                not_found: false,
+            });
+            throttle_repaint_with_priority(ctx, last_repaint, req_priority);
+            return;
+        }
+    }
+
+    // --- CACHE MISS PATH: Now we need to access the source file ---
+
     // EARLY EXIT 2: Skip files that no longer exist (e.g., stale folder covers)
-    // CRITICAL: Use timeout-protected exists() to prevent blocking on OneDrive
-    match onedrive::onedrive_exists(path) {
-        IoTimeoutResult::Ok(false) => {
-            // File definitely doesn't exist
+    // CRITICAL: Use fast_path_exists for non-OneDrive (GetFileAttributesW, no file handle),
+    // timeout-protected exists for OneDrive paths.
+    if onedrive::is_onedrive_path(path) {
+        match onedrive::onedrive_exists(path) {
+            IoTimeoutResult::Ok(false) => {
+                mark_as_failed(path.clone());
+                let _ = tx.send(ThumbnailData {
+                    path: path.clone(),
+                    image_data: Vec::new(),
+                    width: 0,
+                    height: 0,
+                    generation: req_gen,
+                    not_found: true,
+                });
+                throttle_repaint_with_priority(ctx, last_repaint, req_priority);
+                return;
+            }
+            IoTimeoutResult::Timeout => {
+                eprintln!("[THUMB WORKER] exists() timeout for {:?}", path);
+            }
+            IoTimeoutResult::Ok(true) => {}
+            IoTimeoutResult::Err(_) => {
+                mark_as_failed(path.clone());
+                throttle_repaint_with_priority(ctx, last_repaint, req_priority);
+                return;
+            }
+        }
+
+        // EARLY EXIT 3: Skip cloud-only OneDrive files (not downloaded)
+        if !onedrive::is_locally_available_safe(path) {
+            mark_as_failed(path.clone());
+            let _ = tx.send(ThumbnailData {
+                path: path.clone(),
+                image_data: Vec::new(),
+                width: 0,
+                height: 0,
+                generation: req_gen,
+                not_found: false,
+            });
+            throttle_repaint_with_priority(ctx, last_repaint, req_priority);
+            return;
+        }
+    } else {
+        // Non-OneDrive: Use fast_path_exists (GetFileAttributesW — no file handle, no download)
+        if !onedrive::fast_path_exists(path) {
             mark_as_failed(path.clone());
             let _ = tx.send(ThumbnailData {
                 path: path.clone(),
@@ -195,36 +279,6 @@ fn process_thumbnail_request(
             throttle_repaint_with_priority(ctx, last_repaint, req_priority);
             return;
         }
-        IoTimeoutResult::Timeout => {
-            // Timeout - assume file exists but might be cloud-only
-            // Let EARLY EXIT 3 handle the cloud-only check
-            eprintln!("[THUMB WORKER] exists() timeout for {:?}", path);
-        }
-        IoTimeoutResult::Ok(true) => {
-            // File exists, continue processing
-        }
-        IoTimeoutResult::Err(_) => {
-            // Error checking existence - skip this file
-            mark_as_failed(path.clone());
-            throttle_repaint_with_priority(ctx, last_repaint, req_priority);
-            return;
-        }
-    }
-
-    // EARLY EXIT 3: Skip cloud-only OneDrive files (not downloaded)
-    // Use safe version with timeout to prevent race condition blocking
-    if onedrive::is_onedrive_path(path) && !onedrive::is_locally_available_safe(path) {
-        mark_as_failed(path.clone());
-        let _ = tx.send(ThumbnailData {
-            path: path.clone(),
-            image_data: Vec::new(),
-            width: 0,
-            height: 0,
-            generation: req_gen,
-            not_found: false,
-        });
-        throttle_repaint_with_priority(ctx, last_repaint, req_priority);
-        return;
     }
 
     // PERFORMANCE: Use modification time from folder enumeration when available.
@@ -239,7 +293,6 @@ fn process_thumbnail_request(
                 metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH)
             }
             IoTimeoutResult::Timeout => {
-                // Timeout - use epoch time (forces cache miss but prevents blocking)
                 eprintln!("[THUMB WORKER] metadata() timeout for {:?}", path);
                 SystemTime::UNIX_EPOCH
             }
@@ -247,25 +300,20 @@ fn process_thumbnail_request(
         }
     };
 
-    let mut final_result = None;
-
-    // STEP 0: Check Disk Cache with SIZE VALIDATION
-    if let Some((cached_bytes, cached_w, cached_h)) = disk_cache.get(path, modified) {
-        let cached_max_dim = cached_w.max(cached_h);
-
-        // Only use cache if it meets or exceeds the requested size
-        // OR if dimensions are unknown (0) from old cache entries - regenerate those
-        if cached_max_dim >= req_size && cached_max_dim > 0 {
-            // Cache is good enough (or better), use it
-            if let Ok(img) = image::load_from_memory_with_format(
-                &cached_bytes,
-                ImageFormat::WebP,
-            ) {
-                let rgba = img.to_rgba8();
-                final_result = Some((rgba.to_vec(), rgba.width(), rgba.height()));
+    // STEP 0: Check Disk Cache with SIZE VALIDATION (for req_modified == 0 fallback)
+    if final_result.is_none() {
+        if let Some((cached_bytes, cached_w, cached_h)) = disk_cache.get(path, modified) {
+            let cached_max_dim = cached_w.max(cached_h);
+            if cached_max_dim >= req_size && cached_max_dim > 0 {
+                if let Ok(img) = image::load_from_memory_with_format(
+                    &cached_bytes,
+                    ImageFormat::WebP,
+                ) {
+                    let rgba = img.to_rgba8();
+                    final_result = Some((rgba.to_vec(), rgba.width(), rgba.height()));
+                }
             }
         }
-        // If cached_max_dim < req_size or == 0, fall through to regeneration
     }
 
     // STEP 1: Se não está em cache, decodifica com limite de concorrência
