@@ -48,7 +48,20 @@ pub fn spawn_folder_preview_worker(
                 None => break,
             };
 
-            // Get folder preview from Windows Shell
+            // Skip cloud-only OneDrive folders — Shell API can block on network I/O
+            if crate::infrastructure::onedrive::is_onedrive_path(&path)
+                && !crate::infrastructure::onedrive::is_locally_available(&path)
+            {
+                let _ = tx.send(FolderPreviewData {
+                    path,
+                    rgba_data: Vec::new(),
+                    width: 0,
+                    height: 0,
+                });
+                throttle_repaint(&ctx, &mut last_repaint);
+                continue;
+            }
+
             // Get folder preview from Windows Shell
             match get_folder_preview(&path) {
                 Ok((rgba_data, width, height)) => {

@@ -4,8 +4,7 @@ use windows::core::PCWSTR;
 use windows::Win32::Foundation::RPC_E_CHANGED_MODE;
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 use windows::Win32::UI::Shell::PropertiesSystem::{
-    IPropertyStore, SHGetPropertyStoreFromParsingName, GETPROPERTYSTOREFLAGS, GPS_BESTEFFORT,
-    GPS_OPENSLOWITEM,
+    IPropertyStore, SHGetPropertyStoreFromParsingName, GPS_BESTEFFORT,
 };
 
 use super::property_keys::*;
@@ -48,10 +47,14 @@ pub unsafe fn open_property_store(path: &Path) -> Result<IPropertyStore, windows
         .collect();
 
     // SAFETY: wide_path is a null-terminated UTF-16 buffer that stays alive for the call.
+    // CRITICAL: Use GPS_BESTEFFORT only — NOT GPS_OPENSLOWITEM.
+    // GPS_OPENSLOWITEM tells Windows to WAIT for slow/network items (OneDrive cloud files),
+    // which can block the calling thread for 30-60+ seconds on cloud-only files.
+    // GPS_BESTEFFORT returns whatever metadata is locally cached without blocking.
     SHGetPropertyStoreFromParsingName(
         PCWSTR(wide_path.as_ptr()),
         None,
-        GETPROPERTYSTOREFLAGS(GPS_BESTEFFORT.0 | GPS_OPENSLOWITEM.0),
+        GPS_BESTEFFORT,
     )
 }
 

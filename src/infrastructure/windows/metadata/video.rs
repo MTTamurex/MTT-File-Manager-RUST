@@ -198,7 +198,13 @@ pub fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windo
     let bitrate = video_bitrate.or_else(|| {
         if let Some(duration) = duration_100ns {
             if duration > 0 {
-                if let Ok(metadata) = std::fs::metadata(path) {
+                // Use OneDrive-safe metadata to avoid blocking on cloud files
+                let file_meta = if crate::infrastructure::onedrive::is_onedrive_path(path) {
+                    crate::infrastructure::onedrive::onedrive_metadata(path).ok()
+                } else {
+                    std::fs::metadata(path).ok()
+                };
+                if let Some(metadata) = file_meta {
                     let size_bytes = metadata.len();
                     let duration_seconds = duration as f64 / 10_000_000.0;
                     let bitrate_bps = (size_bytes as f64 * 8.0) / duration_seconds;
@@ -255,8 +261,14 @@ pub fn merge_video_metadata(
     let bitrate = ps.bitrate.or(mf.video_bitrate).or_else(|| {
         if let Some(duration) = duration_100ns {
             if duration > 0 {
-                if let Ok(file_meta) = std::fs::metadata(path) {
-                    let size_bytes = file_meta.len();
+                // Use OneDrive-safe metadata to avoid blocking on cloud files
+                let file_meta = if crate::infrastructure::onedrive::is_onedrive_path(path) {
+                    crate::infrastructure::onedrive::onedrive_metadata(path).ok()
+                } else {
+                    std::fs::metadata(path).ok()
+                };
+                if let Some(meta) = file_meta {
+                    let size_bytes = meta.len();
                     let duration_seconds = duration as f64 / 10_000_000.0;
                     return Some((size_bytes as f64 * 8.0 / duration_seconds) as u32);
                 }
