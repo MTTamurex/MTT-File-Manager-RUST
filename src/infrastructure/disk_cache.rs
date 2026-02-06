@@ -369,7 +369,8 @@ impl ThumbnailDiskCache {
             .ok()?;
 
         // Validate that the cover path still exists before returning it
-        if cover_path.exists() {
+        // CRITICAL: Use fast_path_exists() instead of exists() to avoid blocking on OneDrive cloud-only files
+        if crate::infrastructure::onedrive::fast_path_exists(&cover_path) {
             Some(cover_path)
         } else {
             None

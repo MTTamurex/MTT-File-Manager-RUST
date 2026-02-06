@@ -50,10 +50,7 @@ fn get_perceived_type_fast(ext: &str) -> Option<PerceivedType> {
 
     match bytes.len() {
         2 => {
-            let b = [
-                bytes[0].to_ascii_lowercase(),
-                bytes[1].to_ascii_lowercase(),
-            ];
+            let b = [bytes[0].to_ascii_lowercase(), bytes[1].to_ascii_lowercase()];
             match &b {
                 b"ts" => Some(PerceivedType::Video),
                 _ => None,
@@ -67,13 +64,12 @@ fn get_perceived_type_fast(ext: &str) -> Option<PerceivedType> {
             ];
             match &b {
                 // Image
-                b"jpg" | b"png" | b"gif" | b"bmp" | b"svg" | b"ico" | b"tga" | b"psd"
-                | b"raw" => Some(PerceivedType::Image),
-                // Video
-                b"mp4" | b"mkv" | b"avi" | b"wmv" | b"mov" | b"flv" | b"ogv" | b"ogm"
-                | b"m4v" | b"3gp" | b"vob" | b"mts" | b"asf" | b"m2v" | b"mpg" => {
-                    Some(PerceivedType::Video)
+                b"jpg" | b"png" | b"gif" | b"bmp" | b"svg" | b"ico" | b"tga" | b"psd" | b"raw" => {
+                    Some(PerceivedType::Image)
                 }
+                // Video
+                b"mp4" | b"mkv" | b"avi" | b"wmv" | b"mov" | b"flv" | b"ogv" | b"ogm" | b"m4v"
+                | b"3gp" | b"vob" | b"mts" | b"asf" | b"m2v" | b"mpg" => Some(PerceivedType::Video),
                 // Audio
                 b"mp3" | b"wav" | b"ogg" | b"wma" | b"aac" | b"m4a" | b"ape" | b"mid" => {
                     Some(PerceivedType::Audio)
@@ -94,9 +90,7 @@ fn get_perceived_type_fast(ext: &str) -> Option<PerceivedType> {
                     Some(PerceivedType::Image)
                 }
                 // Video
-                b"webm" | b"mpeg" | b"m2ts" | b"divx" | b"rmvb" => {
-                    Some(PerceivedType::Video)
-                }
+                b"webm" | b"mpeg" | b"m2ts" | b"divx" | b"rmvb" => Some(PerceivedType::Video),
                 // Audio
                 b"flac" | b"alac" | b"opus" | b"aiff" | b"weba" => Some(PerceivedType::Audio),
                 _ => None,
@@ -142,7 +136,78 @@ pub fn get_perceived_type(extension: &str) -> PerceivedType {
     // Fallback for common video extensions if Windows query fails
     if perceived == PerceivedType::Other {
         let clean_ext = ext_with_dot.trim_start_matches('.');
-        if matches!(clean_ext, "mp4" | "mkv" | "avi" | "webm" | "mov" | "wmv" | "flv" | "ogm" | "ts" | "mts" | "m2ts" | "vob" | "3gp" | "vtt" | "m4v" | "m4a" | "m4b" | "m4p" | "m4r" | "3g2" | "3gp2" | "3gpp" | "amv" | "asf" | "avs" | "bik" | "divx" | "drc" | "dvr-ms" | "f4v" | "gvi" | "gxf" | "ismv" | "ivf" | "k3g" | "m2v" | "m4u" | "mj2" | "mjp2" | "mod" | "mp2v" | "mp4v" | "mpa" | "mpe" | "mpeg" | "mpg" | "mpv2" | "mqv" | "nsv" | "nuv" | "ogv" | "pva" | "qt" | "rec" | "rm" | "rmvb" | "rpl" | "thp" | "tod" | "trp" | "ty" | "vid" | "vro" | "weba" | "wm" | "wmp" | "wvx" | "xesc" | "y4m") {
+        if matches!(
+            clean_ext,
+            "mp4"
+                | "mkv"
+                | "avi"
+                | "webm"
+                | "mov"
+                | "wmv"
+                | "flv"
+                | "ogm"
+                | "ts"
+                | "mts"
+                | "m2ts"
+                | "vob"
+                | "3gp"
+                | "vtt"
+                | "m4v"
+                | "m4a"
+                | "m4b"
+                | "m4p"
+                | "m4r"
+                | "3g2"
+                | "3gp2"
+                | "3gpp"
+                | "amv"
+                | "asf"
+                | "avs"
+                | "bik"
+                | "divx"
+                | "drc"
+                | "dvr-ms"
+                | "f4v"
+                | "gvi"
+                | "gxf"
+                | "ismv"
+                | "ivf"
+                | "k3g"
+                | "m2v"
+                | "m4u"
+                | "mj2"
+                | "mjp2"
+                | "mod"
+                | "mp2v"
+                | "mp4v"
+                | "mpa"
+                | "mpe"
+                | "mpeg"
+                | "mpg"
+                | "mpv2"
+                | "mqv"
+                | "nsv"
+                | "nuv"
+                | "ogv"
+                | "pva"
+                | "qt"
+                | "rec"
+                | "rm"
+                | "rmvb"
+                | "rpl"
+                | "thp"
+                | "tod"
+                | "trp"
+                | "ty"
+                | "vid"
+                | "vro"
+                | "weba"
+                | "wm"
+                | "wmp"
+                | "wvx"
+                | "xesc"
+                | "y4m"
+        ) {
             perceived = PerceivedType::Video;
         }
     }
@@ -213,10 +278,43 @@ pub fn is_image_extension(extension: &str) -> bool {
     get_perceived_type(extension) == PerceivedType::Image
 }
 
-
 /// Busca primeiro item de mídia (imagem ou vídeo) em uma pasta para usar como preview
 /// Verifica apenas os primeiros 15 arquivos para performance
+/// CRITICAL: Uses timeout-protected enumeration for OneDrive to prevent indefinite blocking
 pub fn find_folder_preview_item(folder_path: &Path) -> Option<PathBuf> {
+    use crate::infrastructure::onedrive::{
+        is_onedrive_path, onedrive_read_directory, IoTimeoutResult,
+    };
+
+    // For OneDrive paths, use timeout-protected enumeration
+    // fs::read_dir() can block for 30-60s on cloud-only folders
+    if is_onedrive_path(folder_path) {
+        match onedrive_read_directory(folder_path) {
+            IoTimeoutResult::Ok(entries) => {
+                for (filename, attrs, _, _) in entries.into_iter().take(15) {
+                    // Check if it's a file (not directory) using attributes
+                    let is_dir = (attrs & 0x10) != 0; // FILE_ATTRIBUTE_DIRECTORY
+                    if !is_dir {
+                        let path = folder_path.join(&filename);
+                        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                            let ptype = get_perceived_type(ext);
+                            if ptype == PerceivedType::Image || ptype == PerceivedType::Video {
+                                return Some(path);
+                            }
+                        }
+                    }
+                }
+                return None;
+            }
+            IoTimeoutResult::Timeout => {
+                eprintln!("[COVER] OneDrive folder scan timed out: {:?}", folder_path);
+                return None;
+            }
+            IoTimeoutResult::Err(_) => return None,
+        }
+    }
+
+    // Standard path (non-OneDrive) - use regular fs::read_dir
     if let Ok(entries) = fs::read_dir(folder_path) {
         for entry in entries.flatten().take(15) {
             let path = entry.path();
@@ -253,5 +351,4 @@ mod tests {
         assert_eq!(get_perceived_type("jpg"), PerceivedType::Image);
         assert_eq!(get_perceived_type("png"), PerceivedType::Image);
     }
-
 }
