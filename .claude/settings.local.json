@@ -17,7 +17,8 @@
       "Bash(git ls-tree:*)",
       "Bash(cargo clippy:*)",
       "Bash(findstr:*)",
-      "Bash(Select-String \"error\")"
+      "Bash(Select-String \"error\")",
+      "Bash(ls:*)"
     ],
     "additionalDirectories": [
       "c:\\Users\\mtamu\\github\\MTT-File-Manager-RUST\\docs"
