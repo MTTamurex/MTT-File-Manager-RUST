@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 pub mod property_keys;
 pub mod utils;
@@ -13,6 +14,10 @@ pub use video_sniffing::sniff_video_codec;
 pub use audio_sniffing::{sniff_audio_codec, AudioCodec};
 
 use crate::infrastructure::onedrive;
+
+/// Maximum time allowed for the entire metadata extraction pipeline per file.
+/// Catches any remaining blocking in Property Store, Media Foundation, codec sniffing, etc.
+const METADATA_EXTRACTION_TIMEOUT_MS: u64 = 3000;
 
 /// Generic media metadata used by the preview panel.
 #[derive(Clone, Debug, Default)]
@@ -54,7 +59,8 @@ pub struct MediaMetadata {
 /// Returns an empty struct when the file type is unsupported or metadata cannot be read.
 ///
 /// PERFORMANCE CRITICAL: For OneDrive files, checks local availability before reading
-/// to prevent blocking on cloud-only files.
+/// to prevent blocking on cloud-only files. Additionally wraps the entire extraction
+/// in a timeout to catch any remaining blocking in COM/MF/sniffing calls.
 pub fn extract_media_metadata(path: &Path) -> MediaMetadata {
     // CRITICAL FIX: Skip metadata extraction for cloud-only OneDrive files
     // Reading metadata requires file I/O which can block indefinitely on cloud-only files
@@ -69,13 +75,56 @@ pub fn extract_media_metadata(path: &Path) -> MediaMetadata {
         .map(|s| s.to_lowercase())
         .unwrap_or_default();
 
-    if image::is_image_extension(&ext) {
-        return read_image_metadata(path).unwrap_or_default();
+    let is_image = image::is_image_extension(&ext);
+    let is_video = video::is_video_extension(&ext);
+
+    if !is_image && !is_video {
+        return MediaMetadata::default();
     }
 
-    if video::is_video_extension(&ext) {
-        return read_video_metadata(path).unwrap_or_default();
+    // For OneDrive paths, wrap the entire extraction in a timeout.
+    // Even "locally available" files can block on Property Store COM calls,
+    // Media Foundation source reader, or codec sniffing I/O.
+    if onedrive::is_onedrive_path(path) {
+        return extract_media_metadata_with_timeout(path, is_image);
     }
 
-    MediaMetadata::default()
+    // Non-OneDrive: extract directly (no timeout overhead)
+    extract_media_metadata_inner(path, is_image)
+}
+
+/// Inner extraction logic (no timeout wrapper).
+fn extract_media_metadata_inner(path: &Path, is_image: bool) -> MediaMetadata {
+    if is_image {
+        read_image_metadata(path).unwrap_or_default()
+    } else {
+        read_video_metadata(path).unwrap_or_default()
+    }
+}
+
+/// Timeout-protected metadata extraction for OneDrive files.
+/// Spawns extraction on a separate thread and polls with timeout.
+fn extract_media_metadata_with_timeout(path: &Path, is_image: bool) -> MediaMetadata {
+    let path_buf = path.to_path_buf();
+    let path_for_log = path_buf.clone();
+    let timeout = Duration::from_millis(METADATA_EXTRACTION_TIMEOUT_MS);
+    let start = Instant::now();
+
+    let handle = std::thread::spawn(move || extract_media_metadata_inner(&path_buf, is_image));
+
+    loop {
+        if start.elapsed() >= timeout {
+            eprintln!(
+                "[METADATA TIMEOUT] Extraction exceeded {}ms for {:?} — returning empty",
+                METADATA_EXTRACTION_TIMEOUT_MS, path_for_log
+            );
+            return MediaMetadata::default();
+        }
+
+        if handle.is_finished() {
+            return handle.join().unwrap_or_default();
+        }
+
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }

@@ -45,6 +45,12 @@ pub enum DetectionConfidence {
 /// Deterministic video codec sniffer (Final Fallback)
 /// Reads up to 256KB to identify codec via container or bitstream headers.
 pub fn sniff_video_codec(path: &Path) -> Option<CodecGuess> {
+    // Skip cloud-only OneDrive files — File::open can trigger download and block
+    if crate::infrastructure::onedrive::is_onedrive_path(path)
+        && !crate::infrastructure::onedrive::is_locally_available(path)
+    {
+        return None;
+    }
     let mut file = File::open(path).ok()?;
     let mut buffer = vec![0u8; 256 * 1024]; // 256 KB
     let bytes_read = file.read(&mut buffer).ok()?;
