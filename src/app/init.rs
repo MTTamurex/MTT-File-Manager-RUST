@@ -39,24 +39,17 @@ fn determine_initial_path(disk_cache: &ThumbnailDiskCache) -> (String, bool) {
             // Check if path still exists and is accessible
             let path_buf = PathBuf::from(&last_folder);
 
-            // Validate path exists
-            if path_buf.exists() {
-                // Additional check: verify we can read the directory
-                match std::fs::read_dir(&path_buf) {
-                    Ok(_) => {
-                        eprintln!("[INIT] Restoring last folder: {}", last_folder);
-                        return (last_folder, false);
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "[INIT] Last folder exists but not accessible ({}), using Este Computador",
-                            e
-                        );
-                    }
-                }
+            // CRITICAL FIX: Use fast_path_exists() + fast_is_dir() instead of
+            // path.exists() + std::fs::read_dir(). The original calls use CreateFileW
+            // and FindFirstFileW which can block for 30-60s on OneDrive cloud-only
+            // folders, freezing the app at startup.
+            // GetFileAttributesW reads cached attributes — no network I/O.
+            if onedrive::fast_path_exists(&path_buf) && onedrive::fast_is_dir(&path_buf) {
+                eprintln!("[INIT] Restoring last folder: {}", last_folder);
+                return (last_folder, false);
             } else {
                 eprintln!(
-                    "[INIT] Last folder no longer exists: {}, using Este Computador",
+                    "[INIT] Last folder no longer exists or not accessible: {}, using Este Computador",
                     last_folder
                 );
             }
@@ -619,6 +612,7 @@ impl ImageViewerApp {
             saved_window_width,
             saved_window_height,
             saved_is_maximized,
+            saved_is_minimized: false,
 
             // Sidebar widths persistence
             sidebar_left_width,

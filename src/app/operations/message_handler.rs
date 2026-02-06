@@ -50,7 +50,9 @@ impl ImageViewerApp {
                     for (new_path, _label) in &self.disks {
                         if !old_disks.iter().any(|(old_path, _)| old_path == new_path) {
                             // VERIFICAÇÃO: O drive realmente está pronto/acessível?
-                            if std::path::Path::new(new_path).exists() {
+                            // CRITICAL FIX: Use fast_path_exists() instead of path.exists()
+                            // to avoid blocking the UI thread on cloud/network drives.
+                            if crate::infrastructure::onedrive::fast_path_exists(std::path::Path::new(new_path)) {
                                 target_drive = Some(new_path.clone());
                                 break;
                             }

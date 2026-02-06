@@ -8,12 +8,46 @@
 
 use std::path::Path;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::domain::file_entry::SyncStatus;
 
+// Maximum number of concurrent timeout threads (prevents thread exhaustion)
+const MAX_CONCURRENT_TIMEOUT_THREADS: u64 = 4;
+
+// Counter of active timeout threads for monitoring and limiting
+static ACTIVE_TIMEOUT_THREADS: AtomicU64 = AtomicU64::new(0);
+
+// Global flag indicating if app is minimized (for operation cancellation)
+static APP_MINIMIZED: AtomicBool = AtomicBool::new(false);
+
+// Timeout configurations
+const ONEDRIVE_METADATA_TIMEOUT_MINIMIZED_MS: u64 = 50;
+
 // Cached OneDrive root paths (initialized once at startup)
 static ONEDRIVE_ROOTS: OnceLock<Vec<String>> = OnceLock::new();
+
+/// Set the minimized state of the application.
+/// When minimized, timeout operations are cancelled more aggressively.
+pub fn set_app_minimized(minimized: bool) {
+    APP_MINIMIZED.store(minimized, Ordering::SeqCst);
+    eprintln!("[ONEDRIVE LIFECYCLE] App minimized state changed: {}", minimized);
+    if minimized {
+        eprintln!("[ONEDRIVE LIFECYCLE] Active timeout threads at minimize: {}",
+                  ACTIVE_TIMEOUT_THREADS.load(Ordering::SeqCst));
+    }
+}
+
+/// Check if the application is currently minimized
+pub fn is_app_minimized() -> bool {
+    APP_MINIMIZED.load(Ordering::SeqCst)
+}
+
+/// Get the current count of active timeout threads (for monitoring)
+pub fn get_active_timeout_threads() -> u64 {
+    ACTIVE_TIMEOUT_THREADS.load(Ordering::SeqCst)
+}
 
 // NOTE: Cloud attribute detection is NOT cached per drive letter.
 // Different paths on the same drive can have different cloud attributes
@@ -78,6 +112,47 @@ pub fn is_onedrive_path(path: &Path) -> bool {
 /// different cloud attributes (e.g., C:\Users\Docs vs C:\Users\OneDrive).
 pub fn path_has_cloud_attributes(path: &Path) -> bool {
     check_cloud_attributes_uncached(path)
+}
+
+/// Fast file/directory existence check using GetFileAttributesW.
+///
+/// CRITICAL: Unlike `path.exists()` which uses `CreateFileW` + `GetFileInformationByHandle`
+/// (can trigger OneDrive file recall/download, blocking for 30-60s on cloud-only files),
+/// `GetFileAttributesW` reads from the local cached attributes maintained by the
+/// cloud filter driver — no network I/O, no file recall, returns in microseconds.
+///
+/// Use this instead of `path.exists()` anywhere on the UI thread or hot paths.
+pub fn fast_path_exists(path: &Path) -> bool {
+    use windows::Win32::Storage::FileSystem::{GetFileAttributesW, INVALID_FILE_ATTRIBUTES};
+
+    let path_wide: Vec<u16> = path
+        .to_string_lossy()
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let attrs = unsafe { GetFileAttributesW(windows::core::PCWSTR(path_wide.as_ptr())) };
+    attrs != INVALID_FILE_ATTRIBUTES
+}
+
+/// Fast directory check using GetFileAttributesW.
+///
+/// Returns true if the path exists AND is a directory.
+/// Same performance characteristics as `fast_path_exists` — no OneDrive file recall.
+pub fn fast_is_dir(path: &Path) -> bool {
+    use windows::Win32::Storage::FileSystem::{GetFileAttributesW, INVALID_FILE_ATTRIBUTES};
+
+    let path_wide: Vec<u16> = path
+        .to_string_lossy()
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let attrs = unsafe { GetFileAttributesW(windows::core::PCWSTR(path_wide.as_ptr())) };
+    if attrs == INVALID_FILE_ATTRIBUTES {
+        return false;
+    }
+    (attrs & 0x10) != 0 // FILE_ATTRIBUTE_DIRECTORY
 }
 
 /// Uncached cloud attribute check via Win32 API
@@ -235,39 +310,78 @@ pub fn metadata_with_timeout(
         }
     }
 
+    // Check if app is minimized - return timeout immediately to avoid spawning threads
+    if is_app_minimized() {
+        eprintln!("[ONEDRIVE] App minimized - skipping metadata for {:?}", path);
+        return IoTimeoutResult::Timeout;
+    }
+
+    // Check concurrent thread limit BEFORE spawning
+    let current_threads = ACTIVE_TIMEOUT_THREADS.load(Ordering::SeqCst);
+    if current_threads >= MAX_CONCURRENT_TIMEOUT_THREADS {
+        eprintln!(
+            "[ONEDRIVE] Thread limit reached ({}/{}), rejecting metadata() for {:?}",
+            current_threads, MAX_CONCURRENT_TIMEOUT_THREADS, path
+        );
+        return IoTimeoutResult::Timeout;
+    }
+
+    // Adjust timeout if minimized (use shorter timeout)
+    let effective_timeout = if is_app_minimized() {
+        ONEDRIVE_METADATA_TIMEOUT_MINIMIZED_MS
+    } else {
+        timeout_ms
+    };
+
+    // Increment active thread counter
+    let active_before = ACTIVE_TIMEOUT_THREADS.fetch_add(1, Ordering::SeqCst);
+    eprintln!("[ONEDRIVE] Active timeout threads: {} -> {}", active_before, active_before + 1);
+
     // OneDrive path: use timeout protection
     let path_buf = path.to_path_buf();
     let path_for_log = path_buf.clone();
-    let timeout = Duration::from_millis(timeout_ms);
+    let timeout = Duration::from_millis(effective_timeout);
     let start = Instant::now();
 
     // Spawn a thread to do the blocking I/O
     let handle = std::thread::spawn(move || std::fs::metadata(&path_buf));
 
     // Poll with timeout
-    loop {
+    let result = loop {
+        // Check if app was minimized during operation
+        if is_app_minimized() {
+            eprintln!("[ONEDRIVE] App minimized during operation - aborting metadata for {:?}", path_for_log);
+            break IoTimeoutResult::Timeout;
+        }
+
         if start.elapsed() >= timeout {
             // Timeout reached - detach thread (it will eventually complete or fail)
             eprintln!(
                 "[ONEDRIVE TIMEOUT] metadata() exceeded {}ms for {:?}",
-                timeout_ms,
+                effective_timeout,
                 path_for_log
             );
-            return IoTimeoutResult::Timeout;
+            break IoTimeoutResult::Timeout;
         }
 
         // Check if thread is done (non-blocking)
         if handle.is_finished() {
-            match handle.join() {
-                Ok(Ok(metadata)) => return IoTimeoutResult::Ok(metadata),
-                Ok(Err(e)) => return IoTimeoutResult::Err(e.kind()),
-                Err(_) => return IoTimeoutResult::Err(std::io::ErrorKind::Other),
-            }
+            break match handle.join() {
+                Ok(Ok(metadata)) => IoTimeoutResult::Ok(metadata),
+                Ok(Err(e)) => IoTimeoutResult::Err(e.kind()),
+                Err(_) => IoTimeoutResult::Err(std::io::ErrorKind::Other),
+            };
         }
 
         // Small sleep to prevent busy-waiting
         std::thread::sleep(Duration::from_millis(1));
-    }
+    };
+
+    // Decrement active thread counter
+    let active_after = ACTIVE_TIMEOUT_THREADS.fetch_sub(1, Ordering::SeqCst);
+    eprintln!("[ONEDRIVE] Active timeout threads: {} -> {}", active_after, active_after - 1);
+
+    result
 }
 
 /// Check if path exists with timeout protection.
@@ -283,35 +397,74 @@ pub fn exists_with_timeout(path: &Path, timeout_ms: u64) -> IoTimeoutResult<bool
         return IoTimeoutResult::Ok(path.exists());
     }
 
+    // Check if app is minimized - return timeout immediately
+    if is_app_minimized() {
+        eprintln!("[ONEDRIVE] App minimized - skipping exists for {:?}", path);
+        return IoTimeoutResult::Timeout;
+    }
+
+    // Check concurrent thread limit BEFORE spawning
+    let current_threads = ACTIVE_TIMEOUT_THREADS.load(Ordering::SeqCst);
+    if current_threads >= MAX_CONCURRENT_TIMEOUT_THREADS {
+        eprintln!(
+            "[ONEDRIVE] Thread limit reached ({}/{}), rejecting exists() for {:?}",
+            current_threads, MAX_CONCURRENT_TIMEOUT_THREADS, path
+        );
+        return IoTimeoutResult::Timeout;
+    }
+
+    // Adjust timeout if minimized
+    let effective_timeout = if is_app_minimized() {
+        ONEDRIVE_METADATA_TIMEOUT_MINIMIZED_MS
+    } else {
+        timeout_ms
+    };
+
+    // Increment active thread counter
+    let active_before = ACTIVE_TIMEOUT_THREADS.fetch_add(1, Ordering::SeqCst);
+    eprintln!("[ONEDRIVE] Active timeout threads: {} -> {}", active_before, active_before + 1);
+
     // OneDrive path: use timeout protection
     let path_buf = path.to_path_buf();
     let path_for_log = path_buf.clone();
-    let timeout = Duration::from_millis(timeout_ms);
+    let timeout = Duration::from_millis(effective_timeout);
     let start = Instant::now();
 
     // Spawn a thread to do the blocking I/O
     let handle = std::thread::spawn(move || path_buf.exists());
 
     // Poll with timeout
-    loop {
+    let result = loop {
+        // Check if app was minimized during operation
+        if is_app_minimized() {
+            eprintln!("[ONEDRIVE] App minimized during operation - aborting exists for {:?}", path_for_log);
+            break IoTimeoutResult::Timeout;
+        }
+
         if start.elapsed() >= timeout {
             eprintln!(
                 "[ONEDRIVE TIMEOUT] exists() exceeded {}ms for {:?}",
-                timeout_ms,
+                effective_timeout,
                 path_for_log
             );
-            return IoTimeoutResult::Timeout;
+            break IoTimeoutResult::Timeout;
         }
 
         if handle.is_finished() {
-            match handle.join() {
-                Ok(exists) => return IoTimeoutResult::Ok(exists),
-                Err(_) => return IoTimeoutResult::Err(std::io::ErrorKind::Other),
-            }
+            break match handle.join() {
+                Ok(exists) => IoTimeoutResult::Ok(exists),
+                Err(_) => IoTimeoutResult::Err(std::io::ErrorKind::Other),
+            };
         }
 
         std::thread::sleep(Duration::from_millis(1));
-    }
+    };
+
+    // Decrement active thread counter
+    let active_after = ACTIVE_TIMEOUT_THREADS.fetch_sub(1, Ordering::SeqCst);
+    eprintln!("[ONEDRIVE] Active timeout threads: {} -> {}", active_after, active_after - 1);
+
+    result
 }
 
 /// Convenience function: Get metadata with default OneDrive timeout (100ms)
@@ -371,36 +524,75 @@ pub fn read_directory_with_timeout(
         };
     }
 
+    // Check if app is minimized - return timeout immediately
+    if is_app_minimized() {
+        eprintln!("[ONEDRIVE] App minimized - skipping read_directory for {:?}", path);
+        return IoTimeoutResult::Timeout;
+    }
+
+    // Check concurrent thread limit BEFORE spawning
+    let current_threads = ACTIVE_TIMEOUT_THREADS.load(Ordering::SeqCst);
+    if current_threads >= MAX_CONCURRENT_TIMEOUT_THREADS {
+        eprintln!(
+            "[ONEDRIVE] Thread limit reached ({}/{}), rejecting read_directory() for {:?}",
+            current_threads, MAX_CONCURRENT_TIMEOUT_THREADS, path
+        );
+        return IoTimeoutResult::Timeout;
+    }
+
+    // Adjust timeout if minimized
+    let effective_timeout = if is_app_minimized() {
+        timeout_ms / 2
+    } else {
+        timeout_ms
+    };
+
+    // Increment active thread counter
+    let active_before = ACTIVE_TIMEOUT_THREADS.fetch_add(1, Ordering::SeqCst);
+    eprintln!("[ONEDRIVE] Active timeout threads: {} -> {}", active_before, active_before + 1);
+
     // OneDrive path: use timeout protection
     let path_buf = path.to_path_buf();
     let path_for_log = path_buf.clone();
-    let timeout = Duration::from_millis(timeout_ms);
+    let timeout = Duration::from_millis(effective_timeout);
     let start = Instant::now();
 
     // Spawn a thread to do the blocking directory enumeration
     let handle = std::thread::spawn(move || read_directory_internal(&path_buf));
 
     // Poll with timeout
-    loop {
+    let result = loop {
+        // Check if app was minimized during operation
+        if is_app_minimized() {
+            eprintln!("[ONEDRIVE] App minimized during operation - aborting read_directory for {:?}", path_for_log);
+            break IoTimeoutResult::Timeout;
+        }
+
         if start.elapsed() >= timeout {
             eprintln!(
                 "[ONEDRIVE TIMEOUT] read_directory() exceeded {}ms for {:?}",
-                timeout_ms,
+                effective_timeout,
                 path_for_log
             );
-            return IoTimeoutResult::Timeout;
+            break IoTimeoutResult::Timeout;
         }
 
         if handle.is_finished() {
-            match handle.join() {
-                Ok(Ok(entries)) => return IoTimeoutResult::Ok(entries),
-                Ok(Err(_)) => return IoTimeoutResult::Err(std::io::ErrorKind::Other),
-                Err(_) => return IoTimeoutResult::Err(std::io::ErrorKind::Other),
-            }
+            break match handle.join() {
+                Ok(Ok(entries)) => IoTimeoutResult::Ok(entries),
+                Ok(Err(_)) => IoTimeoutResult::Err(std::io::ErrorKind::Other),
+                Err(_) => IoTimeoutResult::Err(std::io::ErrorKind::Other),
+            };
         }
 
         std::thread::sleep(Duration::from_millis(5)); // 5ms polling interval
-    }
+    };
+
+    // Decrement active thread counter
+    let active_after = ACTIVE_TIMEOUT_THREADS.fetch_sub(1, Ordering::SeqCst);
+    eprintln!("[ONEDRIVE] Active timeout threads: {} -> {}", active_after, active_after - 1);
+
+    result
 }
 
 /// Internal directory reading function using Win32 APIs
