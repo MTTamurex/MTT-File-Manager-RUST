@@ -370,7 +370,10 @@ fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         app.is_address_editing = true;
                     }
                     ToolbarAction::CommitPathInput(path) => {
-                        if std::path::Path::new(&path).exists() {
+                        // CRITICAL FIX: Use fast_path_exists() instead of path.exists()
+                        // path.exists() uses CreateFileW which triggers OneDrive file recall,
+                        // blocking the UI thread for 30-60s on cloud-only files.
+                        if crate::infrastructure::onedrive::fast_path_exists(std::path::Path::new(&path)) {
                             app.navigate_to(&path);
                             app.is_address_editing = false;
                         } else {

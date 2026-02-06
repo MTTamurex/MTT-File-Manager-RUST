@@ -6,6 +6,7 @@
 //! Non-owner tabs can change their own selection without affecting the global media player.
 
 use crate::app::state::ImageViewerApp;
+use crate::infrastructure::onedrive;
 
 impl ImageViewerApp {
     pub fn update_selected_thumbnail(&mut self) {
@@ -24,7 +25,11 @@ impl ImageViewerApp {
                 crate::infrastructure::windows::shell_folder::is_shell_navigation_path(
                     &path, false,
                 );
-            if !is_virtual_path && !path.exists() {
+            // CRITICAL FIX: Use fast_path_exists() instead of path.exists()
+            // path.exists() uses CreateFileW which triggers OneDrive file recall,
+            // blocking the UI thread for 30-60s on cloud-only files.
+            // GetFileAttributesW reads cached attributes — no network I/O.
+            if !is_virtual_path && !onedrive::fast_path_exists(&path) {
                 self.selected_file = None;
                 self.update_video_visibility(); // Sync visibility after clearing selection
                 return;

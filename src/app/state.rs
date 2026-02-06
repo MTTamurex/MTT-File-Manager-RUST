@@ -222,6 +222,7 @@ pub struct ImageViewerApp {
     pub saved_window_width: f32,
     pub saved_window_height: f32,
     pub saved_is_maximized: bool,
+    pub saved_is_minimized: bool,
 
     // Sidebar widths persistence
     pub sidebar_left_width: f32,

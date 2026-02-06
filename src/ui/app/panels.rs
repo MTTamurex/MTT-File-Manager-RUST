@@ -372,7 +372,29 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
         })
     } else {
         let path = std::path::PathBuf::from(&app.current_path);
-        let mut entry = FileEntry::from_path(path.clone(), true);
+        // CRITICAL FIX: Do NOT use FileEntry::from_path() here!
+        // from_path() calls std::fs::metadata() which uses CreateFileW internally.
+        // On OneDrive, this can block the UI thread for 30-60s on cloud-only files.
+        // This function runs EVERY FRAME — even a 1ms delay compounds.
+        // Build the entry with defaults instead; size/modified are not needed for
+        // the preview panel display of the current directory.
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+        let mut entry = FileEntry {
+            path: path.clone(),
+            name,
+            is_dir: true,
+            size: 0,
+            modified: 0,
+            folder_cover: None,
+            drive_info: None,
+            sync_status: SyncStatus::None,
+            deletion_date: None,
+            recycle_original_path: None,
+        };
         if path.to_string_lossy().len() <= 3 && path.to_string_lossy().contains(':') {
             use crate::infrastructure::windows::get_volume_info;
             let vol = get_volume_info(&app.current_path);

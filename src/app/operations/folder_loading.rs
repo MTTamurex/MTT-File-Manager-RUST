@@ -787,10 +787,20 @@ impl ImageViewerApp {
                     }
                     onedrive::IoTimeoutResult::Timeout => {
                         eprintln!("[FOLDER-LOADING] CRITICAL: OneDrive directory enumeration timed out after 5s for {:?}", base_path);
-                        // Continue to standard fallback - but this might also block
+                        // CRITICAL FIX: Do NOT fall through to standard FindFirstFileW!
+                        // Standard FindFirstFileW can block for 30-60s on OneDrive folders
+                        // with cloud-only files, freezing the background thread and preventing
+                        // any results from being sent to the UI.
+                        // Send empty results to signal "could not load" gracefully.
+                        let _ = file_entry_sender.send((my_gen, Vec::new()));
+                        ctx.request_repaint();
+                        eprintln!("[FOLDER-LOADING] OneDrive enumeration timed out - sent empty results");
+                        return;
                     }
                     onedrive::IoTimeoutResult::Err(_) => {
                         eprintln!("[FOLDER-LOADING] Error in OneDrive directory enumeration, falling back to standard");
+                        // On error (not timeout), fall through to standard Win32 —
+                        // errors are usually fast (milliseconds), not blocking.
                     }
                 }
             }

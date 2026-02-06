@@ -1,5 +1,6 @@
 use eframe::egui;
 use crate::app::ImageViewerApp;
+use crate::infrastructure::onedrive;
 
 pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
     if app.startup_tick < 5 {
@@ -40,13 +41,15 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
     use crate::infrastructure::windows::window_subclass::{
         freeze_layout, layout_phase, WindowLayoutPhase
     };
-    
-    let (size_changed, maximized_changed, is_about_to_minimize) = ctx.input(|i| {
+
+    let (size_changed, maximized_changed, is_minimized, minimized_changed) = ctx.input(|i| {
         let mut size_changed = false;
         let mut maximized_changed = false;
 
-        // Detect if window is about to minimize
+        // Detect if window is minimized
         let minimized = i.viewport().minimized.unwrap_or(false);
+        let prev_minimized = app.saved_is_minimized;
+        let minimized_changed = minimized != prev_minimized;
 
         if let Some(rect) = i.viewport().inner_rect {
             // Only save size when NOT maximized
@@ -67,12 +70,24 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
         }
         app.saved_is_maximized = new_maximized;
 
-        (size_changed, maximized_changed, minimized)
+        (size_changed, maximized_changed, minimized, minimized_changed)
     });
+
+    // Handle minimization state changes - CRITICAL for OneDrive thread management
+    if minimized_changed {
+        app.saved_is_minimized = is_minimized;
+        onedrive::set_app_minimized(is_minimized);
+
+        if is_minimized {
+            eprintln!("[LIFECYCLE] App minimized - canceling OneDrive operations");
+        } else {
+            eprintln!("[LIFECYCLE] App restored - resuming normal operations");
+        }
+    }
 
     // LAYOUT FREEZE: Capture sidebar widths before minimize
     // This happens when egui reports minimized but we haven't frozen yet
-    if is_about_to_minimize && layout_phase() == WindowLayoutPhase::Normal {
+    if is_minimized && layout_phase() == WindowLayoutPhase::Normal {
         // Freeze layout with current sidebar widths
         freeze_layout(app.sidebar_left_width, app.sidebar_right_width);
     }

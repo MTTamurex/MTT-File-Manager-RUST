@@ -2605,6 +2605,7 @@ dependencies = [
  "lru",
  "natord",
  "notify",
+ "once_cell",
  "raw-window-handle",
  "rayon",
  "resvg",
