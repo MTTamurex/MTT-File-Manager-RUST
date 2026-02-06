@@ -765,7 +765,7 @@ impl ImageViewerApp {
                                 
                                 // Send batch when it reaches threshold
                                 if batch.len() >= 1000 {
-                                    let batch_len = batch.len();
+                                        let _batch_len = batch.len();
                                     let _ = file_entry_sender.send((my_gen, std::mem::take(&mut batch)));
                                     batch.clear();
                                     batch.reserve(1000);
