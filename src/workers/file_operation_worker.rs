@@ -29,6 +29,8 @@ pub enum FileOperationResult {
     MoveBatchCompleted {
         source_folders: Vec<PathBuf>,
         dest_folder: PathBuf,
+        /// The actual files/folders that were moved (for folder cover invalidation)
+        moved_files: Vec<PathBuf>,
     },
     /// Copy operation completed - dest folder needs reload if active
     CopyCompleted { dest_folder: PathBuf },
@@ -239,6 +241,7 @@ pub fn start_file_operation_worker(
                         let _ = result_sender.send(FileOperationResult::MoveBatchCompleted {
                             source_folders: source_folders.into_iter().collect(),
                             dest_folder,
+                            moved_files: paths,
                         });
                     }
                 }
@@ -258,7 +261,10 @@ pub fn start_file_operation_worker(
                     }
                     let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
                 }
-                FileOperationRequest::DeletePermanently { physical_paths, hwnd } => {
+                FileOperationRequest::DeletePermanently {
+                    physical_paths,
+                    hwnd,
+                } => {
                     for path in &physical_paths {
                         if recycle_bin::delete_permanently(path, hwnd.0).is_err() {
                             break; // User cancelled or error — stop batch

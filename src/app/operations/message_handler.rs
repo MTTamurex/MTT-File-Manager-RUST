@@ -52,7 +52,9 @@ impl ImageViewerApp {
                             // VERIFICAÇÃO: O drive realmente está pronto/acessível?
                             // CRITICAL FIX: Use fast_path_exists() instead of path.exists()
                             // to avoid blocking the UI thread on cloud/network drives.
-                            if crate::infrastructure::onedrive::fast_path_exists(std::path::Path::new(new_path)) {
+                            if crate::infrastructure::onedrive::fast_path_exists(
+                                std::path::Path::new(new_path),
+                            ) {
                                 target_drive = Some(new_path.clone());
                                 break;
                             }
@@ -323,6 +325,7 @@ impl ImageViewerApp {
                         FileOperationResult::MoveBatchCompleted {
                             source_folders,
                             dest_folder,
+                            moved_files,
                         } => {
                             let dest_str = normalize_for_match(dest_folder.as_path());
 
@@ -340,6 +343,25 @@ impl ImageViewerApp {
                             self.directory_cache.invalidate(&dest_folder);
                             if let Some(di) = &self.directory_index {
                                 let _ = di.invalidate(&dest_folder);
+                            }
+
+                            // FIX: Check if any moved file was a folder cover for its source folder
+                            // If so, invalidate and request recalculation (minimal I/O: SQLite lookup)
+                            for source_folder in &source_folders {
+                                let covers = self
+                                    .disk_cache
+                                    .get_folder_covers(&vec![source_folder.clone()]);
+                                if let Some(current_cover) = covers.get(source_folder) {
+                                    // Check if the current cover was one of the moved files
+                                    if moved_files.iter().any(|f| f == current_cover) {
+                                        // Moved file was the folder cover - invalidate and recalculate
+                                        self.disk_cache.remove_folder_cover(source_folder);
+                                        self.cache_manager.folder_preview_cache.pop(source_folder);
+                                        let _ =
+                                            self.cover_worker_sender.send(source_folder.clone());
+                                        debug_log!("[MOVE-BATCH] Moved file was folder cover for {:?}, requesting recalculation", source_folder);
+                                    }
+                                }
                             }
 
                             // Check if current view matches any source folder
@@ -524,6 +546,28 @@ impl ImageViewerApp {
 
                                 // Previne reload desnecessário - UI já foi atualizada
                                 self.skip_next_auto_reload = true;
+
+                                // FIX: Check if deleted item was the folder cover for parent folder
+                                // If so, invalidate and request recalculation (minimal I/O: SQLite lookup)
+                                if let Some(parent_path) = path_to_remove.parent() {
+                                    let parent_buf = parent_path.to_path_buf();
+                                    let covers = self
+                                        .disk_cache
+                                        .get_folder_covers(&vec![parent_buf.clone()]);
+                                    if let Some(current_cover) = covers.get(&parent_buf) {
+                                        if current_cover == &path_to_remove {
+                                            // Deleted item was the folder cover - invalidate and recalculate
+                                            self.disk_cache.remove_folder_cover(&parent_buf);
+                                            // Also clear from folder_preview_cache (in-memory)
+                                            self.cache_manager
+                                                .folder_preview_cache
+                                                .pop(&parent_buf);
+                                            // Request new cover calculation (worker will scan remaining items)
+                                            let _ = self.cover_worker_sender.send(parent_buf);
+                                            debug_log!("[FS-WATCH] Deleted item was folder cover, requesting recalculation");
+                                        }
+                                    }
+                                }
                             }
 
                             // Não triggera auto-reload - UI já foi atualizada

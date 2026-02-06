@@ -74,6 +74,9 @@ impl ImageViewerApp {
             if let Some(ref selected) = self.selected_file {
                 let still_exists = self.items.iter().any(|item| item.path == selected.path);
                 if !still_exists {
+                    // Store selected path before clearing for folder cover check
+                    let removed_path = selected.path.clone();
+
                     self.selected_file = None;
                     self.selected_item = None;
                     self.selected_thumbnail = None;
@@ -83,6 +86,21 @@ impl ImageViewerApp {
                     active.selected_item = None;
                     active.selected_thumbnail = None;
                     active.selected_metadata = None;
+
+                    // FIX: If the removed file was the folder cover for this folder,
+                    // invalidate the folder_preview_cache so the preview panel updates.
+                    // Uses SQLite lookup (minimal I/O) and requests recalculation.
+                    let current_folder = std::path::PathBuf::from(&active.path);
+                    let covers = self
+                        .disk_cache
+                        .get_folder_covers(&vec![current_folder.clone()]);
+                    if let Some(current_cover) = covers.get(&current_folder) {
+                        if current_cover == &removed_path {
+                            self.disk_cache.remove_folder_cover(&current_folder);
+                            self.cache_manager.folder_preview_cache.pop(&current_folder);
+                            let _ = self.cover_worker_sender.send(current_folder);
+                        }
+                    }
                 }
             }
 
