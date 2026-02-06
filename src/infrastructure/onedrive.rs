@@ -393,8 +393,8 @@ pub fn metadata_with_timeout(
 pub fn exists_with_timeout(path: &Path, timeout_ms: u64) -> IoTimeoutResult<bool> {
     // Fast path: check if it's even a OneDrive path
     if !is_onedrive_path(path) {
-        // Not OneDrive - use regular exists (should be fast)
-        return IoTimeoutResult::Ok(path.exists());
+        // Not OneDrive - use GetFileAttributesW (faster than path.exists() which uses CreateFileW)
+        return IoTimeoutResult::Ok(fast_path_exists(path));
     }
 
     // Check if app is minimized - return timeout immediately

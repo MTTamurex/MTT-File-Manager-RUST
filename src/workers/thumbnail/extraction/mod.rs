@@ -15,6 +15,7 @@ pub mod stage4_force_extract;
 pub mod stage5_media_foundation;
 
 use crate::infrastructure::io_priority::IOPriority;
+use crate::infrastructure::onedrive;
 use std::path::Path;
 
 /// The 5-Step Hybrid Pipeline
@@ -53,7 +54,9 @@ pub fn generate_thumbnail_hybrid(
     );
 
     // Skip if file is pending deletion or no longer exists
-    if pending_deletions.contains_key(path) || !path.exists() {
+    // Use fast_path_exists (GetFileAttributesW) instead of path.exists() (CreateFileW)
+    // to avoid triggering OneDrive downloads and reduce HDD seek overhead
+    if pending_deletions.contains_key(path) || !onedrive::fast_path_exists(path) {
         return None;
     }
 
@@ -66,7 +69,7 @@ pub fn generate_thumbnail_hybrid(
     eprintln!("[Thumbnail] Stage 1 failed, trying Stage 2...");
 
     // Abort if file was deleted or marked for deletion during Stage 1
-    if pending_deletions.contains_key(path) || !path.exists() {
+    if pending_deletions.contains_key(path) || !onedrive::fast_path_exists(path) {
         return None;
     }
 
@@ -79,7 +82,7 @@ pub fn generate_thumbnail_hybrid(
     eprintln!("[Thumbnail] Stage 2 failed, trying Stage 3...");
 
     // Abort if file was deleted or marked for deletion during Stage 2
-    if pending_deletions.contains_key(path) || !path.exists() {
+    if pending_deletions.contains_key(path) || !onedrive::fast_path_exists(path) {
         return None;
     }
 
