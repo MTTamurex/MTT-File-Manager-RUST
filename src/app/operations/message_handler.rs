@@ -463,7 +463,36 @@ impl ImageViewerApp {
 
         let drive_events = self.drive_watcher.poll_events();
         let drive_watcher_active = !drive_events.is_empty();
-        for event in drive_events {
+
+        // CRITICAL FIX: Rate-limit drive watcher event processing.
+        // After long inactivity, OneDrive dehydrates files and generates thousands
+        // of FILE_NOTIFY_CHANGE_ATTRIBUTES events. Processing all in one frame
+        // causes the UI to freeze for seconds. Cap events per frame to stay responsive.
+        // The remaining events will be picked up in subsequent frames via poll_events().
+        //
+        // NOTE: poll_events() drains the channel, so we must process all events NOW
+        // or discard them. We process up to MAX and discard the rest — they're mostly
+        // redundant cache invalidations that a single reload will cover.
+        const MAX_DRIVE_EVENTS_PER_FRAME: usize = 200;
+        let events_total = drive_events.len();
+        let events_to_process = if events_total > MAX_DRIVE_EVENTS_PER_FRAME {
+            eprintln!(
+                "[FS-WATCH] Rate-limiting: {} events accumulated, processing first {}, discarding {} (likely OneDrive dehydration flood)",
+                events_total, MAX_DRIVE_EVENTS_PER_FRAME, events_total - MAX_DRIVE_EVENTS_PER_FRAME
+            );
+            // When we have a flood of events, just invalidate the current directory
+            // and trigger a single reload instead of processing each event individually
+            self.directory_cache.invalidate(&PathBuf::from(&self.current_path));
+            if let Some(di) = &self.directory_index {
+                let _ = di.invalidate(&PathBuf::from(&self.current_path));
+            }
+            self.pending_auto_reload = true;
+            &drive_events[..MAX_DRIVE_EVENTS_PER_FRAME]
+        } else {
+            &drive_events[..]
+        };
+
+        for event in events_to_process {
             match &event {
                 crate::infrastructure::drive_watcher::DriveWatcherEvent::Created(path) => {
                     if should_ignore(path) {
@@ -738,6 +767,20 @@ impl ImageViewerApp {
             self.skip_next_auto_reload = false;
             self.pending_auto_reload = false;
             debug_log!("[DEBUG] Skipping auto-reload - UI already updated by smart delete");
+        }
+
+        // INACTIVITY RECOVERY: After restoring from long minimization (>30s),
+        // suppress auto-reload for 2 seconds to let the UI stabilize first.
+        // OneDrive generates hundreds of attribute-change events during dehydration,
+        // and reloading the folder while those events flood in causes compounding freezes.
+        let recovery_cooldown_active = self.last_restore_time.elapsed().as_secs_f64() < 2.0
+            && self.minimized_duration_secs > 30.0;
+        if recovery_cooldown_active && self.pending_auto_reload {
+            debug_log!(
+                "[DEBUG] Suppressing auto-reload during inactivity recovery ({:.1}s since restore)",
+                self.last_restore_time.elapsed().as_secs_f64()
+            );
+            self.pending_auto_reload = false;
         }
 
         if self.pending_auto_reload && self.file_ops_in_progress == 0 {

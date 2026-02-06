@@ -57,7 +57,11 @@ pub fn create_new_folder(base_path: &Path) -> OpResult<PathBuf> {
     let mut new_folder_name = "Nova Pasta".to_string();
     let mut counter = 1;
 
-    while base_path.join(&new_folder_name).exists() {
+    // CRITICAL FIX: Use fast_path_exists() instead of path.exists()
+    // path.exists() uses CreateFileW which triggers OneDrive file recall,
+    // blocking the UI thread for 30-60s on cloud-only files.
+    // GetFileAttributesW reads cached attributes — no network I/O.
+    while crate::infrastructure::onedrive::fast_path_exists(&base_path.join(&new_folder_name)) {
         counter += 1;
         new_folder_name = format!("Nova Pasta ({})", counter);
     }

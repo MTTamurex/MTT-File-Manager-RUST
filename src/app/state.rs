@@ -265,6 +265,12 @@ pub struct ImageViewerApp {
     pub upload_budget_ms: f32,
     pub last_upload_budget_update: Instant,
 
+    // INACTIVITY RECOVERY: Track when app was restored from minimized state
+    // Used to throttle heavy operations (watcher events, thumbnail loads) for a few frames
+    // after returning from long inactivity, preventing OneDrive-related freezes
+    pub last_restore_time: Instant,
+    pub minimized_duration_secs: f64,
+
     // Media player volume persistence
     pub saved_media_volume: f32,
 
