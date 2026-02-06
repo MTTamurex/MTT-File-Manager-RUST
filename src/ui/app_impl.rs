@@ -42,6 +42,22 @@ impl eframe::App for ImageViewerApp {
         app::lifecycle::handle_startup_sequence(self, ctx);
         app::lifecycle::track_window_state(self, ctx);
         let frame_ms = (ctx.input(|i| i.stable_dt) * 1000.0) as f32;
+
+        // INACTIVITY DETECTION: If stable_dt is very large (>2s), the app was sleeping/inactive
+        // (e.g., user switched to another window, machine locked, or display turned off).
+        // This is NOT the same as minimized — the window may still be visible but unfocused.
+        // OneDrive dehydrates files during this time, so we need the same recovery throttle.
+        if frame_ms > 2000.0 {
+            let inactivity_secs = frame_ms as f64 / 1000.0;
+            eprintln!(
+                "[LIFECYCLE] Long frame detected: {:.1}s - likely returning from inactivity",
+                inactivity_secs
+            );
+            // Set recovery state so watcher events and auto-reload are throttled
+            self.last_restore_time = std::time::Instant::now();
+            self.minimized_duration_secs = inactivity_secs;
+        }
+
         if frame_ms > 0.0 {
             if self.frame_time_avg_ms <= 0.0 {
                 self.frame_time_avg_ms = frame_ms;

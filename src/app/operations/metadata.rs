@@ -2,23 +2,22 @@
 //!
 //! This module handles requesting and formatting metadata for selected files.
 //!
-//! PERFORMANCE CRITICAL: Uses timeout-protected I/O for OneDrive files to prevent
-//! UI freezing on cloud-only files.
+//! PERFORMANCE CRITICAL: Uses mtime from FileEntry (already loaded during folder scan)
+//! instead of calling std::fs::metadata() on the UI thread, which can block indefinitely
+//! on OneDrive cloud-only files.
 
-use std::time::UNIX_EPOCH;
 use crate::app::state::ImageViewerApp;
-use crate::infrastructure::onedrive::{self, IoTimeoutResult};
 
 impl ImageViewerApp {
     pub fn refresh_selected_metadata(&mut self) {
-        let current_file = self
+        let current_file_info = self
             .selected_file
             .as_ref()
             .filter(|f| !f.is_dir)
-            .map(|f| f.path.clone());
+            .map(|f| (f.path.clone(), f.modified));
 
-        match current_file {
-            Some(path) => {
+        match current_file_info {
+            Some((path, file_mtime)) => {
                 // EVENT-DRIVEN: If same file and already loaded, trust the cache.
                 // DriveWatcher clears last_metadata_path when the file changes,
                 // which triggers a re-fetch on the next frame. No polling needed.
@@ -33,27 +32,12 @@ impl ImageViewerApp {
                 self.last_metadata_path = Some(path.clone());
                 self.last_metadata_refresh = std::time::Instant::now();
 
-                // CRITICAL FIX: Use timeout-protected metadata for OneDrive
-                // std::fs::metadata() can block indefinitely on cloud-only files
-                let mtime = match onedrive::onedrive_metadata(&path) {
-                    IoTimeoutResult::Ok(metadata) => {
-                        metadata.modified()
-                            .ok()
-                            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                            .map(|d| d.as_secs())
-                            .unwrap_or(0)
-                    }
-                    IoTimeoutResult::Timeout => {
-                        eprintln!("[METADATA] Timeout reading metadata for {:?}, using cached", path);
-                        // On timeout, use 0 to force cache miss and skip worker request
-                        // This prevents blocking the UI thread
-                        0
-                    }
-                    IoTimeoutResult::Err(_) => {
-                        // Error reading metadata - use 0
-                        0
-                    }
-                };
+                // CRITICAL FIX: Use mtime from FileEntry.modified (already loaded during
+                // folder scan in a background thread) instead of calling onedrive_metadata()
+                // which spin-waits up to 100ms on the UI thread. After long inactivity,
+                // OneDrive dehydrates files and metadata() ALWAYS times out, causing
+                // 100ms blocking per frame.
+                let mtime = file_mtime;
 
                 if let Some((cached_mtime, meta)) = self.metadata_cache.get(&path) {
                     if *cached_mtime == mtime {

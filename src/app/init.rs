@@ -667,6 +667,10 @@ impl ImageViewerApp {
             upload_budget_ms,
             last_upload_budget_update: Instant::now(),
 
+            // INACTIVITY RECOVERY
+            last_restore_time: Instant::now(),
+            minimized_duration_secs: 0.0,
+
             saved_media_volume,
 
             scroll_request: crate::app::state::ScrollRequest::None,
