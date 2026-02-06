@@ -353,12 +353,18 @@ impl ImageViewerApp {
                     // A single metadata() call is cheap compared to serving stale data.
                     if let Some((meta, indexed_files)) = di.get_directory(&base) {
                         // Validate: Check if directory mtime is newer than last_scan
-                        let dir_modified = std::fs::metadata(&base)
-                            .ok()
-                            .and_then(|m| m.modified().ok())
-                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                            .map(|d| d.as_secs())
-                            .unwrap_or(0);
+                        // CRITICAL: For OneDrive paths, skip mtime validation (can block indefinitely on cloud-only dirs)
+                        // Trust the DriveWatcher and explicit invalidation instead
+                        let dir_modified = if crate::infrastructure::onedrive::is_onedrive_path(&base) {
+                            0 // Skip mtime check for OneDrive - trust watcher
+                        } else {
+                            std::fs::metadata(&base)
+                                .ok()
+                                .and_then(|m| m.modified().ok())
+                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map(|d| d.as_secs())
+                                .unwrap_or(0)
+                        };
                         
                         if dir_modified > meta.last_scan {
                             // Index is stale - directory was modified after last scan
