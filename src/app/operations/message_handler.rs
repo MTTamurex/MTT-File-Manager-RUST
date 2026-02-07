@@ -92,6 +92,11 @@ impl ImageViewerApp {
 
         // PERFORMANCE: Precompute normalized current path once for all comparisons
         let current_path_norm = normalize_for_match(Path::new(&self.current_path));
+        let internal_cache_root_norm = dirs::data_local_dir()
+            .map(|d| normalize_for_match(&d.join("MTT-File-Manager")));
+        let internal_cache_root_prefix = internal_cache_root_norm
+            .as_ref()
+            .map(|root| format!("{root}\\"));
 
         // BLOCKING: Process all available file operation results in batch
         loop {
@@ -414,12 +419,24 @@ impl ImageViewerApp {
         // Previously called std::fs::metadata() here which caused synchronous
         // HDD reads on the UI thread for every watcher event.
         let should_ignore = |p: &Path| -> bool {
+            let cleaned = clean_path(p);
+            let cleaned_norm = normalize_for_match(&cleaned);
+            let is_internal_cache_event = match (
+                internal_cache_root_norm.as_ref(),
+                internal_cache_root_prefix.as_ref(),
+            ) {
+                (Some(root), Some(prefix)) => {
+                    cleaned_norm == *root || cleaned_norm.starts_with(prefix)
+                }
+                _ => false,
+            };
             let name = p
                 .file_name()
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_lowercase();
-            name.starts_with("dumpstack.log")
+            is_internal_cache_event
+                || name.starts_with("dumpstack.log")
                 || name.starts_with("hiberfil.sys")
                 || name.starts_with("pagefile.sys")
                 || name.starts_with("swapfile.sys")
@@ -768,7 +785,7 @@ impl ImageViewerApp {
         // (200ms batches, max 500 unique events per batch), so event floods from
         // OneDrive dehydration are absorbed before reaching the UI thread.
 
-        if self.pending_auto_reload && self.file_ops_in_progress == 0 {
+        if self.pending_auto_reload && self.file_ops_in_progress == 0 && !self.is_loading_folder {
             let elapsed = self.last_auto_reload.elapsed();
             if elapsed > Duration::from_millis(theme::AUTO_RELOAD_MS) {
                 debug_log!(
