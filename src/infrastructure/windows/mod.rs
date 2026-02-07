@@ -17,6 +17,7 @@ pub mod metadata;
 pub mod native_menu;
 pub mod recycle_bin;
 pub mod shell_folder;
+pub mod folder_size;
 pub mod shell_operations;
 pub mod system_info;
 pub mod window_subclass;

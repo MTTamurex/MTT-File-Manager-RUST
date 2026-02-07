@@ -251,6 +251,8 @@ fn render_preview_panel_layout(
                                         }
                                     }
                                     PreviewPanelAction::CalculateFolderSize(path) => {
+                                        // Cancel any in-progress calculation before starting new one
+                                        app.folder_size_cancel.store(true, std::sync::atomic::Ordering::Release);
                                         app.folder_size_loading.insert(path.clone());
                                         let _ = app.folder_size_req_sender.send(path);
                                     }
