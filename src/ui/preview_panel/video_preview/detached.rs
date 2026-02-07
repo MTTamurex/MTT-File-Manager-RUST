@@ -231,4 +231,25 @@ pub fn render_detached_video(
         }
         preview.set_detached(false);
     }
+
+    // ESC in detached window mode should re-dock only when player/app is focused.
+    if open && !preview.is_maximized() && ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
+        let app_focused = ui
+            .ctx()
+            .input(|i| i.viewport().focused.unwrap_or(false));
+
+        #[cfg(target_os = "windows")]
+        let player_focused = {
+            use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+            let foreground = unsafe { GetForegroundWindow() };
+            !foreground.is_invalid() && preview.get_hwnd() == Some(foreground)
+        };
+
+        #[cfg(not(target_os = "windows"))]
+        let player_focused = false;
+
+        if app_focused || player_focused {
+            preview.set_detached(false);
+        }
+    }
 }
