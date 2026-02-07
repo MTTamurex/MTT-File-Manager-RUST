@@ -127,7 +127,7 @@ impl ImageViewerApp {
             let current_index = self.items.iter().position(|x| {
                 self.selected_file
                     .as_ref()
-                    .map_or(false, |f| f.path == x.path)
+                    .is_some_and(|f| f.path == x.path)
             });
 
             let nav_result = process_grid_keyboard_input(
@@ -142,7 +142,7 @@ impl ImageViewerApp {
             let shift = ui.input(|i| i.modifiers.shift);
 
             if let Some(new_idx) = nav_result.new_index {
-                let clamped = new_idx.min(self.items.len().saturating_sub(1)) as usize;
+                let clamped = new_idx.min(self.items.len().saturating_sub(1));
                 if let Some(item) = self.items.get(clamped) {
                     // Clone path before any mutable borrows
                     let item_path = item.path.clone();
@@ -392,7 +392,7 @@ impl ImageViewerApp {
                 let path = PathBuf::from(&self.current_path);
                 let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
                 let right_bound = ui.available_rect_before_wrap().right();
-                self.populate_context_menu(ui.ctx(), &[path.clone()], true, None);
+                self.populate_context_menu(ui.ctx(), std::slice::from_ref(&path), true, None);
                 self.context_menu
                     .open(pointer_pos, right_bound, None, vec![path], true);
             }

@@ -42,11 +42,7 @@ pub fn spawn_folder_preview_worker(
         );
 
         let mut last_repaint = Instant::now();
-        loop {
-            let path = match rx.lock().ok().and_then(|lock| lock.recv().ok()) {
-                Some(p) => p,
-                None => break,
-            };
+        while let Some(path) = rx.lock().ok().and_then(|lock| lock.recv().ok()) {
 
             // Skip cloud-only OneDrive folders — Shell API can block on network I/O
             if crate::infrastructure::onedrive::is_onedrive_path(&path)

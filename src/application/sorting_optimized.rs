@@ -51,12 +51,10 @@ pub fn sort_items(
                 } else {
                     Ordering::Greater
                 }
+            } else if folders_come_first {
+                Ordering::Greater
             } else {
-                if folders_come_first {
-                    Ordering::Greater
-                } else {
-                    Ordering::Less
-                }
+                Ordering::Less
             };
         }
 

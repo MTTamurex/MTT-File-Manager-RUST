@@ -267,14 +267,14 @@ impl AppState {
     pub fn is_renaming(&self, index: usize) -> bool {
         self.renaming_state
             .as_ref()
-            .map_or(false, |s| s.item_index == index)
+            .is_some_and(|s| s.item_index == index)
     }
 
     /// Copies the selected item to clipboard
     pub fn copy_to_clipboard(&mut self) {
         if let Some(index) = self.selected_item_index {
             if let Some(item) = self.items.get(index) {
-                self.clipboard.copy(&[item.path.clone()]);
+                self.clipboard.copy(std::slice::from_ref(&item.path));
             }
         }
     }
@@ -283,7 +283,7 @@ impl AppState {
     pub fn cut_to_clipboard(&mut self) {
         if let Some(index) = self.selected_item_index {
             if let Some(item) = self.items.get(index) {
-                self.clipboard.cut(&[item.path.clone()]);
+                self.clipboard.cut(std::slice::from_ref(&item.path));
             }
         }
     }

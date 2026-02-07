@@ -117,6 +117,12 @@ impl PredictivePrefetcher {
     }
 }
 
+impl Default for PredictivePrefetcher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub fn spawn_predictive_prefetcher(
     receiver: Receiver<PredictiveMessage>,
     directory_cache: Arc<DirectoryCache>,

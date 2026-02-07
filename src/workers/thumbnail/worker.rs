@@ -204,8 +204,7 @@ fn process_thumbnail_request(
         }
 
         // If DB cache hit, send result and return — no source drive I/O needed
-        if final_result.is_some() {
-            let (data, w, h) = final_result.unwrap();
+        if let Some((data, w, h)) = final_result {
             let _ = tx.send(ThumbnailData {
                 path: path.clone(),
                 image_data: data,

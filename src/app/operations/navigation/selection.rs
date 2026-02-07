@@ -3,7 +3,7 @@
 //! This module handles selection logic (Ctrl+Click, Shift+Click, Range selection)
 //! in a way that can be reused by both list_view and grid_view.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::app::state::ImageViewerApp;
 use crate::ui::cache::FxHashSet;
@@ -30,7 +30,7 @@ pub struct SelectionResult {
 /// Toggles the item in multi_selection and sets it as the new anchor
 pub fn handle_ctrl_click(
     item_index: usize,
-    item_path: &PathBuf,
+    item_path: &Path,
     current_selection: &FxHashSet<PathBuf>,
 ) -> SelectionResult {
     let mut new_selection = current_selection.clone();
@@ -38,12 +38,12 @@ pub fn handle_ctrl_click(
     if new_selection.contains(item_path) {
         new_selection.remove(item_path);
     } else {
-        new_selection.insert(item_path.clone());
+        new_selection.insert(item_path.to_path_buf());
     }
 
     SelectionResult {
         selected_item: Some(item_index),
-        selected_file: Some(item_path.clone()),
+        selected_file: Some(item_path.to_path_buf()),
         selection_anchor: Some(item_index),
         multi_selection: new_selection,
         selection_changed: true,
@@ -55,7 +55,7 @@ pub fn handle_ctrl_click(
 /// Adds all items between anchor and clicked item to selection
 pub fn handle_shift_click(
     item_index: usize,
-    item_path: &PathBuf,
+    item_path: &Path,
     anchor: Option<usize>,
     current_selection: &FxHashSet<PathBuf>,
     get_item_path: impl Fn(usize) -> Option<PathBuf>,
@@ -77,12 +77,12 @@ pub fn handle_shift_click(
         }
     } else {
         // No anchor set - just add this item
-        new_selection.insert(item_path.clone());
+        new_selection.insert(item_path.to_path_buf());
     }
 
     SelectionResult {
         selected_item: Some(item_index),
-        selected_file: Some(item_path.clone()),
+        selected_file: Some(item_path.to_path_buf()),
         selection_anchor: anchor.or(Some(item_index)),
         multi_selection: new_selection,
         selection_changed: true,
@@ -94,14 +94,14 @@ pub fn handle_shift_click(
 /// Clears selection and selects only the clicked item
 pub fn handle_simple_click(
     item_index: usize,
-    item_path: &PathBuf,
+    item_path: &Path,
 ) -> SelectionResult {
     let mut new_selection = FxHashSet::default();
-    new_selection.insert(item_path.clone());
+    new_selection.insert(item_path.to_path_buf());
 
     SelectionResult {
         selected_item: Some(item_index),
-        selected_file: Some(item_path.clone()),
+        selected_file: Some(item_path.to_path_buf()),
         selection_anchor: Some(item_index),
         multi_selection: new_selection,
         selection_changed: true,
@@ -113,7 +113,7 @@ pub fn handle_simple_click(
 /// This is the main entry point that handles all selection cases
 pub fn handle_selection(
     item_index: usize,
-    item_path: &PathBuf,
+    item_path: &Path,
     modifiers: SelectionModifiers,
     anchor: Option<usize>,
     current_selection: &FxHashSet<PathBuf>,
@@ -178,14 +178,14 @@ pub fn handle_shift_navigation(
 /// Clears selection and selects only the navigated item
 pub fn handle_navigation_selection(
     new_index: usize,
-    item_path: &PathBuf,
+    item_path: &Path,
 ) -> SelectionResult {
     let mut new_selection = FxHashSet::default();
-    new_selection.insert(item_path.clone());
+    new_selection.insert(item_path.to_path_buf());
 
     SelectionResult {
         selected_item: Some(new_index),
-        selected_file: Some(item_path.clone()),
+        selected_file: Some(item_path.to_path_buf()),
         selection_anchor: Some(new_index),
         multi_selection: new_selection,
         selection_changed: true,

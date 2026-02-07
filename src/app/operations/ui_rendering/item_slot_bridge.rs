@@ -21,7 +21,7 @@ impl ImageViewerApp {
         let is_renaming = self
             .renaming_state
             .as_ref()
-            .map_or(false, |(i, _)| *i == idx);
+            .is_some_and(|(i, _)| *i == idx);
 
         // To avoid borrow conflicts, collect pending operations
         // and execute after rendering

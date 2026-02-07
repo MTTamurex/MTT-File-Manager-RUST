@@ -169,7 +169,7 @@ impl ImageViewerApp {
         self.computer_view_network_indices.clear();
         
         for (i, item) in self.items.iter().enumerate() {
-            let is_remote = item.drive_info.as_ref().map_or(false, |di| {
+            let is_remote = item.drive_info.as_ref().is_some_and(|di| {
                 di.drive_type == crate::infrastructure::windows::DriveType::Remote
             });
             if is_remote {
@@ -224,7 +224,7 @@ impl ImageViewerApp {
     pub fn poll_drive_scan(&mut self) {
         if let Ok(new_disks) = self.drive_scan_rx.try_recv() {
             self.drive_scan_pending = false;
-            let old_disks = std::mem::replace(&mut self.disks, Vec::new());
+            let old_disks = std::mem::take(&mut self.disks);
             let changed = new_disks != old_disks;
             self.disks = new_disks;
 
@@ -236,13 +236,13 @@ impl ImageViewerApp {
                 if let Some(_iso_path) = self.pending_iso_mount.take() {
                     let mut target_drive = None;
                     for (new_path, _label) in &self.disks {
-                        if !old_disks.iter().any(|(old_path, _)| old_path == new_path) {
-                            if crate::infrastructure::onedrive::fast_path_exists(
+                        if !old_disks.iter().any(|(old_path, _)| old_path == new_path)
+                            && crate::infrastructure::onedrive::fast_path_exists(
                                 std::path::Path::new(new_path),
-                            ) {
-                                target_drive = Some(new_path.clone());
-                                break;
-                            }
+                            )
+                        {
+                            target_drive = Some(new_path.clone());
+                            break;
                         }
                     }
 

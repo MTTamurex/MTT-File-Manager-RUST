@@ -100,7 +100,7 @@ pub fn ends_with_ignore_case(s: &str, suffix: &str) -> bool {
     s.as_bytes()[start..]
         .iter()
         .zip(suffix.as_bytes())
-        .all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
+        .all(|(a, b)| a.eq_ignore_ascii_case(b))
 }
 
 /// Helper para exibir tipo do arquivo na Lista
