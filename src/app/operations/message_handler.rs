@@ -492,6 +492,11 @@ impl ImageViewerApp {
                         continue;
                     }
                     let cleaned = clean_path(path);
+
+                    // If the removed file was the folder cover of its parent folder,
+                    // invalidate immediately before DB cleanup so lookup still resolves.
+                    self.invalidate_folder_cover_for_removed_path(&cleaned);
+
                     if let Some(parent) = cleaned.parent() {
                         self.directory_cache.invalidate(&parent.to_path_buf());
                         // Invalidate DirectoryIndex so mtime check is not needed
@@ -548,28 +553,6 @@ impl ImageViewerApp {
 
                                 // Previne reload desnecessário - UI já foi atualizada
                                 self.skip_next_auto_reload = true;
-
-                                // FIX: Check if deleted item was the folder cover for parent folder
-                                // If so, invalidate and request recalculation (minimal I/O: SQLite lookup)
-                                if let Some(parent_path) = path_to_remove.parent() {
-                                    let parent_buf = parent_path.to_path_buf();
-                                    let covers = self
-                                        .disk_cache
-                                        .get_folder_covers(&vec![parent_buf.clone()]);
-                                    if let Some(current_cover) = covers.get(&parent_buf) {
-                                        if current_cover == &path_to_remove {
-                                            // Deleted item was the folder cover - invalidate and recalculate
-                                            self.disk_cache.remove_folder_cover(&parent_buf);
-                                            // Also clear from folder_preview_cache (in-memory)
-                                            self.cache_manager
-                                                .folder_preview_cache
-                                                .pop(&parent_buf);
-                                            // Request new cover calculation (worker will scan remaining items)
-                                            let _ = self.cover_worker_sender.send(parent_buf);
-                                            debug_log!("[FS-WATCH] Deleted item was folder cover, requesting recalculation");
-                                        }
-                                    }
-                                }
                             }
 
                             // Não triggera auto-reload - UI já foi atualizada
@@ -618,6 +601,11 @@ impl ImageViewerApp {
                         let cleaned_old = clean_path(old_path);
                         let cleaned_new = clean_path(new_path);
 
+                        // Old path was removed from its original folder (cut/move/rename).
+                        // If it was used as folder cover, force recalculation.
+                        self.invalidate_folder_cover_for_removed_path(&cleaned_old);
+                        self.disk_cache.remove_cache_for_path(&cleaned_old);
+
                         // Invalidate caches for both paths
                         self.cache_manager.texture_cache.pop(&cleaned_old);
                         self.cache_manager.texture_cache.pop(&cleaned_new);
@@ -629,6 +617,10 @@ impl ImageViewerApp {
                             // Invalidate DirectoryIndex for both old and new parent
                             if let Some(di) = &self.directory_index {
                                 let _ = di.invalidate(&parent.to_path_buf());
+                            }
+                            let parent_norm = normalize_for_match(parent);
+                            if parent_norm == current_path_norm {
+                                self.pending_auto_reload = true;
                             }
                         }
                         if let Some(parent) = cleaned_new.parent() {
@@ -1314,6 +1306,29 @@ impl ImageViewerApp {
                 _t_streaming_done.duration_since(_t_auto_reload_done).as_millis(),
                 _t_msg_start.elapsed().as_millis().saturating_sub(_t_streaming_done.duration_since(_t_msg_start).as_millis()),
             );
+        }
+    }
+
+    fn invalidate_folder_cover_for_removed_path(&mut self, removed_path: &Path) {
+        let Some(parent_path) = removed_path.parent() else {
+            return;
+        };
+
+        let parent_buf = parent_path.to_path_buf();
+        let covers = self
+            .disk_cache
+            .get_folder_covers(&vec![parent_buf.clone()]);
+
+        if let Some(current_cover) = covers.get(&parent_buf) {
+            if current_cover.as_path() == removed_path {
+                self.disk_cache.remove_folder_cover(&parent_buf);
+                self.cache_manager.folder_preview_cache.pop(&parent_buf);
+                let _ = self.cover_worker_sender.send(parent_buf.clone());
+                debug_log!(
+                    "[FOLDER-COVER] Removed stale cover and requested recalculation for {:?}",
+                    parent_buf
+                );
+            }
         }
     }
 }
