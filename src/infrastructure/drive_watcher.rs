@@ -33,8 +33,16 @@ use windows::Win32::System::IO::{CancelIoEx, GetOverlappedResult};
 /// Buffer size for directory change notifications (64KB is the typical max)
 const BUFFER_SIZE: usize = 65536;
 
+/// Maximum events to keep in the dedup buffer before flushing.
+/// When exceeded, events are coalesced into a bulk invalidation.
+const MAX_COALESCED_EVENTS: usize = 500;
+
+/// Minimum interval (ms) between sending event batches to the UI thread.
+/// This prevents flooding the channel during OneDrive dehydration storms.
+const COALESCE_INTERVAL_MS: u64 = 200;
+
 /// Events that can be reported by the drive watcher
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DriveWatcherEvent {
     /// File or folder was created
     Created(PathBuf),
@@ -142,28 +150,15 @@ impl DriveWatcher {
 
     /// Poll for new events
     ///
-    /// Returns a vector of events that occurred since the last poll,
-    /// filtered to only include events within the current prefix.
+    /// Returns a vector of events that occurred since the last poll.
+    /// Events are pre-deduplicated and coalesced by the watcher thread,
+    /// so this method is lightweight and safe to call on the UI thread.
     pub fn poll_events(&self) -> Vec<DriveWatcherEvent> {
-        // Collect all available events (non-blocking)
+        // Collect all available pre-coalesced batches (non-blocking)
         let mut all_events = Vec::new();
         while let Ok(events) = self.event_receiver.try_recv() {
             all_events.extend(events);
         }
-
-        // Deduplicate events (same path can trigger multiple notifications)
-        let mut seen = HashSet::new();
-        all_events.retain(|e| {
-            let key = match e {
-                DriveWatcherEvent::Created(p) => p.clone(),
-                DriveWatcherEvent::Deleted(p) => p.clone(),
-                DriveWatcherEvent::Modified(p) => p.clone(),
-                DriveWatcherEvent::Renamed(old, _) => old.clone(),
-                DriveWatcherEvent::Unknown(p) => p.clone(),
-            };
-            seen.insert(key)
-        });
-
         all_events
     }
 
@@ -240,6 +235,13 @@ impl Drop for DriveWatcher {
 }
 
 /// Main watcher thread function
+///
+/// ARCHITECTURE (inspired by Files app):
+/// - Events are coalesced in a HashSet to deduplicate (same path → one event)
+/// - Batches are flushed at most every COALESCE_INTERVAL_MS (200ms)  
+/// - When the buffer exceeds MAX_COALESCED_EVENTS, it's flushed immediately
+///   to prevent unbounded memory growth during OneDrive dehydration storms
+/// - This ensures the UI thread NEVER receives unbounded event lists
 fn watcher_thread_main(
     handle: HANDLE,
     drive_root: PathBuf,
@@ -265,7 +267,9 @@ fn watcher_thread_main(
         let mut overlapped = std::mem::zeroed::<windows::Win32::System::IO::OVERLAPPED>();
         overlapped.hEvent = h_event;
 
-        let mut pending_events = Vec::new();
+        // Coalescing state: events are deduplicated here before sending
+        let mut coalesced: HashSet<DriveWatcherEvent> = HashSet::new();
+        let mut last_flush = std::time::Instant::now();
         let mut bytes_returned: u32 = 0;
         let mut waiting_for_io = false;
 
@@ -327,17 +331,9 @@ fn watcher_thread_main(
                     let events =
                         parse_notify_buffer(&buffer[..bytes_returned as usize], &drive_root);
 
-                    // Send ALL events unfiltered — cache invalidation for any change
-                    // on the drive is handled by message_handler. Only auto-reload
-                    // is gated to the current prefix (done in message_handler).
-                    if !events.is_empty() {
-                        pending_events.extend(events);
-                    }
-
-                    // Send batched events if we have enough
-                    if pending_events.len() >= 10 {
-                        let batch = std::mem::take(&mut pending_events);
-                        let _ = event_tx.send(batch);
+                    // Insert into coalescing set (deduplicates automatically)
+                    for event in events {
+                        coalesced.insert(event);
                     }
                 }
 
@@ -346,11 +342,22 @@ fn watcher_thread_main(
                 waiting_for_io = false;
             }
 
-            // Send any pending events periodically
-            if !pending_events.is_empty() {
-                let batch = std::mem::take(&mut pending_events);
+            // Flush coalesced events based on time or buffer pressure
+            let elapsed = last_flush.elapsed().as_millis() as u64;
+            let should_flush = !coalesced.is_empty()
+                && (elapsed >= COALESCE_INTERVAL_MS || coalesced.len() >= MAX_COALESCED_EVENTS);
+
+            if should_flush {
+                let batch: Vec<DriveWatcherEvent> = coalesced.drain().collect();
                 let _ = event_tx.send(batch);
+                last_flush = std::time::Instant::now();
             }
+        }
+
+        // Flush remaining events before shutdown
+        if !coalesced.is_empty() {
+            let batch: Vec<DriveWatcherEvent> = coalesced.drain().collect();
+            let _ = event_tx.send(batch);
         }
 
         // Cleanup

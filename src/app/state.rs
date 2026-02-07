@@ -105,6 +105,11 @@ pub struct ImageViewerApp {
     // UI state
     pub disks: Vec<(String, String)>, // (path, label)
     pub last_drive_refresh: Instant,
+    pub drive_scan_pending: bool, // Whether a background drive scan is in progress
+    pub drive_scan_rx: Receiver<Vec<(String, String)>>, // Background drive scan results
+    pub drive_scan_tx: Sender<Vec<(String, String)>>, // Sender cloned into background thread
+    pub drive_info_rx: Receiver<Vec<(String, crate::domain::file_entry::DriveInfo)>>, // Background volume info
+    pub drive_info_tx: Sender<Vec<(String, crate::domain::file_entry::DriveInfo)>>, // Sender for bg thread
     pub thumbnail_size: f32, // Zoom: 64-512
     pub selected_item: Option<usize>,
     pub selected_file: Option<FileEntry>,
@@ -270,6 +275,12 @@ pub struct ImageViewerApp {
     // after returning from long inactivity, preventing OneDrive-related freezes
     pub last_restore_time: Instant,
     pub minimized_duration_secs: f64,
+
+    // PREFERENCES DEBOUNCE: Instead of writing 20+ SQLite rows immediately on every
+    // state change (which blocks the UI thread with disk I/O), we set a dirty flag
+    // and flush no more than once per second.
+    pub preferences_dirty: bool,
+    pub preferences_last_save: Instant,
 
     // Media player volume persistence
     pub saved_media_volume: f32,

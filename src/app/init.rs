@@ -457,6 +457,8 @@ impl ImageViewerApp {
         );
 
         let disks = windows_infra::get_all_drives();
+        let (drive_scan_tx, drive_scan_rx) = mpsc::channel();
+        let (drive_info_tx, drive_info_rx) = mpsc::channel();
 
         // Initialize Audio Device (removed)
 
@@ -525,6 +527,11 @@ impl ImageViewerApp {
             path_input: initial_path.clone(),
             disks,
             last_drive_refresh: Instant::now(),
+            drive_scan_pending: false,
+            drive_scan_rx,
+            drive_scan_tx,
+            drive_info_rx,
+            drive_info_tx,
             thumbnail_size, // Loaded from SQLite
             selected_item: None,
             multi_selection: FxHashSet::default(),
@@ -670,6 +677,10 @@ impl ImageViewerApp {
             // INACTIVITY RECOVERY
             last_restore_time: Instant::now(),
             minimized_duration_secs: 0.0,
+
+            // PREFERENCES DEBOUNCE
+            preferences_dirty: false,
+            preferences_last_save: Instant::now(),
 
             saved_media_volume,
 

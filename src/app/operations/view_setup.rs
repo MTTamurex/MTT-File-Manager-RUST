@@ -124,33 +124,40 @@ impl ImageViewerApp {
         // Load Computer View sort mode
         self.sort_mode = self.sort_mode_computer;
 
-        // ALWAYS reload drives to ensure fresh data
-        let _ = self.reload_drive_list();
-
-        // Populate items with drives
+        // Populate items with drives using FAST-ONLY calls (no I/O blocking)
+        // detect_drive_type uses GetDriveTypeW which is cached and < 1ms
+        // get_volume_info is deferred to background thread
         use crate::domain::file_entry::DriveInfo;
-        use crate::infrastructure::windows::get_volume_info;
 
         let mut computer_items = Vec::new();
         for (path, label) in &self.disks {
-            let vol = get_volume_info(path);
             let drive_type = windows_infra::detect_drive_type(path);
-            let mut entry = FileEntry::from_path(PathBuf::from(path), true);
-            entry.name = label.clone();
-            entry.drive_info = Some(DriveInfo {
-                file_system: vol.file_system,
-                total_space: vol.total_space,
-                free_space: vol.free_space,
-                drive_type,
-            });
+            let entry = FileEntry {
+                path: PathBuf::from(path),
+                name: label.clone(),
+                is_dir: true,
+                size: 0,
+                modified: 0,
+                folder_cover: None,
+                drive_info: Some(DriveInfo {
+                    file_system: String::new(),
+                    total_space: 0,
+                    free_space: 0,
+                    drive_type,
+                }),
+                sync_status: crate::domain::file_entry::SyncStatus::None,
+                deletion_date: None,
+                recycle_original_path: None,
+            };
             computer_items.push(entry);
         }
 
+        eprintln!("[COMPUTER-VIEW] setup_computer_view: disks={}, computer_items={}", self.disks.len(), computer_items.len());
         self.all_items = computer_items.clone();
         self.items = Arc::new(computer_items);
+        eprintln!("[COMPUTER-VIEW] after set: items.len()={}, all_items.len()={}", self.items.len(), self.all_items.len());
         
         // PRE-COMPUTE SECTION INDICES (O(n) once, not per frame)
-        // This enables O(visible_items) virtualization in Computer View
         self.computer_view_local_indices.clear();
         self.computer_view_network_indices.clear();
         
@@ -167,24 +174,110 @@ impl ImageViewerApp {
         
         self.reset_selection_and_search();
         self.total_items = self.disks.len();
-        self.is_loading_folder = false; // CRITICAL: Clear loading state for computer view
+        self.is_loading_folder = false;
+
+        // Launch background thread for volume info (total/free space, file_system)
+        let disks_snapshot: Vec<String> = self.disks.iter().map(|(p, _)| p.clone()).collect();
+        let tx = self.drive_info_tx.clone();
+        let ctx = self.ui_ctx.clone();
+        std::thread::spawn(move || {
+            use crate::infrastructure::windows::get_volume_info;
+            let mut results = Vec::new();
+            for path in &disks_snapshot {
+                let vol = get_volume_info(path);
+                let drive_type = crate::infrastructure::windows::detect_drive_type(path);
+                results.push((path.clone(), DriveInfo {
+                    file_system: vol.file_system,
+                    total_space: vol.total_space,
+                    free_space: vol.free_space,
+                    drive_type,
+                }));
+            }
+            let _ = tx.send(results);
+            ctx.request_repaint();
+        });
     }
 
-    pub fn reload_drive_list(&mut self) -> bool {
-        let new_disks = crate::infrastructure::windows::get_all_drives();
-        if new_disks != self.disks {
-            self.disks = new_disks;
-            return true;
+    /// Launches a background thread to scan drives. Non-blocking.
+    pub fn reload_drive_list_async(&mut self) {
+        if self.drive_scan_pending {
+            return; // Already scanning
         }
-        false
+        self.drive_scan_pending = true;
+        let tx = self.drive_scan_tx.clone();
+        let ctx = self.ui_ctx.clone();
+        std::thread::spawn(move || {
+            let new_disks = crate::infrastructure::windows::get_all_drives();
+            let _ = tx.send(new_disks);
+            ctx.request_repaint();
+        });
+    }
+
+    /// Poll for completed background drive scans. Called once per frame.
+    pub fn poll_drive_scan(&mut self) {
+        if let Ok(new_disks) = self.drive_scan_rx.try_recv() {
+            self.drive_scan_pending = false;
+            let old_disks = std::mem::replace(&mut self.disks, Vec::new());
+            let changed = new_disks != old_disks;
+            self.disks = new_disks;
+
+            if changed {
+                // Invalidate cached drive types since drive list changed
+                crate::ui::sidebar::invalidate_drive_type_cache();
+
+                // AUTO-FOCUS PARA ISO RECÉM-MONTADA
+                if let Some(_iso_path) = self.pending_iso_mount.take() {
+                    let mut target_drive = None;
+                    for (new_path, _label) in &self.disks {
+                        if !old_disks.iter().any(|(old_path, _)| old_path == new_path) {
+                            if crate::infrastructure::onedrive::fast_path_exists(
+                                std::path::Path::new(new_path),
+                            ) {
+                                target_drive = Some(new_path.clone());
+                                break;
+                            }
+                        }
+                    }
+
+                    if let Some(drive) = target_drive {
+                        self.navigate_to(&drive);
+                    } else {
+                        self.pending_iso_mount = Some(_iso_path);
+                    }
+                }
+
+                if self.is_computer_view {
+                    self.setup_computer_view();
+                }
+            }
+        }
     }
 
     pub fn refresh_drives_if_needed(&mut self) {
         if self.last_drive_refresh.elapsed() >= Duration::from_millis(DRIVE_REFRESH_INTERVAL_MS) {
             self.last_drive_refresh = Instant::now();
-            if self.reload_drive_list() && self.is_computer_view {
-                self.setup_computer_view();
+            self.reload_drive_list_async();
+        }
+    }
+
+    /// Poll for completed background volume info scans. Called once per frame.
+    /// Updates drive_info (total_space, free_space, file_system) in existing items.
+    pub fn poll_drive_info(&mut self) {
+        if let Ok(results) = self.drive_info_rx.try_recv() {
+            if !self.is_computer_view {
+                return; // Only update if still in computer view
             }
+
+            // Update all_items with the received drive info
+            for item in self.all_items.iter_mut() {
+                let item_path = item.path.to_string_lossy().to_string();
+                if let Some((_, info)) = results.iter().find(|(p, _)| *p == item_path) {
+                    item.drive_info = Some(info.clone());
+                }
+            }
+
+            // Rebuild Arc<Vec> for items
+            self.items = Arc::new(self.all_items.clone());
         }
     }
 }

@@ -1,12 +1,69 @@
 //! Status bar rendering for the file manager.
 //!
 //! This module contains the rendering logic for the application status bar.
+//!
+//! PERFORMANCE: RAM usage (kernel syscall) and VRAM estimation (O(n) texture iteration)
+//! are cached with 1-second TTL to avoid per-frame overhead.
 
 use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
 use crate::ui::theme;
 use eframe::egui;
 use lru::LruCache;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Cached RAM usage value (atomic for cheap per-frame read)
+static CACHED_RAM_BYTES: AtomicU64 = AtomicU64::new(0);
+/// Last time RAM was queried (ms since epoch, stored as u64)
+static CACHED_RAM_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
+/// Cached VRAM estimation in bytes
+static CACHED_VRAM_BYTES: AtomicU64 = AtomicU64::new(0);
+/// Last time VRAM was calculated
+static CACHED_VRAM_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
+
+/// TTL for RAM/VRAM cache (1 second)
+const STATUS_CACHE_TTL_MS: u64 = 1000;
+
+/// Returns cached RAM usage, refreshing only after TTL expires.
+fn get_ram_usage_cached() -> Option<u64> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let last = CACHED_RAM_TIMESTAMP.load(Ordering::Relaxed);
+    if now.saturating_sub(last) > STATUS_CACHE_TTL_MS {
+        if let Some(ram) = get_ram_usage() {
+            CACHED_RAM_BYTES.store(ram, Ordering::Relaxed);
+            CACHED_RAM_TIMESTAMP.store(now, Ordering::Relaxed);
+            return Some(ram);
+        }
+    }
+    let cached = CACHED_RAM_BYTES.load(Ordering::Relaxed);
+    if cached > 0 { Some(cached) } else { None }
+}
+
+/// Returns cached VRAM estimation, refreshing only after TTL expires.
+fn get_vram_usage_cached(texture_cache: &LruCache<PathBuf, egui::TextureHandle>) -> usize {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let last = CACHED_VRAM_TIMESTAMP.load(Ordering::Relaxed);
+    if now.saturating_sub(last) > STATUS_CACHE_TTL_MS {
+        let vram: usize = texture_cache
+            .iter()
+            .map(|(_, tex)| {
+                let size = tex.size();
+                size[0] * size[1] * 4
+            })
+            .sum();
+        CACHED_VRAM_BYTES.store(vram as u64, Ordering::Relaxed);
+        CACHED_VRAM_TIMESTAMP.store(now, Ordering::Relaxed);
+        vram
+    } else {
+        CACHED_VRAM_BYTES.load(Ordering::Relaxed) as usize
+    }
+}
 
 /// Status bar action that needs to be handled by the caller
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -183,19 +240,13 @@ pub fn render_status_bar(
                     ui.label(format!("Frame: {:.1} ms", frame_time_avg_ms));
                 }
             }
-            // RAM usage (appears rightmost)
-            if let Some(ram_usage) = get_ram_usage() {
+            // RAM usage (cached with 1s TTL — avoids kernel syscall every frame)
+            if let Some(ram_usage) = get_ram_usage_cached() {
                 ui.label(format!("RAM: {}", format_size(ram_usage)));
             }
 
-            // VRAM estimation
-            let vram_usage: usize = texture_cache
-                .iter()
-                .map(|(_, tex)| {
-                    let size = tex.size();
-                    size[0] as usize * size[1] as usize * 4 // RGBA = 4 bytes per pixel
-                })
-                .sum();
+            // VRAM estimation (cached with 1s TTL — avoids O(n) texture iteration every frame)
+            let vram_usage = get_vram_usage_cached(texture_cache);
 
             ui.label(format!(
                 "VRAM: {:.1} MB",
