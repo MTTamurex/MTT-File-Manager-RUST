@@ -26,7 +26,6 @@ pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
             // FINAL INITIALIZATION: Agora que a UI está pronta, garante que a aba inicial está populada
             if app.is_computer_view {
                 app.setup_computer_view();
-                eprintln!("[COMPUTER-VIEW] startup: after setup, items.len()={}, all_items.len()={}", app.items.len(), app.all_items.len());
             } else {
                 app.load_folder(false);
             }

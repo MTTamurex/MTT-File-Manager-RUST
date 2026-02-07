@@ -60,10 +60,6 @@ impl ImageViewerApp {
                     if result.request_id != self.items_rebuild_request_id {
                         continue;
                     }
-                    if self.is_computer_view {
-                        eprintln!("[COMPUTER-VIEW] items_rebuild_receiver OVERWRITING computer view items! gen={} req_id={} new_items={}", 
-                            result.generation, result.request_id, result.items.len());
-                    }
                     self.items = Arc::new(result.items);
                     self.total_items = result.total_items;
 
@@ -842,10 +838,6 @@ impl ImageViewerApp {
         }
 
         if saw_end_of_load {
-            if self.is_computer_view {
-                eprintln!("[COMPUTER-VIEW] WARNING: saw_end_of_load while in computer view! gen={} all_items={}", 
-                    self.generation, self.all_items.len());
-            }
             self.is_loading_folder = false;
             self.pending_deletions.clear();
             self.pending_items_rebuild = false;
