@@ -372,6 +372,7 @@ fn watcher_thread_main(
 fn parse_notify_buffer(buffer: &[u8], drive_root: &Path) -> Vec<DriveWatcherEvent> {
     let mut events = Vec::new();
     let mut offset = 0usize;
+    let mut pending_rename_old: Option<PathBuf> = None;
 
     // Ensure drive_root ends with backslash for proper path construction
     let drive_root_str = drive_root.to_string_lossy();
@@ -403,20 +404,34 @@ fn parse_notify_buffer(buffer: &[u8], drive_root: &Path) -> Vec<DriveWatcherEven
             let full_path = PathBuf::from(full_path_str);
 
             // Determine event type using FILE_ACTION constants
-            let event = match info.Action {
-                FILE_ACTION_ADDED => DriveWatcherEvent::Created(full_path),
-                FILE_ACTION_REMOVED => DriveWatcherEvent::Deleted(full_path),
-                FILE_ACTION_MODIFIED => DriveWatcherEvent::Modified(full_path),
+            match info.Action {
+                FILE_ACTION_ADDED => events.push(DriveWatcherEvent::Created(full_path)),
+                FILE_ACTION_REMOVED => events.push(DriveWatcherEvent::Deleted(full_path)),
+                FILE_ACTION_MODIFIED => events.push(DriveWatcherEvent::Modified(full_path)),
                 FILE_ACTION_RENAMED_OLD_NAME => {
-                    DriveWatcherEvent::Renamed(full_path.clone(), full_path)
+                    // Rename notifications arrive as old-name + new-name pairs.
+                    // Keep old-name pending and emit only when new-name arrives.
+                    if let Some(unpaired_old) = pending_rename_old.replace(full_path) {
+                        // Two OLD events in a row (rare): flush previous one conservatively.
+                        events.push(DriveWatcherEvent::Renamed(
+                            unpaired_old.clone(),
+                            unpaired_old,
+                        ));
+                    }
                 }
                 FILE_ACTION_RENAMED_NEW_NAME => {
-                    DriveWatcherEvent::Renamed(full_path.clone(), full_path)
+                    if let Some(old_path) = pending_rename_old.take() {
+                        events.push(DriveWatcherEvent::Renamed(old_path, full_path));
+                    } else {
+                        // Defensive fallback for unmatched NEW event.
+                        events.push(DriveWatcherEvent::Renamed(
+                            full_path.clone(),
+                            full_path,
+                        ));
+                    }
                 }
-                _ => DriveWatcherEvent::Unknown(full_path),
-            };
-
-            events.push(event);
+                _ => events.push(DriveWatcherEvent::Unknown(full_path)),
+            }
 
             // Move to next entry
             if info.NextEntryOffset == 0 {
@@ -424,6 +439,11 @@ fn parse_notify_buffer(buffer: &[u8], drive_root: &Path) -> Vec<DriveWatcherEven
             }
             offset += info.NextEntryOffset as usize;
         }
+    }
+
+    // Defensive fallback: unmatched OLD rename at buffer end.
+    if let Some(old_path) = pending_rename_old.take() {
+        events.push(DriveWatcherEvent::Renamed(old_path.clone(), old_path));
     }
 
     events
