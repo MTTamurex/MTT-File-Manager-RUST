@@ -403,9 +403,29 @@ impl ImageViewerApp {
         let (folder_size_res_tx, folder_size_res_rx) =
             mpsc::channel::<crate::app::state::FolderSizeMessage>();
         let folder_size_ctx = ctx.clone();
+        let folder_size_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let folder_size_cancel_worker = folder_size_cancel.clone();
 
         std::thread::spawn(move || {
+            use std::sync::atomic::Ordering;
+
             while let Ok(folder_path) = folder_size_req_rx.recv() {
+                // Reset cancel flag for this new request
+                folder_size_cancel_worker.store(false, Ordering::Release);
+
+                // Drain any queued requests - only process the latest one
+                let mut latest_path = folder_path;
+                while let Ok(newer_path) = folder_size_req_rx.try_recv() {
+                    let _ = folder_size_res_tx.send(
+                        crate::app::state::FolderSizeMessage::Cancelled {
+                            folder_path: latest_path,
+                        },
+                    );
+                    latest_path = newer_path;
+                }
+                let folder_path = latest_path;
+                folder_size_cancel_worker.store(false, Ordering::Release);
+
                 let is_ssd = crate::infrastructure::io_priority::is_ssd(&folder_path);
                 let priority = if is_ssd {
                     crate::infrastructure::io_priority::IOPriority::Prefetch
@@ -414,43 +434,43 @@ impl ImageViewerApp {
                 };
                 crate::infrastructure::io_priority::set_thread_priority(priority);
 
-                // Calculate folder size recursively using walkdir
-                let mut total_size: u64 = 0;
-                let mut files_scanned: usize = 0;
-                let emit_every_files = if is_ssd { 256 } else { 1024 };
-                let emit_interval = if is_ssd {
-                    std::time::Duration::from_millis(40)
-                } else {
-                    std::time::Duration::from_millis(120)
-                };
-                let mut last_emit = std::time::Instant::now();
+                // Use parallel Win32 folder size calculator
+                let cancel_ref = folder_size_cancel_worker.clone();
+                let res_tx = folder_size_res_tx.clone();
+                let path_clone = folder_path.clone();
+                let ctx_clone = folder_size_ctx.clone();
 
-                for entry in walkdir::WalkDir::new(&folder_path)
-                    .into_iter()
-                    .filter_map(|e| e.ok())
-                    .filter(|e| e.file_type().is_file())
-                {
-                    if let Ok(meta) = entry.metadata() {
-                        total_size = total_size.saturating_add(meta.len());
-                    }
-                    files_scanned = files_scanned.saturating_add(1);
-
-                    if files_scanned % emit_every_files == 0 || last_emit.elapsed() >= emit_interval
-                    {
-                        let _ = folder_size_res_tx.send(
+                let result = crate::infrastructure::windows::folder_size::calculate_folder_size_parallel(
+                    &folder_path,
+                    &cancel_ref,
+                    move |partial_size| {
+                        let _ = res_tx.send(
                             crate::app::state::FolderSizeMessage::Progress {
-                                folder_path: folder_path.clone(),
+                                folder_path: path_clone.clone(),
+                                total_size: partial_size,
+                            },
+                        );
+                        ctx_clone.request_repaint();
+                    },
+                );
+
+                match result {
+                    Some(total_size) => {
+                        let _ = folder_size_res_tx.send(
+                            crate::app::state::FolderSizeMessage::Complete {
+                                folder_path,
                                 total_size,
                             },
                         );
-                        last_emit = std::time::Instant::now();
+                    }
+                    None => {
+                        let _ = folder_size_res_tx.send(
+                            crate::app::state::FolderSizeMessage::Cancelled {
+                                folder_path,
+                            },
+                        );
                     }
                 }
-
-                let _ = folder_size_res_tx.send(crate::app::state::FolderSizeMessage::Complete {
-                    folder_path,
-                    total_size,
-                });
                 folder_size_ctx.request_repaint();
                 crate::infrastructure::io_priority::reset_thread_priority();
             }
@@ -689,6 +709,7 @@ impl ImageViewerApp {
             // FOLDER SIZE CALCULATOR
             folder_size_req_sender: folder_size_req_tx,
             folder_size_res_receiver: folder_size_res_rx,
+            folder_size_cancel,
             folder_size_cache: LruCache::new(NonZeroUsize::new(500).unwrap()),
             folder_size_loading: FxHashSet::default(),
 

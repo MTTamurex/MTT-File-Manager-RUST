@@ -52,6 +52,7 @@ pub struct ItemsRebuildResult {
 pub enum FolderSizeMessage {
     Progress { folder_path: PathBuf, total_size: u64 },
     Complete { folder_path: PathBuf, total_size: u64 },
+    Cancelled { folder_path: PathBuf },
 }
 
 pub struct ImageViewerApp {
@@ -245,6 +246,7 @@ pub struct ImageViewerApp {
     // FOLDER SIZE CALCULATOR (async for details panel)
     pub folder_size_req_sender: Sender<PathBuf>, // UI → Worker
     pub folder_size_res_receiver: Receiver<FolderSizeMessage>, // Worker → UI (progress + complete)
+    pub folder_size_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>, // Cancel current calculation
     pub folder_size_cache: LruCache<PathBuf, u64>, // Calculated sizes (LRU bounded)
     pub folder_size_loading: FxHashSet<PathBuf>, // Currently calculating
 

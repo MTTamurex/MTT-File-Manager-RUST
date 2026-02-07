@@ -1322,6 +1322,11 @@ impl ImageViewerApp {
                     self.folder_size_cache.put(folder_path, total_size);
                     received_any = true;
                 }
+                crate::app::state::FolderSizeMessage::Cancelled { folder_path } => {
+                    self.folder_size_loading.remove(&folder_path);
+                    self.folder_size_cache.pop(&folder_path);
+                    received_any = true;
+                }
             }
         }
 
