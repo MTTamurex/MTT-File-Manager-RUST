@@ -400,30 +400,59 @@ impl ImageViewerApp {
 
         // --- FOLDER SIZE WORKER (async for details panel) ---
         let (folder_size_req_tx, folder_size_req_rx) = mpsc::channel::<PathBuf>();
-        let (folder_size_res_tx, folder_size_res_rx) = mpsc::channel();
+        let (folder_size_res_tx, folder_size_res_rx) =
+            mpsc::channel::<crate::app::state::FolderSizeMessage>();
         let folder_size_ctx = ctx.clone();
 
         std::thread::spawn(move || {
-            // PERFORMANCE: Set background priority to minimize HDD contention with video playback
-            // This worker is especially heavy - walks entire directory trees
-            crate::infrastructure::io_priority::set_thread_priority(
-                crate::infrastructure::io_priority::IOPriority::Background,
-            );
-
             while let Ok(folder_path) = folder_size_req_rx.recv() {
+                let is_ssd = crate::infrastructure::io_priority::is_ssd(&folder_path);
+                let priority = if is_ssd {
+                    crate::infrastructure::io_priority::IOPriority::Prefetch
+                } else {
+                    crate::infrastructure::io_priority::IOPriority::Background
+                };
+                crate::infrastructure::io_priority::set_thread_priority(priority);
+
                 // Calculate folder size recursively using walkdir
                 let mut total_size: u64 = 0;
+                let mut files_scanned: usize = 0;
+                let emit_every_files = if is_ssd { 256 } else { 1024 };
+                let emit_interval = if is_ssd {
+                    std::time::Duration::from_millis(40)
+                } else {
+                    std::time::Duration::from_millis(120)
+                };
+                let mut last_emit = std::time::Instant::now();
+
                 for entry in walkdir::WalkDir::new(&folder_path)
                     .into_iter()
                     .filter_map(|e| e.ok())
                     .filter(|e| e.file_type().is_file())
                 {
                     if let Ok(meta) = entry.metadata() {
-                        total_size += meta.len();
+                        total_size = total_size.saturating_add(meta.len());
+                    }
+                    files_scanned = files_scanned.saturating_add(1);
+
+                    if files_scanned % emit_every_files == 0 || last_emit.elapsed() >= emit_interval
+                    {
+                        let _ = folder_size_res_tx.send(
+                            crate::app::state::FolderSizeMessage::Progress {
+                                folder_path: folder_path.clone(),
+                                total_size,
+                            },
+                        );
+                        last_emit = std::time::Instant::now();
                     }
                 }
-                let _ = folder_size_res_tx.send((folder_path, total_size));
+
+                let _ = folder_size_res_tx.send(crate::app::state::FolderSizeMessage::Complete {
+                    folder_path,
+                    total_size,
+                });
                 folder_size_ctx.request_repaint();
+                crate::infrastructure::io_priority::reset_thread_priority();
             }
         });
 

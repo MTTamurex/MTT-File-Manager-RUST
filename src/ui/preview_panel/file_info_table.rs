@@ -133,7 +133,12 @@ pub fn render_file_info_table(
 
                 let size_str = if file.is_dir {
                     if let Some(size) = folder_size {
-                        crate::infrastructure::windows::format_size(size)
+                        let formatted = crate::infrastructure::windows::format_size(size);
+                        if is_folder_size_loading {
+                            format!("{formatted} (calculando...)")
+                        } else {
+                            formatted
+                        }
                     } else {
                         "Calculando...".to_string()
                     }
