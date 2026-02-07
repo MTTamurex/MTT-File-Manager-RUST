@@ -1,10 +1,13 @@
 //! Fast parallel folder size calculation using Win32 APIs
 //!
-//! Uses FindFirstFileExW with FindExInfoBasic + FIND_FIRST_EX_LARGE_FETCH
-//! to get file sizes directly from directory enumeration (zero extra syscalls).
-//! Subdirectories are traversed in parallel using rayon for maximum throughput.
+//! Optimizations:
+//! - FindFirstFileExW with FindExInfoBasic + FIND_FIRST_EX_LARGE_FETCH (batch I/O)
+//! - Wide-string (Vec<u16>) path building — zero UTF-16↔UTF-8 round-trips
+//! - Thread-local size accumulation — one atomic add per directory (not per file)
+//! - Dedicated rayon thread pool with extra threads for I/O concurrency
+//! - Breadth-first directory collection for better parallel work distribution
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -15,10 +18,11 @@ use windows::Win32::Storage::FileSystem::{
     WIN32_FIND_DATAW,
 };
 
+/// Reparse tags for junctions/symlinks — only these redirect to other locations.
+const IO_REPARSE_TAG_MOUNT_POINT: u32 = 0xA0000003;
+const IO_REPARSE_TAG_SYMLINK: u32 = 0xA000000C;
+
 /// Calculate a folder's total size using parallel Win32 directory enumeration.
-///
-/// - `cancel`: set to `true` to abort early
-/// - `progress_callback`: called periodically with the running total; return from it quickly.
 ///
 /// Returns `None` if cancelled, `Some(total_bytes)` otherwise.
 pub fn calculate_folder_size_parallel(
@@ -27,47 +31,69 @@ pub fn calculate_folder_size_parallel(
     progress_callback: impl Fn(u64) + Send + Sync,
 ) -> Option<u64> {
     let total = Arc::new(AtomicU64::new(0));
-    let cancelled = Arc::new(AtomicBool::new(false));
     let progress_cb = Arc::new(progress_callback);
 
-    // Gather immediate children: files contribute size, dirs go into work list
-    let mut dir_stack: Vec<PathBuf> = Vec::new();
+    // Convert root to wide string once
+    let root_wide = path_to_wide(root);
 
     if cancel.load(Ordering::Relaxed) {
         return None;
     }
 
-    // Scan root directory (single-threaded) to collect first-level subdirs
-    scan_directory_sizes(root, &total, &mut dir_stack);
-
-    // Early progress report after root scan
+    // Phase 1: Breadth-first collection of first 2 levels to build a good work queue
+    let mut level1_dirs: Vec<Vec<u16>> = Vec::new();
+    scan_dir_wide(&root_wide, &total, &mut level1_dirs);
     (progress_cb)(total.load(Ordering::Relaxed));
 
     if cancel.load(Ordering::Relaxed) {
         return None;
     }
 
-    // Process all subdirectories in parallel using rayon
-    // We use a recursive parallel approach: for each directory, scan it,
-    // collect its subdirs, and recurse in parallel.
-    let cancel_ref = cancel.clone();
-    let total_ref = total.clone();
-    let cancelled_ref = cancelled.clone();
-    let progress_ref = progress_cb.clone();
+    // Expand one more level to get more parallel work units
+    let mut work_queue: Vec<Vec<u16>> = Vec::with_capacity(level1_dirs.len() * 4);
+    for dir in &level1_dirs {
+        if cancel.load(Ordering::Relaxed) {
+            return None;
+        }
+        let mut sub_dirs: Vec<Vec<u16>> = Vec::new();
+        scan_dir_wide(dir, &total, &mut sub_dirs);
+        if sub_dirs.is_empty() {
+            // Leaf directory — already counted
+        } else {
+            work_queue.extend(sub_dirs);
+        }
+    }
+    (progress_cb)(total.load(Ordering::Relaxed));
 
-    // Use a counter to emit progress periodically
-    let dirs_processed = Arc::new(AtomicU64::new(0));
+    if cancel.load(Ordering::Relaxed) {
+        return None;
+    }
 
-    parallel_scan_dirs(
-        dir_stack,
-        &total_ref,
-        &cancel_ref,
-        &cancelled_ref,
-        &progress_ref,
-        &dirs_processed,
-    );
+    // Phase 2: Parallel recursive scan with dedicated I/O thread pool
+    // Use more threads than CPU cores — I/O (especially SSD) benefits from concurrency
+    let num_threads = (num_cpus() * 2).max(8);
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(num_threads)
+        .thread_name(|i| format!("folder-size-{}", i))
+        .build();
 
-    if cancelled.load(Ordering::Relaxed) || cancel.load(Ordering::Relaxed) {
+    let pool = match pool {
+        Ok(p) => p,
+        Err(_) => {
+            // Fallback: use global rayon pool
+            parallel_scan_recursive(work_queue, &total, cancel, &progress_cb);
+            if cancel.load(Ordering::Relaxed) {
+                return None;
+            }
+            return Some(total.load(Ordering::Relaxed));
+        }
+    };
+
+    pool.install(|| {
+        parallel_scan_recursive(work_queue, &total, cancel, &progress_cb);
+    });
+
+    if cancel.load(Ordering::Relaxed) {
         return None;
     }
 
@@ -75,58 +101,52 @@ pub fn calculate_folder_size_parallel(
 }
 
 /// Recursively scan directories in parallel using rayon.
-fn parallel_scan_dirs(
-    dirs: Vec<PathBuf>,
+/// Every level yields subdirs back to rayon's work-stealing pool,
+/// ensuring no single thread gets stuck processing a deep/slow subtree alone
+/// (e.g. OneDrive folders behind the cloud filter driver).
+fn parallel_scan_recursive(
+    dirs: Vec<Vec<u16>>,
     total: &Arc<AtomicU64>,
     cancel: &Arc<AtomicBool>,
-    cancelled: &Arc<AtomicBool>,
     progress_cb: &Arc<impl Fn(u64) + Send + Sync>,
-    dirs_processed: &Arc<AtomicU64>,
 ) {
     use rayon::prelude::*;
 
     dirs.into_par_iter().for_each(|dir| {
         if cancel.load(Ordering::Relaxed) {
-            cancelled.store(true, Ordering::Relaxed);
             return;
         }
 
-        let mut sub_dirs: Vec<PathBuf> = Vec::new();
-        scan_directory_sizes(&dir, total, &mut sub_dirs);
+        let mut sub_dirs: Vec<Vec<u16>> = Vec::new();
+        let local_size = scan_dir_wide_local(&dir, &mut sub_dirs);
 
-        // Emit progress every 32 directories
-        let count = dirs_processed.fetch_add(1, Ordering::Relaxed);
-        if count % 32 == 0 {
-            (progress_cb)(total.load(Ordering::Relaxed));
+        if local_size > 0 {
+            total.fetch_add(local_size, Ordering::Relaxed);
         }
 
-        // Recurse into subdirectories (rayon handles work-stealing)
         if !sub_dirs.is_empty() {
-            parallel_scan_dirs(sub_dirs, total, cancel, cancelled, progress_cb, dirs_processed);
+            // Always yield to rayon — even small batches benefit from
+            // work-stealing when individual dirs are slow (OneDrive, network).
+            if sub_dirs.len() >= 8 {
+                (progress_cb)(total.load(Ordering::Relaxed));
+            }
+            parallel_scan_recursive(sub_dirs, total, cancel, progress_cb);
         }
     });
 }
 
-/// Scan a single directory using FindFirstFileExW.
-/// Adds file sizes to `total` and pushes subdirectory paths to `sub_dirs`.
-fn scan_directory_sizes(
-    dir: &Path,
-    total: &Arc<AtomicU64>,
-    sub_dirs: &mut Vec<PathBuf>,
-) {
-    let search_path = if dir.to_string_lossy().ends_with('\\') {
-        format!("{}*", dir.display())
-    } else {
-        format!("{}\\*", dir.display())
-    };
-
-    let wide_path: Vec<u16> = search_path.encode_utf16().chain(std::iter::once(0)).collect();
-
+/// Scan a single directory. Returns the total file size found.
+/// Pushes subdirectory wide-paths onto `sub_dirs`.
+/// Uses wide-string paths throughout — zero UTF conversions.
+fn scan_dir_wide_local(dir_wide: &[u16], sub_dirs: &mut Vec<Vec<u16>>) -> u64 {
+    // Build search pattern: dir\* (wide string, null-terminated)
+    let search = build_search_pattern(dir_wide);
     let mut find_data = WIN32_FIND_DATAW::default();
+    let mut local_size: u64 = 0;
 
     unsafe {
         let handle = FindFirstFileExW(
-            PCWSTR(wide_path.as_ptr()),
+            PCWSTR(search.as_ptr()),
             FindExInfoBasic,
             &mut find_data as *mut _ as *mut std::ffi::c_void,
             FindExSearchNameMatch,
@@ -136,11 +156,23 @@ fn scan_directory_sizes(
 
         let handle = match handle {
             Ok(h) => h,
-            Err(_) => return, // Access denied or invalid path — skip silently
+            Err(_) => return 0,
         };
 
         loop {
-            process_find_entry(&find_data, dir, total, sub_dirs);
+            let attrs = find_data.dwFileAttributes;
+            let is_dir = (attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
+
+            if is_dir {
+                if !is_dot_or_dotdot(&find_data.cFileName) {
+                    if !is_junction_or_symlink(attrs, find_data.dwReserved0) {
+                        sub_dirs.push(build_child_wide(dir_wide, &find_data.cFileName));
+                    }
+                }
+            } else {
+                local_size += ((find_data.nFileSizeHigh as u64) << 32)
+                    | (find_data.nFileSizeLow as u64);
+            }
 
             if FindNextFileW(handle, &mut find_data).is_err() {
                 break;
@@ -149,56 +181,84 @@ fn scan_directory_sizes(
 
         let _ = FindClose(handle);
     }
+
+    local_size
 }
 
-/// Reparse tags that indicate the directory is a redirect to another location.
-/// Only these should be skipped; other reparse types (OneDrive, WOF, etc.) are real dirs.
-const IO_REPARSE_TAG_MOUNT_POINT: u32 = 0xA0000003; // Junction points
-const IO_REPARSE_TAG_SYMLINK: u32 = 0xA000000C; // Symbolic links
-
-/// Process a single WIN32_FIND_DATAW entry.
-#[inline(always)]
-fn process_find_entry(
-    find_data: &WIN32_FIND_DATAW,
-    parent_dir: &Path,
-    total: &Arc<AtomicU64>,
-    sub_dirs: &mut Vec<PathBuf>,
-) {
-    let attrs = find_data.dwFileAttributes;
-    let is_dir = (attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
-
-    if is_dir {
-        // Skip "." and ".."
-        let first = find_data.cFileName[0];
-        if first == b'.' as u16 {
-            let second = find_data.cFileName[1];
-            if second == 0 || (second == b'.' as u16 && find_data.cFileName[2] == 0) {
-                return;
-            }
-        }
-
-        // Skip only junction points and symlinks to avoid double-counting
-        // and infinite loops (e.g. C:\Users\All Users → C:\ProgramData).
-        // Other reparse types (OneDrive cloud dirs, WOF, etc.) are real content.
-        let is_reparse = (attrs & FILE_ATTRIBUTE_REPARSE_POINT.0) != 0;
-        if is_reparse {
-            let tag = find_data.dwReserved0;
-            if tag == IO_REPARSE_TAG_MOUNT_POINT || tag == IO_REPARSE_TAG_SYMLINK {
-                return;
-            }
-        }
-
-        // Build full path for subdirectory
-        let name_len = find_data
-            .cFileName
-            .iter()
-            .position(|&c| c == 0)
-            .unwrap_or(find_data.cFileName.len());
-        let name = String::from_utf16_lossy(&find_data.cFileName[..name_len]);
-        sub_dirs.push(parent_dir.join(name));
-    } else {
-        // File: extract size directly from WIN32_FIND_DATAW (no extra syscall)
-        let size = ((find_data.nFileSizeHigh as u64) << 32) | (find_data.nFileSizeLow as u64);
+/// Scan a single directory — variant that uses Arc<AtomicU64> (for top-level scans).
+fn scan_dir_wide(dir_wide: &[u16], total: &Arc<AtomicU64>, sub_dirs: &mut Vec<Vec<u16>>) {
+    let size = scan_dir_wide_local(dir_wide, sub_dirs);
+    if size > 0 {
         total.fetch_add(size, Ordering::Relaxed);
     }
+}
+
+// ── Helper functions ────────────────────────────────────────────────────────
+
+/// Convert a `Path` to a null-terminated wide string (no trailing backslash).
+fn path_to_wide(path: &Path) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+    // Remove trailing backslash if present (but keep root like C:\)
+    if wide.len() > 3 && wide.last() == Some(&(b'\\' as u16)) {
+        wide.pop();
+    }
+    wide
+}
+
+/// Build a search pattern `dir\*\0` from a wide-string directory path.
+#[inline]
+fn build_search_pattern(dir_wide: &[u16]) -> Vec<u16> {
+    let mut pattern = Vec::with_capacity(dir_wide.len() + 3);
+    pattern.extend_from_slice(dir_wide);
+    if pattern.last() != Some(&(b'\\' as u16)) {
+        pattern.push(b'\\' as u16);
+    }
+    pattern.push(b'*' as u16);
+    pattern.push(0); // null terminator
+    pattern
+}
+
+/// Build a child path `parent\name` as wide string from parent wide + cFileName.
+#[inline]
+fn build_child_wide(parent_wide: &[u16], c_file_name: &[u16]) -> Vec<u16> {
+    let name_len = c_file_name
+        .iter()
+        .position(|&c| c == 0)
+        .unwrap_or(c_file_name.len());
+
+    let mut child = Vec::with_capacity(parent_wide.len() + 1 + name_len);
+    child.extend_from_slice(parent_wide);
+    if child.last() != Some(&(b'\\' as u16)) {
+        child.push(b'\\' as u16);
+    }
+    child.extend_from_slice(&c_file_name[..name_len]);
+    child
+}
+
+/// Check if cFileName is "." or ".."
+#[inline(always)]
+fn is_dot_or_dotdot(name: &[u16]) -> bool {
+    let first = name[0];
+    if first != b'.' as u16 {
+        return false;
+    }
+    let second = name[1];
+    second == 0 || (second == b'.' as u16 && name[2] == 0)
+}
+
+/// Check if a reparse point is a junction or symlink (should be skipped).
+#[inline(always)]
+fn is_junction_or_symlink(attrs: u32, reparse_tag: u32) -> bool {
+    if (attrs & FILE_ATTRIBUTE_REPARSE_POINT.0) == 0 {
+        return false;
+    }
+    reparse_tag == IO_REPARSE_TAG_MOUNT_POINT || reparse_tag == IO_REPARSE_TAG_SYMLINK
+}
+
+/// Get number of logical CPUs.
+fn num_cpus() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
 }
