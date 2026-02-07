@@ -1,13 +1,46 @@
 //! User preferences save/load
 //!
 //! This module handles saving application state to the SQLite database.
+//!
+//! PERFORMANCE: `save_preferences()` is debounced — it sets a dirty flag and the
+//! actual write happens in `flush_preferences_if_needed()` which runs once per frame
+//! but only writes to disk if >1 second has passed since the last write. This prevents
+//! 20+ synchronous SQLite writes from blocking the UI thread on state changes.
 
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
 
+/// Minimum interval between actual disk writes
+const PREFERENCES_FLUSH_INTERVAL_MS: u64 = 1000;
+
 impl ImageViewerApp {
-    /// Salva as preferências atuais no SQLite
-    pub fn save_preferences(&self) {
+    /// Marks preferences as dirty (deferred write).
+    /// The actual SQLite writes happen in `flush_preferences_if_needed()`.
+    pub fn save_preferences(&mut self) {
+        self.preferences_dirty = true;
+    }
+
+    /// Flushes dirty preferences to SQLite if enough time has passed.
+    /// Called once per frame from the update loop.
+    pub fn flush_preferences_if_needed(&mut self) {
+        if !self.preferences_dirty {
+            return;
+        }
+        if self.preferences_last_save.elapsed().as_millis() < PREFERENCES_FLUSH_INTERVAL_MS as u128 {
+            return;
+        }
+        self.preferences_dirty = false;
+        self.preferences_last_save = std::time::Instant::now();
+        self.do_save_preferences();
+    }
+
+    /// Force-flushes preferences immediately (for exit).
+    pub fn force_save_preferences(&self) {
+        self.do_save_preferences();
+    }
+
+    /// Actually writes all preferences to SQLite.
+    fn do_save_preferences(&self) {
         let sort_mode_str = match self.sort_mode {
             SortMode::Name => "name",
             SortMode::Date => "date",

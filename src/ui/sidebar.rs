@@ -1,5 +1,31 @@
 use crate::infrastructure::windows::{detect_drive_type, DriveType};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense};
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+/// Cached drive type results. Drive types don't change at runtime
+/// (a drive letter is always local or always network), so we cache
+/// indefinitely. The cache is cleared when the drive list changes.
+static DRIVE_TYPE_CACHE: std::sync::LazyLock<Mutex<HashMap<String, DriveType>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Get drive type from cache, only calling GetDriveTypeW on cache miss.
+fn get_cached_drive_type(disk_path: &str) -> DriveType {
+    let mut cache = DRIVE_TYPE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(&dt) = cache.get(disk_path) {
+        return dt;
+    }
+    let dt = detect_drive_type(disk_path);
+    cache.insert(disk_path.to_string(), dt);
+    dt
+}
+
+/// Clear the drive type cache (call when drive list changes).
+pub fn invalidate_drive_type_cache() {
+    if let Ok(mut cache) = DRIVE_TYPE_CACHE.lock() {
+        cache.clear();
+    }
+}
 
 /// Context for sidebar rendering
 pub struct SidebarContext<'a> {
@@ -238,7 +264,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
     let mut network_drives = Vec::new();
 
     for (disk_path, disk_label) in ctx.disks.iter() {
-        let drive_type = detect_drive_type(disk_path);
+        let drive_type = get_cached_drive_type(disk_path);
         if drive_type == DriveType::Remote {
             network_drives.push((disk_path, disk_label));
         } else {

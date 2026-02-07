@@ -22,6 +22,12 @@ pub fn render_panels(app: &mut ImageViewerApp, ctx: &egui::Context, _frame: &mut
     render_preview_panel_layout(app, ctx, _frame);
 
     // 4. Central Panel
+    if app.is_computer_view && app.items.is_empty() {
+        eprintln!("[COMPUTER-VIEW] render_panels: items still EMPTY after preview panel! stack trace:");
+        // Print all possible causes
+        eprintln!("[COMPUTER-VIEW]   is_loading_folder={}, generation={}, items_rebuild_request_id={}", 
+            app.is_loading_folder, app.generation, app.items_rebuild_request_id);
+    }
     render_central_panel_layout(app, ctx);
 
     // 5. Focus release: When user clicks anywhere outside the video player,
@@ -396,9 +402,8 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             recycle_original_path: None,
         };
         if path.to_string_lossy().len() <= 3 && path.to_string_lossy().contains(':') {
-            use crate::infrastructure::windows::get_volume_info;
-            let vol = get_volume_info(&app.current_path);
-            let drive_type = windows_infra::detect_drive_type(&app.current_path);
+            // PERFORMANCE FIX: Use cached drive_info from items instead of calling
+            // get_volume_info() which blocks on network drives EVERY FRAME.
             let label = app
                 .disks
                 .iter()
@@ -406,12 +411,26 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
                 .map(|(_, l)| l.clone())
                 .unwrap_or_else(|| app.current_path.clone());
             entry.name = label;
-            entry.drive_info = Some(crate::domain::file_entry::DriveInfo {
-                file_system: vol.file_system,
-                total_space: vol.total_space,
-                free_space: vol.free_space,
-                drive_type,
-            });
+
+            // Try to find cached drive_info from computer view items
+            let cached_info = app.all_items.iter().find(|item| {
+                let item_str = item.path.to_string_lossy();
+                item_str.starts_with(&app.current_path)
+                    || app.current_path.starts_with(item_str.as_ref())
+            }).and_then(|item| item.drive_info.clone());
+
+            if let Some(info) = cached_info {
+                entry.drive_info = Some(info);
+            } else {
+                // Fallback: minimal drive info with type only (GetDriveTypeW is fast/cached)
+                let drive_type = windows_infra::detect_drive_type(&app.current_path);
+                entry.drive_info = Some(crate::domain::file_entry::DriveInfo {
+                    file_system: String::new(),
+                    total_space: 0,
+                    free_space: 0,
+                    drive_type,
+                });
+            }
         } else {
             entry.name = path
                 .file_name()
@@ -436,6 +455,10 @@ fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     ui.label("Carregando...");
                 });
             } else if app.items.is_empty() {
+                if app.is_computer_view {
+                    eprintln!("[COMPUTER-VIEW] render_central_panel: items EMPTY in computer view! all_items={} disks={}", 
+                        app.all_items.len(), app.disks.len());
+                }
                 let response = ui
                     .centered_and_justified(|ui| {
                         ui.label("Pasta vazia");

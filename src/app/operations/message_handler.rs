@@ -25,6 +25,8 @@ macro_rules! debug_log {
 
 impl ImageViewerApp {
     pub fn process_incoming_messages(&mut self, ctx: &egui::Context) {
+        let _t_msg_start = Instant::now();
+
         // 1. CHECK DE REFRESH MANUAL (F5)
         if ctx.input(|i| i.key_pressed(egui::Key::F5)) {
             self.trigger_manual_refresh();
@@ -39,44 +41,12 @@ impl ImageViewerApp {
             // Drive was inserted/removed: clear all drive icon caches so icons are re-extracted
             self.item_icon_loader.clear_drive_icons();
 
-            let old_disks = self.disks.clone();
-            if self.reload_drive_list() {
-                self.last_drive_refresh = Instant::now();
+            // Launch async drive scan (non-blocking)
+            self.last_drive_refresh = Instant::now();
+            self.reload_drive_list_async();
 
-                // AUTO-FOCUS PARA ISO RECÉM-MONTADA
-                if let Some(_iso_path) = self.pending_iso_mount.take() {
-                    let mut target_drive = None;
-                    // Encontra qual drive é novo
-                    for (new_path, _label) in &self.disks {
-                        if !old_disks.iter().any(|(old_path, _)| old_path == new_path) {
-                            // VERIFICAÇÃO: O drive realmente está pronto/acessível?
-                            // CRITICAL FIX: Use fast_path_exists() instead of path.exists()
-                            // to avoid blocking the UI thread on cloud/network drives.
-                            if crate::infrastructure::onedrive::fast_path_exists(
-                                std::path::Path::new(new_path),
-                            ) {
-                                target_drive = Some(new_path.clone());
-                                break;
-                            }
-                        }
-                    }
-
-                    if let Some(drive) = target_drive {
-                        // Navega para ele!
-                        self.navigate_to(&drive);
-                    } else {
-                        // Se não encontrou drive válido, devolve para o estado pendente
-                        // para tentar no próximo evento (pode ser que o Windows mande vários)
-                        self.pending_iso_mount = Some(_iso_path);
-                    }
-                }
-
-                if self.is_computer_view {
-                    self.setup_computer_view();
-                }
-                // Force immediate repaint without waiting for input events
-                ctx.request_repaint_after(std::time::Duration::from_millis(0));
-            }
+            // Force immediate repaint without waiting for input events
+            ctx.request_repaint_after(std::time::Duration::from_millis(0));
         }
 
         // Apply async rebuild results (filter/sort) from background thread
@@ -89,6 +59,10 @@ impl ImageViewerApp {
                     }
                     if result.request_id != self.items_rebuild_request_id {
                         continue;
+                    }
+                    if self.is_computer_view {
+                        eprintln!("[COMPUTER-VIEW] items_rebuild_receiver OVERWRITING computer view items! gen={} req_id={} new_items={}", 
+                            result.generation, result.request_id, result.items.len());
                     }
                     self.items = Arc::new(result.items);
                     self.total_items = result.total_items;
@@ -459,41 +433,44 @@ impl ImageViewerApp {
 
         // Drive-wide watcher (File Pilot optimization)
         // Check for pending watcher activation after startup delay
+        let _t_watcher_start = Instant::now();
         self.drive_watcher.check_pending_activation();
 
         let drive_events = self.drive_watcher.poll_events();
+        let _t_poll_done = Instant::now();
         let drive_watcher_active = !drive_events.is_empty();
+        let _drive_event_count = drive_events.len();
 
-        // CRITICAL FIX: Rate-limit drive watcher event processing.
-        // After long inactivity, OneDrive dehydrates files and generates thousands
-        // of FILE_NOTIFY_CHANGE_ATTRIBUTES events. Processing all in one frame
-        // causes the UI to freeze for seconds. Cap events per frame to stay responsive.
-        // The remaining events will be picked up in subsequent frames via poll_events().
+        // PERFORMANCE FIX: After long inactivity (OS sleep, display off), the watcher
+        // thread accumulates many batches in the channel. Processing each event
+        // individually does SQLite I/O (remove_cache_for_path = 6 SQL queries per DELETE).
+        // With 500+ events, this blocks the UI thread for seconds.
         //
-        // NOTE: poll_events() drains the channel, so we must process all events NOW
-        // or discard them. We process up to MAX and discard the rest — they're mostly
-        // redundant cache invalidations that a single reload will cover.
-        const MAX_DRIVE_EVENTS_PER_FRAME: usize = 200;
-        let events_total = drive_events.len();
-        let events_to_process = if events_total > MAX_DRIVE_EVENTS_PER_FRAME {
-            eprintln!(
-                "[FS-WATCH] Rate-limiting: {} events accumulated, processing first {}, discarding {} (likely OneDrive dehydration flood)",
-                events_total, MAX_DRIVE_EVENTS_PER_FRAME, events_total - MAX_DRIVE_EVENTS_PER_FRAME
-            );
-            // When we have a flood of events, just invalidate the current directory
-            // and trigger a single reload instead of processing each event individually
-            self.directory_cache.invalidate(&PathBuf::from(&self.current_path));
-            if let Some(di) = &self.directory_index {
-                let _ = di.invalidate(&PathBuf::from(&self.current_path));
-            }
-            self.pending_auto_reload = true;
-            &drive_events[..MAX_DRIVE_EVENTS_PER_FRAME]
-        } else {
-            &drive_events[..]
-        };
+        // Strategy: If too many events accumulated, skip individual processing and
+        // just trigger a simple folder reload. The reload will fetch fresh data from
+        // disk, which is faster than processing hundreds of SQLite deletes.
+        const MAX_EVENTS_INDIVIDUAL: usize = 50;
 
-        for event in events_to_process {
-            match &event {
+        if drive_events.len() > MAX_EVENTS_INDIVIDUAL {
+            eprintln!(
+                "[FS-WATCH] Event flood detected: {} events (threshold {}). Skipping individual processing, triggering full reload.",
+                drive_events.len(), MAX_EVENTS_INDIVIDUAL
+            );
+
+            // Invalidate directory caches broadly (cheap in-memory operation)
+            self.directory_cache.clear();
+
+            // Just trigger a reload instead of processing each event
+            if !self.is_computer_view && !self.is_recycle_bin_view {
+                self.pending_auto_reload = true;
+            }
+        } else {
+        // Events are pre-deduplicated and coalesced by the watcher thread (200ms batches,
+        // max 500 unique events per batch). No rate-limiting needed here — the watcher
+        // thread guarantees bounded event delivery even during OneDrive dehydration storms.
+
+        for event in &drive_events {
+            match event {
                 crate::infrastructure::drive_watcher::DriveWatcherEvent::Created(path) => {
                     if should_ignore(path) {
                         continue;
@@ -673,12 +650,37 @@ impl ImageViewerApp {
                 _ => {}
             }
         }
+        } // close else block for event flood check
+
+        let _t_drive_events_done = Instant::now();
+        if _t_drive_events_done.duration_since(_t_watcher_start).as_millis() > 50 {
+            eprintln!("[PERF-MSG] DriveWatcher: poll={}ms process={}ms events={}",
+                _t_poll_done.duration_since(_t_watcher_start).as_millis(),
+                _t_drive_events_done.duration_since(_t_poll_done).as_millis(),
+                _drive_event_count);
+        }
 
         // LEGACY: Processa eventos do notify-watcher (mantido para compatibilidade)
         // Se drive-watcher já detectou eventos, skip notify-watcher para evitar duplicados
         #[cfg(feature = "notify-watcher")]
         if !drive_watcher_active {
+            // PERFORMANCE: Count events first to detect flood
+            let mut legacy_events = Vec::new();
             while let Ok(event) = self.fs_event_receiver.try_recv() {
+                legacy_events.push(event);
+            }
+
+            if legacy_events.len() > MAX_EVENTS_INDIVIDUAL {
+                eprintln!(
+                    "[FS-WATCH-LEGACY] Event flood detected: {} events. Triggering full reload.",
+                    legacy_events.len()
+                );
+                self.directory_cache.clear();
+                if !self.is_computer_view && !self.is_recycle_bin_view {
+                    self.pending_auto_reload = true;
+                }
+            } else {
+            for event in legacy_events {
                 match event {
                     Ok(evt) => {
                         let mut meaningful_change = false;
@@ -757,6 +759,7 @@ impl ImageViewerApp {
                     Err(_e) => debug_log!("Erro de watch: {:?}", _e),
                 }
             }
+            } // close else block for legacy event flood
         } // Fecha o if !drive_watcher_active
 
         // Executa reload apenas quando debounce permitir
@@ -769,19 +772,10 @@ impl ImageViewerApp {
             debug_log!("[DEBUG] Skipping auto-reload - UI already updated by smart delete");
         }
 
-        // INACTIVITY RECOVERY: After restoring from long minimization (>30s),
-        // suppress auto-reload for 2 seconds to let the UI stabilize first.
-        // OneDrive generates hundreds of attribute-change events during dehydration,
-        // and reloading the folder while those events flood in causes compounding freezes.
-        let recovery_cooldown_active = self.last_restore_time.elapsed().as_secs_f64() < 2.0
-            && self.minimized_duration_secs > 30.0;
-        if recovery_cooldown_active && self.pending_auto_reload {
-            debug_log!(
-                "[DEBUG] Suppressing auto-reload during inactivity recovery ({:.1}s since restore)",
-                self.last_restore_time.elapsed().as_secs_f64()
-            );
-            self.pending_auto_reload = false;
-        }
+        // NOTE: Inactivity recovery cooldown removed — no longer needed.
+        // The DriveWatcher thread now coalesces and deduplicates events internally
+        // (200ms batches, max 500 unique events per batch), so event floods from
+        // OneDrive dehydration are absorbed before reaching the UI thread.
 
         if self.pending_auto_reload && self.file_ops_in_progress == 0 {
             let elapsed = self.last_auto_reload.elapsed();
@@ -810,6 +804,8 @@ impl ImageViewerApp {
                 self.pending_auto_reload = false;
             }
         }
+
+        let _t_auto_reload_done = Instant::now();
 
         // 1. STREAMING: Recebe lotes incrementais de FileEntry (Filtrado por geração)
         // BLOCKING: Process all available file entries in batch
@@ -846,6 +842,10 @@ impl ImageViewerApp {
         }
 
         if saw_end_of_load {
+            if self.is_computer_view {
+                eprintln!("[COMPUTER-VIEW] WARNING: saw_end_of_load while in computer view! gen={} all_items={}", 
+                    self.generation, self.all_items.len());
+            }
             self.is_loading_folder = false;
             self.pending_deletions.clear();
             self.pending_items_rebuild = false;
@@ -961,6 +961,8 @@ impl ImageViewerApp {
             self.filter_items();
             ctx.request_repaint();
         }
+
+        let _t_streaming_done = Instant::now();
 
         // 3. Icon Worker: Recebe resultados de ícones assíncronos
         // PERFORMANCE: Throttle icon uploads - reduce when video is playing
@@ -1307,6 +1309,19 @@ impl ImageViewerApp {
 
         if received_any {
             ctx.request_repaint();
+        }
+
+        // PERF: Log detailed breakdown when process_incoming_messages is slow
+        let _t_msg_total = _t_msg_start.elapsed().as_millis();
+        if _t_msg_total > 100 {
+            eprintln!("[PERF-MSG] TOTAL={}ms | pre_watcher={}ms | watcher_events={}ms | legacy+autoreload={}ms | streaming={}ms | icons+thumbs={}ms",
+                _t_msg_total,
+                _t_watcher_start.duration_since(_t_msg_start).as_millis(),
+                _t_drive_events_done.duration_since(_t_watcher_start).as_millis(),
+                _t_auto_reload_done.duration_since(_t_drive_events_done).as_millis(),
+                _t_streaming_done.duration_since(_t_auto_reload_done).as_millis(),
+                _t_msg_start.elapsed().as_millis().saturating_sub(_t_streaming_done.duration_since(_t_msg_start).as_millis()),
+            );
         }
     }
 }

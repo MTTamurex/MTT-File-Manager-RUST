@@ -477,30 +477,20 @@ pub fn onedrive_exists(path: &Path) -> IoTimeoutResult<bool> {
     exists_with_timeout(path, ONEDRIVE_EXISTS_TIMEOUT_MS)
 }
 
-/// Safely check if a file is locally available with timeout.
-/// Returns `false` (not available) on timeout - safe default for cloud files.
+/// Safely check if a file is locally available (not cloud-only).
+///
+/// Uses `GetFileAttributesW` which reads cached attributes from the cloud filter
+/// driver — no file handle, no network I/O, returns in microseconds.
+///
+/// The cloud filter driver (e.g., OneDrive) is the authoritative source for
+/// placeholder status. The Files app (and Windows Explorer) trust these attributes
+/// without secondary `metadata()` verification. We follow the same pattern.
+///
+/// Previously this function did a secondary `std::fs::metadata()` call with timeout
+/// to "double-check" availability, but this was unnecessary and expensive
+/// (spawned a timeout thread per file). The `GetFileAttributesW` result is sufficient.
 pub fn is_locally_available_safe(path: &Path) -> bool {
-    // First check using fast attributes (no I/O)
-    let is_available = is_locally_available(path);
-    
-    // If attributes say it's cloud-only, trust that
-    if !is_available {
-        return false;
-    }
-
-    // Attributes say it's available, but double-check with timeout
-    // This catches the race condition where file was evicted after attribute check
-    match onedrive_metadata(path) {
-        IoTimeoutResult::Ok(_) => true,
-        IoTimeoutResult::Timeout => {
-            eprintln!(
-                "[ONEDRIVE SAFE] File attributes say available but metadata timed out: {:?}",
-                path
-            );
-            false // Safe default: assume not available on timeout
-        }
-        IoTimeoutResult::Err(_) => false,
-    }
+    is_locally_available(path)
 }
 
 /// Result type for directory enumeration with timeout

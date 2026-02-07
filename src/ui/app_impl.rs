@@ -18,6 +18,8 @@ macro_rules! debug_log {
 
 impl eframe::App for ImageViewerApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        let t_frame_start = std::time::Instant::now();
+
         // Check if window is being resized/dragged (for UI optimization)
         let is_resizing = is_in_size_move();
 
@@ -43,21 +45,6 @@ impl eframe::App for ImageViewerApp {
         app::lifecycle::track_window_state(self, ctx);
         let frame_ms = (ctx.input(|i| i.stable_dt) * 1000.0) as f32;
 
-        // INACTIVITY DETECTION: If stable_dt is very large (>2s), the app was sleeping/inactive
-        // (e.g., user switched to another window, machine locked, or display turned off).
-        // This is NOT the same as minimized — the window may still be visible but unfocused.
-        // OneDrive dehydrates files during this time, so we need the same recovery throttle.
-        if frame_ms > 2000.0 {
-            let inactivity_secs = frame_ms as f64 / 1000.0;
-            eprintln!(
-                "[LIFECYCLE] Long frame detected: {:.1}s - likely returning from inactivity",
-                inactivity_secs
-            );
-            // Set recovery state so watcher events and auto-reload are throttled
-            self.last_restore_time = std::time::Instant::now();
-            self.minimized_duration_secs = inactivity_secs;
-        }
-
         if frame_ms > 0.0 {
             if self.frame_time_avg_ms <= 0.0 {
                 self.frame_time_avg_ms = frame_ms;
@@ -82,12 +69,43 @@ impl eframe::App for ImageViewerApp {
         // 3. Infrastructure updates (skip heavy processing during resize)
         self.ensure_window_handle(frame);
         if !is_resizing {
+            // PERF TIMING: Detect slow frames after inactivity
+            let t0 = std::time::Instant::now();
             self.process_incoming_messages(ctx);
+            let t1 = std::time::Instant::now();
             self.refresh_drives_if_needed();
+            let t2 = std::time::Instant::now();
+            self.poll_drive_scan();
+            self.poll_drive_info();
+            let t3 = std::time::Instant::now();
+            // Flush debounced preferences (max once per second)
+            self.flush_preferences_if_needed();
+            let t4 = std::time::Instant::now();
+
+            let msg_ms = t1.duration_since(t0).as_millis();
+            let drives_ms = t2.duration_since(t1).as_millis();
+            let poll_ms = t3.duration_since(t2).as_millis();
+            let prefs_ms = t4.duration_since(t3).as_millis();
+            if msg_ms + drives_ms + poll_ms + prefs_ms > 50 {
+                eprintln!(
+                    "[PERF] Slow infrastructure: messages={}ms drives={}ms poll={}ms prefs={}ms",
+                    msg_ms, drives_ms, poll_ms, prefs_ms
+                );
+            }
         }
+
+        let t_icons_start = std::time::Instant::now();
         self.ensure_folder_icon(ctx);
         self.ensure_computer_icon(ctx);
         self.item_icon_loader.ensure_folder_icon(ctx);
+        let t_icons_end = std::time::Instant::now();
+        let icons_ms = t_icons_end.duration_since(t_icons_start).as_millis();
+        if icons_ms > 50 {
+            eprintln!("[PERF] Slow ensure_icons: {}ms", icons_ms);
+        }
+
+        // Poll background icon extractions (sidebar drive/folder icons)
+        self.item_icon_loader.poll_async_icons(ctx);
 
         // 4. Input: Keyboard shortcuts (resize borders handled by native subclass)
         if !is_resizing {
@@ -120,7 +138,12 @@ impl eframe::App for ImageViewerApp {
                 });
         } else {
             // 8. Layout: Main Panels (Sidebar, Preview, Central)
+            let t_panels = std::time::Instant::now();
             app::panels::render_panels(self, ctx, frame);
+            let panels_ms = t_panels.elapsed().as_millis();
+            if panels_ms > 50 {
+                eprintln!("[PERF] Slow render_panels: {}ms", panels_ms);
+            }
 
             // 9. Operations: Context Menu (Rendering & Actions)
             app::menu_handler::handle_context_menu(self, ctx);
@@ -138,6 +161,12 @@ impl eframe::App for ImageViewerApp {
 
             // 12. Notifications
             app::notifications::render_notifications(self, ctx);
+        }
+
+        // PERF: Log total frame time when slow (helps diagnose post-inactivity freezes)
+        let frame_total_ms = t_frame_start.elapsed().as_millis();
+        if frame_total_ms > 100 {
+            eprintln!("[PERF] SLOW FRAME: {}ms total (stable_dt={:.0}ms)", frame_total_ms, frame_ms);
         }
     }
 

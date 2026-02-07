@@ -1052,8 +1052,7 @@ impl ImageViewerApp {
 
     pub fn trigger_manual_refresh(&mut self) {
         if self.is_computer_view {
-            let _ = self.reload_drive_list();
-            self.setup_computer_view();
+            self.reload_drive_list_async();
             self.last_drive_refresh = Instant::now();
         } else if self.is_recycle_bin_view {
             self.setup_recycle_bin_view();
