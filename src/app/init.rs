@@ -456,6 +456,21 @@ impl ImageViewerApp {
             file_op_res_tx,
         );
 
+        // --- DISK CACHE INVALIDATION WORKER (async SQLite cleanup) ---
+        let (disk_cache_invalidation_tx, disk_cache_invalidation_rx) =
+            mpsc::channel::<Vec<PathBuf>>();
+        let disk_cache_for_invalidation = disk_cache.clone();
+        std::thread::spawn(move || {
+            while let Ok(paths) = disk_cache_invalidation_rx.recv() {
+                let mut unique_paths = std::collections::HashSet::with_capacity(paths.len());
+                for path in paths {
+                    if unique_paths.insert(path.clone()) {
+                        disk_cache_for_invalidation.remove_cache_for_path(&path);
+                    }
+                }
+            }
+        });
+
         let disks = windows_infra::get_all_drives();
         let (drive_scan_tx, drive_scan_rx) = mpsc::channel();
         let (drive_info_tx, drive_info_rx) = mpsc::channel();
@@ -689,6 +704,7 @@ impl ImageViewerApp {
             // FILE OPERATION WORKER
             file_op_sender: file_op_tx,
             file_op_res_receiver: file_op_res_rx,
+            disk_cache_invalidation_sender: disk_cache_invalidation_tx,
             prefetch_sender: prefetch_tx,
             predictive_sender: predictive_tx,
             idle_warmup_sender: idle_warmup_tx,

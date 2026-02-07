@@ -291,6 +291,7 @@ pub struct ImageViewerApp {
     // FILE OPERATION WORKER
     pub file_op_sender: Sender<crate::workers::file_operation_worker::FileOperationRequest>,
     pub file_op_res_receiver: Receiver<crate::workers::file_operation_worker::FileOperationResult>,
+    pub disk_cache_invalidation_sender: Sender<Vec<PathBuf>>,
     pub prefetch_sender: Sender<crate::workers::prefetch_worker::PrefetchMessage>,
     pub predictive_sender: Sender<crate::workers::predictive_prefetch::PredictiveMessage>,
     pub idle_warmup_sender: Sender<crate::workers::idle_warmup::IdleWarmupMessage>,
