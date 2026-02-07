@@ -101,9 +101,8 @@ pub fn calculate_folder_size_parallel(
 }
 
 /// Recursively scan directories in parallel using rayon.
-/// Every level yields subdirs back to rayon's work-stealing pool,
-/// ensuring no single thread gets stuck processing a deep/slow subtree alone
-/// (e.g. OneDrive folders behind the cloud filter driver).
+/// - Single-child chains (node_modules/a/b/c/...) → tight inline loop (zero rayon overhead)
+/// - Multi-child branches → yield to rayon work-stealing pool for parallelism
 fn parallel_scan_recursive(
     dirs: Vec<Vec<u16>>,
     total: &Arc<AtomicU64>,
@@ -117,20 +116,49 @@ fn parallel_scan_recursive(
             return;
         }
 
-        let mut sub_dirs: Vec<Vec<u16>> = Vec::new();
-        let local_size = scan_dir_wide_local(&dir, &mut sub_dirs);
+        // Process this dir and follow single-child chains inline
+        let mut current = dir;
+        let mut local_total: u64 = 0;
+        let mut dirs_inline: u32 = 0;
 
-        if local_size > 0 {
-            total.fetch_add(local_size, Ordering::Relaxed);
-        }
+        loop {
+            if cancel.load(Ordering::Relaxed) {
+                break;
+            }
 
-        if !sub_dirs.is_empty() {
-            // Always yield to rayon — even small batches benefit from
-            // work-stealing when individual dirs are slow (OneDrive, network).
-            if sub_dirs.len() >= 8 {
+            let mut sub_dirs: Vec<Vec<u16>> = Vec::new();
+            local_total += scan_dir_wide_local(&current, &mut sub_dirs);
+            dirs_inline += 1;
+
+            // Flush accumulated size periodically
+            if dirs_inline % 64 == 0 && local_total > 0 {
+                total.fetch_add(local_total, Ordering::Relaxed);
+                local_total = 0;
                 (progress_cb)(total.load(Ordering::Relaxed));
             }
-            parallel_scan_recursive(sub_dirs, total, cancel, progress_cb);
+
+            match sub_dirs.len() {
+                0 => break, // Leaf — done with this chain
+                1 => {
+                    // Single child → continue inline (no rayon overhead)
+                    current = sub_dirs.into_iter().next().unwrap();
+                }
+                _ => {
+                    // Multiple children → flush and yield to rayon for parallelism
+                    if local_total > 0 {
+                        total.fetch_add(local_total, Ordering::Relaxed);
+                        local_total = 0;
+                    }
+                    (progress_cb)(total.load(Ordering::Relaxed));
+                    parallel_scan_recursive(sub_dirs, total, cancel, progress_cb);
+                    break;
+                }
+            }
+        }
+
+        // Flush remaining
+        if local_total > 0 {
+            total.fetch_add(local_total, Ordering::Relaxed);
         }
     });
 }
