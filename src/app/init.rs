@@ -775,16 +775,51 @@ impl ImageViewerApp {
         // Inicia monitoramento inicial
         app.watch_current_folder();
 
-        // Garbage Collector em background (não bloqueia a UI)
-        // Delay de 3s para permitir que a UI carregue primeiro
+        // Garbage Collector em background (incremental + idle window)
+        // Avoids aggressive startup I/O and keeps cleanup bounded on HDD.
         let gc_cache = app.disk_cache.clone();
         std::thread::spawn(move || {
-            // Aguarda a UI carregar antes de iniciar o GC
-            std::thread::sleep(std::time::Duration::from_secs(3));
+            const GC_INITIAL_DELAY_SECS: u64 = 20;
+            const GC_ACTIVE_INTERVAL_SECS: u64 = 180;
+            const GC_IDLE_INTERVAL_SECS: u64 = 20;
+            const GC_ACTIVE_BATCH: usize = 120;
+            const GC_IDLE_BATCH: usize = 600;
+            const GC_VACUUM_THRESHOLD: usize = 8_000;
 
-            let removed = gc_cache.garbage_collect();
-            if removed > 0 {
-                eprintln!("[GC] Removed {} orphaned cache entries", removed);
+            std::thread::sleep(std::time::Duration::from_secs(GC_INITIAL_DELAY_SECS));
+
+            let mut removed_since_vacuum = 0usize;
+            loop {
+                let is_idle_window = crate::infrastructure::onedrive::is_app_minimized();
+                let batch = if is_idle_window {
+                    GC_IDLE_BATCH
+                } else {
+                    GC_ACTIVE_BATCH
+                };
+
+                let removed = gc_cache.garbage_collect_incremental(batch);
+                if removed > 0 {
+                    removed_since_vacuum = removed_since_vacuum.saturating_add(removed);
+                }
+
+                // VACUUM only during idle windows and only after substantial cleanup.
+                if is_idle_window
+                    && removed_since_vacuum >= GC_VACUUM_THRESHOLD
+                    && gc_cache.run_vacuum()
+                {
+                    eprintln!(
+                        "[GC] VACUUM completed after removing {} entries",
+                        removed_since_vacuum
+                    );
+                    removed_since_vacuum = 0;
+                }
+
+                let sleep_secs = if is_idle_window {
+                    GC_IDLE_INTERVAL_SECS
+                } else {
+                    GC_ACTIVE_INTERVAL_SECS
+                };
+                std::thread::sleep(std::time::Duration::from_secs(sleep_secs));
             }
         });
 

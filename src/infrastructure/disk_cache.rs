@@ -445,14 +445,121 @@ impl ThumbnailDiskCache {
         }
     }
 
-    /// Garbage Collector: Remove entradas de arquivos que não existem mais
-    /// OTIMIZADO: Libera o lock durante verificações de arquivo (I/O lento)
-    pub fn garbage_collect(&self) -> usize {
-        eprintln!("[GC] Starting garbage collection...");
+    fn path_exists_fast(path: &str) -> bool {
+        crate::infrastructure::onedrive::fast_path_exists(Path::new(path))
+    }
+
+    fn execute_batch_delete(
+        db: &Connection,
+        table: &str,
+        key_col: &str,
+        items: &[String],
+    ) -> usize {
+        let mut count = 0;
+        const BATCH_SIZE: usize = 500;
+
+        for chunk in items.chunks(BATCH_SIZE) {
+            let placeholders = std::iter::repeat_n("?", chunk.len()).collect::<Vec<_>>().join(",");
+
+            let sql = format!("DELETE FROM {} WHERE {} IN ({})", table, key_col, placeholders);
+
+            match db.execute(&sql, rusqlite::params_from_iter(chunk.iter())) {
+                Ok(c) => count += c,
+                Err(e) => eprintln!("[GC] Failed to delete batch from {}: {:?}", table, e),
+            }
+        }
+
+        count
+    }
+
+    /// Incremental GC pass: scans only a bounded sample to keep I/O low.
+    /// Intended to run periodically in background idle windows.
+    pub fn garbage_collect_incremental(&self, max_candidates: usize) -> usize {
+        let limit = max_candidates.max(1) as i64;
+
+        let sampled_entries: Vec<(String, String)>;
+        let sampled_folders: Vec<String>;
+
+        {
+            let db = match self.reader.lock() {
+                Ok(db) => db,
+                Err(_) => {
+                    eprintln!("[GC] Incremental pass skipped: reader lock failed");
+                    return 0;
+                }
+            };
+
+            sampled_entries = db
+                .prepare(
+                    "SELECT id, path FROM thumbnails WHERE path IS NOT NULL ORDER BY RANDOM() LIMIT ?1",
+                )
+                .and_then(|mut stmt| {
+                    stmt.query_map(params![limit], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })
+                    .map(|rows| rows.flatten().collect())
+                })
+                .unwrap_or_default();
+
+            sampled_folders = db
+                .prepare("SELECT folder_path FROM folder_covers ORDER BY RANDOM() LIMIT ?1")
+                .and_then(|mut stmt| {
+                    stmt.query_map(params![limit], |row| row.get::<_, String>(0))
+                        .map(|rows| rows.flatten().collect())
+                })
+                .unwrap_or_default();
+        }
+
+        if sampled_entries.is_empty() && sampled_folders.is_empty() {
+            return 0;
+        }
+
+        let orphan_thumbs: Vec<String> = sampled_entries
+            .into_iter()
+            .filter(|(_, path)| !Self::path_exists_fast(path))
+            .map(|(id, _)| id)
+            .collect();
+
+        let orphan_folders: Vec<String> = sampled_folders
+            .into_iter()
+            .filter(|path| !Self::path_exists_fast(path))
+            .collect();
+
+        if orphan_thumbs.is_empty() && orphan_folders.is_empty() {
+            return 0;
+        }
 
         let mut removed = 0;
+        if let Ok(db) = self.writer.lock() {
+            let _ = db.execute("BEGIN TRANSACTION", []);
+            if !orphan_thumbs.is_empty() {
+                removed += Self::execute_batch_delete(&db, "thumbnails", "id", &orphan_thumbs);
+            }
+            if !orphan_folders.is_empty() {
+                removed +=
+                    Self::execute_batch_delete(&db, "folder_covers", "folder_path", &orphan_folders);
+            }
+            let _ = db.execute("COMMIT", []);
+        }
 
-        // FASE 1: Lê todos os paths ([READER] lock curto)
+        if removed > 0 {
+            eprintln!("[GC] Incremental pass removed {} entries", removed);
+        }
+        removed
+    }
+
+    /// Runs VACUUM explicitly (heavy operation, call rarely).
+    pub fn run_vacuum(&self) -> bool {
+        match self.writer.lock() {
+            Ok(db) => db.execute("VACUUM", []).is_ok(),
+            Err(_) => false,
+        }
+    }
+
+    /// Full GC: scans all cache rows. Use sparingly.
+    pub fn garbage_collect(&self) -> usize {
+        eprintln!("[GC] Starting full garbage collection...");
+
         let all_entries: Vec<(String, String)>;
         let all_folders: Vec<String>;
 
@@ -465,7 +572,6 @@ impl ThumbnailDiskCache {
                 }
             };
 
-            // Coleta thumbnails
             all_entries = db
                 .prepare("SELECT id, path FROM thumbnails WHERE path IS NOT NULL")
                 .and_then(|mut stmt| {
@@ -476,7 +582,6 @@ impl ThumbnailDiskCache {
                 })
                 .unwrap_or_default();
 
-            // Coleta folder_covers
             all_folders = db
                 .prepare("SELECT folder_path FROM folder_covers")
                 .and_then(|mut stmt| {
@@ -486,83 +591,38 @@ impl ThumbnailDiskCache {
                 .unwrap_or_default();
         }
 
-        eprintln!(
-            "[GC] Loaded {} thumbnails, {} folder covers to check",
-            all_entries.len(),
-            all_folders.len()
-        );
-
-        // FASE 2: Verifica existência de arquivos (SEM lock - I/O puro)
         let orphan_thumbs: Vec<String> = all_entries
             .into_iter()
-            .filter(|(_, path)| !Path::new(path).exists())
+            .filter(|(_, path)| !Self::path_exists_fast(path))
             .map(|(id, _)| id)
             .collect();
 
         let orphan_folders: Vec<String> = all_folders
             .into_iter()
-            .filter(|path| !Path::new(path).exists())
+            .filter(|path| !Self::path_exists_fast(path))
             .collect();
 
-        eprintln!(
-            "[GC] Found {} orphan thumbnails, {} orphan folders",
-            orphan_thumbs.len(),
-            orphan_folders.len()
-        );
-
-        // FASE 3: Remove órfãos usando BATCH DELETE ([WRITER] lock)
-        if !orphan_thumbs.is_empty() || !orphan_folders.is_empty() {
-            if let Ok(db) = self.writer.lock() {
-                // Inicia transação
-                let _ = db.execute("BEGIN TRANSACTION", []);
-
-                // Helper local
-                let execute_batch_delete =
-                    |table: &str, key_col: &str, items: &[String]| -> usize {
-                        let mut count = 0;
-                        const BATCH_SIZE: usize = 500;
-
-                        for chunk in items.chunks(BATCH_SIZE) {
-                            let placeholders = std::iter::repeat("?")
-                                .take(chunk.len())
-                                .collect::<Vec<_>>()
-                                .join(",");
-
-                            let sql = format!(
-                                "DELETE FROM {} WHERE {} IN ({})",
-                                table, key_col, placeholders
-                            );
-
-                            match db.execute(&sql, rusqlite::params_from_iter(chunk.iter())) {
-                                Ok(c) => count += c,
-                                Err(e) => {
-                                    eprintln!("[GC] Failed to delete batch from {}: {:?}", table, e)
-                                }
-                            }
-                        }
-                        count
-                    };
-
-                if !orphan_thumbs.is_empty() {
-                    removed += execute_batch_delete("thumbnails", "id", &orphan_thumbs);
-                }
-
-                if !orphan_folders.is_empty() {
-                    removed +=
-                        execute_batch_delete("folder_covers", "folder_path", &orphan_folders);
-                }
-
-                let _ = db.execute("COMMIT", []);
-
-                if removed > 0 {
-                    eprintln!("[GC] Removed {} entries, running VACUUM...", removed);
-                    let _ = db.execute("VACUUM", []);
-                }
-            }
-        } else {
+        if orphan_thumbs.is_empty() && orphan_folders.is_empty() {
             eprintln!("[GC] No orphans found, skipping cleanup");
+            return 0;
         }
 
+        let mut removed = 0;
+        if let Ok(db) = self.writer.lock() {
+            let _ = db.execute("BEGIN TRANSACTION", []);
+            if !orphan_thumbs.is_empty() {
+                removed += Self::execute_batch_delete(&db, "thumbnails", "id", &orphan_thumbs);
+            }
+            if !orphan_folders.is_empty() {
+                removed +=
+                    Self::execute_batch_delete(&db, "folder_covers", "folder_path", &orphan_folders);
+            }
+            let _ = db.execute("COMMIT", []);
+        }
+
+        if removed > 0 {
+            eprintln!("[GC] Full GC removed {} entries (VACUUM not automatic)", removed);
+        }
         removed
     }
 }

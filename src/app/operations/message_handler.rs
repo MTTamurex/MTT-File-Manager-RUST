@@ -320,7 +320,7 @@ impl ImageViewerApp {
                             for source_folder in &source_folders {
                                 let covers = self
                                     .disk_cache
-                                    .get_folder_covers(&vec![source_folder.clone()]);
+                                    .get_folder_covers(std::slice::from_ref(source_folder));
                                 if let Some(current_cover) = covers.get(source_folder) {
                                     // Check if the current cover was one of the moved files
                                     if moved_files.iter().any(|f| f == current_cover) {
@@ -476,7 +476,7 @@ impl ImageViewerApp {
                         // Invalidate both caches so DirectoryIndex doesn't require mtime check
                         self.directory_cache.invalidate(&parent.to_path_buf());
                         if let Some(di) = &self.directory_index {
-                            let _ = di.invalidate(&parent.to_path_buf());
+                            let _ = di.invalidate(parent);
                         }
                         let parent_norm = normalize_for_match(parent);
                         if parent_norm == current_path_norm {
@@ -502,7 +502,7 @@ impl ImageViewerApp {
                         self.directory_cache.invalidate(&parent.to_path_buf());
                         // Invalidate DirectoryIndex so mtime check is not needed
                         if let Some(di) = &self.directory_index {
-                            let _ = di.invalidate(&parent.to_path_buf());
+                            let _ = di.invalidate(parent);
                         }
                     }
                     self.directory_cache.invalidate_children(&cleaned);
@@ -582,7 +582,7 @@ impl ImageViewerApp {
                         // Invalidate both caches for consistency
                         self.directory_cache.invalidate(&parent.to_path_buf());
                         if let Some(di) = &self.directory_index {
-                            let _ = di.invalidate(&parent.to_path_buf());
+                            let _ = di.invalidate(parent);
                         }
                         let parent_norm = normalize_for_match(parent);
                         if parent_norm == current_path_norm {
@@ -617,7 +617,7 @@ impl ImageViewerApp {
                             self.directory_cache.invalidate(&parent.to_path_buf());
                             // Invalidate DirectoryIndex for both old and new parent
                             if let Some(di) = &self.directory_index {
-                                let _ = di.invalidate(&parent.to_path_buf());
+                                let _ = di.invalidate(parent);
                             }
                             let parent_norm = normalize_for_match(parent);
                             if parent_norm == current_path_norm {
@@ -627,7 +627,7 @@ impl ImageViewerApp {
                         if let Some(parent) = cleaned_new.parent() {
                             self.directory_cache.invalidate(&parent.to_path_buf());
                             if let Some(di) = &self.directory_index {
-                                let _ = di.invalidate(&parent.to_path_buf());
+                                let _ = di.invalidate(parent);
                             }
                             let parent_norm = normalize_for_match(parent);
                             if parent_norm == current_path_norm {
@@ -1184,7 +1184,7 @@ impl ImageViewerApp {
                 // PERFORMANCE: In critical mode, only process visible items
                 // Skip non-visible uploads entirely to maintain responsiveness
                 if is_performance_critical {
-                    if let Some(ref vis) = visible_paths {
+                    if let Some(vis) = visible_paths {
                         if !vis.contains(&thumbnail_data.path) {
                             // Defer to back of queue - will retry later when performance recovers
                             self.pending_thumbnails.push_back(thumbnail_data);
@@ -1199,7 +1199,7 @@ impl ImageViewerApp {
 
                 // PERFORMANCE: During scroll, prioritize visible items
                 // Off-screen thumbnails are deferred to the back of the queue
-                if let Some(ref vis) = visible_paths {
+                if let Some(vis) = visible_paths {
                     if !vis.contains(&thumbnail_data.path) {
                         self.pending_thumbnails.push_back(thumbnail_data);
                         deferred_count += 1;
@@ -1333,7 +1333,7 @@ impl ImageViewerApp {
         let parent_buf = parent_path.to_path_buf();
         let covers = self
             .disk_cache
-            .get_folder_covers(&vec![parent_buf.clone()]);
+            .get_folder_covers(std::slice::from_ref(&parent_buf));
 
         if let Some(current_cover) = covers.get(&parent_buf) {
             if current_cover.as_path() == removed_path {

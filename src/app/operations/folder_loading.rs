@@ -84,7 +84,7 @@ impl ImageViewerApp {
         // FAST PATH: Check folder cover in DB (no HDD hit)
         let mut cover_opt = self
             .disk_cache
-            .get_folder_covers(&vec![folder_path.clone()])
+            .get_folder_covers(std::slice::from_ref(&folder_path))
             .get(&folder_path)
             .cloned();
 
@@ -229,7 +229,6 @@ impl ImageViewerApp {
         // Use existing directory_cache for cache-first strategy
         let directory_index_opt = self.directory_index.clone();
         let _prefetch_sender = self.prefetch_sender.clone();
-        let force_refresh = force_refresh;
 
         // STREAMING BATCH LOADING: Adaptive batch size based on disk type
         std::thread::spawn(move || {
@@ -269,27 +268,9 @@ impl ImageViewerApp {
                     eprintln!("[FOLDER-LOADING] Phase 1: Cache hit for {:?} - {} entries, sending to UI immediately",
                         base_path_buf, cached_entries.len());
 
-                    // BUG FIX: When in OneDrive folder, set sync_status for cached entries
-                    // PERFORMANCE: We avoid std::fs::metadata() here because it can BLOCK
-                    // indefinitely on cloud-only OneDrive files, causing UI freeze.
-                    // Instead, we assume LocallyAvailable for cached entries (they were readable
-                    // when cached) and let the fresh disk scan get accurate status.
-                    let entries_to_send = if is_onedrive_base {
-                        cached_entries
-                            .iter()
-                            .map(|entry| {
-                                let mut updated_entry = entry.clone();
-                                if entry.sync_status == SyncStatus::None {
-                                    // Assume locally available for cached entries
-                                    // Fresh disk scan will get accurate status
-                                    updated_entry.sync_status = SyncStatus::LocallyAvailable;
-                                }
-                                updated_entry
-                            })
-                            .collect::<Vec<_>>()
-                    } else {
-                        cached_entries
-                    };
+                    // For cached OneDrive entries, keep SyncStatus::None (unknown)
+                    // until fresh disk enumeration provides authoritative status.
+                    let entries_to_send = cached_entries;
 
                     // INSTANT RETURN: Send cached entries immediately (0ms navigation)
                     let mut offset = 0;
@@ -447,19 +428,6 @@ impl ImageViewerApp {
                         if !entry.is_dir && entry.name.to_lowercase().ends_with(".zip") {
                             entry.is_dir = true;
                             changed = true;
-                        }
-                    }
-
-                    // BUG FIX: When in OneDrive folder, set sync_status for cached entries
-                    // PERFORMANCE: Avoid std::fs::metadata() - it can BLOCK indefinitely
-                    // on cloud-only OneDrive files, causing UI freeze.
-                    if is_onedrive_base {
-                        for entry in cached_entries.iter_mut() {
-                            if entry.sync_status == SyncStatus::None {
-                                // Assume locally available for cached entries
-                                entry.sync_status = SyncStatus::LocallyAvailable;
-                                changed = true;
-                            }
                         }
                     }
 
