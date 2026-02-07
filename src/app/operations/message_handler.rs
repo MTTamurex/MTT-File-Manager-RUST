@@ -446,6 +446,7 @@ impl ImageViewerApp {
         // just trigger a simple folder reload. The reload will fetch fresh data from
         // disk, which is faster than processing hundreds of SQLite deletes.
         const MAX_EVENTS_INDIVIDUAL: usize = 50;
+        let mut pending_disk_cache_invalidations: Vec<PathBuf> = Vec::new();
 
         if drive_events.len() > MAX_EVENTS_INDIVIDUAL {
             eprintln!(
@@ -505,7 +506,7 @@ impl ImageViewerApp {
                         }
                     }
                     self.directory_cache.invalidate_children(&cleaned);
-                    self.disk_cache.remove_cache_for_path(&cleaned);
+                    pending_disk_cache_invalidations.push(cleaned.clone());
 
                     if let Some(parent) = path.parent() {
                         let parent_norm = normalize_for_match(parent);
@@ -604,7 +605,7 @@ impl ImageViewerApp {
                         // Old path was removed from its original folder (cut/move/rename).
                         // If it was used as folder cover, force recalculation.
                         self.invalidate_folder_cover_for_removed_path(&cleaned_old);
-                        self.disk_cache.remove_cache_for_path(&cleaned_old);
+                        pending_disk_cache_invalidations.push(cleaned_old.clone());
 
                         // Invalidate caches for both paths
                         self.cache_manager.texture_cache.pop(&cleaned_old);
@@ -689,7 +690,7 @@ impl ImageViewerApp {
                                     "[FS-WATCH-LEGACY] REMOVE: {:?}",
                                     path.file_name().unwrap_or_default()
                                 );
-                                self.disk_cache.remove_cache_for_path(&cleaned);
+                                pending_disk_cache_invalidations.push(cleaned.clone());
                             }
                         }
 
@@ -749,6 +750,8 @@ impl ImageViewerApp {
             }
             } // close else block for legacy event flood
         } // Fecha o if !drive_watcher_active
+
+        self.enqueue_disk_cache_invalidations(pending_disk_cache_invalidations);
 
         // Executa reload apenas quando debounce permitir
         // SUPPRESS auto-reload while file operations are in progress to prevent
@@ -1305,6 +1308,19 @@ impl ImageViewerApp {
                 _t_auto_reload_done.duration_since(_t_drive_events_done).as_millis(),
                 _t_streaming_done.duration_since(_t_auto_reload_done).as_millis(),
                 _t_msg_start.elapsed().as_millis().saturating_sub(_t_streaming_done.duration_since(_t_msg_start).as_millis()),
+            );
+        }
+    }
+
+    fn enqueue_disk_cache_invalidations(&self, paths: Vec<PathBuf>) {
+        if paths.is_empty() {
+            return;
+        }
+
+        if let Err(err) = self.disk_cache_invalidation_sender.send(paths) {
+            debug_log!(
+                "[CACHE] Failed to enqueue disk cache invalidations: {:?}",
+                err
             );
         }
     }

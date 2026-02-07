@@ -5,7 +5,7 @@
 use crate::infrastructure::io_priority::{self, IOPriority};
 use crate::workers::thumbnail::types::ThumbnailRequest;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Condvar, Mutex};
 
 /// Queue state with directory-grouped requests for HDD optimization
@@ -16,8 +16,8 @@ struct QueueState {
     /// Quick lookup to prevent duplicates
     pending: FxHashSet<PathBuf>,
 
-    /// Whether we're on an SSD (detected on first request)
-    is_ssd: Option<bool>,
+    /// Per-drive storage class cache (true = SSD, false = HDD)
+    drive_is_ssd: FxHashMap<PathBuf, bool>,
 
     /// Current directory being processed (for HDD locality)
     current_directory: Option<PathBuf>,
@@ -43,7 +43,7 @@ impl PriorityThumbnailQueue {
             state: Mutex::new(QueueState {
                 by_directory: FxHashMap::default(),
                 pending: FxHashSet::default(),
-                is_ssd: None,
+                drive_is_ssd: FxHashMap::default(),
                 current_directory: None,
                 shutdown: false,
             }),
@@ -75,6 +75,7 @@ impl PriorityThumbnailQueue {
 
         // Group by parent directory (for HDD seek optimization)
         let parent = path.parent().unwrap_or(&path).to_path_buf();
+        let is_ssd = Self::detect_drive_class(&mut state, &path);
 
         // Deduplication with merge: upgrade existing request instead of dropping.
         if state.pending.contains(&path) {
@@ -87,18 +88,11 @@ impl PriorityThumbnailQueue {
                 priority,
                 directory_index,
                 modified,
+                is_ssd,
             ) {
                 self.condvar.notify_one();
             }
             return;
-        }
-
-        // Detect disk type on first request
-        if state.is_ssd.is_none() {
-            state.is_ssd = Some(io_priority::is_ssd(&path));
-            if !state.is_ssd.unwrap() {
-                eprintln!("[IO] HDD detected - enabling directory grouping for seek optimization");
-            }
         }
 
         state.pending.insert(path.clone());
@@ -114,7 +108,7 @@ impl PriorityThumbnailQueue {
 
         state.by_directory.entry(parent.clone()).or_default().push(request);
 
-        if !state.is_ssd.unwrap_or(true) {
+        if !is_ssd {
             if let Some(items) = state.by_directory.get_mut(&parent) {
                 items.sort_by(|a, b| match a.priority.cmp(&b.priority) {
                     std::cmp::Ordering::Equal => a.directory_index.cmp(&b.directory_index),
@@ -126,6 +120,39 @@ impl PriorityThumbnailQueue {
         self.condvar.notify_one();
     }
 
+    fn drive_key(path: &Path) -> PathBuf {
+        use std::path::Component;
+
+        let mut components = path.components();
+        match components.next() {
+            Some(Component::Prefix(prefix)) => PathBuf::from(prefix.as_os_str()),
+            Some(Component::RootDir) => PathBuf::from(std::path::MAIN_SEPARATOR.to_string()),
+            _ => PathBuf::new(),
+        }
+    }
+
+    fn detect_drive_class(state: &mut QueueState, path: &Path) -> bool {
+        let drive = Self::drive_key(path);
+        if let Some(is_ssd) = state.drive_is_ssd.get(&drive) {
+            return *is_ssd;
+        }
+
+        let is_ssd = io_priority::is_ssd(path);
+        state.drive_is_ssd.insert(drive.clone(), is_ssd);
+        if !is_ssd {
+            eprintln!(
+                "[IO] HDD detected on drive {:?} - enabling directory grouping for seek optimization",
+                drive
+            );
+        }
+        is_ssd
+    }
+
+    fn is_directory_ssd(state: &QueueState, dir: &Path) -> bool {
+        let drive = Self::drive_key(dir);
+        state.drive_is_ssd.get(&drive).copied().unwrap_or(true)
+    }
+
     fn merge_pending_request(
         state: &mut QueueState,
         parent: &PathBuf,
@@ -135,6 +162,7 @@ impl PriorityThumbnailQueue {
         priority: IOPriority,
         directory_index: Option<usize>,
         modified: u64,
+        is_ssd: bool,
     ) -> bool {
         if let Some(items) = state.by_directory.get_mut(parent) {
             if let Some(existing) = items.iter_mut().find(|req| req.path == *path) {
@@ -176,7 +204,7 @@ impl PriorityThumbnailQueue {
                     updated = true;
                 }
 
-                if updated && !state.is_ssd.unwrap_or(true) {
+                if updated && !is_ssd {
                     items.sort_by(|a, b| match a.priority.cmp(&b.priority) {
                         std::cmp::Ordering::Equal => a.directory_index.cmp(&b.directory_index),
                         other => other,
@@ -247,20 +275,18 @@ impl PriorityThumbnailQueue {
             return None;
         }
 
-        let is_ssd = state.is_ssd.unwrap_or(true);
-
-        if is_ssd {
-            // SSD: Just get highest priority item from any directory
-            Self::pop_highest_priority(state)
-        } else {
-            // HDD: Prefer items from current directory to minimize seeks
-            Self::pop_with_locality(state)
+        // Keep locality only for HDD directories.
+        if let Some(current_dir) = state.current_directory.clone() {
+            match state.by_directory.get(&current_dir) {
+                Some(items) if !items.is_empty() && !Self::is_directory_ssd(state, &current_dir) => {
+                    return Self::pop_with_locality(state);
+                }
+                Some(_) => {}
+                None => state.current_directory = None,
+            }
         }
-    }
 
-    /// Pop highest priority item regardless of directory (SSD mode)
-    fn pop_highest_priority(state: &mut QueueState) -> Option<ThumbnailRequest> {
-        // Find directory with highest priority item
+        // Find directory with highest-priority pending item.
         let best_dir = state
             .by_directory
             .iter()
@@ -274,7 +300,13 @@ impl PriorityThumbnailQueue {
             })
             .map(|(dir, _)| dir.clone())?;
 
-        Self::pop_from_directory(state, &best_dir)
+        if Self::is_directory_ssd(state, &best_dir) {
+            state.current_directory = None;
+            Self::pop_from_directory(state, &best_dir)
+        } else {
+            state.current_directory = Some(best_dir);
+            Self::pop_with_locality(state)
+        }
     }
 
     /// Pop item with locality preference (HDD mode)
@@ -328,6 +360,7 @@ impl PriorityThumbnailQueue {
 
     /// Pop highest priority item from a specific directory
     fn pop_from_directory(state: &mut QueueState, dir: &PathBuf) -> Option<ThumbnailRequest> {
+        let is_ssd = Self::is_directory_ssd(state, dir);
         let items = state.by_directory.get_mut(dir)?;
 
         if items.is_empty() {
@@ -335,7 +368,6 @@ impl PriorityThumbnailQueue {
             return None;
         }
 
-        let is_ssd = state.is_ssd.unwrap_or(true);
         let best_idx = if is_ssd {
             items
                 .iter()
@@ -393,7 +425,9 @@ mod tests {
         let queue = PriorityThumbnailQueue::new();
         {
             let mut state = queue.state.lock().unwrap();
-            state.is_ssd = Some(false);
+            state
+                .drive_is_ssd
+                .insert(PriorityThumbnailQueue::drive_key(&path_a), false);
         }
 
         queue.push_with_index(path_a.clone(), 1, 64, IOPriority::Prefetch, Some(2), 0);
