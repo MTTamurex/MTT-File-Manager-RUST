@@ -73,8 +73,23 @@ impl PriorityThumbnailQueue {
     ) {
         let mut state = self.state.lock().unwrap();
 
-        // Deduplication: if already pending, skip
-        if !state.pending.insert(path.clone()) {
+        // Group by parent directory (for HDD seek optimization)
+        let parent = path.parent().unwrap_or(&path).to_path_buf();
+
+        // Deduplication with merge: upgrade existing request instead of dropping.
+        if state.pending.contains(&path) {
+            if Self::merge_pending_request(
+                &mut state,
+                &parent,
+                &path,
+                gen,
+                request_size,
+                priority,
+                directory_index,
+                modified,
+            ) {
+                self.condvar.notify_one();
+            }
             return;
         }
 
@@ -86,8 +101,7 @@ impl PriorityThumbnailQueue {
             }
         }
 
-        // Group by parent directory (for HDD seek optimization)
-        let parent = path.parent().unwrap_or(&path).to_path_buf();
+        state.pending.insert(path.clone());
 
         let request = ThumbnailRequest {
             path,
@@ -110,6 +124,72 @@ impl PriorityThumbnailQueue {
         }
 
         self.condvar.notify_one();
+    }
+
+    fn merge_pending_request(
+        state: &mut QueueState,
+        parent: &PathBuf,
+        path: &PathBuf,
+        gen: usize,
+        request_size: u32,
+        priority: IOPriority,
+        directory_index: Option<usize>,
+        modified: u64,
+    ) -> bool {
+        if let Some(items) = state.by_directory.get_mut(parent) {
+            if let Some(existing) = items.iter_mut().find(|req| req.path == *path) {
+                let mut updated = false;
+
+                // Promote to the most urgent priority (Interactive < Prefetch < Background).
+                if priority < existing.priority {
+                    existing.priority = priority;
+                    updated = true;
+                }
+
+                // Keep the largest requested size to avoid serving undersized thumbnails.
+                if request_size > existing.size {
+                    existing.size = request_size;
+                    updated = true;
+                }
+
+                // Keep the newest generation so stale requests do not win.
+                if gen > existing.generation {
+                    existing.generation = gen;
+                    updated = true;
+                }
+
+                // Prefer lower directory index for earlier on-screen items.
+                if let Some(new_index) = directory_index {
+                    let replace_index = match existing.directory_index {
+                        Some(old_index) => new_index < old_index,
+                        None => true,
+                    };
+                    if replace_index {
+                        existing.directory_index = Some(new_index);
+                        updated = true;
+                    }
+                }
+
+                // Prefer known/most recent modified timestamp when available.
+                if modified > 0 && (existing.modified == 0 || modified > existing.modified) {
+                    existing.modified = modified;
+                    updated = true;
+                }
+
+                if updated && !state.is_ssd.unwrap_or(true) {
+                    items.sort_by(|a, b| match a.priority.cmp(&b.priority) {
+                        std::cmp::Ordering::Equal => a.directory_index.cmp(&b.directory_index),
+                        other => other,
+                    });
+                }
+
+                return updated;
+            }
+        }
+
+        // Defensive self-healing: pending contained path but request was missing in buckets.
+        state.pending.remove(path);
+        false
     }
 
     /// Remove specific paths from the queue (e.g., files being deleted)
@@ -327,18 +407,21 @@ mod tests {
     fn test_deduplication() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("test.jpg");
-        
+
         let queue = PriorityThumbnailQueue::new();
-        
+
         // Push same path twice
-        queue.push(path.clone(), 1, 64, IOPriority::Interactive, 0);
-        queue.push(path.clone(), 1, 64, IOPriority::Background, 0);
-        
-        // Should only get one back
+        queue.push_with_index(path.clone(), 1, 64, IOPriority::Background, Some(10), 0);
+        queue.push_with_index(path.clone(), 2, 256, IOPriority::Interactive, Some(2), 123);
+
+        // Should only get one back, with merged/upgraded fields
         let result = queue.pop();
         assert!(result.is_some());
-        
-        // Second pop should be None (queue is empty)
-        // Note: This would block, so we can't test it directly without a timeout
+        let (p, g, size, priority, modified) = result.unwrap();
+        assert_eq!(p, path);
+        assert_eq!(g, 2);
+        assert_eq!(size, 256);
+        assert_eq!(priority, IOPriority::Interactive);
+        assert_eq!(modified, 123);
     }
 }

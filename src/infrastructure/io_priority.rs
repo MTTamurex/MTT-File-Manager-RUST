@@ -5,6 +5,7 @@
 //! - Thread priority adjustment for background work
 //! - Directory-grouped request scheduling to minimize seeks on HDDs
 
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -15,6 +16,10 @@ static DISK_TYPE_CACHE: OnceLock<std::sync::Mutex<FxHashMap<char, bool>>> = Once
 
 fn get_disk_cache() -> &'static std::sync::Mutex<FxHashMap<char, bool>> {
     DISK_TYPE_CACHE.get_or_init(|| std::sync::Mutex::new(FxHashMap::default()))
+}
+
+thread_local! {
+    static THREAD_BG_MODE_ACTIVE: Cell<bool> = Cell::new(false);
 }
 
 /// Detects if a drive is a virtual Cryptomator drive
@@ -271,24 +276,30 @@ pub fn set_thread_priority(priority: IOPriority) {
     unsafe {
         let thread = GetCurrentThread();
 
-        match priority {
+        THREAD_BG_MODE_ACTIVE.with(|bg_active| match priority {
             IOPriority::Interactive => {
-                // Slightly elevated for responsive thumbnails
+                // Leaving background mode is required so Interactive requests can truly preempt.
+                if bg_active.replace(false) {
+                    let _ = SetThreadPriority(thread, THREAD_MODE_BACKGROUND_END);
+                }
                 let _ = SetThreadPriority(thread, THREAD_PRIORITY_ABOVE_NORMAL);
             }
             IOPriority::Prefetch => {
-                // Normal priority
+                if bg_active.replace(false) {
+                    let _ = SetThreadPriority(thread, THREAD_MODE_BACKGROUND_END);
+                }
                 let _ = SetThreadPriority(thread, THREAD_PRIORITY_NORMAL);
             }
             IOPriority::Background => {
-                // Lowest priority - yields to other work
+                if !bg_active.get() {
+                    // Enable background processing mode (Windows Vista+).
+                    // This tells the OS to give this thread minimal I/O priority.
+                    let _ = SetThreadPriority(thread, THREAD_MODE_BACKGROUND_BEGIN);
+                    bg_active.set(true);
+                }
                 let _ = SetThreadPriority(thread, THREAD_PRIORITY_LOWEST);
-
-                // Enable background processing mode (Windows Vista+)
-                // This tells the OS to give this thread minimal I/O priority
-                let _ = SetThreadPriority(thread, THREAD_MODE_BACKGROUND_BEGIN);
             }
-        }
+        });
     }
 }
 
@@ -299,8 +310,12 @@ pub fn reset_thread_priority() {
     unsafe {
         let thread = GetCurrentThread();
 
-        // Exit background mode if active
-        let _ = SetThreadPriority(thread, THREAD_MODE_BACKGROUND_END);
+        THREAD_BG_MODE_ACTIVE.with(|bg_active| {
+            if bg_active.replace(false) {
+                // Exit background mode if active
+                let _ = SetThreadPriority(thread, THREAD_MODE_BACKGROUND_END);
+            }
+        });
 
         // Reset to normal
         let _ = SetThreadPriority(thread, THREAD_PRIORITY_NORMAL);
