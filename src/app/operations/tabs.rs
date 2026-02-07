@@ -14,8 +14,14 @@ impl ImageViewerApp {
         active.is_recycle_bin_view = self.is_recycle_bin_view;
         active.navigation = self.navigation.clone();
         active.items = self.items.clone();
-        // PERF: Move instead of clone to reduce memory duplication
-        active.all_items = std::mem::take(&mut self.all_items);
+        // Special views still receive async in-place updates (ex: poll_drive_info for drives).
+        // Moving all_items out of app state would make those updaters rebuild the UI from an empty list.
+        if self.is_computer_view || self.is_recycle_bin_view {
+            active.all_items = self.all_items.clone();
+        } else {
+            // PERF: Move instead of clone to reduce memory duplication
+            active.all_items = std::mem::take(&mut self.all_items);
+        }
         active.selected_item = self.selected_item;
         active.selected_file = self.selected_file.clone();
         // PERF: Keep thumbnail when syncing (user might return to this tab)
