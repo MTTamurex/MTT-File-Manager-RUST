@@ -48,6 +48,12 @@ pub struct ItemsRebuildResult {
     pub total_items: usize,
 }
 
+#[derive(Debug, Clone)]
+pub enum FolderSizeMessage {
+    Progress { folder_path: PathBuf, total_size: u64 },
+    Complete { folder_path: PathBuf, total_size: u64 },
+}
+
 pub struct ImageViewerApp {
     pub current_path: String,
     pub loaded_path: String, // Tracks the last path we actually requested (prevents spam)
@@ -238,7 +244,7 @@ pub struct ImageViewerApp {
 
     // FOLDER SIZE CALCULATOR (async for details panel)
     pub folder_size_req_sender: Sender<PathBuf>, // UI → Worker
-    pub folder_size_res_receiver: Receiver<(PathBuf, u64)>, // Worker → UI
+    pub folder_size_res_receiver: Receiver<FolderSizeMessage>, // Worker → UI (progress + complete)
     pub folder_size_cache: LruCache<PathBuf, u64>, // Calculated sizes (LRU bounded)
     pub folder_size_loading: FxHashSet<PathBuf>, // Currently calculating
 

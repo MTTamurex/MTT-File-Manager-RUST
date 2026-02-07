@@ -1305,10 +1305,24 @@ impl ImageViewerApp {
         }
 
         // 9. FOLDER SIZE RESULTS
-        while let Ok((folder_path, total_size)) = self.folder_size_res_receiver.try_recv() {
-            self.folder_size_loading.remove(&folder_path);
-            self.folder_size_cache.put(folder_path, total_size);
-            received_any = true;
+        while let Ok(msg) = self.folder_size_res_receiver.try_recv() {
+            match msg {
+                crate::app::state::FolderSizeMessage::Progress {
+                    folder_path,
+                    total_size,
+                } => {
+                    self.folder_size_cache.put(folder_path, total_size);
+                    received_any = true;
+                }
+                crate::app::state::FolderSizeMessage::Complete {
+                    folder_path,
+                    total_size,
+                } => {
+                    self.folder_size_loading.remove(&folder_path);
+                    self.folder_size_cache.put(folder_path, total_size);
+                    received_any = true;
+                }
+            }
         }
 
         if received_any {
