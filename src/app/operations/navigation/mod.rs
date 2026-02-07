@@ -159,9 +159,7 @@ impl ImageViewerApp {
         self.reset_selection_and_search();
         self.watch_current_folder();
         self.setup_computer_view();
-        eprintln!("[COMPUTER-VIEW] navigate_to_computer: after setup, items.len()={}, all_items.len()={}", self.items.len(), self.all_items.len());
         self.sync_to_tab();
-        eprintln!("[COMPUTER-VIEW] navigate_to_computer: after sync_to_tab, items.len()={}, all_items.len()={}", self.items.len(), self.all_items.len());
     }
 
     pub fn navigate_to_recycle_bin(&mut self) {

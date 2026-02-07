@@ -115,6 +115,15 @@ impl ImageViewerApp {
 
     /// Configura a visão de "Este Computador" sem afetar o histórico
     pub fn setup_computer_view(&mut self) {
+        // CRITICAL: Increment generation to invalidate any pending items_rebuild results
+        // from the previous folder load. Without this, stale rebuild results (matching
+        // the old generation) arrive on the next frame and overwrite our computer view items.
+        self.generation += 1;
+        self.current_generation
+            .store(self.generation, AtomicOrdering::Relaxed);
+        self.pending_items_rebuild = false;
+        self.pending_items_count = 0;
+
         // Set computer view
         self.current_path = "Este Computador".to_string();
         self.is_computer_view = true;
@@ -152,10 +161,8 @@ impl ImageViewerApp {
             computer_items.push(entry);
         }
 
-        eprintln!("[COMPUTER-VIEW] setup_computer_view: disks={}, computer_items={}", self.disks.len(), computer_items.len());
         self.all_items = computer_items.clone();
         self.items = Arc::new(computer_items);
-        eprintln!("[COMPUTER-VIEW] after set: items.len()={}, all_items.len()={}", self.items.len(), self.all_items.len());
         
         // PRE-COMPUTE SECTION INDICES (O(n) once, not per frame)
         self.computer_view_local_indices.clear();

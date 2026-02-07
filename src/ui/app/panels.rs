@@ -22,12 +22,6 @@ pub fn render_panels(app: &mut ImageViewerApp, ctx: &egui::Context, _frame: &mut
     render_preview_panel_layout(app, ctx, _frame);
 
     // 4. Central Panel
-    if app.is_computer_view && app.items.is_empty() {
-        eprintln!("[COMPUTER-VIEW] render_panels: items still EMPTY after preview panel! stack trace:");
-        // Print all possible causes
-        eprintln!("[COMPUTER-VIEW]   is_loading_folder={}, generation={}, items_rebuild_request_id={}", 
-            app.is_loading_folder, app.generation, app.items_rebuild_request_id);
-    }
     render_central_panel_layout(app, ctx);
 
     // 5. Focus release: When user clicks anywhere outside the video player,
@@ -455,10 +449,6 @@ fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     ui.label("Carregando...");
                 });
             } else if app.items.is_empty() {
-                if app.is_computer_view {
-                    eprintln!("[COMPUTER-VIEW] render_central_panel: items EMPTY in computer view! all_items={} disks={}", 
-                        app.all_items.len(), app.disks.len());
-                }
                 let response = ui
                     .centered_and_justified(|ui| {
                         ui.label("Pasta vazia");
