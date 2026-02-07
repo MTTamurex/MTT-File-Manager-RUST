@@ -418,12 +418,13 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             if let Some(info) = cached_info {
                 entry.drive_info = Some(info);
             } else {
-                // Fallback: minimal drive info with type only (GetDriveTypeW is fast/cached)
+                // Fallback: query volume info directly (fast for local drives — kernel-cached)
                 let drive_type = windows_infra::detect_drive_type(&app.current_path);
+                let vol = windows_infra::get_volume_info(&app.current_path);
                 entry.drive_info = Some(crate::domain::file_entry::DriveInfo {
-                    file_system: String::new(),
-                    total_space: 0,
-                    free_space: 0,
+                    file_system: vol.file_system,
+                    total_space: vol.total_space,
+                    free_space: vol.free_space,
                     drive_type,
                 });
             }
