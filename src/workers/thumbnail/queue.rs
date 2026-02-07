@@ -76,35 +76,24 @@ impl PriorityThumbnailQueue {
         // Group by parent directory (for HDD seek optimization)
         let parent = path.parent().unwrap_or(&path).to_path_buf();
         let is_ssd = Self::detect_drive_class(&mut state, &path);
-
-        // Deduplication with merge: upgrade existing request instead of dropping.
-        if state.pending.contains(&path) {
-            if Self::merge_pending_request(
-                &mut state,
-                &parent,
-                &path,
-                gen,
-                request_size,
-                priority,
-                directory_index,
-                modified,
-                is_ssd,
-            ) {
-                self.condvar.notify_one();
-            }
-            return;
-        }
-
-        state.pending.insert(path.clone());
-
         let request = ThumbnailRequest {
-            path,
+            path: path.clone(),
             generation: gen,
             size: request_size,
             priority,
             directory_index,
             modified,
         };
+
+        // Deduplication with merge: upgrade existing request instead of dropping.
+        if state.pending.contains(&path) {
+            if Self::merge_pending_request(&mut state, &parent, &request, is_ssd) {
+                self.condvar.notify_one();
+            }
+            return;
+        }
+
+        state.pending.insert(path.clone());
 
         state.by_directory.entry(parent.clone()).or_default().push(request);
 
@@ -156,38 +145,33 @@ impl PriorityThumbnailQueue {
     fn merge_pending_request(
         state: &mut QueueState,
         parent: &PathBuf,
-        path: &PathBuf,
-        gen: usize,
-        request_size: u32,
-        priority: IOPriority,
-        directory_index: Option<usize>,
-        modified: u64,
+        incoming: &ThumbnailRequest,
         is_ssd: bool,
     ) -> bool {
         if let Some(items) = state.by_directory.get_mut(parent) {
-            if let Some(existing) = items.iter_mut().find(|req| req.path == *path) {
+            if let Some(existing) = items.iter_mut().find(|req| req.path == incoming.path) {
                 let mut updated = false;
 
                 // Promote to the most urgent priority (Interactive < Prefetch < Background).
-                if priority < existing.priority {
-                    existing.priority = priority;
+                if incoming.priority < existing.priority {
+                    existing.priority = incoming.priority;
                     updated = true;
                 }
 
                 // Keep the largest requested size to avoid serving undersized thumbnails.
-                if request_size > existing.size {
-                    existing.size = request_size;
+                if incoming.size > existing.size {
+                    existing.size = incoming.size;
                     updated = true;
                 }
 
                 // Keep the newest generation so stale requests do not win.
-                if gen > existing.generation {
-                    existing.generation = gen;
+                if incoming.generation > existing.generation {
+                    existing.generation = incoming.generation;
                     updated = true;
                 }
 
                 // Prefer lower directory index for earlier on-screen items.
-                if let Some(new_index) = directory_index {
+                if let Some(new_index) = incoming.directory_index {
                     let replace_index = match existing.directory_index {
                         Some(old_index) => new_index < old_index,
                         None => true,
@@ -199,8 +183,10 @@ impl PriorityThumbnailQueue {
                 }
 
                 // Prefer known/most recent modified timestamp when available.
-                if modified > 0 && (existing.modified == 0 || modified > existing.modified) {
-                    existing.modified = modified;
+                if incoming.modified > 0
+                    && (existing.modified == 0 || incoming.modified > existing.modified)
+                {
+                    existing.modified = incoming.modified;
                     updated = true;
                 }
 
@@ -216,7 +202,7 @@ impl PriorityThumbnailQueue {
         }
 
         // Defensive self-healing: pending contained path but request was missing in buckets.
-        state.pending.remove(path);
+        state.pending.remove(&incoming.path);
         false
     }
 

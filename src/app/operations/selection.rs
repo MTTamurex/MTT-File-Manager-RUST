@@ -46,7 +46,7 @@ impl ImageViewerApp {
             } else {
                 path.extension()
                     .and_then(|e| e.to_str())
-                    .map(|ext| crate::infrastructure::windows::is_media_extension(ext))
+                    .map(crate::infrastructure::windows::is_media_extension)
                     .unwrap_or(false)
             };
             if is_media {
@@ -167,7 +167,7 @@ impl ImageViewerApp {
             let selected_path_matches = self
                 .selected_file
                 .as_ref()
-                .map_or(false, |f| f.path == player.path);
+                .is_some_and(|f| f.path == player.path);
 
             let visible = is_owner && self.show_preview_panel && selected_path_matches;
 

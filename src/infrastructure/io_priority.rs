@@ -19,7 +19,7 @@ fn get_disk_cache() -> &'static std::sync::Mutex<FxHashMap<char, bool>> {
 }
 
 thread_local! {
-    static THREAD_BG_MODE_ACTIVE: Cell<bool> = Cell::new(false);
+    static THREAD_BG_MODE_ACTIVE: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Detects if a drive is a virtual Cryptomator drive
@@ -50,7 +50,7 @@ fn is_virtual_drive(drive_letter: char) -> bool {
         )
     };
 
-    if !ok.is_ok() {
+    if ok.is_err() {
         return false;
     }
 
@@ -75,7 +75,7 @@ fn is_virtual_drive(drive_letter: char) -> bool {
 }
 
 /// Priority levels for I/O operations
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum IOPriority {
     /// Thumbnail visible on screen NOW - user is waiting
     /// Processed with normal thread priority
@@ -83,17 +83,12 @@ pub enum IOPriority {
 
     /// Thumbnail that will be visible soon (prefetch nearby items)
     /// Processed with slightly lower priority
+    #[default]
     Prefetch = 1,
 
     /// Background operations (folder covers, metadata discovery)
     /// Processed with lowest priority, yields to other I/O
     Background = 2,
-}
-
-impl Default for IOPriority {
-    fn default() -> Self {
-        IOPriority::Prefetch
-    }
 }
 
 /// Detect if a path is on an SSD (no seek penalty) or HDD (has seek penalty)
@@ -362,7 +357,7 @@ impl<T> DirectoryGroupedQueue<T> {
         let parent = path.parent().unwrap_or(&path).to_path_buf();
         self.by_directory
             .entry(parent)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push((priority, item));
     }
 

@@ -466,8 +466,6 @@ impl MediaPreview {
     }
 
     /// Force video restore when stuck on white screen - only works for video player
-
-
     pub fn path(&self) -> Option<&std::path::Path> {
         match self {
             MediaPreview::StaticImage(_) => None,

@@ -93,3 +93,9 @@ impl WorkerState {
         (tx, rx)
     }
 }
+
+impl Default for WorkerState {
+    fn default() -> Self {
+        Self::new()
+    }
+}

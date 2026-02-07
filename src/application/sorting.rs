@@ -12,7 +12,7 @@ fn ends_with_ignore_case(s: &str, suffix: &str) -> bool {
     s.as_bytes()[start..]
         .iter()
         .zip(suffix.as_bytes())
-        .all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
+        .all(|(a, b)| a.eq_ignore_ascii_case(b))
 }
 
 /// Helper function to get the appropriate date for sorting.
@@ -61,12 +61,10 @@ pub fn sort_items(
                 } else {
                     Ordering::Greater
                 }
+            } else if folders_come_first {
+                Ordering::Greater
             } else {
-                if folders_come_first {
-                    Ordering::Greater
-                } else {
-                    Ordering::Less
-                }
+                Ordering::Less
             };
         }
 

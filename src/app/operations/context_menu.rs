@@ -307,7 +307,7 @@ impl ImageViewerApp {
         let Some(shell_ctx) = native_ctx.as_ref().downcast_ref::<ShellMenuContext>() else { return };
 
         // 1. Find the ShellMenuItem recursively
-        fn find_shell_item_mut<'a>(items: &'a mut [ShellMenuItem], id: u32) -> Option<&'a mut ShellMenuItem> {
+        fn find_shell_item_mut(items: &mut [ShellMenuItem], id: u32) -> Option<&mut ShellMenuItem> {
             for item in items {
                 if item.id == id {
                     return Some(item);

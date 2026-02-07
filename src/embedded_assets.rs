@@ -1,6 +1,5 @@
 /// Embedded assets module
 /// This module contains all assets embedded at compile time to make the executable portable
-
 // Embed the Remix Icon font
 pub const REMIXICON_TTF: &[u8] = include_bytes!("../assets/remixicon.ttf");
 

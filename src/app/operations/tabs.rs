@@ -90,7 +90,7 @@ impl ImageViewerApp {
                     let current_folder = std::path::PathBuf::from(&active.path);
                     let covers = self
                         .disk_cache
-                        .get_folder_covers(&vec![current_folder.clone()]);
+                        .get_folder_covers(std::slice::from_ref(&current_folder));
                     if let Some(current_cover) = covers.get(&current_folder) {
                         if current_cover == &removed_path {
                             self.disk_cache.remove_folder_cover(&current_folder);

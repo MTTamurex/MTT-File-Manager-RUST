@@ -10,20 +10,11 @@ pub enum ClipboardOp {
 }
 
 /// Manages clipboard content and operations
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ClipboardManager {
     /// Internal clipboard state (fallback/cache)
     internal_files: Vec<PathBuf>,
     internal_op: Option<ClipboardOp>,
-}
-
-impl Default for ClipboardManager {
-    fn default() -> Self {
-        Self {
-            internal_files: Vec::new(),
-            internal_op: None,
-        }
-    }
 }
 
 impl ClipboardManager {

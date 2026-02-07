@@ -105,7 +105,7 @@ impl ImageViewerApp {
             let current_index = self.items.iter().position(|x| {
                 self.selected_file
                     .as_ref()
-                    .map_or(false, |f| f.path == x.path)
+                    .is_some_and(|f| f.path == x.path)
             });
 
             let row_height = 24.0;
@@ -124,7 +124,7 @@ impl ImageViewerApp {
 
             // Apply navigation result
             if let Some(new_idx) = nav_result.new_index {
-                let clamped = new_idx.min(self.items.len().saturating_sub(1)) as usize;
+                let clamped = new_idx.min(self.items.len().saturating_sub(1));
                 if let Some(item) = self.items.get(clamped) {
                     let item_path = item.path.clone();
                     let is_dir = item.is_dir;
@@ -171,12 +171,12 @@ impl ImageViewerApp {
 
                     ui.ctx().request_repaint();
 
-                    if !is_dir && is_media {
-                        if !self.cache_manager.has_thumbnail(&item_path)
-                            && !self.cache_manager.is_loading(&item_path)
-                        {
-                            self.request_thumbnail_load(item_path, 512);
-                        }
+                    if !is_dir
+                        && is_media
+                        && !self.cache_manager.has_thumbnail(&item_path)
+                        && !self.cache_manager.is_loading(&item_path)
+                    {
+                        self.request_thumbnail_load(item_path, 512);
                     }
                 }
             }
@@ -366,12 +366,12 @@ impl ImageViewerApp {
                     self.update_selected_thumbnail();
 
                     // Trigger thumbnail load for sidebar preview
-                    if !is_dir && is_media {
-                        if !self.cache_manager.has_thumbnail(&item_path)
-                            && !self.cache_manager.is_loading(&item_path)
-                        {
-                            self.request_thumbnail_load(item_path, 512);
-                        }
+                    if !is_dir
+                        && is_media
+                        && !self.cache_manager.has_thumbnail(&item_path)
+                        && !self.cache_manager.is_loading(&item_path)
+                    {
+                        self.request_thumbnail_load(item_path, 512);
                     }
                 }
             }
@@ -449,7 +449,7 @@ impl ImageViewerApp {
                 let path = PathBuf::from(&self.current_path);
                 let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
                 let right_bound = ui.available_rect_before_wrap().right();
-                self.populate_context_menu(ui.ctx(), &[path.clone()], true, None);
+                self.populate_context_menu(ui.ctx(), std::slice::from_ref(&path), true, None);
                 self.context_menu
                     .open(pointer_pos, right_bound, None, vec![path], true);
             }

@@ -48,6 +48,12 @@ impl IdleWarmupWorker {
     }
 }
 
+impl Default for IdleWarmupWorker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub fn spawn_idle_warmup_worker(
     receiver: Receiver<IdleWarmupMessage>,
     _thumbnail_queue: Arc<PriorityThumbnailQueue>,

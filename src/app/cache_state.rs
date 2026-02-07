@@ -44,3 +44,9 @@ impl CacheState {
         self.metadata_loading.clear();
     }
 }
+
+impl Default for CacheState {
+    fn default() -> Self {
+        Self::new()
+    }
+}

@@ -242,7 +242,7 @@ pub fn is_file_open(path: &Path) -> bool {
             // Failed to open - likely because it's in use
             // Check specifically for "file in use" errors
             e.kind() == io::ErrorKind::PermissionDenied
-                || e.raw_os_error().map_or(false, |code| {
+                || e.raw_os_error().is_some_and(|code| {
                     // Windows error codes for "file in use":
                     // ERROR_SHARING_VIOLATION (32), ERROR_LOCK_VIOLATION (33)
                     code == 32 || code == 33
