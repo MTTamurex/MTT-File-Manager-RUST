@@ -122,12 +122,10 @@ impl DriveWatcherManager {
     /// This should be called regularly (e.g., every frame or every 100ms).
     pub fn poll_events(&self) -> Vec<DriveWatcherEvent> {
         let Some(ref drive) = self.current_drive else {
-            eprintln!("[DRIVE-WATCHER-MGR] No current drive, skipping poll");
             return Vec::new();
         };
         
         let Some(watcher) = self.watchers.get(drive) else {
-            eprintln!("[DRIVE-WATCHER-MGR] No watcher for drive {:?}, skipping poll", drive);
             return Vec::new();
         };
         

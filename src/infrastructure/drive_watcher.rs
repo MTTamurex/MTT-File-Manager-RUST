@@ -95,10 +95,11 @@ impl DriveWatcher {
     pub fn new(drive_root: PathBuf, initial_prefix: PathBuf) -> Option<Self> {
         let (cmd_tx, cmd_rx) = std::sync::mpsc::channel();
         let (event_tx, event_rx) = std::sync::mpsc::channel();
-        let prefix = Arc::new(Mutex::new(initial_prefix));
+        let prefix = Arc::new(Mutex::new(initial_prefix.clone()));
         let shutdown = Arc::new(AtomicBool::new(false));
 
         let shutdown_clone = Arc::clone(&shutdown);
+        let initial_prefix_for_thread = initial_prefix.clone();
 
         // Open the drive handle in the main thread to validate early
         // We pass the path to the thread and open it there to avoid Send issues with HANDLE
@@ -120,6 +121,7 @@ impl DriveWatcher {
                 cmd_rx,
                 event_tx,
                 shutdown_clone,
+                initial_prefix_for_thread,
             );
         });
 
@@ -248,6 +250,7 @@ fn watcher_thread_main(
     command_rx: std::sync::mpsc::Receiver<WatcherCommand>,
     event_tx: std::sync::mpsc::Sender<Vec<DriveWatcherEvent>>,
     shutdown: Arc<AtomicBool>,
+    mut current_prefix: PathBuf,
 ) {
     eprintln!("[DRIVE-WATCHER] Thread started for drive: {:?}", drive_root);
 
@@ -278,15 +281,26 @@ fn watcher_thread_main(
                 break;
             }
 
-            // Check for commands (non-blocking)
-            match command_rx.try_recv() {
-                Ok(WatcherCommand::UpdatePrefix(_new_prefix)) => {
-                    // Prefix updated (silent)
+            // Drain commands (non-blocking), keeping the latest prefix.
+            let mut should_exit = false;
+            loop {
+                match command_rx.try_recv() {
+                    Ok(WatcherCommand::UpdatePrefix(new_prefix)) => {
+                        current_prefix = new_prefix;
+                    }
+                    Ok(WatcherCommand::Shutdown) => {
+                        should_exit = true;
+                        break;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        should_exit = true;
+                        break;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
                 }
-                Ok(WatcherCommand::Shutdown) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    break;
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+            if should_exit {
+                break;
             }
 
             // Start async read if not already pending
@@ -332,8 +346,11 @@ fn watcher_thread_main(
                         parse_notify_buffer(&buffer[..bytes_returned as usize], &drive_root);
 
                     // Insert into coalescing set (deduplicates automatically)
+                    // and filter by the currently watched prefix.
                     for event in events {
-                        coalesced.insert(event);
+                        if event_matches_prefix(&event, &current_prefix) {
+                            coalesced.insert(event);
+                        }
                     }
                 }
 
@@ -449,38 +466,46 @@ fn parse_notify_buffer(buffer: &[u8], drive_root: &Path) -> Vec<DriveWatcherEven
     events
 }
 
-/// Check if an event matches the current prefix
-#[cfg(test)]
-fn event_matches_prefix(event: &DriveWatcherEvent, prefix: &Path) -> bool {
-    let path = match event {
-        DriveWatcherEvent::Created(p) => p,
-        DriveWatcherEvent::Deleted(p) => p,
-        DriveWatcherEvent::Modified(p) => p,
-        DriveWatcherEvent::Renamed(old, _) => old,
-        DriveWatcherEvent::Unknown(p) => p,
-    };
-
+fn path_matches_prefix(path: &Path, prefix: &Path) -> bool {
     // Normalize both paths for comparison
-    let path_str = path.to_string_lossy().to_lowercase();
-    let prefix_str = prefix.to_string_lossy().to_lowercase();
+    let path_str_raw = path.to_string_lossy().to_lowercase();
+    let prefix_str_raw = prefix.to_string_lossy().to_lowercase();
+
+    if prefix_str_raw.is_empty() {
+        return true;
+    }
+
+    let path_str = path_str_raw
+        .strip_prefix(r"\\?\")
+        .unwrap_or(&path_str_raw);
+    let prefix_str = prefix_str_raw
+        .strip_prefix(r"\\?\")
+        .unwrap_or(&prefix_str_raw);
 
     // Ensure both end with backslash for proper prefix matching
     let prefix_normalized = if prefix_str.ends_with('\\') {
-        prefix_str
+        prefix_str.to_string()
     } else {
         format!("{}\\", prefix_str)
     };
 
-    // Event matches if path starts with the prefix
-    // This handles both files in subdirectories and files in the root
-    let matches = path_str.starts_with(&prefix_normalized) ||
-                  // Special case: if prefix is drive root (e.g., "d:\\")
-                  // then any path on that drive matches
-                  (prefix_normalized.len() == 3 && path_str.starts_with(&prefix_normalized[..2]));
+    path_str.starts_with(&prefix_normalized)
+        // Special case: if prefix is drive root (e.g., "d:\\"),
+        // any path on that drive matches.
+        || (prefix_normalized.len() == 3 && path_str.starts_with(&prefix_normalized[..2]))
+}
 
-    // Silent prefix matching (verbose logging removed)
-
-    matches
+/// Check if an event matches the current prefix.
+fn event_matches_prefix(event: &DriveWatcherEvent, prefix: &Path) -> bool {
+    match event {
+        DriveWatcherEvent::Created(p)
+        | DriveWatcherEvent::Deleted(p)
+        | DriveWatcherEvent::Modified(p)
+        | DriveWatcherEvent::Unknown(p) => path_matches_prefix(p, prefix),
+        DriveWatcherEvent::Renamed(old, new) => {
+            path_matches_prefix(old, prefix) || path_matches_prefix(new, prefix)
+        }
+    }
 }
 
 #[cfg(test)]
