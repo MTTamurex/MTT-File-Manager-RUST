@@ -22,6 +22,7 @@
 
 pub mod clipboard_ops;
 pub mod context_menu;
+pub mod drag_drop;
 pub mod file_ops;
 pub mod folder_loading;
 pub mod icons;

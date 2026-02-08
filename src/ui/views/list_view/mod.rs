@@ -263,6 +263,14 @@ pub struct ListViewContext<'a> {
     pub prefetch_rows: usize,
     /// Output: visible item index range for GPU upload prioritization
     pub visible_index_range: &'a mut Option<(usize, usize)>,
+    /// Whether an item drag operation is active
+    pub is_item_dragging: bool,
+    /// Current folder path under drop target highlight
+    pub drag_target_folder: Option<PathBuf>,
+    /// Output: item where drag started this frame
+    pub drag_started_item: &'a mut Option<usize>,
+    /// Output: currently hovered folder item during drag
+    pub drag_hovered_item: &'a mut Option<usize>,
     // Resizable column widths
     pub col_name_width: &'a mut f32,
     pub col_date_width: &'a mut f32,

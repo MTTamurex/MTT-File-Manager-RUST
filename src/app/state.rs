@@ -129,6 +129,10 @@ pub struct ImageViewerApp {
     pub selected_item: Option<usize>,
     pub selected_file: Option<FileEntry>,
     pub multi_selection: FxHashSet<PathBuf>,
+    // Internal drag-and-drop state (Explorer-like item move/copy inside file list views)
+    pub is_item_dragging: bool,
+    pub drag_payload_paths: Vec<PathBuf>,
+    pub drag_target_folder: Option<PathBuf>,
     pub selected_thumbnail: Option<egui::TextureHandle>, // Persistent thumbnail for preview panel
     pub selected_gif: Option<crate::ui::components::media_preview::GifPlayer>, // Local GIF for preview panel
     pub media_preview: Option<MediaPreview>, // Global media preview (video/image)

@@ -220,6 +220,8 @@ impl ImageViewerApp {
         let multi_selection = &self.multi_selection;
         let is_ssd = io_priority::is_ssd(&PathBuf::from(&self.current_path));
         let prefetch_rows = if is_ssd { 1 } else { 3 };
+        let mut drag_started_item = None;
+        let mut drag_hovered_item = None;
 
         // Select appropriate column width references based on context
         let (col_name_width, col_date_width, col_type_width, col_size_width, col_status_width) =
@@ -286,6 +288,10 @@ impl ImageViewerApp {
             is_on_hdd: !is_ssd,
             prefetch_rows,
             visible_index_range: &mut self.visible_index_range,
+            is_item_dragging: self.is_item_dragging,
+            drag_target_folder: self.drag_target_folder.clone(),
+            drag_started_item: &mut drag_started_item,
+            drag_hovered_item: &mut drag_hovered_item,
             col_name_width,
             col_date_width,
             col_type_width,
@@ -454,6 +460,34 @@ impl ImageViewerApp {
                     .open(pointer_pos, right_bound, None, vec![path], true);
             }
             _ => {}
+        }
+
+        if !is_renaming {
+            if let Some(start_idx) = drag_started_item {
+                self.begin_item_drag(start_idx);
+            }
+
+            if self.is_item_dragging {
+                self.update_item_drag_target_from_hover(drag_hovered_item);
+                let (ctrl, shift, primary_down, primary_released) = ui.input(|i| {
+                    (
+                        i.modifiers.ctrl,
+                        i.modifiers.shift,
+                        i.pointer.primary_down(),
+                        i.pointer.primary_released(),
+                    )
+                });
+
+                self.apply_item_drag_cursor_feedback(ui.ctx(), ctrl, shift);
+
+                if primary_released {
+                    self.complete_item_drag(ctrl, shift);
+                } else if !primary_down {
+                    self.cancel_item_drag();
+                }
+            }
+        } else if self.is_item_dragging {
+            self.cancel_item_drag();
         }
 
         // Execute collected actions

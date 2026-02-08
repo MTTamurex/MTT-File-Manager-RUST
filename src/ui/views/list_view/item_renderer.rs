@@ -57,7 +57,7 @@ pub(super) fn render_list_item(
     let w_size = col_widths.size;
 
     ui.push_id(i, |ui| {
-        let response = ui.interact(rect, ui.id().with(i), Sense::click());
+        let response = ui.interact(rect, ui.id().with(i), Sense::click_and_drag());
 
         // Selection and Action
         if response.clicked() {
@@ -70,6 +70,16 @@ pub(super) fn render_list_item(
 
         if response.secondary_clicked() {
             *secondary_clicked_item = Some(i);
+        }
+        if response.drag_started() {
+            *ctx.drag_started_item = Some(i);
+        }
+        let is_pointer_over = ui
+            .ctx()
+            .pointer_latest_pos()
+            .is_some_and(|pos| rect.contains(pos));
+        if (response.hovered() || is_pointer_over) && item.is_dir {
+            *ctx.drag_hovered_item = Some(i);
         }
 
         // --- VISUAL FEEDBACK: BORDER-ONLY (MODERN DESIGN) ---
@@ -104,6 +114,28 @@ pub(super) fn render_list_item(
                 visual_rect,
                 rounding,
                 egui::Stroke::new(1.0, hover_color),
+                egui::StrokeKind::Inside,
+            );
+        }
+
+        let pointer_over_drop_candidate = ctx.is_item_dragging && item.is_dir && is_pointer_over;
+        let is_active_drop_target = ctx.is_item_dragging
+            && item.is_dir
+            && ctx
+                .drag_target_folder
+                .as_ref()
+                .is_some_and(|target| *target == item.path);
+
+        if pointer_over_drop_candidate || is_active_drop_target {
+            let stroke_color = if is_active_drop_target {
+                Color32::from_rgb(24, 122, 255)
+            } else {
+                accent_color.gamma_multiply(0.75)
+            };
+            ui.painter().rect_stroke(
+                visual_rect.shrink(1.0),
+                rounding,
+                egui::Stroke::new(2.0, stroke_color),
                 egui::StrokeKind::Inside,
             );
         }
