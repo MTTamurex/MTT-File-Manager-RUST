@@ -150,5 +150,25 @@ Racional: começa nos pontos com maior risco de regressão silenciosa e maior ga
 ---
 
 ## Status
-Plano criado. Nenhuma refatoração iniciada ainda.  
-Aguardando sua ordem para começar pela Fase 1.
+Plano em execucao.
+Considere a secao **Status Atual (2026-02-08)** como fonte de verdade.
+
+## Status Atual (2026-02-08)
+
+### Concluido
+- [x] `message_handler` modularizado e normalizado para `src/app/operations/message_handler/mod.rs`.
+- [x] `folder_loading` modularizado e normalizado para `src/app/operations/folder_loading/mod.rs`.
+- [x] `grid_view` modularizado e normalizado para `src/ui/views/grid_view/mod.rs`.
+- [x] `app_impl` reduzido para arquivo coordenador com extracoes em `src/ui/app/`.
+- [x] `tab_bar` modularizado e normalizado para `src/ui/tab_bar/mod.rs`.
+- [x] `onedrive` modularizado e normalizado para `src/infrastructure/onedrive/mod.rs`.
+- [x] `mpv_preview` modularizado (`lifecycle`, `playback_state`, `docked_filters`, `window_embed`) e normalizado para `src/ui/components/mpv_preview/mod.rs`.
+- [x] `item_slot` modularizado (`drive_slot`, `folder_slot`, `file_slot`, `badges`) e normalizado para `src/ui/components/item_slot/mod.rs`.
+
+### Validacao tecnica
+- `cargo fmt` executado apos cada etapa.
+- `cargo check --all-targets --all-features` verde apos cada etapa.
+
+### Pendente
+- [ ] Rodada de validacao funcional manual (UI/UX) dos fluxos criticos: navegacao, interacao de grid/lista, preview de midia, operacoes de arquivo e watchers.
+
