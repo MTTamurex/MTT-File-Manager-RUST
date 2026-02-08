@@ -40,9 +40,9 @@ src/
 - **`clipboard_ops.rs`** - Operações de clipboard (copiar, cortar, colar)
 - **`context_menu.rs`** - Menu de contexto
 - **`file_ops.rs`** - Operações de arquivo (deletar, renomear)
-- **`folder_loading.rs`** - Carregamento de pastas
+- **`folder_loading/mod.rs`** - Carregamento de pastas
 - **`icons.rs`** - Gerenciamento de ícones
-- **`message_handler.rs`** - Handler de mensagens entre threads
+- **`message_handler/mod.rs`** - Handler de mensagens entre threads
 - **`metadata.rs`** - Solicitação de metadados
 - **`preferences.rs`** - Preferências do usuário
 - **`recycle_bin_ops.rs`** - Operações da lixeira
@@ -53,6 +53,22 @@ src/
 - **`view_setup.rs`** - Configuração de views
 - **`watcher.rs`** - Monitoramento de mudanças
 - **`window.rs`** - Gerenciamento de janela
+
+**Submódulos de operações refatorados**:
+- **`folder_loading/`** - Pipeline de carregamento de pastas
+  - **`mod.rs`** - Coordenador do fluxo
+  - **`load_pipeline.rs`** - Pipeline principal de carregamento
+  - **`folder_scan.rs`** - Scan e leitura de diretórios
+  - **`refresh.rs`** - Regras de refresh e reload
+  - **`guards.rs`** - Guards/validações de fluxo
+  - **`view_updates.rs`** - Atualizações de estado para UI
+- **`message_handler/`** - Processamento de eventos dos workers/watchers
+  - **`mod.rs`** - Dispatcher/orquestração
+  - **`file_op_events.rs`** - Eventos de operações de arquivo
+  - **`watcher_events.rs`** - Eventos de file watcher
+  - **`thumbnail_events.rs`** - Eventos de thumbnail
+  - **`rebuild_events.rs`** - Eventos de rebuild/reordenação
+  - **`helpers.rs`** - Helpers e utilitários de apoio
 
 **Navegação** (`src/app/operations/navigation/`):
 - **`mod.rs`** - Lógica principal de navegação
@@ -181,11 +197,19 @@ pub enum AppError {
 - **`ntfs_reader.rs`** - Leitor NTFS otimizado
 - **`drive_watcher.rs`** - Drive-wide file watcher (ReadDirectoryChangesW)
 - **`drive_watcher_integration.rs`** - Manager para múltiplos drive watchers
-- **`onedrive.rs`** - Detecção de status OneDrive
+- **`onedrive/mod.rs`** - Detecção de status OneDrive
 - **`security.rs`** - Validações de segurança
 - **`virtual_drive_config.rs`** - Configuração de drives virtuais
 - **`watcher.rs`** - Watcher genérico de filesystem
 - **`windows_clipboard.rs`** - Clipboard Windows (CF_HDROP)
+
+**Submódulos refatorados**:
+- **`onedrive/`** - Módulo OneDrive segmentado por responsabilidade
+  - **`mod.rs`** - API pública/coordenador
+  - **`path_detection.rs`** - Detecção de caminhos OneDrive
+  - **`attributes.rs`** - Atributos/sync flags
+  - **`timeout_ops.rs`** - Operações com timeout
+  - **`directory_enum.rs`** - Enumeração de diretórios
 
 **Integrações Windows** (`src/infrastructure/windows/`):
 - **`mod.rs`** - Re-exports e funções principais
@@ -257,12 +281,26 @@ pub fn is_active(&self) -> bool
 **Componentes** (`src/ui/components/`):
 - **`mod.rs`** - Re-exports
 - **`gif_manager.rs`** - Gerenciador de GIFs animados
-- **`item_slot.rs`** - Slot de item para grid
+- **`item_slot/mod.rs`** - Slot de item para grid
 - **`media_preview.rs`** - Preview genérico de mídia
-- **`mpv_preview.rs`** - Preview de vídeo com mpv
+- **`mpv_preview/mod.rs`** - Preview de vídeo com mpv
 - **`video_controls_state.rs`** - Estado de controles de vídeo
 - **`video_menu.rs`** - Menu de vídeo
 - **`virtual_drive_settings.rs`** - Configuração de drives virtuais
+
+**Submódulos de componentes refatorados**:
+- **`item_slot/`** - Renderização de slots por tipo
+  - **`mod.rs`** - Dispatch principal
+  - **`drive_slot.rs`** - Slot de drive
+  - **`folder_slot.rs`** - Slot de pasta
+  - **`file_slot.rs`** - Slot de arquivo
+  - **`badges.rs`** - Badges de sync/status
+- **`mpv_preview/`** - Bridge MPV por responsabilidade
+  - **`mod.rs`** - Coordenador do preview
+  - **`lifecycle.rs`** - Inicialização/shutdown
+  - **`playback_state.rs`** - Estado e comandos de playback
+  - **`docked_filters.rs`** - Filtros/perfil docked
+  - **`window_embed.rs`** - Embedding e sync da janela nativa
 
 **MPV Sub-módulo** (`src/ui/components/mpv/`):
 - **`mod.rs`** - Re-exports
@@ -276,13 +314,21 @@ pub fn is_active(&self) -> bool
 - **`mod.rs`** - Re-exports
 - **`common.rs`** - Funções comuns às views
 - **`computer_view.rs`** - View "Este Computador"
-- **`grid_view.rs`** - Visualização em grade
+- **`grid_view/mod.rs`** - Visualização em grade
 - **`list_view/`** - Visualização em lista (sub-módulo)
   - **`mod.rs`** - Entry point
   - **`header.rs`** - Cabeçalho da lista
   - **`helpers.rs`** - Funções auxiliares
   - **`item_renderer.rs`** - Renderização de itens
   - **`virtualization.rs`** - Virtualização de lista
+
+**Submódulo de grid view refatorado** (`src/ui/views/grid_view/`):
+- **`mod.rs`** - Orquestração principal da grid
+- **`virtualization.rs`** - Cálculo de janela visível
+- **`item_renderer.rs`** - Renderização dos itens
+- **`scroll.rs`** - Gerenciamento de scroll
+- **`prefetch.rs`** - Estratégia de prefetch
+- **`interactions.rs`** - Interações e eventos de input
 
 **Preview Panel** (`src/ui/preview_panel/`):
 - **`mod.rs`** - Entry point do preview panel
@@ -307,10 +353,17 @@ pub fn is_active(&self) -> bool
 - **`sidebar.rs`** - Sidebar com atalhos
 - **`status_bar.rs`** - Barra de status
 - **`svg_icons.rs`** - Gerenciador de ícones SVG
-- **`tab_bar.rs`** - Sistema de abas
+- **`tab_bar/mod.rs`** - Sistema de abas
 - **`theme.rs`** - Tema e cores
 - **`toolbar.rs`** - Barra de ferramentas
 - **`widgets.rs`** - Widgets customizados
+
+**Submódulo de tab bar refatorado** (`src/ui/tab_bar/`):
+- **`mod.rs`** - Coordenador principal
+- **`tabs_renderer.rs`** - Renderização de tabs
+- **`window_controls.rs`** - Controles de janela
+- **`drag_dwell.rs`** - Lógica de hover/drag dwell
+- **`new_tab_area.rs`** - Área de criação de nova aba
 
 ---
 
@@ -434,4 +487,5 @@ lib.rs
 
 ---
 
-*Última atualização: 2026-02-03 (pós-refatoração)*
+*Última atualização: 2026-02-08 (modularização de monólitos concluída)*
+

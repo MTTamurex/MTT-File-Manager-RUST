@@ -33,8 +33,8 @@ walkdir = "2.5"
 notify = { version = "6.1.1", optional = true }
 ```
 - **Propósito**: Monitoramento de mudanças no filesystem
-- **Feature**: `notify-watcher` (default)
-- **Nota**: Usa ReadDirectoryChangesW no Windows (não requer admin)
+- **Feature**: `notify-watcher` (default, fallback para UNC/rede)
+- **Nota**: Monitoramento principal é feito por Drive Watcher nativo; `notify` cobre fallback
 
 ### Cache e Performance
 ```toml
@@ -238,10 +238,10 @@ notify-watcher = ["notify"]
 ```
 
 ### `notify-watcher` (Default)
-- Habilita monitoramento de filesystem via `notify` crate
-- Implementa `ReadDirectoryChangesW` no Windows
+- Habilita fallback de monitoramento para UNC/rede via `notify` crate
+- Complementa o Drive Watcher nativo usado em drives locais
 - Não requer privilégios de administrador
-- Pode ser desabilitado com: `cargo build --no-default-features`
+- Pode ser desabilitado com: `cargo build --no-default-features` (desativa apenas o fallback notify)
 
 ## Build Dependencies
 
@@ -353,4 +353,4 @@ cargo audit
 
 ---
 
-*Última atualização: 2026-02-03 (pós-refatoração)*
+*Última atualização: 2026-02-08 (documentação de watcher/fallback atualizada)*

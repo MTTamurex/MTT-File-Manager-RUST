@@ -76,7 +76,7 @@ Responsável pela interface com o usuário usando eframe/egui (immediate mode GU
 
 **Componentes principais**:
 - **Toolbar**: Barra de ferramentas superior com botões de ação (`src/ui/toolbar.rs`)
-- **Tab Bar**: Sistema de abas para navegação múltipla (`src/ui/tab_bar.rs`)
+- **Tab Bar**: Sistema de abas para navegação múltipla (`src/ui/tab_bar/mod.rs`)
 - **File List/Grid**: Visualização de arquivos em grade ou lista (`src/ui/views/`)
 - **Sidebar**: Painel lateral com atalhos e drives (`src/ui/sidebar.rs`)
 - **Preview Panel**: Painel de preview de arquivos (`src/ui/preview_panel/`)
@@ -85,6 +85,9 @@ Responsável pela interface com o usuário usando eframe/egui (immediate mode GU
 **Sub-módulos**:
 - `src/ui/app/` - Ciclo de vida, input e notificações da aplicação
 - `src/ui/components/` - Componentes reutilizáveis (media_preview, gif_manager, etc.)
+- `src/ui/components/item_slot/` - Renderização de slots separada por tipo (drive/folder/file)
+- `src/ui/components/mpv_preview/` - Bridge MPV separado por ciclo de vida/estado/embed
+- `src/ui/tab_bar/` - Sistema de abas separado por renderer/controles/drag dwell
 - `src/ui/views/` - Views principais (grid, list, computer)
 - `src/ui/preview_panel/` - Sub-sistema de preview com suporte a vídeo
 
@@ -92,7 +95,8 @@ Responsável pela interface com o usuário usando eframe/egui (immediate mode GU
 - `src/ui/app_impl.rs` - Implementação principal do eframe::App
 - `src/ui/app/input.rs` - Handler de input do usuário
 - `src/ui/app/lifecycle.rs` - Ciclo de vida da aplicação
-- `src/ui/views/grid_view.rs` - Visualização em grade
+- `src/ui/tab_bar/mod.rs` - Sistema de abas (módulo coordenador)
+- `src/ui/views/grid_view/mod.rs` - Visualização em grade
 - `src/ui/views/list_view/` - Visualização em lista (com submódulos)
 - `src/ui/views/computer_view.rs` - View "Este Computador"
 
@@ -158,7 +162,7 @@ Fornece acesso a recursos externos e serviços de sistema.
 - **`virtual_drive_config.rs`** - Configuração de drives virtuais
 - **`watcher.rs`** - Watcher genérico de filesystem
 - **`windows_clipboard.rs`** - Integração nativa com clipboard Windows
-- **`onedrive.rs`** - Detecção de status OneDrive
+- **`onedrive/mod.rs`** - Detecção de status OneDrive (path_detection, attributes, timeout_ops, directory_enum)
 - **`security.rs`** - Validações de segurança
 
 **Integrações Windows** (`src/infrastructure/windows/`):
@@ -352,7 +356,7 @@ pub struct ImageViewerApp {
 
 ### Roteamento de Telas
 - **Computer View**: `src/ui/views/computer_view.rs`
-- **Grid View**: `src/ui/views/grid_view.rs`
+- **Grid View**: `src/ui/views/grid_view/mod.rs`
 - **List View**: `src/ui/views/list_view/mod.rs`
 - **Recycle Bin View**: Renderização especial em `computer_view.rs`
 
@@ -449,4 +453,5 @@ pub struct SharedState {
 
 ---
 
-*Última atualização: 2026-02-03 (pós-refatoração)*
+*Última atualização: 2026-02-08 (módulos modularizados em `mod.rs`)*
+

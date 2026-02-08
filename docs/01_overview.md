@@ -98,7 +98,7 @@ O MTT File Manager é um gerenciador de arquivos nativo para Windows desenvolvid
 | Compressão | webp | 0.3 | Compressão WebP para thumbnails |
 | Clipboard | clipboard-win | 5.4 | Integração clipboard Windows |
 | File Dialogs | rfd | 0.15 | Diálogos de arquivo nativos |
-| Watcher | notify | 6.1.1 | Monitoramento de filesystem (opcional) |
+| Watcher | Drive Watcher nativo + notify (fallback) | nativo/6.1.1 | Monitoramento de filesystem (local + UNC) |
 
 ## Dependências de Runtime
 
@@ -139,4 +139,4 @@ O MTT File Manager é um gerenciador de arquivos nativo para Windows desenvolvid
 
 ---
 
-*Última atualização: 2026-02-03 (pós-refatoração)*
+*Última atualização: 2026-02-08 (watcher primário atualizado para Drive Watcher)*

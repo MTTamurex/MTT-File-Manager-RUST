@@ -3,6 +3,8 @@
 ## Objetivo do Documento
 Este documento descreve os fluxos principais do aplicativo, incluindo sequência de chamadas, arquivos envolvidos, pontos de bug comuns e como debugar.
 
+> Nota de estrutura: alguns módulos listados abaixo foram modularizados em diretórios com `mod.rs` (ex.: `folder_loading/`, `message_handler/`, `grid_view/`, `mpv_preview/`).
+
 ## 1. Navegação para Pasta
 
 ### Sequência de Chamadas
@@ -13,7 +15,7 @@ src/ui/app/input.rs - handle_input() / handle_double_click()
     ↓
 src/app/operations/navigation/mod.rs - navigate_to_path()
     ↓
-src/app/operations/folder_loading.rs - load_folder_contents()
+src/app/operations/folder_loading/mod.rs - load_folder_contents()
     ↓
 src/infrastructure/windows/hdd_directory_reader.rs - read_directory()
     ↓
@@ -23,7 +25,7 @@ src/app/operations/thumbnails.rs - request_thumbnails()
     ↓
 src/workers/thumbnail/mod.rs - spawn_thumbnail_workers()
     ↓
-src/workers/thumbnail/extraction/stage*.rs (estágios de extração)
+src/workers/thumbnail/extraction/ (estágios de extração)
     ↓
 UI Update via channels (image_receiver)
 ```
@@ -32,13 +34,13 @@ UI Update via channels (image_receiver)
 - **`src/ui/app/input.rs`** - Captura input do usuário
 - **`src/app/operations/navigation/mod.rs`** - Lógica de navegação
 - **`src/app/operations/navigation/keyboard.rs`** - Navegação por teclado
-- **`src/app/operations/folder_loading.rs`** - Carregamento de pasta
+- **`src/app/operations/folder_loading/mod.rs`** - Carregamento de pasta
 - **`src/infrastructure/windows/hdd_directory_reader.rs`** - Leitura do disco
 - **`src/workers/folder_scanner.rs`** - Scanner em background
 - **`src/app/operations/thumbnails.rs`** - Solicitação de thumbnails
 - **`src/workers/thumbnail/`** - Sistema de thumbnails multi-estágio
 - **`src/ui/views/computer_view.rs`** - View especial para "Este Computador"
-- **`src/ui/views/grid_view.rs`** - View em grade
+- **`src/ui/views/grid_view/mod.rs`** - View em grade
 - **`src/ui/views/list_view/`** - View em lista
 
 ### Pontos de Bug Comuns
@@ -78,7 +80,7 @@ println!("current_generation: {:?}", app.current_generation);
 ```
 User Selection (Click/Navigate)
     ↓
-src/ui/views/grid_view.rs - render_item() / handle_click()
+src/ui/views/grid_view/mod.rs - render_item() / handle_click()
     ↓
 src/app/operations/selection.rs - handle_selection()
     ↓
@@ -90,13 +92,13 @@ src/ui/preview_panel/mod.rs - render_preview_panel()
     ↓
   ├── Imagem: src/ui/preview_panel/image_preview.rs
   ├── Vídeo: src/ui/preview_panel/video_preview/ 
-  │         └── src/ui/components/mpv_preview.rs
+  │         └── src/ui/components/mpv_preview/mod.rs
   ├── GIF: src/ui/components/gif_manager.rs
   └── PDF: src/pdf_viewer/mod.rs - show_pdf_window()
 ```
 
 ### Arquivos Envolvidos
-- **`src/ui/views/grid_view.rs`** - Renderização do item
+- **`src/ui/views/grid_view/mod.rs`** - Renderização do item
 - **`src/app/operations/selection.rs`** - Handler de seleção
 - **`src/app/operations/metadata.rs`** - Solicitação de metadados
 - **`src/infrastructure/windows/metadata/mod.rs`** - Extração de metadados
@@ -106,7 +108,7 @@ src/ui/preview_panel/mod.rs - render_preview_panel()
 - **`src/ui/preview_panel/image_preview.rs`** - Preview de imagens
 - **`src/ui/preview_panel/video_preview/`** - Preview de vídeo
 - **`src/ui/components/media_preview.rs`** - Preview genérico
-- **`src/ui/components/mpv_preview.rs`** - Preview de vídeo com mpv
+- **`src/ui/components/mpv_preview/mod.rs`** - Preview de vídeo com mpv
 - **`src/ui/components/gif_manager.rs`** - Preview de GIFs
 - **`src/pdf_viewer/`** - Preview de PDF
 
@@ -444,7 +446,7 @@ Parse FILE_NOTIFY_INFORMATION buffer
     ↓
 Send events via channel to UI thread
     ↓
-src/app/operations/message_handler.rs - poll_events()
+src/app/operations/message_handler/mod.rs - poll_events()
     ↓
 Process events: Smart DELETE / CREATE handling
     ↓
@@ -455,7 +457,7 @@ Update UI without full reload
 - **`src/infrastructure/drive_watcher.rs`** - Core implementation with ReadDirectoryChangesW
 - **`src/infrastructure/drive_watcher_integration.rs`** - Manager for multiple drives
 - **`src/app/operations/watcher.rs`** - Setup and lifecycle management
-- **`src/app/operations/message_handler.rs`** - Event processing and UI updates
+- **`src/app/operations/message_handler/mod.rs`** - Event processing and UI updates
 
 ### Smart DELETE Handling
 ```
@@ -505,4 +507,5 @@ eprintln!("[FS-WATCH] SMART DELETE: Removed from UI without reload");
 
 ---
 
-*Última atualização: 2026-02-04 (Drive Watcher implementation)*
+*Última atualização: 2026-02-08 (paths atualizados para módulos `mod.rs`)*
+

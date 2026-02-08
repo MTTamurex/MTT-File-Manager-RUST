@@ -18,7 +18,7 @@ API nativa do Windows NT que permite ler múltiplas entradas de diretório em um
 
 ### Implementação Existente
 - **Arquivo:** `src/infrastructure/ntfs_reader.rs`
-- **Uso:** Ativo em `src/app/operations/folder_loading.rs:548-675`
+- **Uso:** Ativo no pipeline de carregamento em `src/app/operations/folder_loading/mod.rs`
 - **Condição:** Usado quando `!is_ssd && ntfs_reader::is_available()`
 
 ### Como funciona
@@ -138,7 +138,7 @@ Quando um arquivo era deletado, o sistema:
 Em vez de reload, removemos o item diretamente da UI:
 
 ```rust
-// Em message_handler.rs - DriveWatcherEvent::Deleted
+// Em src/app/operations/message_handler/mod.rs - DriveWatcherEvent::Deleted
 let filtered: Vec<_> = self.items.iter()
     .filter(|item| item.path != path_to_remove)
     .cloned()
@@ -174,7 +174,7 @@ O Drive Watcher está totalmente integrado e em uso ativo:
 ```
 src/infrastructure/drive_watcher.rs              # Core implementation
 src/infrastructure/drive_watcher_integration.rs  # Manager
-src/app/operations/message_handler.rs            # Event handling
+src/app/operations/message_handler/mod.rs        # Event handling
 src/app/operations/watcher.rs                    # Watch setup
 ```
 
@@ -202,3 +202,7 @@ cargo test drive_watcher
 - [NtQueryDirectoryFile - NT API](https://docs.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntquerydirectoryfile)
 - [File Pilot - Features](https://filepilot.tech/)
 - Implementação MTT: `src/infrastructure/drive_watcher.rs`
+
+---
+
+*Última atualização: 2026-02-08 (paths atualizados para módulos `mod.rs`)*

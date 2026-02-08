@@ -64,21 +64,21 @@ cargo run --release
 
 ### Build com Features Específicas
 ```bash
-# Build padrão (com notify-watcher)
+# Build padrão (Drive Watcher + fallback notify-watcher)
 cargo build
 
 # Build sem features opcionais
-# (sem monitoramento de filesystem em tempo real)
+# (sem fallback notify para UNC/rede; Drive Watcher local continua ativo)
 cargo build --no-default-features
 ```
 
 ## Flags e Features do Cargo
 
 ### Features Disponíveis
-- **`notify-watcher`** - Usa notify crate para watcher de filesystem (cross-platform)
+- **`notify-watcher`** - Habilita fallback via notify para paths UNC/rede
 - **`default = ["notify-watcher"]`** - Feature padrão
 
-**Nota**: O monitoramento usa `notify` crate que implementa `ReadDirectoryChangesW` no Windows. Não requer privilégios de administrador.
+**Nota**: O monitoramento principal usa Drive Watcher nativo (`ReadDirectoryChangesW` no drive raiz). A feature `notify-watcher` mantém o fallback para UNC/rede.
 
 ### Profiles de Build
 
@@ -347,4 +347,4 @@ cargo check -p mtt-file-manager
 
 ---
 
-*Última atualização: 2026-02-03 (pós-refatoração)*
+*Última atualização: 2026-02-08 (semântica de watcher atualizada)*

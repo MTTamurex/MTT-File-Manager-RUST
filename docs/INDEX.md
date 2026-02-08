@@ -123,10 +123,12 @@ Este índice fornece navegação para todos os documentos técnicos do MTT File 
 
 ### Fluxos Principais
 - `src/app/operations/navigation/` - Navegação (mod.rs, keyboard.rs, selection.rs)
-- `src/app/operations/folder_loading.rs` - Carregamento de pastas
+- `src/app/operations/folder_loading/mod.rs` - Carregamento de pastas
+- `src/app/operations/message_handler/mod.rs` - Processamento de eventos assíncronos
 - `src/app/operations/thumbnails.rs` - Solicitação de thumbnails
 - `src/workers/thumbnail/` - Workers de thumbnail (multi-estágio)
-- `src/ui/app_impl.rs` - Main loop da UI
+- `src/ui/app_impl.rs` - Main loop da UI (orquestração)
+- `src/ui/views/grid_view/mod.rs` - Renderização de grid modularizada
 
 ### Integrações Críticas
 - `src/infrastructure/windows/` - Integrações Windows (Shell, COM, Media Foundation)
@@ -137,7 +139,8 @@ Este índice fornece navegação para todos os documentos técnicos do MTT File 
 ### Sistema de Preview
 - `src/ui/preview_panel/` - Painel de preview
 - `src/ui/components/media_preview.rs` - Preview de mídia
-- `src/ui/components/mpv_preview.rs` - Preview de vídeo
+- `src/ui/components/mpv_preview/mod.rs` - Preview de vídeo
+- `src/ui/components/item_slot/mod.rs` - Renderização de slot de item (grid)
 - `src/pdf_viewer/` - Visualizador de PDF
 
 ## Comandos Úteis
@@ -155,7 +158,7 @@ cargo run --release
 # Com logs (PowerShell)
 .\target\release\mtt-file-manager.exe 2>&1 | Tee-Object "debug.log"
 
-# Sem watcher
+# Sem fallback notify (UNC/rede)
 cargo build --no-default-features
 ```
 
@@ -279,4 +282,5 @@ src/
 
 ---
 
-*Última atualização: 2026-02-03 (pós-refatoração)*
+*Última atualização: 2026-02-08 (módulos modularizados em `mod.rs`)*
+
