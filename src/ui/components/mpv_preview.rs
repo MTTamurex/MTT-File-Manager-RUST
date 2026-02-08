@@ -778,6 +778,45 @@ impl MpvPreview {
         self.event_thread_handle = Some(handle);
     }
 
+    /// Performs explicit MPV teardown to release decode buffers and caches immediately.
+    /// This is used when closing preview/tab to avoid waiting for eventual allocator cleanup.
+    pub fn shutdown(&mut self) {
+        eprintln!("[VIDEO] Teardown MPV preview: {}", self.path.display());
+
+        if let Some(m) = &self.mpv {
+            let _ = m.set_property("pause", true);
+            let _ = m.set_property("keep-open", "no");
+            let _ = m.set_property("cache", "no");
+            let _ = m.set_property("vid", "no");
+            let _ = m.set_property("aid", "no");
+            let _ = m.set_property("sid", "no");
+            let empty: [&str; 0] = [];
+            let _ = m.command("stop", &empty);
+            let _ = m.command("playlist-clear", &empty);
+        }
+
+        mpv_event_loop::stop_event_loop(
+            self.event_thread_running.clone(),
+            self.event_thread_handle.take(),
+        );
+
+        #[cfg(target_os = "windows")]
+        if let Some(hwnd) = self.mpv_hwnd.take() {
+            unsafe {
+                let _ = ShowWindow(hwnd, SW_HIDE);
+                let _ = DestroyWindow(hwnd);
+            }
+        }
+
+        self.cached_duration = None;
+        self.cached_tracks = None;
+        self.loaded_path = None;
+        self.show_player = false;
+        self.is_visible = false;
+        self.last_rect = egui::Rect::NAN;
+        self.mpv = None;
+    }
+
     /// Enables NVIDIA RTX Video Super Resolution (VSR).
     ///
     /// Requires MPV to be initialized with:
@@ -819,18 +858,6 @@ impl MpvPreview {
 
 impl Drop for MpvPreview {
     fn drop(&mut self) {
-        // PERF FASE 2: Gracefully shutdown event loop thread
-        mpv_event_loop::stop_event_loop(
-            self.event_thread_running.clone(),
-            self.event_thread_handle.take(),
-        );
-
-        #[cfg(target_os = "windows")]
-        if let Some(hwnd) = self.mpv_hwnd.take() {
-            unsafe {
-                let _ = ShowWindow(hwnd, SW_HIDE);
-                let _ = DestroyWindow(hwnd);
-            }
-        }
+        self.shutdown();
     }
 }

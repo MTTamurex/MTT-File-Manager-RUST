@@ -404,9 +404,18 @@ impl ImageViewerApp {
     /// Applies bounded cache cleanup when process memory is above thresholds.
     /// Keeps hot assets while avoiding long-session RAM growth.
     pub fn run_memory_maintenance(&mut self) {
+        self.run_memory_maintenance_impl(false);
+    }
+
+    /// Runs memory maintenance immediately, bypassing normal periodic throttle.
+    pub fn run_memory_maintenance_now(&mut self) {
+        self.run_memory_maintenance_impl(true);
+    }
+
+    fn run_memory_maintenance_impl(&mut self, force: bool) {
         use std::time::Duration;
 
-        if self.last_memory_maintenance.elapsed() < Duration::from_secs(2) {
+        if !force && self.last_memory_maintenance.elapsed() < Duration::from_secs(2) {
             return;
         }
         self.last_memory_maintenance = Instant::now();

@@ -9,6 +9,17 @@ use crate::app::state::ImageViewerApp;
 use crate::infrastructure::onedrive;
 
 impl ImageViewerApp {
+    /// Teardown media preview resources immediately (MPV buffers, thread, HWND).
+    pub fn destroy_media_preview(&mut self) {
+        if let Some(mut preview) = self.media_preview.take() {
+            preview.shutdown();
+        }
+        self.media_preview_owner_tab_id = None;
+        self.ui_ctx.request_repaint();
+        // Run memory maintenance immediately after tearing down the player.
+        self.run_memory_maintenance_now();
+    }
+
     pub fn update_selected_thumbnail(&mut self) {
         // Selection change only updates the persistent thumbnail and metadata.
         // It NO LONGER clears or sets the global media_preview automatically.
@@ -81,12 +92,7 @@ impl ImageViewerApp {
                     };
 
                     if should_stop {
-                        if let Some(MediaPreview::Video(ref mut wv)) = self.media_preview {
-                            wv.pause();
-                        }
-                        self.media_preview = None;
-                        self.media_preview_owner_tab_id = None;
-                        self.ui_ctx.request_repaint();
+                        self.destroy_media_preview();
                     }
                 }
             }
@@ -97,14 +103,7 @@ impl ImageViewerApp {
 
             let active_tab_id = self.tab_manager.active().id;
             if self.media_preview_owner_tab_id == Some(active_tab_id) {
-                if let Some(crate::ui::components::media_preview::MediaPreview::Video(ref mut wv)) =
-                    self.media_preview
-                {
-                    wv.pause();
-                }
-                self.media_preview = None;
-                self.media_preview_owner_tab_id = None;
-                self.ui_ctx.request_repaint();
+                self.destroy_media_preview();
             }
         }
 
@@ -136,13 +135,7 @@ impl ImageViewerApp {
         // CLEANUP LOGIC: If owner resets selection, clear media
         let active_tab_id = self.tab_manager.active().id;
         if self.media_preview_owner_tab_id == Some(active_tab_id) {
-            use crate::ui::components::media_preview::MediaPreview;
-            if let Some(MediaPreview::Video(ref mut wv)) = self.media_preview {
-                wv.pause();
-            }
-            self.media_preview = None;
-            self.media_preview_owner_tab_id = None;
-            self.ui_ctx.request_repaint();
+            self.destroy_media_preview();
         }
 
         // CRITICAL: Sync visibility whenever selection is reset
