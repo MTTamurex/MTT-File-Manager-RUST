@@ -37,7 +37,7 @@ pub fn render_virtual_drive_settings(ctx: &egui::Context, show_modal: bool) -> b
 
                 // Detect virtual drives
                 let virtual_drives = detect_virtual_drives();
-                
+
                 if virtual_drives.is_empty() {
                     ui.colored_label(
                         egui::Color32::from_rgb(200, 200, 0),
@@ -70,7 +70,7 @@ pub fn render_virtual_drive_settings(ctx: &egui::Context, show_modal: bool) -> b
                 ui.add_space(16.0);
 
                 ui.separator();
-                
+
                 // Info footer
                 ui.horizontal(|ui| {
                     ui.label("💡");

@@ -98,8 +98,8 @@ pub fn render_tab_bar(
             } else {
                 egui::Sense::click()
             };
-            let (rect, response) = ui
-                .allocate_exact_size(Vec2::new(ideal_tab_width, tab_height), sense);
+            let (rect, response) =
+                ui.allocate_exact_size(Vec2::new(ideal_tab_width, tab_height), sense);
 
             // Handle clicks
             if response.clicked() {
@@ -115,9 +115,9 @@ pub fn render_tab_bar(
             if is_item_dragging && !is_active && response.contains_pointer() {
                 let dwell_id = egui::Id::new("drag_tab_dwell").with(idx);
                 let now = ui.input(|i| i.time);
-                let dwell_start = ui.ctx().data_mut(|d| {
-                    *d.get_temp_mut_or_insert_with(dwell_id, || now)
-                });
+                let dwell_start = ui
+                    .ctx()
+                    .data_mut(|d| *d.get_temp_mut_or_insert_with(dwell_id, || now));
                 let elapsed = (now - dwell_start) as f32;
                 if elapsed >= 0.4 {
                     // Clear dwell timer and switch
@@ -125,9 +125,10 @@ pub fn render_tab_bar(
                     action = TabBarAction::SwitchTab(idx);
                 } else {
                     // Request repaint near the threshold
-                    ui.ctx().request_repaint_after(
-                        std::time::Duration::from_secs_f32(0.4 - elapsed + 0.02),
-                    );
+                    ui.ctx()
+                        .request_repaint_after(std::time::Duration::from_secs_f32(
+                            0.4 - elapsed + 0.02,
+                        ));
                 }
             } else if is_item_dragging && !response.contains_pointer() {
                 // Pointer left this tab — reset its dwell timer

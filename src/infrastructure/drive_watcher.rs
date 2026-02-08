@@ -240,7 +240,7 @@ impl Drop for DriveWatcher {
 ///
 /// ARCHITECTURE (inspired by Files app):
 /// - Events are coalesced in a HashSet to deduplicate (same path → one event)
-/// - Batches are flushed at most every COALESCE_INTERVAL_MS (200ms)  
+/// - Batches are flushed at most every COALESCE_INTERVAL_MS (200ms)
 /// - When the buffer exceeds MAX_COALESCED_EVENTS, it's flushed immediately
 ///   to prevent unbounded memory growth during OneDrive dehydration storms
 /// - This ensures the UI thread NEVER receives unbounded event lists

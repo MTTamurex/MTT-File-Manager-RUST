@@ -628,14 +628,14 @@ impl ImageViewerApp {
                             if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
                                 break;
                             }
-                            
+
                             // Process batch with folder covers
                             let folders: Vec<PathBuf> = batch_entries
                                 .iter()
                                 .filter(|e| e.is_dir)
                                 .map(|e| e.path.clone())
                                 .collect();
-                            
+
                             let mut processed_batch = batch_entries;
                             if !folders.is_empty() {
                                 let covers = disk_cache.get_folder_covers(&folders);
@@ -647,7 +647,7 @@ impl ImageViewerApp {
                                     }
                                 }
                             }
-                            
+
                             all_entries_disk.extend(processed_batch.clone());
                             let batch_len = processed_batch.len();
                             let _ = file_entry_sender.send((my_gen, processed_batch));
@@ -655,17 +655,17 @@ impl ImageViewerApp {
                             batch_start = std::time::Instant::now();
                             ctx.request_repaint();
                         }
-                        
+
                         // Send empty batch to signal completion
                         if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                             let _ = file_entry_sender.send((my_gen, Vec::new()));
                             ctx.request_repaint();
                         }
-                        
+
                         // Cache results for future navigations
                         if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                             directory_cache.put(PathBuf::from(&base_path), all_entries_disk.clone());
-                            
+
                             if let Some(di) = &directory_index_opt {
                                 let indexed: Vec<IndexedFile> = all_entries_disk
                                     .iter()
@@ -683,7 +683,7 @@ impl ImageViewerApp {
                                 );
                             }
                         }
-                        
+
                         return;
                     }
                     Err(e) => {
