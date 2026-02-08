@@ -12,9 +12,10 @@ use crate::tabs::TabManager;
 use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::theme;
-use eframe::egui::{self, Color32, CornerRadius, Stroke, Vec2};
+use eframe::egui::{self, Color32};
 
 mod drag_dwell;
+mod new_tab_area;
 mod tabs_renderer;
 mod window_controls;
 
@@ -117,67 +118,17 @@ pub fn render_tab_bar(
             action = tabs_action;
         }
 
-        // New tab button (+)
-        let new_tab_btn_width = 36.0;
-        let (new_tab_rect, new_tab_response) = ui.allocate_exact_size(
-            Vec2::new(new_tab_btn_width, tab_height),
-            egui::Sense::click(),
-        );
-
-        if new_tab_response.clicked() {
+        if new_tab_area::render_new_tab_and_drag_area(
+            ui,
+            &ctx,
+            tab_height,
+            window_controls_width,
+            inactive_bg,
+            hover_bg,
+            text_color,
+        ) {
             action = TabBarAction::NewTab;
         }
-        // Drag area (space between new tab button and window controls)
-        let remaining_width = ui.available_width() - window_controls_width;
-        if remaining_width > 0.0 {
-            let (drag_rect, drag_response) = ui.allocate_exact_size(
-                Vec2::new(remaining_width, tab_height),
-                egui::Sense::click_and_drag(),
-            );
-
-            // Fundo da topbar (mesma cor das abas inativas)
-            ui.painter().rect_filled(drag_rect, 0.0, inactive_bg);
-
-            // Drag to move window
-            if drag_response.drag_started() || drag_response.dragged() {
-                ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
-            }
-        }
-        let new_tab_bg = if new_tab_response.hovered() {
-            hover_bg
-        } else {
-            inactive_bg
-        };
-
-        ui.painter().rect_filled(
-            new_tab_rect,
-            CornerRadius {
-                nw: 6,
-                ne: 6,
-                sw: 0,
-                se: 0,
-            },
-            new_tab_bg,
-        );
-
-        // + icon
-        let plus_center = new_tab_rect.center();
-        let plus_size = 10.0;
-        let plus_stroke = Stroke::new(1.0, text_color);
-        ui.painter().line_segment(
-            [
-                plus_center + Vec2::new(-plus_size / 2.0, 0.0),
-                plus_center + Vec2::new(plus_size / 2.0, 0.0),
-            ],
-            plus_stroke,
-        );
-        ui.painter().line_segment(
-            [
-                plus_center + Vec2::new(0.0, -plus_size / 2.0),
-                plus_center + Vec2::new(0.0, plus_size / 2.0),
-            ],
-            plus_stroke,
-        );
 
         // Render window controls (min/max/close) for borderless window
         window_controls::render_window_controls(
