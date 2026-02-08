@@ -1,11 +1,12 @@
 use crate::app::state::ImageViewerApp;
-use crate::domain::file_entry::{FileEntry, SyncStatus};
+use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::adaptive_batch::{AdaptiveBatchConfig, AdaptiveBatchTracker};
 use crate::infrastructure::directory_index::IndexedFile;
 use crate::infrastructure::io_priority;
-use crate::infrastructure::ntfs_reader;
 use crate::infrastructure::onedrive;
-use crate::infrastructure::windows::{is_shell_navigation_path, list_shell_folder};
+mod fast_paths;
+mod optimized_tiers;
+
 use std::os::windows::ffi::OsStringExt;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering as AtomicOrdering;
@@ -53,439 +54,49 @@ impl ImageViewerApp {
             // path_has_cloud_attributes() was removed because GetFileAttributesW can BLOCK
             // indefinitely on cloud-only OneDrive folders
             let is_onedrive_base = onedrive::is_onedrive_path(&base_path_buf);
-
-            // Phase 1: Instant Feedback (The Cache Hit) - HDD ONLY
-            if !is_ssd {
-                // DriveWatcher monitors the ENTIRE drive and proactively invalidates
-                // both DirectoryCache and DirectoryIndex for ANY change on the drive.
-                // No fs::metadata() mtime check needed — if the cache has data, it's valid.
-                if let Some(cached_entries) = directory_cache.get(&base_path_buf) {
-                    eprintln!("[FOLDER-LOADING] Phase 1: Cache hit for {:?} - {} entries, sending to UI immediately",
-                        base_path_buf, cached_entries.len());
-
-                    // For cached OneDrive entries, keep SyncStatus::None (unknown)
-                    // until fresh disk enumeration provides authoritative status.
-                    let entries_to_send = cached_entries;
-
-                    // INSTANT RETURN: Send cached entries immediately (0ms navigation)
-                    let mut offset = 0;
-                    while offset < entries_to_send.len() {
-                        if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
-                            return;
-                        }
-                        let end = (offset + batch_size).min(entries_to_send.len());
-                        let chunk = entries_to_send[offset..end].to_vec();
-                        let _ = file_entry_sender.send((my_gen, chunk));
-                        ctx.request_repaint();
-                        batch_tracker
-                            .record_batch(std::time::Instant::now().elapsed(), end - offset);
-                        batch_size = batch_tracker.batch_size();
-                        offset = end;
-                    }
-                    let _ = file_entry_sender.send((my_gen, Vec::new()));
-                    ctx.request_repaint();
-
-                    // Phase 2: HDD SILENCE - Trust cache + file watcher
-                    // The file watcher (ReadDirectoryChangesW) passively monitors the current
-                    // directory and invalidates the cache on changes. We don't need to poll
-                    // the filesystem to check for modifications — the watcher handles this.
-                    // This eliminates std::fs::metadata() syscalls on HDD per navigation.
-                    eprintln!("[FOLDER-LOADING] Phase 2: Cache valid, trusting watcher for {:?} - HDD silence maintained", base_path_buf);
-                    return;
-                } else {
-                    eprintln!("[FOLDER-LOADING] Phase 1: Cache miss for {:?}, proceeding to Phase 3 (disk load)", base_path_buf);
-                }
-            } else {
-                eprintln!("[FOLDER-LOADING] SSD detected - bypassing cache for raw disk speed");
-            }
-
-            eprintln!(
-                "[FOLDER-LOADING] Phase 3: Starting disk scan for {:?} (batch_size={}, is_ssd={})",
-                current_path, batch_size, is_ssd
-            );
-
             let mut batch = Vec::with_capacity(batch_size);
             let mut all_entries_disk: Vec<FileEntry> = Vec::new();
             let mut batch_start = std::time::Instant::now();
-
-            // Check if we are navigating a virtual Shell folder (like a ZIP)
-            if is_shell_navigation_path(&PathBuf::from(&base_path), false) {
-                if let Ok(shell_items) = list_shell_folder(&PathBuf::from(&base_path)) {
-                    if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
-                        let _ = file_entry_sender.send((my_gen, shell_items));
-                        let _ = file_entry_sender.send((my_gen, Vec::new()));
-                        ctx.request_repaint();
-                        return;
-                    }
-                }
+            if fast_paths::try_handle_fast_paths(
+                my_gen,
+                &gen_clone,
+                &current_path,
+                force_refresh,
+                &base_path,
+                &base_path_buf,
+                is_ssd,
+                is_onedrive_base,
+                &mut batch_size,
+                &mut batch_tracker,
+                &mut batch_start,
+                &file_entry_sender,
+                &ctx,
+                &disk_cache,
+                &directory_cache,
+                &directory_index_opt,
+            ) {
+                return;
             }
 
-            if !force_refresh && !is_onedrive_base {
-                if let Some(di) = &directory_index_opt {
-                    let base = PathBuf::from(&base_path);
-                    // SAFETY CHECK: Verify directory mtime before trusting cached index
-                    // The DriveWatcher may not have been active when files were added
-                    // (e.g., during startup delay or when the app was closed).
-                    // A single metadata() call is cheap compared to serving stale data.
-                    if let Some((meta, indexed_files)) = di.get_directory(&base) {
-                        // Validate: Check if directory mtime is newer than last_scan
-                        // CRITICAL: For OneDrive paths, skip mtime validation (can block indefinitely on cloud-only dirs)
-                        // Trust the DriveWatcher and explicit invalidation instead
-                        let dir_modified =
-                            if crate::infrastructure::onedrive::is_onedrive_path(&base) {
-                                0 // Skip mtime check for OneDrive - trust watcher
-                            } else {
-                                std::fs::metadata(&base)
-                                    .ok()
-                                    .and_then(|m| m.modified().ok())
-                                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                                    .map(|d| d.as_secs())
-                                    .unwrap_or(0)
-                            };
-
-                        if dir_modified > meta.last_scan {
-                            // Index is stale - directory was modified after last scan
-                            eprintln!("[FOLDER-LOADING] DirectoryIndex stale for {:?} (dir_mtime={} > index_time={}), invalidating",
-                                base, dir_modified, meta.last_scan);
-                            let _ = di.invalidate(&base);
-                            // Fall through to disk scan below
-                        } else {
-                            eprintln!(
-                                "[FOLDER-LOADING] Using DirectoryIndex (pre-built index) for {:?}",
-                                base
-                            );
-                            let mut entries: Vec<FileEntry> = indexed_files
-                                .into_iter()
-                                .filter(|f| !f.name.starts_with('.'))
-                                .map(|f| {
-                                    let is_zip = f.name.to_lowercase().ends_with(".zip");
-                                    let is_dir = f.is_dir || is_zip;
-                                    FileEntry {
-                                        path: base.join(&f.name),
-                                        name: f.name,
-                                        is_dir,
-                                        size: if is_dir && !is_zip { 0 } else { f.size },
-                                        modified: f.modified,
-                                        folder_cover: None,
-                                        drive_info: None,
-                                        sync_status: SyncStatus::None,
-                                        deletion_date: None,
-                                        recycle_original_path: None,
-                                    }
-                                })
-                                .collect();
-
-                            let folders: Vec<PathBuf> = entries
-                                .iter()
-                                .filter(|e| e.is_dir)
-                                .map(|e| e.path.clone())
-                                .collect();
-                            if !folders.is_empty() {
-                                let covers = disk_cache.get_folder_covers(&folders);
-                                for entry in entries.iter_mut() {
-                                    if entry.is_dir {
-                                        if let Some(cover) = covers.get(&entry.path) {
-                                            entry.folder_cover = Some(cover.clone());
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Only cache for HDDs - SSDs bypass cache
-                            if !is_ssd {
-                                directory_cache.put(base.clone(), entries.clone());
-                            }
-
-                            let mut offset = 0;
-                            while offset < entries.len() {
-                                if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
-                                    return;
-                                }
-                                let end = (offset + batch_size).min(entries.len());
-                                let chunk = entries[offset..end].to_vec();
-                                let _ = file_entry_sender.send((my_gen, chunk));
-                                ctx.request_repaint();
-                                batch_tracker.record_batch(batch_start.elapsed(), end - offset);
-                                let _ = batch_tracker.batch_size();
-                                batch_start = std::time::Instant::now();
-                                offset = end;
-                            }
-                            let _ = file_entry_sender.send((my_gen, Vec::new()));
-                            ctx.request_repaint();
-                            return;
-                        } // end else (index not stale)
-                    } // end if let Some((meta, indexed_files))
-                } // end if let Some(di)
-            } // end if !force_refresh && !is_onedrive_base
-
-            if !force_refresh {
-                // DriveWatcher pre-invalidates cache — no mtime check needed
-                if let Some(mut cached_entries) = directory_cache.get(&PathBuf::from(&base_path)) {
-                    eprintln!(
-                        "[FOLDER-LOADING] Using secondary DirectoryCache for {:?}",
-                        base_path
-                    );
-                    let mut changed = false;
-                    for entry in cached_entries.iter_mut() {
-                        if !entry.is_dir && entry.name.to_lowercase().ends_with(".zip") {
-                            entry.is_dir = true;
-                            changed = true;
-                        }
-                    }
-
-                    if changed {
-                        // Only cache for HDDs - SSDs bypass cache
-                        if !is_ssd {
-                            directory_cache.put(PathBuf::from(&base_path), cached_entries.clone());
-                        }
-                    }
-                    let mut offset = 0;
-                    while offset < cached_entries.len() {
-                        if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
-                            return;
-                        }
-                        let end = (offset + batch_size).min(cached_entries.len());
-                        let chunk = cached_entries[offset..end].to_vec();
-                        let _ = file_entry_sender.send((my_gen, chunk));
-                        ctx.request_repaint();
-                        batch_tracker
-                            .record_batch(std::time::Instant::now().elapsed(), end - offset);
-                        batch_size = batch_tracker.batch_size();
-                        offset = end;
-                    }
-                    let _ = file_entry_sender.send((my_gen, Vec::new()));
-                    ctx.request_repaint();
-
-                    // PERFORMANCE: Don't prefetch when serving from cache.
-                    // Prefetch only runs after actual disk enumeration (first visit).
-                    // Subdirectories are likely already cached from previous visits.
-                    // This eliminates 5x background directory enumerations on HDD.
-                    return;
-                }
-            }
-
-            // OPTIMIZATION: Tiered disk reading strategy
-            // Priority: 1) NTFS native API, 2) HDD-optimized FindFirstFileExW, 3) Standard FindFirstFileW
-            let is_hdd = !is_ssd;
-            let ntfs_api_available = ntfs_reader::is_available();
-
-            // Track if we successfully used an optimized path
-            let used_optimized_path = false;
-
-            // TIER 1: Try NTFS native API first (fastest for NTFS drives)
-            if is_hdd && ntfs_api_available {
-                eprintln!("[FOLDER-LOADING] TIER 1: Trying NTFS native API (NtQueryDirectoryFile) for {:?}", base_path);
-                if let Some(entries) = ntfs_reader::read_directory_fast(&PathBuf::from(&base_path))
-                {
-                    for dir_entry in entries {
-                        if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
-                            break;
-                        }
-                        let is_hidden = (dir_entry.attributes & 0x02) != 0;
-                        let is_system = (dir_entry.attributes & 0x04) != 0;
-                        let is_special = matches!(
-                            dir_entry.name.to_lowercase().as_str(),
-                            "desktop.ini"
-                                | "thumbs.db"
-                                | "$recycle.bin"
-                                | "system volume information"
-                        );
-                        if !is_hidden
-                            && !is_system
-                            && !is_special
-                            && !dir_entry.name.starts_with('.')
-                        {
-                            let full_path = PathBuf::from(&base_path).join(&dir_entry.name);
-                            let mut is_dir = dir_entry.is_dir;
-                            if !is_dir && dir_entry.name.to_lowercase().ends_with(".zip") {
-                                is_dir = true;
-                            }
-                            let sync_status =
-                                onedrive::get_sync_status(dir_entry.attributes, is_onedrive_base);
-                            let entry = crate::domain::file_entry::FileEntry {
-                                path: full_path,
-                                name: dir_entry.name,
-                                is_dir,
-                                size: if is_dir { 0 } else { dir_entry.size },
-                                modified: dir_entry.modified,
-                                folder_cover: None,
-                                drive_info: None,
-                                sync_status,
-                                deletion_date: None,
-                                recycle_original_path: None,
-                            };
-                            all_entries_disk.push(entry.clone());
-                            batch.push(entry);
-                            if batch.len() >= batch_size {
-                                let folders: Vec<PathBuf> = batch
-                                    .iter()
-                                    .filter(|e| e.is_dir)
-                                    .map(|e| e.path.clone())
-                                    .collect();
-                                if !folders.is_empty() {
-                                    let covers = disk_cache.get_folder_covers(&folders);
-                                    for item in batch.iter_mut() {
-                                        if item.is_dir {
-                                            if let Some(cover) = covers.get(&item.path) {
-                                                item.folder_cover = Some(cover.clone());
-                                            }
-                                        }
-                                    }
-                                }
-                                let batch_len = batch.len();
-                                let _ = file_entry_sender.send((my_gen, batch.clone()));
-                                batch_tracker.record_batch(batch_start.elapsed(), batch_len);
-                                batch_size = batch_tracker.batch_size();
-                                batch_start = std::time::Instant::now();
-                                batch.clear();
-                                ctx.request_repaint();
-                            }
-                        }
-                    }
-                    if !batch.is_empty() && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
-                        let folders: Vec<PathBuf> = batch
-                            .iter()
-                            .filter(|e| e.is_dir)
-                            .map(|e| e.path.clone())
-                            .collect();
-                        if !folders.is_empty() {
-                            let covers = disk_cache.get_folder_covers(&folders);
-                            for item in batch.iter_mut() {
-                                if item.is_dir {
-                                    if let Some(cover) = covers.get(&item.path) {
-                                        item.folder_cover = Some(cover.clone());
-                                    }
-                                }
-                            }
-                        }
-                        let batch_len = batch.len();
-                        let _ = file_entry_sender.send((my_gen, batch));
-                        batch_tracker.record_batch(batch_start.elapsed(), batch_len);
-                        ctx.request_repaint();
-                    }
-                    if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
-                        let _ = file_entry_sender.send((my_gen, Vec::new()));
-                        ctx.request_repaint();
-                    }
-                    if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
-                        // Only cache for HDDs - SSDs bypass cache
-                        if !is_ssd {
-                            directory_cache
-                                .put(PathBuf::from(&base_path), all_entries_disk.clone());
-                        }
-                        if let Some(di) = &directory_index_opt {
-                            let indexed: Vec<IndexedFile> = all_entries_disk
-                                .iter()
-                                .map(|e| IndexedFile {
-                                    name: e.name.clone(),
-                                    size: e.size,
-                                    modified: e.modified,
-                                    is_dir: e.is_dir,
-                                })
-                                .collect();
-                            let _ = di.put_directory(
-                                &PathBuf::from(&base_path),
-                                &indexed,
-                                scan_start.elapsed().as_millis() as u64,
-                            );
-                        }
-                    }
-                    // DISABLED: Direct subdirectory prefetch (testing HDD I/O impact)
-                    // if !is_ssd && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
-                    //     let subdirs: Vec<PathBuf> = all_entries_disk
-                    //         .iter()
-                    //         .filter(|e| e.is_dir)
-                    //         .take(5)
-                    //         .map(|e| e.path.clone())
-                    //         .collect();
-                    //     if !subdirs.is_empty() {
-                    //         let _ = prefetch_sender.send(PrefetchMessage::Prefetch(subdirs));
-                    //     }
-                    // }
-                    return;
-                }
-                // NTFS API returned None - filesystem may not be NTFS (e.g., exFAT)
-                eprintln!(
-                    "[FOLDER-LOADING] NTFS API returned None for {:?}, trying HDD-optimized path",
-                    base_path
-                );
-            }
-
-            // TIER 2: Try HDD-optimized FindFirstFileExW (for exFAT, FAT32, or when NTFS fails)
-            if is_hdd && !used_optimized_path {
-                match crate::infrastructure::windows::hdd_directory_reader::read_directory_hdd_batched(
-                    &PathBuf::from(&base_path),
-                    is_onedrive_base,
-                ) {
-                    Ok(batches) => {
-                        eprintln!("[FOLDER-LOADING] TIER 2: Using HDD-optimized FindFirstFileExW for {:?}", base_path);
-                        for batch_entries in batches {
-                            if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
-                                break;
-                            }
-
-                            // Process batch with folder covers
-                            let folders: Vec<PathBuf> = batch_entries
-                                .iter()
-                                .filter(|e| e.is_dir)
-                                .map(|e| e.path.clone())
-                                .collect();
-
-                            let mut processed_batch = batch_entries;
-                            if !folders.is_empty() {
-                                let covers = disk_cache.get_folder_covers(&folders);
-                                for item in processed_batch.iter_mut() {
-                                    if item.is_dir {
-                                        if let Some(cover) = covers.get(&item.path) {
-                                            item.folder_cover = Some(cover.clone());
-                                        }
-                                    }
-                                }
-                            }
-
-                            all_entries_disk.extend(processed_batch.clone());
-                            let batch_len = processed_batch.len();
-                            let _ = file_entry_sender.send((my_gen, processed_batch));
-                            batch_tracker.record_batch(batch_start.elapsed(), batch_len);
-                            batch_start = std::time::Instant::now();
-                            ctx.request_repaint();
-                        }
-
-                        // Send empty batch to signal completion
-                        if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
-                            let _ = file_entry_sender.send((my_gen, Vec::new()));
-                            ctx.request_repaint();
-                        }
-
-                        // Cache results for future navigations
-                        if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
-                            directory_cache.put(PathBuf::from(&base_path), all_entries_disk.clone());
-
-                            if let Some(di) = &directory_index_opt {
-                                let indexed: Vec<IndexedFile> = all_entries_disk
-                                    .iter()
-                                    .map(|e| IndexedFile {
-                                        name: e.name.clone(),
-                                        size: e.size,
-                                        modified: e.modified,
-                                        is_dir: e.is_dir,
-                                    })
-                                    .collect();
-                                let _ = di.put_directory(
-                                    &PathBuf::from(&base_path),
-                                    &indexed,
-                                    scan_start.elapsed().as_millis() as u64,
-                                );
-                            }
-                        }
-
-                        return;
-                    }
-                    Err(e) => {
-                        eprintln!("[FOLDER-LOADING] TIER 2 failed: {}, falling back to standard Win32", e);
-                        // Continue to TIER 3 (standard Win32)
-                    }
-                }
+            if optimized_tiers::try_handle_optimized_tiers(
+                my_gen,
+                &gen_clone,
+                &scan_start,
+                &base_path,
+                is_ssd,
+                is_onedrive_base,
+                &mut batch_size,
+                &mut batch_tracker,
+                &mut batch_start,
+                &mut batch,
+                &mut all_entries_disk,
+                &file_entry_sender,
+                &ctx,
+                &disk_cache,
+                &directory_cache,
+                &directory_index_opt,
+            ) {
+                return;
             }
 
             // TIER 3: Standard FindFirstFileW fallback (last resort)
