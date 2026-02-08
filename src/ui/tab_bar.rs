@@ -37,6 +37,7 @@ pub fn render_tab_bar(
     media_owner_id: Option<usize>,
     is_playing: bool,
     is_muted: bool,
+    is_item_dragging: bool,
 ) -> TabBarAction {
     let ctx = ui.ctx().clone();
     let mut action = TabBarAction::None;
@@ -91,8 +92,14 @@ pub fn render_tab_bar(
         for (idx, tab) in tab_manager.tabs.iter().enumerate() {
             let is_active = idx == tab_manager.active_tab;
 
+            // Use click_and_drag sense during drag so we detect pointer hover
+            let sense = if is_item_dragging {
+                egui::Sense::click_and_drag()
+            } else {
+                egui::Sense::click()
+            };
             let (rect, response) = ui
-                .allocate_exact_size(Vec2::new(ideal_tab_width, tab_height), egui::Sense::click());
+                .allocate_exact_size(Vec2::new(ideal_tab_width, tab_height), sense);
 
             // Handle clicks
             if response.clicked() {
@@ -104,9 +111,37 @@ pub fn render_tab_bar(
                 action = TabBarAction::CloseTab(idx);
             }
 
-            // Background
+            // Drag-over tab activation: switch to this tab after dwelling 400ms
+            if is_item_dragging && !is_active && response.contains_pointer() {
+                let dwell_id = egui::Id::new("drag_tab_dwell").with(idx);
+                let now = ui.input(|i| i.time);
+                let dwell_start = ui.ctx().data_mut(|d| {
+                    *d.get_temp_mut_or_insert_with(dwell_id, || now)
+                });
+                let elapsed = (now - dwell_start) as f32;
+                if elapsed >= 0.4 {
+                    // Clear dwell timer and switch
+                    ui.ctx().data_mut(|d| d.remove::<f64>(dwell_id));
+                    action = TabBarAction::SwitchTab(idx);
+                } else {
+                    // Request repaint near the threshold
+                    ui.ctx().request_repaint_after(
+                        std::time::Duration::from_secs_f32(0.4 - elapsed + 0.02),
+                    );
+                }
+            } else if is_item_dragging && !response.contains_pointer() {
+                // Pointer left this tab — reset its dwell timer
+                let dwell_id = egui::Id::new("drag_tab_dwell").with(idx);
+                ui.ctx().data_mut(|d| d.remove::<f64>(dwell_id));
+            }
+
+            // Background — highlight when dragging items over this tab
+            let drag_hovering = is_item_dragging && !is_active && response.contains_pointer();
             let bg_color = if is_active {
                 active_bg
+            } else if drag_hovering {
+                // Bright accent tint so the user knows the tab will activate
+                egui::Color32::from_rgba_unmultiplied(60, 130, 220, 90)
             } else if response.hovered() {
                 hover_bg
             } else {

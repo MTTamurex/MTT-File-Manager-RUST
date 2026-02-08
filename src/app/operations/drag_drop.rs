@@ -52,6 +52,7 @@ impl ImageViewerApp {
 
         self.is_item_dragging = true;
         self.drag_payload_paths = payload;
+        self.drag_source_folder = Some(PathBuf::from(&self.current_path));
         self.drag_target_folder = None;
         self.drag_hovered_folder = None;
         self.ui_ctx.request_repaint();
@@ -71,7 +72,26 @@ impl ImageViewerApp {
             .map(|item| item.path.clone());
 
         self.drag_hovered_folder = hovered_folder.clone();
-        self.drag_target_folder = hovered_folder.filter(|target| self.is_valid_drop_target(target));
+
+        // If hovering over a specific folder, try that as the target.
+        // Otherwise, fall back to the current directory as the drop target,
+        // but only when we're NOT in the drag's source folder (to allow
+        // dropping onto the open folder of a different tab).
+        let candidate = hovered_folder.or_else(|| {
+            if self.current_path.is_empty() {
+                return None;
+            }
+            let cur = PathBuf::from(&self.current_path);
+            // Don't fall back to the source folder (items are already there)
+            if let Some(ref src) = self.drag_source_folder {
+                if normalize_path_for_compare(src) == normalize_path_for_compare(&cur) {
+                    return None;
+                }
+            }
+            Some(cur)
+        });
+
+        self.drag_target_folder = candidate.filter(|target| self.is_valid_drop_target(target));
     }
 
     /// Applies cursor feedback while dragging.
@@ -83,9 +103,12 @@ impl ImageViewerApp {
         if self.drag_target_folder.is_some() {
             // Over a valid drop target → show Grab cursor
             ctx.set_cursor_icon(egui::CursorIcon::Grab);
-        } else {
-            // Not over any valid drop target → show NotAllowed
+        } else if self.drag_hovered_folder.is_some() {
+            // Hovering over a specific folder that was rejected → NotAllowed
             ctx.set_cursor_icon(egui::CursorIcon::NotAllowed);
+        } else {
+            // Not over any folder (empty space, tab bar, files, etc.) → default cursor
+            ctx.set_cursor_icon(egui::CursorIcon::Default);
         }
 
         ctx.request_repaint();
@@ -294,9 +317,37 @@ impl ImageViewerApp {
             self.file_ops_in_progress = self.file_ops_in_progress.saturating_sub(1);
         }
 
+        // Clear drag state
         self.is_item_dragging = false;
         self.drag_target_folder = None;
         self.drag_hovered_folder = None;
+
+        // Clear selection so the detail panel updates to show folder info
+        // instead of stale references to the moved/copied items.
+        self.multi_selection.clear();
+        self.selected_item = None;
+        self.selected_file = None;
+        self.selected_thumbnail = None;
+        self.selected_metadata = None;
+
+        // Also clear selection in the source tab's saved state.
+        // After a tab switch the source tab's selection was persisted via sync_to_tab,
+        // so clearing only the current (destination) app state isn't enough.
+        if let Some(ref src) = self.drag_source_folder {
+            let src_norm = normalize_path_for_compare(src);
+            let active_idx = self.tab_manager.active_tab;
+            for (i, tab) in self.tab_manager.tabs.iter_mut().enumerate() {
+                if i != active_idx && normalize_path_for_compare(&std::path::PathBuf::from(&tab.path)) == src_norm {
+                    tab.multi_selection.clear();
+                    tab.selected_item = None;
+                    tab.selected_file = None;
+                    tab.selected_thumbnail = None;
+                    tab.selected_metadata = None;
+                }
+            }
+        }
+        self.drag_source_folder = None;
+
         self.ui_ctx.request_repaint();
     }
 
@@ -304,6 +355,7 @@ impl ImageViewerApp {
     pub fn cancel_item_drag(&mut self) {
         self.is_item_dragging = false;
         self.drag_payload_paths.clear();
+        self.drag_source_folder = None;
         self.drag_target_folder = None;
         self.drag_hovered_folder = None;
     }
