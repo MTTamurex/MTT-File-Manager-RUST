@@ -6,12 +6,15 @@
 //! PERFORMANCE CRITICAL: All I/O operations on OneDrive files use timeout-based
 //! wrappers to prevent indefinite blocking on cloud-only files.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
-use std::time::{Duration, Instant};
 
 use crate::domain::file_entry::SyncStatus;
+mod attributes;
+mod directory_enum;
+mod path_detection;
+mod timeout_ops;
 
 // Maximum number of concurrent timeout threads (prevents thread exhaustion)
 const MAX_CONCURRENT_TIMEOUT_THREADS: u64 = 4;
@@ -120,37 +123,19 @@ const ONEDRIVE_DIR_ENUM_TIMEOUT_MS: u64 = 5000;
 /// Returns true if the attribute set contains any Cloud Files flags (OneDrive, iCloud, etc).
 /// This acts as a fallback when the path-based detection fails (e.g., alternate mount points).
 pub fn has_cloud_attributes(attrs: u32) -> bool {
-    (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0
-        || (attrs & FILE_ATTRIBUTE_RECALL_ON_OPEN) != 0
-        || (attrs & FILE_ATTRIBUTE_PINNED) != 0
-        || (attrs & FILE_ATTRIBUTE_OFFLINE) != 0
+    attributes::has_cloud_attributes(attrs)
 }
 
 /// Initialize OneDrive root paths from environment variables.
 /// Should be called once at application startup.
 pub fn init_onedrive_paths() {
-    ONEDRIVE_ROOTS.get_or_init(|| {
-        let mut roots = Vec::new();
-        for var in ["OneDrive", "OneDriveConsumer", "OneDriveCommercial"] {
-            if let Ok(path) = std::env::var(var) {
-                if !path.is_empty() {
-                    roots.push(path.to_lowercase());
-                }
-            }
-        }
-        eprintln!("[OneDrive] Detected roots: {:?}", roots);
-        roots
-    });
+    path_detection::init_onedrive_paths();
 }
 
 /// Check if a path is within a OneDrive folder.
 /// Uses cached roots from environment variables.
 pub fn is_onedrive_path(path: &Path) -> bool {
-    let path_lower = path.to_string_lossy().to_lowercase();
-    ONEDRIVE_ROOTS
-        .get()
-        .map(|roots| roots.iter().any(|r| path_lower.starts_with(r)))
-        .unwrap_or(false)
+    path_detection::is_onedrive_path(path)
 }
 
 /// Fallback detection using file attributes for cases where the OneDrive root
@@ -160,7 +145,7 @@ pub fn is_onedrive_path(path: &Path) -> bool {
 /// NOT cached per drive letter — different paths on the same drive can have
 /// different cloud attributes (e.g., C:\Users\Docs vs C:\Users\OneDrive).
 pub fn path_has_cloud_attributes(path: &Path) -> bool {
-    check_cloud_attributes_uncached(path)
+    attributes::path_has_cloud_attributes(path)
 }
 
 /// Fast file/directory existence check using GetFileAttributesW.
@@ -172,16 +157,7 @@ pub fn path_has_cloud_attributes(path: &Path) -> bool {
 ///
 /// Use this instead of `path.exists()` anywhere on the UI thread or hot paths.
 pub fn fast_path_exists(path: &Path) -> bool {
-    use windows::Win32::Storage::FileSystem::{GetFileAttributesW, INVALID_FILE_ATTRIBUTES};
-
-    let path_wide: Vec<u16> = path
-        .to_string_lossy()
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
-
-    let attrs = unsafe { GetFileAttributesW(windows::core::PCWSTR(path_wide.as_ptr())) };
-    attrs != INVALID_FILE_ATTRIBUTES
+    attributes::fast_path_exists(path)
 }
 
 /// Fast directory check using GetFileAttributesW.
@@ -189,68 +165,14 @@ pub fn fast_path_exists(path: &Path) -> bool {
 /// Returns true if the path exists AND is a directory.
 /// Same performance characteristics as `fast_path_exists` — no OneDrive file recall.
 pub fn fast_is_dir(path: &Path) -> bool {
-    use windows::Win32::Storage::FileSystem::{GetFileAttributesW, INVALID_FILE_ATTRIBUTES};
-
-    let path_wide: Vec<u16> = path
-        .to_string_lossy()
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
-
-    let attrs = unsafe { GetFileAttributesW(windows::core::PCWSTR(path_wide.as_ptr())) };
-    if attrs == INVALID_FILE_ATTRIBUTES {
-        return false;
-    }
-    (attrs & 0x10) != 0 // FILE_ATTRIBUTE_DIRECTORY
-}
-
-/// Uncached cloud attribute check via Win32 API
-fn check_cloud_attributes_uncached(path: &Path) -> bool {
-    use windows::Win32::Storage::FileSystem::{GetFileAttributesW, INVALID_FILE_ATTRIBUTES};
-
-    let path_wide: Vec<u16> = path
-        .to_string_lossy()
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
-
-    let attrs = unsafe { GetFileAttributesW(windows::core::PCWSTR(path_wide.as_ptr())) };
-    if attrs == INVALID_FILE_ATTRIBUTES {
-        return false;
-    }
-    has_cloud_attributes(attrs)
+    attributes::fast_is_dir(path)
 }
 
 /// Check if a file is currently open in any application.
 /// Uses a simple heuristic: tries to open the file with exclusive access.
 /// If it fails, the file is likely open in another application.
 pub fn is_file_open(path: &Path) -> bool {
-    use std::fs::OpenOptions;
-    use std::io;
-
-    // For files, try to open with exclusive access
-    // If another process has it open, this will fail
-    match OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(false)
-        .open(path)
-    {
-        Ok(_) => {
-            // Successfully opened, so it's not being used by another process
-            false
-        }
-        Err(e) => {
-            // Failed to open - likely because it's in use
-            // Check specifically for "file in use" errors
-            e.kind() == io::ErrorKind::PermissionDenied
-                || e.raw_os_error().is_some_and(|code| {
-                    // Windows error codes for "file in use":
-                    // ERROR_SHARING_VIOLATION (32), ERROR_LOCK_VIOLATION (33)
-                    code == 32 || code == 33
-                })
-        }
-    }
+    attributes::is_file_open(path)
 }
 
 /// Determine sync status from file attributes.
@@ -260,52 +182,13 @@ pub fn is_file_open(path: &Path) -> bool {
 /// fall back to per-file cloud attributes here, because files copied FROM OneDrive
 /// retain their cloud attributes even in non-OneDrive locations.
 pub fn get_sync_status(attrs: u32, is_onedrive: bool) -> SyncStatus {
-    if !is_onedrive {
-        return SyncStatus::None;
-    }
-
-    // Syncing: File is being actively synced (highest priority)
-    if (attrs & FILE_ATTRIBUTE_RECALL_ON_OPEN) != 0 {
-        return SyncStatus::Syncing;
-    }
-
-    // Cloud Only: File needs to be downloaded (placeholder)
-    if (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0 || (attrs & FILE_ATTRIBUTE_OFFLINE) != 0
-    {
-        return SyncStatus::CloudOnly;
-    }
-
-    // Pinned: Always keep on device
-    if (attrs & FILE_ATTRIBUTE_PINNED) != 0 {
-        return SyncStatus::Pinned;
-    }
-
-    // LocallyAvailable: Downloaded but not pinned
-    SyncStatus::LocallyAvailable
+    attributes::get_sync_status(attrs, is_onedrive)
 }
 
 /// Check if a file is available locally (not cloud-only).
 /// Returns true if the file data is on disk, false if it needs download.
 pub fn is_locally_available(path: &Path) -> bool {
-    use windows::Win32::Storage::FileSystem::{GetFileAttributesW, INVALID_FILE_ATTRIBUTES};
-
-    let path_wide: Vec<u16> = path
-        .to_string_lossy()
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
-
-    let attrs = unsafe { GetFileAttributesW(windows::core::PCWSTR(path_wide.as_ptr())) };
-
-    if attrs == INVALID_FILE_ATTRIBUTES {
-        return false; // File doesn't exist or error
-    }
-
-    // Cloud-only indicators: need to be recalled/downloaded
-    let is_cloud_only = (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0
-        || (attrs & FILE_ATTRIBUTE_OFFLINE) != 0;
-
-    !is_cloud_only
+    attributes::is_locally_available(path)
 }
 
 /// Result of a timeout-protected I/O operation
@@ -339,107 +222,6 @@ impl<T> IoTimeoutResult<T> {
     }
 }
 
-fn run_onedrive_timeout_operation<T, F>(
-    path: &Path,
-    timeout_ms: u64,
-    poll_interval_ms: u64,
-    op_name: &str,
-    operation: F,
-) -> IoTimeoutResult<T>
-where
-    T: Send + 'static,
-    F: FnOnce(PathBuf) -> IoTimeoutResult<T> + Send + 'static,
-{
-    if is_app_minimized() {
-        eprintln!(
-            "[ONEDRIVE] App minimized - skipping {} for {:?}",
-            op_name, path
-        );
-        return IoTimeoutResult::Timeout;
-    }
-
-    let current_threads = ACTIVE_TIMEOUT_THREADS.load(Ordering::SeqCst);
-    if current_threads >= MAX_CONCURRENT_TIMEOUT_THREADS {
-        eprintln!(
-            "[ONEDRIVE] Thread limit reached ({}/{}), rejecting {} for {:?}",
-            current_threads, MAX_CONCURRENT_TIMEOUT_THREADS, op_name, path
-        );
-        return IoTimeoutResult::Timeout;
-    }
-
-    let active_before = ACTIVE_TIMEOUT_THREADS.fetch_add(1, Ordering::SeqCst);
-    eprintln!(
-        "[ONEDRIVE] Active timeout threads: {} -> {}",
-        active_before,
-        active_before + 1
-    );
-
-    let path_buf = path.to_path_buf();
-    let path_for_log = path_buf.clone();
-    let (result_tx, result_rx) = mpsc::channel::<IoTimeoutResult<T>>();
-
-    if onedrive_io_pool()
-        .execute(move || {
-            let _ = result_tx.send(operation(path_buf));
-        })
-        .is_err()
-    {
-        let active_after = ACTIVE_TIMEOUT_THREADS.fetch_sub(1, Ordering::SeqCst);
-        eprintln!(
-            "[ONEDRIVE] Active timeout threads: {} -> {}",
-            active_after,
-            active_after - 1
-        );
-        return IoTimeoutResult::Err(std::io::ErrorKind::Other);
-    }
-
-    let start = Instant::now();
-    let timeout = Duration::from_millis(timeout_ms);
-    let poll_interval = Duration::from_millis(poll_interval_ms.max(1));
-
-    let result = loop {
-        if is_app_minimized() {
-            eprintln!(
-                "[ONEDRIVE] App minimized during operation - aborting {} for {:?}",
-                op_name, path_for_log
-            );
-            break IoTimeoutResult::Timeout;
-        }
-
-        if start.elapsed() >= timeout {
-            eprintln!(
-                "[ONEDRIVE TIMEOUT] {} exceeded {}ms for {:?}",
-                op_name, timeout_ms, path_for_log
-            );
-            break IoTimeoutResult::Timeout;
-        }
-
-        let remaining = timeout.saturating_sub(start.elapsed());
-        let wait_for = if remaining < poll_interval {
-            remaining
-        } else {
-            poll_interval
-        };
-
-        match result_rx.recv_timeout(wait_for) {
-            Ok(result) => break result,
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                break IoTimeoutResult::Err(std::io::ErrorKind::Other);
-            }
-        }
-    };
-
-    let active_after = ACTIVE_TIMEOUT_THREADS.fetch_sub(1, Ordering::SeqCst);
-    eprintln!(
-        "[ONEDRIVE] Active timeout threads: {} -> {}",
-        active_after,
-        active_after - 1
-    );
-
-    result
-}
-
 /// Get file metadata with timeout protection.
 /// CRITICAL for OneDrive: prevents indefinite blocking on cloud-only files.
 ///
@@ -448,27 +230,7 @@ where
 /// - `Timeout` if operation takes longer than timeout_ms
 /// - `Err(kind)` if operation fails
 pub fn metadata_with_timeout(path: &Path, timeout_ms: u64) -> IoTimeoutResult<std::fs::Metadata> {
-    // Fast path: check if it's even a OneDrive path
-    if !is_onedrive_path(path) {
-        // Not OneDrive - use regular metadata (should be fast)
-        match std::fs::metadata(path) {
-            Ok(m) => return IoTimeoutResult::Ok(m),
-            Err(e) => return IoTimeoutResult::Err(e.kind()),
-        }
-    }
-
-    // Adjust timeout if minimized (use shorter timeout)
-    let effective_timeout = if is_app_minimized() {
-        ONEDRIVE_METADATA_TIMEOUT_MINIMIZED_MS
-    } else {
-        timeout_ms
-    };
-    run_onedrive_timeout_operation(path, effective_timeout, 1, "metadata()", move |path_buf| {
-        match std::fs::metadata(&path_buf) {
-            Ok(metadata) => IoTimeoutResult::Ok(metadata),
-            Err(err) => IoTimeoutResult::Err(err.kind()),
-        }
-    })
+    timeout_ops::metadata_with_timeout(path, timeout_ms)
 }
 
 /// Check if path exists with timeout protection.
@@ -478,31 +240,17 @@ pub fn metadata_with_timeout(path: &Path, timeout_ms: u64) -> IoTimeoutResult<st
 /// - `Ok(true/false)` if successful within timeout
 /// - `Timeout` if operation takes longer than timeout_ms
 pub fn exists_with_timeout(path: &Path, timeout_ms: u64) -> IoTimeoutResult<bool> {
-    // Fast path: check if it's even a OneDrive path
-    if !is_onedrive_path(path) {
-        // Not OneDrive - use GetFileAttributesW (faster than path.exists() which uses CreateFileW)
-        return IoTimeoutResult::Ok(fast_path_exists(path));
-    }
-
-    // Adjust timeout if minimized
-    let effective_timeout = if is_app_minimized() {
-        ONEDRIVE_METADATA_TIMEOUT_MINIMIZED_MS
-    } else {
-        timeout_ms
-    };
-    run_onedrive_timeout_operation(path, effective_timeout, 1, "exists()", move |path_buf| {
-        IoTimeoutResult::Ok(path_buf.exists())
-    })
+    timeout_ops::exists_with_timeout(path, timeout_ms)
 }
 
 /// Convenience function: Get metadata with default OneDrive timeout (100ms)
 pub fn onedrive_metadata(path: &Path) -> IoTimeoutResult<std::fs::Metadata> {
-    metadata_with_timeout(path, ONEDRIVE_METADATA_TIMEOUT_MS)
+    timeout_ops::onedrive_metadata(path)
 }
 
 /// Convenience function: Check exists with default OneDrive timeout (50ms)
 pub fn onedrive_exists(path: &Path) -> IoTimeoutResult<bool> {
-    exists_with_timeout(path, ONEDRIVE_EXISTS_TIMEOUT_MS)
+    timeout_ops::onedrive_exists(path)
 }
 
 /// Safely check if a file is locally available (not cloud-only).
@@ -534,103 +282,12 @@ pub fn read_directory_with_timeout(
     path: &Path,
     timeout_ms: u64,
 ) -> IoTimeoutResult<DirectoryEntries> {
-    // Fast path: not OneDrive - use regular reading (should be fast)
-    if !is_onedrive_path(path) {
-        return match read_directory_internal(path) {
-            Ok(entries) => IoTimeoutResult::Ok(entries),
-            Err(_) => IoTimeoutResult::Err(std::io::ErrorKind::Other),
-        };
-    }
-
-    // Adjust timeout if minimized
-    let effective_timeout = if is_app_minimized() {
-        timeout_ms / 2
-    } else {
-        timeout_ms
-    };
-    run_onedrive_timeout_operation(
-        path,
-        effective_timeout,
-        5,
-        "read_directory()",
-        move |path_buf| match read_directory_internal(&path_buf) {
-            Ok(entries) => IoTimeoutResult::Ok(entries),
-            Err(_) => IoTimeoutResult::Err(std::io::ErrorKind::Other),
-        },
-    )
-}
-
-/// Internal directory reading function using Win32 APIs
-fn read_directory_internal(path: &Path) -> Result<DirectoryEntries, std::io::Error> {
-    use std::ffi::OsString;
-    use std::os::windows::ffi::OsStringExt;
-    use windows::core::PCWSTR;
-    use windows::Win32::Storage::FileSystem::{
-        FindClose, FindFirstFileW, FindNextFileW, WIN32_FIND_DATAW,
-    };
-
-    let search_path = if path.to_string_lossy().ends_with('\\') {
-        format!("{}*", path.display())
-    } else {
-        format!("{}\\*", path.display())
-    };
-
-    let wide_path: Vec<u16> = search_path
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
-    let mut find_data = WIN32_FIND_DATAW::default();
-    let mut entries = Vec::new();
-
-    unsafe {
-        let handle = FindFirstFileW(PCWSTR(wide_path.as_ptr()), &mut find_data)?;
-
-        loop {
-            // Extract filename
-            let len = find_data
-                .cFileName
-                .iter()
-                .position(|&c| c == 0)
-                .unwrap_or(find_data.cFileName.len());
-            let filename = OsString::from_wide(&find_data.cFileName[0..len])
-                .to_string_lossy()
-                .into_owned();
-
-            if filename != "." && filename != ".." {
-                let attrs = find_data.dwFileAttributes;
-                let is_dir = (attrs & 0x10) != 0;
-
-                let size = if is_dir {
-                    0
-                } else {
-                    ((find_data.nFileSizeHigh as u64) << 32) | (find_data.nFileSizeLow as u64)
-                };
-
-                let ft = find_data.ftLastWriteTime;
-                let windows_ticks = ((ft.dwHighDateTime as u64) << 32) | (ft.dwLowDateTime as u64);
-                let modified = if windows_ticks > 116444736000000000 {
-                    (windows_ticks - 116444736000000000) / 10_000_000
-                } else {
-                    0
-                };
-
-                entries.push((filename, attrs, size, modified));
-            }
-
-            if FindNextFileW(handle, &mut find_data).is_err() {
-                break;
-            }
-        }
-
-        let _ = FindClose(handle);
-    }
-
-    Ok(entries)
+    directory_enum::read_directory_with_timeout(path, timeout_ms)
 }
 
 /// Convenience function: Read directory with default OneDrive timeout (5s)
 pub fn onedrive_read_directory(path: &Path) -> IoTimeoutResult<DirectoryEntries> {
-    read_directory_with_timeout(path, ONEDRIVE_DIR_ENUM_TIMEOUT_MS)
+    directory_enum::onedrive_read_directory(path)
 }
 
 #[cfg(test)]
