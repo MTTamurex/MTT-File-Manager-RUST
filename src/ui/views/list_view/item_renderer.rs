@@ -71,14 +71,15 @@ pub(super) fn render_list_item(
         if response.secondary_clicked() {
             *secondary_clicked_item = Some(i);
         }
-        if response.drag_started() {
+        let pointer_moved = ui.input(|i| i.pointer.delta() != egui::Vec2::ZERO);
+        if response.drag_started()
+            || response.dragged()
+            || (response.is_pointer_button_down_on() && pointer_moved)
+        {
             *ctx.drag_started_item = Some(i);
         }
-        let is_pointer_over = ui
-            .ctx()
-            .pointer_latest_pos()
-            .is_some_and(|pos| rect.contains(pos));
-        if (response.hovered() || is_pointer_over) && item.is_dir {
+        let is_pointer_over = response.contains_pointer() || response.hovered();
+        if is_pointer_over && item.is_dir {
             *ctx.drag_hovered_item = Some(i);
         }
 
@@ -141,7 +142,10 @@ pub(super) fn render_list_item(
         }
 
         // PERFORMANCE: Tooltip with debounce to avoid spam during scroll
-        render_item_tooltip(ui, &response, item, ctx, is_recycle_bin);
+        // Suppress tooltips during item drag to avoid clutter with drag ghost
+        if !ctx.is_item_dragging {
+            render_item_tooltip(ui, &response, item, ctx, is_recycle_bin);
+        }
 
         let text_color = if is_selected {
             crate::ui::theme::COLOR_SELECTION_TEXT

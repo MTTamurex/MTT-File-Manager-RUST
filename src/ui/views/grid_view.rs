@@ -260,14 +260,15 @@ pub fn render_grid_view(
         if response.secondary_clicked() {
             *secondary_clicked_item = Some(index);
         }
-        if response.drag_started() {
+        let pointer_moved = ui.input(|i| i.pointer.delta() != egui::Vec2::ZERO);
+        if response.drag_started()
+            || response.dragged()
+            || (response.is_pointer_button_down_on() && pointer_moved)
+        {
             *ctx.drag_started_item = Some(index);
         }
-        let is_pointer_over = ui
-            .ctx()
-            .pointer_latest_pos()
-            .is_some_and(|pos| rect.contains(pos));
-        if (response.hovered() || is_pointer_over) && item.is_dir {
+        let is_pointer_over = response.contains_pointer() || response.hovered();
+        if is_pointer_over && item.is_dir {
             *ctx.drag_hovered_item = Some(index);
         }
 
@@ -326,7 +327,8 @@ pub fn render_grid_view(
         }
 
         // PERFORMANCE: Tooltip with debounce to avoid spam during scroll
-        if response.hovered() {
+        // Suppress tooltips during item drag to avoid clutter with drag ghost
+        if response.hovered() && !ctx.is_item_dragging {
             let current_time = ui.input(|i| i.time);
             let hover_id = response.id.with("hover_start");
 

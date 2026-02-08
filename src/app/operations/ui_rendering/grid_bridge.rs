@@ -416,21 +416,13 @@ impl ImageViewerApp {
 
             if self.is_item_dragging {
                 self.update_item_drag_target_from_hover(drag_hovered_item);
-                let (ctrl, shift, primary_down, primary_released) = ui.input(|i| {
-                    (
-                        i.modifiers.ctrl,
-                        i.modifiers.shift,
-                        i.pointer.primary_down(),
-                        i.pointer.primary_released(),
-                    )
-                });
-
-                self.apply_item_drag_cursor_feedback(ui.ctx(), ctrl, shift);
+                // Cursor feedback and drag ghost are rendered in app_impl.rs
+                // after all UI, so no widget can override the cursor.
+                let (ctrl, shift, primary_released) =
+                    ui.input(|i| (i.modifiers.ctrl, i.modifiers.shift, i.pointer.primary_released()));
 
                 if primary_released {
                     self.complete_item_drag(ctrl, shift);
-                } else if !primary_down {
-                    self.cancel_item_drag();
                 }
             }
         } else if self.is_item_dragging {

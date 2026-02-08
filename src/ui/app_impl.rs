@@ -168,6 +168,17 @@ impl eframe::App for ImageViewerApp {
             app::notifications::render_notifications(self, ctx);
         }
 
+        // Keep drag feedback on top and avoid cursor override by later widgets.
+        if self.is_item_dragging {
+            let (ctrl, shift, primary_released) =
+                ctx.input(|i| (i.modifiers.ctrl, i.modifiers.shift, i.pointer.primary_released()));
+            self.apply_item_drag_cursor_feedback(ctx);
+            self.render_item_drag_preview(ctx, ctrl, shift);
+            if primary_released {
+                self.complete_item_drag(ctrl, shift);
+            }
+        }
+
         // PERF: Log total frame time when slow (helps diagnose post-inactivity freezes)
         let frame_total_ms = t_frame_start.elapsed().as_millis();
         if frame_total_ms > 100 {
