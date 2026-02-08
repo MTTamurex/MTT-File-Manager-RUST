@@ -224,6 +224,13 @@ impl MediaPreview {
         }
     }
 
+    /// Explicitly teardown the underlying player resources.
+    pub fn shutdown(&mut self) {
+        if let MediaPreview::Video(player) = self {
+            player.shutdown();
+        }
+    }
+
     /// Seek to specific time
     pub fn seek(&self, time: f64) {
         if let MediaPreview::Video(player) = self {

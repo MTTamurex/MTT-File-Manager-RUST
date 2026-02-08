@@ -131,17 +131,14 @@ impl ImageViewerApp {
                             // FIX: Stop media player if the renamed file is currently playing.
                             // The player holds the OLD path, so the preview panel would show a
                             // broken state (thumbnail over playing video, no controls).
-                            if let Some(
-                                crate::ui::components::media_preview::MediaPreview::Video(
-                                    ref mut player,
-                                ),
-                            ) = self.media_preview
-                            {
-                                if normalize_for_match(&player.path) == path_str {
-                                    player.pause();
-                                    self.media_preview = None;
-                                    self.media_preview_owner_tab_id = None;
-                                }
+                            let should_destroy_preview = match self.media_preview.as_ref() {
+                                Some(crate::ui::components::media_preview::MediaPreview::Video(
+                                    player,
+                                )) => normalize_for_match(&player.path) == path_str,
+                                _ => false,
+                            };
+                            if should_destroy_preview {
+                                self.destroy_media_preview();
                             }
 
                             for tab in self.tab_manager.tabs.iter_mut() {

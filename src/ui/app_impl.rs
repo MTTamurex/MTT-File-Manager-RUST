@@ -300,12 +300,7 @@ fn render_tab_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context, frame: &m
                         let tab_id = tab.id;
                         if app.media_preview_owner_tab_id == Some(tab_id) {
                             eprintln!("[DEBUG] Closing tab owns media player. Destroying player.");
-                            if let Some(crate::ui::components::media_preview::MediaPreview::Video(ref mut wv)) = app.media_preview {
-                                wv.pause();
-                            }
-                            app.media_preview = None;
-                            app.media_preview_owner_tab_id = None;
-                            app.ui_ctx.request_repaint();
+                            app.destroy_media_preview();
                         }
                     }
 

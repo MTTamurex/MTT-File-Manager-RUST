@@ -185,13 +185,13 @@ fn render_preview_panel_layout(
                                         use crate::ui::components::MpvPreview;
 
                                         // TAKE OVER: Stop and drop existing player if any
-                                        if let Some(MediaPreview::Video(ref mut old_player)) =
-                                            app.media_preview
+                                        if matches!(
+                                            app.media_preview.as_ref(),
+                                            Some(MediaPreview::Video(_))
+                                        )
                                         {
-                                            old_player.pause();
-                                            // Dropping app.media_preview will stop the previous player
+                                            app.destroy_media_preview();
                                         }
-                                        app.media_preview = None;
 
                                         // Take ownership and start new player
                                         let mut player = MpvPreview::new(path);
