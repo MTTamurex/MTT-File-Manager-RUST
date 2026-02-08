@@ -597,6 +597,7 @@ impl ImageViewerApp {
             is_item_dragging: false,
             drag_payload_paths: Vec::new(),
             drag_target_folder: None,
+            drag_hovered_folder: None,
             total_items: 0,
             // Search & Navigation (NEW)
             all_items: Vec::new(),
