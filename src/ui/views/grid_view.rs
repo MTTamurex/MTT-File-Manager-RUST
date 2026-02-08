@@ -1,7 +1,7 @@
 //! Grid view rendering
 //! Follows .cursorrules: single responsibility, < 300 lines
 
-use eframe::egui::{self, Rect, Sense, Ui};
+use eframe::egui::{self, Sense, Ui};
 use std::path::PathBuf;
 
 use crate::domain::file_entry::FileEntry;
@@ -11,6 +11,7 @@ mod interactions;
 mod item_renderer;
 mod prefetch;
 mod scroll;
+mod virtualization;
 
 // PERFORMANCE: Tooltip debounce to avoid creation/destruction during scroll
 const TOOLTIP_DELAY_SECS: f32 = 0.3; // Only show tooltip after 300ms hover
@@ -282,188 +283,25 @@ pub fn render_grid_view(
     // 3. Render Virtual Grid
     // DETECT BACKGROUND INTERACTION
     let bg_response = ui.interact(viewport_rect, ui.id().with("grid_bg"), Sense::click());
-
-    let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(viewport_rect));
-    child_ui.set_clip_rect(viewport_rect);
-
-    let content_min = viewport_rect.min;
-
-    // Virtualization Math (using Interpolated Visual Scroll)
-    let vis_min_row = (current_scroll / virtual_cell_h).floor() as usize;
-    let vis_max_row = ((current_scroll + viewport_h) / virtual_cell_h).ceil() as usize;
-
-    // Export range for prefetch relative to visual position
-    visible_rows_range = Some((vis_min_row, vis_max_row));
-
-    // PERFORMANCE: Clear stale loading_set entries when scrolling
-    // This ensures that slots are freed for currently visible items.
-    // Without this, the loading_set fills with items from previous scroll positions
-    // and new visible items can't load (blocked by the loading limit).
-    // Only clean if loading_set has significant entries to avoid overhead on every frame.
-    if ctx.loading_set.len() > 30 {
-        // Build set of paths that SHOULD remain (visible range + generous margin)
-        let cleanup_margin = 8; // Keep items within 8 rows of visible area
-        let keep_min_row = vis_min_row.saturating_sub(cleanup_margin);
-        let keep_max_row = (vis_max_row + cleanup_margin).min(total_rows);
-
-        // PERFORMANCE: Calculate index range instead of building a HashSet
-        // This avoids O(n) PathBuf clones and HashSet allocations
-        let keep_start_idx = keep_min_row * cols;
-        let keep_end_idx = (keep_max_row * cols).min(count);
-
-        // PERFORMANCE: Build O(1) lookup set from keep range (references only, no clones)
-        // This replaces an O(loading_set × keep_range) linear scan with O(keep_range + loading_set)
-        let keep_paths: FxHashSet<&PathBuf> = (keep_start_idx..keep_end_idx)
-            .flat_map(|idx| {
-                let item = &ctx.items[idx];
-                std::iter::once(&item.path).chain(item.folder_cover.iter())
-            })
-            .collect();
-        ctx.loading_set.retain(|path| keep_paths.contains(path));
-    }
-
-    // PERFORMANCE: Adaptive overscan based on scroll velocity
-    // Higher velocity = more overscan to prevent white areas during fast scroll
-    let overscan = if is_scrolling {
-        if ctx.scroll_predictor.velocity > 5.0 {
-            3
-        } else {
-            2
-        }
-    } else {
-        4 // More overscan when idle for smoother experience
-    };
-
-    let pre_clamp_min_row = vis_min_row.saturating_sub(overscan);
-    let pre_clamp_max_row = (vis_max_row + overscan).min(total_rows);
-
-    // Standard Virtualization Limits (with overscan)
-    let loop_min_row = pre_clamp_min_row;
-    let loop_max_row = pre_clamp_max_row;
-
-    if ctx.is_computer_view {
-        // Computer view with sections (Manual Scroll & Layout)
-        let mut current_y = content_min.y - current_scroll;
-
-        // ZERO-ALLOCATION RENDERING: Partitioning optimization
-        // OPTIMIZATION: Partition indices once instead of iterating all items multiple times
-        let mut local_indices = Vec::with_capacity(count / 2);
-        let mut network_indices = Vec::with_capacity(count / 2);
-
-        for (i, item) in ctx.items.iter().enumerate() {
-            let is_remote = item.drive_info.as_ref().map_or(false, |di| {
-                di.drive_type == crate::infrastructure::windows::DriveType::Remote
-            });
-            if is_remote {
-                network_indices.push(i);
-            } else {
-                local_indices.push(i);
-            }
-        }
-
-        // Helper to render a section from a list of indices
-        let mut render_section_indices =
-            |ui: &mut Ui, title: &str, indices: &[usize], start_y: &mut f32| {
-                let section_count = indices.len();
-                if section_count == 0 {
-                    return;
-                }
-
-                // Header
-                let header_h = 25.0;
-                // Check visibility of header
-                if *start_y + header_h > content_min.y && *start_y < content_min.y + viewport_h {
-                    let header_x = content_min.x + padding;
-                    let header_w = (available_w - padding).max(0.0);
-                    let header_rect = Rect::from_min_size(
-                        egui::pos2(header_x, *start_y),
-                        egui::vec2(header_w, header_h),
-                    );
-                    let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
-                    item_renderer::render_section_header(&mut header_ui, title);
-                }
-                *start_y += header_h;
-
-                let rows = (section_count as f32 / cols as f32).ceil() as usize;
-                let section_h = rows as f32 * virtual_cell_h + padding;
-
-                // Render items in this section
-                // Optimization: Only iterate if section is visible
-                if *start_y + section_h > content_min.y && *start_y < content_min.y + viewport_h {
-                    for (section_arr_idx, &real_idx) in indices.iter().enumerate() {
-                        let row = section_arr_idx / cols;
-                        let col_idx = section_arr_idx % cols;
-
-                        let item_y = *start_y + row as f32 * virtual_cell_h + padding;
-
-                        if item_y + item_h > content_min.y && item_y < content_min.y + viewport_h {
-                            let x_pos = col_idx as f32 * (item_w + padding) + padding;
-                            let item_rect = Rect::from_min_size(
-                                egui::pos2(content_min.x + x_pos, item_y),
-                                egui::vec2(item_w, item_h),
-                            );
-                            let item = &ctx.items[real_idx];
-                            item_renderer::render_grid_item(
-                                ui,
-                                real_idx,
-                                item,
-                                item_rect,
-                                ctx,
-                                &mut clicked_item,
-                                &mut double_clicked_item,
-                                &mut secondary_clicked_item,
-                                is_scrolling,
-                            );
-                        }
-                    }
-                }
-
-                *start_y += section_h;
-            };
-
-        render_section_indices(
-            &mut child_ui,
-            "Discos locais",
-            &local_indices,
-            &mut current_y,
-        );
-        render_section_indices(
-            &mut child_ui,
-            "Unidades de rede",
-            &network_indices,
-            &mut current_y,
-        );
-    } else {
-        // Standard Grid Virtualization
-        for row in loop_min_row..loop_max_row {
-            for col in 0..cols {
-                let index = row * cols + col;
-                if index >= count {
-                    break;
-                }
-
-                let x_pos = col as f32 * (item_w + padding) + padding;
-                let y_pos = content_min.y + row as f32 * virtual_cell_h + padding - current_scroll;
-
-                let item_rect = Rect::from_min_size(
-                    egui::pos2(content_min.x + x_pos, y_pos),
-                    egui::vec2(item_w, item_h),
-                );
-
-                item_renderer::render_grid_item(
-                    &mut child_ui,
-                    index,
-                    &ctx.items[index],
-                    item_rect,
-                    ctx,
-                    &mut clicked_item,
-                    &mut double_clicked_item,
-                    &mut secondary_clicked_item,
-                    is_scrolling,
-                );
-            }
-        }
-    }
+    visible_rows_range = virtualization::render_virtualized_grid(
+        ui,
+        ctx,
+        viewport_rect,
+        viewport_h,
+        current_scroll,
+        total_rows,
+        count,
+        cols,
+        padding,
+        item_w,
+        item_h,
+        available_w,
+        virtual_cell_h,
+        is_scrolling,
+        &mut clicked_item,
+        &mut double_clicked_item,
+        &mut secondary_clicked_item,
+    );
 
     scroll::render_custom_scrollbar(
         ui,
