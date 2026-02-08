@@ -22,6 +22,16 @@ use crate::ui::components::mpv::playback as mpv_playback;
 pub use crate::ui::components::mpv::state::{MpvState, TrackInfo};
 pub use crate::ui::components::mpv::utils::format_time;
 
+const MPV_DEFAULT_CACHE_SECS: f64 = 8.0;
+const MPV_DEFAULT_READAHEAD_SECS: f64 = 4.0;
+const MPV_DEFAULT_DEMUXER_MAX_BYTES: i64 = 32_i64 * 1024 * 1024;
+const MPV_DEFAULT_DEMUXER_MAX_BACK_BYTES: i64 = 8_i64 * 1024 * 1024;
+
+const MPV_DOCKED_CACHE_SECS: f64 = 12.0;
+const MPV_DOCKED_READAHEAD_SECS: f64 = 6.0;
+const MPV_DOCKED_DEMUXER_MAX_BYTES: i64 = 48_i64 * 1024 * 1024;
+const MPV_DOCKED_DEMUXER_MAX_BACK_BYTES: i64 = 12_i64 * 1024 * 1024;
+
 /// MPV video preview (WIP). This is a scaffold for the migration.
 pub struct MpvPreview {
     pub path: PathBuf,
@@ -359,13 +369,22 @@ impl MpvPreview {
                         eprintln!("[MpvPreview] Failed to set hwdec=d3d11va: {:?}", e);
                     }
 
-                    // PERF: Low-latency flags to reduce micro-stuttering and improve smoothness
-                    // video-sync=display-resample: Sync to display refresh rate (eliminates 24fps→60Hz judder)
-                    let _ = m.set_property("video-sync", "display-resample");
-                    // interpolation: Enable motion interpolation for smoother playback
-                    let _ = m.set_property("interpolation", true);
-                    // tscale=oversample: High-quality temporal interpolation
-                    let _ = m.set_property("tscale", "oversample");
+                    // Use a balanced baseline profile for 4K stability.
+                    // display-resample + interpolation can overload some GPUs in fullscreen.
+                    let _ = m.set_property("video-sync", "audio");
+                    let _ = m.set_property("interpolation", false);
+                    let _ = m.set_property("tscale", "linear");
+                    let _ = m.set_property("framedrop", "vo");
+
+                    // Bound demux/cache memory so high-bitrate files do not balloon RAM usage.
+                    let _ = m.set_property("cache", "yes");
+                    let _ = m.set_property("cache-secs", MPV_DEFAULT_CACHE_SECS);
+                    let _ = m.set_property("demuxer-readahead-secs", MPV_DEFAULT_READAHEAD_SECS);
+                    let _ = m.set_property("demuxer-max-bytes", MPV_DEFAULT_DEMUXER_MAX_BYTES);
+                    let _ = m.set_property(
+                        "demuxer-max-back-bytes",
+                        MPV_DEFAULT_DEMUXER_MAX_BACK_BYTES,
+                    );
 
                     let _ = m.set_property("pause", true);
 
@@ -614,10 +633,13 @@ impl MpvPreview {
             }
 
             let _ = m.set_property("cache", "yes");
-            let _ = m.set_property("cache-secs", 20.0f64);
-            let _ = m.set_property("demuxer-readahead-secs", 10.0f64);
-            let _ = m.set_property("demuxer-max-bytes", 64_i64 * 1024 * 1024);
-            let _ = m.set_property("demuxer-max-back-bytes", 16_i64 * 1024 * 1024);
+            let _ = m.set_property("cache-secs", MPV_DOCKED_CACHE_SECS);
+            let _ = m.set_property("demuxer-readahead-secs", MPV_DOCKED_READAHEAD_SECS);
+            let _ = m.set_property("demuxer-max-bytes", MPV_DOCKED_DEMUXER_MAX_BYTES);
+            let _ = m.set_property(
+                "demuxer-max-back-bytes",
+                MPV_DOCKED_DEMUXER_MAX_BACK_BYTES,
+            );
 
             self.docked_downscale_applied = true;
             self.docked_fps_limit_applied = true;
