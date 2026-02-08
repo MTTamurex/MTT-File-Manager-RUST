@@ -1,25 +1,21 @@
 //! Grid view rendering
 //! Follows .cursorrules: single responsibility, < 300 lines
 
-use eframe::egui::{self, Color32, Rect, Sense, Ui};
+use eframe::egui::{self, Rect, Sense, Ui};
 use std::path::PathBuf;
-use std::time::Duration;
 
 use crate::domain::file_entry::FileEntry;
 // PERFORMANCE: Use FxHashSet for PathBuf keys - faster hashing than std::collections::HashSet
 use crate::ui::cache::FxHashSet;
-use crate::ui::views::ViewportTracker;
+mod interactions;
+mod item_renderer;
+mod prefetch;
+mod scroll;
 
 // PERFORMANCE: Tooltip debounce to avoid creation/destruction during scroll
 const TOOLTIP_DELAY_SECS: f32 = 0.3; // Only show tooltip after 300ms hover
                                      // STRICT LIMIT: Mínimo zoom permitido para evitar degradação de performance
 const MIN_THUMBNAIL_SIZE: f32 = 96.0;
-
-/// Scroll state tracking for visual smoothing
-#[derive(Clone, Copy, Debug)]
-struct ScrollState {
-    visual_scroll_y: f32,
-}
 
 #[derive(Clone, Copy)]
 pub struct ScrollPredictor {
@@ -234,195 +230,8 @@ pub fn render_grid_view(
     let mut clicked_item = None;
     let mut double_clicked_item = None;
     let mut secondary_clicked_item = None;
-    let mut empty_area_secondary_click = false;
     #[allow(unused_assignments)]
     let mut visible_rows_range: Option<(usize, usize)> = None;
-
-    /// Helper to render a single grid item with full interaction
-    fn render_grid_item(
-        ui: &mut Ui,
-        index: usize,
-        item: &FileEntry,
-        rect: Rect,
-        ctx: &mut GridViewContext,
-        clicked_item: &mut Option<usize>,
-        double_clicked_item: &mut Option<usize>,
-        secondary_clicked_item: &mut Option<usize>,
-        is_scrolling: bool,
-    ) {
-        let response = ui.interact(rect, ui.id().with(index), Sense::click_and_drag());
-        if response.clicked() {
-            *clicked_item = Some(index);
-        }
-        if response.double_clicked() {
-            *double_clicked_item = Some(index);
-        }
-        if response.secondary_clicked() {
-            *secondary_clicked_item = Some(index);
-        }
-        let pointer_moved = ui.input(|i| i.pointer.delta() != egui::Vec2::ZERO);
-        if response.drag_started()
-            || response.dragged()
-            || (response.is_pointer_button_down_on() && pointer_moved)
-        {
-            *ctx.drag_started_item = Some(index);
-        }
-        let is_pointer_over = response.contains_pointer() || response.hovered();
-        if is_pointer_over && item.is_dir {
-            *ctx.drag_hovered_item = Some(index);
-        }
-
-        // --- VISUAL FEEDBACK: BORDER-ONLY (MODERN DESIGN) ---
-        let is_selected = ctx.multi_selection.contains(&item.path);
-
-        // STRICT HOVER LOGIC: Only allow hover if LastInput was Mouse
-        let allow_hover = matches!(ctx.last_input, crate::app::state::LastInput::Mouse);
-        let is_hovered_visual = allow_hover && response.hovered() && !is_selected;
-
-        let is_focused = ctx.selected_item == Some(index);
-
-        let rounding = 4.0;
-        let accent_color = crate::ui::theme::COLOR_ACCENT;
-
-        if is_selected {
-            // Selected: Bold primary border
-            let stroke_width = if is_hovered_visual { 2.5 } else { 2.0 };
-            ui.painter().rect_stroke(
-                rect,
-                rounding,
-                egui::Stroke::new(stroke_width, accent_color),
-                egui::StrokeKind::Inside,
-            );
-        } else if is_hovered_visual || is_focused {
-            // Hovered or Focused: Thin subtle border
-            let hover_color = accent_color.gamma_multiply(0.35); // ~35% alpha
-            ui.painter().rect_stroke(
-                rect,
-                rounding,
-                egui::Stroke::new(1.0, hover_color),
-                egui::StrokeKind::Inside,
-            );
-        }
-
-        let pointer_over_drop_candidate = ctx.is_item_dragging && item.is_dir && is_pointer_over;
-        let is_active_drop_target = ctx.is_item_dragging
-            && item.is_dir
-            && ctx
-                .drag_target_folder
-                .as_ref()
-                .is_some_and(|target| *target == item.path);
-
-        if pointer_over_drop_candidate || is_active_drop_target {
-            let stroke_color = if is_active_drop_target {
-                Color32::from_rgb(24, 122, 255)
-            } else {
-                accent_color.gamma_multiply(0.75)
-            };
-            ui.painter().rect_stroke(
-                rect.shrink(1.0),
-                rounding,
-                egui::Stroke::new(2.0, stroke_color),
-                egui::StrokeKind::Inside,
-            );
-        }
-
-        // PERFORMANCE: Tooltip with debounce to avoid spam during scroll
-        // Suppress tooltips during item drag to avoid clutter with drag ghost
-        if response.hovered() && !ctx.is_item_dragging {
-            let current_time = ui.input(|i| i.time);
-            let hover_id = response.id.with("hover_start");
-
-            // Track hover start time using egui's memory
-            let hover_start_time = ui
-                .ctx()
-                .data_mut(|d| *d.get_temp_mut_or_insert_with(hover_id, || current_time));
-
-            let hover_duration = (current_time - hover_start_time) as f32;
-
-            // Request repaint when approaching tooltip delay to ensure it appears
-            if hover_duration < TOOLTIP_DELAY_SECS {
-                ui.ctx()
-                    .request_repaint_after(std::time::Duration::from_secs_f32(
-                        TOOLTIP_DELAY_SECS - hover_duration + 0.01,
-                    ));
-            }
-
-            // Only show tooltip if hover duration exceeds threshold
-            // This prevents tooltip spam during scroll
-            if hover_duration >= TOOLTIP_DELAY_SECS {
-                let is_recycle = ctx.is_recycle_bin_view;
-                let mouse_pos = ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
-
-                // SMART TOOLTIP: Position to avoid video player overlay
-                // Native HWND windows (MPV) render above egui content, so we must avoid that area
-                let screen_right = ui.ctx().screen_rect().right();
-                let tooltip_width = 320.0;
-
-                // When video is docked, the preview panel takes ~25-30% of window width
-                // Only flip tooltip when it would actually overlap the video area
-                let effective_right = if ctx.is_video_docked_visible {
-                    screen_right * 0.72 // Preview panel is ~28% of window
-                } else {
-                    screen_right
-                };
-
-                let tooltip_x = if mouse_pos.x + tooltip_width > effective_right {
-                    (effective_right - tooltip_width - 5.0).max(10.0)
-                } else {
-                    mouse_pos.x
-                };
-                let tooltip_pos = egui::pos2(tooltip_x, mouse_pos.y);
-
-                // Use Order::Tooltip layer (though it won't help with native HWND windows)
-                let tooltip_layer =
-                    egui::LayerId::new(egui::Order::Tooltip, response.id.with("tooltip"));
-                egui::show_tooltip_at(
-                    ui.ctx(),
-                    tooltip_layer,
-                    response.id,
-                    tooltip_pos,
-                    |ui: &mut Ui| {
-                        ui.set_max_width(300.0);
-                        ui.vertical(|ui| {
-                            ui.label(egui::RichText::new(&item.name).strong());
-                            ui.separator();
-                            ui.label(format!("Tipo: {}", get_file_type_string(item)));
-                            let is_zip = item.is_zip();
-                            if !item.is_dir || is_zip {
-                                ui.label(format!(
-                                    "Tamanho: {}",
-                                    crate::infrastructure::windows::format_size(item.size)
-                                ));
-                            }
-                            let (date_lbl, date_val) = if is_recycle {
-                                (
-                                    "Data de Exclusão",
-                                    item.deletion_date
-                                        .clone()
-                                        .unwrap_or_else(|| "-".to_string()),
-                                )
-                            } else {
-                                (
-                                    "Última modificação",
-                                    crate::infrastructure::windows::format_date(item.modified),
-                                )
-                            };
-                            ui.label(format!("{}: {}", date_lbl, date_val));
-                        });
-                    },
-                );
-            }
-        } else {
-            // Clear hover time when not hovering
-            let hover_id = response.id.with("hover_start");
-            ui.ctx().data_mut(|d| d.remove::<f64>(hover_id));
-        }
-
-        // STANDARD RENDERING
-        let inner_rect = rect.shrink(3.0);
-        render_item_slot_for_grid(ui, inner_rect, index, item, ctx, is_scrolling);
-    }
-
     // --- MANUAL VIRTUALIZATION START ---
     let visual_cell_h = item_h + padding;
     const MIN_VIRTUAL_CELL_HEIGHT: f32 = 24.0;
@@ -436,58 +245,9 @@ pub fn render_grid_view(
     let viewport_h = viewport_rect.height();
     let max_scroll = (total_content_height - viewport_h).max(0.0);
 
-    // 1. Handle Input (Target Scroll)
-    let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
-    if scroll_delta != 0.0 {
-        let speed = 2.5;
-        *ctx.mut_scroll_offset_y -= scroll_delta * speed;
-    }
-
-    // 1.5 Clamp Target
-    *ctx.mut_scroll_offset_y = ctx.mut_scroll_offset_y.clamp(0.0, max_scroll);
-
-    // 2. Interpolate Visual Scroll (Frame-based smoothing)
-    let scroll_target = *ctx.mut_scroll_offset_y;
-    let scroll_state_id = ui.id().with("scroll_state");
-    // Limit dt to avoid massive jumps on lag spikes
-    let dt = ui.input(|i| i.stable_dt).min(0.05);
-
-    let visual_scroll = ui.ctx().data_mut(|d| {
-        let state = d.get_temp_mut_or_insert_with::<ScrollState>(scroll_state_id, || ScrollState {
-            visual_scroll_y: scroll_target,
-        });
-
-        // TUNED SMOOTHING:
-        // Use a stiffer spring (higher factor) to reduce "heavy/laggy" feel.
-        // Factor 25.0 = ~60% movement per 33ms frame (snappy but smooth)
-        // Factor 15.0 was ~40% (too floating)
-        let t = (dt * 25.0).min(1.0);
-
-        // If delta is huge (page jump), skip smoothing to avoid "teleporting" look
-        if (state.visual_scroll_y - scroll_target).abs() > viewport_h * 1.5 {
-            state.visual_scroll_y = scroll_target;
-        } else {
-            state.visual_scroll_y =
-                state.visual_scroll_y + (scroll_target - state.visual_scroll_y) * t;
-        }
-
-        // Snap to target if very close to stop micro-adjustments
-        if (state.visual_scroll_y - scroll_target).abs() < 1.0 {
-            state.visual_scroll_y = scroll_target;
-        }
-
-        state.visual_scroll_y
-    });
-
-    // PERFORMANCE: Request repaint only if animation delta exceeds 0.5px threshold
-    // This prevents infinite repaints due to floating-point precision issues
-    let scroll_delta = (visual_scroll - scroll_target).abs();
-    if scroll_delta > 0.5 {
-        ui.ctx().request_repaint_after(Duration::from_millis(16));
-    }
-
-    // Use visual_scroll for rendering from here on
-    let current_scroll = visual_scroll;
+    scroll::apply_scroll_input(ui, ctx.mut_scroll_offset_y, max_scroll);
+    let (current_scroll, scroll_delta) =
+        scroll::compute_visual_scroll(ui, *ctx.mut_scroll_offset_y, viewport_h);
 
     // PERFORMANCE: Track scroll changes
     if (*ctx.mut_scroll_offset_y - *ctx.last_scroll_offset).abs() > 0.1 {
@@ -620,7 +380,7 @@ pub fn render_grid_view(
                         egui::vec2(header_w, header_h),
                     );
                     let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
-                    render_section_header(&mut header_ui, title);
+                    item_renderer::render_section_header(&mut header_ui, title);
                 }
                 *start_y += header_h;
 
@@ -643,7 +403,7 @@ pub fn render_grid_view(
                                 egui::vec2(item_w, item_h),
                             );
                             let item = &ctx.items[real_idx];
-                            render_grid_item(
+                            item_renderer::render_grid_item(
                                 ui,
                                 real_idx,
                                 item,
@@ -690,7 +450,7 @@ pub fn render_grid_view(
                     egui::vec2(item_w, item_h),
                 );
 
-                render_grid_item(
+                item_renderer::render_grid_item(
                     &mut child_ui,
                     index,
                     &ctx.items[index],
@@ -705,335 +465,24 @@ pub fn render_grid_view(
         }
     }
 
-    // 4. Custom Scrollbar
-    if total_content_height > viewport_h {
-        let scrollbar_w = 12.0;
-        let scrollbar_rect = Rect::from_min_max(
-            viewport_rect.right_top() - egui::vec2(scrollbar_w, 0.0),
-            viewport_rect.right_bottom(),
-        );
-
-        ui.painter()
-            .rect_filled(scrollbar_rect, 0.0, Color32::from_gray(245));
-
-        let handle_h = (viewport_h / total_content_height * viewport_h).max(30.0);
-        // Use VISUAL scroll for handle position to match rendering
-        let handle_y = (current_scroll / max_scroll) * (viewport_h - handle_h);
-        let handle_rect = Rect::from_min_size(
-            scrollbar_rect.min + egui::vec2(2.0, handle_y),
-            egui::vec2(scrollbar_w - 4.0, handle_h),
-        );
-
-        let interact = ui.interact(
-            scrollbar_rect,
-            ui.id().with("scrollbar"),
-            Sense::click_and_drag(),
-        );
-
-        if interact.clicked() {
-            if let Some(click_pos) = ui.input(|i| i.pointer.interact_pos()) {
-                let relative_y = click_pos.y - scrollbar_rect.top();
-                let target_handle_top = relative_y - (handle_h / 2.0);
-                let scroll_ratio = target_handle_top / (viewport_h - handle_h);
-                // Update TARGET
-                *ctx.mut_scroll_offset_y = (scroll_ratio * max_scroll).clamp(0.0, max_scroll);
-            }
-        } else if interact.dragged() {
-            let delta_y = interact.drag_delta().y;
-            let scroll_pct_delta = delta_y / (viewport_h - handle_h);
-            // Update TARGET
-            *ctx.mut_scroll_offset_y += scroll_pct_delta * max_scroll;
-            *ctx.mut_scroll_offset_y = ctx.mut_scroll_offset_y.clamp(0.0, max_scroll);
-        }
-
-        let color = if interact.dragged() {
-            Color32::from_gray(150)
-        } else if interact.hovered() {
-            Color32::from_gray(180)
-        } else {
-            Color32::from_gray(200)
-        };
-        ui.painter().rect_filled(handle_rect, 4.0, color);
-    }
+    scroll::render_custom_scrollbar(
+        ui,
+        viewport_rect,
+        viewport_h,
+        total_content_height,
+        current_scroll,
+        max_scroll,
+        ctx.mut_scroll_offset_y,
+    );
     // --- MANUAL VIRTUALIZATION END ---
 
-    // Header helper
-    fn render_section_header(ui: &mut Ui, title: &str) {
-        ui.add_space(8.0);
-        ui.label(
-            egui::RichText::new(title)
-                .size(13.0)
-                .color(Color32::from_gray(120))
-                .strong(),
-        );
-        ui.add_space(4.0);
-    }
+    prefetch::flush_pending_operations(ctx, ops);
+    prefetch::process_visible_range_prefetch(ctx, cols, visible_rows_range, ops);
 
-    // BATCH PROCESSING: Flush all pending operations collected during render
-    // This avoids context switching and virtual dispatch inside the render loop
-    // Note: Thumbnail cache is on SSD, so we don't skip I/O even during video playback
-    for (path, size, index, modified) in ctx.pending_ops.thumbnail_loads.drain(..) {
-        if let Some(index) = index {
-            ops.request_thumbnail_load_with_index(path, size, index, modified);
-        } else {
-            ops.request_thumbnail_load(path, size, modified);
-        }
-    }
-    for path in ctx.pending_ops.folder_scans.drain(..) {
-        ops.request_folder_scan(path);
-    }
-    for path in ctx.pending_ops.folder_preview_loads.drain(..) {
-        ops.request_folder_preview_load(path);
-    }
-    for path in ctx.pending_ops.icon_loads.drain(..) {
-        ops.request_icon_load(path);
-    }
-    for rename_idx in ctx.pending_ops.renames.drain(..) {
-        ops.rename_with_shell(rename_idx);
-    }
-
-    if let Some((vis_min, vis_max)) = visible_rows_range {
-        let count = ctx.items.len();
-        if count > 0 {
-            let first_visible_index = (vis_min * cols).min(count.saturating_sub(1));
-            let last_visible_index = (vis_max * cols).min(count).saturating_sub(1);
-
-            // Export visible range for GPU upload prioritization
-            *ctx.visible_index_range = Some((first_visible_index, last_visible_index));
-            let tracker = ViewportTracker {
-                first_visible_index,
-                last_visible_index,
-                prefetch_rows: ctx.prefetch_rows,
-                columns: cols,
-            };
-            let (prefetch_start, prefetch_end) = tracker.get_prefetch_range(count);
-
-            for index in prefetch_start..prefetch_end {
-                if index >= count {
-                    break;
-                }
-                if tracker.is_visible(index) {
-                    continue;
-                }
-                let item = &ctx.items[index];
-                // FIX: Only prefetch thumbnails for media files (prevents .exe/.dll extraction)
-                if !item.is_dir && item.is_media() {
-                    if !ctx.texture_cache.contains(&item.path)
-                        && !ctx.loading_set.contains(&item.path)
-                        && !ctx.pending_upload_set.contains(&item.path)
-                    {
-                        ctx.loading_set.insert(item.path.clone());
-                        ops.request_thumbnail_prefetch_with_index(
-                            item.path.clone(),
-                            ctx.thumbnail_size as u32,
-                            index,
-                            item.modified,
-                        );
-                    }
-                }
-            }
-            let mut idle_visible_items = Vec::new();
-            for index in first_visible_index..=last_visible_index {
-                let item = &ctx.items[index];
-                if !item.is_dir {
-                    idle_visible_items.push(item.path.clone());
-                }
-            }
-            if !idle_visible_items.is_empty() {
-                ops.notify_idle_visible_items(idle_visible_items);
-            }
-        }
-    }
-
-    // Handle actions after rendering - ORDER MATTERS!
-    // double_clicked and secondary_clicked must be checked BEFORE clicked
-    // because clicked() also returns true on double-click
-    if let Some(idx) = double_clicked_item {
-        return Some(GridViewAction::DoubleClick(idx));
-    }
-
-    if let Some(idx) = secondary_clicked_item {
-        return Some(GridViewAction::SecondaryClick(idx));
-    }
-
-    // Fallback global: detect secondary click on empty area if no item was clicked
-    if secondary_clicked_item.is_none() && bg_response.secondary_clicked() {
-        empty_area_secondary_click = true;
-    }
-
-    if empty_area_secondary_click {
-        return Some(GridViewAction::EmptyAreaSecondaryClick);
-    }
-
-    if let Some(idx) = clicked_item {
-        return Some(GridViewAction::Click(idx));
-    }
-
-    None
-}
-
-/// Renders an individual item slot for grid view
-/// PERFORMANCE: Uses shared buffers from ctx.pending_ops instead of allocating per-item
-fn render_item_slot_for_grid(
-    ui: &mut Ui,
-    rect: Rect,
-    idx: usize,
-    item: &FileEntry,
-    ctx: &mut GridViewContext,
-    is_scrolling: bool,
-) {
-    use crate::ui::components::item_slot::{render_item_slot, ItemSlotContext};
-
-    let is_renaming = ctx
-        .renaming_state
-        .as_ref()
-        .map_or(false, |(i, _)| *i == idx);
-
-    // Texto de renomeação precisa ser tratado separadamente
-    let mut renaming_text_clone = if is_renaming {
-        ctx.renaming_state.as_ref().map(|(_, s)| s.clone())
-    } else {
-        None
-    };
-
-    // Create context with mutable reference to the clone
-    {
-        let renaming_text = renaming_text_clone.as_mut();
-
-        let mut item_slot_ctx = ItemSlotContext {
-            item,
-            idx,
-            thumbnail_size: ctx.thumbnail_size,
-            is_renaming,
-            renaming_text,
-            focus_rename: ctx.focus_rename,
-            is_recycle_bin_view: ctx.is_recycle_bin_view,
-            texture_cache: ctx.texture_cache,
-            icon_loader: ctx.item_icon_loader,
-            scanned_folders: ctx.scanned_folders,
-            loading_set: ctx.loading_set,
-            loading_icons: ctx.loading_icons,
-            failed_icons: ctx.failed_icons,
-            folder_preview_cache: ctx.folder_preview_cache,
-            folder_preview_loading: ctx.folder_preview_loading,
-            failed_thumbnails: ctx.failed_thumbnails,
-            pending_upload_set: ctx.pending_upload_set,
-            is_dense_mode: false, // Legacy: dense mode logic removed from grid view
-            is_scrolling,
-        };
-
-        // PERFORMANCE: SimpleOps now writes directly to shared buffers
-        struct SimpleOps<'a> {
-            pending_ops: &'a mut PendingOperations,
-        }
-
-        impl<'a> crate::ui::components::item_slot::ItemSlotOperations for SimpleOps<'a> {
-            fn request_thumbnail_load(
-                &mut self,
-                path: std::path::PathBuf,
-                size: u32,
-                directory_index: Option<usize>,
-                modified: u64,
-            ) {
-                self.pending_ops
-                    .thumbnail_loads
-                    .push((path, size, directory_index, modified));
-            }
-
-            fn request_folder_scan(&mut self, path: std::path::PathBuf) {
-                self.pending_ops.folder_scans.push(path);
-            }
-            fn request_folder_preview_load(&mut self, path: std::path::PathBuf) {
-                self.pending_ops.folder_preview_loads.push(path);
-            }
-            fn request_icon_load(&mut self, path: std::path::PathBuf) {
-                self.pending_ops.icon_loads.push(path);
-            }
-
-            fn rename_item(&mut self, idx: usize) {
-                self.pending_ops.renames.push(idx);
-            }
-        }
-
-        let mut simple_ops = SimpleOps {
-            pending_ops: ctx.pending_ops,
-        };
-
-        render_item_slot(ui, rect, &mut item_slot_ctx, &mut simple_ops);
-    }
-
-    // Apply changes after render
-    if let Some(new_text) = renaming_text_clone {
-        if is_renaming {
-            if let Some((_, ref mut text)) = ctx.renaming_state {
-                *text = new_text;
-            }
-        }
-    }
-}
-
-/// Helper function to get file type string.
-///
-/// PERFORMANCE: Uses Cow<'static, str> to return static strings for common types
-/// without allocation. Only allocates for dynamic extension strings.
-fn get_file_type_string(item: &FileEntry) -> std::borrow::Cow<'static, str> {
-    use std::borrow::Cow;
-
-    // PERFORMANCE: Use case-insensitive comparison without allocation
-    let name_lower = item.name.to_ascii_lowercase();
-
-    // Check for ZIP manually because is_dir might be true
-    if name_lower.ends_with(".zip") {
-        return Cow::Borrowed("Arquivo ZIP");
-    }
-    if item.is_dir {
-        return Cow::Borrowed("Pasta");
-    }
-
-    // For files, check common extensions first (static strings)
-    if let Some(ext) = item.path.extension() {
-        let ext_lower = ext.to_ascii_lowercase();
-        let ext_str = ext_lower.to_string_lossy();
-
-        // PERFORMANCE: Return static strings for common file types
-        match ext_str.as_ref() {
-            "txt" => return Cow::Borrowed("Arquivo TXT"),
-            "pdf" => return Cow::Borrowed("Arquivo PDF"),
-            "doc" | "docx" => return Cow::Borrowed("Arquivo Word"),
-            "xls" | "xlsx" => return Cow::Borrowed("Arquivo Excel"),
-            "ppt" | "pptx" => return Cow::Borrowed("Arquivo PowerPoint"),
-            "jpg" | "jpeg" => return Cow::Borrowed("Arquivo JPEG"),
-            "png" => return Cow::Borrowed("Arquivo PNG"),
-            "gif" => return Cow::Borrowed("Arquivo GIF"),
-            "bmp" => return Cow::Borrowed("Arquivo BMP"),
-            "webp" => return Cow::Borrowed("Arquivo WebP"),
-            "mp4" => return Cow::Borrowed("Arquivo MP4"),
-            "mkv" => return Cow::Borrowed("Arquivo MKV"),
-            "avi" => return Cow::Borrowed("Arquivo AVI"),
-            "mov" => return Cow::Borrowed("Arquivo MOV"),
-            "wmv" => return Cow::Borrowed("Arquivo WMV"),
-            "mp3" => return Cow::Borrowed("Arquivo MP3"),
-            "wav" => return Cow::Borrowed("Arquivo WAV"),
-            "flac" => return Cow::Borrowed("Arquivo FLAC"),
-            "exe" => return Cow::Borrowed("Arquivo Executável"),
-            "dll" => return Cow::Borrowed("Biblioteca DLL"),
-            "html" | "htm" => return Cow::Borrowed("Arquivo HTML"),
-            "css" => return Cow::Borrowed("Arquivo CSS"),
-            "js" => return Cow::Borrowed("Arquivo JavaScript"),
-            "json" => return Cow::Borrowed("Arquivo JSON"),
-            "xml" => return Cow::Borrowed("Arquivo XML"),
-            "rs" => return Cow::Borrowed("Arquivo Rust"),
-            "py" => return Cow::Borrowed("Arquivo Python"),
-            "java" => return Cow::Borrowed("Arquivo Java"),
-            "c" | "cpp" | "h" | "hpp" => return Cow::Borrowed("Arquivo C/C++"),
-            "lnk" => return Cow::Borrowed("Atalho"),
-            "iso" => return Cow::Borrowed("Imagem de Disco"),
-            _ => {
-                // Dynamic allocation only for unknown extensions
-                return Cow::Owned(format!("Arquivo {}", ext.to_string_lossy().to_uppercase()));
-            }
-        }
-    }
-
-    Cow::Borrowed("Arquivo")
+    interactions::resolve_grid_action(
+        clicked_item,
+        double_clicked_item,
+        secondary_clicked_item,
+        bg_response.secondary_clicked(),
+    )
 }
