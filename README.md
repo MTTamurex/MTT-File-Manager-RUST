@@ -55,7 +55,7 @@ O MTT File Manager é um gerenciador de arquivos desktop que combina a performan
 - **Workers assíncronos** - Processamento em background sem travar UI
 - **Pré-carregamento inteligente** - Prefetch preditivo de pastas e arquivos
 - **Virtualização de UI** - Renderização eficiente de listas grandes
-- **Monitoramento de mudanças** - Atualização automática da UI via notify
+- **Monitoramento de mudanças** - Drive Watcher nativo (ReadDirectoryChangesW) com fallback `notify` para caminhos UNC
 
 ## 🛠️ Tecnologias
 
@@ -93,7 +93,7 @@ O MTT File Manager é um gerenciador de arquivos desktop que combina a performan
 ## 🚀 Instalação
 
 ### Opção 1: Download Direto (Recomendado)
-1. Baixe a última release de [releases](../../releases)
+1. Baixe a última release em [GitHub Releases](https://github.com/mtamu/MTT-File-Manager-RUST/releases)
 2. Extraia o arquivo ZIP
 3. Execute `mtt-file-manager.exe`
 
@@ -161,6 +161,7 @@ Acesse a pasta [`docs/`](docs/) para documentação completa:
 - **[Storage e Config](docs/07_storage_config.md)** - Onde e como dados são armazenados
 - **[Logs e Erros](docs/08_logging_errors_telemetry.md)** - Sistema de logs e debugging
 - **[Playbook de Suporte](docs/09_support_playbook.md)** - Guia para suporte e troubleshooting
+- **[Otimizações File Pilot](docs/10_file_pilot_optimizations.md)** - Drive watcher e otimizações de I/O
 
 ### 🔗 Links Rápidos
 - [Documentação Principal](docs/INDEX.md) - Índice completo da documentação
