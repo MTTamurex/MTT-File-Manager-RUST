@@ -1,0 +1,315 @@
+use super::{item_renderer, GridViewContext};
+use crate::ui::cache::FxHashSet;
+use eframe::egui::{self, Rect, Ui};
+use std::path::PathBuf;
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn render_virtualized_grid(
+    ui: &mut Ui,
+    ctx: &mut GridViewContext,
+    viewport_rect: Rect,
+    viewport_h: f32,
+    current_scroll: f32,
+    total_rows: usize,
+    count: usize,
+    cols: usize,
+    padding: f32,
+    item_w: f32,
+    item_h: f32,
+    available_w: f32,
+    virtual_cell_h: f32,
+    is_scrolling: bool,
+    clicked_item: &mut Option<usize>,
+    double_clicked_item: &mut Option<usize>,
+    secondary_clicked_item: &mut Option<usize>,
+) -> Option<(usize, usize)> {
+    let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(viewport_rect));
+    child_ui.set_clip_rect(viewport_rect);
+    let content_min = viewport_rect.min;
+
+    let vis_min_row = (current_scroll / virtual_cell_h).floor() as usize;
+    let vis_max_row = ((current_scroll + viewport_h) / virtual_cell_h).ceil() as usize;
+    let visible_rows_range = Some((vis_min_row, vis_max_row));
+
+    cleanup_loading_set(ctx, vis_min_row, vis_max_row, total_rows, cols, count);
+
+    let overscan = if is_scrolling {
+        if ctx.scroll_predictor.velocity > 5.0 {
+            3
+        } else {
+            2
+        }
+    } else {
+        4
+    };
+
+    let loop_min_row = vis_min_row.saturating_sub(overscan);
+    let loop_max_row = (vis_max_row + overscan).min(total_rows);
+
+    if ctx.is_computer_view {
+        render_computer_view_sections(
+            &mut child_ui,
+            ctx,
+            content_min,
+            viewport_h,
+            current_scroll,
+            cols,
+            padding,
+            item_w,
+            item_h,
+            available_w,
+            virtual_cell_h,
+            count,
+            is_scrolling,
+            clicked_item,
+            double_clicked_item,
+            secondary_clicked_item,
+        );
+    } else {
+        render_standard_grid(
+            &mut child_ui,
+            ctx,
+            content_min,
+            current_scroll,
+            cols,
+            padding,
+            item_w,
+            item_h,
+            virtual_cell_h,
+            count,
+            loop_min_row,
+            loop_max_row,
+            is_scrolling,
+            clicked_item,
+            double_clicked_item,
+            secondary_clicked_item,
+        );
+    }
+
+    visible_rows_range
+}
+
+fn cleanup_loading_set(
+    ctx: &mut GridViewContext,
+    vis_min_row: usize,
+    vis_max_row: usize,
+    total_rows: usize,
+    cols: usize,
+    count: usize,
+) {
+    if ctx.loading_set.len() <= 30 {
+        return;
+    }
+
+    let cleanup_margin = 8;
+    let keep_min_row = vis_min_row.saturating_sub(cleanup_margin);
+    let keep_max_row = (vis_max_row + cleanup_margin).min(total_rows);
+
+    let keep_start_idx = keep_min_row * cols;
+    let keep_end_idx = (keep_max_row * cols).min(count);
+
+    let keep_paths: FxHashSet<&PathBuf> = (keep_start_idx..keep_end_idx)
+        .flat_map(|idx| {
+            let item = &ctx.items[idx];
+            std::iter::once(&item.path).chain(item.folder_cover.iter())
+        })
+        .collect();
+    ctx.loading_set.retain(|path| keep_paths.contains(path));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_computer_view_sections(
+    ui: &mut Ui,
+    ctx: &mut GridViewContext,
+    content_min: egui::Pos2,
+    viewport_h: f32,
+    current_scroll: f32,
+    cols: usize,
+    padding: f32,
+    item_w: f32,
+    item_h: f32,
+    available_w: f32,
+    virtual_cell_h: f32,
+    count: usize,
+    is_scrolling: bool,
+    clicked_item: &mut Option<usize>,
+    double_clicked_item: &mut Option<usize>,
+    secondary_clicked_item: &mut Option<usize>,
+) {
+    let mut current_y = content_min.y - current_scroll;
+
+    let mut local_indices = Vec::with_capacity(count / 2);
+    let mut network_indices = Vec::with_capacity(count / 2);
+
+    for (i, item) in ctx.items.iter().enumerate() {
+        let is_remote = item
+            .drive_info
+            .as_ref()
+            .is_some_and(|di| di.drive_type == crate::infrastructure::windows::DriveType::Remote);
+        if is_remote {
+            network_indices.push(i);
+        } else {
+            local_indices.push(i);
+        }
+    }
+
+    render_section_indices(
+        ui,
+        ctx,
+        "Discos locais",
+        &local_indices,
+        &mut current_y,
+        content_min,
+        viewport_h,
+        cols,
+        padding,
+        item_w,
+        item_h,
+        available_w,
+        virtual_cell_h,
+        is_scrolling,
+        clicked_item,
+        double_clicked_item,
+        secondary_clicked_item,
+    );
+    render_section_indices(
+        ui,
+        ctx,
+        "Unidades de rede",
+        &network_indices,
+        &mut current_y,
+        content_min,
+        viewport_h,
+        cols,
+        padding,
+        item_w,
+        item_h,
+        available_w,
+        virtual_cell_h,
+        is_scrolling,
+        clicked_item,
+        double_clicked_item,
+        secondary_clicked_item,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_section_indices(
+    ui: &mut Ui,
+    ctx: &mut GridViewContext,
+    title: &str,
+    indices: &[usize],
+    start_y: &mut f32,
+    content_min: egui::Pos2,
+    viewport_h: f32,
+    cols: usize,
+    padding: f32,
+    item_w: f32,
+    item_h: f32,
+    available_w: f32,
+    virtual_cell_h: f32,
+    is_scrolling: bool,
+    clicked_item: &mut Option<usize>,
+    double_clicked_item: &mut Option<usize>,
+    secondary_clicked_item: &mut Option<usize>,
+) {
+    let section_count = indices.len();
+    if section_count == 0 {
+        return;
+    }
+
+    let header_h = 25.0;
+    if *start_y + header_h > content_min.y && *start_y < content_min.y + viewport_h {
+        let header_x = content_min.x + padding;
+        let header_w = (available_w - padding).max(0.0);
+        let header_rect = Rect::from_min_size(
+            egui::pos2(header_x, *start_y),
+            egui::vec2(header_w, header_h),
+        );
+        let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
+        item_renderer::render_section_header(&mut header_ui, title);
+    }
+    *start_y += header_h;
+
+    let rows = (section_count as f32 / cols as f32).ceil() as usize;
+    let section_h = rows as f32 * virtual_cell_h + padding;
+
+    if *start_y + section_h > content_min.y && *start_y < content_min.y + viewport_h {
+        for (section_arr_idx, &real_idx) in indices.iter().enumerate() {
+            let row = section_arr_idx / cols;
+            let col_idx = section_arr_idx % cols;
+
+            let item_y = *start_y + row as f32 * virtual_cell_h + padding;
+            if item_y + item_h > content_min.y && item_y < content_min.y + viewport_h {
+                let x_pos = col_idx as f32 * (item_w + padding) + padding;
+                let item_rect = Rect::from_min_size(
+                    egui::pos2(content_min.x + x_pos, item_y),
+                    egui::vec2(item_w, item_h),
+                );
+                let item = &ctx.items[real_idx];
+                item_renderer::render_grid_item(
+                    ui,
+                    real_idx,
+                    item,
+                    item_rect,
+                    ctx,
+                    clicked_item,
+                    double_clicked_item,
+                    secondary_clicked_item,
+                    is_scrolling,
+                );
+            }
+        }
+    }
+
+    *start_y += section_h;
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_standard_grid(
+    ui: &mut Ui,
+    ctx: &mut GridViewContext,
+    content_min: egui::Pos2,
+    current_scroll: f32,
+    cols: usize,
+    padding: f32,
+    item_w: f32,
+    item_h: f32,
+    virtual_cell_h: f32,
+    count: usize,
+    loop_min_row: usize,
+    loop_max_row: usize,
+    is_scrolling: bool,
+    clicked_item: &mut Option<usize>,
+    double_clicked_item: &mut Option<usize>,
+    secondary_clicked_item: &mut Option<usize>,
+) {
+    for row in loop_min_row..loop_max_row {
+        for col in 0..cols {
+            let index = row * cols + col;
+            if index >= count {
+                break;
+            }
+
+            let x_pos = col as f32 * (item_w + padding) + padding;
+            let y_pos = content_min.y + row as f32 * virtual_cell_h + padding - current_scroll;
+
+            let item_rect = Rect::from_min_size(
+                egui::pos2(content_min.x + x_pos, y_pos),
+                egui::vec2(item_w, item_h),
+            );
+
+            item_renderer::render_grid_item(
+                ui,
+                index,
+                &ctx.items[index],
+                item_rect,
+                ctx,
+                clicked_item,
+                double_clicked_item,
+                secondary_clicked_item,
+                is_scrolling,
+            );
+        }
+    }
+}
