@@ -459,9 +459,14 @@ impl ThumbnailDiskCache {
         const BATCH_SIZE: usize = 500;
 
         for chunk in items.chunks(BATCH_SIZE) {
-            let placeholders = std::iter::repeat_n("?", chunk.len()).collect::<Vec<_>>().join(",");
+            let placeholders = std::iter::repeat_n("?", chunk.len())
+                .collect::<Vec<_>>()
+                .join(",");
 
-            let sql = format!("DELETE FROM {} WHERE {} IN ({})", table, key_col, placeholders);
+            let sql = format!(
+                "DELETE FROM {} WHERE {} IN ({})",
+                table, key_col, placeholders
+            );
 
             match db.execute(&sql, rusqlite::params_from_iter(chunk.iter())) {
                 Ok(c) => count += c,
@@ -536,8 +541,12 @@ impl ThumbnailDiskCache {
                 removed += Self::execute_batch_delete(&db, "thumbnails", "id", &orphan_thumbs);
             }
             if !orphan_folders.is_empty() {
-                removed +=
-                    Self::execute_batch_delete(&db, "folder_covers", "folder_path", &orphan_folders);
+                removed += Self::execute_batch_delete(
+                    &db,
+                    "folder_covers",
+                    "folder_path",
+                    &orphan_folders,
+                );
             }
             let _ = db.execute("COMMIT", []);
         }
@@ -614,14 +623,21 @@ impl ThumbnailDiskCache {
                 removed += Self::execute_batch_delete(&db, "thumbnails", "id", &orphan_thumbs);
             }
             if !orphan_folders.is_empty() {
-                removed +=
-                    Self::execute_batch_delete(&db, "folder_covers", "folder_path", &orphan_folders);
+                removed += Self::execute_batch_delete(
+                    &db,
+                    "folder_covers",
+                    "folder_path",
+                    &orphan_folders,
+                );
             }
             let _ = db.execute("COMMIT", []);
         }
 
         if removed > 0 {
-            eprintln!("[GC] Full GC removed {} entries (VACUUM not automatic)", removed);
+            eprintln!(
+                "[GC] Full GC removed {} entries (VACUUM not automatic)",
+                removed
+            );
         }
         removed
     }

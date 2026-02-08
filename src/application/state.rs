@@ -55,7 +55,7 @@ pub struct AppState {
     pub clipboard: ClipboardManager,
     pub watcher: WatcherState,
     pub renaming_state: Option<RenamingState>,
-    
+
     // UI states
     pub show_virtual_drive_settings: bool,
 
@@ -101,7 +101,7 @@ impl AppState {
             clipboard: ClipboardManager::new(),
             watcher: WatcherState::new(),
             renaming_state: None,
-            
+
             show_virtual_drive_settings: false,
 
             scanned_folders: FxHashSet::default(),

@@ -8,6 +8,7 @@ pub mod drives;
 pub mod file_flags;
 pub mod file_system;
 pub mod file_type;
+pub mod folder_size;
 pub mod formatting;
 pub mod hdd_directory_reader;
 pub mod icons;
@@ -17,11 +18,9 @@ pub mod metadata;
 pub mod native_menu;
 pub mod recycle_bin;
 pub mod shell_folder;
-pub mod folder_size;
 pub mod shell_operations;
 pub mod system_info;
 pub mod window_subclass;
-
 
 // Re-export for convenience
 pub use bitmap_conversion::*;

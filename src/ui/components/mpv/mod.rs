@@ -8,8 +8,8 @@ pub use state::{MpvState, TrackInfo};
 pub use utils::format_time;
 
 // Sub-modules
-pub mod state;
+pub mod event_loop;
 pub mod filters;
 pub mod playback;
-pub mod event_loop;
+pub mod state;
 pub mod utils;

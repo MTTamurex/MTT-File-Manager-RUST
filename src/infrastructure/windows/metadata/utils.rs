@@ -51,11 +51,7 @@ pub unsafe fn open_property_store(path: &Path) -> Result<IPropertyStore, windows
     // GPS_OPENSLOWITEM tells Windows to WAIT for slow/network items (OneDrive cloud files),
     // which can block the calling thread for 30-60+ seconds on cloud-only files.
     // GPS_BESTEFFORT returns whatever metadata is locally cached without blocking.
-    SHGetPropertyStoreFromParsingName(
-        PCWSTR(wide_path.as_ptr()),
-        None,
-        GPS_BESTEFFORT,
-    )
+    SHGetPropertyStoreFromParsingName(PCWSTR(wide_path.as_ptr()), None, GPS_BESTEFFORT)
 }
 
 // Helper to read property value as u32
@@ -67,7 +63,10 @@ pub unsafe fn read_u32(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<u32>
         } as *const _ as *const _)
         .ok()?;
 
-    let raw = unsafe { &*(&pv.Anonymous.Anonymous as *const _ as *const windows::Win32::System::Com::StructuredStorage::PROPVARIANT_0_0) };
+    let raw = unsafe {
+        &*(&pv.Anonymous.Anonymous as *const _
+            as *const windows::Win32::System::Com::StructuredStorage::PROPVARIANT_0_0)
+    };
     let vt = raw.vt;
 
     match vt.0 {
@@ -78,7 +77,11 @@ pub unsafe fn read_u32(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<u32>
         VT_LPWSTR | VT_BSTR => {
             // Fallback: Try parsing string as number
             let s = read_string(store, key)?;
-            s.chars().filter(|c| c.is_ascii_digit()).collect::<String>().parse::<u32>().ok()
+            s.chars()
+                .filter(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse::<u32>()
+                .ok()
         }
         VT_EMPTY => None,
         _ => None,
@@ -94,7 +97,10 @@ pub unsafe fn read_u64(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<u64>
         } as *const _ as *const _)
         .ok()?;
 
-    let raw = unsafe { &*(&pv.Anonymous.Anonymous as *const _ as *const windows::Win32::System::Com::StructuredStorage::PROPVARIANT_0_0) };
+    let raw = unsafe {
+        &*(&pv.Anonymous.Anonymous as *const _
+            as *const windows::Win32::System::Com::StructuredStorage::PROPVARIANT_0_0)
+    };
     let vt = raw.vt;
 
     match vt.0 {
@@ -104,7 +110,11 @@ pub unsafe fn read_u64(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<u64>
         VT_I4 => Some(unsafe { raw.Anonymous.lVal as u64 }),
         VT_LPWSTR | VT_BSTR => {
             let s = read_string(store, key)?;
-            s.chars().filter(|c| c.is_ascii_digit()).collect::<String>().parse::<u64>().ok()
+            s.chars()
+                .filter(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse::<u64>()
+                .ok()
         }
         _ => None,
     }
@@ -119,7 +129,10 @@ pub unsafe fn read_f64(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<f64>
         } as *const _ as *const _)
         .ok()?;
 
-    let raw = unsafe { &*(&pv.Anonymous.Anonymous as *const _ as *const windows::Win32::System::Com::StructuredStorage::PROPVARIANT_0_0) };
+    let raw = unsafe {
+        &*(&pv.Anonymous.Anonymous as *const _
+            as *const windows::Win32::System::Com::StructuredStorage::PROPVARIANT_0_0)
+    };
     let vt = raw.vt;
 
     match vt.0 {
@@ -137,12 +150,16 @@ pub unsafe fn read_string(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<S
     let pv = match store.GetValue(&PROPERTYKEY {
         fmtid: key.fmtid,
         pid: key.pid,
-    } as *const _ as *const _) {
+    } as *const _ as *const _)
+    {
         Ok(v) => v,
         Err(_) => return None,
     };
 
-    let raw = unsafe { &*(&pv.Anonymous.Anonymous as *const _ as *const windows::Win32::System::Com::StructuredStorage::PROPVARIANT_0_0) };
+    let raw = unsafe {
+        &*(&pv.Anonymous.Anonymous as *const _
+            as *const windows::Win32::System::Com::StructuredStorage::PROPVARIANT_0_0)
+    };
     let vt = raw.vt;
 
     match vt.0 {
@@ -212,7 +229,10 @@ pub unsafe fn read_fourcc(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<S
         } as *const _ as *const _)
         .ok()?;
 
-    let raw = unsafe { &*(&pv.Anonymous.Anonymous as *const _ as *const windows::Win32::System::Com::StructuredStorage::PROPVARIANT_0_0) };
+    let raw = unsafe {
+        &*(&pv.Anonymous.Anonymous as *const _
+            as *const windows::Win32::System::Com::StructuredStorage::PROPVARIANT_0_0)
+    };
     let vt = raw.vt;
 
     match vt.0 {
@@ -226,7 +246,10 @@ pub unsafe fn read_fourcc(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<S
             ];
             let codec_str = String::from_utf8(bytes.to_vec()).ok()?;
             // Debug log para verificar FourCC do Property Store
-            eprintln!("[DEBUG] read_fourcc VT_UI4: fourcc=0x{:08X}, bytes={:?}, codec_str='{}'", fourcc, bytes, codec_str);
+            eprintln!(
+                "[DEBUG] read_fourcc VT_UI4: fourcc=0x{:08X}, bytes={:?}, codec_str='{}'",
+                fourcc, bytes, codec_str
+            );
             if codec_str.trim().is_empty() {
                 None
             } else {

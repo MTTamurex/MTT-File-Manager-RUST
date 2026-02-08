@@ -1,8 +1,10 @@
 //! Virtual drive settings modal for configuring SSD/HDD optimization
 
-use crate::infrastructure::virtual_drive_config::{DiskTypeOverride, get_all_overrides, set_drive_override, remove_drive_override};
-use crate::infrastructure::windows::drives::get_all_drives;
 use crate::infrastructure::io_priority;
+use crate::infrastructure::virtual_drive_config::{
+    get_all_overrides, remove_drive_override, set_drive_override, DiskTypeOverride,
+};
+use crate::infrastructure::windows::drives::get_all_drives;
 use eframe::egui;
 
 /// Info about a detected virtual drive
@@ -15,12 +17,9 @@ struct VirtualDriveInfo {
 }
 
 /// Render the virtual drive settings modal window
-pub fn render_virtual_drive_settings(
-    ctx: &egui::Context,
-    show_modal: bool,
-) -> bool {
+pub fn render_virtual_drive_settings(ctx: &egui::Context, show_modal: bool) -> bool {
     let mut keep_open = show_modal;
-    
+
     let response = egui::Window::new("⚙ Configuração de Drives Virtuais")
         .collapsible(false)
         .resizable(true)
@@ -88,7 +87,7 @@ pub fn render_virtual_drive_settings(
                 });
             });
         });
-    
+
     // Check if user closed via X button
     if let Some(resp) = response {
         if resp.response.hovered() {
@@ -113,7 +112,7 @@ fn detect_virtual_drives() -> Vec<VirtualDriveInfo> {
     for (path, label) in drives {
         if let Some(drive_letter) = path.chars().next() {
             let drive_letter = drive_letter.to_ascii_uppercase();
-            
+
             // Check if it's a virtual drive by querying volume info
             if let Some((is_virtual, fs)) = check_if_virtual(drive_letter) {
                 if is_virtual {
@@ -227,7 +226,11 @@ fn render_drive_row(ui: &mut egui::Ui, drive_info: &VirtualDriveInfo) {
     // Actions
     ui.horizontal(|ui| {
         if drive_info.current_override.is_some() {
-            if ui.button("🗑").on_hover_text("Remover configuração").clicked() {
+            if ui
+                .button("🗑")
+                .on_hover_text("Remover configuração")
+                .clicked()
+            {
                 if let Err(e) = remove_drive_override(drive_info.letter) {
                     eprintln!("[Config] Failed to remove override: {}", e);
                 } else {

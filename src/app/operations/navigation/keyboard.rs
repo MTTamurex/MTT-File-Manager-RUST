@@ -41,18 +41,14 @@ impl KeyboardNavResult {
 }
 
 /// Check if keyboard navigation should be active
-/// 
+///
 /// Navigation is disabled when renaming or when media has keyboard focus
-pub fn should_handle_navigation(
-    _ui: &egui::Ui,
-    is_renaming: bool,
-    is_media_focused: bool,
-) -> bool {
+pub fn should_handle_navigation(_ui: &egui::Ui, is_renaming: bool, is_media_focused: bool) -> bool {
     !is_renaming && !is_media_focused
 }
 
 /// Process keyboard input for list view navigation
-/// 
+///
 /// Returns the navigation result without modifying any state
 pub fn process_list_keyboard_input(
     ui: &egui::Ui,
@@ -99,8 +95,8 @@ pub fn process_list_keyboard_input(
         new_index = Some(
             current_index
                 .map(|idx| {
-                    (idx as i32 + pending_delta)
-                        .clamp(0, item_count.saturating_sub(1) as i32) as usize
+                    (idx as i32 + pending_delta).clamp(0, item_count.saturating_sub(1) as i32)
+                        as usize
                 })
                 .unwrap_or(0),
         );
@@ -116,7 +112,7 @@ pub fn process_list_keyboard_input(
 }
 
 /// Process keyboard input for grid view navigation
-/// 
+///
 /// Returns the navigation result without modifying any state
 pub fn process_grid_keyboard_input(
     ui: &egui::Ui,
@@ -170,8 +166,8 @@ pub fn process_grid_keyboard_input(
         new_index = Some(
             current_index
                 .map(|idx| {
-                    (idx as i32 + pending_delta)
-                        .clamp(0, item_count.saturating_sub(1) as i32) as usize
+                    (idx as i32 + pending_delta).clamp(0, item_count.saturating_sub(1) as i32)
+                        as usize
                 })
                 .unwrap_or(0),
         );
@@ -187,18 +183,11 @@ pub fn process_grid_keyboard_input(
 }
 
 /// Calculate the new index based on current position and desired movement
-/// 
+///
 /// This is a helper that can be used by both views
-pub fn calculate_new_index(
-    current_index: Option<usize>,
-    delta: i32,
-    item_count: usize,
-) -> usize {
+pub fn calculate_new_index(current_index: Option<usize>, delta: i32, item_count: usize) -> usize {
     current_index
-        .map(|idx| {
-            (idx as i32 + delta)
-                .clamp(0, item_count.saturating_sub(1) as i32) as usize
-        })
+        .map(|idx| (idx as i32 + delta).clamp(0, item_count.saturating_sub(1) as i32) as usize)
         .unwrap_or(0)
 }
 

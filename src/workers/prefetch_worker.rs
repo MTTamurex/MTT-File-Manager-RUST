@@ -14,7 +14,10 @@ pub enum PrefetchMessage {
     Shutdown,
 }
 
-pub fn spawn_prefetch_worker(receiver: Receiver<PrefetchMessage>, directory_cache: Arc<DirectoryCache>) {
+pub fn spawn_prefetch_worker(
+    receiver: Receiver<PrefetchMessage>,
+    directory_cache: Arc<DirectoryCache>,
+) {
     std::thread::spawn(move || {
         io_priority::set_thread_priority(IOPriority::Background);
 

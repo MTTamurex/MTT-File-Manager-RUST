@@ -15,7 +15,9 @@ impl ItemSlotOperations for ImageViewerApp {
         modified: u64,
     ) {
         if let Some(index) = directory_index {
-            ImageViewerApp::request_thumbnail_load_with_index_and_modified(self, path, size, index, modified);
+            ImageViewerApp::request_thumbnail_load_with_index_and_modified(
+                self, path, size, index, modified,
+            );
         } else {
             ImageViewerApp::request_thumbnail_load_with_modified(self, path, size, modified);
         }

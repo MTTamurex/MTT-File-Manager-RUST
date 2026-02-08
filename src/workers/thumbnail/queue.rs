@@ -58,7 +58,14 @@ impl PriorityThumbnailQueue {
     }
 
     /// Push a thumbnail request with the new IOPriority system
-    pub fn push(&self, path: PathBuf, gen: usize, request_size: u32, priority: IOPriority, modified: u64) {
+    pub fn push(
+        &self,
+        path: PathBuf,
+        gen: usize,
+        request_size: u32,
+        priority: IOPriority,
+        modified: u64,
+    ) {
         self.push_with_index(path, gen, request_size, priority, None, modified);
     }
 
@@ -95,7 +102,11 @@ impl PriorityThumbnailQueue {
 
         state.pending.insert(path.clone());
 
-        state.by_directory.entry(parent.clone()).or_default().push(request);
+        state
+            .by_directory
+            .entry(parent.clone())
+            .or_default()
+            .push(request);
 
         if !is_ssd {
             if let Some(items) = state.by_directory.get_mut(&parent) {
@@ -264,7 +275,9 @@ impl PriorityThumbnailQueue {
         // Keep locality only for HDD directories.
         if let Some(current_dir) = state.current_directory.clone() {
             match state.by_directory.get(&current_dir) {
-                Some(items) if !items.is_empty() && !Self::is_directory_ssd(state, &current_dir) => {
+                Some(items)
+                    if !items.is_empty() && !Self::is_directory_ssd(state, &current_dir) =>
+                {
                     return Self::pop_with_locality(state);
                 }
                 Some(_) => {}

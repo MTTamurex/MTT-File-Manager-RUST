@@ -234,9 +234,7 @@ pub fn render_detached_video(
 
     // ESC in detached window mode should re-dock only when player/app is focused.
     if open && !preview.is_maximized() && ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
-        let app_focused = ui
-            .ctx()
-            .input(|i| i.viewport().focused.unwrap_or(false));
+        let app_focused = ui.ctx().input(|i| i.viewport().focused.unwrap_or(false));
 
         #[cfg(target_os = "windows")]
         let player_focused = {

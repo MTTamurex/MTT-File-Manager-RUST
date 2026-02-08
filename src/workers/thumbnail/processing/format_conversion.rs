@@ -57,18 +57,18 @@ mod tests {
         // Y plane: 4 bytes (2x2)
         // UV plane: 2 bytes (2x2 subsampled to 1x2)
         let mut nv12_data = vec![0u8; 6];
-        
+
         // Y plane: all gray (128)
         nv12_data[0..4].fill(128);
-        
+
         // UV plane: neutral (128, 128) = no color
         nv12_data[4] = 128;
         nv12_data[5] = 128;
-        
+
         let rgba = convert_nv12_to_rgba(&nv12_data, 2, 2);
-        
+
         assert_eq!(rgba.len(), 16); // 2x2 RGBA = 16 bytes
-        
+
         // With Y=128 (gray) and U=V=128 (neutral), we should get a mid-gray color
         // The exact values depend on the YUV conversion formula
         for i in 0..4 {
@@ -76,7 +76,7 @@ mod tests {
             let g = rgba[i * 4 + 1];
             let b = rgba[i * 4 + 2];
             let a = rgba[i * 4 + 3];
-            
+
             assert_eq!(a, 255, "Alpha should be fully opaque");
             // Gray values should be approximately equal
             assert!(r.abs_diff(g) < 10, "R and G should be similar for gray");
@@ -91,9 +91,9 @@ mod tests {
         // Y=0 (already zeroed)
         nv12_data[4] = 128; // U
         nv12_data[5] = 128; // V
-        
+
         let rgba = convert_nv12_to_rgba(&nv12_data, 2, 2);
-        
+
         // All pixels should be black (or very close)
         for i in 0..4 {
             assert!(rgba[i * 4] < 10, "Red should be near 0 for black");
@@ -108,9 +108,9 @@ mod tests {
         let mut nv12_data = vec![255u8; 6];
         nv12_data[4] = 128; // U
         nv12_data[5] = 128; // V
-        
+
         let rgba = convert_nv12_to_rgba(&nv12_data, 2, 2);
-        
+
         // All pixels should be white (or very close)
         for i in 0..4 {
             assert!(rgba[i * 4] > 245, "Red should be near 255 for white");

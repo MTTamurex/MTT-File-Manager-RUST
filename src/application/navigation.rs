@@ -78,10 +78,10 @@ mod tests {
         let mut history = NavigationHistory::new("1".to_string());
         history.navigate_to("2".to_string());
         history.navigate_to("3".to_string());
-        
+
         history.go_back(); // Now at "2"
         assert_eq!(history.current_path(), Some(&"2".to_string()));
-        
+
         // Navigate to "4" from "2" should truncate "3"
         history.navigate_to("4".to_string());
         assert_eq!(history.current_index, 2);
@@ -95,11 +95,11 @@ mod tests {
         let mut history = NavigationHistory::new("1".to_string());
         assert_eq!(history.go_back(), None);
         assert_eq!(history.go_forward(), None);
-        
+
         history.navigate_to("2".to_string());
         history.go_back();
         assert_eq!(history.current_index, 0);
-        
+
         history.go_forward();
         assert_eq!(history.current_index, 1);
     }

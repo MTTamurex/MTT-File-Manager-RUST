@@ -209,6 +209,22 @@ impl TabState {
     pub fn can_go_forward(&self) -> bool {
         self.navigation.can_go_forward()
     }
+
+    /// Keep only lightweight state for closed-tab history to avoid retaining heavy caches.
+    fn into_lightweight_closed_snapshot(mut self) -> Self {
+        self.items = Arc::new(Vec::new());
+        self.all_items.clear();
+        self.selected_item = None;
+        self.selected_file = None;
+        self.selected_thumbnail = None;
+        self.selected_metadata = None;
+        self.selected_gif = None;
+        self.multi_selection.clear();
+        self.scroll_offset_y = 0.0;
+        self.total_items = 0;
+        self.quick_search_buffer.clear();
+        self
+    }
 }
 
 /// Manages all open tabs
@@ -316,7 +332,7 @@ impl TabManager {
         }
 
         // Save to closed tabs for potential reopening
-        let closed = self.tabs.remove(index);
+        let closed = self.tabs.remove(index).into_lightweight_closed_snapshot();
         self.closed_tabs.push(closed);
 
         // Keep max 10 closed tabs

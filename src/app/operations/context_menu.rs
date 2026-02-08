@@ -2,9 +2,9 @@
 //!
 //! This module handles population of the right-click context menu, merging native Shell items.
 
-use std::path::PathBuf;
-use eframe::egui;
 use crate::app::state::ImageViewerApp;
+use eframe::egui;
+use std::path::PathBuf;
 
 impl ImageViewerApp {
     pub fn context_target_paths(&self, item_idx: Option<usize>) -> Vec<PathBuf> {
@@ -298,13 +298,15 @@ impl ImageViewerApp {
     }
 
     pub fn handle_lazy_submenu_load(&mut self, egui_ctx: &egui::Context, item_id: i32) {
-        use crate::infrastructure::windows::native_menu::{ShellMenuContext, ShellMenuItem};
         use crate::application::context_menu::ContextMenuItem;
+        use crate::infrastructure::windows::native_menu::{ShellMenuContext, ShellMenuItem};
 
         let native_ctx = self.context_menu.native_context.clone();
         let Some(native_ctx) = native_ctx else { return };
         // Use as_ref() to get &dyn Any before downcasting
-        let Some(shell_ctx) = native_ctx.as_ref().downcast_ref::<ShellMenuContext>() else { return };
+        let Some(shell_ctx) = native_ctx.as_ref().downcast_ref::<ShellMenuContext>() else {
+            return;
+        };
 
         // 1. Find the ShellMenuItem recursively
         fn find_shell_item_mut(items: &mut [ShellMenuItem], id: u32) -> Option<&mut ShellMenuItem> {
@@ -323,11 +325,17 @@ impl ImageViewerApp {
         if let Some(shell_item) = find_shell_item_mut(&mut items, item_id as u32) {
             if shell_ctx.load_pending_submenu(shell_item) {
                 // 2. Success! Now update the ContextMenuItem tree
-                fn convert_item(ui_ctx: &egui::Context, shell_item: &ShellMenuItem) -> ContextMenuItem {
+                fn convert_item(
+                    ui_ctx: &egui::Context,
+                    shell_item: &ShellMenuItem,
+                ) -> ContextMenuItem {
                     let icon = shell_item.icon_rgba.as_ref().map(|(rgba, w, h)| {
                         ui_ctx.load_texture(
                             format!("menu_icon_{}", shell_item.id),
-                            egui::ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], rgba),
+                            egui::ColorImage::from_rgba_unmultiplied(
+                                [*w as usize, *h as usize],
+                                rgba,
+                            ),
                             Default::default(),
                         )
                     });
@@ -336,7 +344,11 @@ impl ImageViewerApp {
                         id: shell_item.id as i32,
                         text: shell_item.text.clone(),
                         icon,
-                        sub_items: shell_item.sub_items.iter().map(|s| convert_item(ui_ctx, s)).collect(),
+                        sub_items: shell_item
+                            .sub_items
+                            .iter()
+                            .map(|s| convert_item(ui_ctx, s))
+                            .collect(),
                         is_separator: shell_item.is_separator,
                         is_enabled: shell_item.is_enabled,
                         is_primary: false,
@@ -347,7 +359,11 @@ impl ImageViewerApp {
                     }
                 }
 
-                fn update_ui_item(items: &mut [ContextMenuItem], id: i32, new_subitems: Vec<ContextMenuItem>) -> bool {
+                fn update_ui_item(
+                    items: &mut [ContextMenuItem],
+                    id: i32,
+                    new_subitems: Vec<ContextMenuItem>,
+                ) -> bool {
                     for item in items {
                         if item.id == id {
                             item.sub_items = new_subitems;
@@ -361,7 +377,11 @@ impl ImageViewerApp {
                     false
                 }
 
-                let new_subitems: Vec<ContextMenuItem> = shell_item.sub_items.iter().map(|s| convert_item(egui_ctx, s)).collect();
+                let new_subitems: Vec<ContextMenuItem> = shell_item
+                    .sub_items
+                    .iter()
+                    .map(|s| convert_item(egui_ctx, s))
+                    .collect();
                 update_ui_item(&mut self.context_menu.items, item_id, new_subitems);
             }
         }

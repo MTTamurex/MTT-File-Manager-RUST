@@ -336,17 +336,18 @@ impl ImageViewerApp {
                         // Validate: Check if directory mtime is newer than last_scan
                         // CRITICAL: For OneDrive paths, skip mtime validation (can block indefinitely on cloud-only dirs)
                         // Trust the DriveWatcher and explicit invalidation instead
-                        let dir_modified = if crate::infrastructure::onedrive::is_onedrive_path(&base) {
-                            0 // Skip mtime check for OneDrive - trust watcher
-                        } else {
-                            std::fs::metadata(&base)
-                                .ok()
-                                .and_then(|m| m.modified().ok())
-                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                                .map(|d| d.as_secs())
-                                .unwrap_or(0)
-                        };
-                        
+                        let dir_modified =
+                            if crate::infrastructure::onedrive::is_onedrive_path(&base) {
+                                0 // Skip mtime check for OneDrive - trust watcher
+                            } else {
+                                std::fs::metadata(&base)
+                                    .ok()
+                                    .and_then(|m| m.modified().ok())
+                                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                    .map(|d| d.as_secs())
+                                    .unwrap_or(0)
+                            };
+
                         if dir_modified > meta.last_scan {
                             // Index is stale - directory was modified after last scan
                             eprintln!("[FOLDER-LOADING] DirectoryIndex stale for {:?} (dir_mtime={} > index_time={}), invalidating",
@@ -354,7 +355,10 @@ impl ImageViewerApp {
                             let _ = di.invalidate(&base);
                             // Fall through to disk scan below
                         } else {
-                            eprintln!("[FOLDER-LOADING] Using DirectoryIndex (pre-built index) for {:?}", base);
+                            eprintln!(
+                                "[FOLDER-LOADING] Using DirectoryIndex (pre-built index) for {:?}",
+                                base
+                            );
                             let mut entries: Vec<FileEntry> = indexed_files
                                 .into_iter()
                                 .filter(|f| !f.name.starts_with('.'))
@@ -422,7 +426,10 @@ impl ImageViewerApp {
             if !force_refresh {
                 // DriveWatcher pre-invalidates cache — no mtime check needed
                 if let Some(mut cached_entries) = directory_cache.get(&PathBuf::from(&base_path)) {
-                    eprintln!("[FOLDER-LOADING] Using secondary DirectoryCache for {:?}", base_path);
+                    eprintln!(
+                        "[FOLDER-LOADING] Using secondary DirectoryCache for {:?}",
+                        base_path
+                    );
                     let mut changed = false;
                     for entry in cached_entries.iter_mut() {
                         if !entry.is_dir && entry.name.to_lowercase().ends_with(".zip") {
@@ -603,7 +610,10 @@ impl ImageViewerApp {
                     return;
                 }
                 // NTFS API returned None - filesystem may not be NTFS (e.g., exFAT)
-                eprintln!("[FOLDER-LOADING] NTFS API returned None for {:?}, trying HDD-optimized path", base_path);
+                eprintln!(
+                    "[FOLDER-LOADING] NTFS API returned None for {:?}, trying HDD-optimized path",
+                    base_path
+                );
             }
 
             // TIER 2: Try HDD-optimized FindFirstFileExW (for exFAT, FAT32, or when NTFS fails)
@@ -687,7 +697,7 @@ impl ImageViewerApp {
             // CRITICAL FIX: For OneDrive folders, use timeout-protected enumeration
             // to prevent 30-60s blocking on folders with cloud-only files
             let is_onedrive = is_onedrive_base;
-            
+
             if is_onedrive {
                 // Use timeout-protected directory reading for OneDrive
                 eprintln!("[FOLDER-LOADING] Using timeout-protected directory enumeration for OneDrive: {:?}", base_path);
@@ -698,7 +708,7 @@ impl ImageViewerApp {
                             if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
                                 break;
                             }
-                            
+
                             let is_hidden = (attrs & FILE_ATTRIBUTE_HIDDEN.0) != 0;
                             let is_system = (attrs & FILE_ATTRIBUTE_SYSTEM.0) != 0;
                             let is_special = matches!(
@@ -708,20 +718,21 @@ impl ImageViewerApp {
                                     | "$recycle.bin"
                                     | "system volume information"
                             );
-                            
-                            if !is_hidden && !is_system && !is_special && !filename.starts_with('.') {
+
+                            if !is_hidden && !is_system && !is_special && !filename.starts_with('.')
+                            {
                                 let mut is_dir = (attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
                                 let full_path = PathBuf::from(&base_path).join(&filename);
-                                
+
                                 if !is_dir && filename.to_lowercase().ends_with(".zip") {
                                     is_dir = true;
                                 }
-                                
+
                                 let is_zip = filename.to_lowercase().ends_with(".zip");
                                 let file_size = if is_dir && !is_zip { 0 } else { size };
-                                
+
                                 let sync_status = onedrive::get_sync_status(attrs, true);
-                                
+
                                 let entry = FileEntry {
                                     path: full_path.clone(),
                                     name: filename.clone(),
@@ -734,28 +745,29 @@ impl ImageViewerApp {
                                     deletion_date: None,
                                     recycle_original_path: None,
                                 };
-                                
+
                                 batch.push(entry);
-                                
+
                                 // Send batch when it reaches threshold
                                 if batch.len() >= 1000 {
-                                        let _batch_len = batch.len();
-                                    let _ = file_entry_sender.send((my_gen, std::mem::take(&mut batch)));
+                                    let _batch_len = batch.len();
+                                    let _ = file_entry_sender
+                                        .send((my_gen, std::mem::take(&mut batch)));
                                     batch.clear();
                                     batch.reserve(1000);
                                 }
                             }
                         }
-                        
+
                         // Send remaining entries
                         if !batch.is_empty() {
                             let _ = file_entry_sender.send((my_gen, batch));
                         }
-                        
+
                         // Signal completion
                         let _ = file_entry_sender.send((my_gen, Vec::new()));
                         ctx.request_repaint();
-                        
+
                         eprintln!("[FOLDER-LOADING] OneDrive directory enumeration completed successfully");
                         return;
                     }
@@ -768,7 +780,9 @@ impl ImageViewerApp {
                         // Send empty results to signal "could not load" gracefully.
                         let _ = file_entry_sender.send((my_gen, Vec::new()));
                         ctx.request_repaint();
-                        eprintln!("[FOLDER-LOADING] OneDrive enumeration timed out - sent empty results");
+                        eprintln!(
+                            "[FOLDER-LOADING] OneDrive enumeration timed out - sent empty results"
+                        );
                         return;
                     }
                     onedrive::IoTimeoutResult::Err(_) => {

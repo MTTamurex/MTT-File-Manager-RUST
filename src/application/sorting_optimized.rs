@@ -1,7 +1,7 @@
 use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode};
+use rayon::prelude::*;
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use rayon::prelude::*;
 
 /// PERFORMANCE: Converte String para Cow<str> para evitar clones desnecessários
 #[inline]
@@ -35,9 +35,8 @@ pub fn sort_items(
 ) {
     // Helper para verificar se é diretório "verdadeiro" (não ZIP)
     // PERFORMANCE: Usa ends_with_ignore_case para evitar alocação
-    let is_true_dir = |item: &FileEntry| -> bool {
-        item.is_dir && !ends_with_ignore_case(&item.name, ".zip")
-    };
+    let is_true_dir =
+        |item: &FileEntry| -> bool { item.is_dir && !ends_with_ignore_case(&item.name, ".zip") };
 
     let compare = |a: &FileEntry, b: &FileEntry| -> Ordering {
         // 1. Lógica de posicionamento de pastas (ZIPs são tratados como arquivos)
@@ -66,7 +65,7 @@ pub fn sort_items(
                 let a_name_cow = to_cow_str(&a.name);
                 let b_name_cow = to_cow_str(&b.name);
                 natord::compare_ignore_case(&a_name_cow, &b_name_cow)
-            },
+            }
             SortMode::Date => a.modified.cmp(&b.modified),
             SortMode::Size => a.size.cmp(&b.size),
             SortMode::Type => {
@@ -79,7 +78,7 @@ pub fn sort_items(
                         let a_name_cow = to_cow_str(&a.name);
                         let b_name_cow = to_cow_str(&b.name);
                         natord::compare_ignore_case(&a_name_cow, &b_name_cow)
-                    },
+                    }
                     other => other,
                 }
             }
@@ -116,10 +115,7 @@ pub fn sort_items(
 }
 
 /// PERFORMANCE: Filtra items usando Cow<str> para reduzir alocações
-pub fn filter_items_cow(
-    items: &[FileEntry],
-    filter: &str,
-) -> Vec<FileEntry> {
+pub fn filter_items_cow(items: &[FileEntry], filter: &str) -> Vec<FileEntry> {
     let filter_cow = to_cow_str(filter);
     items
         .iter()
@@ -132,10 +128,7 @@ pub fn filter_items_cow(
 }
 
 /// PERFORMANCE: Filtra items com cache de resultados
-pub fn filter_items_opt(
-    items: &[FileEntry],
-    filter: &str,
-) -> Vec<FileEntry> {
+pub fn filter_items_opt(items: &[FileEntry], filter: &str) -> Vec<FileEntry> {
     if filter.is_empty() {
         return items.to_vec();
     }

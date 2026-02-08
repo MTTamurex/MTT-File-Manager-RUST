@@ -38,12 +38,11 @@ pub fn spawn_folder_preview_worker(
         // PERFORMANCE: Set background priority to minimize HDD contention with video playback
         // This worker uses Windows Shell API to get folder previews - low priority I/O
         crate::infrastructure::io_priority::set_thread_priority(
-            crate::infrastructure::io_priority::IOPriority::Background
+            crate::infrastructure::io_priority::IOPriority::Background,
         );
 
         let mut last_repaint = Instant::now();
         while let Some(path) = rx.lock().ok().and_then(|lock| lock.recv().ok()) {
-
             // Skip cloud-only OneDrive folders — Shell API can block on network I/O
             if crate::infrastructure::onedrive::is_onedrive_path(&path)
                 && !crate::infrastructure::onedrive::is_locally_available(&path)

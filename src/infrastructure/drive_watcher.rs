@@ -441,10 +441,7 @@ fn parse_notify_buffer(buffer: &[u8], drive_root: &Path) -> Vec<DriveWatcherEven
                         events.push(DriveWatcherEvent::Renamed(old_path, full_path));
                     } else {
                         // Defensive fallback for unmatched NEW event.
-                        events.push(DriveWatcherEvent::Renamed(
-                            full_path.clone(),
-                            full_path,
-                        ));
+                        events.push(DriveWatcherEvent::Renamed(full_path.clone(), full_path));
                     }
                 }
                 _ => events.push(DriveWatcherEvent::Unknown(full_path)),
@@ -475,9 +472,7 @@ fn path_matches_prefix(path: &Path, prefix: &Path) -> bool {
         return true;
     }
 
-    let path_str = path_str_raw
-        .strip_prefix(r"\\?\")
-        .unwrap_or(&path_str_raw);
+    let path_str = path_str_raw.strip_prefix(r"\\?\").unwrap_or(&path_str_raw);
     let prefix_str = prefix_str_raw
         .strip_prefix(r"\\?\")
         .unwrap_or(&prefix_str_raw);

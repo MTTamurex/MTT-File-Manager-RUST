@@ -1,6 +1,6 @@
+use crate::app::ImageViewerApp;
 use eframe::egui;
 use std::time::Duration;
-use crate::app::ImageViewerApp;
 
 pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
     app.notifications.cleanup();

@@ -65,7 +65,9 @@ pub fn icon_button(
         [60, 60, 60, 255]
     };
 
-    if let Some(texture) = svg_manager.get_icon(ui.ctx(), icon_name, theme::ICON_SIZE_MD as u32, color) {
+    if let Some(texture) =
+        svg_manager.get_icon(ui.ctx(), icon_name, theme::ICON_SIZE_MD as u32, color)
+    {
         let icon_rect = egui::Rect::from_center_size(
             rect.center(),
             egui::vec2(theme::ICON_SIZE_MD, theme::ICON_SIZE_MD),

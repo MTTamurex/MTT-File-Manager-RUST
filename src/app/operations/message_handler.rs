@@ -92,8 +92,8 @@ impl ImageViewerApp {
 
         // PERFORMANCE: Precompute normalized current path once for all comparisons
         let current_path_norm = normalize_for_match(Path::new(&self.current_path));
-        let internal_cache_root_norm = dirs::data_local_dir()
-            .map(|d| normalize_for_match(&d.join("MTT-File-Manager")));
+        let internal_cache_root_norm =
+            dirs::data_local_dir().map(|d| normalize_for_match(&d.join("MTT-File-Manager")));
         let internal_cache_root_prefix = internal_cache_root_norm
             .as_ref()
             .map(|root| format!("{root}\\"));
@@ -479,191 +479,199 @@ impl ImageViewerApp {
                 self.pending_auto_reload = true;
             }
         } else {
-        // Events are pre-deduplicated and coalesced by the watcher thread (200ms batches,
-        // max 500 unique events per batch). No rate-limiting needed here — the watcher
-        // thread guarantees bounded event delivery even during OneDrive dehydration storms.
+            // Events are pre-deduplicated and coalesced by the watcher thread (200ms batches,
+            // max 500 unique events per batch). No rate-limiting needed here — the watcher
+            // thread guarantees bounded event delivery even during OneDrive dehydration storms.
 
-        for event in &drive_events {
-            match event {
-                crate::infrastructure::drive_watcher::DriveWatcherEvent::Created(path) => {
-                    if should_ignore(path) {
-                        continue;
-                    }
-                    if let Some(parent) = path.parent() {
-                        // Invalidate both caches so DirectoryIndex doesn't require mtime check
-                        self.directory_cache.invalidate(&parent.to_path_buf());
-                        if let Some(di) = &self.directory_index {
-                            let _ = di.invalidate(parent);
+            for event in &drive_events {
+                match event {
+                    crate::infrastructure::drive_watcher::DriveWatcherEvent::Created(path) => {
+                        if should_ignore(path) {
+                            continue;
                         }
-                        let parent_norm = normalize_for_match(parent);
-                        if parent_norm == current_path_norm {
-                            debug_log!(
-                                "[FS-WATCH] CREATE: {:?}",
-                                path.file_name().unwrap_or_default()
-                            );
-                            self.pending_auto_reload = true;
-                        }
-                    }
-                }
-                crate::infrastructure::drive_watcher::DriveWatcherEvent::Deleted(path) => {
-                    if should_ignore(path) {
-                        continue;
-                    }
-                    let cleaned = clean_path(path);
-
-                    // If the removed file was the folder cover of its parent folder,
-                    // invalidate immediately before DB cleanup so lookup still resolves.
-                    self.invalidate_folder_cover_for_removed_path(&cleaned);
-
-                    if let Some(parent) = cleaned.parent() {
-                        self.directory_cache.invalidate(&parent.to_path_buf());
-                        // Invalidate DirectoryIndex so mtime check is not needed
-                        if let Some(di) = &self.directory_index {
-                            let _ = di.invalidate(parent);
-                        }
-                    }
-                    self.directory_cache.invalidate_children(&cleaned);
-                    pending_disk_cache_invalidations.push(cleaned.clone());
-
-                    if let Some(parent) = path.parent() {
-                        let parent_norm = normalize_for_match(parent);
-                        if parent_norm == current_path_norm {
-                            debug_log!(
-                                "[FS-WATCH] DELETE: {:?}",
-                                path.file_name().unwrap_or_default()
-                            );
-
-                            // SMART DELETE: Remove da UI sem reload completo
-                            let path_to_remove = cleaned.clone();
-                            let removed_from_all = self
-                                .all_items
-                                .iter()
-                                .position(|item| item.path == path_to_remove)
-                                .map(|idx| {
-                                    self.all_items.remove(idx);
-                                    true
-                                })
-                                .unwrap_or(false);
-
-                            if removed_from_all {
-                                // Atualiza items (Arc) - recria sem o item deletado
-                                let filtered: Vec<_> = self
-                                    .items
-                                    .iter()
-                                    .filter(|item| item.path != path_to_remove)
-                                    .cloned()
-                                    .collect();
-                                self.items = Arc::new(filtered);
-                                self.total_items = self.items.len();
+                        if let Some(parent) = path.parent() {
+                            // Invalidate both caches so DirectoryIndex doesn't require mtime check
+                            self.directory_cache.invalidate(&parent.to_path_buf());
+                            if let Some(di) = &self.directory_index {
+                                let _ = di.invalidate(parent);
+                            }
+                            let parent_norm = normalize_for_match(parent);
+                            if parent_norm == current_path_norm {
                                 debug_log!(
-                                    "[FS-WATCH] SMART DELETE: Removed from UI without reload"
+                                    "[FS-WATCH] CREATE: {:?}",
+                                    path.file_name().unwrap_or_default()
+                                );
+                                self.pending_auto_reload = true;
+                            }
+                        }
+                    }
+                    crate::infrastructure::drive_watcher::DriveWatcherEvent::Deleted(path) => {
+                        if should_ignore(path) {
+                            continue;
+                        }
+                        let cleaned = clean_path(path);
+
+                        // If the removed file was the folder cover of its parent folder,
+                        // invalidate immediately before DB cleanup so lookup still resolves.
+                        self.invalidate_folder_cover_for_removed_path(&cleaned);
+
+                        if let Some(parent) = cleaned.parent() {
+                            self.directory_cache.invalidate(&parent.to_path_buf());
+                            // Invalidate DirectoryIndex so mtime check is not needed
+                            if let Some(di) = &self.directory_index {
+                                let _ = di.invalidate(parent);
+                            }
+                        }
+                        self.directory_cache.invalidate_children(&cleaned);
+                        pending_disk_cache_invalidations.push(cleaned.clone());
+
+                        if let Some(parent) = path.parent() {
+                            let parent_norm = normalize_for_match(parent);
+                            if parent_norm == current_path_norm {
+                                debug_log!(
+                                    "[FS-WATCH] DELETE: {:?}",
+                                    path.file_name().unwrap_or_default()
                                 );
 
-                                // Ajusta seleção se necessário
-                                if let Some(selected) = self.selected_item {
-                                    if selected >= self.items.len() && !self.items.is_empty() {
-                                        self.selected_item = Some(self.items.len() - 1);
-                                    } else if self.items.is_empty() {
-                                        self.selected_item = None;
-                                        self.selected_file = None;
+                                // SMART DELETE: Remove da UI sem reload completo
+                                let path_to_remove = cleaned.clone();
+                                let removed_from_all = self
+                                    .all_items
+                                    .iter()
+                                    .position(|item| item.path == path_to_remove)
+                                    .map(|idx| {
+                                        self.all_items.remove(idx);
+                                        true
+                                    })
+                                    .unwrap_or(false);
+
+                                if removed_from_all {
+                                    // Atualiza items (Arc) - recria sem o item deletado
+                                    let filtered: Vec<_> = self
+                                        .items
+                                        .iter()
+                                        .filter(|item| item.path != path_to_remove)
+                                        .cloned()
+                                        .collect();
+                                    self.items = Arc::new(filtered);
+                                    self.total_items = self.items.len();
+                                    debug_log!(
+                                        "[FS-WATCH] SMART DELETE: Removed from UI without reload"
+                                    );
+
+                                    // Ajusta seleção se necessário
+                                    if let Some(selected) = self.selected_item {
+                                        if selected >= self.items.len() && !self.items.is_empty() {
+                                            self.selected_item = Some(self.items.len() - 1);
+                                        } else if self.items.is_empty() {
+                                            self.selected_item = None;
+                                            self.selected_file = None;
+                                        }
                                     }
+
+                                    // Previne reload desnecessário - UI já foi atualizada
+                                    self.skip_next_auto_reload = true;
                                 }
 
-                                // Previne reload desnecessário - UI já foi atualizada
-                                self.skip_next_auto_reload = true;
-                            }
-
-                            // Não triggera auto-reload - UI já foi atualizada
-                            // self.pending_auto_reload = true;
-                        }
-                    }
-                }
-                crate::infrastructure::drive_watcher::DriveWatcherEvent::Modified(path) => {
-                    if should_ignore(path) {
-                        continue;
-                    }
-                    let cleaned = clean_path(path);
-                    self.cache_manager.texture_cache.pop(&cleaned);
-                    self.cache_manager.failed_thumbnails.pop(&cleaned);
-                    crate::workers::thumbnail::clear_failure_cache(&cleaned);
-
-                    // Invalidate metadata cache if modified file is currently selected
-                    if let Some(ref selected) = self.selected_file {
-                        if selected.path == cleaned {
-                            self.metadata_cache.pop(&cleaned);
-                            self.last_metadata_path = None;
-                        }
-                    }
-
-                    if let Some(parent) = path.parent() {
-                        // Invalidate both caches for consistency
-                        self.directory_cache.invalidate(&parent.to_path_buf());
-                        if let Some(di) = &self.directory_index {
-                            let _ = di.invalidate(parent);
-                        }
-                        let parent_norm = normalize_for_match(parent);
-                        if parent_norm == current_path_norm {
-                            debug_log!(
-                                "[FS-WATCH] MODIFY: {:?}",
-                                path.file_name().unwrap_or_default()
-                            );
-                            self.pending_auto_reload = true;
-                        }
-                    }
-                }
-                crate::infrastructure::drive_watcher::DriveWatcherEvent::Renamed(
-                    old_path,
-                    new_path,
-                ) => {
-                    if !should_ignore(old_path) || !should_ignore(new_path) {
-                        let cleaned_old = clean_path(old_path);
-                        let cleaned_new = clean_path(new_path);
-
-                        // Old path was removed from its original folder (cut/move/rename).
-                        // If it was used as folder cover, force recalculation.
-                        self.invalidate_folder_cover_for_removed_path(&cleaned_old);
-                        pending_disk_cache_invalidations.push(cleaned_old.clone());
-
-                        // Invalidate caches for both paths
-                        self.cache_manager.texture_cache.pop(&cleaned_old);
-                        self.cache_manager.texture_cache.pop(&cleaned_new);
-                        self.cache_manager.failed_thumbnails.pop(&cleaned_old);
-                        self.cache_manager.failed_thumbnails.pop(&cleaned_new);
-
-                        if let Some(parent) = cleaned_old.parent() {
-                            self.directory_cache.invalidate(&parent.to_path_buf());
-                            // Invalidate DirectoryIndex for both old and new parent
-                            if let Some(di) = &self.directory_index {
-                                let _ = di.invalidate(parent);
-                            }
-                            let parent_norm = normalize_for_match(parent);
-                            if parent_norm == current_path_norm {
-                                self.pending_auto_reload = true;
+                                // Não triggera auto-reload - UI já foi atualizada
+                                // self.pending_auto_reload = true;
                             }
                         }
-                        if let Some(parent) = cleaned_new.parent() {
+                    }
+                    crate::infrastructure::drive_watcher::DriveWatcherEvent::Modified(path) => {
+                        if should_ignore(path) {
+                            continue;
+                        }
+                        let cleaned = clean_path(path);
+                        self.cache_manager.texture_cache.pop(&cleaned);
+                        self.cache_manager.failed_thumbnails.pop(&cleaned);
+                        crate::workers::thumbnail::clear_failure_cache(&cleaned);
+
+                        // Invalidate metadata cache if modified file is currently selected
+                        if let Some(ref selected) = self.selected_file {
+                            if selected.path == cleaned {
+                                self.metadata_cache.pop(&cleaned);
+                                self.last_metadata_path = None;
+                            }
+                        }
+
+                        if let Some(parent) = path.parent() {
+                            // Invalidate both caches for consistency
                             self.directory_cache.invalidate(&parent.to_path_buf());
                             if let Some(di) = &self.directory_index {
                                 let _ = di.invalidate(parent);
                             }
                             let parent_norm = normalize_for_match(parent);
                             if parent_norm == current_path_norm {
+                                debug_log!(
+                                    "[FS-WATCH] MODIFY: {:?}",
+                                    path.file_name().unwrap_or_default()
+                                );
                                 self.pending_auto_reload = true;
                             }
                         }
                     }
+                    crate::infrastructure::drive_watcher::DriveWatcherEvent::Renamed(
+                        old_path,
+                        new_path,
+                    ) => {
+                        if !should_ignore(old_path) || !should_ignore(new_path) {
+                            let cleaned_old = clean_path(old_path);
+                            let cleaned_new = clean_path(new_path);
+
+                            // Old path was removed from its original folder (cut/move/rename).
+                            // If it was used as folder cover, force recalculation.
+                            self.invalidate_folder_cover_for_removed_path(&cleaned_old);
+                            pending_disk_cache_invalidations.push(cleaned_old.clone());
+
+                            // Invalidate caches for both paths
+                            self.cache_manager.texture_cache.pop(&cleaned_old);
+                            self.cache_manager.texture_cache.pop(&cleaned_new);
+                            self.cache_manager.failed_thumbnails.pop(&cleaned_old);
+                            self.cache_manager.failed_thumbnails.pop(&cleaned_new);
+
+                            if let Some(parent) = cleaned_old.parent() {
+                                self.directory_cache.invalidate(&parent.to_path_buf());
+                                // Invalidate DirectoryIndex for both old and new parent
+                                if let Some(di) = &self.directory_index {
+                                    let _ = di.invalidate(parent);
+                                }
+                                let parent_norm = normalize_for_match(parent);
+                                if parent_norm == current_path_norm {
+                                    self.pending_auto_reload = true;
+                                }
+                            }
+                            if let Some(parent) = cleaned_new.parent() {
+                                self.directory_cache.invalidate(&parent.to_path_buf());
+                                if let Some(di) = &self.directory_index {
+                                    let _ = di.invalidate(parent);
+                                }
+                                let parent_norm = normalize_for_match(parent);
+                                if parent_norm == current_path_norm {
+                                    self.pending_auto_reload = true;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
-        }
         } // close else block for event flood check
 
         let _t_drive_events_done = Instant::now();
-        if _t_drive_events_done.duration_since(_t_watcher_start).as_millis() > 50 {
-            eprintln!("[PERF-MSG] DriveWatcher: poll={}ms process={}ms events={}",
+        if _t_drive_events_done
+            .duration_since(_t_watcher_start)
+            .as_millis()
+            > 50
+        {
+            eprintln!(
+                "[PERF-MSG] DriveWatcher: poll={}ms process={}ms events={}",
                 _t_poll_done.duration_since(_t_watcher_start).as_millis(),
-                _t_drive_events_done.duration_since(_t_poll_done).as_millis(),
-                _drive_event_count);
+                _t_drive_events_done
+                    .duration_since(_t_poll_done)
+                    .as_millis(),
+                _drive_event_count
+            );
         }
 
         // LEGACY: Processa eventos do notify-watcher (mantido para compatibilidade)
@@ -686,85 +694,85 @@ impl ImageViewerApp {
                     self.pending_auto_reload = true;
                 }
             } else {
-            for event in legacy_events {
-                match event {
-                    Ok(evt) => {
-                        let mut meaningful_change = false;
+                for event in legacy_events {
+                    match event {
+                        Ok(evt) => {
+                            let mut meaningful_change = false;
 
-                        if matches!(evt.kind, notify::EventKind::Remove(_)) {
+                            if matches!(evt.kind, notify::EventKind::Remove(_)) {
+                                for path in &evt.paths {
+                                    if should_ignore(path) {
+                                        continue;
+                                    }
+                                    meaningful_change = true;
+
+                                    let cleaned = clean_path(path);
+                                    if let Some(parent) = cleaned.parent() {
+                                        self.directory_cache.invalidate(&parent.to_path_buf());
+                                    }
+                                    self.directory_cache.invalidate_children(&cleaned);
+                                    debug_log!(
+                                        "[FS-WATCH-LEGACY] REMOVE: {:?}",
+                                        path.file_name().unwrap_or_default()
+                                    );
+                                    pending_disk_cache_invalidations.push(cleaned.clone());
+                                }
+                            }
+
                             for path in &evt.paths {
                                 if should_ignore(path) {
                                     continue;
                                 }
                                 meaningful_change = true;
 
-                                let cleaned = clean_path(path);
-                                if let Some(parent) = cleaned.parent() {
-                                    self.directory_cache.invalidate(&parent.to_path_buf());
-                                }
-                                self.directory_cache.invalidate_children(&cleaned);
-                                debug_log!(
-                                    "[FS-WATCH-LEGACY] REMOVE: {:?}",
-                                    path.file_name().unwrap_or_default()
-                                );
-                                pending_disk_cache_invalidations.push(cleaned.clone());
-                            }
-                        }
-
-                        for path in &evt.paths {
-                            if should_ignore(path) {
-                                continue;
-                            }
-                            meaningful_change = true;
-
-                            if let Some(parent) = path.parent() {
-                                let parent_norm = normalize_for_match(parent);
-                                if parent_norm == current_path_norm {
-                                    let cleaned = clean_path(path);
-                                    if let Some(cache_parent) = cleaned.parent() {
-                                        self.directory_cache
-                                            .invalidate(&cache_parent.to_path_buf());
-                                    }
-                                    debug_log!(
-                                        "[FS] Direct subfolder modified: {:?}",
-                                        cleaned.file_name()
-                                    );
-                                    self.cache_manager.invalidate_folder_preview(&cleaned);
-                                }
-                            }
-
-                            if let Some(parent) = path.parent() {
-                                if let Some(grandparent) = parent.parent() {
-                                    let grandparent_norm = normalize_for_match(grandparent);
-                                    if grandparent_norm == current_path_norm {
-                                        let cleaned_parent = clean_path(parent);
-                                        if let Some(cache_parent) = cleaned_parent.parent() {
+                                if let Some(parent) = path.parent() {
+                                    let parent_norm = normalize_for_match(parent);
+                                    if parent_norm == current_path_norm {
+                                        let cleaned = clean_path(path);
+                                        if let Some(cache_parent) = cleaned.parent() {
                                             self.directory_cache
                                                 .invalidate(&cache_parent.to_path_buf());
                                         }
                                         debug_log!(
+                                            "[FS] Direct subfolder modified: {:?}",
+                                            cleaned.file_name()
+                                        );
+                                        self.cache_manager.invalidate_folder_preview(&cleaned);
+                                    }
+                                }
+
+                                if let Some(parent) = path.parent() {
+                                    if let Some(grandparent) = parent.parent() {
+                                        let grandparent_norm = normalize_for_match(grandparent);
+                                        if grandparent_norm == current_path_norm {
+                                            let cleaned_parent = clean_path(parent);
+                                            if let Some(cache_parent) = cleaned_parent.parent() {
+                                                self.directory_cache
+                                                    .invalidate(&cache_parent.to_path_buf());
+                                            }
+                                            debug_log!(
                                             "[FS] File in subfolder modified, invalidating: {:?}",
                                             cleaned_parent.file_name()
                                         );
-                                        self.cache_manager
-                                            .invalidate_folder_preview(&cleaned_parent);
+                                            self.cache_manager
+                                                .invalidate_folder_preview(&cleaned_parent);
+                                        }
                                     }
                                 }
+
+                                let cleaned = clean_path(path);
+                                self.cache_manager.texture_cache.pop(&cleaned);
+                                self.cache_manager.failed_thumbnails.pop(&cleaned);
+                                crate::workers::thumbnail::clear_failure_cache(&cleaned);
                             }
 
-                            let cleaned = clean_path(path);
-                            self.cache_manager.texture_cache.pop(&cleaned);
-                            self.cache_manager.failed_thumbnails.pop(&cleaned);
-                            crate::workers::thumbnail::clear_failure_cache(&cleaned);
+                            if meaningful_change {
+                                self.pending_auto_reload = true;
+                            }
                         }
-
-                        if meaningful_change {
-                            self.pending_auto_reload = true;
-                        }
+                        Err(_e) => debug_log!("Erro de watch: {:?}", _e),
                     }
-                    Err(_e) => debug_log!("Erro de watch: {:?}", _e),
                 }
-            }
             } // close else block for legacy event flood
         } // Fecha o if !drive_watcher_active
 
@@ -1031,8 +1039,8 @@ impl ImageViewerApp {
         // PERFORMANCE: Drain ALL pending thumbnails from worker into a persistent buffer
         // This ensures no data is lost when throttling GPU uploads.
         // PERFORMANCE: Limit pending_thumbnails buffer to prevent RAM spikes
-        // Each thumbnail data can be ~1MB, so limit to ~100MB worth of pending data
-        const MAX_PENDING_THUMBNAILS: usize = 100;
+        // Each thumbnail data can be ~1MB, so limit to ~64MB worth of pending data
+        const MAX_PENDING_THUMBNAILS: usize = 64;
 
         while let Ok(thumbnail_data) = self.image_receiver.try_recv() {
             // Se a imagem pertence a uma geração anterior (outra folder), descarta.

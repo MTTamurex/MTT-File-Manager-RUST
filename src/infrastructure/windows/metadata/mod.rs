@@ -1,17 +1,17 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+pub mod audio_sniffing;
+pub mod image;
 pub mod property_keys;
 pub mod utils;
-pub mod image;
 pub mod video;
 pub mod video_sniffing;
-pub mod audio_sniffing;
 
+pub use audio_sniffing::{sniff_audio_codec, AudioCodec};
 pub use image::read_image_metadata;
 pub use video::read_video_metadata;
 pub use video_sniffing::sniff_video_codec;
-pub use audio_sniffing::{sniff_audio_codec, AudioCodec};
 
 use crate::infrastructure::onedrive;
 

@@ -17,10 +17,8 @@ use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 // GUIDs - COM interface identifiers (must match Windows SDK definitions)
-const IID_ICoreWebView2Environment: GUID =
-    GUID::from_u128(0x33D17ECE_82FA_47D9_83E6_131350E3ED79);
-const IID_ICoreWebView2Controller: GUID =
-    GUID::from_u128(0x4D00C0D1_9455_4428_9463_47C941B300C9);
+const IID_ICoreWebView2Environment: GUID = GUID::from_u128(0x33D17ECE_82FA_47D9_83E6_131350E3ED79);
+const IID_ICoreWebView2Controller: GUID = GUID::from_u128(0x4D00C0D1_9455_4428_9463_47C941B300C9);
 const IID_ICoreWebView2: GUID = GUID::from_u128(0x76ECEACB_0462_4D94_AC83_420A6DDA05D2);
 const IID_ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler: GUID =
     GUID::from_u128(0x4E8A3389_C9D8_4BD2_B6B5_124FEE6CC14D);
@@ -32,8 +30,16 @@ const IID_IUnknown: GUID = GUID::from_u128(0x00000000_0000_0000_C000_00000000004
 #[repr(C)]
 struct ICoreWebView2Environment_Vtbl {
     pub base: IUnknown_Vtbl,
-    pub CreateCoreWebView2Controller: unsafe extern "system" fn(*mut c_void, HWND, *mut c_void) -> HRESULT,
-    pub CreateWebResourceRequest: unsafe extern "system" fn(*mut c_void, PCWSTR, PCWSTR, *mut c_void, PCWSTR, *mut *mut c_void) -> HRESULT,
+    pub CreateCoreWebView2Controller:
+        unsafe extern "system" fn(*mut c_void, HWND, *mut c_void) -> HRESULT,
+    pub CreateWebResourceRequest: unsafe extern "system" fn(
+        *mut c_void,
+        PCWSTR,
+        PCWSTR,
+        *mut c_void,
+        PCWSTR,
+        *mut *mut c_void,
+    ) -> HRESULT,
 }
 
 #[repr(C)]
@@ -45,17 +51,20 @@ struct ICoreWebView2Controller_Vtbl {
     pub put_Bounds: unsafe extern "system" fn(*mut c_void, RECT) -> HRESULT,
     pub get_ZoomFactor: unsafe extern "system" fn(*mut c_void, *mut f64) -> HRESULT,
     pub put_ZoomFactor: unsafe extern "system" fn(*mut c_void, f64) -> HRESULT,
-    pub add_ZoomFactorChanged: unsafe extern "system" fn(*mut c_void, *mut c_void, *mut i64) -> HRESULT,
+    pub add_ZoomFactorChanged:
+        unsafe extern "system" fn(*mut c_void, *mut c_void, *mut i64) -> HRESULT,
     pub remove_ZoomFactorChanged: unsafe extern "system" fn(*mut c_void, i64) -> HRESULT,
     pub SetBoundsAndZoomFactor: unsafe extern "system" fn(*mut c_void, RECT, f64) -> HRESULT,
     pub MoveFocus: unsafe extern "system" fn(*mut c_void, i32) -> HRESULT,
-    pub add_MoveFocusRequested: unsafe extern "system" fn(*mut c_void, *mut c_void, *mut i64) -> HRESULT,
+    pub add_MoveFocusRequested:
+        unsafe extern "system" fn(*mut c_void, *mut c_void, *mut i64) -> HRESULT,
     pub remove_MoveFocusRequested: unsafe extern "system" fn(*mut c_void, i64) -> HRESULT,
     pub add_GotFocus: unsafe extern "system" fn(*mut c_void, *mut c_void, *mut i64) -> HRESULT,
     pub remove_GotFocus: unsafe extern "system" fn(*mut c_void, i64) -> HRESULT,
     pub add_LostFocus: unsafe extern "system" fn(*mut c_void, *mut c_void, *mut i64) -> HRESULT,
     pub remove_LostFocus: unsafe extern "system" fn(*mut c_void, i64) -> HRESULT,
-    pub add_AcceleratorKeyPressed: unsafe extern "system" fn(*mut c_void, *mut c_void, *mut i64) -> HRESULT,
+    pub add_AcceleratorKeyPressed:
+        unsafe extern "system" fn(*mut c_void, *mut c_void, *mut i64) -> HRESULT,
     pub remove_AcceleratorKeyPressed: unsafe extern "system" fn(*mut c_void, i64) -> HRESULT,
     pub get_ParentWindow: unsafe extern "system" fn(*mut c_void, *mut HWND) -> HRESULT,
     pub put_ParentWindow: unsafe extern "system" fn(*mut c_void, HWND) -> HRESULT,
@@ -74,9 +83,15 @@ struct ICoreWebView2_Vtbl {
 }
 
 // Wrapper Structs
-struct CoreWebView2Environment { ptr: *mut c_void }
-struct CoreWebView2Controller { ptr: *mut c_void }
-struct CoreWebView2 { ptr: *mut c_void }
+struct CoreWebView2Environment {
+    ptr: *mut c_void,
+}
+struct CoreWebView2Controller {
+    ptr: *mut c_void,
+}
+struct CoreWebView2 {
+    ptr: *mut c_void,
+}
 
 // State management
 pub struct WebViewState {
@@ -89,7 +104,7 @@ impl Drop for WebViewState {
         unsafe {
             let vtbl = *(self.controller.ptr as *mut *mut ICoreWebView2Controller_Vtbl);
             ((*vtbl).base.Release)(self.controller.ptr);
-            
+
             let vtbl_wv = *(self.webview.ptr as *mut *mut ICoreWebView2_Vtbl);
             ((*vtbl_wv).base.Release)(self.webview.ptr);
         }
@@ -103,14 +118,16 @@ pub fn init(hwnd: HWND, url: String) -> Result<()> {
         // Load DLL
         let dll_name = w!("WebView2Loader.dll");
         let hmodule = LoadLibraryW(dll_name)?;
-        
+
         eprintln!("WebView2: Getting ProcAddress");
         let func_name = s!("CreateCoreWebView2EnvironmentWithOptions");
-        let create_env_ptr = GetProcAddress(hmodule, func_name)
-            .ok_or(Error::from_win32())?;
-            
+        let create_env_ptr = GetProcAddress(hmodule, func_name).ok_or(Error::from_win32())?;
+
         let create_env: unsafe extern "system" fn(
-            PCWSTR, PCWSTR, *mut c_void, *mut c_void
+            PCWSTR,
+            PCWSTR,
+            *mut c_void,
+            *mut c_void,
         ) -> HRESULT = std::mem::transmute(create_env_ptr);
 
         // Create Environment Handler
@@ -118,7 +135,12 @@ pub fn init(hwnd: HWND, url: String) -> Result<()> {
         let handler_ptr: *mut c_void = handler;
 
         eprintln!("WebView2: Calling CreateCoreWebView2EnvironmentWithOptions");
-        let hr = create_env(PCWSTR::null(), PCWSTR::null(), std::ptr::null_mut(), handler_ptr);
+        let hr = create_env(
+            PCWSTR::null(),
+            PCWSTR::null(),
+            std::ptr::null_mut(),
+            handler_ptr,
+        );
         eprintln!("WebView2: CreateEnv result: {:?}", hr);
         hr.ok()
     }
@@ -131,7 +153,7 @@ pub fn resize(hwnd: HWND) {
             let state = &*(ptr as *mut WebViewState);
             let mut rect = RECT::default();
             GetClientRect(hwnd, &mut rect);
-            
+
             let vtbl = *(state.controller.ptr as *mut *mut ICoreWebView2Controller_Vtbl);
             ((*vtbl).put_Bounds)(state.controller.ptr, rect);
         }
@@ -175,8 +197,14 @@ impl EnvironmentCompletedHandler {
         Box::into_raw(handler) as *mut c_void
     }
 
-    unsafe extern "system" fn QueryInterface(this: *mut c_void, iid: *const GUID, obj: *mut *mut c_void) -> HRESULT {
-        if *iid == IID_IUnknown || *iid == IID_ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler {
+    unsafe extern "system" fn QueryInterface(
+        this: *mut c_void,
+        iid: *const GUID,
+        obj: *mut *mut c_void,
+    ) -> HRESULT {
+        if *iid == IID_IUnknown
+            || *iid == IID_ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler
+        {
             *obj = this;
             Self::AddRef(this);
             return HRESULT(0);
@@ -199,16 +227,26 @@ impl EnvironmentCompletedHandler {
         count as u32
     }
 
-    unsafe extern "system" fn Invoke(this: *mut c_void, result: HRESULT, env: *mut c_void) -> HRESULT {
-        eprintln!("WebView2: EnvHandler::Invoke called. Result: {:?}, Env: {:p}", result, env);
-        if result.is_err() || env.is_null() { return HRESULT(0); }
+    unsafe extern "system" fn Invoke(
+        this: *mut c_void,
+        result: HRESULT,
+        env: *mut c_void,
+    ) -> HRESULT {
+        eprintln!(
+            "WebView2: EnvHandler::Invoke called. Result: {:?}, Env: {:p}",
+            result, env
+        );
+        if result.is_err() || env.is_null() {
+            return HRESULT(0);
+        }
         let handler = &*(this as *mut Self);
 
         // Env -> CreateController
         eprintln!("WebView2: Creating Controller");
         let vtbl = *(env as *mut *mut ICoreWebView2Environment_Vtbl);
-        let controller_handler = ControllerCompletedHandler::create(handler.hwnd, handler.url.clone());
-        
+        let controller_handler =
+            ControllerCompletedHandler::create(handler.hwnd, handler.url.clone());
+
         let hr = ((*vtbl).CreateCoreWebView2Controller)(env, handler.hwnd, controller_handler);
         eprintln!("WebView2: CreateController result: {:?}", hr);
         HRESULT(0)
@@ -249,8 +287,14 @@ impl ControllerCompletedHandler {
         Box::into_raw(handler) as *mut c_void
     }
 
-    unsafe extern "system" fn QueryInterface(this: *mut c_void, iid: *const GUID, obj: *mut *mut c_void) -> HRESULT {
-        if *iid == IID_IUnknown || *iid == IID_ICoreWebView2CreateCoreWebView2ControllerCompletedHandler {
+    unsafe extern "system" fn QueryInterface(
+        this: *mut c_void,
+        iid: *const GUID,
+        obj: *mut *mut c_void,
+    ) -> HRESULT {
+        if *iid == IID_IUnknown
+            || *iid == IID_ICoreWebView2CreateCoreWebView2ControllerCompletedHandler
+        {
             *obj = this;
             Self::AddRef(this);
             return HRESULT(0);
@@ -273,8 +317,14 @@ impl ControllerCompletedHandler {
         count as u32
     }
 
-    unsafe extern "system" fn Invoke(this: *mut c_void, result: HRESULT, controller_ptr: *mut c_void) -> HRESULT {
-        if result.is_err() || controller_ptr.is_null() { return HRESULT(0); }
+    unsafe extern "system" fn Invoke(
+        this: *mut c_void,
+        result: HRESULT,
+        controller_ptr: *mut c_void,
+    ) -> HRESULT {
+        if result.is_err() || controller_ptr.is_null() {
+            return HRESULT(0);
+        }
         let handler = &*(this as *mut Self);
 
         // Get CoreWebView2
@@ -289,24 +339,26 @@ impl ControllerCompletedHandler {
             ((*ctrl_vtbl).put_Bounds)(controller_ptr, rect);
 
             // Navigate
-             let mut wide_url: Vec<u16> = handler.url.encode_utf16().collect();
+            let mut wide_url: Vec<u16> = handler.url.encode_utf16().collect();
             wide_url.push(0);
             let wv_vtbl = *(webview_ptr as *mut *mut ICoreWebView2_Vtbl);
-             ((*wv_vtbl).Navigate)(webview_ptr, PCWSTR::from_raw(wide_url.as_ptr()));
-            
+            ((*wv_vtbl).Navigate)(webview_ptr, PCWSTR::from_raw(wide_url.as_ptr()));
+
             // Store state
             let state = Box::new(WebViewState {
-                controller: CoreWebView2Controller { ptr: controller_ptr },
+                controller: CoreWebView2Controller {
+                    ptr: controller_ptr,
+                },
                 webview: CoreWebView2 { ptr: webview_ptr },
             });
-            
+
             // AddRef because we kept pointers
             ((*ctrl_vtbl).base.AddRef)(controller_ptr);
             ((*wv_vtbl).base.AddRef)(webview_ptr);
 
             SetWindowLongPtrW(handler.hwnd, GWLP_USERDATA, Box::into_raw(state) as isize);
         }
-        
+
         HRESULT(0)
     }
 }
@@ -340,8 +392,14 @@ impl WarmupCompletedHandler {
         Box::into_raw(handler) as *mut c_void
     }
 
-    unsafe extern "system" fn QueryInterface(this: *mut c_void, iid: *const GUID, obj: *mut *mut c_void) -> HRESULT {
-        if *iid == IID_IUnknown || *iid == IID_ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler {
+    unsafe extern "system" fn QueryInterface(
+        this: *mut c_void,
+        iid: *const GUID,
+        obj: *mut *mut c_void,
+    ) -> HRESULT {
+        if *iid == IID_IUnknown
+            || *iid == IID_ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler
+        {
             *obj = this;
             Self::AddRef(this);
             return HRESULT(0);
@@ -364,12 +422,16 @@ impl WarmupCompletedHandler {
         count as u32
     }
 
-    unsafe extern "system" fn Invoke(_this: *mut c_void, result: HRESULT, env: *mut c_void) -> HRESULT {
+    unsafe extern "system" fn Invoke(
+        _this: *mut c_void,
+        result: HRESULT,
+        env: *mut c_void,
+    ) -> HRESULT {
         // This is where the magic happens (or doesn't).
         // We successfully created the environment, which means the runtime is loaded.
         // We simply release the environment and return.
         // This keeps the "msedgewebview2.exe" process warm for a short period or in cache.
-        
+
         if result.is_err() || env.is_null() {
             // Silently fail in warmup
             return HRESULT(0);
@@ -396,25 +458,32 @@ static WARMUP_HANDLER_VTBL: EnvironmentCompletedHandler_Vtbl = EnvironmentComple
 pub fn warmup_env() -> Result<()> {
     unsafe {
         // Load DLL silently
-         let dll_name = w!("WebView2Loader.dll");
+        let dll_name = w!("WebView2Loader.dll");
         // We use LoadLibraryW directly. If it's already loaded, it just increments ref count.
         let hmodule = LoadLibraryW(dll_name).ok().ok_or(Error::from_win32())?;
-        
+
         let func_name = s!("CreateCoreWebView2EnvironmentWithOptions");
-        let create_env_ptr = GetProcAddress(hmodule, func_name)
-            .ok_or(Error::from_win32())?;
-            
+        let create_env_ptr = GetProcAddress(hmodule, func_name).ok_or(Error::from_win32())?;
+
         let create_env: unsafe extern "system" fn(
-            PCWSTR, PCWSTR, *mut c_void, *mut c_void
+            PCWSTR,
+            PCWSTR,
+            *mut c_void,
+            *mut c_void,
         ) -> HRESULT = std::mem::transmute(create_env_ptr);
 
         let handler = WarmupCompletedHandler::create();
-        
+
         // Pass NULL for user_data_folder to use default (standard for app),
         // OR use the same logic as real viewer if we set specific path.
         // Real viewer uses nullptr (default), so we use nullptr here too.
-        let _ = create_env(PCWSTR::null(), PCWSTR::null(), std::ptr::null_mut(), handler);
-        
+        let _ = create_env(
+            PCWSTR::null(),
+            PCWSTR::null(),
+            std::ptr::null_mut(),
+            handler,
+        );
+
         Ok(())
     }
 }

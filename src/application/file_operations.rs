@@ -93,7 +93,10 @@ pub fn restore_from_recycle_bin(physical_path: &Path, original_path: &Path) -> O
 }
 
 /// Deletes file permanently (no Recycle Bin).
-pub fn delete_permanently(physical_path: &Path, hwnd: windows::Win32::Foundation::HWND) -> OpResult<()> {
+pub fn delete_permanently(
+    physical_path: &Path,
+    hwnd: windows::Win32::Foundation::HWND,
+) -> OpResult<()> {
     recycle_bin::delete_permanently(physical_path, hwnd).map_err(|e| e.to_string())
 }
 

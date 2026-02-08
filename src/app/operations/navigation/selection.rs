@@ -26,7 +26,7 @@ pub struct SelectionResult {
 }
 
 /// Handle Ctrl+Click selection
-/// 
+///
 /// Toggles the item in multi_selection and sets it as the new anchor
 pub fn handle_ctrl_click(
     item_index: usize,
@@ -34,7 +34,7 @@ pub fn handle_ctrl_click(
     current_selection: &FxHashSet<PathBuf>,
 ) -> SelectionResult {
     let mut new_selection = current_selection.clone();
-    
+
     if new_selection.contains(item_path) {
         new_selection.remove(item_path);
     } else {
@@ -51,7 +51,7 @@ pub fn handle_ctrl_click(
 }
 
 /// Handle Shift+Click selection (range selection)
-/// 
+///
 /// Adds all items between anchor and clicked item to selection
 pub fn handle_shift_click(
     item_index: usize,
@@ -68,7 +68,7 @@ pub fn handle_shift_click(
         } else {
             (item_index, anchor_idx)
         };
-        
+
         // Add range to selection (do NOT clear outside selection)
         for i in start..=end {
             if let Some(path) = get_item_path(i) {
@@ -90,12 +90,9 @@ pub fn handle_shift_click(
 }
 
 /// Handle simple click (no modifiers)
-/// 
+///
 /// Clears selection and selects only the clicked item
-pub fn handle_simple_click(
-    item_index: usize,
-    item_path: &Path,
-) -> SelectionResult {
+pub fn handle_simple_click(item_index: usize, item_path: &Path) -> SelectionResult {
     let mut new_selection = FxHashSet::default();
     new_selection.insert(item_path.to_path_buf());
 
@@ -109,7 +106,7 @@ pub fn handle_simple_click(
 }
 
 /// Handle selection with automatic modifier detection
-/// 
+///
 /// This is the main entry point that handles all selection cases
 pub fn handle_selection(
     item_index: usize,
@@ -122,14 +119,20 @@ pub fn handle_selection(
     if modifiers.ctrl {
         handle_ctrl_click(item_index, item_path, current_selection)
     } else if modifiers.shift {
-        handle_shift_click(item_index, item_path, anchor, current_selection, get_item_path)
+        handle_shift_click(
+            item_index,
+            item_path,
+            anchor,
+            current_selection,
+            get_item_path,
+        )
     } else {
         handle_simple_click(item_index, item_path)
     }
 }
 
 /// Handle keyboard navigation selection with Shift modifier
-/// 
+///
 /// This is used when navigating with Shift held down for range selection
 pub fn handle_shift_navigation(
     new_index: usize,
@@ -145,7 +148,7 @@ pub fn handle_shift_navigation(
         } else {
             (new_index, anchor_idx)
         };
-        
+
         // Add range between anchor and focus
         for i in start..=end {
             if let Some(path) = get_item_path(i) {
@@ -174,12 +177,9 @@ pub fn handle_shift_navigation(
 }
 
 /// Handle keyboard navigation without modifiers
-/// 
+///
 /// Clears selection and selects only the navigated item
-pub fn handle_navigation_selection(
-    new_index: usize,
-    item_path: &Path,
-) -> SelectionResult {
+pub fn handle_navigation_selection(new_index: usize, item_path: &Path) -> SelectionResult {
     let mut new_selection = FxHashSet::default();
     new_selection.insert(item_path.to_path_buf());
 
@@ -193,13 +193,13 @@ pub fn handle_navigation_selection(
 }
 
 /// Apply selection result to app state
-/// 
+///
 /// This updates the app's selection state based on the result
 pub fn apply_selection_result(app: &mut ImageViewerApp, result: SelectionResult) {
     app.selected_item = result.selected_item;
     app.selection_anchor = result.selection_anchor;
     app.multi_selection = result.multi_selection;
-    
+
     // Note: selected_file and update_selected_thumbnail should be handled
     // by the caller after this function returns
 }

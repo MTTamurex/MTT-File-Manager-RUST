@@ -3,13 +3,13 @@
 //! This module handles setting up special views like "This PC" and "Recycle Bin".
 
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::Ordering as AtomicOrdering;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::app::state::ImageViewerApp;
-use crate::infrastructure::windows as windows_infra;
 use crate::domain::file_entry::FileEntry;
+use crate::infrastructure::windows as windows_infra;
 
 // PERFORMANCE: Increased from 2s to 30s to avoid periodic HDD access.
 // Device insertion/removal is detected instantly via RegisterDeviceNotificationW
@@ -163,11 +163,11 @@ impl ImageViewerApp {
 
         self.all_items = computer_items.clone();
         self.items = Arc::new(computer_items);
-        
+
         // PRE-COMPUTE SECTION INDICES (O(n) once, not per frame)
         self.computer_view_local_indices.clear();
         self.computer_view_network_indices.clear();
-        
+
         for (i, item) in self.items.iter().enumerate() {
             let is_remote = item.drive_info.as_ref().is_some_and(|di| {
                 di.drive_type == crate::infrastructure::windows::DriveType::Remote
@@ -178,7 +178,7 @@ impl ImageViewerApp {
                 self.computer_view_local_indices.push(i);
             }
         }
-        
+
         self.reset_selection_and_search();
         self.total_items = self.disks.len();
         self.is_loading_folder = false;
@@ -193,12 +193,15 @@ impl ImageViewerApp {
             for path in &disks_snapshot {
                 let vol = get_volume_info(path);
                 let drive_type = crate::infrastructure::windows::detect_drive_type(path);
-                results.push((path.clone(), DriveInfo {
-                    file_system: vol.file_system,
-                    total_space: vol.total_space,
-                    free_space: vol.free_space,
-                    drive_type,
-                }));
+                results.push((
+                    path.clone(),
+                    DriveInfo {
+                        file_system: vol.file_system,
+                        total_space: vol.total_space,
+                        free_space: vol.free_space,
+                        drive_type,
+                    },
+                ));
             }
             let _ = tx.send(results);
             ctx.request_repaint();

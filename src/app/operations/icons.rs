@@ -2,10 +2,10 @@
 //!
 //! This module ensures standard icons (folder, computer) are loaded into the cache.
 
-use eframe::egui;
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::IconSize;
 use crate::infrastructure::windows as windows_infra;
+use eframe::egui;
 
 impl ImageViewerApp {
     pub fn ensure_folder_icon(&mut self, ctx: &egui::Context) {

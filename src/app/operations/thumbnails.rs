@@ -2,19 +2,35 @@
 //!
 //! This module handles requests for generating thumbnails and folder previews.
 
-use std::path::PathBuf;
 use crate::app::state::ImageViewerApp;
 use crate::domain::thumbnail::ThumbnailData;
 use crate::workers::thumbnail::ThumbnailPriority;
+use std::path::PathBuf;
 
 impl ImageViewerApp {
-
     pub fn request_thumbnail_load(&mut self, path: PathBuf, size_px: u32) {
-        self.request_thumbnail_load_internal(path, size_px, None, ThumbnailPriority::Interactive, 0);
+        self.request_thumbnail_load_internal(
+            path,
+            size_px,
+            None,
+            ThumbnailPriority::Interactive,
+            0,
+        );
     }
 
-    pub fn request_thumbnail_load_with_modified(&mut self, path: PathBuf, size_px: u32, modified: u64) {
-        self.request_thumbnail_load_internal(path, size_px, None, ThumbnailPriority::Interactive, modified);
+    pub fn request_thumbnail_load_with_modified(
+        &mut self,
+        path: PathBuf,
+        size_px: u32,
+        modified: u64,
+    ) {
+        self.request_thumbnail_load_internal(
+            path,
+            size_px,
+            None,
+            ThumbnailPriority::Interactive,
+            modified,
+        );
     }
 
     pub fn request_thumbnail_load_with_index(
@@ -127,8 +143,14 @@ impl ImageViewerApp {
 
         // Not in RAM cache - send to worker (will read from disk cache or generate)
         if let Some(index) = directory_index {
-            self.thumbnail_queue
-                .push_with_index(path, self.generation, size_px, priority, Some(index), modified);
+            self.thumbnail_queue.push_with_index(
+                path,
+                self.generation,
+                size_px,
+                priority,
+                Some(index),
+                modified,
+            );
         } else {
             self.thumbnail_queue
                 .push(path, self.generation, size_px, priority, modified);
@@ -150,10 +172,7 @@ impl ImageViewerApp {
             let _ = self.icon_req_sender.send(path);
         }
     }
-
-
 }
 
 #[cfg(test)]
-mod tests {
-}
+mod tests {}

@@ -152,13 +152,22 @@ fn sniff_h264_bitstream(data: &[u8]) -> Option<CodecGuess> {
 
     let mut i = 0;
     while i < data.len() - 5 {
-        if data[i] == 0 && data[i + 1] == 0 && (data[i + 2] == 1 || (data[i + 2] == 0 && data[i + 3] == 1)) {
+        if data[i] == 0
+            && data[i + 1] == 0
+            && (data[i + 2] == 1 || (data[i + 2] == 0 && data[i + 3] == 1))
+        {
             let offset = if data[i + 2] == 1 { 3 } else { 4 };
-            if i + offset >= data.len() { break; }
-            
+            if i + offset >= data.len() {
+                break;
+            }
+
             let nal_type = data[i + offset] & 0x1F;
-            if nal_type == 7 { found_sps = true; }
-            if nal_type == 8 { found_pps = true; }
+            if nal_type == 7 {
+                found_sps = true;
+            }
+            if nal_type == 8 {
+                found_pps = true;
+            }
 
             if found_sps && found_pps {
                 return Some(CodecGuess {
@@ -193,13 +202,22 @@ fn sniff_hevc_bitstream(data: &[u8]) -> Option<CodecGuess> {
 
     let mut i = 0;
     while i < data.len() - 6 {
-        if data[i] == 0 && data[i + 1] == 0 && (data[i + 2] == 1 || (data[i + 2] == 0 && data[i + 3] == 1)) {
+        if data[i] == 0
+            && data[i + 1] == 0
+            && (data[i + 2] == 1 || (data[i + 2] == 0 && data[i + 3] == 1))
+        {
             let offset = if data[i + 2] == 1 { 3 } else { 4 };
-            if i + offset >= data.len() { break; }
+            if i + offset >= data.len() {
+                break;
+            }
 
             let nal_type = (data[i + offset] >> 1) & 0x3F;
-            if nal_type == 32 { found_vps = true; }
-            if nal_type == 33 { found_sps = true; }
+            if nal_type == 32 {
+                found_vps = true;
+            }
+            if nal_type == 33 {
+                found_sps = true;
+            }
 
             if found_vps && found_sps {
                 return Some(CodecGuess {
@@ -227,7 +245,7 @@ fn sniff_av1_bitstream(data: &[u8]) -> Option<CodecGuess> {
     // AV1 uses OBU (Open Bitstream Units)
     // Looking for OBU_SEQUENCE_HEADER (type 1)
     // OBU Header: [forbidden_bit(1) | obu_type(4) | obu_extension_flag(1) | obu_has_size_field(1) | reserved_bit(1)]
-    
+
     // Pattern search for AV01 (container) or common bitstream signatures
     if find_byte_pattern(data, b"av01").is_some() {
         return Some(CodecGuess {
@@ -256,7 +274,9 @@ fn sniff_vp9_bitstream(data: &[u8]) -> Option<CodecGuess> {
 
 /// Helper to find a byte pattern in data
 fn find_byte_pattern(data: &[u8], pattern: &[u8]) -> Option<usize> {
-    if pattern.is_empty() { return None; }
+    if pattern.is_empty() {
+        return None;
+    }
     data.windows(pattern.len())
         .position(|window| window == pattern)
 }
@@ -286,7 +306,7 @@ mod tests {
         // NAL Type 32 = 0x40 (binary: 0 100000 0000000 0)
         // NAL Type 33 = 0x42 (binary: 0 100001 0000000 0)
         data[10..14].copy_from_slice(&[0, 0, 0, 1]);
-        data[14] = 32 << 1; 
+        data[14] = 32 << 1;
         data[30..34].copy_from_slice(&[0, 0, 0, 1]);
         data[34] = 33 << 1;
 

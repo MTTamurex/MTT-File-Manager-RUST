@@ -1,9 +1,9 @@
 use super::state::MpvState;
+use eframe::egui;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
-use eframe::egui;
 
 /// PERF FASE 2: Starts async polling thread for offloading FFI calls from main thread
 ///
@@ -87,10 +87,7 @@ pub fn start_event_loop(
 }
 
 /// Stop the event loop gracefully
-pub fn stop_event_loop(
-    running: Arc<AtomicBool>,
-    handle: Option<thread::JoinHandle<()>>,
-) {
+pub fn stop_event_loop(running: Arc<AtomicBool>, handle: Option<thread::JoinHandle<()>>) {
     if running.load(Ordering::Relaxed) {
         eprintln!("[MpvPreview] Shutting down event loop thread...");
 

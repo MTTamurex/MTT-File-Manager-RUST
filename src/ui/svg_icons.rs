@@ -26,14 +26,22 @@ impl SvgIconManager {
     ) -> Option<TextureHandle> {
         // Check if icon should preserve original colors (duotone icons)
         // But only if NOT in disabled state (disabled uses alpha < 255 or specific gray)
-        let is_duotone = matches!(icon_name, "copy" | "cut" | "paste" | "rename" | "folder_new");
+        let is_duotone = matches!(
+            icon_name,
+            "copy" | "cut" | "paste" | "rename" | "folder_new"
+        );
         // Disabled state is indicated by: alpha < 255 (e.g., [128, 128, 128, 180])
         let is_disabled = color[3] < 255;
         let preserve_colors = is_duotone && !is_disabled;
-        
+
         let ppp = ctx.pixels_per_point();
         // Include pixels_per_point and preserve_colors in cache key
-        let cache_key = (icon_name.to_string(), size, if preserve_colors { [0, 0, 0, 0] } else { color }, (ppp * 100.0) as u32);
+        let cache_key = (
+            icon_name.to_string(),
+            size,
+            if preserve_colors { [0, 0, 0, 0] } else { color },
+            (ppp * 100.0) as u32,
+        );
 
         // Return cached texture if available
         if let Some(texture) = self.cache.get(&cache_key) {
@@ -45,16 +53,19 @@ impl SvgIconManager {
         let image = render_svg_to_image(svg_data, size, color, ppp, preserve_colors)?;
 
         // Create texture with unique name
-        let color_str = if preserve_colors { 
-            "original".to_string() 
-        } else { 
-            format!("{:02x}{:02x}{:02x}", color[0], color[1], color[2]) 
+        let color_str = if preserve_colors {
+            "original".to_string()
+        } else {
+            format!("{:02x}{:02x}{:02x}", color[0], color[1], color[2])
         };
-        
+
         let texture = ctx.load_texture(
             format!(
-                "icon_{}_{}_{}_{}", 
-                icon_name, size, (ppp * 100.0) as u32, color_str
+                "icon_{}_{}_{}_{}",
+                icon_name,
+                size,
+                (ppp * 100.0) as u32,
+                color_str
             ),
             image,
             TextureOptions::LINEAR,
@@ -72,10 +83,18 @@ impl SvgIconManager {
 }
 
 /// Render an SVG file to a ColorImage at the specified logical size, respecting pixels_per_point
-fn render_svg_to_image(svg_data: &[u8], logical_size: u32, color: [u8; 4], ppp: f32, preserve_colors: bool) -> Option<ColorImage> {
+fn render_svg_to_image(
+    svg_data: &[u8],
+    logical_size: u32,
+    color: [u8; 4],
+    ppp: f32,
+    preserve_colors: bool,
+) -> Option<ColorImage> {
     // Physical size for rendering - ensuring 1:1 pixel mapping
     let physical_size = (logical_size as f32 * ppp).round() as u32;
-    if physical_size == 0 { return None; }
+    if physical_size == 0 {
+        return None;
+    }
 
     // Parse SVG from embedded bytes
     let svg_str = std::str::from_utf8(svg_data).ok()?;

@@ -221,7 +221,7 @@ fn render_preview_panel_layout(
                                         eprintln!("[REFRESH THUMBNAIL] Loading set cleared");
                                         // CRITICAL: Also clear RAM cache (rgba_data_cache) or
                                         // request_thumbnail_load will return early without re-extracting
-                                        app.cache_manager.rgba_data_cache.pop(&path);
+                                        app.cache_manager.pop_rgba_data(&path);
                                         eprintln!("[REFRESH THUMBNAIL] RGBA cache cleared");
                                         // Clear failure cache so it will be retried
                                         crate::workers::thumbnail::clear_failure_cache(&path);
@@ -252,7 +252,8 @@ fn render_preview_panel_layout(
                                     }
                                     PreviewPanelAction::CalculateFolderSize(path) => {
                                         // Cancel any in-progress calculation before starting new one
-                                        app.folder_size_cancel.store(true, std::sync::atomic::Ordering::Release);
+                                        app.folder_size_cancel
+                                            .store(true, std::sync::atomic::Ordering::Release);
                                         app.folder_size_loading.insert(path.clone());
                                         let _ = app.folder_size_req_sender.send(path);
                                     }
@@ -409,11 +410,15 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             entry.name = label;
 
             // Try to find cached drive_info from computer view items
-            let cached_info = app.all_items.iter().find(|item| {
-                let item_str = item.path.to_string_lossy();
-                item_str.starts_with(&app.current_path)
-                    || app.current_path.starts_with(item_str.as_ref())
-            }).and_then(|item| item.drive_info.clone());
+            let cached_info = app
+                .all_items
+                .iter()
+                .find(|item| {
+                    let item_str = item.path.to_string_lossy();
+                    item_str.starts_with(&app.current_path)
+                        || app.current_path.starts_with(item_str.as_ref())
+                })
+                .and_then(|item| item.drive_info.clone());
 
             if let Some(info) = cached_info {
                 entry.drive_info = Some(info);

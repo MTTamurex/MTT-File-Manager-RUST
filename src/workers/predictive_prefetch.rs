@@ -157,27 +157,31 @@ pub fn spawn_predictive_prefetcher(
 
                             // Not cached - read from disk (this is the only HDD I/O, and only for
                             // directories that haven't been visited yet)
-                            if let Some(entries) = ntfs_reader::read_directory_fast(&prediction.path) {
-                                let file_entries: Vec<crate::domain::file_entry::FileEntry> = entries
-                                    .into_iter()
-                                    .filter(|e| {
-                                        let is_hidden = (e.attributes & 0x02) != 0;
-                                        let is_system = (e.attributes & 0x04) != 0;
-                                        !is_hidden && !is_system && !e.name.starts_with('.')
-                                    })
-                                    .map(|e| crate::domain::file_entry::FileEntry {
-                                        path: prediction.path.join(&e.name),
-                                        name: e.name,
-                                        is_dir: e.is_dir,
-                                        size: if e.is_dir { 0 } else { e.size },
-                                        modified: e.modified,
-                                        folder_cover: None,
-                                        drive_info: None,
-                                        sync_status: crate::domain::file_entry::SyncStatus::None,
-                                        deletion_date: None,
-                                        recycle_original_path: None,
-                                    })
-                                    .collect();
+                            if let Some(entries) =
+                                ntfs_reader::read_directory_fast(&prediction.path)
+                            {
+                                let file_entries: Vec<crate::domain::file_entry::FileEntry> =
+                                    entries
+                                        .into_iter()
+                                        .filter(|e| {
+                                            let is_hidden = (e.attributes & 0x02) != 0;
+                                            let is_system = (e.attributes & 0x04) != 0;
+                                            !is_hidden && !is_system && !e.name.starts_with('.')
+                                        })
+                                        .map(|e| crate::domain::file_entry::FileEntry {
+                                            path: prediction.path.join(&e.name),
+                                            name: e.name,
+                                            is_dir: e.is_dir,
+                                            size: if e.is_dir { 0 } else { e.size },
+                                            modified: e.modified,
+                                            folder_cover: None,
+                                            drive_info: None,
+                                            sync_status:
+                                                crate::domain::file_entry::SyncStatus::None,
+                                            deletion_date: None,
+                                            recycle_original_path: None,
+                                        })
+                                        .collect();
 
                                 directory_cache.put(prediction.path.clone(), file_entries);
                                 eprintln!(

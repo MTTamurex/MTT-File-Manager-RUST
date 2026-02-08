@@ -25,8 +25,7 @@ pub fn add_icon_button(
     }
 
     // Draw icon centered
-    let icon_rect =
-        egui::Rect::from_center_size(rect.center(), egui::vec2(btn_size, btn_size));
+    let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(btn_size, btn_size));
     ui.painter().image(
         tex.id(),
         icon_rect,
@@ -47,7 +46,13 @@ fn icon_color(dark_mode: bool) -> [u8; 4] {
 }
 
 /// Draw the seek bar
-fn draw_seek_bar(ui: &mut egui::Ui, preview: &mut MediaPreview, full_width: f32, current_time: f64, duration: f64) {
+fn draw_seek_bar(
+    ui: &mut egui::Ui,
+    preview: &mut MediaPreview,
+    full_width: f32,
+    current_time: f64,
+    duration: f64,
+) {
     ui.horizontal(|ui| {
         ui.spacing_mut().slider_width = full_width;
         ui.visuals_mut().selection.bg_fill = crate::ui::theme::COLOR_ACCENT;
@@ -165,7 +170,11 @@ fn draw_time_display(ui: &mut egui::Ui, current_time: f64, duration: f64) {
 }
 
 /// Draw audio track wheel picker
-fn draw_audio_track_picker(ui: &mut egui::Ui, preview: &mut MediaPreview, _svg_manager: &mut SvgIconManager) {
+fn draw_audio_track_picker(
+    ui: &mut egui::Ui,
+    preview: &mut MediaPreview,
+    _svg_manager: &mut SvgIconManager,
+) {
     let audio_tracks = preview
         .get_video_state()
         .map(|s| s.audio_tracks.clone())
@@ -199,7 +208,11 @@ fn draw_audio_track_picker(ui: &mut egui::Ui, preview: &mut MediaPreview, _svg_m
 }
 
 /// Draw subtitle wheel picker
-fn draw_subtitle_track_picker(ui: &mut egui::Ui, preview: &mut MediaPreview, _svg_manager: &mut SvgIconManager) {
+fn draw_subtitle_track_picker(
+    ui: &mut egui::Ui,
+    preview: &mut MediaPreview,
+    _svg_manager: &mut SvgIconManager,
+) {
     let subtitle_tracks = preview
         .get_video_state()
         .map(|s| s.subtitle_tracks.clone())
@@ -238,8 +251,12 @@ fn draw_subtitle_track_picker(ui: &mut egui::Ui, preview: &mut MediaPreview, _sv
 }
 
 /// Standard picker dimensions
-fn picker_width() -> f32 { 140.0 }
-fn picker_height() -> f32 { 22.0 }
+fn picker_width() -> f32 {
+    140.0
+}
+fn picker_height() -> f32 {
+    22.0
+}
 
 /// Generic wheel picker for tracks
 fn draw_wheel_picker(
@@ -253,10 +270,8 @@ fn draw_wheel_picker(
 ) -> Option<usize> {
     let font_id = egui::FontId::proportional(11.0);
     let display_text = truncate_text_to_fit(text, width - 16.0, &font_id, ui);
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(width, height),
-        egui::Sense::click_and_drag(),
-    );
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click_and_drag());
 
     // Background with subtle border
     let bg_color = if dark_mode {
@@ -322,7 +337,11 @@ fn draw_wheel_picker(
 }
 
 /// Draw audio normalizer button
-fn draw_audio_normalizer(ui: &mut egui::Ui, preview: &mut MediaPreview, svg_manager: &mut SvgIconManager) {
+fn draw_audio_normalizer(
+    ui: &mut egui::Ui,
+    preview: &mut MediaPreview,
+    svg_manager: &mut SvgIconManager,
+) {
     let normalizer_enabled = preview.is_audio_normalizer_enabled();
     let icon_color_val = icon_color(ui.visuals().dark_mode);
     let normalizer_color = if normalizer_enabled {
@@ -330,7 +349,7 @@ fn draw_audio_normalizer(ui: &mut egui::Ui, preview: &mut MediaPreview, svg_mana
     } else {
         icon_color_val
     };
-    
+
     if let Some(tex) = svg_manager.get_icon(ui.ctx(), "headphones", 48, normalizer_color) {
         let tooltip = if normalizer_enabled {
             "Normalizador: Ativo"
@@ -352,9 +371,13 @@ fn draw_audio_normalizer(ui: &mut egui::Ui, preview: &mut MediaPreview, svg_mana
 }
 
 /// Draw detached-only buttons (fullscreen, VSR)
-fn draw_detached_buttons(ui: &mut egui::Ui, preview: &mut MediaPreview, svg_manager: &mut SvgIconManager) {
+fn draw_detached_buttons(
+    ui: &mut egui::Ui,
+    preview: &mut MediaPreview,
+    svg_manager: &mut SvgIconManager,
+) {
     let icon_color_val = icon_color(ui.visuals().dark_mode);
-    
+
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         // Fullscreen Button
         let is_fullscreen = preview.is_maximized();
@@ -375,8 +398,7 @@ fn draw_detached_buttons(ui: &mut egui::Ui, preview: &mut MediaPreview, svg_mana
                     // Entering fullscreen — only set flags here.
                     // The actual ViewportCommand::Fullscreen(true) is sent
                     // from render_fullscreen_video() on the next frame.
-                    let was_maximized =
-                        ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+                    let was_maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
                     preview.set_prev_app_maximized(was_maximized);
                     preview.set_fullscreen_applied(false);
                     preview.toggle_maximized();
@@ -541,13 +563,27 @@ pub fn draw_video_controls(
 ) {
     if is_detached {
         draw_detached_controls(
-            ui, preview, full_width, svg_manager,
-            is_playing, current_time, duration, volume, is_muted,
+            ui,
+            preview,
+            full_width,
+            svg_manager,
+            is_playing,
+            current_time,
+            duration,
+            volume,
+            is_muted,
         );
     } else {
         draw_docked_controls(
-            ui, preview, full_width, svg_manager,
-            is_playing, current_time, duration, volume, is_muted,
+            ui,
+            preview,
+            full_width,
+            svg_manager,
+            is_playing,
+            current_time,
+            duration,
+            volume,
+            is_muted,
         );
     }
 }

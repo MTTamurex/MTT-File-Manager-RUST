@@ -1,7 +1,7 @@
-use std::path::Path;
-use super::MediaMetadata;
 use super::property_keys::*;
 use super::utils::*;
+use super::MediaMetadata;
+use std::path::Path;
 
 pub fn is_video_extension(ext: &str) -> bool {
     // Use Windows Perceived Type API for dynamic detection
@@ -30,7 +30,9 @@ pub fn read_video_metadata(path: &Path) -> Result<MediaMetadata, windows::core::
     };
 
     if need_mf {
-        if let Some(mf_meta) = crate::infrastructure::windows::media_foundation::extract_video_metadata_mf(path) {
+        if let Some(mf_meta) =
+            crate::infrastructure::windows::media_foundation::extract_video_metadata_mf(path)
+        {
             let base = ps_meta_opt.take().unwrap_or_default();
             return Ok(merge_video_metadata(base, mf_meta, path));
         }
@@ -130,9 +132,15 @@ pub fn read_video_via_property_store(path: &Path) -> Result<MediaMetadata, windo
     if width.is_none() || height.is_none() || frame_rate.is_none() {
         if let Some(desc) = &stream_description {
             let (ext_w, ext_h, ext_fps) = parse_resolution_and_fps_from_description(desc);
-            if width.is_none() { width = ext_w; }
-            if height.is_none() { height = ext_h; }
-            if frame_rate.is_none() { frame_rate = ext_fps; }
+            if width.is_none() {
+                width = ext_w;
+            }
+            if height.is_none() {
+                height = ext_h;
+            }
+            if frame_rate.is_none() {
+                frame_rate = ext_fps;
+            }
         }
     }
     // --------------------------------------------------------------------
@@ -409,17 +417,22 @@ pub fn is_container_name(codec: &str, path: &Path) -> bool {
 }
 
 /// Helper to parse resolution (e.g., \"1920x1080\") and FPS (e.g., \"23.97 fps\") from a description string.
-fn parse_resolution_and_fps_from_description(desc: &str) -> (Option<u32>, Option<u32>, Option<f32>) {
+fn parse_resolution_and_fps_from_description(
+    desc: &str,
+) -> (Option<u32>, Option<u32>, Option<f32>) {
     let mut width = None;
     let mut height = None;
     let mut fps = None;
 
     // Use regex-free parsing for performance
-    let parts: Vec<&str> = desc.split(|c: char| !c.is_ascii_alphanumeric() && c != '.').filter(|s| !s.is_empty()).collect();
+    let parts: Vec<&str> = desc
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '.')
+        .filter(|s| !s.is_empty())
+        .collect();
 
     for i in 0..parts.len() {
         let p = parts[i].to_uppercase();
-        
+
         // Look for 1920x1080 pattern
         if p.contains('X') {
             let dim_parts: Vec<&str> = p.split('X').collect();
@@ -435,7 +448,7 @@ fn parse_resolution_and_fps_from_description(desc: &str) -> (Option<u32>, Option
 
         // Look for numbers followed by \"FPS\"
         if p == "FPS" && i > 0 {
-            if let Ok(val) = parts[i-1].parse::<f32>() {
+            if let Ok(val) = parts[i - 1].parse::<f32>() {
                 fps = Some(val);
             }
         }

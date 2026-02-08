@@ -123,7 +123,11 @@ impl ImageViewerApp {
             .max(1.0) as usize;
 
         // Keyboard navigation (ONLY when not renaming and media is NOT focused)
-        if should_handle_navigation(ui, self.renaming_state.is_some(), self.is_media_keyboard_focused()) {
+        if should_handle_navigation(
+            ui,
+            self.renaming_state.is_some(),
+            self.is_media_keyboard_focused(),
+        ) {
             let current_index = self.items.iter().position(|x| {
                 self.selected_file
                     .as_ref()
@@ -417,9 +421,10 @@ impl ImageViewerApp {
                 GridAction::RequestThumbnailPrefetch(path, size, modified) => {
                     self.request_thumbnail_prefetch_with_index_and_modified(path, size, 0, modified)
                 }
-                GridAction::RequestThumbnailPrefetchWithIndex(path, size, index, modified) => {
-                    self.request_thumbnail_prefetch_with_index_and_modified(path, size, index, modified)
-                }
+                GridAction::RequestThumbnailPrefetchWithIndex(path, size, index, modified) => self
+                    .request_thumbnail_prefetch_with_index_and_modified(
+                        path, size, index, modified,
+                    ),
                 GridAction::RequestIconLoad(path) => self.request_icon_load(path),
                 GridAction::RenameWithShell(idx) => self.rename_with_shell(idx),
                 GridAction::NotifyIdleVisibleItems(items) => {

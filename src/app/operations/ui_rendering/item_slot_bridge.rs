@@ -18,14 +18,12 @@ impl ImageViewerApp {
         // without a deep clone while still mutating self later
         let items_arc = self.items.clone();
         let item = &items_arc[idx];
-        let is_renaming = self
-            .renaming_state
-            .as_ref()
-            .is_some_and(|(i, _)| *i == idx);
+        let is_renaming = self.renaming_state.as_ref().is_some_and(|(i, _)| *i == idx);
 
         // To avoid borrow conflicts, collect pending operations
         // and execute after rendering
-        let mut pending_thumbnail_loads: Vec<(std::path::PathBuf, u32, Option<usize>, u64)> = Vec::new();
+        let mut pending_thumbnail_loads: Vec<(std::path::PathBuf, u32, Option<usize>, u64)> =
+            Vec::new();
         let mut pending_folder_scans: Vec<std::path::PathBuf> = Vec::new();
         let mut pending_folder_preview_loads: Vec<std::path::PathBuf> = Vec::new();
         let mut pending_icon_loads: Vec<std::path::PathBuf> = Vec::new();
@@ -81,7 +79,8 @@ impl ImageViewerApp {
                     directory_index: Option<usize>,
                     modified: u64,
                 ) {
-                    self.thumbnail_loads.push((path, size, directory_index, modified));
+                    self.thumbnail_loads
+                        .push((path, size, directory_index, modified));
                 }
 
                 fn request_folder_scan(&mut self, path: std::path::PathBuf) {
