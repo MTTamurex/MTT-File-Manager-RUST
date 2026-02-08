@@ -132,6 +132,7 @@ pub struct ImageViewerApp {
     // Internal drag-and-drop state (Explorer-like item move/copy inside file list views)
     pub is_item_dragging: bool,
     pub drag_payload_paths: Vec<PathBuf>,
+    pub drag_source_folder: Option<PathBuf>,
     pub drag_target_folder: Option<PathBuf>,
     pub drag_hovered_folder: Option<PathBuf>,
     pub selected_thumbnail: Option<egui::TextureHandle>, // Persistent thumbnail for preview panel

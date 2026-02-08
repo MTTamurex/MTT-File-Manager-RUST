@@ -596,6 +596,7 @@ impl ImageViewerApp {
             multi_selection: FxHashSet::default(),
             is_item_dragging: false,
             drag_payload_paths: Vec::new(),
+            drag_source_folder: None,
             drag_target_folder: None,
             drag_hovered_folder: None,
             total_items: 0,

@@ -455,6 +455,17 @@ fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     ui.spinner();
                     ui.label("Carregando...");
                 });
+
+                // During loading, still update drag target so cursor feedback
+                // isn't stale from the previous tab's hovered folder.
+                if app.is_item_dragging {
+                    app.update_item_drag_target_from_hover(None);
+                    let (ctrl, shift, primary_released) = ui
+                        .input(|i| (i.modifiers.ctrl, i.modifiers.shift, i.pointer.primary_released()));
+                    if primary_released {
+                        app.complete_item_drag(ctrl, shift);
+                    }
+                }
             } else if app.items.is_empty() {
                 let response = ui
                     .centered_and_justified(|ui| {
@@ -462,6 +473,17 @@ fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     })
                     .response
                     .on_hover_cursor(egui::CursorIcon::Default);
+
+                // During an active drag, update the drop target to the current folder
+                // even though there are no items to hover over.
+                if app.is_item_dragging {
+                    app.update_item_drag_target_from_hover(None);
+                    let (ctrl, shift, primary_released) = ui
+                        .input(|i| (i.modifiers.ctrl, i.modifiers.shift, i.pointer.primary_released()));
+                    if primary_released {
+                        app.complete_item_drag(ctrl, shift);
+                    }
+                }
 
                 // Handle context menu on empty area
                 let interact_response = ui
