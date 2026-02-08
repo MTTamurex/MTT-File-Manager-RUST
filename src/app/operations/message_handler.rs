@@ -132,9 +132,11 @@ impl ImageViewerApp {
                             // The player holds the OLD path, so the preview panel would show a
                             // broken state (thumbnail over playing video, no controls).
                             let should_destroy_preview = match self.media_preview.as_ref() {
-                                Some(crate::ui::components::media_preview::MediaPreview::Video(
-                                    player,
-                                )) => normalize_for_match(&player.path) == path_str,
+                                Some(
+                                    crate::ui::components::media_preview::MediaPreview::Video(
+                                        player,
+                                    ),
+                                ) => normalize_for_match(&player.path) == path_str,
                                 _ => false,
                             };
                             if should_destroy_preview {

@@ -594,6 +594,9 @@ impl ImageViewerApp {
             thumbnail_size, // Loaded from SQLite
             selected_item: None,
             multi_selection: FxHashSet::default(),
+            is_item_dragging: false,
+            drag_payload_paths: Vec::new(),
+            drag_target_folder: None,
             total_items: 0,
             // Search & Navigation (NEW)
             all_items: Vec::new(),

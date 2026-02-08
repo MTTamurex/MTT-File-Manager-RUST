@@ -381,10 +381,8 @@ impl MpvPreview {
                     let _ = m.set_property("cache-secs", MPV_DEFAULT_CACHE_SECS);
                     let _ = m.set_property("demuxer-readahead-secs", MPV_DEFAULT_READAHEAD_SECS);
                     let _ = m.set_property("demuxer-max-bytes", MPV_DEFAULT_DEMUXER_MAX_BYTES);
-                    let _ = m.set_property(
-                        "demuxer-max-back-bytes",
-                        MPV_DEFAULT_DEMUXER_MAX_BACK_BYTES,
-                    );
+                    let _ = m
+                        .set_property("demuxer-max-back-bytes", MPV_DEFAULT_DEMUXER_MAX_BACK_BYTES);
 
                     let _ = m.set_property("pause", true);
 
@@ -636,10 +634,7 @@ impl MpvPreview {
             let _ = m.set_property("cache-secs", MPV_DOCKED_CACHE_SECS);
             let _ = m.set_property("demuxer-readahead-secs", MPV_DOCKED_READAHEAD_SECS);
             let _ = m.set_property("demuxer-max-bytes", MPV_DOCKED_DEMUXER_MAX_BYTES);
-            let _ = m.set_property(
-                "demuxer-max-back-bytes",
-                MPV_DOCKED_DEMUXER_MAX_BACK_BYTES,
-            );
+            let _ = m.set_property("demuxer-max-back-bytes", MPV_DOCKED_DEMUXER_MAX_BACK_BYTES);
 
             self.docked_downscale_applied = true;
             self.docked_fps_limit_applied = true;

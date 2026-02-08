@@ -188,8 +188,7 @@ fn render_preview_panel_layout(
                                         if matches!(
                                             app.media_preview.as_ref(),
                                             Some(MediaPreview::Video(_))
-                                        )
-                                        {
+                                        ) {
                                             app.destroy_media_preview();
                                         }
 

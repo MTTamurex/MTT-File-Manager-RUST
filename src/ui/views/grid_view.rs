@@ -163,6 +163,14 @@ pub struct GridViewContext<'a> {
     pub prefetch_rows: usize,
     /// Output: visible item index range for GPU upload prioritization
     pub visible_index_range: &'a mut Option<(usize, usize)>,
+    /// Whether an item drag operation is active
+    pub is_item_dragging: bool,
+    /// Current folder path under drop target highlight
+    pub drag_target_folder: Option<PathBuf>,
+    /// Output: item where drag started this frame
+    pub drag_started_item: &'a mut Option<usize>,
+    /// Output: currently hovered folder item during drag
+    pub drag_hovered_item: &'a mut Option<usize>,
 }
 
 /// Operations that can be performed from grid view
@@ -242,7 +250,7 @@ pub fn render_grid_view(
         secondary_clicked_item: &mut Option<usize>,
         is_scrolling: bool,
     ) {
-        let response = ui.interact(rect, ui.id().with(index), Sense::click());
+        let response = ui.interact(rect, ui.id().with(index), Sense::click_and_drag());
         if response.clicked() {
             *clicked_item = Some(index);
         }
@@ -251,6 +259,16 @@ pub fn render_grid_view(
         }
         if response.secondary_clicked() {
             *secondary_clicked_item = Some(index);
+        }
+        if response.drag_started() {
+            *ctx.drag_started_item = Some(index);
+        }
+        let is_pointer_over = ui
+            .ctx()
+            .pointer_latest_pos()
+            .is_some_and(|pos| rect.contains(pos));
+        if (response.hovered() || is_pointer_over) && item.is_dir {
+            *ctx.drag_hovered_item = Some(index);
         }
 
         // --- VISUAL FEEDBACK: BORDER-ONLY (MODERN DESIGN) ---
@@ -281,6 +299,28 @@ pub fn render_grid_view(
                 rect,
                 rounding,
                 egui::Stroke::new(1.0, hover_color),
+                egui::StrokeKind::Inside,
+            );
+        }
+
+        let pointer_over_drop_candidate = ctx.is_item_dragging && item.is_dir && is_pointer_over;
+        let is_active_drop_target = ctx.is_item_dragging
+            && item.is_dir
+            && ctx
+                .drag_target_folder
+                .as_ref()
+                .is_some_and(|target| *target == item.path);
+
+        if pointer_over_drop_candidate || is_active_drop_target {
+            let stroke_color = if is_active_drop_target {
+                Color32::from_rgb(24, 122, 255)
+            } else {
+                accent_color.gamma_multiply(0.75)
+            };
+            ui.painter().rect_stroke(
+                rect.shrink(1.0),
+                rounding,
+                egui::Stroke::new(2.0, stroke_color),
                 egui::StrokeKind::Inside,
             );
         }
