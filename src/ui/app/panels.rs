@@ -460,8 +460,13 @@ fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 // isn't stale from the previous tab's hovered folder.
                 if app.is_item_dragging {
                     app.update_item_drag_target_from_hover(None);
-                    let (ctrl, shift, primary_released) = ui
-                        .input(|i| (i.modifiers.ctrl, i.modifiers.shift, i.pointer.primary_released()));
+                    let (ctrl, shift, primary_released) = ui.input(|i| {
+                        (
+                            i.modifiers.ctrl,
+                            i.modifiers.shift,
+                            i.pointer.primary_released(),
+                        )
+                    });
                     if primary_released {
                         app.complete_item_drag(ctrl, shift);
                     }
@@ -478,8 +483,13 @@ fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 // even though there are no items to hover over.
                 if app.is_item_dragging {
                     app.update_item_drag_target_from_hover(None);
-                    let (ctrl, shift, primary_released) = ui
-                        .input(|i| (i.modifiers.ctrl, i.modifiers.shift, i.pointer.primary_released()));
+                    let (ctrl, shift, primary_released) = ui.input(|i| {
+                        (
+                            i.modifiers.ctrl,
+                            i.modifiers.shift,
+                            i.pointer.primary_released(),
+                        )
+                    });
                     if primary_released {
                         app.complete_item_drag(ctrl, shift);
                     }

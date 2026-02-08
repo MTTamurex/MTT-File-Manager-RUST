@@ -170,8 +170,13 @@ impl eframe::App for ImageViewerApp {
 
         // Keep drag feedback on top and avoid cursor override by later widgets.
         if self.is_item_dragging {
-            let (ctrl, shift, primary_released) =
-                ctx.input(|i| (i.modifiers.ctrl, i.modifiers.shift, i.pointer.primary_released()));
+            let (ctrl, shift, primary_released) = ctx.input(|i| {
+                (
+                    i.modifiers.ctrl,
+                    i.modifiers.shift,
+                    i.pointer.primary_released(),
+                )
+            });
             self.apply_item_drag_cursor_feedback(ctx);
             self.render_item_drag_preview(ctx, ctrl, shift);
             if primary_released {
@@ -306,7 +311,7 @@ fn render_tab_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context, frame: &m
                 }
                 TabBarAction::CloseTab(idx) => {
                     eprintln!("[DEBUG] Closing Tab index: {}. Active was: {}", idx, app.tab_manager.active_tab);
-                    
+
                     // CLEANUP LOGIC: If the tab being closed is the owner of the media player, destroy the player.
                     if let Some(tab) = app.tab_manager.tabs.get(idx) {
                         let tab_id = tab.id;

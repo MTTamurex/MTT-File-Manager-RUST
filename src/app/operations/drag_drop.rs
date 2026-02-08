@@ -138,7 +138,11 @@ impl ImageViewerApp {
             return;
         };
 
-        let primary_item = self.items.iter().find(|it| it.path == primary_path).cloned();
+        let primary_item = self
+            .items
+            .iter()
+            .find(|it| it.path == primary_path)
+            .cloned();
         let (display_name, icon_texture) = if let Some(item) = primary_item {
             let display_name = if item.name.is_empty() {
                 item.path
@@ -217,7 +221,11 @@ impl ImageViewerApp {
 
         let mut total_width = padding + icon_size + spacing + text_width + padding;
         let op_galley = op_label.as_ref().map(|op| {
-            let g = painter.layout_no_wrap(op.to_string(), op_font_id.clone(), egui::Color32::from_rgb(24, 122, 255));
+            let g = painter.layout_no_wrap(
+                op.to_string(),
+                op_font_id.clone(),
+                egui::Color32::from_rgb(24, 122, 255),
+            );
             total_width += spacing + g.size().x;
             g
         });
@@ -230,8 +238,17 @@ impl ImageViewerApp {
         let shadow_offset = egui::vec2(1.0, 2.0);
         let shadow_rect = box_rect.translate(shadow_offset);
         painter.rect_filled(shadow_rect, 6.0, egui::Color32::from_black_alpha(30));
-        painter.rect_filled(box_rect, 6.0, egui::Color32::from_rgba_unmultiplied(250, 250, 250, 240));
-        painter.rect_stroke(box_rect, 6.0, egui::Stroke::new(1.0, egui::Color32::from_gray(200)), egui::StrokeKind::Outside);
+        painter.rect_filled(
+            box_rect,
+            6.0,
+            egui::Color32::from_rgba_unmultiplied(250, 250, 250, 240),
+        );
+        painter.rect_stroke(
+            box_rect,
+            6.0,
+            egui::Stroke::new(1.0, egui::Color32::from_gray(200)),
+            egui::StrokeKind::Outside,
+        );
 
         // Icon
         let icon_rect = egui::Rect::from_min_size(
@@ -337,7 +354,9 @@ impl ImageViewerApp {
             let src_norm = normalize_path_for_compare(src);
             let active_idx = self.tab_manager.active_tab;
             for (i, tab) in self.tab_manager.tabs.iter_mut().enumerate() {
-                if i != active_idx && normalize_path_for_compare(&std::path::PathBuf::from(&tab.path)) == src_norm {
+                if i != active_idx
+                    && normalize_path_for_compare(&std::path::PathBuf::from(&tab.path)) == src_norm
+                {
                     tab.multi_selection.clear();
                     tab.selected_item = None;
                     tab.selected_file = None;
