@@ -1,10 +1,10 @@
-use eframe::egui;
 use crate::app::ImageViewerApp;
 use crate::domain::file_entry::{SortMode, ViewMode};
+use crate::infrastructure::windows::window_subclass::is_in_size_move;
 use crate::ui::app;
 use crate::ui::theme;
 use crate::ui::widgets;
-use crate::infrastructure::windows::window_subclass::is_in_size_move;
+use eframe::egui;
 
 #[cfg(debug_assertions)]
 macro_rules! debug_log {
@@ -13,7 +13,7 @@ macro_rules! debug_log {
 
 #[cfg(not(debug_assertions))]
 macro_rules! debug_log {
-    ($($arg:tt)*) => {}
+    ($($arg:tt)*) => {};
 }
 
 impl eframe::App for ImageViewerApp {
@@ -81,15 +81,19 @@ impl eframe::App for ImageViewerApp {
             // Flush debounced preferences (max once per second)
             self.flush_preferences_if_needed();
             let t4 = std::time::Instant::now();
+            // Bound long-session cache growth without disrupting interactive work.
+            self.run_memory_maintenance();
+            let t5 = std::time::Instant::now();
 
             let msg_ms = t1.duration_since(t0).as_millis();
             let drives_ms = t2.duration_since(t1).as_millis();
             let poll_ms = t3.duration_since(t2).as_millis();
             let prefs_ms = t4.duration_since(t3).as_millis();
-            if msg_ms + drives_ms + poll_ms + prefs_ms > 50 {
+            let memory_ms = t5.duration_since(t4).as_millis();
+            if msg_ms + drives_ms + poll_ms + prefs_ms + memory_ms > 50 {
                 eprintln!(
-                    "[PERF] Slow infrastructure: messages={}ms drives={}ms poll={}ms prefs={}ms",
-                    msg_ms, drives_ms, poll_ms, prefs_ms
+                    "[PERF] Slow infrastructure: messages={}ms drives={}ms poll={}ms prefs={}ms memory={}ms",
+                    msg_ms, drives_ms, poll_ms, prefs_ms, memory_ms
                 );
             }
         }
@@ -153,10 +157,11 @@ impl eframe::App for ImageViewerApp {
 
             // 11. Virtual drive settings modal
             if self.show_virtual_drive_settings {
-                self.show_virtual_drive_settings = crate::ui::components::virtual_drive_settings::render_virtual_drive_settings(
-                    ctx,
-                    self.show_virtual_drive_settings,
-                );
+                self.show_virtual_drive_settings =
+                    crate::ui::components::virtual_drive_settings::render_virtual_drive_settings(
+                        ctx,
+                        self.show_virtual_drive_settings,
+                    );
             }
 
             // 12. Notifications
@@ -166,7 +171,10 @@ impl eframe::App for ImageViewerApp {
         // PERF: Log total frame time when slow (helps diagnose post-inactivity freezes)
         let frame_total_ms = t_frame_start.elapsed().as_millis();
         if frame_total_ms > 100 {
-            eprintln!("[PERF] SLOW FRAME: {}ms total (stable_dt={:.0}ms)", frame_total_ms, frame_ms);
+            eprintln!(
+                "[PERF] SLOW FRAME: {}ms total (stable_dt={:.0}ms)",
+                frame_total_ms, frame_ms
+            );
         }
     }
 
@@ -348,12 +356,17 @@ fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context) {
             } else {
                 egui::Color32::from_rgb(243, 243, 243) // Same as active tab (Windows Explorer style)
             },
-            inner_margin: egui::Margin { left: 8, right: 8, top: 7, bottom: 7 }, // Padding to center content in taller bar
+            inner_margin: egui::Margin {
+                left: 8,
+                right: 8,
+                top: 7,
+                bottom: 7,
+            }, // Padding to center content in taller bar
             ..Default::default()
         })
         .show(ctx, |ui| {
-            use crate::ui::toolbar::{render_toolbar, ToolbarAction};
             use crate::domain::file_entry::ViewMode;
+            use crate::ui::toolbar::{render_toolbar, ToolbarAction};
 
             let action = render_toolbar(
                 ui,
@@ -387,7 +400,11 @@ fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         } else {
                             app.view_mode = ViewMode::List;
                         }
-                        debug_log!("[VIEW-MODE] Toolbar toggle -> {:?} (tab={})", app.view_mode, app.tab_manager.active_tab);
+                        debug_log!(
+                            "[VIEW-MODE] Toolbar toggle -> {:?} (tab={})",
+                            app.view_mode,
+                            app.tab_manager.active_tab
+                        );
                     }
                     ToolbarAction::TogglePreviewPanel => {
                         app.show_preview_panel = !app.show_preview_panel;
@@ -418,7 +435,9 @@ fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         // CRITICAL FIX: Use fast_path_exists() instead of path.exists()
                         // path.exists() uses CreateFileW which triggers OneDrive file recall,
                         // blocking the UI thread for 30-60s on cloud-only files.
-                        if crate::infrastructure::onedrive::fast_path_exists(std::path::Path::new(&path)) {
+                        if crate::infrastructure::onedrive::fast_path_exists(std::path::Path::new(
+                            &path,
+                        )) {
                             app.navigate_to(&path);
                             app.is_address_editing = false;
                         } else {
@@ -442,7 +461,7 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
     } else {
         egui::Color32::from_rgb(210, 210, 210)
     };
-    
+
     egui::TopBottomPanel::top("secondary_nav_bar")
         .show_separator_line(false)
         .exact_height(46.0) // Same height as main toolbar
@@ -452,7 +471,12 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
             } else {
                 egui::Color32::WHITE
             },
-            inner_margin: egui::Margin { left: 8, right: 8, top: 7, bottom: 7 },
+            inner_margin: egui::Margin {
+                left: 8,
+                right: 8,
+                top: 7,
+                bottom: 7,
+            },
             ..Default::default()
         })
         .show(ctx, |ui| {
@@ -463,7 +487,7 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                 rect.bottom(),
                 egui::Stroke::new(1.0, separator_color),
             );
-            
+
             // Internal enum to defer actions and avoid borrow checker conflicts
             enum SecAction {
                 None,
@@ -480,20 +504,27 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
             ui.horizontal(|ui| {
                 // Calculate approximate content width to center it
                 // 6 icons (28px) + sort button + combobox (~70px) + 2 view icons + slider (80px) + zoom label + separators + spacing
-                let content_width = 6.0 * 28.0 + 30.0 + 110.0 + 2.0 * 28.0 + 80.0 + 80.0 + 3.0 * 8.0 + 16.0 * 12.0;
+                let content_width =
+                    6.0 * 28.0 + 30.0 + 110.0 + 2.0 * 28.0 + 80.0 + 80.0 + 3.0 * 8.0 + 16.0 * 12.0;
                 let available = ui.available_width();
                 let left_pad = ((available - content_width) / 2.0).max(0.0);
                 ui.add_space(left_pad);
-                
+
                 ui.spacing_mut().item_spacing = egui::vec2(12.0, 0.0);
 
                 let icon_size = egui::vec2(28.0, 28.0); // Consistent button size
-                
+
                 // --- Logic for Enablement ---
                 // Calculated BEFORE the mutable borrow of svg_icon_manager
-                let is_drive_selected = app.selected_file.as_ref().map_or(false, |f| f.drive_info.is_some());
-                let has_selection = (app.selected_file.is_some() || !app.multi_selection.is_empty()) && !is_drive_selected;
-                let can_rename = app.multi_selection.len() <= 1 && (app.multi_selection.len() == 1 || app.selected_file.is_some());
+                let is_drive_selected = app
+                    .selected_file
+                    .as_ref()
+                    .map_or(false, |f| f.drive_info.is_some());
+                let has_selection = (app.selected_file.is_some()
+                    || !app.multi_selection.is_empty())
+                    && !is_drive_selected;
+                let can_rename = app.multi_selection.len() <= 1
+                    && (app.multi_selection.len() == 1 || app.selected_file.is_some());
                 let can_paste = app.clipboard.has_content() && !is_drive_selected;
                 let can_create_folder = !app.is_computer_view && !app.is_recycle_bin_view;
 
@@ -512,7 +543,11 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                     // --- Helper Closure for Rendering Buttons ---
                     let mut render_btn = |icon_name: &str, enabled: bool, tooltip: &str| -> bool {
                         let color = if enabled { icon_color } else { disabled_color };
-                        let sense = if enabled { egui::Sense::click() } else { egui::Sense::hover() };
+                        let sense = if enabled {
+                            egui::Sense::click()
+                        } else {
+                            egui::Sense::hover()
+                        };
                         let (rect, response) = ui.allocate_exact_size(icon_size, sense);
 
                         if enabled && response.hovered() {
@@ -524,13 +559,13 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                             ui.painter().rect_filled(rect, 6.0, bg_color);
                         }
 
-                        if let Some(texture) = svg_manager.get_icon(
-                            ui.ctx(),
-                            icon_name,
-                            32,
-                            color,
-                        ) {
-                            let display_size = if icon_name == "folder_new" { 18.0 } else { 16.0 };
+                        if let Some(texture) = svg_manager.get_icon(ui.ctx(), icon_name, 32, color)
+                        {
+                            let display_size = if icon_name == "folder_new" {
+                                18.0
+                            } else {
+                                16.0
+                            };
                             let icon_rect = egui::Rect::from_center_size(
                                 rect.center(),
                                 egui::vec2(display_size, display_size),
@@ -538,7 +573,10 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                             ui.painter().image(
                                 texture.id(),
                                 icon_rect,
-                                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                egui::Rect::from_min_max(
+                                    egui::pos2(0.0, 0.0),
+                                    egui::pos2(1.0, 1.0),
+                                ),
                                 egui::Color32::WHITE,
                             );
                         } else {
@@ -548,7 +586,9 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                                 egui::Align2::CENTER_CENTER,
                                 fallback,
                                 egui::FontId::proportional(12.0),
-                                egui::Color32::from_rgba_unmultiplied(color[0], color[1], color[2], color[3]),
+                                egui::Color32::from_rgba_unmultiplied(
+                                    color[0], color[1], color[2], color[3],
+                                ),
                             );
                         }
 
@@ -587,7 +627,11 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                     }
 
                     // 5. Create Folder
-                    if render_btn("folder_new", can_create_folder, "Criar Nova Pasta (Ctrl+Shift+N)") {
+                    if render_btn(
+                        "folder_new",
+                        can_create_folder,
+                        "Criar Nova Pasta (Ctrl+Shift+N)",
+                    ) {
                         action = SecAction::CreateFolder;
                     }
 
@@ -619,7 +663,9 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                     ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
 
                     if ui
-                        .add(egui::Button::new(egui::RichText::new(sort_symbol).color(egui::Color32::BLACK)))
+                        .add(egui::Button::new(
+                            egui::RichText::new(sort_symbol).color(egui::Color32::BLACK),
+                        ))
                         .on_hover_text("Inverter Ordem")
                         .clicked()
                     {
@@ -667,7 +713,10 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                         })
                         .show_ui(ui, |ui| {
                             // Opção Nome sempre disponível
-                            if ui.selectable_value(&mut SortMode::Name, app.sort_mode, "Nome").clicked() {
+                            if ui
+                                .selectable_value(&mut SortMode::Name, app.sort_mode, "Nome")
+                                .clicked()
+                            {
                                 app.sort_mode = SortMode::Name;
                                 if app.is_computer_view {
                                     app.sort_mode_computer = SortMode::Name;
@@ -677,16 +726,30 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                                 app.sort_items();
                                 app.save_preferences();
                             }
-                            
+
                             // Opções específicas para Computer View
                             if app.is_computer_view {
-                                if ui.selectable_value(&mut SortMode::DriveTotalSpace, app.sort_mode, "Espaço Total").clicked() {
+                                if ui
+                                    .selectable_value(
+                                        &mut SortMode::DriveTotalSpace,
+                                        app.sort_mode,
+                                        "Espaço Total",
+                                    )
+                                    .clicked()
+                                {
                                     app.sort_mode = SortMode::DriveTotalSpace;
                                     app.sort_mode_computer = SortMode::DriveTotalSpace;
                                     app.sort_items();
                                     app.save_preferences();
                                 }
-                                if ui.selectable_value(&mut SortMode::DriveFreeSpace, app.sort_mode, "Espaço Livre").clicked() {
+                                if ui
+                                    .selectable_value(
+                                        &mut SortMode::DriveFreeSpace,
+                                        app.sort_mode,
+                                        "Espaço Livre",
+                                    )
+                                    .clicked()
+                                {
                                     app.sort_mode = SortMode::DriveFreeSpace;
                                     app.sort_mode_computer = SortMode::DriveFreeSpace;
                                     app.sort_items();
@@ -694,19 +757,28 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                                 }
                             } else {
                                 // Opções para visualização normal (não Computer View)
-                                if ui.selectable_value(&mut SortMode::Date, app.sort_mode, "Data").clicked() {
+                                if ui
+                                    .selectable_value(&mut SortMode::Date, app.sort_mode, "Data")
+                                    .clicked()
+                                {
                                     app.sort_mode = SortMode::Date;
                                     app.sort_mode_normal = SortMode::Date;
                                     app.sort_items();
                                     app.save_preferences();
                                 }
-                                if ui.selectable_value(&mut SortMode::Size, app.sort_mode, "Tamanho").clicked() {
+                                if ui
+                                    .selectable_value(&mut SortMode::Size, app.sort_mode, "Tamanho")
+                                    .clicked()
+                                {
                                     app.sort_mode = SortMode::Size;
                                     app.sort_mode_normal = SortMode::Size;
                                     app.sort_items();
                                     app.save_preferences();
                                 }
-                                if ui.selectable_value(&mut SortMode::Type, app.sort_mode, "Tipo").clicked() {
+                                if ui
+                                    .selectable_value(&mut SortMode::Type, app.sort_mode, "Tipo")
+                                    .clicked()
+                                {
                                     app.sort_mode = SortMode::Type;
                                     app.sort_mode_normal = SortMode::Type;
                                     app.sort_items();
@@ -766,22 +838,22 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                 SecAction::Copy => app.command_copy(Option::from(app.selected_item)),
                 SecAction::Paste => app.command_paste(None),
                 SecAction::Rename => {
-                     if let Some(idx) = app.selected_item {
+                    if let Some(idx) = app.selected_item {
                         if let Some(item) = app.items.get(idx) {
                             app.renaming_state = Some((idx, item.name.clone()));
                             app.focus_rename = true;
                         }
                     }
-                },
+                }
                 SecAction::CreateFolder => app.create_new_folder(),
                 SecAction::Delete => {
                     let mut targets = Vec::new();
                     if app.multi_selection.is_empty() {
-                         if let Some(idx) = app.selected_item {
-                             if let Some(item) = app.items.get(idx) {
-                                 targets.push(item.path.clone());
-                             }
-                         }
+                        if let Some(idx) = app.selected_item {
+                            if let Some(item) = app.items.get(idx) {
+                                targets.push(item.path.clone());
+                            }
+                        }
                     } else {
                         targets.extend(app.multi_selection.iter().cloned());
                     }
@@ -789,7 +861,7 @@ fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context)
                     if !targets.is_empty() {
                         app.delete_with_shell_for_paths(&targets);
                     }
-                },
+                }
                 SecAction::None => {}
             }
         });

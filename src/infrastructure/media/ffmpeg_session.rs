@@ -13,8 +13,8 @@ use std::collections::HashSet;
 use std::io::{self, Read};
 use std::process::{Child, ChildStdout, Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, Instant};
 use std::thread;
+use std::time::{Duration, Instant};
 
 // ============================================================================
 // GLOBAL PID REGISTRY - Fail-safe cleanup
@@ -30,7 +30,11 @@ fn get_registry() -> &'static Mutex<HashSet<u32>> {
 fn register_pid(pid: u32) {
     if let Ok(mut registry) = get_registry().lock() {
         registry.insert(pid);
-        println!("[FFmpegSession] Registered PID {} (active: {})", pid, registry.len());
+        println!(
+            "[FFmpegSession] Registered PID {} (active: {})",
+            pid,
+            registry.len()
+        );
     }
 }
 
@@ -38,7 +42,11 @@ fn register_pid(pid: u32) {
 fn unregister_pid(pid: u32) {
     if let Ok(mut registry) = get_registry().lock() {
         registry.remove(&pid);
-        println!("[FFmpegSession] Unregistered PID {} (active: {})", pid, registry.len());
+        println!(
+            "[FFmpegSession] Unregistered PID {} (active: {})",
+            pid,
+            registry.len()
+        );
     }
 }
 
@@ -50,14 +58,17 @@ pub fn kill_all_ffmpeg_processes() {
             Err(_) => return,
         }
     };
-    
+
     if pids.is_empty() {
         println!("[FFmpegSession] No active FFmpeg processes to kill");
         return;
     }
-    
-    println!("[FFmpegSession] Killing {} orphan FFmpeg process(es)...", pids.len());
-    
+
+    println!(
+        "[FFmpegSession] Killing {} orphan FFmpeg process(es)...",
+        pids.len()
+    );
+
     for pid in pids {
         kill_process_by_pid(pid);
         unregister_pid(pid);
@@ -69,13 +80,13 @@ pub fn kill_all_ffmpeg_processes() {
 fn kill_process_by_pid(pid: u32) {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x08000000;
-    
+
     let mut cmd = Command::new("taskkill");
     cmd.args(&["/F", "/PID", &pid.to_string()]);
     cmd.creation_flags(CREATE_NO_WINDOW);
     cmd.stdout(Stdio::null());
     cmd.stderr(Stdio::null());
-    
+
     match cmd.status() {
         Ok(status) => {
             if status.success() {
@@ -91,7 +102,9 @@ fn kill_process_by_pid(pid: u32) {
 #[cfg(not(target_os = "windows"))]
 fn kill_process_by_pid(pid: u32) {
     use std::os::unix::process::CommandExt;
-    let _ = Command::new("kill").args(&["-9", &pid.to_string()]).status();
+    let _ = Command::new("kill")
+        .args(&["-9", &pid.to_string()])
+        .status();
 }
 
 // ============================================================================
@@ -116,7 +129,7 @@ impl Default for FfmpegSessionInner {
 }
 
 /// Thread-safe FFmpeg process controller.
-/// 
+///
 /// Ensures at most ONE FFmpeg process per session.
 /// Seek operations must call `kill()` before `spawn()`.
 #[derive(Clone)]
@@ -131,13 +144,13 @@ impl FfmpegSession {
             inner: Arc::new(Mutex::new(FfmpegSessionInner::default())),
         }
     }
-    
+
     /// Check if a process is currently running
     pub fn is_running(&self) -> bool {
         if let Ok(mut inner) = self.inner.lock() {
             if let Some(ref mut child) = inner.child {
                 match child.try_wait() {
-                    Ok(None) => return true,  // Still running
+                    Ok(None) => return true, // Still running
                     Ok(Some(_)) => {
                         // Process exited, clean up
                         if let Some(pid) = inner.pid.take() {
@@ -152,9 +165,9 @@ impl FfmpegSession {
         }
         false
     }
-    
+
     /// Kill the current FFmpeg process with explicit wait.
-    /// 
+    ///
     /// This method:
     /// 1. Sends kill signal
     /// 2. Waits up to 5 seconds for graceful exit
@@ -165,22 +178,22 @@ impl FfmpegSession {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(), // Recover from panic
         };
-        
+
         let pid = match inner.pid {
             Some(p) => p,
             None => return, // No process to kill
         };
-        
+
         println!("[FFmpegSession] Killing PID {} (reason: {})", pid, reason);
-        
+
         if let Some(ref mut child) = inner.child {
             // Step 1: Send kill signal
             let _ = child.kill();
-            
+
             // Step 2: Wait with timeout (5 seconds)
             let start = Instant::now();
             let timeout = Duration::from_secs(5);
-            
+
             loop {
                 match child.try_wait() {
                     Ok(Some(status)) => {
@@ -205,73 +218,75 @@ impl FfmpegSession {
                 }
             }
         }
-        
+
         // Step 4: Cleanup
         unregister_pid(pid);
         inner.child = None;
         inner.pid = None;
         inner.stderr_reader = None;
     }
-    
+
     /// Spawn a new FFmpeg process.
-    /// 
+    ///
     /// **IMPORTANT**: Call `kill()` first if a process might be running!
-    /// 
+    ///
     /// Returns the stdout pipe for reading transcoded data.
     pub fn spawn(&self, args: Vec<String>) -> io::Result<ChildStdout> {
         let mut inner = match self.inner.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
-        
+
         // Safety check: kill existing process first
         if inner.child.is_some() {
             drop(inner);
             self.kill("spawn called with existing process");
             inner = self.inner.lock().unwrap();
         }
-        
+
         // Build command
         let mut cmd = Command::new("ffmpeg");
         cmd.args(&args);
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
-        
+
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x08000000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
-        
+
         // Spawn
         let mut child = cmd.spawn()?;
         let pid = child.id();
-        
+
         // Extract stdout
-        let stdout = child.stdout.take()
+        let stdout = child
+            .stdout
+            .take()
             .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Failed to capture stdout"))?;
-        
+
         // Store stderr for debugging
         inner.stderr_reader = child.stderr.take();
-        
+
         // Register and store
         register_pid(pid);
         inner.pid = Some(pid);
         inner.child = Some(child);
-        
+
         println!("[FFmpegSession] Spawned new FFmpeg PID {}", pid);
-        
+
         Ok(stdout)
     }
-    
+
     /// Get stderr output (for debugging failed processes)
     pub fn read_stderr(&self) -> Option<String> {
         let mut inner = match self.inner.lock() {
             Ok(guard) => guard,
             Err(_) => return None,
         };
-        
+
         if let Some(ref mut stderr) = inner.stderr_reader {
             let mut buf = String::new();
             if stderr.read_to_string(&mut buf).is_ok() {
@@ -280,7 +295,7 @@ impl FfmpegSession {
         }
         None
     }
-    
+
     /// Get current PID if running
     pub fn pid(&self) -> Option<u32> {
         self.inner.lock().ok().and_then(|inner| inner.pid)
@@ -305,7 +320,7 @@ impl Default for FfmpegSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_session_lifecycle() {
         let session = FfmpegSession::new();

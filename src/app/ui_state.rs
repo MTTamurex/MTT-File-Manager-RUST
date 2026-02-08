@@ -86,7 +86,7 @@ impl UIState {
             list_col_computer_free_width: 120.0,
         }
     }
-    
+
     /// Limpa estado de UI
     pub fn clear(&mut self) {
         self.selected_items.clear();

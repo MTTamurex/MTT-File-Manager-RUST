@@ -174,8 +174,8 @@ impl IconLoader {
                     // PERFORMANCE: Detect virtual paths (inside ZIPs) via string check
                     // instead of path.exists() which causes synchronous HDD reads on UI thread.
                     let path_lower = path.to_string_lossy().to_lowercase();
-                    let is_virtual_path = path_lower.contains(".zip\\")
-                        || path_lower.contains(".zip/");
+                    let is_virtual_path =
+                        path_lower.contains(".zip\\") || path_lower.contains(".zip/");
 
                     if is_virtual_path {
                         // Virtual path (inside ZIP): try Shell Namespace (PIDL) for correct icon
@@ -222,8 +222,8 @@ impl IconLoader {
         // Check if path is inside a ZIP file (virtual path)
         // MUST check this BEFORE cache lookups to avoid returning stale generic icons
         let path_str = path.to_string_lossy();
-        let is_virtual_path = path_str.to_lowercase().contains(".zip\\") 
-            || path_str.to_lowercase().contains(".zip/");
+        let is_virtual_path =
+            path_str.to_lowercase().contains(".zip\\") || path_str.to_lowercase().contains(".zip/");
 
         // For virtual paths (inside ZIPs), check cache first but load with Shell API if not cached
         if is_virtual_path {
@@ -464,7 +464,10 @@ impl IconLoader {
         let path_owned = folder_path.to_string();
         std::thread::spawn(move || {
             let data = windows::extract_drive_icon(&path_owned, IconSize::Jumbo).ok();
-            let _ = tx.send(AsyncIconResult { key: cache_key, data });
+            let _ = tx.send(AsyncIconResult {
+                key: cache_key,
+                data,
+            });
         });
 
         None

@@ -1,10 +1,10 @@
+use crate::pdf_viewer::webview;
 use std::path::PathBuf;
 use windows::core::*;
 use windows::Win32::Foundation::*;
-use windows::Win32::UI::WindowsAndMessaging::*;
+use windows::Win32::Graphics::Gdi::{COLOR_WINDOW, HBRUSH};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::Graphics::Gdi::{HBRUSH, COLOR_WINDOW};
-use crate::pdf_viewer::webview;
+use windows::Win32::UI::WindowsAndMessaging::*;
 
 pub fn create_and_run(path: PathBuf, title_prefix: &str) -> Result<()> {
     unsafe {
@@ -26,7 +26,11 @@ pub fn create_and_run(path: PathBuf, title_prefix: &str) -> Result<()> {
 
         RegisterClassW(&wnd_class);
 
-        let title = format!("{} - {}", title_prefix, path.file_name().unwrap_or_default().to_string_lossy());
+        let title = format!(
+            "{} - {}",
+            title_prefix,
+            path.file_name().unwrap_or_default().to_string_lossy()
+        );
         let mut title_u16: Vec<u16> = title.encode_utf16().collect();
         title_u16.push(0);
 
@@ -65,7 +69,12 @@ pub fn create_and_run(path: PathBuf, title_prefix: &str) -> Result<()> {
     Ok(())
 }
 
-unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+unsafe extern "system" fn wnd_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
     match msg {
         WM_SIZE => {
             // Resize logic will be called here

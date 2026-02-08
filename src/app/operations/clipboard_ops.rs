@@ -2,9 +2,9 @@
 //!
 //! This module handles interaction with the Windows clipboard for file operations.
 
-use std::path::{Path, PathBuf};
 use crate::app::state::ImageViewerApp;
 use crate::application::file_operations;
+use std::path::{Path, PathBuf};
 
 impl ImageViewerApp {
     pub fn command_copy(&mut self, idx: Option<usize>) {
@@ -21,11 +21,11 @@ impl ImageViewerApp {
         };
 
         if use_multi_selection {
-             files.extend(self.multi_selection.iter().cloned());
+            files.extend(self.multi_selection.iter().cloned());
         } else if let Some(i) = idx.or(self.selected_item) {
-             if let Some(item) = self.items.get(i) {
-                 files.push(item.path.clone());
-             }
+            if let Some(item) = self.items.get(i) {
+                files.push(item.path.clone());
+            }
         }
 
         if !files.is_empty() {
@@ -48,11 +48,11 @@ impl ImageViewerApp {
         };
 
         if use_multi_selection {
-             files.extend(self.multi_selection.iter().cloned());
+            files.extend(self.multi_selection.iter().cloned());
         } else if let Some(i) = idx.or(self.selected_item) {
-             if let Some(item) = self.items.get(i) {
-                 files.push(item.path.clone());
-             }
+            if let Some(item) = self.items.get(i) {
+                files.push(item.path.clone());
+            }
         }
 
         if !files.is_empty() {

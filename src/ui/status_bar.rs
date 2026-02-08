@@ -39,7 +39,11 @@ fn get_ram_usage_cached() -> Option<u64> {
         }
     }
     let cached = CACHED_RAM_BYTES.load(Ordering::Relaxed);
-    if cached > 0 { Some(cached) } else { None }
+    if cached > 0 {
+        Some(cached)
+    } else {
+        None
+    }
 }
 
 /// Returns cached VRAM estimation, refreshing only after TTL expires.
@@ -118,141 +122,144 @@ pub fn render_status_bar(
         ui.visuals_mut().widgets.active.fg_stroke = egui::Stroke::NONE;
 
         ui.horizontal(|ui| {
-        // === LEFTMOST: Virtual drive settings button ===
-        if ui
-            .button(egui::RichText::new("⚙").color(egui::Color32::BLACK))
-            .on_hover_text("Configurar otimização de drives virtuais")
-            .clicked()
-        {
-            action = StatusBarAction::OpenVirtualDriveSettings;
-        }
+            // === LEFTMOST: Virtual drive settings button ===
+            if ui
+                .button(egui::RichText::new("⚙").color(egui::Color32::BLACK))
+                .on_hover_text("Configurar otimização de drives virtuais")
+                .clicked()
+            {
+                action = StatusBarAction::OpenVirtualDriveSettings;
+            }
 
-        ui.separator();
+            ui.separator();
 
-        // === LEFT SIDE: Item count and loading status ===
-        if *is_loading_folder {
-            ui.spinner();
-            ui.label("Carregando...");
-        } else {
-            let item_text = if total_items == 1 {
-                "1 item".to_string()
+            // === LEFT SIDE: Item count and loading status ===
+            if *is_loading_folder {
+                ui.spinner();
+                ui.label("Carregando...");
             } else {
-                format!("{} itens", total_items)
-            };
-            ui.label(item_text);
-        }
-
-        ui.separator();
-
-        // === CENTER: View mode ===
-        ui.label("Modo:");
-        if ui
-            .selectable_label(*view_mode == ViewMode::Grid, "Grade")
-            .clicked()
-        {
-            *view_mode = ViewMode::Grid;
-            action = StatusBarAction::ViewModeChanged;
-        }
-        if ui
-            .selectable_label(*view_mode == ViewMode::List, "Lista")
-            .clicked()
-        {
-            *view_mode = ViewMode::List;
-            action = StatusBarAction::ViewModeChanged;
-        }
-
-        ui.separator();
-
-        // === CENTER-RIGHT: Sort controls ===
-        ui.label("Ordenar:");
-
-        // PERFORMANCE: Static arrays instead of Vec allocation per frame
-        let sort_modes: &[(SortMode, &str)] = if is_computer_view {
-            &[
-                (SortMode::Name, "Nome"),
-                (SortMode::DriveTotalSpace, "Espaço Total"),
-                (SortMode::DriveFreeSpace, "Espaço Livre"),
-            ]
-        } else {
-            &[
-                (SortMode::Name, "Nome"),
-                (SortMode::Date, "Data"),
-                (SortMode::Size, "Tamanho"),
-            ]
-        };
-
-        for &(mode, label) in sort_modes {
-            if ui.selectable_label(*sort_mode == mode, label).clicked() {
-                if *sort_mode == mode {
-                    *sort_descending = !*sort_descending;
+                let item_text = if total_items == 1 {
+                    "1 item".to_string()
                 } else {
-                    *sort_mode = mode;
-                    *sort_descending = false;
+                    format!("{} itens", total_items)
+                };
+                ui.label(item_text);
+            }
+
+            ui.separator();
+
+            // === CENTER: View mode ===
+            ui.label("Modo:");
+            if ui
+                .selectable_label(*view_mode == ViewMode::Grid, "Grade")
+                .clicked()
+            {
+                *view_mode = ViewMode::Grid;
+                action = StatusBarAction::ViewModeChanged;
+            }
+            if ui
+                .selectable_label(*view_mode == ViewMode::List, "Lista")
+                .clicked()
+            {
+                *view_mode = ViewMode::List;
+                action = StatusBarAction::ViewModeChanged;
+            }
+
+            ui.separator();
+
+            // === CENTER-RIGHT: Sort controls ===
+            ui.label("Ordenar:");
+
+            // PERFORMANCE: Static arrays instead of Vec allocation per frame
+            let sort_modes: &[(SortMode, &str)] = if is_computer_view {
+                &[
+                    (SortMode::Name, "Nome"),
+                    (SortMode::DriveTotalSpace, "Espaço Total"),
+                    (SortMode::DriveFreeSpace, "Espaço Livre"),
+                ]
+            } else {
+                &[
+                    (SortMode::Name, "Nome"),
+                    (SortMode::Date, "Data"),
+                    (SortMode::Size, "Tamanho"),
+                ]
+            };
+
+            for &(mode, label) in sort_modes {
+                if ui.selectable_label(*sort_mode == mode, label).clicked() {
+                    if *sort_mode == mode {
+                        *sort_descending = !*sort_descending;
+                    } else {
+                        *sort_mode = mode;
+                        *sort_descending = false;
+                    }
+                    action = StatusBarAction::SortChanged;
                 }
+            }
+
+            // Sort direction indicator
+            let arrow = if *sort_descending { "↓" } else { "↑" };
+            ui.label(arrow);
+
+            ui.separator();
+
+            ui.label("Pastas:");
+            if ui
+                .selectable_label(*folders_position == FoldersPosition::First, "Início")
+                .on_hover_text("Pastas sempre no topo")
+                .clicked()
+            {
+                *folders_position = FoldersPosition::First;
                 action = StatusBarAction::SortChanged;
             }
-        }
-
-        // Sort direction indicator
-        let arrow = if *sort_descending { "↓" } else { "↑" };
-        ui.label(arrow);
-
-        ui.separator();
-
-        ui.label("Pastas:");
-        if ui
-            .selectable_label(*folders_position == FoldersPosition::First, "Início")
-            .on_hover_text("Pastas sempre no topo")
-            .clicked()
-        {
-            *folders_position = FoldersPosition::First;
-            action = StatusBarAction::SortChanged;
-        }
-        if ui
-            .selectable_label(*folders_position == FoldersPosition::Last, "Fim")
-            .on_hover_text("Pastas no final da lista")
-            .clicked()
-        {
-            *folders_position = FoldersPosition::Last;
-            action = StatusBarAction::SortChanged;
-        }
-        if ui
-            .selectable_label(*folders_position == FoldersPosition::Mixed, "Misto")
-            .on_hover_text("Pastas misturadas com arquivos")
-            .clicked()
-        {
-            *folders_position = FoldersPosition::Mixed;
-            action = StatusBarAction::SortChanged;
-        }
-
-        // === RIGHT SIDE: System info (push to right with available space) ===
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if upload_budget_ms > 0.0 {
-                ui.label(format!("Upload: {:.0} ms", upload_budget_ms));
+            if ui
+                .selectable_label(*folders_position == FoldersPosition::Last, "Fim")
+                .on_hover_text("Pastas no final da lista")
+                .clicked()
+            {
+                *folders_position = FoldersPosition::Last;
+                action = StatusBarAction::SortChanged;
             }
-            if fps_avg > 0.0 {
-                ui.label(format!("FPS: {:.0}", fps_avg));
+            if ui
+                .selectable_label(*folders_position == FoldersPosition::Mixed, "Misto")
+                .on_hover_text("Pastas misturadas com arquivos")
+                .clicked()
+            {
+                *folders_position = FoldersPosition::Mixed;
+                action = StatusBarAction::SortChanged;
             }
-            if frame_time_avg_ms > 0.0 {
-                if frame_time_peak_ms > 0.0 {
-                    ui.label(format!("Frame: {:.1} ms ({:.1} ms)", frame_time_avg_ms, frame_time_peak_ms));
-                } else {
-                    ui.label(format!("Frame: {:.1} ms", frame_time_avg_ms));
+
+            // === RIGHT SIDE: System info (push to right with available space) ===
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if upload_budget_ms > 0.0 {
+                    ui.label(format!("Upload: {:.0} ms", upload_budget_ms));
                 }
-            }
-            // RAM usage (cached with 1s TTL — avoids kernel syscall every frame)
-            if let Some(ram_usage) = get_ram_usage_cached() {
-                ui.label(format!("RAM: {}", format_size(ram_usage)));
-            }
+                if fps_avg > 0.0 {
+                    ui.label(format!("FPS: {:.0}", fps_avg));
+                }
+                if frame_time_avg_ms > 0.0 {
+                    if frame_time_peak_ms > 0.0 {
+                        ui.label(format!(
+                            "Frame: {:.1} ms ({:.1} ms)",
+                            frame_time_avg_ms, frame_time_peak_ms
+                        ));
+                    } else {
+                        ui.label(format!("Frame: {:.1} ms", frame_time_avg_ms));
+                    }
+                }
+                // RAM usage (cached with 1s TTL — avoids kernel syscall every frame)
+                if let Some(ram_usage) = get_ram_usage_cached() {
+                    ui.label(format!("RAM: {}", format_size(ram_usage)));
+                }
 
-            // VRAM estimation (cached with 1s TTL — avoids O(n) texture iteration every frame)
-            let vram_usage = get_vram_usage_cached(texture_cache);
+                // VRAM estimation (cached with 1s TTL — avoids O(n) texture iteration every frame)
+                let vram_usage = get_vram_usage_cached(texture_cache);
 
-            ui.label(format!(
-                "VRAM: {:.1} MB",
-                vram_usage as f64 / 1024.0 / 1024.0
-            ));
-        });
+                ui.label(format!(
+                    "VRAM: {:.1} MB",
+                    vram_usage as f64 / 1024.0 / 1024.0
+                ));
+            });
         });
     });
 

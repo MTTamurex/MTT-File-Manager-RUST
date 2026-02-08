@@ -1,6 +1,6 @@
-use eframe::egui;
 use crate::app::ImageViewerApp;
 use crate::infrastructure::onedrive;
+use eframe::egui;
 
 pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
     if app.startup_tick < 5 {
@@ -39,7 +39,7 @@ pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
 pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
     use crate::infrastructure::windows::window_subclass::{
-        freeze_layout, layout_phase, WindowLayoutPhase
+        freeze_layout, layout_phase, WindowLayoutPhase,
     };
 
     let (size_changed, maximized_changed, is_minimized, minimized_changed) = ctx.input(|i| {
@@ -70,7 +70,12 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
         }
         app.saved_is_maximized = new_maximized;
 
-        (size_changed, maximized_changed, minimized, minimized_changed)
+        (
+            size_changed,
+            maximized_changed,
+            minimized,
+            minimized_changed,
+        )
     });
 
     // Handle minimization state changes - CRITICAL for OneDrive thread management

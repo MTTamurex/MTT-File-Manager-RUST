@@ -22,9 +22,8 @@ use std::sync::Mutex;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetClientRect, IsZoomed, WM_NCHITTEST, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_SIZE,
-    HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCLIENT,
-    HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT,
+    GetClientRect, IsZoomed, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCLIENT, HTLEFT, HTRIGHT,
+    HTTOP, HTTOPLEFT, HTTOPRIGHT, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_NCHITTEST, WM_SIZE,
 };
 
 /// SIZE_MINIMIZED constant (wParam for WM_SIZE when window is minimized)
@@ -157,7 +156,7 @@ pub fn get_frozen_sidebar_widths() -> (f32, f32) {
 /// Returns true if layout is now Normal (unfrozen).
 pub fn try_unfreeze_layout(available_width: f32, available_height: f32) -> bool {
     let current_phase = LAYOUT_PHASE.load(Ordering::Relaxed);
-    
+
     // Only transition from Restoring to Normal
     if current_phase == WindowLayoutPhase::Restoring as u8 {
         // Require valid dimensions
@@ -166,7 +165,7 @@ pub fn try_unfreeze_layout(available_width: f32, available_height: f32) -> bool 
             return true;
         }
     }
-    
+
     current_phase == WindowLayoutPhase::Normal as u8
 }
 

@@ -398,20 +398,22 @@ pub fn extract_drive_icon(
         // For Jumbo icons, try IShellItemImageFactory first (higher quality),
         // then fall back to SHGetFileInfoW if it fails (common for USB drives).
         if matches!(size, IconSize::Jumbo) {
-            let jumbo_result = (|| -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
-                let shell_item: IShellItem =
-                    SHCreateItemFromParsingName(PCWSTR(path_wide.as_ptr()), None)?;
+            let jumbo_result =
+                (|| -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
+                    let shell_item: IShellItem =
+                        SHCreateItemFromParsingName(PCWSTR(path_wide.as_ptr()), None)?;
 
-                let image_factory: IShellItemImageFactory = shell_item.cast()?;
+                    let image_factory: IShellItemImageFactory = shell_item.cast()?;
 
-                let size_factory = SIZE { cx: 256, cy: 256 };
+                    let size_factory = SIZE { cx: 256, cy: 256 };
 
-                let hbitmap: HBITMAP = image_factory.GetImage(size_factory, SIIGBF_ICONONLY)?;
+                    let hbitmap: HBITMAP = image_factory.GetImage(size_factory, SIIGBF_ICONONLY)?;
 
-                let (rgba_data, width, height) = super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
-                let _ = DeleteObject(hbitmap.into());
-                Ok((rgba_data, width, height))
-            })();
+                    let (rgba_data, width, height) =
+                        super::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
+                    let _ = DeleteObject(hbitmap.into());
+                    Ok((rgba_data, width, height))
+                })();
 
             if let Ok(result) = jumbo_result {
                 return Ok(result);

@@ -70,7 +70,9 @@ impl GifPlayer {
                     match self.data.lock() {
                         Ok(d) => self.current_frame % d.frames.len(),
                         Err(_) => {
-                            eprintln!("[GifPlayer] Erro ao lock dados para next_idx - Mutex poisonado");
+                            eprintln!(
+                                "[GifPlayer] Erro ao lock dados para next_idx - Mutex poisonado"
+                            );
                             return;
                         }
                     }
@@ -80,7 +82,9 @@ impl GifPlayer {
                     match self.data.lock() {
                         Ok(d) => d.frames[next_idx].clone(),
                         Err(_) => {
-                            eprintln!("[GifPlayer] Erro ao lock dados para next_frame - Mutex poisonado");
+                            eprintln!(
+                                "[GifPlayer] Erro ao lock dados para next_frame - Mutex poisonado"
+                            );
                             return;
                         }
                     }
@@ -492,7 +496,9 @@ impl MediaPreview {
     }
 
     /// Access to controls state (for inline menus)
-    pub fn controls_state_mut(&mut self) -> Option<&mut crate::ui::components::video_controls_state::VideoControlsState> {
+    pub fn controls_state_mut(
+        &mut self,
+    ) -> Option<&mut crate::ui::components::video_controls_state::VideoControlsState> {
         if let MediaPreview::Video(player) = self {
             Some(&mut player.controls_state)
         } else {

@@ -1,6 +1,6 @@
+use crate::app::ImageViewerApp;
 use eframe::egui;
 use std::path::{Path, PathBuf};
-use crate::app::ImageViewerApp;
 
 pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
     // 1. Render the menu (ui construction)
@@ -12,8 +12,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
         &mut context_menu,
         &mut app.svg_icon_manager,
     );
-    
-    
+
     // 2. Handle lazy load request
     if let Some(id) = context_menu.pending_load_item.take() {
         app.context_menu = context_menu;
@@ -107,19 +106,20 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         match app.create_shell_shortcut(&path) {
                             Ok(created) => {
                                 app.load_folder(false);
-                                app.notifications.push(
-                                    crate::application::AppNotification::info(format!(
+                                app.notifications
+                                    .push(crate::application::AppNotification::info(format!(
                                         "Atalho criado: {}",
-                                        created.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()
-                                    )),
-                                );
+                                        created
+                                            .file_name()
+                                            .map(|n| n.to_string_lossy())
+                                            .unwrap_or_default()
+                                    )));
                             }
                             Err(e) => {
-                                app.notifications.push(
-                                    crate::application::AppNotification::error(format!(
+                                app.notifications
+                                    .push(crate::application::AppNotification::error(format!(
                                         "Falha ao criar atalho: {e}"
-                                    )),
-                                );
+                                    )));
                             }
                         }
                     }
@@ -127,12 +127,12 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 -28 => app.show_properties_for_idx(item_idx),
                 -50 | -52 => {
                     if !target_paths.is_empty() {
-                         app.restore_from_recycle_bin(&target_paths);
+                        app.restore_from_recycle_bin(&target_paths);
                     }
                 }
                 -51 | -53 => {
                     if !target_paths.is_empty() {
-                         app.delete_permanently(&target_paths);
+                        app.delete_permanently(&target_paths);
                     }
                 }
                 -54 => app.empty_recycle_bin(),

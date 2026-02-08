@@ -266,10 +266,9 @@ pub fn resolve_codec_guid(guid_str: &str) -> String {
 /// This is the preferred method as it works with both installed and system codecs.
 fn query_mf_codec_name(guid: &GUID) -> Option<String> {
     use windows::Win32::Media::MediaFoundation::{
-        IMFActivate, MFTEnumEx, MFT_CATEGORY_AUDIO_DECODER, MFT_CATEGORY_AUDIO_ENCODER,
-        MFT_CATEGORY_VIDEO_DECODER, MFT_CATEGORY_VIDEO_ENCODER,
+        IMFActivate, MFMediaType_Audio, MFMediaType_Video, MFTEnumEx, MFT_CATEGORY_AUDIO_DECODER,
+        MFT_CATEGORY_AUDIO_ENCODER, MFT_CATEGORY_VIDEO_DECODER, MFT_CATEGORY_VIDEO_ENCODER,
         MFT_ENUM_FLAG, MFT_REGISTER_TYPE_INFO, MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
-        MFMediaType_Audio, MFMediaType_Video,
     };
     use windows::Win32::System::Com::CoTaskMemFree;
 
@@ -284,12 +283,23 @@ fn query_mf_codec_name(guid: &GUID) -> Option<String> {
     unsafe {
         // Try both audio and video categories, both decoders and encoders
         for media_type in [MFMediaType_Audio, MFMediaType_Video] {
-            for category in [MFT_CATEGORY_AUDIO_DECODER, MFT_CATEGORY_AUDIO_ENCODER, MFT_CATEGORY_VIDEO_DECODER, MFT_CATEGORY_VIDEO_ENCODER] {
+            for category in [
+                MFT_CATEGORY_AUDIO_DECODER,
+                MFT_CATEGORY_AUDIO_ENCODER,
+                MFT_CATEGORY_VIDEO_DECODER,
+                MFT_CATEGORY_VIDEO_ENCODER,
+            ] {
                 // Skip mismatched category/media type combinations
-                if media_type == MFMediaType_Audio && (category == MFT_CATEGORY_VIDEO_DECODER || category == MFT_CATEGORY_VIDEO_ENCODER) {
+                if media_type == MFMediaType_Audio
+                    && (category == MFT_CATEGORY_VIDEO_DECODER
+                        || category == MFT_CATEGORY_VIDEO_ENCODER)
+                {
                     continue;
                 }
-                if media_type == MFMediaType_Video && (category == MFT_CATEGORY_AUDIO_DECODER || category == MFT_CATEGORY_AUDIO_ENCODER) {
+                if media_type == MFMediaType_Video
+                    && (category == MFT_CATEGORY_AUDIO_DECODER
+                        || category == MFT_CATEGORY_AUDIO_ENCODER)
+                {
                     continue;
                 }
 
@@ -339,15 +349,18 @@ fn query_mf_codec_name(guid: &GUID) -> Option<String> {
                                     .is_ok()
                                     && !friendly_name_ptr.is_null()
                                 {
-                                    let name = String::from_utf16_lossy(std::slice::from_raw_parts(
-                                        friendly_name_ptr.as_ptr(),
-                                        length as usize,
-                                    ));
+                                    let name =
+                                        String::from_utf16_lossy(std::slice::from_raw_parts(
+                                            friendly_name_ptr.as_ptr(),
+                                            length as usize,
+                                        ));
                                     CoTaskMemFree(Some(friendly_name_ptr.as_ptr() as *const _));
 
                                     // Cleanup activate array
                                     for i in 0..count {
-                                        if let Some(act_ptr) = activate_array.add(i as usize).as_ref() {
+                                        if let Some(act_ptr) =
+                                            activate_array.add(i as usize).as_ref()
+                                        {
                                             if let Some(act) = act_ptr {
                                                 let _ = act.ShutdownObject();
                                             }
@@ -501,10 +514,9 @@ fn get_microsoft_codec_name(tag: u32) -> Option<&'static str> {
 fn query_mft_by_subtype(tag: u32) -> Option<String> {
     use windows::core::GUID;
     use windows::Win32::Media::MediaFoundation::{
-        IMFActivate, MFTEnumEx, MFT_CATEGORY_AUDIO_DECODER, MFT_CATEGORY_AUDIO_ENCODER,
-        MFT_CATEGORY_VIDEO_DECODER, MFT_CATEGORY_VIDEO_ENCODER,
+        IMFActivate, MFMediaType_Audio, MFMediaType_Video, MFTEnumEx, MFT_CATEGORY_AUDIO_DECODER,
+        MFT_CATEGORY_AUDIO_ENCODER, MFT_CATEGORY_VIDEO_DECODER, MFT_CATEGORY_VIDEO_ENCODER,
         MFT_ENUM_FLAG, MFT_REGISTER_TYPE_INFO, MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
-        MFMediaType_Audio, MFMediaType_Video,
     };
     use windows::Win32::System::Com::CoTaskMemFree;
 
@@ -524,12 +536,23 @@ fn query_mft_by_subtype(tag: u32) -> Option<String> {
     unsafe {
         // Try both audio and video categories, both decoders and encoders
         for media_type in [MFMediaType_Audio, MFMediaType_Video] {
-            for category in [MFT_CATEGORY_AUDIO_DECODER, MFT_CATEGORY_AUDIO_ENCODER, MFT_CATEGORY_VIDEO_DECODER, MFT_CATEGORY_VIDEO_ENCODER] {
+            for category in [
+                MFT_CATEGORY_AUDIO_DECODER,
+                MFT_CATEGORY_AUDIO_ENCODER,
+                MFT_CATEGORY_VIDEO_DECODER,
+                MFT_CATEGORY_VIDEO_ENCODER,
+            ] {
                 // Skip mismatched category/media type combinations
-                if media_type == MFMediaType_Audio && (category == MFT_CATEGORY_VIDEO_DECODER || category == MFT_CATEGORY_VIDEO_ENCODER) {
+                if media_type == MFMediaType_Audio
+                    && (category == MFT_CATEGORY_VIDEO_DECODER
+                        || category == MFT_CATEGORY_VIDEO_ENCODER)
+                {
                     continue;
                 }
-                if media_type == MFMediaType_Video && (category == MFT_CATEGORY_AUDIO_DECODER || category == MFT_CATEGORY_AUDIO_ENCODER) {
+                if media_type == MFMediaType_Video
+                    && (category == MFT_CATEGORY_AUDIO_DECODER
+                        || category == MFT_CATEGORY_AUDIO_ENCODER)
+                {
                     continue;
                 }
 
@@ -579,15 +602,18 @@ fn query_mft_by_subtype(tag: u32) -> Option<String> {
                                     .is_ok()
                                     && !friendly_name_ptr.is_null()
                                 {
-                                    let name = String::from_utf16_lossy(std::slice::from_raw_parts(
-                                        friendly_name_ptr.as_ptr(),
-                                        length as usize,
-                                    ));
+                                    let name =
+                                        String::from_utf16_lossy(std::slice::from_raw_parts(
+                                            friendly_name_ptr.as_ptr(),
+                                            length as usize,
+                                        ));
                                     CoTaskMemFree(Some(friendly_name_ptr.as_ptr() as *const _));
 
                                     // Cleanup activate array
                                     for i in 0..count {
-                                        if let Some(act_ptr) = activate_array.add(i as usize).as_ref() {
+                                        if let Some(act_ptr) =
+                                            activate_array.add(i as usize).as_ref()
+                                        {
                                             if let Some(act) = act_ptr {
                                                 let _ = act.ShutdownObject();
                                             }
@@ -828,14 +854,16 @@ mod tests {
         // Test with a common video codec GUID (H.264/AVC)
         let h264_guid = parse_guid_string("{34363248-0000-0010-8000-00AA00389B71}").unwrap();
         let name = query_mf_codec_name(&h264_guid);
-        
+
         // Should return Some(name) if Media Foundation finds the codec
         // Different systems may have different names for H.264
         if let Some(codec_name) = name {
             assert!(!codec_name.is_empty(), "Codec name should not be empty");
             eprintln!("Found H.264 codec name: {}", codec_name);
         } else {
-            eprintln!("H.264 codec not found in Media Foundation - this is normal if not installed");
+            eprintln!(
+                "H.264 codec not found in Media Foundation - this is normal if not installed"
+            );
         }
     }
 
@@ -845,7 +873,7 @@ mod tests {
         // Test with AAC audio codec GUID
         let aac_guid = parse_guid_string("{00001610-0000-0010-8000-00AA00389B71}").unwrap();
         let name = query_mf_codec_name(&aac_guid);
-        
+
         // Should return Some(name) for common audio codecs
         if let Some(codec_name) = name {
             assert!(!codec_name.is_empty(), "Codec name should not be empty");
@@ -860,15 +888,18 @@ mod tests {
         init_codec_cache();
         // Test that query_mft_by_subtype can handle video codec tags
         let h264_tag = 0x34363248; // "H264" in little-endian
-        
+
         // This should not panic and should handle video categories properly
         let result = std::panic::catch_unwind(|| {
             // We can't easily test the full function without proper Media Foundation setup,
             // but we can verify it doesn't panic on video tags
             let _ = query_mft_by_subtype(h264_tag);
         });
-        
-        assert!(result.is_ok(), "query_mft_by_subtype should not panic on video tags");
+
+        assert!(
+            result.is_ok(),
+            "query_mft_by_subtype should not panic on video tags"
+        );
     }
 
     #[test]
@@ -877,15 +908,22 @@ mod tests {
         // Test DIV3 codec (DivX 3) - the problematic case from user report
         // DIV3 FourCC = 0x33444956 ("DIV3" in little-endian)
         let _div3_guid = parse_guid_string("{33444956-0000-0010-8000-00AA00389B71}").unwrap();
-        
+
         // Should identify as "DivX 3" via check_known_codec, not "MP43" via MFTEnumEx
         let name = resolve_codec_guid("{33444956-0000-0010-8000-00AA00389B71}");
-        assert_eq!(name, "DivX 3", "DIV3 should be identified as DivX 3, not {}", name);
-        
+        assert_eq!(
+            name, "DivX 3",
+            "DIV3 should be identified as DivX 3, not {}",
+            name
+        );
+
         // Also test lowercase variant
         let name_lower = resolve_codec_guid("{33444956-0000-0010-8000-00AA00389B71}");
-        assert_eq!(name_lower, "DivX 3", "div3 should also be identified as DivX 3");
-        
+        assert_eq!(
+            name_lower, "DivX 3",
+            "div3 should also be identified as DivX 3"
+        );
+
         eprintln!("DIV3 codec correctly identified as: {}", name);
     }
 
@@ -893,14 +931,14 @@ mod tests {
     fn test_video_lazy_loading_integration() {
         // Test that video codec resolution works with the cache system
         init_codec_cache();
-        
+
         // Test common video codecs
         let video_codecs = [
             "{34363248-0000-0010-8000-00AA00389B71}", // H.264
             "{31435641-0000-0010-8000-00AA00389B71}", // AVC1
             "{56555948-0000-0010-8000-00AA00389B71}", // HEVC/H.265
         ];
-        
+
         for codec_guid in &video_codecs {
             let name = resolve_codec_guid(codec_guid);
             eprintln!("Video codec {} resolved to: {}", codec_guid, name);

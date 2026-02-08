@@ -5,9 +5,7 @@
 
 use std::path::Path;
 use windows::{
-    core::PCWSTR,
-    Win32::Foundation::GENERIC_ACCESS_RIGHTS,
-    Win32::Graphics::Imaging::*,
+    core::PCWSTR, Win32::Foundation::GENERIC_ACCESS_RIGHTS, Win32::Graphics::Imaging::*,
     Win32::System::Com::*,
 };
 

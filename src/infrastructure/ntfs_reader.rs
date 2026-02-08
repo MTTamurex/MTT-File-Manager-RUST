@@ -2,7 +2,7 @@ use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
 use std::path::Path;
 use std::sync::OnceLock;
-use windows::core::{PCWSTR, s, w};
+use windows::core::{s, w, PCWSTR};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, NTSTATUS};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_LIST_DIRECTORY, FILE_SHARE_DELETE,
@@ -133,13 +133,15 @@ pub fn read_directory_fast(dir_path: &Path) -> Option<Vec<DirectoryEntry>> {
             let entry_ptr = unsafe { buffer.as_ptr().add(offset) as *const FileDirectoryInfo };
             let entry = unsafe { &*entry_ptr };
 
-            let name_ptr = unsafe {
-                (entry_ptr as *const u8).add(std::mem::size_of::<FileDirectoryInfo>())
-            } as *const u16;
+            let name_ptr =
+                unsafe { (entry_ptr as *const u8).add(std::mem::size_of::<FileDirectoryInfo>()) }
+                    as *const u16;
 
             let name_len = (entry.file_name_length / 2) as usize;
             let name_slice = unsafe { std::slice::from_raw_parts(name_ptr, name_len) };
-            let name = OsString::from_wide(name_slice).to_string_lossy().into_owned();
+            let name = OsString::from_wide(name_slice)
+                .to_string_lossy()
+                .into_owned();
 
             if name != "." && name != ".." {
                 let is_dir = (entry.file_attributes & 0x10) != 0;

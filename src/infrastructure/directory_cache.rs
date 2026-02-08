@@ -7,7 +7,7 @@ use lru::LruCache;
 
 use crate::domain::file_entry::FileEntry;
 
-const CACHE_CAPACITY: usize = 500; // 500 items (approx 83-167MB RAM)
+const CACHE_CAPACITY: usize = 200; // Bounded to avoid high long-session RAM growth
 
 struct CachedFolder {
     entries: Vec<FileEntry>,

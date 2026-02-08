@@ -45,7 +45,7 @@ impl DriveWatcherManager {
             startup_delay_ms: 5000, // 5 second delay to avoid burst I/O on startup
         }
     }
-    
+
     /// Set up or update watching for the given path
     ///
     /// This is called when the user navigates to a new folder.
@@ -62,44 +62,55 @@ impl DriveWatcherManager {
             self.pending_watch = Some(path);
             return;
         }
-        
+
         // Process any pending watch from startup delay
         let path_to_watch = self.pending_watch.take().unwrap_or(path);
-        
+
         // Extract drive root from path
         let drive_root = match DriveWatcher::extract_drive_root(&path_to_watch) {
             Some(root) => root,
             None => {
-                eprintln!("[DRIVE-WATCHER-MGR] Could not extract drive root from: {:?}", path_to_watch);
+                eprintln!(
+                    "[DRIVE-WATCHER-MGR] Could not extract drive root from: {:?}",
+                    path_to_watch
+                );
                 return;
             }
         };
-        
+
         // Create watcher for this drive if not exists
         if !self.watchers.contains_key(&drive_root) {
-            eprintln!("[DRIVE-WATCHER-MGR] Creating new watcher for drive: {:?}", drive_root);
+            eprintln!(
+                "[DRIVE-WATCHER-MGR] Creating new watcher for drive: {:?}",
+                drive_root
+            );
             match DriveWatcher::new(drive_root.clone(), path_to_watch.clone()) {
                 Some(watcher) => {
                     self.watchers.insert(drive_root.clone(), watcher);
                 }
                 None => {
-                    eprintln!("[DRIVE-WATCHER-MGR] Failed to create watcher for: {:?}", drive_root);
+                    eprintln!(
+                        "[DRIVE-WATCHER-MGR] Failed to create watcher for: {:?}",
+                        drive_root
+                    );
                     return;
                 }
             }
         } else {
             // Update prefix on existing watcher
             if let Some(watcher) = self.watchers.get(&drive_root) {
-                eprintln!("[DRIVE-WATCHER-MGR] Updating prefix for drive {:?} to: {:?}",
-                    drive_root, path_to_watch);
+                eprintln!(
+                    "[DRIVE-WATCHER-MGR] Updating prefix for drive {:?} to: {:?}",
+                    drive_root, path_to_watch
+                );
                 watcher.update_prefix(path_to_watch.clone());
             }
         }
-        
+
         self.current_prefix = path_to_watch;
         self.current_drive = Some(drive_root);
     }
-    
+
     /// Check and activate any pending watcher after startup delay
     /// Call this regularly (e.g., in the update loop) to activate delayed watchers
     pub fn check_pending_activation(&mut self) {
@@ -115,7 +126,7 @@ impl DriveWatcherManager {
             }
         }
     }
-    
+
     /// Poll for file system events
     ///
     /// Returns events from the currently active drive's watcher.
@@ -124,32 +135,33 @@ impl DriveWatcherManager {
         let Some(ref drive) = self.current_drive else {
             return Vec::new();
         };
-        
+
         let Some(watcher) = self.watchers.get(drive) else {
             return Vec::new();
         };
-        
+
         watcher.poll_events()
     }
-    
+
     /// Check if the watcher system is active
     pub fn is_active(&self) -> bool {
-        self.current_drive.as_ref()
+        self.current_drive
+            .as_ref()
             .and_then(|d| self.watchers.get(d))
             .map(|w| w.is_running())
             .unwrap_or(false)
     }
-    
+
     /// Get the current watched path
     pub fn current_path(&self) -> &PathBuf {
         &self.current_prefix
     }
-    
+
     /// Clean up watchers that haven't been used recently (optional memory management)
     pub fn cleanup_unused_watchers(&mut self, except_drive: Option<&PathBuf>) {
         self.watchers.retain(|drive, _| {
-            except_drive.map(|e| e == drive).unwrap_or(false) || 
-            self.current_drive.as_ref() == Some(drive)
+            except_drive.map(|e| e == drive).unwrap_or(false)
+                || self.current_drive.as_ref() == Some(drive)
         });
     }
 }
@@ -166,15 +178,17 @@ impl Default for DriveWatcherManager {
 /// continue to work while the underlying implementation uses DriveWatcher.
 pub fn convert_drive_event_to_notify_event(event: &DriveWatcherEvent) -> Option<notify::Event> {
     use notify::{Event, EventKind};
-    
+
     let kind = match event {
         DriveWatcherEvent::Created(_) => EventKind::Create(notify::event::CreateKind::Any),
         DriveWatcherEvent::Deleted(_) => EventKind::Remove(notify::event::RemoveKind::Any),
         DriveWatcherEvent::Modified(_) => EventKind::Modify(notify::event::ModifyKind::Any),
-        DriveWatcherEvent::Renamed(_, _) => EventKind::Modify(notify::event::ModifyKind::Name(notify::event::RenameMode::Any)),
+        DriveWatcherEvent::Renamed(_, _) => EventKind::Modify(notify::event::ModifyKind::Name(
+            notify::event::RenameMode::Any,
+        )),
         DriveWatcherEvent::Unknown(_) => EventKind::Any,
     };
-    
+
     let paths = match event {
         DriveWatcherEvent::Created(p) => vec![p.clone()],
         DriveWatcherEvent::Deleted(p) => vec![p.clone()],
@@ -182,7 +196,7 @@ pub fn convert_drive_event_to_notify_event(event: &DriveWatcherEvent) -> Option<
         DriveWatcherEvent::Renamed(old, new) => vec![old.clone(), new.clone()],
         DriveWatcherEvent::Unknown(p) => vec![p.clone()],
     };
-    
+
     Some(Event {
         kind,
         paths,
@@ -193,7 +207,7 @@ pub fn convert_drive_event_to_notify_event(event: &DriveWatcherEvent) -> Option<
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_drive_watcher_manager_creation() {
         let manager = DriveWatcherManager::new();

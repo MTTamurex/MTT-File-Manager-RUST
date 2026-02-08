@@ -1,11 +1,11 @@
-pub mod lifecycle;
 pub mod input;
+pub mod lifecycle;
 pub mod menu_handler;
-pub mod panels;
 pub mod notifications;
+pub mod panels;
 
-pub use lifecycle::*;
 pub use input::*;
+pub use lifecycle::*;
 pub use menu_handler::*;
-pub use panels::*;
 pub use notifications::*;
+pub use panels::*;

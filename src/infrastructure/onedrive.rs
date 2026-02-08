@@ -7,8 +7,8 @@
 //! wrappers to prevent indefinite blocking on cloud-only files.
 
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::domain::file_entry::SyncStatus;
@@ -44,17 +44,15 @@ impl OneDriveIoPool {
             let receiver_clone = Arc::clone(&receiver);
             let _ = std::thread::Builder::new()
                 .name(format!("onedrive-io-{}", worker_id))
-                .spawn(move || {
-                    loop {
-                        let recv_result = match receiver_clone.lock() {
-                            Ok(rx) => rx.recv(),
-                            Err(_) => return,
-                        };
+                .spawn(move || loop {
+                    let recv_result = match receiver_clone.lock() {
+                        Ok(rx) => rx.recv(),
+                        Err(_) => return,
+                    };
 
-                        match recv_result {
-                            Ok(job) => job(),
-                            Err(_) => break,
-                        }
+                    match recv_result {
+                        Ok(job) => job(),
+                        Err(_) => break,
                     }
                 });
         }
@@ -71,18 +69,22 @@ impl OneDriveIoPool {
 }
 
 fn onedrive_io_pool() -> &'static OneDriveIoPool {
-    ONEDRIVE_IO_POOL
-        .get_or_init(|| OneDriveIoPool::new(MAX_CONCURRENT_TIMEOUT_THREADS as usize))
+    ONEDRIVE_IO_POOL.get_or_init(|| OneDriveIoPool::new(MAX_CONCURRENT_TIMEOUT_THREADS as usize))
 }
 
 /// Set the minimized state of the application.
 /// When minimized, timeout operations are cancelled more aggressively.
 pub fn set_app_minimized(minimized: bool) {
     APP_MINIMIZED.store(minimized, Ordering::SeqCst);
-    eprintln!("[ONEDRIVE LIFECYCLE] App minimized state changed: {}", minimized);
+    eprintln!(
+        "[ONEDRIVE LIFECYCLE] App minimized state changed: {}",
+        minimized
+    );
     if minimized {
-        eprintln!("[ONEDRIVE LIFECYCLE] Active timeout threads at minimize: {}",
-                  ACTIVE_TIMEOUT_THREADS.load(Ordering::SeqCst));
+        eprintln!(
+            "[ONEDRIVE LIFECYCLE] Active timeout threads at minimize: {}",
+            ACTIVE_TIMEOUT_THREADS.load(Ordering::SeqCst)
+        );
     }
 }
 
@@ -349,7 +351,10 @@ where
     F: FnOnce(PathBuf) -> IoTimeoutResult<T> + Send + 'static,
 {
     if is_app_minimized() {
-        eprintln!("[ONEDRIVE] App minimized - skipping {} for {:?}", op_name, path);
+        eprintln!(
+            "[ONEDRIVE] App minimized - skipping {} for {:?}",
+            op_name, path
+        );
         return IoTimeoutResult::Timeout;
     }
 
@@ -442,10 +447,7 @@ where
 /// - `Ok(metadata)` if successful within timeout
 /// - `Timeout` if operation takes longer than timeout_ms
 /// - `Err(kind)` if operation fails
-pub fn metadata_with_timeout(
-    path: &Path,
-    timeout_ms: u64,
-) -> IoTimeoutResult<std::fs::Metadata> {
+pub fn metadata_with_timeout(path: &Path, timeout_ms: u64) -> IoTimeoutResult<std::fs::Metadata> {
     // Fast path: check if it's even a OneDrive path
     if !is_onedrive_path(path) {
         // Not OneDrive - use regular metadata (should be fast)
@@ -573,7 +575,10 @@ fn read_directory_internal(path: &Path) -> Result<DirectoryEntries, std::io::Err
         format!("{}\\*", path.display())
     };
 
-    let wide_path: Vec<u16> = search_path.encode_utf16().chain(std::iter::once(0)).collect();
+    let wide_path: Vec<u16> = search_path
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
     let mut find_data = WIN32_FIND_DATAW::default();
     let mut entries = Vec::new();
 

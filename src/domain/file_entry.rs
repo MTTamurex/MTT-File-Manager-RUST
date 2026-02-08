@@ -14,10 +14,10 @@ pub struct DriveInfo {
 #[derive(Clone, Debug)]
 pub struct FileEntry {
     pub path: PathBuf,
-    pub name: String,                  // Cache do nome para sort rápido
-    pub is_dir: bool,                  // Pastas primeiro
-    pub size: u64,                     // Tamanho em bytes (0 para diretórios)
-    pub modified: u64,                 // Timestamp (segundos desde UNIX_EPOCH)
+    pub name: String,                           // Cache do nome para sort rápido
+    pub is_dir: bool,                           // Pastas primeiro
+    pub size: u64,                              // Tamanho em bytes (0 para diretórios)
+    pub modified: u64,                          // Timestamp (segundos desde UNIX_EPOCH)
     pub folder_cover: Option<PathBuf>, // Primeira imagem encontrada na pasta (para preview)
     pub drive_info: Option<DriveInfo>, // Metadados de drive (opcional)
     pub sync_status: SyncStatus,       // Status de sincronização OneDrive

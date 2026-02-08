@@ -18,7 +18,7 @@ fn ends_with_ignore_case(s: &str, suffix: &str) -> bool {
 /// Helper function to get the appropriate date for sorting.
 /// For recycle bin items with deletion_date, uses the deletion date string for comparison.
 /// For all other items, uses the modified timestamp.
-/// 
+///
 /// PERFORMANCE: Para lixeira, compara strings de data diretamente (formato brasileiro dd/mm/yyyy)
 /// Para arquivos normais, usa o timestamp modificado como antes
 fn get_sort_date_for_comparison(a: &FileEntry, b: &FileEntry) -> Ordering {
@@ -45,9 +45,8 @@ pub fn sort_items(
 ) {
     // Helper to check if an item is a "true" directory (not a ZIP file)
     // PERFORMANCE: Uses ends_with_ignore_case to avoid allocation
-    let is_true_dir = |item: &FileEntry| -> bool {
-        item.is_dir && !ends_with_ignore_case(&item.name, ".zip")
-    };
+    let is_true_dir =
+        |item: &FileEntry| -> bool { item.is_dir && !ends_with_ignore_case(&item.name, ".zip") };
 
     let compare = |a: &FileEntry, b: &FileEntry| -> Ordering {
         // 1. Folders Position logic (ZIP files should be treated as files, not folders)
@@ -128,14 +127,17 @@ fn contains_ignore_case_precomputed(haystack: &str, needle_lower: &[char]) -> bo
     // Uses byte-by-byte comparison without any allocation
     if haystack.is_ascii() && needle_lower.iter().all(|c| c.is_ascii()) {
         let needle_bytes: Vec<u8> = needle_lower.iter().map(|c| *c as u8).collect();
-        return haystack.as_bytes().windows(needle_bytes.len())
-            .any(|w| w.iter().zip(needle_bytes.iter())
-                .all(|(h, n)| h.to_ascii_lowercase() == *n));
+        return haystack.as_bytes().windows(needle_bytes.len()).any(|w| {
+            w.iter()
+                .zip(needle_bytes.iter())
+                .all(|(h, n)| h.to_ascii_lowercase() == *n)
+        });
     }
 
     // Fallback: Unicode-aware comparison using Vec<char>
     let haystack_chars: Vec<char> = haystack.chars().flat_map(|c| c.to_lowercase()).collect();
-    haystack_chars.windows(needle_lower.len())
+    haystack_chars
+        .windows(needle_lower.len())
         .any(|window| window == needle_lower)
 }
 
@@ -155,11 +157,13 @@ pub fn filter_items_opt(items: &[FileEntry], query: &str) -> Option<Vec<FileEntr
     // PERFORMANCE: Precompute needle_lower once for the entire filter operation
     let needle_lower: Vec<char> = query.chars().flat_map(|c| c.to_lowercase()).collect();
 
-    Some(items
-        .iter()
-        .filter(|item| contains_ignore_case_precomputed(&item.name, &needle_lower))
-        .cloned()
-        .collect())
+    Some(
+        items
+            .iter()
+            .filter(|item| contains_ignore_case_precomputed(&item.name, &needle_lower))
+            .cloned()
+            .collect(),
+    )
 }
 
 /// Filters items based on a query string. Returns a new Vec of matching items.
@@ -334,7 +338,7 @@ mod tests {
 
         // Ordena por data (ascendente)
         sort_items(&mut items, SortMode::Date, false, FoldersPosition::Mixed);
-        
+
         // Verifica se está ordenado pelas datas de exclusão (não por modified)
         // file2 foi excluído primeiro (01/01), depois file1 (02/01), depois file3 (03/01)
         assert_eq!(items[0].name, "file2.txt");
@@ -346,14 +350,14 @@ mod tests {
     fn test_sort_by_date_normal_files() {
         // Testa ordenação por data para arquivos normais (usa modified)
         let mut items = vec![
-            create_test_file("file1.txt", 100, 1000),  // modified antigo
-            create_test_file("file2.txt", 200, 2000),  // modified recente
-            create_test_file("file3.txt", 300, 3000),  // modified mais recente
+            create_test_file("file1.txt", 100, 1000), // modified antigo
+            create_test_file("file2.txt", 200, 2000), // modified recente
+            create_test_file("file3.txt", 300, 3000), // modified mais recente
         ];
 
         // Ordena por data (ascendente)
         sort_items(&mut items, SortMode::Date, false, FoldersPosition::Mixed);
-        
+
         // Verifica se está ordenado pelas datas de modificação
         assert_eq!(items[0].name, "file1.txt");
         assert_eq!(items[1].name, "file2.txt");

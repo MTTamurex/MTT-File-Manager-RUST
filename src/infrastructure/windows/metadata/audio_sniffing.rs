@@ -1,7 +1,7 @@
+use super::video_sniffing::DetectionConfidence;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
-use super::video_sniffing::DetectionConfidence;
 
 /// Result of an audio codec sniffing operation
 #[derive(Debug, Clone, PartialEq)]
@@ -219,7 +219,7 @@ fn sniff_aac_adts_syncword(data: &[u8]) -> Option<AudioCodecGuess> {
         if data[i] == 0xFF && (data[i + 1] & 0xF0) == 0xF0 {
             // Check potential ADTS header (12 bits syncword)
             // Extra check: Layer is usually 00
-            if (data[i+1] & 0x06) == 0x00 {
+            if (data[i + 1] & 0x06) == 0x00 {
                 return Some(AudioCodecGuess {
                     codec: AudioCodec::AAC,
                     confidence: DetectionConfidence::High,
@@ -238,8 +238,8 @@ fn sniff_mp3_syncword(data: &[u8]) -> Option<AudioCodecGuess> {
             // Potential MP3 sync. Check version and layer bits.
             // Version (data[i+1] >> 3) & 0x03 -> 2 (MPEG v2), 3 (MPEG v1)
             // Layer (data[i+1] >> 1) & 0x03 -> 1 (Layer III), 2 (Layer II), 3 (Layer I)
-            let version = (data[i+1] >> 3) & 0x03;
-            let layer = (data[i+1] >> 1) & 0x03;
+            let version = (data[i + 1] >> 3) & 0x03;
+            let layer = (data[i + 1] >> 1) & 0x03;
             if version >= 2 && layer >= 1 {
                 return Some(AudioCodecGuess {
                     codec: AudioCodec::MP3,
@@ -257,7 +257,11 @@ fn sniff_ac3_syncword(data: &[u8]) -> Option<AudioCodecGuess> {
         if data.len() >= pos + 6 {
             // Bitstream ID is in byte 5 (bits 3-7)
             let bsid = data[pos + 5] >> 3;
-            let codec = if bsid > 10 { AudioCodec::EAC3 } else { AudioCodec::AC3 };
+            let codec = if bsid > 10 {
+                AudioCodec::EAC3
+            } else {
+                AudioCodec::AC3
+            };
             return Some(AudioCodecGuess {
                 codec,
                 confidence: DetectionConfidence::Definitive,
@@ -269,7 +273,9 @@ fn sniff_ac3_syncword(data: &[u8]) -> Option<AudioCodecGuess> {
 
 /// Helper to find a byte pattern in data
 fn find_byte_pattern(data: &[u8], pattern: &[u8]) -> Option<usize> {
-    if pattern.is_empty() { return None; }
+    if pattern.is_empty() {
+        return None;
+    }
     data.windows(pattern.len())
         .position(|window| window == pattern)
 }

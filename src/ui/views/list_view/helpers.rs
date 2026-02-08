@@ -74,10 +74,7 @@ pub(super) fn get_file_type_string(item: &FileEntry) -> std::borrow::Cow<'static
             "lnk" => return Cow::Borrowed("Atalho"),
             "iso" => return Cow::Borrowed("Imagem de Disco"),
             _ => {
-                return Cow::Owned(format!(
-                    "Arquivo {}",
-                    ext.to_string_lossy().to_uppercase()
-                ));
+                return Cow::Owned(format!("Arquivo {}", ext.to_string_lossy().to_uppercase()));
             }
         }
     }

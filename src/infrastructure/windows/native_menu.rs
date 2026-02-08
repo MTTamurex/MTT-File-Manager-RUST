@@ -8,8 +8,8 @@ use std::os::windows::ffi::OsStrExt;
 use windows::core::*;
 use windows::Win32::Foundation::*;
 use windows::Win32::System::Com::*;
-use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::Shell::Common::*;
+use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 /// Represents a single item in the shell context menu
@@ -83,7 +83,8 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
     unsafe {
         eprintln!(
             "[ShellMenu] ===== EXTRACTION #{} for: {:?} items =====",
-            call_num, paths.len()
+            call_num,
+            paths.len()
         );
 
         // Parse all paths to PIDLs and collect children
@@ -92,32 +93,33 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
         let mut parent_folder_opt: Option<IShellFolder> = None;
 
         for path in paths {
-             let wide_path: Vec<u16> = path
+            let wide_path: Vec<u16> = path
                 .as_os_str()
                 .encode_wide()
                 .chain(std::iter::once(0))
                 .collect();
             let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
-            if let Ok(_) = SHParseDisplayName(PCWSTR(wide_path.as_ptr()), None, &mut pidl, 0, None) {
+            if let Ok(_) = SHParseDisplayName(PCWSTR(wide_path.as_ptr()), None, &mut pidl, 0, None)
+            {
                 if !pidl.is_null() {
                     pidls_to_free.push(pidl);
 
                     let mut child: *mut ITEMIDLIST = std::ptr::null_mut();
                     if let Ok(folder) = SHBindToParent(pidl, Some(&mut child)) {
-                         if parent_folder_opt.is_none() {
-                             parent_folder_opt = Some(folder);
-                         }
-                         child_pidls.push(child as *const ITEMIDLIST);
+                        if parent_folder_opt.is_none() {
+                            parent_folder_opt = Some(folder);
+                        }
+                        child_pidls.push(child as *const ITEMIDLIST);
                     }
                 }
             }
         }
 
         if parent_folder_opt.is_none() || child_pidls.is_empty() {
-             for pidl in pidls_to_free {
-                 CoTaskMemFree(Some(pidl as _));
-             }
-             return Err(Error::from_win32());
+            for pidl in pidls_to_free {
+                CoTaskMemFree(Some(pidl as _));
+            }
+            return Err(Error::from_win32());
         }
 
         let parent_folder = parent_folder_opt.unwrap();
@@ -127,7 +129,9 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
 
         // Create popup menu to extract items
         let hmenu = CreatePopupMenu()?;
-        context_menu.QueryContextMenu(hmenu, 0, 1, 0x7FFF, CMF_NORMAL).ok()?;
+        context_menu
+            .QueryContextMenu(hmenu, 0, 1, 0x7FFF, CMF_NORMAL)
+            .ok()?;
 
         let count = GetMenuItemCount(Some(hmenu));
         eprintln!("[ShellMenu] Total menu items: {}", count);
@@ -157,7 +161,7 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
         );
 
         for pidl in pidls_to_free {
-             CoTaskMemFree(Some(pidl as _));
+            CoTaskMemFree(Some(pidl as _));
         }
 
         Ok(ShellMenuContext {
@@ -282,11 +286,13 @@ unsafe fn extract_item_info(
         if recursive {
             // Send WM_INITMENUPOPUP BEFORE checking item count to trigger lazy loading
             if let Ok(ctx2) = context_menu.cast::<IContextMenu2>() {
-                let _ = ctx2.HandleMenuMsg(
-                    WM_INITMENUPOPUP,
-                    WPARAM(info.hSubMenu.0 as usize),
-                    LPARAM(index as isize),
-                ).ok();
+                let _ = ctx2
+                    .HandleMenuMsg(
+                        WM_INITMENUPOPUP,
+                        WPARAM(info.hSubMenu.0 as usize),
+                        LPARAM(index as isize),
+                    )
+                    .ok();
             }
 
             let sub_count = GetMenuItemCount(Some(info.hSubMenu));
@@ -331,11 +337,13 @@ impl ShellMenuContext {
 
                 // Send WM_INITMENUPOPUP to trigger lazy loading
                 if let Ok(ctx2) = self.context_menu.cast::<IContextMenu2>() {
-                    let _ = ctx2.HandleMenuMsg(
-                        WM_INITMENUPOPUP,
-                        WPARAM(hmenu_ptr as usize),
-                        LPARAM(item.parent_index as isize),
-                    ).ok();
+                    let _ = ctx2
+                        .HandleMenuMsg(
+                            WM_INITMENUPOPUP,
+                            WPARAM(hmenu_ptr as usize),
+                            LPARAM(item.parent_index as isize),
+                        )
+                        .ok();
                 }
 
                 // Now extract the items

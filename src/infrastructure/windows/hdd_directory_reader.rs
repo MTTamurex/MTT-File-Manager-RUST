@@ -10,9 +10,9 @@
 use std::path::Path;
 use windows::core::PCWSTR;
 use windows::Win32::Storage::FileSystem::{
-    FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, FindNextFileW, FindClose,
-    WIN32_FIND_DATAW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM,
-    FIND_FIRST_EX_LARGE_FETCH,
+    FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, FindNextFileW,
+    FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM,
+    FIND_FIRST_EX_LARGE_FETCH, WIN32_FIND_DATAW,
 };
 use windows::Win32::System::Threading::{
     GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_NORMAL,
@@ -69,11 +69,11 @@ pub fn read_directory_hdd_batched(
     is_onedrive: bool,
 ) -> Result<Vec<Vec<FileEntry>>, String> {
     let entries = read_directory_hdd_optimized(path, is_onedrive)?;
-    
+
     // Split into batches
     let mut batches = Vec::new();
     let mut current_batch = Vec::with_capacity(BATCH_SIZE);
-    
+
     for entry in entries {
         current_batch.push(entry);
         if current_batch.len() >= BATCH_SIZE {
@@ -81,12 +81,12 @@ pub fn read_directory_hdd_batched(
             current_batch = Vec::with_capacity(BATCH_SIZE);
         }
     }
-    
+
     // Add remaining entries
     if !current_batch.is_empty() {
         batches.push(current_batch);
     }
-    
+
     Ok(batches)
 }
 
@@ -97,37 +97,37 @@ fn read_directory_impl(path: &Path, is_onedrive: bool) -> Result<Vec<FileEntry>,
     } else {
         format!("{}\\*", path.display())
     };
-    
+
     // Convert to wide string
     let wide_path: Vec<u16> = search_path
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect();
-    
+
     let mut find_data = WIN32_FIND_DATAW::default();
     let mut entries = Vec::new();
-    
+
     unsafe {
         // Use FindFirstFileExW with optimization flags
         let handle = FindFirstFileExW(
             PCWSTR(wide_path.as_ptr()),
-            FindExInfoBasic,  // Skip 8.3 short name generation
+            FindExInfoBasic, // Skip 8.3 short name generation
             &mut find_data as *mut _ as *mut std::ffi::c_void,
-            FindExSearchNameMatch,  // Standard name matching
-            Some(std::ptr::null_mut()),   // No additional search criteria
+            FindExSearchNameMatch,      // Standard name matching
+            Some(std::ptr::null_mut()), // No additional search criteria
             FIND_FIRST_EX_LARGE_FETCH,  // Critical: Read larger directory chunks
         );
-        
+
         if handle.is_err() {
             return Err(format!("Failed to open directory: {}", path.display()));
         }
-        
+
         let handle = handle.unwrap();
-        
+
         loop {
             // Extract filename from wide string
             let filename = extract_filename(&find_data.cFileName)?;
-            
+
             // Skip special entries
             if filename == "." || filename == ".." {
                 if FindNextFileW(handle, &mut find_data).is_err() {
@@ -135,25 +135,25 @@ fn read_directory_impl(path: &Path, is_onedrive: bool) -> Result<Vec<FileEntry>,
                 }
                 continue;
             }
-            
+
             // Extract metadata in one pass
             let entry = create_file_entry(&find_data, path, &filename, is_onedrive)?;
-            
+
             // Apply filters
             if should_include_entry(&entry) {
                 entries.push(entry);
             }
-            
+
             // Get next entry
             if FindNextFileW(handle, &mut find_data).is_err() {
                 break;
             }
         }
-        
+
         // Always close the handle
         let _ = FindClose(handle);
     }
-    
+
     Ok(entries)
 }
 
@@ -163,11 +163,11 @@ fn extract_filename(wide_name: &[u16]) -> Result<String, String> {
         .iter()
         .position(|&c| c == 0)
         .unwrap_or(wide_name.len());
-    
+
     if len == 0 {
         return Err("Empty filename".to_string());
     }
-    
+
     Ok(String::from_utf16_lossy(&wide_name[0..len]))
 }
 
@@ -179,27 +179,27 @@ fn create_file_entry(
     is_onedrive: bool,
 ) -> Result<FileEntry, String> {
     let full_path = base_path.join(filename);
-    
+
     // Extract attributes
     let attributes = find_data.dwFileAttributes;
     let _is_hidden = (attributes & FILE_ATTRIBUTE_HIDDEN.0) != 0;
     let _is_system = (attributes & FILE_ATTRIBUTE_SYSTEM.0) != 0;
     let is_directory = (attributes & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
-    
+
     // Handle ZIP files as directories
     let mut is_dir = is_directory;
     let is_zip = filename.to_lowercase().ends_with(".zip");
     if !is_dir && is_zip {
         is_dir = true;
     }
-    
+
     // Extract file size (combine high and low 32-bit values)
     let size = if is_dir && !is_zip {
         0
     } else {
         ((find_data.nFileSizeHigh as u64) << 32) | (find_data.nFileSizeLow as u64)
     };
-    
+
     // Extract modification time (Windows FILETIME to Unix timestamp)
     let ft = find_data.ftLastWriteTime;
     let windows_ticks = ((ft.dwHighDateTime as u64) << 32) | (ft.dwLowDateTime as u64);
@@ -208,17 +208,17 @@ fn create_file_entry(
     } else {
         0
     };
-    
+
     // Get sync status from attributes (OneDrive flags are already included)
     let sync_status = onedrive::get_sync_status(attributes, is_onedrive);
-    
+
     Ok(FileEntry {
         path: full_path,
         name: filename.to_string(),
         is_dir,
         size,
         modified,
-        folder_cover: None,  // Will be populated later if needed
+        folder_cover: None, // Will be populated later if needed
         drive_info: None,
         sync_status,
         deletion_date: None,
@@ -232,7 +232,7 @@ fn should_include_entry(entry: &FileEntry) -> bool {
     if entry.name.starts_with('.') {
         return false;
     }
-    
+
     // Skip special system files
     match entry.name.to_lowercase().as_str() {
         "desktop.ini" | "thumbs.db" | "$recycle.bin" | "system volume information" => false,
@@ -245,7 +245,7 @@ mod tests {
     use super::*;
     use crate::domain::file_entry::SyncStatus;
     use std::path::PathBuf;
-    
+
     #[test]
     fn test_should_include_entry() {
         let test_entry = |name: &str| -> FileEntry {
@@ -262,7 +262,7 @@ mod tests {
                 recycle_original_path: None,
             }
         };
-        
+
         assert!(!should_include_entry(&test_entry(".hidden")));
         assert!(!should_include_entry(&test_entry("desktop.ini")));
         assert!(!should_include_entry(&test_entry("Thumbs.db")));

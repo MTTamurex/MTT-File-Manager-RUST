@@ -18,8 +18,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Instant, SystemTime};
+use windows::Win32::Media::MediaFoundation::{MFShutdown, MFStartup, MFSTARTUP_NOSOCKET};
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
-use windows::Win32::Media::MediaFoundation::{MFStartup, MFShutdown, MFSTARTUP_NOSOCKET};
 
 /// Maximum concurrent decode operations (RAM limiter)
 /// Reduced from 5 to 3 to prevent RAM spikes on HDD folders
@@ -82,7 +82,15 @@ pub fn spawn_thumbnail_workers(
         let pending_deletions = pending_deletions.clone();
 
         std::thread::spawn(move || {
-            thumbnail_worker_loop(queue, tx, ctx, gen_tracker, disk_cache, semaphore, pending_deletions);
+            thumbnail_worker_loop(
+                queue,
+                tx,
+                ctx,
+                gen_tracker,
+                disk_cache,
+                semaphore,
+                pending_deletions,
+            );
         });
     }
 }
@@ -98,7 +106,7 @@ fn thumbnail_worker_loop(
     pending_deletions: Arc<dashmap::DashMap<std::path::PathBuf, ()>>,
 ) {
     let mut last_repaint = Instant::now();
-    
+
     unsafe {
         // SAFETY: Initializing COM with Multithreaded support for this worker thread.
         // It is paired with `CoUninitialize` at the end of the thread loop.
@@ -193,10 +201,9 @@ fn process_thumbnail_request(
             let cached_max_dim = cached_w.max(cached_h);
             if cached_max_dim >= req_size && cached_max_dim > 0 {
                 // Cache hit — serve from SQLite DB, ZERO I/O on source drive
-                if let Ok(img) = image::load_from_memory_with_format(
-                    &cached_bytes,
-                    ImageFormat::WebP,
-                ) {
+                if let Ok(img) =
+                    image::load_from_memory_with_format(&cached_bytes, ImageFormat::WebP)
+                {
                     let rgba = img.to_rgba8();
                     final_result = Some((rgba.to_vec(), rgba.width(), rgba.height()));
                 }
@@ -288,9 +295,7 @@ fn process_thumbnail_request(
         // CRITICAL FIX: Use timeout-protected metadata for OneDrive
         // std::fs::metadata() can block indefinitely on cloud-only files
         match onedrive::onedrive_metadata(path) {
-            IoTimeoutResult::Ok(metadata) => {
-                metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH)
-            }
+            IoTimeoutResult::Ok(metadata) => metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
             IoTimeoutResult::Timeout => {
                 eprintln!("[THUMB WORKER] metadata() timeout for {:?}", path);
                 SystemTime::UNIX_EPOCH
@@ -304,10 +309,9 @@ fn process_thumbnail_request(
         if let Some((cached_bytes, cached_w, cached_h)) = disk_cache.get(path, modified) {
             let cached_max_dim = cached_w.max(cached_h);
             if cached_max_dim >= req_size && cached_max_dim > 0 {
-                if let Ok(img) = image::load_from_memory_with_format(
-                    &cached_bytes,
-                    ImageFormat::WebP,
-                ) {
+                if let Ok(img) =
+                    image::load_from_memory_with_format(&cached_bytes, ImageFormat::WebP)
+                {
                     let rgba = img.to_rgba8();
                     final_result = Some((rgba.to_vec(), rgba.width(), rgba.height()));
                 }
@@ -326,7 +330,9 @@ fn process_thumbnail_request(
         semaphore.acquire();
 
         // HYBRID PIPELINE com resize imediato
-        if let Some((raw_data, w, h)) = generate_thumbnail_hybrid(path, req_priority, pending_deletions) {
+        if let Some((raw_data, w, h)) =
+            generate_thumbnail_hybrid(path, req_priority, pending_deletions)
+        {
             // STEP 2: Resize to bucket (libera RAM e otimiza upload GPU)
             let bucket_size = get_bucket_size(req_size);
             let resized = resize_to_bucket(raw_data, w, h, bucket_size);

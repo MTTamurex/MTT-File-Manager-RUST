@@ -416,11 +416,10 @@ impl ImageViewerApp {
                 // Drain any queued requests - only process the latest one
                 let mut latest_path = folder_path;
                 while let Ok(newer_path) = folder_size_req_rx.try_recv() {
-                    let _ = folder_size_res_tx.send(
-                        crate::app::state::FolderSizeMessage::Cancelled {
+                    let _ =
+                        folder_size_res_tx.send(crate::app::state::FolderSizeMessage::Cancelled {
                             folder_path: latest_path,
-                        },
-                    );
+                        });
                     latest_path = newer_path;
                 }
                 let folder_path = latest_path;
@@ -440,19 +439,18 @@ impl ImageViewerApp {
                 let path_clone = folder_path.clone();
                 let ctx_clone = folder_size_ctx.clone();
 
-                let result = crate::infrastructure::windows::folder_size::calculate_folder_size_parallel(
-                    &folder_path,
-                    &cancel_ref,
-                    move |partial_size| {
-                        let _ = res_tx.send(
-                            crate::app::state::FolderSizeMessage::Progress {
+                let result =
+                    crate::infrastructure::windows::folder_size::calculate_folder_size_parallel(
+                        &folder_path,
+                        &cancel_ref,
+                        move |partial_size| {
+                            let _ = res_tx.send(crate::app::state::FolderSizeMessage::Progress {
                                 folder_path: path_clone.clone(),
                                 total_size: partial_size,
-                            },
-                        );
-                        ctx_clone.request_repaint();
-                    },
-                );
+                            });
+                            ctx_clone.request_repaint();
+                        },
+                    );
 
                 match result {
                     Some(total_size) => {
@@ -464,11 +462,8 @@ impl ImageViewerApp {
                         );
                     }
                     None => {
-                        let _ = folder_size_res_tx.send(
-                            crate::app::state::FolderSizeMessage::Cancelled {
-                                folder_path,
-                            },
-                        );
+                        let _ = folder_size_res_tx
+                            .send(crate::app::state::FolderSizeMessage::Cancelled { folder_path });
                     }
                 }
                 folder_size_ctx.request_repaint();
@@ -738,6 +733,7 @@ impl ImageViewerApp {
             fps_avg: 0.0,
             upload_budget_ms,
             last_upload_budget_update: Instant::now(),
+            last_memory_maintenance: Instant::now(),
 
             // INACTIVITY RECOVERY
             last_restore_time: Instant::now(),

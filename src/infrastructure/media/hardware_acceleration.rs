@@ -36,12 +36,12 @@ pub fn get_capabilities() -> &'static HardwareCapabilities {
 
 fn detect_capabilities() -> HardwareCapabilities {
     let mut caps = HardwareCapabilities::default();
-    
+
     // Step 1: Check what encoders are compiled into this ffmpeg binary
     let encoders_output = get_ffmpeg_encoders();
-    
+
     // Step 2: Independent Validation Loop
-    
+
     // --- QSV ---
     if encoders_output.contains("h264_qsv") {
         println!("[HardwareDetection] Testing QSV...");
@@ -86,14 +86,14 @@ fn detect_capabilities() -> HardwareCapabilities {
 fn get_ffmpeg_encoders() -> String {
     let mut cmd = Command::new("ffmpeg");
     cmd.args(&["-hide_banner", "-encoders"]);
-    
+
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    
+
     match cmd.output() {
         Ok(output) => String::from_utf8_lossy(&output.stdout).to_string(),
         Err(e) => {
@@ -106,38 +106,61 @@ fn get_ffmpeg_encoders() -> String {
 /// Runs a real dummy encode to see if the hardware path actually works.
 fn smoke_test_backend(backend: TranscodeBackend) -> bool {
     let mut cmd = Command::new("ffmpeg");
-    
+
     // Common quiet flags
     cmd.args(&["-v", "error", "-hide_banner"]);
-    
+
     match backend {
         TranscodeBackend::QSV => {
             // QSV initialization: 1280x720 is a safe standard
             cmd.args(&[
-                "-init_hw_device", "qsv=hw",
-                "-filter_hw_device", "hw",
-                "-f", "lavfi", "-i", "color=black:s=1280x720",
-                "-c:v", "h264_qsv",
-                "-f", "null", "-"
+                "-init_hw_device",
+                "qsv=hw",
+                "-filter_hw_device",
+                "hw",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=black:s=1280x720",
+                "-c:v",
+                "h264_qsv",
+                "-f",
+                "null",
+                "-",
             ]);
         }
         TranscodeBackend::NVENC => {
             // Strict NVENC: Use 1920x1080 to avoid "invalid param" on some GPUs
             cmd.args(&[
-                "-init_hw_device", "cuda=cuda",
-                "-filter_hw_device", "cuda",
-                "-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=30",
-                "-frames:v", "1",
-                "-c:v", "h264_nvenc",
-                "-f", "null", "-"
+                "-init_hw_device",
+                "cuda=cuda",
+                "-filter_hw_device",
+                "cuda",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=1920x1080:rate=30",
+                "-frames:v",
+                "1",
+                "-c:v",
+                "h264_nvenc",
+                "-f",
+                "null",
+                "-",
             ]);
         }
         TranscodeBackend::AMF => {
-             // AMF: Use 1280x720
-             cmd.args(&[
-                "-f", "lavfi", "-i", "color=black:s=1280x720",
-                "-c:v", "h264_amf",
-                "-f", "null", "-"
+            // AMF: Use 1280x720
+            cmd.args(&[
+                "-f",
+                "lavfi",
+                "-i",
+                "color=black:s=1280x720",
+                "-c:v",
+                "h264_amf",
+                "-f",
+                "null",
+                "-",
             ]);
         }
         TranscodeBackend::CPU => return true,
@@ -149,23 +172,29 @@ fn smoke_test_backend(backend: TranscodeBackend) -> bool {
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    
+
     // Run and capture output to log failure reasons
     match cmd.output() {
         Ok(output) => {
             if output.status.success() {
-                true 
+                true
             } else {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 // Log the confusing failure for debugging
                 // We print to stdout so it shows in the app console logs
-                println!("[HardwareDetection] Backend {:?} failed: {}", backend, stderr);
+                println!(
+                    "[HardwareDetection] Backend {:?} failed: {}",
+                    backend, stderr
+                );
                 false
             }
-        },
+        }
         Err(e) => {
-             println!("[HardwareDetection] Backend {:?} failed to spawn: {}", backend, e);
-             false
+            println!(
+                "[HardwareDetection] Backend {:?} failed to spawn: {}",
+                backend, e
+            );
+            false
         }
     }
 }
@@ -198,7 +227,7 @@ pub fn get_prioritized_profiles() -> Vec<TranscodeProfile> {
             name: "NVIDIA NVENC",
         });
     }
-    
+
     if caps.has_amf {
         profiles.push(TranscodeProfile {
             backend: TranscodeBackend::AMF,
@@ -219,31 +248,41 @@ pub fn get_prioritized_profiles() -> Vec<TranscodeProfile> {
 
 /// Centralized Command Builder
 /// Ensures that complex flags (like QSV init) are applied consistently.
-pub fn build_transcode_args(profile: &TranscodeProfile, file_path: &str, seek: Option<f64>) -> Vec<String> {
+pub fn build_transcode_args(
+    profile: &TranscodeProfile,
+    file_path: &str,
+    seek: Option<f64>,
+) -> Vec<String> {
     let mut args = Vec::new();
 
     // 1. Pre-input flags (hardware init)
     match profile.backend {
         TranscodeBackend::QSV => {
             args.extend_from_slice(&[
-                "-init_hw_device".into(), "qsv=hw".into(),
-                "-filter_hw_device".into(), "hw".into()
+                "-init_hw_device".into(),
+                "qsv=hw".into(),
+                "-filter_hw_device".into(),
+                "hw".into(),
             ]);
         }
         TranscodeBackend::NVENC => {
-             // NVENC Full Pipeline:
-             // 1. Init CUDA
-             // 2. Enable HW Decoding (-hwaccel cuda)
-             // 3. Keep decode in GPU memory (-hwaccel_output_format cuda)
-             args.extend_from_slice(&[
-                 "-init_hw_device".into(), "cuda=cuda".into(),
-                 "-filter_hw_device".into(), "cuda".into(),
-                 "-hwaccel".into(), "cuda".into(),
-                 "-hwaccel_output_format".into(), "cuda".into(),
-             ]);
+            // NVENC Full Pipeline:
+            // 1. Init CUDA
+            // 2. Enable HW Decoding (-hwaccel cuda)
+            // 3. Keep decode in GPU memory (-hwaccel_output_format cuda)
+            args.extend_from_slice(&[
+                "-init_hw_device".into(),
+                "cuda=cuda".into(),
+                "-filter_hw_device".into(),
+                "cuda".into(),
+                "-hwaccel".into(),
+                "cuda".into(),
+                "-hwaccel_output_format".into(),
+                "cuda".into(),
+            ]);
         }
-         TranscodeBackend::AMF => {
-             args.extend_from_slice(&["-hwaccel".into(), "d3d11va".into()]);
+        TranscodeBackend::AMF => {
+            args.extend_from_slice(&["-hwaccel".into(), "d3d11va".into()]);
         }
         _ => {}
     }
@@ -265,38 +304,49 @@ pub fn build_transcode_args(profile: &TranscodeProfile, file_path: &str, seek: O
     // Hardware specific encoding filters & presets
     match profile.backend {
         TranscodeBackend::QSV => {
-             args.extend_from_slice(&["-preset".into(), "fast".into()]);
+            args.extend_from_slice(&["-preset".into(), "fast".into()]);
         }
         TranscodeBackend::NVENC => {
-             // NVENC: Use p4 preset (balanced speed/quality), scale to NV12 in GPU memory
-             // -cq 23 = Constant Quality mode (similar to x264 CRF, lower = better quality)
-             args.extend_from_slice(&[
-                 "-vf".into(), "scale_cuda=format=nv12".into(),
-                 "-preset".into(), "p4".into(),
-                 "-cq".into(), "23".into(),
-                 "-rc".into(), "vbr".into()  // Variable bitrate for better quality
-             ]);
+            // NVENC: Use p4 preset (balanced speed/quality), scale to NV12 in GPU memory
+            // -cq 23 = Constant Quality mode (similar to x264 CRF, lower = better quality)
+            args.extend_from_slice(&[
+                "-vf".into(),
+                "scale_cuda=format=nv12".into(),
+                "-preset".into(),
+                "p4".into(),
+                "-cq".into(),
+                "23".into(),
+                "-rc".into(),
+                "vbr".into(), // Variable bitrate for better quality
+            ]);
         }
-         TranscodeBackend::CPU => {
-             // CPU: libx264 supports -tune zerolatency for streaming
-             args.extend_from_slice(&[
-                 "-preset".into(), "ultrafast".into(),
-                 "-tune".into(), "zerolatency".into()
-             ]);
-         }
-         _ => {
-             args.extend_from_slice(&["-preset".into(), "fast".into()]);
-         }
+        TranscodeBackend::CPU => {
+            // CPU: libx264 supports -tune zerolatency for streaming
+            args.extend_from_slice(&[
+                "-preset".into(),
+                "ultrafast".into(),
+                "-tune".into(),
+                "zerolatency".into(),
+            ]);
+        }
+        _ => {
+            args.extend_from_slice(&["-preset".into(), "fast".into()]);
+        }
     }
 
     // 5. Common settings (Audio, Container) - NO -tune here, it's encoder-specific
     args.extend_from_slice(&[
-        "-c:a".into(), "aac".into(),
-        "-ac".into(), "2".into(), // Force stereo for safety
-        "-b:a".into(), "128k".into(),
-        "-f".into(), "mp4".into(),
-        "-movflags".into(), "frag_keyframe+empty_moov+faststart".into(),
-        "pipe:1".into()
+        "-c:a".into(),
+        "aac".into(),
+        "-ac".into(),
+        "2".into(), // Force stereo for safety
+        "-b:a".into(),
+        "128k".into(),
+        "-f".into(),
+        "mp4".into(),
+        "-movflags".into(),
+        "frag_keyframe+empty_moov+faststart".into(),
+        "pipe:1".into(),
     ]);
 
     args
@@ -308,15 +358,23 @@ mod tests {
 
     #[test]
     fn test_builder_qsv() {
-        let profile = TranscodeProfile { backend: TranscodeBackend::QSV, video_codec: "h264_qsv", name: "Test" };
+        let profile = TranscodeProfile {
+            backend: TranscodeBackend::QSV,
+            video_codec: "h264_qsv",
+            name: "Test",
+        };
         let args = build_transcode_args(&profile, "input.mp4", Some(10.0));
         assert!(args.contains(&"-init_hw_device".to_string()));
         assert!(args.contains(&"qsv=hw".to_string()));
     }
-    
+
     #[test]
     fn test_builder_nvenc() {
-        let profile = TranscodeProfile { backend: TranscodeBackend::NVENC, video_codec: "h264_nvenc", name: "Test" };
+        let profile = TranscodeProfile {
+            backend: TranscodeBackend::NVENC,
+            video_codec: "h264_nvenc",
+            name: "Test",
+        };
         let args = build_transcode_args(&profile, "input.mp4", None);
         assert!(args.contains(&"cuda=cuda".to_string()));
     }

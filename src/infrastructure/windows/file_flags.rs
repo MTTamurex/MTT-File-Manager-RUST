@@ -4,9 +4,9 @@ use std::path::Path;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FileIoPriorityHintInfo, PRIORITY_HINT, SetFileInformationByHandle,
-    FILE_FLAG_RANDOM_ACCESS, FILE_FLAG_SEQUENTIAL_SCAN, FILE_GENERIC_READ,
-    FILE_IO_PRIORITY_HINT_INFO, FILE_SHARE_READ, OPEN_EXISTING,
+    CreateFileW, FileIoPriorityHintInfo, SetFileInformationByHandle, FILE_FLAG_RANDOM_ACCESS,
+    FILE_FLAG_SEQUENTIAL_SCAN, FILE_GENERIC_READ, FILE_IO_PRIORITY_HINT_INFO, FILE_SHARE_READ,
+    OPEN_EXISTING, PRIORITY_HINT,
 };
 
 pub fn open_sequential(path: &Path) -> std::io::Result<File> {
@@ -33,7 +33,10 @@ pub fn open_sequential(path: &Path) -> std::io::Result<File> {
             Ok(unsafe { File::from_raw_handle(h.0 as *mut std::ffi::c_void) })
         }
         Ok(_) => Err(std::io::Error::last_os_error()),
-        Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())),
+        Err(e) => Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            e.to_string(),
+        )),
     }
 }
 
@@ -61,7 +64,10 @@ pub fn open_random_access(path: &Path) -> std::io::Result<File> {
             Ok(unsafe { File::from_raw_handle(h.0 as *mut std::ffi::c_void) })
         }
         Ok(_) => Err(std::io::Error::last_os_error()),
-        Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())),
+        Err(e) => Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            e.to_string(),
+        )),
     }
 }
 

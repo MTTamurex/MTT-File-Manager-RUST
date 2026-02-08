@@ -69,8 +69,11 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
             ui.painter()
                 .rect_filled(header_rect_full, 0.0, crate::ui::theme::COLOR_SELECTION);
         } else if header_response.hovered() {
-            ui.painter()
-                .rect_filled(header_rect_full, 0.0, crate::ui::theme::color_selection_hover());
+            ui.painter().rect_filled(
+                header_rect_full,
+                0.0,
+                crate::ui::theme::color_selection_hover(),
+            );
         }
 
         let mut cursor_x = header_rect_full.min.x + 8.0;
@@ -307,11 +310,8 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
                     ui.painter()
                         .rect_filled(rect, 0.0, crate::ui::theme::COLOR_SELECTION);
                 } else if response.hovered() {
-                    ui.painter().rect_filled(
-                        rect,
-                        0.0,
-                        crate::ui::theme::color_selection_hover(),
-                    );
+                    ui.painter()
+                        .rect_filled(rect, 0.0, crate::ui::theme::color_selection_hover());
                 }
 
                 let mut cursor_x = rect.min.x + 12.0; // Identação para discos

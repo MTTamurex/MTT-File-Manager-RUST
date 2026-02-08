@@ -90,10 +90,10 @@ impl ImageViewerApp {
                 self.path_input = self.current_path.clone();
                 self.is_computer_view = false;
                 self.is_recycle_bin_view = false;
-                
+
                 // Restore normal folder sort mode
                 self.sort_mode = self.sort_mode_normal;
-                
+
                 self.reset_selection_and_search();
                 self.watch_current_folder(); // Atualiza o watcher
                 self.load_folder(false);
@@ -136,10 +136,10 @@ impl ImageViewerApp {
                 self.path_input = self.current_path.clone();
                 self.is_computer_view = false;
                 self.is_recycle_bin_view = false;
-                
+
                 // Restore normal folder sort mode
                 self.sort_mode = self.sort_mode_normal;
-                
+
                 self.reset_selection_and_search();
                 self.watch_current_folder();
                 self.load_folder(false);
@@ -189,7 +189,7 @@ impl ImageViewerApp {
 
         if let Some(parent_path) = parent {
             if parent_path.as_os_str().is_empty() {
-                 self.navigate_to_computer();
+                self.navigate_to_computer();
             } else {
                 self.navigate_to(parent_path.to_string_lossy().to_string().as_str());
             }

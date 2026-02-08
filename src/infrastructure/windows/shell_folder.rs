@@ -123,12 +123,11 @@ unsafe fn process_shell_child(
     // Check multiple folder attributes for better detection inside ZIPs
     let mut attributes = 0u32;
     parent.GetAttributesOf(&[child_pidl as *const _], &mut attributes)?;
-    
+
     // SFGAO_FOLDER (0x20000000) - Primary folder check
     // SFGAO_STREAM (0x00400000) - If NOT set, likely a folder
     // SFGAO_FILESYSTEM (0x40000000) - File system object
-    let is_dir = (attributes & 0x20000000) != 0;  // SFGAO_FOLDER
-    
+    let is_dir = (attributes & 0x20000000) != 0; // SFGAO_FOLDER
 
     // Size (System.Size)
     let size = match item2.GetUInt64(&crate::infrastructure::windows::recycle_bin::PKEY_SIZE) {

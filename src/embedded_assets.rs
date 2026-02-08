@@ -13,7 +13,8 @@ pub const ICON_DELETE: &[u8] = include_bytes!("../assets/icons/delete.svg");
 pub const ICON_DRIVE: &[u8] = include_bytes!("../assets/icons/drive.svg");
 pub const ICON_EXTERNAL_LINK: &[u8] = include_bytes!("../assets/icons/external-link.svg");
 pub const ICON_FOLDER: &[u8] = include_bytes!("../assets/icons/folder.svg");
-pub const ICON_FOLDER_NEW: &[u8] = include_bytes!("../assets/icons/folder_new_duotone_black_blue_lighter2.svg");
+pub const ICON_FOLDER_NEW: &[u8] =
+    include_bytes!("../assets/icons/folder_new_duotone_black_blue_lighter2.svg");
 pub const ICON_HEADPHONES: &[u8] = include_bytes!("../assets/icons/headphones.svg");
 pub const ICON_HOME: &[u8] = include_bytes!("../assets/icons/home.svg");
 pub const ICON_INFO: &[u8] = include_bytes!("../assets/icons/info.svg");
@@ -24,12 +25,14 @@ pub const ICON_MINIMIZE_2: &[u8] = include_bytes!("../assets/icons/minimize_2.sv
 pub const ICON_NAV_BACK: &[u8] = include_bytes!("../assets/icons/nav_back.svg");
 pub const ICON_NAV_FORWARD: &[u8] = include_bytes!("../assets/icons/nav_forward.svg");
 pub const ICON_NAV_UP: &[u8] = include_bytes!("../assets/icons/nav_up.svg");
-pub const ICON_PASTE: &[u8] = include_bytes!("../assets/icons/paste_duotone_black_blue_lighter2.svg");
+pub const ICON_PASTE: &[u8] =
+    include_bytes!("../assets/icons/paste_duotone_black_blue_lighter2.svg");
 pub const ICON_PAUSE: &[u8] = include_bytes!("../assets/icons/pause.svg");
 pub const ICON_PLAY: &[u8] = include_bytes!("../assets/icons/play.svg");
 pub const ICON_PROPERTIES: &[u8] = include_bytes!("../assets/icons/properties.svg");
 pub const ICON_REFRESH: &[u8] = include_bytes!("../assets/icons/refresh.svg");
-pub const ICON_RENAME: &[u8] = include_bytes!("../assets/icons/rename_duotone_black_blue_lighter2.svg");
+pub const ICON_RENAME: &[u8] =
+    include_bytes!("../assets/icons/rename_duotone_black_blue_lighter2.svg");
 pub const ICON_SEARCH: &[u8] = include_bytes!("../assets/icons/search.svg");
 pub const ICON_VIEW_GRID: &[u8] = include_bytes!("../assets/icons/view_grid.svg");
 pub const ICON_VIEW_LIST: &[u8] = include_bytes!("../assets/icons/view_list.svg");

@@ -502,7 +502,14 @@ fn render_single_item(
                             ui.set_max_width(MENU_MAX_WIDTH);
                             ui.spacing_mut().item_spacing = egui::vec2(0.0, 1.0);
                             for sub in &item.sub_items {
-                                render_single_item(ui, sub, action, depth + 1, lazy_load, right_bound);
+                                render_single_item(
+                                    ui,
+                                    sub,
+                                    action,
+                                    depth + 1,
+                                    lazy_load,
+                                    right_bound,
+                                );
                             }
                         });
                 });

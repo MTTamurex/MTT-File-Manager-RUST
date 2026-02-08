@@ -40,7 +40,9 @@ impl ClipboardManager {
 
     /// Copy files to clipboard (System + Internal)
     pub fn copy(&mut self, paths: &[PathBuf]) {
-        if paths.is_empty() { return; }
+        if paths.is_empty() {
+            return;
+        }
 
         // 1. System Clipboard (Just copy first path as text for now, should improve later)
         if let Some(first) = paths.first() {
@@ -54,7 +56,9 @@ impl ClipboardManager {
 
     /// Cut files (System + Internal)
     pub fn cut(&mut self, paths: &[PathBuf]) {
-        if paths.is_empty() { return; }
+        if paths.is_empty() {
+            return;
+        }
 
         // 1. System Clipboard
         if let Some(first) = paths.first() {

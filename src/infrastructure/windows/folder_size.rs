@@ -198,8 +198,8 @@ fn scan_dir_wide_local(dir_wide: &[u16], sub_dirs: &mut Vec<Vec<u16>>) -> u64 {
                     }
                 }
             } else {
-                local_size += ((find_data.nFileSizeHigh as u64) << 32)
-                    | (find_data.nFileSizeLow as u64);
+                local_size +=
+                    ((find_data.nFileSizeHigh as u64) << 32) | (find_data.nFileSizeLow as u64);
             }
 
             if FindNextFileW(handle, &mut find_data).is_err() {

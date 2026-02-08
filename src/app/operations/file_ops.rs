@@ -2,10 +2,10 @@
 //!
 //! This module handles basic file operations interacting with the shell.
 
-use std::path::{Path, PathBuf};
 use crate::app::state::ImageViewerApp;
 use crate::application::file_operations;
 use crate::domain::file_entry::FileEntry;
+use std::path::{Path, PathBuf};
 
 impl ImageViewerApp {
     pub fn delete_with_shell_for_idx(&mut self, idx: Option<usize>) {
@@ -14,14 +14,18 @@ impl ImageViewerApp {
     }
 
     pub fn delete_with_shell_for_paths(&mut self, paths: &[PathBuf]) {
-        if paths.is_empty() { return; }
+        if paths.is_empty() {
+            return;
+        }
 
         // Send request to background worker (BATCH)
         self.file_ops_in_progress += 1;
-        let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::delete(
-            paths.to_vec(),
-            self.native_hwnd.unwrap_or_default(),
-        ));
+        let _ = self.file_op_sender.send(
+            crate::workers::file_operation_worker::FileOperationRequest::delete(
+                paths.to_vec(),
+                self.native_hwnd.unwrap_or_default(),
+            ),
+        );
 
         // Track pending deletions to suppress thumbnail extraction for these files
         for path in paths {
@@ -37,49 +41,53 @@ impl ImageViewerApp {
 
         // Reset primary selection if it was deleted
         if let Some(selected) = &self.selected_file {
-             if paths.contains(&selected.path) {
-                 self.selected_item = None;
-                 self.selected_file = None;
-             }
+            if paths.contains(&selected.path) {
+                self.selected_item = None;
+                self.selected_file = None;
+            }
         }
     }
 
     pub fn show_properties_for_idx(&mut self, idx: Option<usize>) {
         let paths = self.context_target_paths(idx);
-        if paths.is_empty() { return; }
+        if paths.is_empty() {
+            return;
+        }
 
         if let Some(hwnd) = self.native_hwnd {
             // Use shell context menu to invoke properties (handles single and multiple files)
-            if let Ok(shell_ctx) = crate::infrastructure::windows::native_menu::extract_shell_menu(hwnd, &paths) {
-                 let items = shell_ctx.items.borrow();
+            if let Ok(shell_ctx) =
+                crate::infrastructure::windows::native_menu::extract_shell_menu(hwnd, &paths)
+            {
+                let items = shell_ctx.items.borrow();
 
-                 // Look for properties verb
-                 let mut prop_id = None;
-                 for item in items.iter() {
-                     if let Some(verb) = &item.command_string {
-                         if verb.eq_ignore_ascii_case("properties") {
-                             prop_id = Some(item.id);
-                             break;
-                         }
-                     }
-                 }
+                // Look for properties verb
+                let mut prop_id = None;
+                for item in items.iter() {
+                    if let Some(verb) = &item.command_string {
+                        if verb.eq_ignore_ascii_case("properties") {
+                            prop_id = Some(item.id);
+                            break;
+                        }
+                    }
+                }
 
-                 if let Some(id) = prop_id {
-                     let _ = crate::infrastructure::windows::native_menu::invoke_menu_command(
+                if let Some(id) = prop_id {
+                    let _ = crate::infrastructure::windows::native_menu::invoke_menu_command(
                         hwnd,
                         &shell_ctx.context_menu,
                         id,
-                        0, 0
-                     );
-                     return;
-                 }
+                        0,
+                        0,
+                    );
+                    return;
+                }
             }
 
             // Fallback for single file if menu extraction failed or no property item found
             if paths.len() == 1 {
                 let _ = crate::infrastructure::windows::native_menu::show_properties_dialog(
-                    hwnd,
-                    &paths[0],
+                    hwnd, &paths[0],
                 );
             }
         }
@@ -137,11 +145,13 @@ impl ImageViewerApp {
             if let Some(item) = self.items.get(idx) {
                 // Send request to background worker
                 self.file_ops_in_progress += 1;
-                let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::rename(
-                    item.path.clone(),
-                    new_name,
-                    self.native_hwnd.unwrap_or_default(),
-                ));
+                let _ = self.file_op_sender.send(
+                    crate::workers::file_operation_worker::FileOperationRequest::rename(
+                        item.path.clone(),
+                        new_name,
+                        self.native_hwnd.unwrap_or_default(),
+                    ),
+                );
             }
         }
     }
@@ -154,22 +164,27 @@ impl ImageViewerApp {
     /// Monta uma ISO programaticamente e marca para auto-navegação
     pub fn mount_and_navigate_iso(&mut self, path: PathBuf) {
         use crate::infrastructure::windows::mount_iso;
-        
+
         self.pending_iso_mount = Some(path.clone());
-        
+
         match mount_iso(&path) {
             Ok(_) => {
                 // Notifica o início da montagem
-                self.notifications.push(crate::application::AppNotification::info(format!(
-                    "Montando ISO: {}", 
-                    path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()
-                )));
+                self.notifications
+                    .push(crate::application::AppNotification::info(format!(
+                        "Montando ISO: {}",
+                        path.file_name()
+                            .map(|n| n.to_string_lossy())
+                            .unwrap_or_default()
+                    )));
             }
             Err(e) => {
                 self.pending_iso_mount = None;
-                self.notifications.push(crate::application::AppNotification::error(format!(
-                    "Falha ao montar ISO: {}", e
-                )));
+                self.notifications
+                    .push(crate::application::AppNotification::error(format!(
+                        "Falha ao montar ISO: {}",
+                        e
+                    )));
             }
         }
     }

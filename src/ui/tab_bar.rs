@@ -178,14 +178,22 @@ pub fn render_tab_bar(
 
             // Tab title (truncated dynamically based on available width)
             let title_x = icon_pos.x + icon_size + 6.0;
-            
+
             // Audio Indicator (Speaker) - only for media owner tab if playing
             let speaker_btn_size = 14.0;
             let has_speaker = media_owner_id == Some(tab.id) && is_playing;
-            let speaker_width = if has_speaker { speaker_btn_size + 8.0 } else { 0.0 };
+            let speaker_width = if has_speaker {
+                speaker_btn_size + 8.0
+            } else {
+                0.0
+            };
 
-            let title_max_width =
-                ideal_tab_width - icon_size - close_btn_size - speaker_width - tab_padding * 2.0 - 12.0;
+            let title_max_width = ideal_tab_width
+                - icon_size
+                - close_btn_size
+                - speaker_width
+                - tab_padding * 2.0
+                - 12.0;
 
             // Use egui's galley to measure text and truncate properly
             let font_id = egui::FontId::proportional(13.0);
@@ -200,8 +208,7 @@ pub fn render_tab_bar(
                     .layout_no_wrap(title_text.clone(), font_id.clone(), title_color);
 
             if galley.rect.width() > title_max_width {
-                let mut boundaries: Vec<usize> =
-                    full_text.char_indices().map(|(i, _)| i).collect();
+                let mut boundaries: Vec<usize> = full_text.char_indices().map(|(i, _)| i).collect();
                 boundaries.push(full_text.len());
                 let mut low = 0usize;
                 let mut high = boundaries.len().saturating_sub(1);
@@ -261,9 +268,17 @@ pub fn render_tab_bar(
                 // Render icon
                 let icon_name = if is_muted { "vol_mute" } else { "vol_high" };
                 let icon_color = if speaker_response.hovered() {
-                    if is_dark { [255, 255, 255, 255] } else { [0, 0, 0, 255] }
+                    if is_dark {
+                        [255, 255, 255, 255]
+                    } else {
+                        [0, 0, 0, 255]
+                    }
                 } else {
-                    if is_dark { [200, 200, 200, 255] } else { [80, 80, 80, 255] }
+                    if is_dark {
+                        [200, 200, 200, 255]
+                    } else {
+                        [80, 80, 80, 255]
+                    }
                 };
 
                 if let Some(tex) = svg_icons.get_icon(ui.ctx(), icon_name, 32, icon_color) {
@@ -274,8 +289,12 @@ pub fn render_tab_bar(
                         Color32::WHITE,
                     );
                 }
-                
-                speaker_response.on_hover_text(if is_muted { "Ativar Áudio" } else { "Mutar Áudio" });
+
+                speaker_response.on_hover_text(if is_muted {
+                    "Ativar Áudio"
+                } else {
+                    "Mutar Áudio"
+                });
             }
 
             // Close button
@@ -298,11 +317,8 @@ pub fn render_tab_bar(
 
             // Close button background on hover
             if close_response.hovered() {
-                ui.painter().rect_filled(
-                    close_btn_rect,
-                    CornerRadius::same(4),
-                    hover_bg,
-                );
+                ui.painter()
+                    .rect_filled(close_btn_rect, CornerRadius::same(4), hover_bg);
             }
 
             // X icon
@@ -444,7 +460,11 @@ fn render_window_controls(
     }
 
     // Fundo sempre visível, muda no hover
-    let min_bg = if min_response.hovered() { hover_bg } else { normal_bg };
+    let min_bg = if min_response.hovered() {
+        hover_bg
+    } else {
+        normal_bg
+    };
     ui.painter().rect_filled(min_rect, 0.0, min_bg);
 
     // Minimize icon (horizontal line)
@@ -466,7 +486,11 @@ fn render_window_controls(
     }
 
     // Fundo sempre visível, muda no hover
-    let max_bg = if max_response.hovered() { hover_bg } else { normal_bg };
+    let max_bg = if max_response.hovered() {
+        hover_bg
+    } else {
+        normal_bg
+    };
     ui.painter().rect_filled(max_rect, 0.0, max_bg);
 
     // Maximize/Restore icon
@@ -515,7 +539,11 @@ fn render_window_controls(
     }
 
     // Fundo cinza normal, vermelho no hover
-    let close_bg = if close_response.hovered() { close_hover_bg } else { normal_bg };
+    let close_bg = if close_response.hovered() {
+        close_hover_bg
+    } else {
+        normal_bg
+    };
     ui.painter().rect_filled(close_rect, 0.0, close_bg);
 
     // Close icon (X)

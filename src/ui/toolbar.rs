@@ -129,16 +129,13 @@ pub fn render_toolbar(
 
             // Desenha o fundo branco para campo de busca
             let visuals = ui.style().interact(&search_resp);
-            ui.painter().rect_filled(
-                search_rect,
-                visuals.corner_radius,
-                egui::Color32::WHITE,
-            );
+            ui.painter()
+                .rect_filled(search_rect, visuals.corner_radius, egui::Color32::WHITE);
             ui.painter().rect_stroke(
                 search_rect,
                 visuals.corner_radius,
                 ui.visuals().widgets.inactive.bg_stroke,
-                egui::StrokeKind::Inside, 
+                egui::StrokeKind::Inside,
             );
 
             let mut search_ui = ui.new_child(
@@ -158,13 +155,16 @@ pub fn render_toolbar(
             // Lógica para largura do texto: Total - Ícones - Paddings
             // Total (250) - Icon(14) - Pad(6+4) - ClearBtn(18 se houver) - Pad(4) - RightPad(4)
             // Antes faltava o RightPad no cálculo e na adição.
-            let text_available_w = search_ui.available_width() - if has_text { 22.0 + 4.0 } else { 4.0 };
+            let text_available_w =
+                search_ui.available_width() - if has_text { 22.0 + 4.0 } else { 4.0 };
 
             let text_resp = search_ui.add_sized(
                 egui::vec2(text_available_w, input_height - 2.0),
                 egui::TextEdit::singleline(search_query)
                     .frame(false)
-                    .hint_text(egui::RichText::new("Buscar...").color(egui::Color32::from_gray(120)))
+                    .hint_text(
+                        egui::RichText::new("Buscar...").color(egui::Color32::from_gray(120)),
+                    )
                     .text_color(egui::Color32::BLACK)
                     .vertical_align(egui::Align::Center),
             );
@@ -200,17 +200,12 @@ pub fn render_toolbar(
             // 3. BARRA DE ENDEREÇO (Breadcrumbs ou Edição)
             // Mesma técnica da barra de busca: allocate + new_child
             let addr_width = (ui.available_width() - 4.0).max(100.0);
-            let (addr_rect, addr_resp) = ui.allocate_exact_size(
-                egui::vec2(addr_width, input_height),
-                egui::Sense::click(),
-            );
+            let (addr_rect, addr_resp) =
+                ui.allocate_exact_size(egui::vec2(addr_width, input_height), egui::Sense::click());
 
             // Desenha fundo branco
-            ui.painter().rect_filled(
-                addr_rect,
-                4.0,
-                egui::Color32::WHITE,
-            );
+            ui.painter()
+                .rect_filled(addr_rect, 4.0, egui::Color32::WHITE);
             ui.painter().rect_stroke(
                 addr_rect,
                 4.0,
@@ -253,7 +248,11 @@ pub fn render_toolbar(
                 addr_ui.spacing_mut().item_spacing.x = 2.0;
 
                 if current_path == "Este Computador" {
-                    addr_ui.label(egui::RichText::new("Este Computador").size(13.0).color(egui::Color32::BLACK));
+                    addr_ui.label(
+                        egui::RichText::new("Este Computador")
+                            .size(13.0)
+                            .color(egui::Color32::BLACK),
+                    );
                 } else {
                     let path = std::path::Path::new(current_path);
                     let mut full_accumulated = std::path::PathBuf::new();
@@ -284,26 +283,31 @@ pub fn render_toolbar(
                         };
 
                         // Breadcrumb clicável - transparente, cinza claro no hover
-                        let btn_resp = addr_ui.scope(|ui| {
-                            let hover_color = if ui.visuals().dark_mode {
-                                theme::color_dark_hover()
-                            } else {
-                                theme::color_hover()
-                            };
+                        let btn_resp = addr_ui
+                            .scope(|ui| {
+                                let hover_color = if ui.visuals().dark_mode {
+                                    theme::color_dark_hover()
+                                } else {
+                                    theme::color_hover()
+                                };
 
-                            ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
-                            ui.visuals_mut().widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
-                            ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
+                                ui.visuals_mut().widgets.inactive.bg_fill =
+                                    egui::Color32::TRANSPARENT;
+                                ui.visuals_mut().widgets.inactive.weak_bg_fill =
+                                    egui::Color32::TRANSPARENT;
+                                ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
 
-                            ui.visuals_mut().widgets.hovered.bg_fill = hover_color;
-                            ui.visuals_mut().widgets.hovered.weak_bg_fill = hover_color;
-                            ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
+                                ui.visuals_mut().widgets.hovered.bg_fill = hover_color;
+                                ui.visuals_mut().widgets.hovered.weak_bg_fill = hover_color;
+                                ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
 
-                            ui.visuals_mut().widgets.active.bg_fill = egui::Color32::from_gray(210);
-                            ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
+                                ui.visuals_mut().widgets.active.bg_fill =
+                                    egui::Color32::from_gray(210);
+                                ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
 
-                            ui.button(egui::RichText::new(&display).color(egui::Color32::BLACK))
-                        }).inner;
+                                ui.button(egui::RichText::new(&display).color(egui::Color32::BLACK))
+                            })
+                            .inner;
 
                         if btn_resp.clicked() {
                             action = Some(ToolbarAction::Navigate(target_path));

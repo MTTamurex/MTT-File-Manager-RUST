@@ -1,11 +1,11 @@
-use std::path::Path;
 use exif::{In, Reader as ExifReader, Tag};
 use image::ImageReader;
+use std::path::Path;
 use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
 
-use super::MediaMetadata;
 use super::property_keys::*;
 use super::utils::*;
+use super::MediaMetadata;
 
 pub fn is_image_extension(ext: &str) -> bool {
     // Use Windows Perceived Type API for dynamic detection

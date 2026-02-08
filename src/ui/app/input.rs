@@ -1,7 +1,7 @@
-use eframe::egui;
-use crate::workers::idle_warmup::IdleWarmupMessage;
-use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 use crate::app::ImageViewerApp;
+use crate::workers::idle_warmup::IdleWarmupMessage;
+use eframe::egui;
+use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 
 pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
     let mut user_active = false;
@@ -40,10 +40,14 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         if *pressed {
                             user_active = true;
                             match key {
-                                egui::Key::ArrowDown | egui::Key::ArrowUp | 
-                                egui::Key::ArrowLeft | egui::Key::ArrowRight |
-                                egui::Key::PageDown | egui::Key::PageUp |
-                                egui::Key::Home | egui::Key::End => {
+                                egui::Key::ArrowDown
+                                | egui::Key::ArrowUp
+                                | egui::Key::ArrowLeft
+                                | egui::Key::ArrowRight
+                                | egui::Key::PageDown
+                                | egui::Key::PageUp
+                                | egui::Key::Home
+                                | egui::Key::End => {
                                     app.last_input = crate::app::state::LastInput::Keyboard;
                                 }
                                 _ => {}
@@ -125,9 +129,15 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         }
 
         // Executar ações de clipboard
-        if do_copy { app.command_copy(None); }
-        if do_cut { app.command_cut(None); }
-        if do_paste { app.command_paste(None); }
+        if do_copy {
+            app.command_copy(None);
+        }
+        if do_cut {
+            app.command_cut(None);
+        }
+        if do_paste {
+            app.command_paste(None);
+        }
 
         // Delete: Excluir
         if ctx.input(|i| i.key_pressed(egui::Key::Delete)) {
@@ -160,7 +170,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
 }
 
 /// Handle resize borders for borderless window.
-/// 
+///
 /// NOTE: This is now a no-op. Resize hit-testing is handled by the native
 /// WM_NCHITTEST subclass in `infrastructure::windows::window_subclass`.
 /// Keeping this function signature for compatibility but removing the
@@ -182,8 +192,12 @@ fn handle_media_hardware_input(app: &mut ImageViewerApp, ctx: &egui::Context) ->
         return false;
     }
 
-    let preview = if let Some(p) = &mut app.media_preview { p } else { return false; };
-    
+    let preview = if let Some(p) = &mut app.media_preview {
+        p
+    } else {
+        return false;
+    };
+
     // Condition 3: Debounce (200ms)
     if app.last_media_key_press.elapsed() < std::time::Duration::from_millis(200) {
         return false;
@@ -194,21 +208,21 @@ fn handle_media_hardware_input(app: &mut ImageViewerApp, ctx: &egui::Context) ->
     let mut consumed = false;
     unsafe {
         // VK_SPACE = 0x20, VK_UP = 0x26, VK_DOWN = 0x28, VK_RIGHT = 0x27, VK_LEFT = 0x25
-        if (GetAsyncKeyState(0x20) as u16 & 0x8000) != 0 { 
+        if (GetAsyncKeyState(0x20) as u16 & 0x8000) != 0 {
             preview.toggle_play();
             consumed = true;
-        } else if (GetAsyncKeyState(0x26) as u16 & 0x8000) != 0 { 
+        } else if (GetAsyncKeyState(0x26) as u16 & 0x8000) != 0 {
             let vol = preview.get_video_state().map(|s| s.volume).unwrap_or(1.0);
             preview.set_volume((vol + 0.05).min(1.0));
             consumed = true;
-        } else if (GetAsyncKeyState(0x28) as u16 & 0x8000) != 0 { 
+        } else if (GetAsyncKeyState(0x28) as u16 & 0x8000) != 0 {
             let vol = preview.get_video_state().map(|s| s.volume).unwrap_or(1.0);
             preview.set_volume((vol - 0.05).max(0.0));
             consumed = true;
-        } else if (GetAsyncKeyState(0x27) as u16 & 0x8000) != 0 { 
+        } else if (GetAsyncKeyState(0x27) as u16 & 0x8000) != 0 {
             preview.seek_relative(5.0);
             consumed = true;
-        } else if (GetAsyncKeyState(0x25) as u16 & 0x8000) != 0 { 
+        } else if (GetAsyncKeyState(0x25) as u16 & 0x8000) != 0 {
             preview.seek_relative(-5.0);
             consumed = true;
         }
@@ -222,27 +236,30 @@ fn handle_media_hardware_input(app: &mut ImageViewerApp, ctx: &egui::Context) ->
 }
 
 /// Handle quick search (type-to-search like Explorer)
-/// 
+///
 /// Captures alphanumeric keys and searches for matching items in the current folder.
 /// Buffer is cleared after 1.5 seconds of inactivity.
 /// Each tab has its own independent search buffer.
 fn handle_quick_search(app: &mut ImageViewerApp, ctx: &egui::Context) {
     const QUICK_SEARCH_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
-    
+
     // Get active tab's quick search state
     let (buffer_is_empty, timeout_elapsed) = {
         let active_tab = app.tab_manager.active();
         (
             active_tab.quick_search_buffer.is_empty(),
-            active_tab.quick_search_last_input.elapsed() > QUICK_SEARCH_TIMEOUT
+            active_tab.quick_search_last_input.elapsed() > QUICK_SEARCH_TIMEOUT,
         )
     };
-    
+
     // Clear buffer if timeout elapsed
     if timeout_elapsed && !buffer_is_empty {
         let active_tab = app.tab_manager.active_mut();
         active_tab.quick_search_buffer.clear();
-        eprintln!("[QUICK_SEARCH] Buffer cleared due to timeout (Tab {})", active_tab.id);
+        eprintln!(
+            "[QUICK_SEARCH] Buffer cleared due to timeout (Tab {})",
+            active_tab.id
+        );
     }
 
     // Capture text input events (alphanumeric, space, etc.)
@@ -250,9 +267,7 @@ fn handle_quick_search(app: &mut ImageViewerApp, ctx: &egui::Context) {
         i.events.iter().find_map(|event| {
             if let egui::Event::Text(text) = event {
                 // Filter out control characters
-                let filtered: String = text.chars()
-                    .filter(|c| !c.is_control())
-                    .collect();
+                let filtered: String = text.chars().filter(|c| !c.is_control()).collect();
                 if !filtered.is_empty() {
                     return Some(filtered);
                 }
@@ -269,9 +284,11 @@ fn handle_quick_search(app: &mut ImageViewerApp, ctx: &egui::Context) {
         if !active_tab.quick_search_buffer.is_empty() {
             active_tab.quick_search_buffer.pop();
             active_tab.quick_search_last_input = std::time::Instant::now();
-            eprintln!("[QUICK_SEARCH] Backspace - Buffer: '{}' (Tab {})", 
-                active_tab.quick_search_buffer, active_tab.id);
-            
+            eprintln!(
+                "[QUICK_SEARCH] Backspace - Buffer: '{}' (Tab {})",
+                active_tab.quick_search_buffer, active_tab.id
+            );
+
             if !active_tab.quick_search_buffer.is_empty() {
                 perform_quick_search(app);
             }
@@ -280,9 +297,11 @@ fn handle_quick_search(app: &mut ImageViewerApp, ctx: &egui::Context) {
         let active_tab = app.tab_manager.active_mut();
         active_tab.quick_search_buffer.push_str(&text);
         active_tab.quick_search_last_input = std::time::Instant::now();
-        eprintln!("[QUICK_SEARCH] Input: '{}' - Buffer: '{}' (Tab {})", 
-            text, active_tab.quick_search_buffer, active_tab.id);
-        
+        eprintln!(
+            "[QUICK_SEARCH] Input: '{}' - Buffer: '{}' (Tab {})",
+            text, active_tab.quick_search_buffer, active_tab.id
+        );
+
         perform_quick_search(app);
     }
 }
@@ -290,39 +309,45 @@ fn handle_quick_search(app: &mut ImageViewerApp, ctx: &egui::Context) {
 /// Find and scroll to the first item matching the search buffer
 fn perform_quick_search(app: &mut ImageViewerApp) {
     let search_lower = app.tab_manager.active().quick_search_buffer.to_lowercase();
-    
+
     if search_lower.is_empty() {
         return;
     }
 
     // Search in current items
-    let found_index = app.items.iter().position(|item| {
-        item.name.to_lowercase().starts_with(&search_lower)
-    });
+    let found_index = app
+        .items
+        .iter()
+        .position(|item| item.name.to_lowercase().starts_with(&search_lower));
 
     if let Some(index) = found_index {
         let tab_id = app.tab_manager.active().id;
-        eprintln!("[QUICK_SEARCH] Found match at index {} - '{}' (Tab {})", 
-            index, app.items[index].name, tab_id);
-        
+        eprintln!(
+            "[QUICK_SEARCH] Found match at index {} - '{}' (Tab {})",
+            index, app.items[index].name, tab_id
+        );
+
         // Update selection
         app.selected_item = Some(index);
         app.selected_file = Some(app.items[index].clone());
-        
+
         // Clear multi-selection and add selected item (shows dark blue border)
         app.multi_selection.clear();
         app.multi_selection.insert(app.items[index].path.clone());
-        
+
         // Update selection anchor for shift+click support
         app.selection_anchor = Some(index);
-        
+
         // Trigger scroll to selected item
         app.scroll_to_selected = true;
-        
+
         // Mark keyboard as last input (strict hover control)
         app.last_input = crate::app::state::LastInput::Keyboard;
     } else {
         let tab_id = app.tab_manager.active().id;
-        eprintln!("[QUICK_SEARCH] No match found for '{}' (Tab {})", search_lower, tab_id);
+        eprintln!(
+            "[QUICK_SEARCH] No match found for '{}' (Tab {})",
+            search_lower, tab_id
+        );
     }
 }

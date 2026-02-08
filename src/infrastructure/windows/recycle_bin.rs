@@ -5,12 +5,12 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
-use windows::core::*;
 use windows::core::Interface;
-use windows::Win32::UI::Shell::*;
+use windows::core::*;
 use windows::Win32::Foundation::*;
 use windows::Win32::System::Com::*;
 use windows::Win32::UI::Shell::Common::*;
+use windows::Win32::UI::Shell::*;
 
 // Property keys for Recycle Bin items
 pub const PKEY_SIZE: PROPERTYKEY = PROPERTYKEY {
@@ -116,7 +116,11 @@ pub fn enumerate_recycle_bin_streaming(
         let mut enum_list_opt: Option<IEnumIDList> = None;
 
         if recycle_bin_folder
-            .EnumObjects(windows::Win32::Foundation::HWND::default(), flags, &mut enum_list_opt)
+            .EnumObjects(
+                windows::Win32::Foundation::HWND::default(),
+                flags,
+                &mut enum_list_opt,
+            )
             .is_err()
         {
             eprintln!("[Lixeira] Failed to get enumerator");
@@ -552,7 +556,9 @@ pub fn delete_permanently(physical_path: &std::path::Path, hwnd: HWND) -> Result
 
         // Check if user cancelled
         if file_op.GetAnyOperationsAborted()?.as_bool() {
-            return Err(windows::core::Error::from_hresult(windows::Win32::Foundation::E_ABORT));
+            return Err(windows::core::Error::from_hresult(
+                windows::Win32::Foundation::E_ABORT,
+            ));
         }
 
         Ok(())
@@ -565,11 +571,7 @@ pub fn empty_recycle_bin(hwnd: HWND) -> Result<()> {
     unsafe {
         // SHEmptyRecycleBinW with NULL path empties all drives.
         // No SHERB_NOCONFIRMATION = Windows shows native confirmation dialog.
-        SHEmptyRecycleBinW(
-            Some(hwnd),
-            PCWSTR::default(),
-            SHERB_NOPROGRESSUI,
-        )?;
+        SHEmptyRecycleBinW(Some(hwnd), PCWSTR::default(), SHERB_NOPROGRESSUI)?;
         Ok(())
     }
 }

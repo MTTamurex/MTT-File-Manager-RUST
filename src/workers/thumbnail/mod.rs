@@ -23,7 +23,8 @@ use std::sync::Mutex;
 
 /// Global cache of paths that failed thumbnail extraction (shared across workers)
 /// Prevents re-attempting extraction on files that consistently fail (e.g., corrupt files)
-static FAILED_PATHS_CACHE: std::sync::OnceLock<Mutex<FxHashSet<PathBuf>>> = std::sync::OnceLock::new();
+static FAILED_PATHS_CACHE: std::sync::OnceLock<Mutex<FxHashSet<PathBuf>>> =
+    std::sync::OnceLock::new();
 
 fn get_failed_paths() -> &'static Mutex<FxHashSet<PathBuf>> {
     FAILED_PATHS_CACHE.get_or_init(|| Mutex::new(FxHashSet::default()))

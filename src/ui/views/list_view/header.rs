@@ -2,8 +2,8 @@
 
 use eframe::egui::{self, Color32, FontId, Sense, Ui};
 
-use crate::domain::file_entry::SortMode;
 use super::{truncate_text_for_column, ListViewContext};
+use crate::domain::file_entry::SortMode;
 
 /// Draws a single resizable header column.
 /// Returns true if the column was clicked (for sorting).
@@ -18,10 +18,7 @@ fn draw_header_resizable(
     sort_descending: bool,
     available_for_columns: f32,
 ) -> bool {
-    let header_rect = egui::Rect::from_min_size(
-        ui.cursor().min,
-        egui::vec2(*width, 22.0),
-    );
+    let header_rect = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(*width, 22.0));
 
     // Header clickable area (for sorting)
     let header_id = ui.id().with(format!("header_{}", text));
@@ -31,7 +28,8 @@ fn draw_header_resizable(
 
     if ui.is_rect_visible(header_rect) {
         if is_active {
-            ui.painter().rect_filled(header_rect, 2.0, Color32::from_gray(230));
+            ui.painter()
+                .rect_filled(header_rect, 2.0, Color32::from_gray(230));
         }
         let text_color = if is_active {
             Color32::BLACK
@@ -136,8 +134,15 @@ pub(super) fn render_list_header(
         let current_size = *ctx.col_size_width;
 
         if draw_header_resizable(
-            ui, "Nome", ctx.col_name_width, SortMode::Name, 100.0,
-            current_date + current_size, sort_mode, sort_descending, available_for_columns,
+            ui,
+            "Nome",
+            ctx.col_name_width,
+            SortMode::Name,
+            100.0,
+            current_date + current_size,
+            sort_mode,
+            sort_descending,
+            available_for_columns,
         ) {
             return Some(SortMode::Name);
         }
@@ -149,8 +154,15 @@ pub(super) fn render_list_header(
             let current_size = *ctx.col_size_width;
 
             if draw_header_resizable(
-                ui, "Espaço Total", ctx.col_date_width, SortMode::DriveTotalSpace, 80.0,
-                current_name + current_size, sort_mode, sort_descending, available_for_columns,
+                ui,
+                "Espaço Total",
+                ctx.col_date_width,
+                SortMode::DriveTotalSpace,
+                80.0,
+                current_name + current_size,
+                sort_mode,
+                sort_descending,
+                available_for_columns,
             ) {
                 return Some(SortMode::DriveTotalSpace);
             }
@@ -160,8 +172,15 @@ pub(super) fn render_list_header(
             let current_date = *ctx.col_date_width;
 
             if draw_header_resizable(
-                ui, "Espaço Livre", ctx.col_size_width, SortMode::DriveFreeSpace, 80.0,
-                current_name + current_date, sort_mode, sort_descending, available_for_columns,
+                ui,
+                "Espaço Livre",
+                ctx.col_size_width,
+                SortMode::DriveFreeSpace,
+                80.0,
+                current_name + current_date,
+                sort_mode,
+                sort_descending,
+                available_for_columns,
             ) {
                 return Some(SortMode::DriveFreeSpace);
             }
@@ -178,8 +197,15 @@ pub(super) fn render_list_header(
                 "Última modificação"
             };
             if draw_header_resizable(
-                ui, date_label, ctx.col_date_width, SortMode::Date, 120.0,
-                current_name + current_type + current_size, sort_mode, sort_descending, available_for_columns,
+                ui,
+                date_label,
+                ctx.col_date_width,
+                SortMode::Date,
+                120.0,
+                current_name + current_type + current_size,
+                sort_mode,
+                sort_descending,
+                available_for_columns,
             ) {
                 return Some(SortMode::Date);
             }
@@ -190,8 +216,15 @@ pub(super) fn render_list_header(
             let current_size = *ctx.col_size_width;
 
             if draw_header_resizable(
-                ui, "Tipo", ctx.col_type_width, SortMode::Type, 80.0,
-                current_name + current_date + current_size, sort_mode, sort_descending, available_for_columns,
+                ui,
+                "Tipo",
+                ctx.col_type_width,
+                SortMode::Type,
+                80.0,
+                current_name + current_date + current_size,
+                sort_mode,
+                sort_descending,
+                available_for_columns,
             ) {
                 return Some(SortMode::Type);
             }
@@ -202,8 +235,15 @@ pub(super) fn render_list_header(
             let current_type = *ctx.col_type_width;
 
             if draw_header_resizable(
-                ui, "Tamanho", ctx.col_size_width, SortMode::Size, 80.0,
-                current_name + current_date + current_type, sort_mode, sort_descending, available_for_columns,
+                ui,
+                "Tamanho",
+                ctx.col_size_width,
+                SortMode::Size,
+                80.0,
+                current_name + current_date + current_type,
+                sort_mode,
+                sort_descending,
+                available_for_columns,
             ) {
                 return Some(SortMode::Size);
             }
@@ -229,10 +269,8 @@ fn render_status_header(ui: &mut Ui, ctx: &mut ListViewContext, available_w: f32
     let current_type = *ctx.col_type_width;
     let current_size = *ctx.col_size_width;
 
-    let header_rect = egui::Rect::from_min_size(
-        ui.cursor().min,
-        egui::vec2(*ctx.col_status_width, 22.0),
-    );
+    let header_rect =
+        egui::Rect::from_min_size(ui.cursor().min, egui::vec2(*ctx.col_status_width, 22.0));
 
     let header_id = ui.id().with("header_status");
     let _header_response = ui.interact(header_rect, header_id, Sense::hover());

@@ -16,12 +16,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 // Re-export from sub-modules for backward compatibility
-pub use crate::ui::components::mpv::state::{MpvState, TrackInfo};
-pub use crate::ui::components::mpv::utils::format_time;
+use crate::ui::components::mpv::event_loop as mpv_event_loop;
 use crate::ui::components::mpv::filters as mpv_filters;
 use crate::ui::components::mpv::playback as mpv_playback;
-use crate::ui::components::mpv::event_loop as mpv_event_loop;
-
+pub use crate::ui::components::mpv::state::{MpvState, TrackInfo};
+pub use crate::ui::components::mpv::utils::format_time;
 
 /// MPV video preview (WIP). This is a scaffold for the migration.
 pub struct MpvPreview {
@@ -158,7 +157,8 @@ impl MpvPreview {
 
     /// Tenta obter o estado com tratamento de erro explícito
     pub fn try_get_state(&self) -> Result<MpvState, String> {
-        self.state.read()
+        self.state
+            .read()
             .map(|state: std::sync::RwLockReadGuard<'_, MpvState>| MpvState::clone(&state))
             .map_err(|e| format!("[MpvPreview] RwLock poisonado: {}", e))
     }
@@ -232,7 +232,7 @@ impl MpvPreview {
                 false
             }
         };
-        
+
         // CRASH FIX: Wrap MPV call in catch_unwind to prevent FFI crashes
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.set_muted(!current_muted);
@@ -375,7 +375,7 @@ impl MpvPreview {
 
                     self.mpv = Some(m);
                     self.set_audio_normalizer(self.audio_normalizer_enabled);
-                    
+
                     // Apply initial volume
                     self.set_volume(self.initial_volume);
                 }
@@ -465,7 +465,8 @@ impl MpvPreview {
 
             // CACHE: Track list (read once file is ready, then cache until file change)
             if self.cached_tracks.is_none() && file_ready {
-                let (audio_tracks, sub_tracks): (Vec<TrackInfo>, Vec<TrackInfo>) = mpv_playback::query_tracks(m);
+                let (audio_tracks, sub_tracks): (Vec<TrackInfo>, Vec<TrackInfo>) =
+                    mpv_playback::query_tracks(m);
 
                 // Cache the tracks (even if empty, file is loaded so this is final)
                 self.cached_tracks = Some((audio_tracks.clone(), sub_tracks.clone()));
@@ -674,12 +675,14 @@ impl MpvPreview {
 
         if interlaced && !has_deinterlace {
             let _ = m.set_property("deinterlace", "yes");
-            let new_vf = mpv_filters::append_vf_filter(&current_vf, mpv_filters::DEINTERLACE_FILTER);
+            let new_vf =
+                mpv_filters::append_vf_filter(&current_vf, mpv_filters::DEINTERLACE_FILTER);
             let _ = m.set_property("vf", new_vf);
             self.update_prev_vf_deinterlace(true);
         } else if !interlaced && has_deinterlace {
             let _ = m.set_property("deinterlace", "no");
-            let new_vf = mpv_filters::remove_vf_filter(&current_vf, mpv_filters::DEINTERLACE_MARKER);
+            let new_vf =
+                mpv_filters::remove_vf_filter(&current_vf, mpv_filters::DEINTERLACE_MARKER);
             let _ = m.set_property("vf", new_vf);
             self.update_prev_vf_deinterlace(false);
         } else if !interlaced {

@@ -50,9 +50,17 @@ pub struct ItemsRebuildResult {
 
 #[derive(Debug, Clone)]
 pub enum FolderSizeMessage {
-    Progress { folder_path: PathBuf, total_size: u64 },
-    Complete { folder_path: PathBuf, total_size: u64 },
-    Cancelled { folder_path: PathBuf },
+    Progress {
+        folder_path: PathBuf,
+        total_size: u64,
+    },
+    Complete {
+        folder_path: PathBuf,
+        total_size: u64,
+    },
+    Cancelled {
+        folder_path: PathBuf,
+    },
 }
 
 pub struct ImageViewerApp {
@@ -117,7 +125,7 @@ pub struct ImageViewerApp {
     pub drive_scan_tx: Sender<Vec<(String, String)>>, // Sender cloned into background thread
     pub drive_info_rx: Receiver<Vec<(String, crate::domain::file_entry::DriveInfo)>>, // Background volume info
     pub drive_info_tx: Sender<Vec<(String, crate::domain::file_entry::DriveInfo)>>, // Sender for bg thread
-    pub thumbnail_size: f32, // Zoom: 64-512
+    pub thumbnail_size: f32,                                                        // Zoom: 64-512
     pub selected_item: Option<usize>,
     pub selected_file: Option<FileEntry>,
     pub multi_selection: FxHashSet<PathBuf>,
@@ -248,7 +256,7 @@ pub struct ImageViewerApp {
     pub folder_size_res_receiver: Receiver<FolderSizeMessage>, // Worker → UI (progress + complete)
     pub folder_size_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>, // Cancel current calculation
     pub folder_size_cache: LruCache<PathBuf, u64>, // Calculated sizes (LRU bounded)
-    pub folder_size_loading: FxHashSet<PathBuf>, // Currently calculating
+    pub folder_size_loading: FxHashSet<PathBuf>,   // Currently calculating
 
     // RECYCLE BIN CACHE
     pub deletion_date_cache: LruCache<String, String>,
@@ -277,6 +285,7 @@ pub struct ImageViewerApp {
     pub fps_avg: f32,
     pub upload_budget_ms: f32,
     pub last_upload_budget_update: Instant,
+    pub last_memory_maintenance: Instant,
 
     // INACTIVITY RECOVERY: Track when app was restored from minimized state
     // Used to throttle heavy operations (watcher events, thumbnail loads) for a few frames
@@ -391,6 +400,94 @@ impl ImageViewerApp {
             false
         }
     }
+
+    /// Applies bounded cache cleanup when process memory is above thresholds.
+    /// Keeps hot assets while avoiding long-session RAM growth.
+    pub fn run_memory_maintenance(&mut self) {
+        use std::time::Duration;
+
+        if self.last_memory_maintenance.elapsed() < Duration::from_secs(2) {
+            return;
+        }
+        self.last_memory_maintenance = Instant::now();
+
+        let Some(working_set_bytes) = current_working_set_bytes() else {
+            return;
+        };
+
+        const SOFT_LIMIT_BYTES: u64 = 550 * 1024 * 1024;
+        const HARD_LIMIT_BYTES: u64 = 700 * 1024 * 1024;
+
+        if working_set_bytes < SOFT_LIMIT_BYTES {
+            return;
+        }
+
+        let aggressive = working_set_bytes >= HARD_LIMIT_BYTES;
+        let max_pending = if aggressive { 24 } else { 48 };
+
+        while self.pending_thumbnails.len() > max_pending {
+            if let Some(old) = self.pending_thumbnails.pop_front() {
+                self.cache_manager.finish_pending_upload(&old.path);
+            } else {
+                break;
+            }
+        }
+
+        let (textures_removed, rgba_removed, folder_previews_removed) = if aggressive {
+            self.cache_manager
+                .trim_thumbnail_caches(96, 64 * 1024 * 1024, 24)
+        } else {
+            self.cache_manager
+                .trim_thumbnail_caches(140, 96 * 1024 * 1024, 48)
+        };
+
+        if aggressive {
+            self.directory_cache.clear();
+            self.visible_paths_cache.clear();
+            self.visible_range_cached = None;
+        }
+
+        // Reuse existing GIF cleanup policy (TTL + bounded memory) without forcing visible preview drop.
+        self.gif_manager.cleanup(false);
+
+        if textures_removed > 0 || rgba_removed > 0 || folder_previews_removed > 0 {
+            eprintln!(
+                "[MEMORY] RAM {:.1}MB -> trimmed textures={} rgba={} folder_previews={} pending={} mode={}",
+                working_set_bytes as f64 / 1024.0 / 1024.0,
+                textures_removed,
+                rgba_removed,
+                folder_previews_removed,
+                max_pending,
+                if aggressive { "hard" } else { "soft" }
+            );
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn current_working_set_bytes() -> Option<u64> {
+    use windows::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+    use windows::Win32::System::Threading::GetCurrentProcess;
+
+    unsafe {
+        let mut counters = PROCESS_MEMORY_COUNTERS::default();
+        if K32GetProcessMemoryInfo(
+            GetCurrentProcess(),
+            &mut counters,
+            std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+        )
+        .as_bool()
+        {
+            Some(counters.WorkingSetSize as u64)
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn current_working_set_bytes() -> Option<u64> {
+    None
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

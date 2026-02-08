@@ -42,7 +42,7 @@ impl VirtualDriveConfig {
                 return exe_dir.join("virtual_drive_config.json");
             }
         }
-        
+
         // Fallback to current directory if exe path detection fails
         PathBuf::from("virtual_drive_config.json")
     }
@@ -50,7 +50,7 @@ impl VirtualDriveConfig {
     /// Load configuration from file
     pub fn load() -> Self {
         let path = Self::config_path();
-        
+
         if !path.exists() {
             return Self::default();
         }
@@ -59,7 +59,7 @@ impl VirtualDriveConfig {
             Ok(contents) => match serde_json::from_str::<serde_json::Value>(&contents) {
                 Ok(json) => {
                     let mut config = Self::default();
-                    
+
                     if let Some(overrides) = json.get("overrides").and_then(|v| v.as_object()) {
                         for (key, value) in overrides {
                             if let Some(drive_letter) = key.chars().next() {
@@ -68,22 +68,33 @@ impl VirtualDriveConfig {
                                         "HDD" => DiskTypeOverride::HDD,
                                         _ => DiskTypeOverride::SSD,
                                     };
-                                    config.overrides.insert(drive_letter.to_ascii_uppercase(), disk_type);
+                                    config
+                                        .overrides
+                                        .insert(drive_letter.to_ascii_uppercase(), disk_type);
                                 }
                             }
                         }
                     }
-                    
-                    eprintln!("[Config] Loaded virtual drive configuration from {:?}", path);
+
+                    eprintln!(
+                        "[Config] Loaded virtual drive configuration from {:?}",
+                        path
+                    );
                     config
                 }
                 Err(e) => {
-                    eprintln!("[Config] Failed to parse config file: {} - using defaults", e);
+                    eprintln!(
+                        "[Config] Failed to parse config file: {} - using defaults",
+                        e
+                    );
                     Self::default()
                 }
             },
             Err(e) => {
-                eprintln!("[Config] Failed to read config file: {} - using defaults", e);
+                eprintln!(
+                    "[Config] Failed to read config file: {} - using defaults",
+                    e
+                );
                 Self::default()
             }
         }
@@ -92,7 +103,7 @@ impl VirtualDriveConfig {
     /// Save configuration to file
     pub fn save(&self) -> Result<(), String> {
         let path = Self::config_path();
-        
+
         // Build JSON manually
         let mut overrides_map = serde_json::Map::new();
         for (drive_letter, disk_type) in &self.overrides {
@@ -100,18 +111,20 @@ impl VirtualDriveConfig {
                 DiskTypeOverride::SSD => "SSD",
                 DiskTypeOverride::HDD => "HDD",
             };
-            overrides_map.insert(drive_letter.to_string(), serde_json::Value::String(type_str.to_string()));
+            overrides_map.insert(
+                drive_letter.to_string(),
+                serde_json::Value::String(type_str.to_string()),
+            );
         }
-        
+
         let json_obj = serde_json::json!({
             "overrides": overrides_map
         });
-        
+
         let json = serde_json::to_string_pretty(&json_obj)
             .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
-        fs::write(&path, json)
-            .map_err(|e| format!("Failed to write config file: {}", e))?;
+        fs::write(&path, json).map_err(|e| format!("Failed to write config file: {}", e))?;
 
         eprintln!("[Config] Saved virtual drive configuration to {:?}", path);
         Ok(())
@@ -119,12 +132,15 @@ impl VirtualDriveConfig {
 
     /// Get override for a drive letter
     pub fn get_override(&self, drive_letter: char) -> Option<DiskTypeOverride> {
-        self.overrides.get(&drive_letter.to_ascii_uppercase()).copied()
+        self.overrides
+            .get(&drive_letter.to_ascii_uppercase())
+            .copied()
     }
 
     /// Set override for a drive letter
     pub fn set_override(&mut self, drive_letter: char, disk_type: DiskTypeOverride) {
-        self.overrides.insert(drive_letter.to_ascii_uppercase(), disk_type);
+        self.overrides
+            .insert(drive_letter.to_ascii_uppercase(), disk_type);
     }
 
     /// Remove override for a drive letter
@@ -147,10 +163,7 @@ fn get_config() -> &'static Arc<Mutex<VirtualDriveConfig>> {
 
 /// Get override for a specific drive letter
 pub fn get_drive_override(drive_letter: char) -> Option<DiskTypeOverride> {
-    get_config()
-        .lock()
-        .ok()?
-        .get_override(drive_letter)
+    get_config().lock().ok()?.get_override(drive_letter)
 }
 
 /// Set override for a drive letter and save to disk
