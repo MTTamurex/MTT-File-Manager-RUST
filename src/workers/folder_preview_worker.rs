@@ -1,8 +1,8 @@
 //! Folder preview worker for async thumbnail extraction using Windows Shell API
 //!
-//! Uses IShellItemImageFactory::GetImage to get native folder previews (sandwich effect).
+//! Uses IThumbnailCache with WTS_FORCEEXTRACTION to bypass Windows thumbnail cache
+//! and avoid black background issues on folder previews.
 
-use crate::infrastructure::windows::icons::get_folder_preview;
 use eframe::egui;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
@@ -56,8 +56,10 @@ pub fn spawn_folder_preview_worker(
                 continue;
             }
 
-            // Get folder preview from Windows Shell
-            match get_folder_preview(&path) {
+            // CRITICAL: Always use force_extract to bypass Windows thumbnail cache.
+            // This prevents black background issues that occur when Windows returns
+            // a corrupted cached preview.
+            match crate::infrastructure::windows::icons::force_extract_folder_preview(&path) {
                 Ok((rgba_data, width, height)) => {
                     let _ = tx.send(FolderPreviewData {
                         path,
@@ -67,15 +69,28 @@ pub fn spawn_folder_preview_worker(
                     });
                     throttle_repaint(&ctx, &mut last_repaint);
                 }
-                Err(_) => {
-                    // Send empty data to signal failure/completion
-                    // This signals the UI to stop the loading spinner
-                    let _ = tx.send(FolderPreviewData {
-                        path,
-                        rgba_data: Vec::new(),
-                        width: 0,
-                        height: 0,
-                    });
+                Err(e) => {
+                    eprintln!("[FOLDER PREVIEW] Failed for {:?}: {}", path, e);
+                    // Fallback to regular get_folder_preview if force_extract fails
+                    match crate::infrastructure::windows::icons::get_folder_preview(&path) {
+                        Ok((rgba_data, width, height)) => {
+                            let _ = tx.send(FolderPreviewData {
+                                path,
+                                rgba_data,
+                                width,
+                                height,
+                            });
+                        }
+                        Err(_) => {
+                            // Send empty data to signal failure
+                            let _ = tx.send(FolderPreviewData {
+                                path,
+                                rgba_data: Vec::new(),
+                                width: 0,
+                                height: 0,
+                            });
+                        }
+                    }
                     throttle_repaint(&ctx, &mut last_repaint);
                 }
             }
