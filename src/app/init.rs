@@ -395,7 +395,17 @@ impl ImageViewerApp {
         let folder_preview_rx = Arc::new(std::sync::Mutex::new(folder_preview_rx_thread));
         {
             use crate::workers::folder_preview_worker::spawn_folder_preview_worker;
-            spawn_folder_preview_worker(folder_preview_rx, folder_preview_res_tx, ctx.clone());
+            let cpu = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4);
+            let worker_count = cpu.clamp(2, 6);
+            for _ in 0..worker_count {
+                spawn_folder_preview_worker(
+                    folder_preview_rx.clone(),
+                    folder_preview_res_tx.clone(),
+                    ctx.clone(),
+                );
+            }
         }
 
         // --- FOLDER SIZE WORKER (async for details panel) ---

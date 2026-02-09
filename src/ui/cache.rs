@@ -303,7 +303,8 @@ impl CacheManager {
 
     /// Starts loading a folder preview (returns false if too many loads in progress)
     pub fn start_folder_preview_loading(&mut self, path: PathBuf) -> bool {
-        if self.folder_preview_loading.len() < 30 {
+        // Allow deeper queueing so initial folders can request previews without waiting.
+        if self.folder_preview_loading.len() < 120 {
             self.folder_preview_loading.insert(path);
             true
         } else {

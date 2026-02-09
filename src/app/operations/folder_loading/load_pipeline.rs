@@ -105,10 +105,22 @@ impl ImageViewerApp {
 
             if is_onedrive {
                 // Use timeout-protected directory reading for OneDrive
-                eprintln!("[FOLDER-LOADING] Using timeout-protected directory enumeration for OneDrive: {:?}", base_path);
+                eprintln!(
+                    "[FOLDER-LOADING] Using timeout-protected directory enumeration for OneDrive: {:?}",
+                    base_path
+                );
+                let onedrive_enum_start = std::time::Instant::now();
                 match onedrive::onedrive_read_directory(&PathBuf::from(&base_path)) {
                     onedrive::IoTimeoutResult::Ok(entries) => {
-                        let mut batch: Vec<FileEntry> = Vec::with_capacity(entries.len().min(1000));
+                        eprintln!(
+                            "[PERF] OneDrive enum complete: {:?} items={} elapsed={}ms",
+                            base_path,
+                            entries.len(),
+                            onedrive_enum_start.elapsed().as_millis()
+                        );
+                        batch.clear();
+                        batch.reserve(batch_size.max(64));
+
                         for (filename, attrs, size, modified) in entries {
                             if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
                                 break;
@@ -151,29 +163,62 @@ impl ImageViewerApp {
                                     recycle_original_path: None,
                                 };
 
+                                all_entries_disk.push(entry.clone());
                                 batch.push(entry);
 
-                                // Send batch when it reaches threshold
-                                if batch.len() >= 1000 {
-                                    let _batch_len = batch.len();
+                                // Send adaptive batches to improve first paint.
+                                if batch.len() >= batch_size {
+                                    let batch_len = batch.len();
                                     let _ = file_entry_sender
                                         .send((my_gen, std::mem::take(&mut batch)));
-                                    batch.clear();
-                                    batch.reserve(1000);
+                                    batch_tracker.record_batch(batch_start.elapsed(), batch_len);
+                                    batch_size = batch_tracker.batch_size();
+                                    batch_start = std::time::Instant::now();
+                                    batch.reserve(batch_size.max(64));
+                                    ctx.request_repaint();
                                 }
                             }
                         }
 
                         // Send remaining entries
                         if !batch.is_empty() {
-                            let _ = file_entry_sender.send((my_gen, batch));
+                            let batch_len = batch.len();
+                            let _ = file_entry_sender.send((my_gen, std::mem::take(&mut batch)));
+                            batch_tracker.record_batch(batch_start.elapsed(), batch_len);
                         }
 
                         // Signal completion
                         let _ = file_entry_sender.send((my_gen, Vec::new()));
                         ctx.request_repaint();
 
-                        eprintln!("[FOLDER-LOADING] OneDrive directory enumeration completed successfully");
+                        // Populate caches so subsequent OneDrive navigations are instant.
+                        if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+                            directory_cache
+                                .put(PathBuf::from(&base_path), all_entries_disk.clone());
+
+                            if let Some(di) = &directory_index_opt {
+                                let indexed: Vec<IndexedFile> = all_entries_disk
+                                    .iter()
+                                    .map(|e| IndexedFile {
+                                        name: e.name.clone(),
+                                        size: e.size,
+                                        modified: e.modified,
+                                        is_dir: e.is_dir,
+                                    })
+                                    .collect();
+                                let _ = di.put_directory(
+                                    &PathBuf::from(&base_path),
+                                    &indexed,
+                                    scan_start.elapsed().as_millis() as u64,
+                                );
+                            }
+                        }
+
+                        eprintln!(
+                            "[FOLDER-LOADING] OneDrive directory enumeration completed successfully in {}ms (visible_items={})",
+                            onedrive_enum_start.elapsed().as_millis(),
+                            all_entries_disk.len()
+                        );
                         return;
                     }
                     onedrive::IoTimeoutResult::Timeout => {

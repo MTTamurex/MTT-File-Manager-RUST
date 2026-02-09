@@ -9,7 +9,6 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
     ops: &mut O,
 ) {
     let item = ctx.item;
-
     if !ctx.is_recycle_bin_view {
         // --- GATILHO LAZY LOAD ---
         // Se não tem capa E ainda não foi escaneado: Dispara Scan.

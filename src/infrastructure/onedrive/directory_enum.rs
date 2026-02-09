@@ -39,7 +39,9 @@ fn read_directory_internal(path: &Path) -> Result<DirectoryEntries, std::io::Err
     use std::os::windows::ffi::OsStringExt;
     use windows::core::PCWSTR;
     use windows::Win32::Storage::FileSystem::{
-        FindClose, FindFirstFileW, FindNextFileW, WIN32_FIND_DATAW,
+        FindClose, FindExInfoBasic, FindExInfoStandard, FindExSearchNameMatch, FindFirstFileExW,
+        FindFirstFileW, FindNextFileW, FIND_FIRST_EX_FLAGS, FIND_FIRST_EX_LARGE_FETCH,
+        WIN32_FIND_DATAW,
     };
 
     let search_path = if path.to_string_lossy().ends_with('\\') {
@@ -56,7 +58,29 @@ fn read_directory_internal(path: &Path) -> Result<DirectoryEntries, std::io::Err
     let mut entries = Vec::new();
 
     unsafe {
-        let handle = FindFirstFileW(PCWSTR(wide_path.as_ptr()), &mut find_data)?;
+        // Fast path: Explorer-like enumeration flags to reduce OneDrive overhead.
+        // Fallback to standard Win32 call for compatibility.
+        let handle = match FindFirstFileExW(
+            PCWSTR(wide_path.as_ptr()),
+            FindExInfoBasic,
+            &mut find_data as *mut _ as *mut std::ffi::c_void,
+            FindExSearchNameMatch,
+            Some(std::ptr::null_mut()),
+            FIND_FIRST_EX_LARGE_FETCH,
+        ) {
+            Ok(h) => h,
+            Err(_) => match FindFirstFileExW(
+                PCWSTR(wide_path.as_ptr()),
+                FindExInfoStandard,
+                &mut find_data as *mut _ as *mut std::ffi::c_void,
+                FindExSearchNameMatch,
+                Some(std::ptr::null_mut()),
+                FIND_FIRST_EX_FLAGS(0),
+            ) {
+                Ok(h) => h,
+                Err(_) => FindFirstFileW(PCWSTR(wide_path.as_ptr()), &mut find_data)?,
+            },
+        };
 
         loop {
             let len = find_data
