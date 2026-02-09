@@ -229,7 +229,9 @@ unsafe fn process_shell_child(
     let item2: IShellItem2 = item.cast()?;
 
     // Check folder attributes
-    let mut attributes = 0u32;
+    // IMPORTANT: GetAttributesOf uses the input value as a MASK of which attributes to query.
+    // We MUST set the bits we want to check, otherwise the shell extension may return 0.
+    let mut attributes = 0x20400000u32; // SFGAO_FOLDER (0x20000000) | SFGAO_STREAM (0x00400000)
     parent.GetAttributesOf(&[child_pidl as *const _], &mut attributes)?;
 
     // SFGAO_FOLDER (0x20000000) - Primary folder check
