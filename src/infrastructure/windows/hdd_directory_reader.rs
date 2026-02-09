@@ -186,15 +186,15 @@ fn create_file_entry(
     let _is_system = (attributes & FILE_ATTRIBUTE_SYSTEM.0) != 0;
     let is_directory = (attributes & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
 
-    // Handle ZIP files as directories
+    // Handle archive files as directories
     let mut is_dir = is_directory;
-    let is_zip = filename.to_lowercase().ends_with(".zip");
-    if !is_dir && is_zip {
+    let is_archive = crate::domain::file_entry::is_archive_extension(filename);
+    if !is_dir && is_archive {
         is_dir = true;
     }
 
     // Extract file size (combine high and low 32-bit values)
-    let size = if is_dir && !is_zip {
+    let size = if is_dir && !is_archive {
         0
     } else {
         ((find_data.nFileSizeHigh as u64) << 32) | (find_data.nFileSizeLow as u64)

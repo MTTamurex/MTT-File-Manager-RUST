@@ -88,7 +88,7 @@ pub fn render_item_slot<O: ItemSlotOperations>(
 ) {
     if let Some(drive_info) = &ctx.item.drive_info {
         render_drive_slot(ui, rect, ctx, drive_info);
-    } else if ctx.item.is_dir && !ctx.item.is_zip() {
+    } else if ctx.item.is_dir && !ctx.item.is_archive() {
         render_directory_slot(ui, rect, ctx, ops);
     } else {
         render_file_slot(ui, rect, ctx, ops);

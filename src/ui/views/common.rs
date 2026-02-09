@@ -1,14 +1,13 @@
 //! Common helper functions for views
 //! Follows .cursorrules: single responsibility, < 300 lines
 
-use crate::domain::file_entry::FileEntry;
+use crate::domain::file_entry::{archive_type_label, FileEntry};
 use crate::infrastructure::windows;
 
 /// Gets file type string for display
 pub fn get_file_type_string(item: &FileEntry) -> String {
-    // Check for ZIP manually because is_dir might be true
-    if item.is_zip() {
-        return "Arquivo ZIP".to_string();
+    if let Some(label) = archive_type_label(&item.name) {
+        return label.to_string();
     }
     if item.is_dir {
         "Pasta".to_string()

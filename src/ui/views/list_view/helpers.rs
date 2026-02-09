@@ -20,17 +20,8 @@ pub(super) fn render_section_header(ui: &mut Ui, title: &str) {
 pub(super) fn get_file_type_string(item: &FileEntry) -> std::borrow::Cow<'static, str> {
     use std::borrow::Cow;
 
-    // Check for ZIP manually because is_dir might be true (ASCII byte check, no allocation)
-    if item.name.len() >= 4 {
-        let bytes = item.name.as_bytes();
-        let last4 = &bytes[bytes.len() - 4..];
-        if last4[0] == b'.'
-            && last4[1].to_ascii_lowercase() == b'z'
-            && last4[2].to_ascii_lowercase() == b'i'
-            && last4[3].to_ascii_lowercase() == b'p'
-        {
-            return Cow::Borrowed("Arquivo ZIP");
-        }
+    if let Some(label) = crate::domain::file_entry::archive_type_label(&item.name) {
+        return Cow::Borrowed(label);
     }
     if item.is_dir {
         return Cow::Borrowed("Pasta");

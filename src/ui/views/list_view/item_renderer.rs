@@ -314,8 +314,7 @@ fn render_item_tooltip(
                         ui.label(RichText::new(&item.name).strong());
                         ui.separator();
                         ui.label(format!("Tipo: {}", get_file_type_string(item)));
-                        let is_zip = item.is_zip();
-                        if !item.is_dir || is_zip {
+                        if !item.is_dir || item.is_archive() {
                             ui.label(format!("Tamanho: {}", format_size(item.size)));
                         }
                         let date_lbl = if is_recycle_bin {
@@ -377,13 +376,13 @@ fn render_item_icon(
                 Color32::GRAY,
             );
         }
-    } else if item.is_dir && !item.is_zip() {
+    } else if item.is_dir && !item.is_archive() {
         // folder: Windows native icon
-        // PERFORMANCE: Single to_string_lossy() + to_lowercase() instead of two
         let path_lower = item.path.to_string_lossy().to_lowercase();
-        let is_virtual_zip = path_lower.contains(".zip\\") || path_lower.contains(".zip/");
+        let is_virtual_archive =
+            crate::domain::file_entry::path_contains_archive_segment(&path_lower);
 
-        if is_virtual_zip {
+        if is_virtual_archive {
             if let Some(folder_icon) =
                 ctx.item_icon_loader
                     .get_or_load_icon(ui.ctx(), &item.path, true, false)
@@ -542,8 +541,7 @@ fn render_regular_columns(
     );
 
     // 4. Size
-    let is_zip = item.is_zip();
-    let size_str = if item.is_dir && !is_zip {
+    let size_str = if item.is_dir && !item.is_archive() {
         "".to_string()
     } else {
         format_size(item.size)

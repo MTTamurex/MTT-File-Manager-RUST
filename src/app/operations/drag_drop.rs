@@ -158,7 +158,7 @@ impl ImageViewerApp {
             let icon_texture = if item.drive_info.is_some() {
                 self.item_icon_loader
                     .get_or_load_drive_icon(ctx, &item.path.to_string_lossy())
-            } else if item.is_dir && !item.is_zip() {
+            } else if item.is_dir && !item.is_archive() {
                 self.item_icon_loader
                     .get_or_load_icon(ctx, &item.path, true, true)
                     .or_else(|| self.cache_manager.folder_icon_texture.clone())

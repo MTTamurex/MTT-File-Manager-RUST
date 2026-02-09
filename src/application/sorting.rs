@@ -1,19 +1,6 @@
-use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode};
+use crate::domain::file_entry::{is_archive_extension, FileEntry, FoldersPosition, SortMode};
 use rayon::prelude::*;
 use std::cmp::Ordering;
-
-/// PERFORMANCE: Check if string ends with suffix (case-insensitive) without allocation.
-#[inline]
-fn ends_with_ignore_case(s: &str, suffix: &str) -> bool {
-    if s.len() < suffix.len() {
-        return false;
-    }
-    let start = s.len() - suffix.len();
-    s.as_bytes()[start..]
-        .iter()
-        .zip(suffix.as_bytes())
-        .all(|(a, b)| a.eq_ignore_ascii_case(b))
-}
 
 /// Helper function to get the appropriate date for sorting.
 /// For recycle bin items with deletion_date, uses the deletion date string for comparison.
@@ -43,10 +30,9 @@ pub fn sort_items(
     descending: bool,
     folders_position: FoldersPosition,
 ) {
-    // Helper to check if an item is a "true" directory (not a ZIP file)
-    // PERFORMANCE: Uses ends_with_ignore_case to avoid allocation
+    // Helper to check if an item is a "true" directory (not an archive file)
     let is_true_dir =
-        |item: &FileEntry| -> bool { item.is_dir && !ends_with_ignore_case(&item.name, ".zip") };
+        |item: &FileEntry| -> bool { item.is_dir && !is_archive_extension(&item.name) };
 
     let compare = |a: &FileEntry, b: &FileEntry| -> Ordering {
         // 1. Folders Position logic (ZIP files should be treated as files, not folders)

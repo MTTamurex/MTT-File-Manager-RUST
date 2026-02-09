@@ -127,8 +127,7 @@ pub(super) fn render_grid_item(
                         ui.label(egui::RichText::new(&item.name).strong());
                         ui.separator();
                         ui.label(format!("Tipo: {}", get_file_type_string(item)));
-                        let is_zip = item.is_zip();
-                        if !item.is_dir || is_zip {
+                        if !item.is_dir || item.is_archive() {
                             ui.label(format!(
                                 "Tamanho: {}",
                                 crate::infrastructure::windows::format_size(item.size)
@@ -266,10 +265,8 @@ fn render_item_slot_for_grid(
 fn get_file_type_string(item: &FileEntry) -> std::borrow::Cow<'static, str> {
     use std::borrow::Cow;
 
-    let name_lower = item.name.to_ascii_lowercase();
-
-    if name_lower.ends_with(".zip") {
-        return Cow::Borrowed("Arquivo ZIP");
+    if let Some(label) = crate::domain::file_entry::archive_type_label(&item.name) {
+        return Cow::Borrowed(label);
     }
     if item.is_dir {
         return Cow::Borrowed("Pasta");

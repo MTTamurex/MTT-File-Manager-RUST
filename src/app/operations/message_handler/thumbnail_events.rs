@@ -149,7 +149,7 @@ impl ImageViewerApp {
                 let eager_paths: Vec<PathBuf> = self
                     .all_items
                     .iter()
-                    .filter(|i| i.is_dir && !i.is_zip())
+                    .filter(|i| i.is_dir && !i.is_archive())
                     .map(|i| i.path.clone())
                     .take(MAX_EAGER_FOLDER_PREVIEWS)
                     .collect();

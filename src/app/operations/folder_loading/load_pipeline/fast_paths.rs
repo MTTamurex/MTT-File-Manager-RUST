@@ -1,4 +1,4 @@
-use crate::domain::file_entry::{FileEntry, SyncStatus};
+use crate::domain::file_entry::{is_archive_extension, FileEntry, SyncStatus};
 use crate::infrastructure::adaptive_batch::AdaptiveBatchTracker;
 use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::directory_index::DirectoryIndex;
@@ -150,16 +150,35 @@ pub(super) fn try_handle_fast_paths(
         current_path, *batch_size, is_ssd
     );
 
-    // Check if we are navigating a virtual Shell folder (like a ZIP)
+    // Check if we are navigating a virtual Shell folder (like an archive)
     if is_shell_navigation_path(&PathBuf::from(base_path), false) {
-        if let Ok(shell_items) = list_shell_folder(&PathBuf::from(base_path)) {
-            if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
-                let _ = file_entry_sender.send((my_gen, shell_items));
-                let _ = file_entry_sender.send((my_gen, Vec::new()));
-                ctx.request_repaint();
-                return true;
+        eprintln!("[FOLDER-LOADING] Shell navigation detected for {:?}", base_path);
+        match list_shell_folder(&PathBuf::from(base_path)) {
+            Ok(shell_items) => {
+                eprintln!(
+                    "[FOLDER-LOADING] Shell folder listed OK: {} items for {:?}",
+                    shell_items.len(),
+                    base_path
+                );
+                if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+                    let _ = file_entry_sender.send((my_gen, shell_items));
+                    let _ = file_entry_sender.send((my_gen, Vec::new()));
+                    ctx.request_repaint();
+                    return true;
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "[FOLDER-LOADING] Shell folder FAILED for {:?}: {:?}",
+                    base_path, e
+                );
             }
         }
+    } else {
+        eprintln!(
+            "[FOLDER-LOADING] NOT detected as shell path: {:?}",
+            base_path
+        );
     }
 
     if !force_refresh && !is_onedrive_base {
@@ -201,13 +220,13 @@ pub(super) fn try_handle_fast_paths(
                         .into_iter()
                         .filter(|f| !f.name.starts_with('.'))
                         .map(|f| {
-                            let is_zip = f.name.to_lowercase().ends_with(".zip");
-                            let is_dir = f.is_dir || is_zip;
+                            let is_archive = is_archive_extension(&f.name);
+                            let is_dir = f.is_dir || is_archive;
                             FileEntry {
                                 path: base.join(&f.name),
                                 name: f.name,
                                 is_dir,
-                                size: if is_dir && !is_zip { 0 } else { f.size },
+                                size: if is_dir && !is_archive { 0 } else { f.size },
                                 modified: f.modified,
                                 folder_cover: None,
                                 drive_info: None,
@@ -285,7 +304,7 @@ pub(super) fn try_handle_fast_paths(
             );
             let mut changed = false;
             for entry in cached_entries.iter_mut() {
-                if !entry.is_dir && entry.name.to_lowercase().ends_with(".zip") {
+                if !entry.is_dir && is_archive_extension(&entry.name) {
                     entry.is_dir = true;
                     changed = true;
                 }
