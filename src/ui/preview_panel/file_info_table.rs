@@ -131,7 +131,7 @@ pub fn render_file_info_table(
                     crate::infrastructure::windows::format_date(file.modified),
                 );
 
-                let size_str = if file.is_dir {
+                let size_str = if file.is_dir && !file.is_zip() {
                     if let Some(size) = folder_size {
                         let formatted = crate::infrastructure::windows::format_size(size);
                         if is_folder_size_loading {
@@ -148,7 +148,7 @@ pub fn render_file_info_table(
 
                 add_detail(ui, "Tamanho:", size_str);
 
-                if file.is_dir && folder_size.is_none() && !is_folder_size_loading {
+                if file.is_dir && !file.is_zip() && folder_size.is_none() && !is_folder_size_loading {
                     action = Some(PreviewPanelAction::CalculateFolderSize(file.path.clone()));
                 }
             }

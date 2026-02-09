@@ -59,7 +59,8 @@ pub(super) fn try_handle_optimized_tiers(
                 if !is_hidden && !is_system && !is_special && !dir_entry.name.starts_with('.') {
                     let full_path = PathBuf::from(base_path).join(&dir_entry.name);
                     let mut is_dir = dir_entry.is_dir;
-                    if !is_dir && dir_entry.name.to_lowercase().ends_with(".zip") {
+                    let is_zip = !is_dir && dir_entry.name.to_lowercase().ends_with(".zip");
+                    if is_zip {
                         is_dir = true;
                     }
                     let sync_status =
@@ -68,7 +69,7 @@ pub(super) fn try_handle_optimized_tiers(
                         path: full_path,
                         name: dir_entry.name,
                         is_dir,
-                        size: if is_dir { 0 } else { dir_entry.size },
+                        size: if is_dir && !is_zip { 0 } else { dir_entry.size },
                         modified: dir_entry.modified,
                         folder_cover: None,
                         drive_info: None,
