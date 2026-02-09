@@ -259,8 +259,8 @@ fn draw_subtitle_track_picker(
             "Carregar legenda externa (.srt/.ass/.vtt/.sub)",
             ui.visuals().dark_mode,
         ) {
-            let mut file_dialog = FileDialog::new()
-                .add_filter("Legendas", &["srt", "ass", "ssa", "vtt", "sub"]);
+            let mut file_dialog =
+                FileDialog::new().add_filter("Legendas", &["srt", "ass", "ssa", "vtt", "sub"]);
 
             if let Some(current_video_path) = preview.path() {
                 if let Some(parent) = current_video_path.parent() {

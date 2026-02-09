@@ -24,31 +24,26 @@ pub fn format_date(timestamp: u64) -> String {
         return "Desconhecido".to_string();
     }
 
-    let seconds_in_day = 86400u64;
-    let days_since_epoch = timestamp / seconds_in_day;
-    let seconds_of_day = timestamp % seconds_in_day;
+    const SECONDS_IN_DAY: u64 = 86_400;
+    let days_since_epoch = (timestamp / SECONDS_IN_DAY) as i64;
+    let seconds_of_day = timestamp % SECONDS_IN_DAY;
 
     let hour = (seconds_of_day / 3600) % 24;
     let minute = (seconds_of_day / 60) % 60;
 
-    // Howard Hinnant's algorithm to convert days since epoch to y/m/d
-    let z = (days_since_epoch as i64) + 719468;
+    // Howard Hinnant civil_from_days algorithm (Unix epoch days -> Y/M/D)
+    let z = days_since_epoch + 719468;
     let era = (if z >= 0 { z } else { z - 146096 }) / 146097;
-    let doe = (z - era * 146097) as u64;
-    let yoe = (doe * 2000 + 1) / 730485;
-    let y = (yoe as i64) + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let doe = z - era * 146097; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // [0, 399]
+    let mut y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
     let mp = (5 * doy + 2) / 153;
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let final_y = y + (if m <= 2 { 0 } else { 1 });
+    y += if m <= 2 { 1 } else { 0 };
 
-    let display_y = if m <= 2 { final_y + 1 } else { final_y };
-
-    format!(
-        "{:02}/{:02}/{:04} {:02}:{:02}",
-        d, m, display_y, hour, minute
-    )
+    format!("{:02}/{:02}/{:04} {:02}:{:02}", d, m, y, hour, minute)
 }
 
 /// Formats duration in 100-nanosecond units to HH:MM:SS or MM:SS.
@@ -88,4 +83,26 @@ pub fn approximate_bitrate(size_bytes: u64, duration_100ns: u64) -> Option<u32> 
     }
     let bits_per_sec = (size_bytes as f64 * 8.0) / seconds;
     Some(bits_per_sec.max(0.0) as u32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_date;
+
+    #[test]
+    fn format_date_handles_known_dates() {
+        assert_eq!(format_date(1760097600), "10/10/2025 12:00");
+        assert_eq!(format_date(1770638400), "09/02/2026 12:00");
+        assert_eq!(format_date(1770465600), "07/02/2026 12:00");
+    }
+
+    #[test]
+    fn format_date_handles_leap_day() {
+        assert_eq!(format_date(1709221500), "29/02/2024 15:45");
+    }
+
+    #[test]
+    fn format_date_zero_is_unknown() {
+        assert_eq!(format_date(0), "Desconhecido");
+    }
 }

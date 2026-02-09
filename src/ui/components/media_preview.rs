@@ -274,7 +274,10 @@ impl MediaPreview {
         }
     }
 
-    pub fn load_external_subtitle(&mut self, subtitle_path: &std::path::Path) -> Result<(), String> {
+    pub fn load_external_subtitle(
+        &mut self,
+        subtitle_path: &std::path::Path,
+    ) -> Result<(), String> {
         if let MediaPreview::Video(player) = self {
             player.load_external_subtitle(subtitle_path)
         } else {

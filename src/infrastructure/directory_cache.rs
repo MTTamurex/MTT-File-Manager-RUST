@@ -2,6 +2,7 @@ use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use lru::LruCache;
 
@@ -11,6 +12,7 @@ const CACHE_CAPACITY: usize = 200; // Bounded to avoid high long-session RAM gro
 
 struct CachedFolder {
     entries: Vec<FileEntry>,
+    cached_at_ms: u64,
 }
 
 pub struct DirectoryCache {
@@ -37,11 +39,30 @@ impl DirectoryCache {
         None
     }
 
+    /// Returns cached entries and the cache timestamp in Unix milliseconds.
+    pub fn get_with_meta(&self, path: &PathBuf) -> Option<(Vec<FileEntry>, u64)> {
+        let mut cache = self.inner.lock().ok()?;
+        if let Some(cached) = cache.get_mut(path) {
+            return Some((cached.entries.clone(), cached.cached_at_ms));
+        }
+        None
+    }
+
     /// Store directory entries in cache.
     /// No fs::metadata() syscall — DriveWatcher handles invalidation.
     pub fn put(&self, path: PathBuf, entries: Vec<FileEntry>) {
         if let Ok(mut cache) = self.inner.lock() {
-            cache.put(path, CachedFolder { entries });
+            let cached_at_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            cache.put(
+                path,
+                CachedFolder {
+                    entries,
+                    cached_at_ms,
+                },
+            );
         }
     }
 
