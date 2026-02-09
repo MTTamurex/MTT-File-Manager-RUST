@@ -261,11 +261,22 @@ impl ThumbnailDiskCache {
             dynamic_img
         };
 
-        // STEP 2: Encode to WebP Lossy
-        let rgb_img = resized.to_rgb8();
-        let (final_width, final_height) = (rgb_img.width(), rgb_img.height());
-        let encoder = webp::Encoder::from_rgb(&rgb_img, final_width, final_height);
-        let webp_data = encoder.encode(85.0);
+        // STEP 2: Encode to WebP Lossy (preserve alpha channel for transparent images)
+        let (final_width, final_height) = (resized.width(), resized.height());
+
+        // Check if image has transparency (non-opaque alpha values)
+        let has_alpha = resized.color().has_alpha();
+        let webp_data = if has_alpha {
+            // Preserve alpha channel for transparent images (PNG, SVG, etc.)
+            let rgba_img = resized.to_rgba8();
+            let encoder = webp::Encoder::from_rgba(&rgba_img, final_width, final_height);
+            encoder.encode(85.0)
+        } else {
+            // Use RGB for opaque images (slightly smaller file size)
+            let rgb_img = resized.to_rgb8();
+            let encoder = webp::Encoder::from_rgb(&rgb_img, final_width, final_height);
+            encoder.encode(85.0)
+        };
 
         // STEP 3: Save to SQLite (Writer)
         let db = self.writer.lock().map_err(|_| "Database lock failed")?;
