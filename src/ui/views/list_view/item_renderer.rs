@@ -425,6 +425,34 @@ fn render_item_icon(
                 Color32::from_rgb(255, 193, 7),
             );
         }
+    } else if item.is_archive() {
+        // Archive file: load native Windows icon based on extension (ZIP, 7Z, RAR, etc.)
+        if let Some(file_icon) =
+            ctx.item_icon_loader
+                .get_or_load_icon(ui.ctx(), &item.path, false, false)
+        {
+            ui.painter().image(
+                file_icon.id(),
+                icon_rect,
+                Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
+                Color32::WHITE,
+            );
+        } else {
+            // If icon not in cache and not loading, request it (async)
+            if !ctx.loading_icons.contains(&item.path)
+                && ctx.failed_icons.peek(&item.path).is_none()
+            {
+                ops.request_icon_load(item.path.clone());
+            }
+
+            ui.painter().text(
+                icon_rect.min,
+                egui::Align2::LEFT_TOP,
+                "\u{ECD3}", // ICON_FILE
+                FontId::new(14.0, egui::FontFamily::Name("icons".into())),
+                Color32::GRAY,
+            );
+        }
     } else {
         // File: load native Windows icon using IconLoader (same as grid view)
         if let Some(file_icon) =
