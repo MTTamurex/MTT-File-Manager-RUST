@@ -393,6 +393,9 @@ fn scale_column_widths(
     // Ensure total column width doesn't exceed available space
     // Reserve 8px for scrollbar
     let max_total_width = available_w - 8.0;
+    if max_total_width <= 0.0 {
+        return;
+    }
 
     // Calculate total based on which columns are actually visible
     let current_total = if ctx.is_computer_view {
@@ -405,6 +408,17 @@ fn scale_column_widths(
         // Regular View: Name + Date + Type + Size
         w_name + w_date + w_type + w_size
     };
+
+    let min_total_width = if ctx.is_computer_view {
+        260.0 // Name + Total + Free minimums
+    } else if ctx.is_onedrive_folder {
+        420.0 // Name + Date + Type + Size + Status minimums
+    } else {
+        340.0 // Name + Date + Type + Size minimums
+    };
+    if max_total_width <= min_total_width {
+        return;
+    }
 
     if current_total > max_total_width {
         // Proportionally reduce visible columns to fit
