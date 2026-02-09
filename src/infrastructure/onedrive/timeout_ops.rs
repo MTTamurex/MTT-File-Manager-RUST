@@ -47,19 +47,16 @@ where
     let path_for_log = path_buf.clone();
     let (result_tx, result_rx) = mpsc::channel::<IoTimeoutResult<T>>();
 
-    if super::onedrive_io_pool()
-        .execute(move || {
-            let _ = result_tx.send(operation(path_buf));
-        })
-        .is_err()
-    {
+    if !super::onedrive_io_pool().execute(move || {
+        let _ = result_tx.send(operation(path_buf));
+    }) {
         let active_after = super::ACTIVE_TIMEOUT_THREADS.fetch_sub(1, Ordering::SeqCst);
         eprintln!(
             "[ONEDRIVE] Active timeout threads: {} -> {}",
             active_after,
             active_after - 1
         );
-        return IoTimeoutResult::Err(std::io::ErrorKind::Other);
+        return IoTimeoutResult::Timeout;
     }
 
     let start = Instant::now();
