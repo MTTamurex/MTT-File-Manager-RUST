@@ -30,49 +30,113 @@ pub(super) fn try_handle_fast_paths(
     directory_cache: &Arc<DirectoryCache>,
     directory_index_opt: &Option<Arc<DirectoryIndex>>,
 ) -> bool {
+    let directory_mtime_ms = |path: &PathBuf| -> u64 {
+        std::fs::metadata(path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+    };
+
     // Phase 1: Instant Feedback (The Cache Hit) - HDD ONLY
     if !is_ssd {
         // DriveWatcher monitors the ENTIRE drive and proactively invalidates
         // both DirectoryCache and DirectoryIndex for ANY change on the drive.
         // No fs::metadata() mtime check needed — if the cache has data, it's valid.
-        if let Some(cached_entries) = directory_cache.get(base_path_buf) {
-            eprintln!(
-                "[FOLDER-LOADING] Phase 1: Cache hit for {:?} - {} entries, sending to UI immediately",
-                base_path_buf,
-                cached_entries.len()
-            );
+        if let Some((cached_entries, cached_at_ms)) = directory_cache.get_with_meta(base_path_buf) {
+            // Fail-safe against missed watcher events: validate folder mtime.
+            // Skip for OneDrive to avoid potential blocking metadata calls.
+            if !is_onedrive_base {
+                let dir_mtime_ms = directory_mtime_ms(base_path_buf);
+                if dir_mtime_ms > cached_at_ms {
+                    eprintln!(
+                        "[FOLDER-LOADING] DirectoryCache stale for {:?} (dir_mtime_ms={} > cached_at_ms={}), invalidating",
+                        base_path_buf, dir_mtime_ms, cached_at_ms
+                    );
+                    directory_cache.invalidate(base_path_buf);
+                    if let Some(di) = directory_index_opt {
+                        let _ = di.invalidate(base_path_buf);
+                    }
+                } else {
+                    eprintln!(
+                        "[FOLDER-LOADING] Phase 1: Cache hit for {:?} - {} entries, sending to UI immediately",
+                        base_path_buf,
+                        cached_entries.len()
+                    );
 
-            // For cached OneDrive entries, keep SyncStatus::None (unknown)
-            // until fresh disk enumeration provides authoritative status.
-            let entries_to_send = cached_entries;
+                    // For cached OneDrive entries, keep SyncStatus::None (unknown)
+                    // until fresh disk enumeration provides authoritative status.
+                    let entries_to_send = cached_entries;
 
-            // INSTANT RETURN: Send cached entries immediately (0ms navigation)
-            let mut offset = 0;
-            while offset < entries_to_send.len() {
-                if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
+                    // INSTANT RETURN: Send cached entries immediately (0ms navigation)
+                    let mut offset = 0;
+                    while offset < entries_to_send.len() {
+                        if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
+                            return true;
+                        }
+                        let end = (offset + *batch_size).min(entries_to_send.len());
+                        let chunk = entries_to_send[offset..end].to_vec();
+                        let _ = file_entry_sender.send((my_gen, chunk));
+                        ctx.request_repaint();
+                        batch_tracker
+                            .record_batch(std::time::Instant::now().elapsed(), end - offset);
+                        *batch_size = batch_tracker.batch_size();
+                        offset = end;
+                    }
+                    let _ = file_entry_sender.send((my_gen, Vec::new()));
+                    ctx.request_repaint();
+
+                    // Phase 2: HDD SILENCE - Trust cache + file watcher
+                    // The file watcher (ReadDirectoryChangesW) passively monitors the current
+                    // directory and invalidates the cache on changes. We don't need to poll
+                    // the filesystem to check for modifications — the watcher handles this.
+                    // This eliminates std::fs::metadata() syscalls on HDD per navigation.
+                    eprintln!(
+                        "[FOLDER-LOADING] Phase 2: Cache valid, trusting watcher for {:?} - HDD silence maintained",
+                        base_path_buf
+                    );
                     return true;
                 }
-                let end = (offset + *batch_size).min(entries_to_send.len());
-                let chunk = entries_to_send[offset..end].to_vec();
-                let _ = file_entry_sender.send((my_gen, chunk));
-                ctx.request_repaint();
-                batch_tracker.record_batch(std::time::Instant::now().elapsed(), end - offset);
-                *batch_size = batch_tracker.batch_size();
-                offset = end;
-            }
-            let _ = file_entry_sender.send((my_gen, Vec::new()));
-            ctx.request_repaint();
+            } else {
+                eprintln!(
+                    "[FOLDER-LOADING] Phase 1: Cache hit for {:?} - {} entries, sending to UI immediately",
+                    base_path_buf,
+                    cached_entries.len()
+                );
 
-            // Phase 2: HDD SILENCE - Trust cache + file watcher
-            // The file watcher (ReadDirectoryChangesW) passively monitors the current
-            // directory and invalidates the cache on changes. We don't need to poll
-            // the filesystem to check for modifications — the watcher handles this.
-            // This eliminates std::fs::metadata() syscalls on HDD per navigation.
-            eprintln!(
-                "[FOLDER-LOADING] Phase 2: Cache valid, trusting watcher for {:?} - HDD silence maintained",
-                base_path_buf
-            );
-            return true;
+                // For cached OneDrive entries, keep SyncStatus::None (unknown)
+                // until fresh disk enumeration provides authoritative status.
+                let entries_to_send = cached_entries;
+
+                // INSTANT RETURN: Send cached entries immediately (0ms navigation)
+                let mut offset = 0;
+                while offset < entries_to_send.len() {
+                    if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
+                        return true;
+                    }
+                    let end = (offset + *batch_size).min(entries_to_send.len());
+                    let chunk = entries_to_send[offset..end].to_vec();
+                    let _ = file_entry_sender.send((my_gen, chunk));
+                    ctx.request_repaint();
+                    batch_tracker.record_batch(std::time::Instant::now().elapsed(), end - offset);
+                    *batch_size = batch_tracker.batch_size();
+                    offset = end;
+                }
+                let _ = file_entry_sender.send((my_gen, Vec::new()));
+                ctx.request_repaint();
+
+                // Phase 2: HDD SILENCE - Trust cache + file watcher
+                // The file watcher (ReadDirectoryChangesW) passively monitors the current
+                // directory and invalidates the cache on changes. We don't need to poll
+                // the filesystem to check for modifications — the watcher handles this.
+                // This eliminates std::fs::metadata() syscalls on HDD per navigation.
+                eprintln!(
+                    "[FOLDER-LOADING] Phase 2: Cache valid, trusting watcher for {:?} - HDD silence maintained",
+                    base_path_buf
+                );
+                return true;
+            }
         } else {
             eprintln!(
                 "[FOLDER-LOADING] Phase 1: Cache miss for {:?}, proceeding to Phase 3 (disk load)",
@@ -201,7 +265,25 @@ pub(super) fn try_handle_fast_paths(
 
     if !force_refresh {
         // DriveWatcher pre-invalidates cache — no mtime check needed
-        if let Some(mut cached_entries) = directory_cache.get(&PathBuf::from(base_path)) {
+        let base_path_buf_owned = PathBuf::from(base_path);
+        if let Some((mut cached_entries, cached_at_ms)) =
+            directory_cache.get_with_meta(&base_path_buf_owned)
+        {
+            if !is_onedrive_base {
+                let dir_mtime_ms = directory_mtime_ms(&base_path_buf_owned);
+                if dir_mtime_ms > cached_at_ms {
+                    eprintln!(
+                        "[FOLDER-LOADING] Secondary DirectoryCache stale for {:?} (dir_mtime_ms={} > cached_at_ms={}), invalidating",
+                        base_path_buf_owned, dir_mtime_ms, cached_at_ms
+                    );
+                    directory_cache.invalidate(&base_path_buf_owned);
+                    if let Some(di) = directory_index_opt {
+                        let _ = di.invalidate(&base_path_buf_owned);
+                    }
+                    return false;
+                }
+            }
+
             eprintln!(
                 "[FOLDER-LOADING] Using secondary DirectoryCache for {:?}",
                 base_path

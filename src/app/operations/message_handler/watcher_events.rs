@@ -96,7 +96,8 @@ impl ImageViewerApp {
                         if should_ignore(path) {
                             continue;
                         }
-                        if let Some(parent) = path.parent() {
+                        let cleaned = Self::clean_path(path);
+                        if let Some(parent) = cleaned.parent() {
                             // Invalidate both caches so DirectoryIndex doesn't require mtime check
                             self.directory_cache.invalidate(&parent.to_path_buf());
                             if let Some(di) = &self.directory_index {
@@ -202,7 +203,7 @@ impl ImageViewerApp {
                             }
                         }
 
-                        if let Some(parent) = path.parent() {
+                        if let Some(parent) = cleaned.parent() {
                             // Invalidate both caches for consistency
                             self.directory_cache.invalidate(&parent.to_path_buf());
                             if let Some(di) = &self.directory_index {
