@@ -91,6 +91,7 @@ pub struct MpvPreview {
     // Performance: Caching (polling removed in Fase 2)
     cached_duration: Option<f64>,
     cached_tracks: Option<(Vec<TrackInfo>, Vec<TrackInfo>)>,
+    pending_external_subtitle: Option<PathBuf>,
 
     #[cfg(target_os = "windows")]
     mpv_hwnd: Option<HWND>,
@@ -147,6 +148,7 @@ impl MpvPreview {
             event_thread_handle: None,
             cached_duration: None,
             cached_tracks: None,
+            pending_external_subtitle: None,
             #[cfg(target_os = "windows")]
             mpv_hwnd: None,
             #[cfg(target_os = "windows")]
@@ -261,6 +263,10 @@ impl MpvPreview {
             if let Some(m) = &self.mpv {
                 let path_str = self.path.to_string_lossy().to_string();
                 let _ = m.command("loadfile", &[&path_str]);
+
+                // Prefer sidecar subtitle when available (movie.srt, movie.en.srt, etc.)
+                self.pending_external_subtitle = mpv_playback::find_sidecar_subtitle(&self.path);
+
                 if self.play_on_init {
                     let _ = m.set_property("pause", false);
                     self.play_on_init = false;
@@ -283,14 +289,21 @@ impl MpvPreview {
         // PERF FASE 2: State updates now handled by async event loop (zero polling overhead!)
         // Only tracks still need manual fetching (heavy JSON parse, done once per file)
         // NOTE: We must wait for file to be loaded before querying tracks, otherwise we get empty list
-        if let Some(m) = &self.mpv {
+        if let Some(m) = self.mpv.clone() {
             // Check if file is ready by checking if duration is available
-            let file_ready = mpv_playback::is_file_ready(m);
+            let file_ready = mpv_playback::is_file_ready(&m);
+            if file_ready {
+                if let Some(sidecar) = self.pending_external_subtitle.take() {
+                    if let Err(e) = self.load_external_subtitle(&sidecar) {
+                        eprintln!("[MPV] Failed to auto-load sidecar subtitle: {}", e);
+                    }
+                }
+            }
 
             // CACHE: Track list (read once file is ready, then cache until file change)
             if self.cached_tracks.is_none() && file_ready {
                 let (audio_tracks, sub_tracks): (Vec<TrackInfo>, Vec<TrackInfo>) =
-                    mpv_playback::query_tracks(m);
+                    mpv_playback::query_tracks(&m);
 
                 // Cache the tracks (even if empty, file is loaded so this is final)
                 self.cached_tracks = Some((audio_tracks.clone(), sub_tracks.clone()));

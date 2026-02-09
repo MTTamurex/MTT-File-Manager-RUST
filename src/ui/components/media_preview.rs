@@ -274,6 +274,14 @@ impl MediaPreview {
         }
     }
 
+    pub fn load_external_subtitle(&mut self, subtitle_path: &std::path::Path) -> Result<(), String> {
+        if let MediaPreview::Video(player) = self {
+            player.load_external_subtitle(subtitle_path)
+        } else {
+            Err("Preview atual não é vídeo".to_string())
+        }
+    }
+
     /// Whether video controls should be visible (based on mouse activity)
     pub fn controls_active(&self) -> bool {
         if let MediaPreview::Video(player) = self {
