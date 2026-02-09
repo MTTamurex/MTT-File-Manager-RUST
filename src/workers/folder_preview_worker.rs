@@ -35,10 +35,9 @@ pub fn spawn_folder_preview_worker(
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         }
 
-        // PERFORMANCE: Set background priority to minimize HDD contention with video playback
-        // This worker uses Windows Shell API to get folder previews - low priority I/O
+        // Preview is user-visible; keep it above background to reduce first-paint latency.
         crate::infrastructure::io_priority::set_thread_priority(
-            crate::infrastructure::io_priority::IOPriority::Background,
+            crate::infrastructure::io_priority::IOPriority::Prefetch,
         );
 
         let mut last_repaint = Instant::now();
