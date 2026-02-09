@@ -1,5 +1,7 @@
 //! Formatting helpers for Windows
 //! Follows .cursorrules: single responsibility, < 300 lines
+use windows::Win32::Foundation::{FILETIME, SYSTEMTIME};
+use windows::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime};
 
 /// Formats bytes into human-readable size (KB, MB, GB).
 pub fn format_size(bytes: u64) -> String {
@@ -24,6 +26,52 @@ pub fn format_date(timestamp: u64) -> String {
         return "Desconhecido".to_string();
     }
 
+    if let Some(local_time) = unix_timestamp_to_local_system_time(timestamp) {
+        return format!(
+            "{:02}/{:02}/{:04} {:02}:{:02}",
+            local_time.wDay,
+            local_time.wMonth,
+            local_time.wYear,
+            local_time.wHour,
+            local_time.wMinute
+        );
+    }
+
+    // Fallback if Windows local-time conversion fails for any reason.
+    format_date_utc(timestamp)
+}
+
+fn unix_timestamp_to_local_system_time(timestamp: u64) -> Option<SYSTEMTIME> {
+    const UNIX_TO_FILETIME_SECS: u64 = 11_644_473_600;
+    const HUNDRED_NS_PER_SEC: u64 = 10_000_000;
+
+    let filetime_ticks = timestamp
+        .checked_add(UNIX_TO_FILETIME_SECS)?
+        .checked_mul(HUNDRED_NS_PER_SEC)?;
+
+    let file_time = FILETIME {
+        dwLowDateTime: filetime_ticks as u32,
+        dwHighDateTime: (filetime_ticks >> 32) as u32,
+    };
+
+    let mut utc_system_time = SYSTEMTIME::default();
+    unsafe {
+        FileTimeToSystemTime(&file_time, &mut utc_system_time).ok()?;
+    }
+
+    let mut local_system_time = SYSTEMTIME::default();
+    let local_ok =
+        unsafe { SystemTimeToTzSpecificLocalTime(None, &utc_system_time, &mut local_system_time) }
+            .is_ok();
+
+    if local_ok {
+        Some(local_system_time)
+    } else {
+        Some(utc_system_time)
+    }
+}
+
+fn format_date_utc(timestamp: u64) -> String {
     const SECONDS_IN_DAY: u64 = 86_400;
     let days_since_epoch = (timestamp / SECONDS_IN_DAY) as i64;
     let seconds_of_day = timestamp % SECONDS_IN_DAY;
@@ -87,22 +135,32 @@ pub fn approximate_bitrate(size_bytes: u64, duration_100ns: u64) -> Option<u32> 
 
 #[cfg(test)]
 mod tests {
-    use super::format_date;
+    use super::{format_date, format_date_utc};
 
     #[test]
-    fn format_date_handles_known_dates() {
-        assert_eq!(format_date(1760097600), "10/10/2025 12:00");
-        assert_eq!(format_date(1770638400), "09/02/2026 12:00");
-        assert_eq!(format_date(1770465600), "07/02/2026 12:00");
+    fn format_date_utc_handles_known_dates() {
+        assert_eq!(format_date_utc(1760097600), "10/10/2025 12:00");
+        assert_eq!(format_date_utc(1770638400), "09/02/2026 12:00");
+        assert_eq!(format_date_utc(1770465600), "07/02/2026 12:00");
     }
 
     #[test]
-    fn format_date_handles_leap_day() {
-        assert_eq!(format_date(1709221500), "29/02/2024 15:45");
+    fn format_date_utc_handles_leap_day() {
+        assert_eq!(format_date_utc(1709221500), "29/02/2024 15:45");
     }
 
     #[test]
     fn format_date_zero_is_unknown() {
         assert_eq!(format_date(0), "Desconhecido");
+    }
+
+    #[test]
+    fn format_date_returns_expected_shape() {
+        let s = format_date(1760097600);
+        assert_eq!(s.len(), 16);
+        assert_eq!(&s[2..3], "/");
+        assert_eq!(&s[5..6], "/");
+        assert_eq!(&s[10..11], " ");
+        assert_eq!(&s[13..14], ":");
     }
 }
