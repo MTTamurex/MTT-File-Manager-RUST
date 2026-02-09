@@ -422,13 +422,13 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             if let Some(info) = cached_info {
                 entry.drive_info = Some(info);
             } else {
-                // Fallback: query volume info directly (fast for local drives — kernel-cached)
+                // Fallback NON-BLOCKING: avoid volume probes in render loop.
+                // Detailed volume info is filled asynchronously by computer view pipeline.
                 let drive_type = windows_infra::detect_drive_type(&app.current_path);
-                let vol = windows_infra::get_volume_info(&app.current_path);
                 entry.drive_info = Some(crate::domain::file_entry::DriveInfo {
-                    file_system: vol.file_system,
-                    total_space: vol.total_space,
-                    free_space: vol.free_space,
+                    file_system: String::new(),
+                    total_space: 0,
+                    free_space: 0,
                     drive_type,
                 });
             }

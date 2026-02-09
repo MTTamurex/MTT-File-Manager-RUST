@@ -7,8 +7,9 @@
 //! wrappers to prevent indefinite blocking on cloud-only files.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
+use std::time::Duration;
 
 use crate::domain::file_entry::SyncStatus;
 mod attributes;
@@ -16,8 +17,12 @@ mod directory_enum;
 mod path_detection;
 mod timeout_ops;
 
-// Maximum number of concurrent timeout threads (prevents thread exhaustion)
-const MAX_CONCURRENT_TIMEOUT_THREADS: u64 = 4;
+// Base worker count for timeout-protected OneDrive I/O.
+const ONEDRIVE_IO_BASE_WORKERS: usize = 4;
+// Temporary overflow workers to avoid starvation when base workers are stuck.
+const ONEDRIVE_IO_MAX_OVERFLOW_WORKERS: usize = 24;
+// Maximum concurrent timeout requests waiting on results.
+const MAX_CONCURRENT_TIMEOUT_THREADS: u64 = 32;
 
 // Counter of active timeout threads for monitoring and limiting
 static ACTIVE_TIMEOUT_THREADS: AtomicU64 = AtomicU64::new(0);
@@ -35,16 +40,25 @@ static ONEDRIVE_IO_POOL: OnceLock<OneDriveIoPool> = OnceLock::new();
 type IoJob = Box<dyn FnOnce() + Send + 'static>;
 
 struct OneDriveIoPool {
-    sender: mpsc::Sender<IoJob>,
+    sender: mpsc::SyncSender<IoJob>,
+    receiver: Arc<Mutex<mpsc::Receiver<IoJob>>>,
+    active_workers: Arc<AtomicUsize>,
+    overflow_workers: Arc<AtomicUsize>,
+    max_overflow_workers: usize,
 }
 
 impl OneDriveIoPool {
-    fn new(worker_count: usize) -> Self {
-        let (sender, receiver) = mpsc::channel::<IoJob>();
+    fn new(worker_count: usize, max_overflow_workers: usize) -> Self {
+        // Keep queue small to avoid long backlogs behind blocked I/O.
+        let queue_capacity = worker_count.max(4);
+        let (sender, receiver) = mpsc::sync_channel::<IoJob>(queue_capacity);
         let receiver = Arc::new(Mutex::new(receiver));
+        let active_workers = Arc::new(AtomicUsize::new(0));
+        let overflow_workers = Arc::new(AtomicUsize::new(0));
 
         for worker_id in 0..worker_count {
             let receiver_clone = Arc::clone(&receiver);
+            let active_workers_clone = Arc::clone(&active_workers);
             let _ = std::thread::Builder::new()
                 .name(format!("onedrive-io-{}", worker_id))
                 .spawn(move || loop {
@@ -54,25 +68,126 @@ impl OneDriveIoPool {
                     };
 
                     match recv_result {
-                        Ok(job) => job(),
+                        Ok(job) => {
+                            active_workers_clone.fetch_add(1, Ordering::SeqCst);
+                            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+                            active_workers_clone.fetch_sub(1, Ordering::SeqCst);
+                        }
                         Err(_) => break,
                     }
                 });
         }
 
-        Self { sender }
+        Self {
+            sender,
+            receiver,
+            active_workers,
+            overflow_workers,
+            max_overflow_workers,
+        }
     }
 
-    fn execute<F>(&self, job: F) -> Result<(), mpsc::SendError<IoJob>>
+    fn execute<F>(&self, job: F) -> bool
     where
         F: FnOnce() + Send + 'static,
     {
-        self.sender.send(Box::new(job))
+        let queued = match self.sender.try_send(Box::new(job)) {
+            Ok(()) => true,
+            Err(mpsc::TrySendError::Full(job)) => {
+                // Queue is full while workers are likely blocked.
+                // Run job directly on an overflow worker to keep progress.
+                return self.try_spawn_overflow_worker_with_job(job);
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => return false,
+        };
+
+        if queued {
+            let base_saturated =
+                self.active_workers.load(Ordering::Acquire) >= ONEDRIVE_IO_BASE_WORKERS;
+            if base_saturated {
+                let _ = self.try_spawn_overflow_worker();
+            }
+        }
+
+        true
+    }
+
+    fn try_acquire_overflow_slot(&self) -> bool {
+        self.overflow_workers
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                if current < self.max_overflow_workers {
+                    Some(current + 1)
+                } else {
+                    None
+                }
+            })
+            .is_ok()
+    }
+
+    fn try_spawn_overflow_worker(&self) -> bool {
+        if !self.try_acquire_overflow_slot() {
+            return false;
+        }
+
+        let receiver = Arc::clone(&self.receiver);
+        let active_workers = Arc::clone(&self.active_workers);
+        let overflow_workers = Arc::clone(&self.overflow_workers);
+
+        let spawn_result = std::thread::Builder::new()
+            .name("onedrive-io-overflow".to_string())
+            .spawn(move || {
+                let recv_result = match receiver.lock() {
+                    Ok(rx) => rx.recv_timeout(Duration::from_millis(10)),
+                    Err(_) => Err(mpsc::RecvTimeoutError::Disconnected),
+                };
+
+                if let Ok(job) = recv_result {
+                    active_workers.fetch_add(1, Ordering::SeqCst);
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+                    active_workers.fetch_sub(1, Ordering::SeqCst);
+                }
+
+                overflow_workers.fetch_sub(1, Ordering::SeqCst);
+            });
+
+        if spawn_result.is_err() {
+            self.overflow_workers.fetch_sub(1, Ordering::SeqCst);
+            return false;
+        }
+
+        true
+    }
+
+    fn try_spawn_overflow_worker_with_job(&self, job: IoJob) -> bool {
+        if !self.try_acquire_overflow_slot() {
+            return false;
+        }
+
+        let active_workers = Arc::clone(&self.active_workers);
+        let overflow_workers = Arc::clone(&self.overflow_workers);
+
+        let spawn_result = std::thread::Builder::new()
+            .name("onedrive-io-overflow-direct".to_string())
+            .spawn(move || {
+                active_workers.fetch_add(1, Ordering::SeqCst);
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+                active_workers.fetch_sub(1, Ordering::SeqCst);
+                overflow_workers.fetch_sub(1, Ordering::SeqCst);
+            });
+
+        if spawn_result.is_err() {
+            self.overflow_workers.fetch_sub(1, Ordering::SeqCst);
+            return false;
+        }
+
+        true
     }
 }
 
 fn onedrive_io_pool() -> &'static OneDriveIoPool {
-    ONEDRIVE_IO_POOL.get_or_init(|| OneDriveIoPool::new(MAX_CONCURRENT_TIMEOUT_THREADS as usize))
+    ONEDRIVE_IO_POOL.get_or_init(|| {
+        OneDriveIoPool::new(ONEDRIVE_IO_BASE_WORKERS, ONEDRIVE_IO_MAX_OVERFLOW_WORKERS)
+    })
 }
 
 /// Set the minimized state of the application.
