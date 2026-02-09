@@ -208,10 +208,15 @@ pub(super) fn render_list_item(
                 }
 
                 // Confirma renomeação com Enter (enquanto tem foco)
-                if response.has_focus() && ui.input(|i_in| i_in.key_pressed(egui::Key::Enter)) {
+                if ui.input(|i_in| i_in.key_pressed(egui::Key::Enter)) {
                     ops.rename_with_shell(i);
                 }
             });
+
+            // Persist edited text back to rename state (same behavior as grid mode).
+            if let Some((_, rename_text)) = ctx.renaming_state.as_mut() {
+                *rename_text = text;
+            }
         } else {
             // Name (truncated to fit column precisely)
             let font_id = FontId::proportional(12.0);
