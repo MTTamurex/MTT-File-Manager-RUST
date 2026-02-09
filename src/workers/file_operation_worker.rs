@@ -203,8 +203,12 @@ pub fn start_file_operation_worker(
                 } => {
                     // Capture source folder before move
                     let source_folder = path.parent().map(|p| p.to_path_buf());
-                    let success =
-                        shell_operations::move_item_with_shell(&path, &dest_folder, hwnd.0);
+                    // Use IFileOperation for virtual paths (like items inside archives)
+                    let success = if crate::infrastructure::windows::is_shell_navigation_path(&path, false) {
+                        shell_operations::move_item_with_file_op(&path, &dest_folder, hwnd.0)
+                    } else {
+                        shell_operations::move_item_with_shell(&path, &dest_folder, hwnd.0)
+                    };
                     // Notify source folder for cross-tab refresh
                     if success {
                         if let Some(src) = source_folder {
@@ -220,8 +224,19 @@ pub fn start_file_operation_worker(
                     dest_folder,
                     hwnd,
                 } => {
-                    let _ = shell_operations::copy_items_with_shell(&paths, &dest_folder, hwnd.0);
-                    let _ = result_sender.send(FileOperationResult::CopyCompleted { dest_folder });
+                    // Check if any path is a virtual path (inside archive)
+                    let has_virtual_path = paths.iter()
+                        .any(|p| crate::infrastructure::windows::is_shell_navigation_path(p, false));
+
+                    let success = if has_virtual_path {
+                        shell_operations::copy_items_with_file_op(&paths, &dest_folder, hwnd.0)
+                    } else {
+                        shell_operations::copy_items_with_shell(&paths, &dest_folder, hwnd.0)
+                    };
+
+                    if success {
+                        let _ = result_sender.send(FileOperationResult::CopyCompleted { dest_folder });
+                    }
                 }
                 FileOperationRequest::MoveBatch {
                     paths,
@@ -235,8 +250,16 @@ pub fn start_file_operation_worker(
                             source_folders.insert(parent.to_path_buf());
                         }
                     }
-                    let success =
-                        shell_operations::move_items_with_shell(&paths, &dest_folder, hwnd.0);
+                    // Check if any path is a virtual path (inside archive)
+                    let has_virtual_path = paths.iter()
+                        .any(|p| crate::infrastructure::windows::is_shell_navigation_path(p, false));
+
+                    let success = if has_virtual_path {
+                        shell_operations::move_items_with_file_op(&paths, &dest_folder, hwnd.0)
+                    } else {
+                        shell_operations::move_items_with_shell(&paths, &dest_folder, hwnd.0)
+                    };
+
                     if success && !source_folders.is_empty() {
                         let _ = result_sender.send(FileOperationResult::MoveBatchCompleted {
                             source_folders: source_folders.into_iter().collect(),
