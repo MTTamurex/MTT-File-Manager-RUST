@@ -130,7 +130,7 @@ fn render_computer_view_sections(
     item_h: f32,
     available_w: f32,
     virtual_cell_h: f32,
-    count: usize,
+    _count: usize,
     is_scrolling: bool,
     clicked_item: &mut Option<usize>,
     double_clicked_item: &mut Option<usize>,
@@ -138,26 +138,15 @@ fn render_computer_view_sections(
 ) {
     let mut current_y = content_min.y - current_scroll;
 
-    let mut local_indices = Vec::with_capacity(count / 2);
-    let mut network_indices = Vec::with_capacity(count / 2);
-
-    for (i, item) in ctx.items.iter().enumerate() {
-        let is_remote = item
-            .drive_info
-            .as_ref()
-            .is_some_and(|di| di.drive_type == crate::infrastructure::windows::DriveType::Remote);
-        if is_remote {
-            network_indices.push(i);
-        } else {
-            local_indices.push(i);
-        }
-    }
+    // PERFORMANCE: Use pre-computed indices from view_setup (computed once on items change, not per frame)
+    let local_indices = ctx.computer_local_indices;
+    let network_indices = ctx.computer_network_indices;
 
     render_section_indices(
         ui,
         ctx,
         "Discos locais",
-        &local_indices,
+        local_indices,
         &mut current_y,
         content_min,
         viewport_h,
@@ -176,7 +165,7 @@ fn render_computer_view_sections(
         ui,
         ctx,
         "Unidades de rede",
-        &network_indices,
+        network_indices,
         &mut current_y,
         content_min,
         viewport_h,
