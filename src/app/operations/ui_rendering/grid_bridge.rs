@@ -271,6 +271,8 @@ impl ImageViewerApp {
             drag_target_folder: self.drag_target_folder.clone(),
             drag_started_item: &mut drag_started_item,
             drag_hovered_item: &mut drag_hovered_item,
+            computer_local_indices: &self.computer_view_local_indices,
+            computer_network_indices: &self.computer_view_network_indices,
         };
 
         // Use a different approach: collect actions in vectors

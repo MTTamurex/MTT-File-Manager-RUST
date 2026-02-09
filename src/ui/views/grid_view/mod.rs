@@ -168,6 +168,10 @@ pub struct GridViewContext<'a> {
     pub drag_started_item: &'a mut Option<usize>,
     /// Output: currently hovered folder item during drag
     pub drag_hovered_item: &'a mut Option<usize>,
+    /// PERFORMANCE: Pre-computed local drive indices for computer view (avoids per-frame allocation)
+    pub computer_local_indices: &'a [usize],
+    /// PERFORMANCE: Pre-computed network drive indices for computer view
+    pub computer_network_indices: &'a [usize],
 }
 
 /// Operations that can be performed from grid view
