@@ -1,5 +1,8 @@
 use super::state::{MpvState, TrackInfo};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
+
+const EXTERNAL_SUBTITLE_EXTENSIONS: &[&str] = &["srt", "ass", "ssa", "vtt", "sub"];
 
 /// Play commands wrapper
 pub fn play(mpv: &Option<Arc<mpv::Mpv>>) {
@@ -103,6 +106,60 @@ pub fn set_subtitle_track(
             track.selected = track.id == id;
         }
     }
+}
+
+/// Find sidecar subtitle near the video file using strict basename match.
+///
+/// Rule:
+/// - Only files with EXACT same basename as the video are accepted
+///   (movie.mkv -> movie.srt/movie.ass/etc.)
+pub fn find_sidecar_subtitle(video_path: &Path) -> Option<PathBuf> {
+    let parent = video_path.parent()?;
+    let stem = video_path.file_stem()?.to_str()?;
+
+    // Strict basename match with extension priority order.
+    for ext in EXTERNAL_SUBTITLE_EXTENSIONS {
+        let candidate = parent.join(format!("{}.{}", stem, ext));
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
+/// Add external subtitle and select it immediately.
+pub fn load_external_subtitle(
+    mpv: &Option<Arc<mpv::Mpv>>,
+    state: &Arc<RwLock<MpvState>>,
+    cached_tracks: &mut Option<(Vec<TrackInfo>, Vec<TrackInfo>)>,
+    subtitle_path: &Path,
+) -> Result<(), String> {
+    if !subtitle_path.is_file() {
+        return Err(format!(
+            "Arquivo de legenda não encontrado: {}",
+            subtitle_path.display()
+        ));
+    }
+
+    let m = mpv
+        .as_ref()
+        .ok_or_else(|| "Player MPV não inicializado".to_string())?;
+
+    let subtitle_str = subtitle_path.to_string_lossy().to_string();
+    m.command("sub-add", &[&subtitle_str, "select"])
+        .map_err(|e| format!("Falha ao carregar legenda externa: {:?}", e))?;
+
+    // Force refresh of subtitle track list after sub-add.
+    *cached_tracks = None;
+
+    if let Ok(mut s) = state.write() {
+        for track in &mut s.subtitle_tracks {
+            track.selected = false;
+        }
+    }
+
+    Ok(())
 }
 
 /// Check if file is ready by checking if duration is available

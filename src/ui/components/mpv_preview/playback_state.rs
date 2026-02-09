@@ -1,4 +1,5 @@
 use super::*;
+use std::path::Path;
 
 impl MpvPreview {
     /// Retorna o estado atual de forma segura, com valor padrão em caso de erro
@@ -124,5 +125,14 @@ impl MpvPreview {
 
     pub fn set_subtitle_track(&mut self, id: i64) {
         mpv_playback::set_subtitle_track(&self.mpv, &self.state, &mut self.cached_tracks, id);
+    }
+
+    pub fn load_external_subtitle(&mut self, subtitle_path: &Path) -> Result<(), String> {
+        mpv_playback::load_external_subtitle(
+            &self.mpv,
+            &self.state,
+            &mut self.cached_tracks,
+            subtitle_path,
+        )
     }
 }

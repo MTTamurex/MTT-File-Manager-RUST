@@ -2,6 +2,7 @@ use crate::ui::components::MediaPreview;
 use crate::ui::preview_panel::utils::truncate_text_to_fit;
 use crate::ui::svg_icons::SvgIconManager;
 use eframe::egui;
+use rfd::FileDialog;
 
 /// Helper: Create frameless button with hover effect
 pub fn add_icon_button(
@@ -211,7 +212,7 @@ fn draw_audio_track_picker(
 fn draw_subtitle_track_picker(
     ui: &mut egui::Ui,
     preview: &mut MediaPreview,
-    _svg_manager: &mut SvgIconManager,
+    svg_manager: &mut SvgIconManager,
 ) {
     let subtitle_tracks = preview
         .get_video_state()
@@ -245,6 +246,34 @@ fn draw_subtitle_track_picker(
     ) {
         let new_id = sub_options[new_idx].0.unwrap_or(0);
         preview.set_subtitle_track(new_id);
+    }
+
+    ui.add_space(4.0);
+
+    let icon_color_val = icon_color(ui.visuals().dark_mode);
+    if let Some(tex) = svg_manager.get_icon(ui.ctx(), "languages", 48, icon_color_val) {
+        if add_icon_button(
+            ui,
+            &tex,
+            18.0,
+            "Carregar legenda externa (.srt/.ass/.vtt/.sub)",
+            ui.visuals().dark_mode,
+        ) {
+            let mut file_dialog = FileDialog::new()
+                .add_filter("Legendas", &["srt", "ass", "ssa", "vtt", "sub"]);
+
+            if let Some(current_video_path) = preview.path() {
+                if let Some(parent) = current_video_path.parent() {
+                    file_dialog = file_dialog.set_directory(parent);
+                }
+            }
+
+            if let Some(subtitle_path) = file_dialog.pick_file() {
+                if let Err(e) = preview.load_external_subtitle(&subtitle_path) {
+                    eprintln!("[MPV] Failed to load subtitle from picker: {}", e);
+                }
+            }
+        }
     }
 
     ui.add_space(2.0);
