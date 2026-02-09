@@ -39,8 +39,8 @@ pub(super) fn try_handle_fast_paths(
             .unwrap_or(0)
     };
 
-    // Phase 1: Instant Feedback (The Cache Hit) - HDD ONLY
-    if !is_ssd {
+    // Phase 1: Instant feedback from DirectoryCache (all local disks).
+    {
         // DriveWatcher monitors the ENTIRE drive and proactively invalidates
         // both DirectoryCache and DirectoryIndex for ANY change on the drive.
         // No fs::metadata() mtime check needed — if the cache has data, it's valid.
@@ -143,8 +143,6 @@ pub(super) fn try_handle_fast_paths(
                 base_path_buf
             );
         }
-    } else {
-        eprintln!("[FOLDER-LOADING] SSD detected - bypassing cache for raw disk speed");
     }
 
     eprintln!(
@@ -236,10 +234,7 @@ pub(super) fn try_handle_fast_paths(
                         }
                     }
 
-                    // Only cache for HDDs - SSDs bypass cache
-                    if !is_ssd {
-                        directory_cache.put(base.clone(), entries.clone());
-                    }
+                    directory_cache.put(base.clone(), entries.clone());
 
                     let mut offset = 0;
                     while offset < entries.len() {
@@ -297,10 +292,7 @@ pub(super) fn try_handle_fast_paths(
             }
 
             if changed {
-                // Only cache for HDDs - SSDs bypass cache
-                if !is_ssd {
-                    directory_cache.put(PathBuf::from(base_path), cached_entries.clone());
-                }
+                directory_cache.put(PathBuf::from(base_path), cached_entries.clone());
             }
             let mut offset = 0;
             while offset < cached_entries.len() {

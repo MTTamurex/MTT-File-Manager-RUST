@@ -12,7 +12,9 @@ pub struct AdaptiveBatchConfig {
 impl AdaptiveBatchConfig {
     pub fn initial_batch_size(&self) -> usize {
         match (self.is_ssd, self.total_items) {
-            (true, _) => 500,
+            // Keep SSD/NVMe responsive: smaller first batches improve time-to-first-items.
+            (true, Some(n)) if n <= 80 => n.max(MIN_BATCH_SIZE),
+            (true, _) => 250,
             (false, Some(n)) if n <= 50 => n.max(MIN_BATCH_SIZE),
             (false, Some(n)) if n <= 200 => 50,
             (false, Some(n)) if n <= 1000 => 100,
@@ -83,5 +85,14 @@ mod tests {
             total_items: Some(40),
         };
         assert_eq!(config.initial_batch_size(), 40);
+    }
+
+    #[test]
+    fn initial_batch_size_ssd_default() {
+        let config = AdaptiveBatchConfig {
+            is_ssd: true,
+            total_items: Some(5000),
+        };
+        assert_eq!(config.initial_batch_size(), 250);
     }
 }

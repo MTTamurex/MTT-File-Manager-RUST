@@ -98,13 +98,10 @@ impl ImageViewerApp {
                         }
                         let cleaned = Self::clean_path(path);
                         if let Some(parent) = cleaned.parent() {
-                            // Invalidate both caches so DirectoryIndex doesn't require mtime check
-                            self.directory_cache.invalidate(&parent.to_path_buf());
-                            if let Some(di) = &self.directory_index {
-                                let _ = di.invalidate(parent);
-                            }
                             let parent_norm = Self::normalize_for_match(parent);
                             if parent_norm == current_path_norm {
+                                // Only invalidate active folder cache to keep watcher handling O(1).
+                                self.directory_cache.invalidate(&parent.to_path_buf());
                                 #[cfg(debug_assertions)]
                                 eprintln!(
                                     "[FS-WATCH] CREATE: {:?}",
@@ -119,24 +116,17 @@ impl ImageViewerApp {
                             continue;
                         }
                         let cleaned = Self::clean_path(path);
-
-                        // If the removed file was the folder cover of its parent folder,
-                        // invalidate immediately before DB cleanup so lookup still resolves.
-                        self.invalidate_folder_cover_for_removed_path(&cleaned);
-
-                        if let Some(parent) = cleaned.parent() {
-                            self.directory_cache.invalidate(&parent.to_path_buf());
-                            // Invalidate DirectoryIndex so mtime check is not needed
-                            if let Some(di) = &self.directory_index {
-                                let _ = di.invalidate(parent);
-                            }
-                        }
-                        self.directory_cache.invalidate_children(&cleaned);
                         pending_disk_cache_invalidations.push(cleaned.clone());
 
-                        if let Some(parent) = path.parent() {
+                        if let Some(parent) = cleaned.parent() {
                             let parent_norm = Self::normalize_for_match(parent);
                             if parent_norm == current_path_norm {
+                                // If the removed file was the folder cover of its parent folder,
+                                // invalidate immediately before DB cleanup so lookup still resolves.
+                                self.invalidate_folder_cover_for_removed_path(&cleaned);
+                                self.directory_cache.invalidate(&parent.to_path_buf());
+                                self.directory_cache.invalidate_children(&cleaned);
+
                                 #[cfg(debug_assertions)]
                                 eprintln!(
                                     "[FS-WATCH] DELETE: {:?}",
@@ -204,13 +194,9 @@ impl ImageViewerApp {
                         }
 
                         if let Some(parent) = cleaned.parent() {
-                            // Invalidate both caches for consistency
-                            self.directory_cache.invalidate(&parent.to_path_buf());
-                            if let Some(di) = &self.directory_index {
-                                let _ = di.invalidate(parent);
-                            }
                             let parent_norm = Self::normalize_for_match(parent);
                             if parent_norm == current_path_norm {
+                                self.directory_cache.invalidate(&parent.to_path_buf());
                                 #[cfg(debug_assertions)]
                                 eprintln!(
                                     "[FS-WATCH] MODIFY: {:?}",
@@ -228,9 +214,6 @@ impl ImageViewerApp {
                             let cleaned_old = Self::clean_path(old_path);
                             let cleaned_new = Self::clean_path(new_path);
 
-                            // Old path was removed from its original folder (cut/move/rename).
-                            // If it was used as folder cover, force recalculation.
-                            self.invalidate_folder_cover_for_removed_path(&cleaned_old);
                             pending_disk_cache_invalidations.push(cleaned_old.clone());
 
                             // Invalidate caches for both paths
@@ -240,23 +223,19 @@ impl ImageViewerApp {
                             self.cache_manager.failed_thumbnails.pop(&cleaned_new);
 
                             if let Some(parent) = cleaned_old.parent() {
-                                self.directory_cache.invalidate(&parent.to_path_buf());
-                                // Invalidate DirectoryIndex for both old and new parent
-                                if let Some(di) = &self.directory_index {
-                                    let _ = di.invalidate(parent);
-                                }
                                 let parent_norm = Self::normalize_for_match(parent);
                                 if parent_norm == current_path_norm {
+                                    // Old path was removed from its original folder (cut/move/rename).
+                                    // If it was used as folder cover, force recalculation.
+                                    self.invalidate_folder_cover_for_removed_path(&cleaned_old);
+                                    self.directory_cache.invalidate(&parent.to_path_buf());
                                     self.pending_auto_reload = true;
                                 }
                             }
                             if let Some(parent) = cleaned_new.parent() {
-                                self.directory_cache.invalidate(&parent.to_path_buf());
-                                if let Some(di) = &self.directory_index {
-                                    let _ = di.invalidate(parent);
-                                }
                                 let parent_norm = Self::normalize_for_match(parent);
                                 if parent_norm == current_path_norm {
+                                    self.directory_cache.invalidate(&parent.to_path_buf());
                                     self.pending_auto_reload = true;
                                 }
                             }

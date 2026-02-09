@@ -130,10 +130,7 @@ pub(super) fn try_handle_optimized_tiers(
                 ctx.request_repaint();
             }
             if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
-                // Only cache for HDDs - SSDs bypass cache
-                if !is_ssd {
-                    directory_cache.put(PathBuf::from(base_path), all_entries_disk.clone());
-                }
+                directory_cache.put(PathBuf::from(base_path), all_entries_disk.clone());
                 if let Some(di) = directory_index_opt {
                     let indexed: Vec<IndexedFile> = all_entries_disk
                         .iter()

@@ -47,8 +47,7 @@ impl ImageViewerApp {
             let mut batch_tracker = AdaptiveBatchTracker::new(config);
             let mut batch_size = batch_tracker.batch_size();
 
-            // STALE-WHILE-REVALIDATE STRATEGY: Instant feedback with debounce
-            // NOTE: Only used for HDDs - SSDs bypass cache entirely for raw speed
+            // STALE-WHILE-REVALIDATE STRATEGY: Instant feedback via DirectoryCache
             let base_path_buf = PathBuf::from(&base_path);
             // PERFORMANCE: Only use is_onedrive_path() which is string-based (no I/O)
             // path_has_cloud_attributes() was removed because GetFileAttributesW can BLOCK
@@ -400,11 +399,8 @@ impl ImageViewerApp {
             }
 
             if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
-                // CACHE STORAGE: Store in directory cache for instant future navigation (HDD ONLY)
-                // SSDs bypass cache entirely - raw disk speed is faster than RAM cache
-                if !is_ssd {
-                    directory_cache.put(PathBuf::from(&base_path), all_entries_disk.clone());
-                }
+                // CACHE STORAGE: store for instant future navigation (all local disks)
+                directory_cache.put(PathBuf::from(&base_path), all_entries_disk.clone());
 
                 if let Some(di) = &directory_index_opt {
                     let indexed: Vec<IndexedFile> = all_entries_disk
