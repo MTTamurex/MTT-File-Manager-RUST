@@ -1,4 +1,4 @@
-use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode};
+use crate::domain::file_entry::{is_archive_extension, FileEntry, FoldersPosition, SortMode};
 use rayon::prelude::*;
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -16,12 +16,6 @@ fn compare_names_cow(a_name: &str, b_name: &str) -> Ordering {
     natord::compare_ignore_case(a_name, b_name)
 }
 
-/// PERFORMANCE: Verifica se termina com extensão ignorando case
-#[inline]
-fn ends_with_ignore_case(name: &str, extension: &str) -> bool {
-    name.to_lowercase().ends_with(&extension.to_lowercase())
-}
-
 /// Sorts a slice of FileEntry in place based on the given criteria.
 /// Uses Rayon for parallel sorting if the list is large (>5000 items).
 ///
@@ -33,10 +27,9 @@ pub fn sort_items(
     descending: bool,
     folders_position: FoldersPosition,
 ) {
-    // Helper para verificar se é diretório "verdadeiro" (não ZIP)
-    // PERFORMANCE: Usa ends_with_ignore_case para evitar alocação
+    // Helper para verificar se é diretório "verdadeiro" (não arquivo compactado)
     let is_true_dir =
-        |item: &FileEntry| -> bool { item.is_dir && !ends_with_ignore_case(&item.name, ".zip") };
+        |item: &FileEntry| -> bool { item.is_dir && !is_archive_extension(&item.name) };
 
     let compare = |a: &FileEntry, b: &FileEntry| -> Ordering {
         // 1. Lógica de posicionamento de pastas (ZIPs são tratados como arquivos)

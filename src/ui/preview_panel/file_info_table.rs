@@ -109,8 +109,8 @@ pub fn render_file_info_table(
             } else if let Some(drive) = &file.drive_info {
                 add_detail(ui, "Tipo:", format!("{:?}", drive.drive_type));
             } else if file.is_dir {
-                if file.is_zip() {
-                    add_detail(ui, "Tipo:", "Arquivo ZIP".to_string());
+                if let Some(label) = crate::domain::file_entry::archive_type_label(&file.name) {
+                    add_detail(ui, "Tipo:", label.to_string());
                 } else {
                     add_detail(ui, "Tipo:", "Pasta de Arquivos".to_string());
                 }
@@ -131,7 +131,7 @@ pub fn render_file_info_table(
                     crate::infrastructure::windows::format_date(file.modified),
                 );
 
-                let size_str = if file.is_dir && !file.is_zip() {
+                let size_str = if file.is_dir && !file.is_archive() {
                     if let Some(size) = folder_size {
                         let formatted = crate::infrastructure::windows::format_size(size);
                         if is_folder_size_loading {
@@ -148,7 +148,7 @@ pub fn render_file_info_table(
 
                 add_detail(ui, "Tamanho:", size_str);
 
-                if file.is_dir && !file.is_zip() && folder_size.is_none() && !is_folder_size_loading {
+                if file.is_dir && !file.is_archive() && folder_size.is_none() && !is_folder_size_loading {
                     action = Some(PreviewPanelAction::CalculateFolderSize(file.path.clone()));
                 }
             }

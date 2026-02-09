@@ -41,8 +41,8 @@ pub fn render_fallback(
         } else {
             ui.label(egui::RichText::new("🗑").size(icon_size * 0.6));
         }
-    } else if file.is_dir && !file.is_zip() {
-        // PASTA (Exceto Zip)
+    } else if file.is_dir && !file.is_archive() {
+        // PASTA (Exceto arquivos compactados)
         if is_recycle_bin_view {
             item_icon_loader.ensure_folder_icon(ui.ctx());
             if let Some(icon) = item_icon_loader.folder_icon() {
@@ -111,10 +111,9 @@ pub fn render_fallback(
             }
         }
     } else {
-        // IS FILE (or Zip Archive)
-        // Force is_folder=false for Zip archives to get the Zip Icon
-        let is_zip_archive = file.is_zip();
-        let treat_as_folder = file.is_dir && !is_zip_archive;
+        // IS FILE (or Archive)
+        // Force is_folder=false for archives to get the archive icon
+        let treat_as_folder = file.is_dir && !file.is_archive();
 
         if let Some(icon) = item_icon_loader.get_or_load_icon_sized(
             ui.ctx(),

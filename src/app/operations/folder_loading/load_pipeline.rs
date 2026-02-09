@@ -1,5 +1,5 @@
 use crate::app::state::ImageViewerApp;
-use crate::domain::file_entry::FileEntry;
+use crate::domain::file_entry::{is_archive_extension, FileEntry};
 use crate::infrastructure::adaptive_batch::{AdaptiveBatchConfig, AdaptiveBatchTracker};
 use crate::infrastructure::directory_index::IndexedFile;
 use crate::infrastructure::io_priority;
@@ -141,12 +141,12 @@ impl ImageViewerApp {
                                 let mut is_dir = (attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
                                 let full_path = PathBuf::from(&base_path).join(&filename);
 
-                                if !is_dir && filename.to_lowercase().ends_with(".zip") {
+                                let is_archive = is_archive_extension(&filename);
+                                if !is_dir && is_archive {
                                     is_dir = true;
                                 }
 
-                                let is_zip = filename.to_lowercase().ends_with(".zip");
-                                let file_size = if is_dir && !is_zip { 0 } else { size };
+                                let file_size = if is_dir && !is_archive { 0 } else { size };
 
                                 let sync_status = onedrive::get_sync_status(attrs, true);
 
@@ -308,13 +308,13 @@ impl ImageViewerApp {
                             {
                                 let mut is_dir = (extended_attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
 
-                                // Treat ZIP files as navigable folders
-                                if !is_dir && filename.to_lowercase().ends_with(".zip") {
+                                // Treat archive files as navigable folders
+                                let is_archive = is_archive_extension(&filename);
+                                if !is_dir && is_archive {
                                     is_dir = true;
                                 }
 
-                                let is_zip = filename.to_lowercase().ends_with(".zip");
-                                let size = if is_dir && !is_zip {
+                                let size = if is_dir && !is_archive {
                                     0
                                 } else {
                                     ((find_data.nFileSizeHigh as u64) << 32)
