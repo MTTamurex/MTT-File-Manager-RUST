@@ -24,7 +24,8 @@ pub fn render_file_info_table(
             ui.horizontal(|ui| {
                 ui.add_space(5.0);
 
-                let has_button = !file.is_dir && file.drive_info.is_none();
+                // Show button for: files (non-folders) that are not drives, OR for folders (to refresh preview)
+                let has_button = (!file.is_dir && file.drive_info.is_none()) || (file.is_dir && !file.is_archive());
                 // Reserve space for button if needed
                 let button_width = if has_button { 22.0 } else { 0.0 };
                 // Calculate available width for text
@@ -44,10 +45,11 @@ pub fn render_file_info_table(
 
                 // 2. Refresh Button (Right aligned)
                 if has_button {
-                    // PERFORMANCE: Use is_media() method
+                    // Show refresh button for media files OR folders (in grid view with preview)
                     let is_media = file.is_media();
+                    let is_folder = file.is_dir && !file.is_archive();
 
-                    if is_media {
+                    if is_media || is_folder {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
                             ui.add_space(5.0); // Spacing between text and button
                             let icon_color = if ui.visuals().dark_mode {
@@ -58,6 +60,11 @@ pub fn render_file_info_table(
                             if let Some(tex) =
                                 svg_manager.get_icon(ui.ctx(), "refresh", 32, icon_color)
                             {
+                                let hover_text = if is_folder {
+                                    "Recarregar Preview da Pasta"
+                                } else {
+                                    "Recarregar Thumbnail"
+                                };
                                 if ui
                                     .add(
                                         egui::ImageButton::new(egui::load::SizedTexture::new(
@@ -66,7 +73,7 @@ pub fn render_file_info_table(
                                         ))
                                         .frame(false),
                                     )
-                                    .on_hover_text("Recarregar Thumbnail")
+                                    .on_hover_text(hover_text)
                                     .clicked()
                                 {
                                     action = Some(PreviewPanelAction::RefreshThumbnail(

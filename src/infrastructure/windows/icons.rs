@@ -134,6 +134,68 @@ pub fn get_folder_preview(
     }
 }
 
+/// Forces extraction of folder preview, bypassing Windows thumbnail cache.
+///
+/// Uses IThumbnailCache with WTS_FORCEEXTRACTION flag to ensure we get a fresh preview.
+/// This is useful when the cached folder preview has black background or is corrupted.
+///
+/// # Safety
+/// Uses COM interfaces (IShellItem, IThumbnailCache, ISharedBitmap).
+/// All COM objects are properly released.
+pub fn force_extract_folder_preview(
+    folder_path: &Path,
+) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
+    use windows::Win32::UI::Shell::{
+        ISharedBitmap, IThumbnailCache, LocalThumbnailCache, WTS_CACHEFLAGS, WTS_FORCEEXTRACTION,
+        WTS_SCALETOREQUESTEDSIZE,
+    };
+
+    unsafe {
+        // SAFETY: path_wide is valid for the duration of this call
+        let path_wide: Vec<u16> = folder_path
+            .to_string_lossy()
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+
+        // Create IShellItem for the folder
+        let shell_item: IShellItem = SHCreateItemFromParsingName(PCWSTR(path_wide.as_ptr()), None)?;
+
+        // Create IThumbnailCache instance
+        let thumbnail_cache: IThumbnailCache =
+            CoCreateInstance(&LocalThumbnailCache, None, CLSCTX_INPROC_SERVER)?;
+
+        // Request thumbnail with FORCE EXTRACTION (ignores cache)
+        let flags = WTS_FORCEEXTRACTION | WTS_SCALETOREQUESTEDSIZE;
+        let requested_size: u32 = 256;
+
+        let mut shared_bitmap: Option<ISharedBitmap> = None;
+        let mut _cache_flags: WTS_CACHEFLAGS = WTS_CACHEFLAGS::default();
+        let mut _thumbnail_id = windows::Win32::UI::Shell::WTS_THUMBNAILID::default();
+
+        thumbnail_cache.GetThumbnail(
+            &shell_item,
+            requested_size,
+            flags,
+            Some(&mut shared_bitmap),
+            Some(&mut _cache_flags),
+            Some(&mut _thumbnail_id),
+        )?;
+
+        // Extract HBITMAP from shared bitmap
+        let bitmap = shared_bitmap.ok_or("No bitmap returned")?;
+        let hbitmap = bitmap.GetSharedBitmap()?;
+
+        // Convert to RGBA
+        let result = super::bitmap_conversion::hbitmap_to_rgba(HBITMAP(hbitmap.0))?;
+
+        // Cleanup: ISharedBitmap is released when dropped (Rust RAII)
+        // HBITMAP ownership remains with ISharedBitmap, don't delete it
+
+        Ok(result)
+    }
+}
+
 /// Forces extraction of a new thumbnail, bypassing the Windows thumbnail cache.
 ///
 /// Uses IThumbnailCache::GetThumbnail with WTS_FORCEEXTRACTION flag.
