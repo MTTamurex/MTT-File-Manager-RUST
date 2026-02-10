@@ -324,9 +324,13 @@ fn render_item_tooltip(
                             "Última modificação"
                         };
                         let date_val = if is_recycle_bin {
-                            item.deletion_date
-                                .clone()
-                                .unwrap_or_else(|| "-".to_string())
+                            if item.modified > 0 {
+                                format_date(item.modified)
+                            } else {
+                                item.deletion_date
+                                    .clone()
+                                    .unwrap_or_else(|| "-".to_string())
+                            }
                         } else {
                             format_date(item.modified)
                         };
@@ -539,9 +543,13 @@ fn render_regular_columns(
 ) {
     // 2. Date (truncated)
     let date_str = if is_recycle_bin {
-        item.deletion_date
-            .clone()
-            .unwrap_or_else(|| "-".to_string())
+        if item.modified > 0 {
+            format_date(item.modified)
+        } else {
+            item.deletion_date
+                .clone()
+                .unwrap_or_else(|| "-".to_string())
+        }
     } else {
         format_date(item.modified)
     };

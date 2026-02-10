@@ -46,12 +46,40 @@ pub struct RecycleBinItem {
     pub physical_path: PathBuf,
     /// Date when item was deleted
     pub date_deleted: String,
+    /// Deletion timestamp in UNIX seconds (0 when unavailable)
+    pub date_deleted_unix: u64,
     /// Size in bytes
     pub size: u64,
     /// Whether item is a directory
     pub is_directory: bool,
     /// File extension for icon lookup (e.g., ".docx")
     pub extension: String,
+}
+
+/// RAII guard for COM apartment initialization on the current thread.
+struct ComApartmentGuard {
+    initialized: bool,
+}
+
+impl ComApartmentGuard {
+    fn init_sta_best_effort() -> Self {
+        let initialized = unsafe {
+            // SAFETY: Initializes COM apartment for the current thread.
+            CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok()
+        };
+        Self { initialized }
+    }
+}
+
+impl Drop for ComApartmentGuard {
+    fn drop(&mut self) {
+        if self.initialized {
+            unsafe {
+                // SAFETY: Balanced with successful CoInitializeEx in init_sta_best_effort.
+                CoUninitialize();
+            }
+        }
+    }
 }
 
 /// Retrieves the total count and size of items in the Recycle Bin
@@ -76,7 +104,7 @@ pub fn enumerate_recycle_bin_streaming(
     unsafe {
         eprintln!("[Lixeira] Starting streaming enumeration (Shell API)...");
 
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let _com = ComApartmentGuard::init_sta_best_effort();
 
         // 1. Get Desktop Folder
         let desktop: IShellFolder = match SHGetDesktopFolder() {
@@ -227,9 +255,10 @@ unsafe fn process_shell_item(shell_item: &IShellItem) -> Option<RecycleBinItem> 
         .map(|e| format!(".{}", e.to_string_lossy().to_lowercase()))
         .unwrap_or_default();
 
-    // Get date deleted (as FILETIME, then convert to formatted string)
-    let date_deleted = get_shell_item_filetime_property(&shell_item2, &PKEY_RECYCLE_DATE_DELETED)
-        .unwrap_or_else(|_| "Desconhecido".to_string());
+    // Get date deleted as both UNIX timestamp and formatted string.
+    let (date_deleted_unix, date_deleted) =
+        get_shell_item_filetime_property(&shell_item2, &PKEY_RECYCLE_DATE_DELETED)
+            .unwrap_or_else(|_| (0, "Desconhecido".to_string()));
 
     // Get size
     let size = get_shell_item_u64_property(&shell_item2, &PKEY_SIZE).unwrap_or(0);
@@ -249,6 +278,7 @@ unsafe fn process_shell_item(shell_item: &IShellItem) -> Option<RecycleBinItem> 
         original_path,
         physical_path,
         date_deleted,
+        date_deleted_unix,
         size,
         is_directory,
         extension,
@@ -316,14 +346,21 @@ unsafe fn get_shell_item_u64_property(item: &IShellItem2, pkey: &PROPERTYKEY) ->
 unsafe fn get_shell_item_filetime_property(
     item: &IShellItem2,
     pkey: &PROPERTYKEY,
-) -> Result<String> {
+) -> Result<(u64, String)> {
     if let Ok(str_ptr) = item.GetString(pkey) {
         let result = str_ptr.to_string().unwrap_or_default();
         CoTaskMemFree(Some(str_ptr.0 as *mut _));
         if !result.is_empty() {
             // Format: '2026/01/12:19:21:00.000' -> '12/01/2026 19:21'
             let formatted = format_recycle_date(&result);
-            return Ok(formatted);
+            // Try to also read FILETIME for stable numeric sorting.
+            if let Ok(ft) = item.GetFileTime(pkey) {
+                let ft_val = ((ft.dwHighDateTime as u64) << 32) | (ft.dwLowDateTime as u64);
+                if let Some(unix_secs) = filetime_to_unix_secs(ft_val) {
+                    return Ok((unix_secs, formatted));
+                }
+            }
+            return Ok((0, formatted));
         }
     }
 
@@ -331,16 +368,24 @@ unsafe fn get_shell_item_filetime_property(
     if let Ok(ft) = item.GetFileTime(pkey) {
         // Fallback: raw FILETIME
         let ft_val = ((ft.dwHighDateTime as u64) << 32) | (ft.dwLowDateTime as u64);
-        if ft_val > 0 {
-            const FILETIME_TO_UNIX: u64 = 116444736000000000;
-            if ft_val > FILETIME_TO_UNIX {
-                let unix_secs = (ft_val - FILETIME_TO_UNIX) / 10_000_000;
-                return Ok(super::formatting::format_date(unix_secs));
-            }
+        if let Some(unix_secs) = filetime_to_unix_secs(ft_val) {
+            return Ok((unix_secs, super::formatting::format_date(unix_secs)));
         }
     }
 
     Err(Error::from_win32())
+}
+
+#[inline]
+fn filetime_to_unix_secs(filetime: u64) -> Option<u64> {
+    if filetime == 0 {
+        return None;
+    }
+    const FILETIME_TO_UNIX: u64 = 116444736000000000;
+    if filetime <= FILETIME_TO_UNIX {
+        return None;
+    }
+    Some((filetime - FILETIME_TO_UNIX) / 10_000_000)
 }
 
 /// Format recycle bin date from '2026/01/12:19:21:00.000' to '12/01/2026 19:21'
@@ -375,7 +420,7 @@ pub fn enumerate_recycle_bin() -> Result<Vec<RecycleBinItem>> {
         eprintln!("[Lixeira] Starting enumeration...");
 
         let mut items = Vec::new();
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let _com = ComApartmentGuard::init_sta_best_effort();
 
         let recycle_bin_folder: IShellItem =
             SHGetKnownFolderItem(&FOLDERID_RecycleBinFolder, KF_FLAG_DEFAULT, None)?;
@@ -488,7 +533,7 @@ pub fn restore_from_recycle_bin(
     original_path: &std::path::Path,
 ) -> Result<()> {
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let _com = ComApartmentGuard::init_sta_best_effort();
 
         // Use IFileOperation for undo/restore
         let file_op: IFileOperation = CoCreateInstance(&FileOperation, None, CLSCTX_ALL)?;
@@ -533,7 +578,7 @@ pub fn restore_from_recycle_bin(
 /// Shows native Windows confirmation dialog before deleting.
 pub fn delete_permanently(physical_path: &std::path::Path, hwnd: HWND) -> Result<()> {
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let _com = ComApartmentGuard::init_sta_best_effort();
 
         // Use IFileOperation for permanent deletion
         let file_op: IFileOperation = CoCreateInstance(&FileOperation, None, CLSCTX_ALL)?;
