@@ -77,7 +77,16 @@ impl ImageViewerApp {
             .unwrap_or_else(|| PathBuf::from("."))
             .join("MTT-File-Manager")
             .join("thumbnails");
-        let disk_cache = Arc::new(ThumbnailDiskCache::new(cache_dir.clone()));
+        let disk_cache = Arc::new(match ThumbnailDiskCache::new(cache_dir.clone()) {
+            Ok(cache) => cache,
+            Err(e) => {
+                eprintln!(
+                    "[Cache] Fatal: failed to initialize thumbnail cache at {:?}: {:?}",
+                    cache_dir, e
+                );
+                std::process::exit(1);
+            }
+        });
         let directory_index = match DirectoryIndex::open(&cache_dir.join("thumbnails.db")) {
             Ok(index) => Some(Arc::new(index)),
             Err(e) => {
@@ -173,9 +182,13 @@ impl ImageViewerApp {
         std::thread::spawn(move || {
             let mut fonts = eframe::egui::FontDefinitions::default();
             let mut loaded_fonts = Vec::new();
+            let windows_dir = std::env::var_os("WINDIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("C:\\Windows"));
+            let fonts_dir = windows_dir.join("Fonts");
 
             // 1. Segoe UI (fonte principal)
-            let segoe_path = std::path::PathBuf::from("C:\\Windows\\Fonts\\segoeui.ttf");
+            let segoe_path = fonts_dir.join("segoeui.ttf");
             if let Ok(font_data) = std::fs::read(&segoe_path) {
                 fonts.font_data.insert(
                     "segoe_ui".to_owned(),
@@ -185,7 +198,7 @@ impl ImageViewerApp {
             }
 
             // 2. Segoe UI Symbol (fallback 1 - símbolos)
-            let symbol_path = std::path::PathBuf::from("C:\\Windows\\Fonts\\seguisym.ttf");
+            let symbol_path = fonts_dir.join("seguisym.ttf");
             if let Ok(font_data) = std::fs::read(&symbol_path) {
                 fonts.font_data.insert(
                     "segoe_ui_symbol".to_owned(),
@@ -196,7 +209,7 @@ impl ImageViewerApp {
 
             // 3. Arial Unicode MS (fallback 2 - se disponível)
             // ESTE ARQUIVO É GRANDE (~22MB) - O carregamento síncrono trava o startup
-            let arial_path = std::path::PathBuf::from("C:\\Windows\\Fonts\\ARIALUNI.TTF");
+            let arial_path = fonts_dir.join("ARIALUNI.TTF");
             if let Ok(font_data) = std::fs::read(&arial_path) {
                 fonts.font_data.insert(
                     "arial_unicode".to_owned(),

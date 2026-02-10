@@ -22,10 +22,20 @@ pub struct CacheState {
 impl CacheState {
     pub fn new() -> Self {
         let cache_dir = std::env::temp_dir().join("mtt-thumbnail-cache");
+        let disk_cache = match ThumbnailDiskCache::new(cache_dir.clone()) {
+            Ok(cache) => Arc::new(cache),
+            Err(e) => {
+                eprintln!(
+                    "[Cache] Fatal: failed to initialize cache state at {:?}: {:?}",
+                    cache_dir, e
+                );
+                std::process::exit(1);
+            }
+        };
 
         Self {
             cache_manager: Arc::new(Mutex::new(CacheManager::new())),
-            disk_cache: Arc::new(ThumbnailDiskCache::new(cache_dir)),
+            disk_cache,
             directory_cache: Arc::new(DirectoryCache::new()),
             directory_index: None,
             metadata_cache: LruCache::new(std::num::NonZeroUsize::new(100).unwrap()),
