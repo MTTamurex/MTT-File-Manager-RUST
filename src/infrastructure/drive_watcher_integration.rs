@@ -187,6 +187,7 @@ pub fn convert_drive_event_to_notify_event(event: &DriveWatcherEvent) -> Option<
             notify::event::RenameMode::Any,
         )),
         DriveWatcherEvent::Unknown(_) => EventKind::Any,
+        DriveWatcherEvent::DriveLost(_) => return None, // Not convertible to notify event
     };
 
     let paths = match event {
@@ -195,6 +196,7 @@ pub fn convert_drive_event_to_notify_event(event: &DriveWatcherEvent) -> Option<
         DriveWatcherEvent::Modified(p) => vec![p.clone()],
         DriveWatcherEvent::Renamed(old, new) => vec![old.clone(), new.clone()],
         DriveWatcherEvent::Unknown(p) => vec![p.clone()],
+        DriveWatcherEvent::DriveLost(_) => unreachable!(),
     };
 
     Some(Event {

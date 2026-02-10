@@ -611,6 +611,7 @@ impl ImageViewerApp {
             path_input: initial_path.clone(),
             disks,
             last_drive_refresh: Instant::now(),
+            last_drive_bitmask: crate::infrastructure::windows::get_logical_drives_bitmask(),
             drive_scan_pending: false,
             drive_scan_rx,
             drive_scan_tx,

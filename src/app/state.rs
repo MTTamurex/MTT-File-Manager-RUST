@@ -120,6 +120,7 @@ pub struct ImageViewerApp {
     // UI state
     pub disks: Vec<(String, String)>, // (path, label)
     pub last_drive_refresh: Instant,
+    pub last_drive_bitmask: u32,  // Fast bitmask from GetLogicalDrives() for quick change detection
     pub drive_scan_pending: bool, // Whether a background drive scan is in progress
     pub drive_scan_rx: Receiver<Vec<(String, String)>>, // Background drive scan results
     pub drive_scan_tx: Sender<Vec<(String, String)>>, // Sender cloned into background thread
