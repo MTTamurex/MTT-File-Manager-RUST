@@ -2,6 +2,7 @@ use super::{GridViewContext, PendingOperations, TOOLTIP_DELAY_SECS};
 use crate::domain::file_entry::FileEntry;
 use eframe::egui::{self, Color32, Rect, Sense, Ui};
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn render_grid_item(
     ui: &mut Ui,
     index: usize,

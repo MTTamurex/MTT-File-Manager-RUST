@@ -15,10 +15,9 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
             "Lista",
         )
         .clicked()
+            && !matches!(app.view_mode, ViewMode::List)
         {
-            if !matches!(app.view_mode, ViewMode::List) {
-                app.view_mode = ViewMode::List;
-            }
+            app.view_mode = ViewMode::List;
         }
 
         if widgets::toggle_icon_button(
@@ -29,10 +28,9 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
             "Grade",
         )
         .clicked()
+            && !matches!(app.view_mode, ViewMode::Grid)
         {
-            if !matches!(app.view_mode, ViewMode::Grid) {
-                app.view_mode = ViewMode::Grid;
-            }
+            app.view_mode = ViewMode::Grid;
         }
     }
 

@@ -62,7 +62,10 @@ fn get_nt_query_directory_file() -> Option<NtQueryDirectoryFileFn> {
     *NT_QUERY_DIR.get_or_init(|| unsafe {
         let ntdll = GetModuleHandleW(w!("ntdll.dll")).ok()?;
         let proc = GetProcAddress(ntdll, s!("NtQueryDirectoryFile"))?;
-        Some(std::mem::transmute(proc))
+        Some(std::mem::transmute::<
+            unsafe extern "system" fn() -> isize,
+            NtQueryDirectoryFileFn,
+        >(proc))
     })
 }
 

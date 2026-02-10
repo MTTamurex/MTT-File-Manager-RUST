@@ -146,6 +146,7 @@ pub(super) fn render_virtualized_content(
 }
 
 /// Grouped rendering for Computer View with local/network sections
+#[allow(clippy::too_many_arguments)]
 fn render_computer_view_grouped(
     child_ui: &mut Ui,
     ctx: &mut ListViewContext,
@@ -251,6 +252,7 @@ fn render_computer_view_grouped(
 }
 
 /// Regular virtualized rendering with adaptive overscan
+#[allow(clippy::too_many_arguments)]
 fn render_regular_virtualized(
     child_ui: &mut Ui,
     ctx: &mut ListViewContext,
@@ -420,19 +422,14 @@ fn handle_prefetch(
         }
         let item = &ctx.items[index];
         // FIX: Only prefetch thumbnails for media files (prevents .exe/.dll extraction)
-        if !item.is_dir && item.is_media() {
-            if !ctx.texture_cache.contains(&item.path)
-                && !ctx.loading_set.contains(&item.path)
-                && !ctx.pending_upload_set.contains(&item.path)
-            {
-                ctx.loading_set.insert(item.path.clone());
-                ops.request_thumbnail_prefetch_with_index(
-                    item.path.clone(),
-                    64,
-                    index,
-                    item.modified,
-                );
-            }
+        if !item.is_dir
+            && item.is_media()
+            && !ctx.texture_cache.contains(&item.path)
+            && !ctx.loading_set.contains(&item.path)
+            && !ctx.pending_upload_set.contains(&item.path)
+        {
+            ctx.loading_set.insert(item.path.clone());
+            ops.request_thumbnail_prefetch_with_index(item.path.clone(), 64, index, item.modified);
         }
     }
 

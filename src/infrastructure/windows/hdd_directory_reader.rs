@@ -234,10 +234,10 @@ fn should_include_entry(entry: &FileEntry) -> bool {
     }
 
     // Skip special system files
-    match entry.name.to_lowercase().as_str() {
-        "desktop.ini" | "thumbs.db" | "$recycle.bin" | "system volume information" => false,
-        _ => true,
-    }
+    !matches!(
+        entry.name.to_lowercase().as_str(),
+        "desktop.ini" | "thumbs.db" | "$recycle.bin" | "system volume information"
+    )
 }
 
 #[cfg(test)]

@@ -155,7 +155,7 @@ fn check_if_virtual(drive_letter: char) -> Option<(bool, String)> {
         )
     };
 
-    if !ok.is_ok() {
+    if ok.is_err() {
         return None;
     }
 

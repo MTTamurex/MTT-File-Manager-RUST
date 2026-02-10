@@ -18,6 +18,7 @@ use file_info_table::render_file_info_table;
 use image_preview::{render_gif_preview, render_texture_with_overlay};
 use video_preview::render_video_preview;
 
+#[allow(clippy::too_many_arguments)]
 pub fn render_preview_panel(
     ui: &mut egui::Ui,
     file: &FileEntry,
@@ -47,7 +48,7 @@ pub fn render_preview_panel(
         .path
         .extension()
         .and_then(|ext| ext.to_str())
-        .map(|ext| crate::infrastructure::windows::is_video_extension(ext))
+        .map(crate::infrastructure::windows::is_video_extension)
         .unwrap_or(false);
 
     // === MULTI-SELECTION VIEW ===
@@ -149,7 +150,7 @@ pub fn render_preview_panel(
                 let media_rect = image_resp.rect;
 
                 let hover_pos = ui.input(|i| i.pointer.hover_pos());
-                let is_hovered = hover_pos.map_or(false, |pos| media_rect.contains(pos));
+                let is_hovered = hover_pos.is_some_and(|pos| media_rect.contains(pos));
 
                 if is_hovered {
                     let center_size = 64.0;
@@ -191,18 +192,16 @@ pub fn render_preview_panel(
             if let Some(act) = render_texture_with_overlay(ui, file, tex, svg_manager) {
                 action = Some(act);
             }
-        } else {
-            if let Some(act) = render_fallback(
-                ui,
-                file,
-                is_recycle_bin_view,
-                item_icon_loader,
-                svg_manager,
-                folder_preview_peek,
-                is_folder_preview_loading,
-            ) {
-                action = Some(act);
-            }
+        } else if let Some(act) = render_fallback(
+            ui,
+            file,
+            is_recycle_bin_view,
+            item_icon_loader,
+            svg_manager,
+            folder_preview_peek,
+            is_folder_preview_loading,
+        ) {
+            action = Some(act);
         }
         ui.add_space(20.0);
     });

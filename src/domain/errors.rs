@@ -164,8 +164,7 @@ mod tests {
     }
 
     fn unwrap_err_case() -> AppResult<()> {
-        let bad_result: Result<i32, std::io::Error> =
-            Err(std::io::Error::other("test error"));
+        let bad_result: Result<i32, std::io::Error> = Err(std::io::Error::other("test error"));
         let _ = safe_unwrap!(bad_result, "testing error");
         Ok(())
     }

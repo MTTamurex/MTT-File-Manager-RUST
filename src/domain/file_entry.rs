@@ -110,8 +110,8 @@ pub fn ends_with_ignore_case(s: &str, suffix: &str) -> bool {
 /// Extensões de arquivo compactado suportadas para navegação via Windows Shell Namespace.
 /// Extensões compostas (.tar.gz) devem vir antes das simples (.gz).
 pub const ARCHIVE_EXTENSIONS: &[&str] = &[
-    ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.zst", ".tzst", ".tar.xz", ".txz", ".tar",
-    ".zip", ".7z", ".rar", ".gz", ".gzip",
+    ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.zst", ".tzst", ".tar.xz", ".txz", ".tar", ".zip",
+    ".7z", ".rar", ".gz", ".gzip",
 ];
 
 /// Checa se um nome de arquivo termina com uma extensão de arquivo compactado (case-insensitive).

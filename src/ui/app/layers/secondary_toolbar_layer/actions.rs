@@ -125,8 +125,8 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
 
 pub(super) fn execute_action(action: SecAction, app: &mut ImageViewerApp) {
     match action {
-        SecAction::Cut => app.command_cut(Option::from(app.selected_item)),
-        SecAction::Copy => app.command_copy(Option::from(app.selected_item)),
+        SecAction::Cut => app.command_cut(app.selected_item),
+        SecAction::Copy => app.command_copy(app.selected_item),
         SecAction::Paste => app.command_paste(None),
         SecAction::Rename => {
             if let Some(idx) = app.selected_item {

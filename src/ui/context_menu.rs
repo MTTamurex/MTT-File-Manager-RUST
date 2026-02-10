@@ -11,7 +11,7 @@ use crate::ui::svg_icons::SvgIconManager;
 // Example: hovering "7-Zip" -> [Some(7zip_id)]
 // Hovering item inside 7-Zip submenu -> [Some(7zip_id), Some(sub_item_id)]
 thread_local! {
-    static SUBMENU_HIERARCHY: RefCell<Vec<Option<i32>>> = RefCell::new(Vec::new());
+    static SUBMENU_HIERARCHY: RefCell<Vec<Option<i32>>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Operations that can be performed from context menu
@@ -415,7 +415,7 @@ fn render_single_item(
         };
 
         // Check if pointer is in the expanded area (item + gap to submenu)
-        let pointer_in_expanded_area = pointer_pos.map_or(false, |p| expanded_rect.contains(p));
+        let pointer_in_expanded_area = pointer_pos.is_some_and(|p| expanded_rect.contains(p));
 
         // CRITICAL: Check if there are DEEPER levels active (nested submenus)
         // If so, don't interfere with them by activating this item
@@ -536,7 +536,7 @@ fn render_single_item(
 
         // If pointer is neither on the parent nor on the submenu, and there's no deeper submenu active, clear this level
         let pointer_in_submenu =
-            pointer_pos.map_or(false, |p| submenu_rect.map_or(false, |r| r.contains(p)));
+            pointer_pos.is_some_and(|p| submenu_rect.is_some_and(|r| r.contains(p)));
 
         if !pointer_in_expanded_area && !pointer_in_submenu && !has_deeper_active {
             SUBMENU_HIERARCHY.with(|hierarchy| {

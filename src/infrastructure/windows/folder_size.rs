@@ -131,7 +131,7 @@ fn parallel_scan_recursive(
             dirs_inline += 1;
 
             // Flush accumulated size periodically
-            if dirs_inline % 64 == 0 && local_total > 0 {
+            if dirs_inline.is_multiple_of(64) && local_total > 0 {
                 total.fetch_add(local_total, Ordering::Relaxed);
                 local_total = 0;
                 (progress_cb)(total.load(Ordering::Relaxed));
@@ -192,10 +192,10 @@ fn scan_dir_wide_local(dir_wide: &[u16], sub_dirs: &mut Vec<Vec<u16>>) -> u64 {
             let is_dir = (attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
 
             if is_dir {
-                if !is_dot_or_dotdot(&find_data.cFileName) {
-                    if !is_junction_or_symlink(attrs, find_data.dwReserved0) {
-                        sub_dirs.push(build_child_wide(dir_wide, &find_data.cFileName));
-                    }
+                if !is_dot_or_dotdot(&find_data.cFileName)
+                    && !is_junction_or_symlink(attrs, find_data.dwReserved0)
+                {
+                    sub_dirs.push(build_child_wide(dir_wide, &find_data.cFileName));
                 }
             } else {
                 local_size +=

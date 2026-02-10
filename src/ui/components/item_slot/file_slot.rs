@@ -49,10 +49,11 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
     // NOTE: Do NOT insert into loading_icons here - request_icon_load handles it.
     // Inserting here would cause the deferred request_icon_load to skip (already in set).
     // NOTE: Also works for Recycle Bin - physical_path ($R files) contain embedded icons.
-    if file_icon.is_none() {
-        if !ctx.loading_icons.contains(&item.path) && ctx.failed_icons.peek(&item.path).is_none() {
-            ops.request_icon_load(item.path.clone());
-        }
+    if file_icon.is_none()
+        && !ctx.loading_icons.contains(&item.path)
+        && ctx.failed_icons.peek(&item.path).is_none()
+    {
+        ops.request_icon_load(item.path.clone());
     }
 
     // GEOMETRIA - reduz tamanho para caber na área com margem

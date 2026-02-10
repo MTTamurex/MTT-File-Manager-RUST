@@ -117,7 +117,7 @@ fn sniff_mp4_container(data: &[u8]) -> Option<CodecGuess> {
 /// Sniff MKV/WebM (EBML) headers
 fn sniff_mkv_container(data: &[u8]) -> Option<CodecGuess> {
     // MKV starts with EBML ID: [0x1A, 0x45, 0xDF, 0xA3]
-    if data.len() < 4 || &data[0..4] != [0x1A, 0x45, 0xDF, 0xA3] {
+    if data.len() < 4 || data[0..4] != [0x1A, 0x45, 0xDF, 0xA3] {
         return None;
     }
 

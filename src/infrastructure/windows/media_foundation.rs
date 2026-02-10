@@ -124,10 +124,11 @@ pub fn extract_video_metadata_mf(path: &Path) -> Option<VideoMetadataMF> {
     let reader: IMFSourceReader =
         unsafe { MFCreateSourceReaderFromURL(PCWSTR(wide_path.as_ptr()), None).ok()? };
 
-    let mut meta = VideoMetadataMF::default();
-
-    // Read duration from presentation descriptor
-    meta.duration_100ns = read_duration(&reader);
+    let mut meta = VideoMetadataMF {
+        // Read duration from presentation descriptor.
+        duration_100ns: read_duration(&reader),
+        ..VideoMetadataMF::default()
+    };
 
     // Read video stream info
     if let Some(video_type) = get_native_media_type(&reader, MF_SOURCE_READER_FIRST_VIDEO_STREAM) {

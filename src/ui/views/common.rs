@@ -71,3 +71,9 @@ impl ViewportTracker {
         index >= self.first_visible_index && index <= self.last_visible_index
     }
 }
+
+impl Default for ViewportTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}

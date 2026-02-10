@@ -3,6 +3,7 @@ use crate::ui::preview_panel::video_preview::controls::draw_video_controls;
 use crate::ui::svg_icons::SvgIconManager;
 use eframe::egui;
 
+#[allow(clippy::too_many_arguments)]
 pub fn render_fullscreen_video(
     ui: &mut egui::Ui,
     preview: &mut MediaPreview,

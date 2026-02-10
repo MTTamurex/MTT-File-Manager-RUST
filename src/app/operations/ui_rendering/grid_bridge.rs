@@ -43,8 +43,9 @@ impl<'a> GridViewOperations for GridOps<'a> {
         self.actions.push(GridAction::NavigateTo(path.to_string()));
     }
 
-    fn open_with_shell(&mut self, path: &PathBuf) {
-        self.actions.push(GridAction::OpenWithShell(path.clone()));
+    fn open_with_shell(&mut self, path: &Path) {
+        self.actions
+            .push(GridAction::OpenWithShell(path.to_path_buf()));
     }
 
     fn request_thumbnail_load(&mut self, path: PathBuf, size: u32, modified: u64) {

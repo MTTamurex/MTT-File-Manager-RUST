@@ -127,7 +127,7 @@ impl GifPlayer {
 pub enum MediaPreview {
     StaticImage(egui::TextureHandle),
     AnimatedGif(GifPlayer),
-    Video(VideoPreview),
+    Video(Box<VideoPreview>),
     Error(String),
 }
 

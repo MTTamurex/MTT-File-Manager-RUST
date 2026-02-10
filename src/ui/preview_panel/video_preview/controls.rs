@@ -485,6 +485,7 @@ fn draw_detached_buttons(
 
 /// Draw simple controls for docked mode (preview panel)
 /// Shows only: seek bar, play/pause, detach, volume, time
+#[allow(clippy::too_many_arguments)]
 pub fn draw_docked_controls(
     ui: &mut egui::Ui,
     preview: &mut MediaPreview,
@@ -525,6 +526,7 @@ pub fn draw_docked_controls(
 
 /// Draw full controls for detached mode (floating window)
 /// Shows all controls including audio/subtitle pickers, normalizer, fullscreen, VSR
+#[allow(clippy::too_many_arguments)]
 pub fn draw_detached_controls(
     ui: &mut egui::Ui,
     preview: &mut MediaPreview,
@@ -578,6 +580,7 @@ pub fn draw_detached_controls(
 }
 
 /// Legacy function for backward compatibility - delegates to appropriate version
+#[allow(clippy::too_many_arguments)]
 pub fn draw_video_controls(
     ui: &mut egui::Ui,
     preview: &mut MediaPreview,

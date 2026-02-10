@@ -12,7 +12,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::domain::file_entry::{FileEntry, SortMode};
 // PERFORMANCE: Use FxHashSet for PathBuf keys - faster hashing than std::collections::HashSet
@@ -162,7 +162,7 @@ pub(crate) fn truncate_text_for_column(
     let mut right = char_count;
 
     while left < right {
-        let mid = (left + right + 1) / 2;
+        let mid = (left + right).div_ceil(2);
         let byte_end = if mid < char_count {
             char_boundaries[mid]
         } else {
@@ -291,7 +291,7 @@ pub enum ListViewAction {
 /// Operations that can be performed from list view
 pub trait ListViewOperations {
     fn navigate_to(&mut self, path: &str);
-    fn open_with_shell(&mut self, path: &PathBuf);
+    fn open_with_shell(&mut self, path: &Path);
     fn request_thumbnail_load(&mut self, path: PathBuf, directory_index: usize, modified: u64);
     fn request_folder_scan(&mut self, path: PathBuf);
     fn request_folder_preview_load(&mut self, path: PathBuf);

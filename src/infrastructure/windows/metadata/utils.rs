@@ -39,6 +39,11 @@ impl Drop for ComGuard {
     }
 }
 
+/// Opens a Windows property store for a file path.
+///
+/// # Safety
+/// Caller must ensure COM is initialized on the current thread and that `path`
+/// points to a valid UTF-16 representable path for Shell property APIs.
 pub unsafe fn open_property_store(path: &Path) -> Result<IPropertyStore, windows::core::Error> {
     let wide_path: Vec<u16> = path
         .as_os_str()
@@ -54,7 +59,11 @@ pub unsafe fn open_property_store(path: &Path) -> Result<IPropertyStore, windows
     SHGetPropertyStoreFromParsingName(PCWSTR(wide_path.as_ptr()), None, GPS_BESTEFFORT)
 }
 
-// Helper to read property value as u32
+/// Reads a property value as `u32`.
+///
+/// # Safety
+/// `store` must be a valid COM property store for the current thread apartment.
+/// `key` must be a valid property key for this store.
 pub unsafe fn read_u32(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<u32> {
     let pv = store
         .GetValue(&PROPERTYKEY {
@@ -88,7 +97,11 @@ pub unsafe fn read_u32(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<u32>
     }
 }
 
-// Helper to read property value as u64
+/// Reads a property value as `u64`.
+///
+/// # Safety
+/// `store` must be a valid COM property store for the current thread apartment.
+/// `key` must be a valid property key for this store.
 pub unsafe fn read_u64(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<u64> {
     let pv = store
         .GetValue(&PROPERTYKEY {
@@ -120,7 +133,11 @@ pub unsafe fn read_u64(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<u64>
     }
 }
 
-// Helper to read property value as f64 (double)
+/// Reads a property value as `f64`.
+///
+/// # Safety
+/// `store` must be a valid COM property store for the current thread apartment.
+/// `key` must be a valid property key for this store.
 pub unsafe fn read_f64(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<f64> {
     let pv = store
         .GetValue(&PROPERTYKEY {
@@ -146,6 +163,11 @@ pub unsafe fn read_f64(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<f64>
     }
 }
 
+/// Reads a property value as `String`.
+///
+/// # Safety
+/// `store` must be a valid COM property store for the current thread apartment.
+/// `key` must be a valid property key for this store.
 pub unsafe fn read_string(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<String> {
     let pv = match store.GetValue(&PROPERTYKEY {
         fmtid: key.fmtid,
@@ -220,7 +242,11 @@ pub unsafe fn read_string(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<S
     }
 }
 
-// Helper to read FourCC (can be u32 or string)
+/// Reads FourCC value, supporting both numeric and string representations.
+///
+/// # Safety
+/// `store` must be a valid COM property store for the current thread apartment.
+/// `key` must be a valid property key for this store.
 pub unsafe fn read_fourcc(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<String> {
     let pv = store
         .GetValue(&PROPERTYKEY {

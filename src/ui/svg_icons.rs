@@ -8,6 +8,12 @@ pub struct SvgIconManager {
     cache: LruCache<(String, u32, [u8; 4], u32), TextureHandle>,
 }
 
+impl Default for SvgIconManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SvgIconManager {
     /// Create a new SvgIconManager
     pub fn new() -> Self {
@@ -101,7 +107,7 @@ fn render_svg_to_image(
 
     // Parse SVG
     let opt = usvg::Options::default();
-    let tree = usvg::Tree::from_str(&svg_str, &opt).ok()?;
+    let tree = usvg::Tree::from_str(svg_str, &opt).ok()?;
 
     // Calculate scale to fit exactly into physical pixels
     let svg_size = tree.size();
