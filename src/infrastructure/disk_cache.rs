@@ -188,6 +188,19 @@ impl ThumbnailDiskCache {
         )
         .unwrap_or(0);
 
+        // Folder preview cache table (Shell sandwich icons)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS folder_previews (
+                folder_path TEXT PRIMARY KEY,
+                data BLOB NOT NULL,
+                width INTEGER NOT NULL,
+                height INTEGER NOT NULL,
+                created_at INTEGER NOT NULL
+            )",
+            [],
+        )
+        .unwrap_or(0);
+
         // Directory index tables
         conn.execute(
             "CREATE TABLE IF NOT EXISTS directory_index (
@@ -520,6 +533,101 @@ impl ThumbnailDiskCache {
         }
     }
 
+    // ========== Folder Preview Cache (Shell Sandwich Icons) ==========
+
+    /// Retrieves a cached folder preview (Shell sandwich icon) from SQLite.
+    /// Returns decoded RGBA data ready for GPU upload.
+    /// [READER]
+    pub fn get_folder_preview_cache(
+        &self,
+        folder_path: &Path,
+    ) -> Option<(Vec<u8>, u32, u32)> {
+        let db = self.reader.lock().ok()?;
+        let mut stmt = db
+            .prepare_cached(
+                "SELECT data, width, height FROM folder_previews WHERE folder_path = ?",
+            )
+            .ok()?;
+
+        let folder_path_str = folder_path.to_string_lossy();
+        let (webp_data, _db_width, _db_height): (Vec<u8>, u32, u32) = match stmt
+            .query_row([&*folder_path_str], |row| {
+                Ok((
+                    row.get::<_, Vec<u8>>(0)?,
+                    row.get::<_, i64>(1)? as u32,
+                    row.get::<_, i64>(2)? as u32,
+                ))
+            }) {
+            Ok(row) => row,
+            Err(_) => return None,
+        };
+
+        // Decode WebP back to RGBA
+        let decoder = webp::Decoder::new(&webp_data);
+        let decoded = match decoder.decode() {
+            Some(img) => img,
+            None => {
+                eprintln!(
+                    "[FOLDER PREVIEW CACHE] WebP decode failed for {:?} ({} bytes)",
+                    folder_path.file_name(),
+                    webp_data.len()
+                );
+                return None;
+            }
+        };
+        let rgba = decoded.to_image().to_rgba8();
+        let (w, h) = (rgba.width(), rgba.height());
+        Some((rgba.into_raw(), w, h))
+    }
+
+    /// Saves a folder preview (Shell sandwich icon) to SQLite, compressed as WebP.
+    /// [WRITER]
+    pub fn put_folder_preview_cache(
+        &self,
+        folder_path: &Path,
+        rgba_data: &[u8],
+        width: u32,
+        height: u32,
+    ) {
+        if rgba_data.len() != (width * height * 4) as usize {
+            return;
+        }
+
+        // Encode to WebP lossy (folder previews are small, ~256x256)
+        let encoder = webp::Encoder::from_rgba(rgba_data, width, height);
+        let webp_data = encoder.encode(85.0);
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+
+        if let Ok(db) = self.writer.lock() {
+            let _ = db.execute(
+                "INSERT OR REPLACE INTO folder_previews (folder_path, data, width, height, created_at)
+                 VALUES (?, ?, ?, ?, ?)",
+                params![
+                    folder_path.to_string_lossy().to_string(),
+                    webp_data.to_vec(),
+                    width as i64,
+                    height as i64,
+                    now
+                ],
+            );
+        }
+    }
+
+    /// Removes a cached folder preview.
+    /// [WRITER]
+    pub fn remove_folder_preview_cache(&self, folder_path: &Path) {
+        if let Ok(db) = self.writer.lock() {
+            let _ = db.execute(
+                "DELETE FROM folder_previews WHERE folder_path = ?",
+                [folder_path.to_string_lossy()],
+            );
+        }
+    }
+
     /// Remove cache entries for a specific path (file or folder)
     /// [WRITER]
     pub fn remove_cache_for_path(&self, path: &Path) {
@@ -555,6 +663,16 @@ impl ThumbnailDiskCache {
             // Children match: covers inside a deleted folder
             let _ = db.execute(
                 "DELETE FROM folder_covers WHERE cover_path LIKE ?",
+                [&pattern],
+            );
+
+            // Remove folder preview cache entries
+            let _ = db.execute(
+                "DELETE FROM folder_previews WHERE folder_path = ?",
+                [&path_str],
+            );
+            let _ = db.execute(
+                "DELETE FROM folder_previews WHERE folder_path LIKE ?",
                 [&pattern],
             );
 
@@ -648,6 +766,7 @@ impl ThumbnailDiskCache {
 
         let sampled_entries: Vec<(String, String)>;
         let sampled_folders: Vec<String>;
+        let sampled_folder_previews: Vec<String>;
 
         {
             let db = match self.reader.lock() {
@@ -677,9 +796,20 @@ impl ThumbnailDiskCache {
                         .map(|rows| rows.flatten().collect())
                 })
                 .unwrap_or_default();
+
+            sampled_folder_previews = db
+                .prepare("SELECT folder_path FROM folder_previews ORDER BY RANDOM() LIMIT ?1")
+                .and_then(|mut stmt| {
+                    stmt.query_map(params![limit], |row| row.get::<_, String>(0))
+                        .map(|rows| rows.flatten().collect())
+                })
+                .unwrap_or_default();
         }
 
-        if sampled_entries.is_empty() && sampled_folders.is_empty() {
+        if sampled_entries.is_empty()
+            && sampled_folders.is_empty()
+            && sampled_folder_previews.is_empty()
+        {
             return 0;
         }
 
@@ -689,7 +819,8 @@ impl ThumbnailDiskCache {
         let all_paths = sampled_entries
             .iter()
             .map(|(_, p)| p.as_str())
-            .chain(sampled_folders.iter().map(|p| p.as_str()));
+            .chain(sampled_folders.iter().map(|p| p.as_str()))
+            .chain(sampled_folder_previews.iter().map(|p| p.as_str()));
         let accessible = Self::accessible_drives(all_paths);
 
         let orphan_thumbs: Vec<String> = sampled_entries
@@ -707,7 +838,17 @@ impl ThumbnailDiskCache {
             })
             .collect();
 
-        if orphan_thumbs.is_empty() && orphan_folders.is_empty() {
+        let orphan_folder_previews: Vec<String> = sampled_folder_previews
+            .into_iter()
+            .filter(|path| {
+                Self::is_on_accessible_drive(path, &accessible) && !Self::path_exists_fast(path)
+            })
+            .collect();
+
+        if orphan_thumbs.is_empty()
+            && orphan_folders.is_empty()
+            && orphan_folder_previews.is_empty()
+        {
             return 0;
         }
 
@@ -723,6 +864,14 @@ impl ThumbnailDiskCache {
                     "folder_covers",
                     "folder_path",
                     &orphan_folders,
+                );
+            }
+            if !orphan_folder_previews.is_empty() {
+                removed += Self::execute_batch_delete(
+                    &db,
+                    "folder_previews",
+                    "folder_path",
+                    &orphan_folder_previews,
                 );
             }
             let _ = db.execute("COMMIT", []);
@@ -748,6 +897,7 @@ impl ThumbnailDiskCache {
 
         let all_entries: Vec<(String, String)>;
         let all_folders: Vec<String>;
+        let all_folder_previews: Vec<String>;
 
         {
             let db = match self.reader.lock() {
@@ -775,6 +925,14 @@ impl ThumbnailDiskCache {
                         .map(|rows| rows.flatten().collect())
                 })
                 .unwrap_or_default();
+
+            all_folder_previews = db
+                .prepare("SELECT folder_path FROM folder_previews")
+                .and_then(|mut stmt| {
+                    stmt.query_map([], |row| row.get::<_, String>(0))
+                        .map(|rows| rows.flatten().collect())
+                })
+                .unwrap_or_default();
         }
 
         // CRITICAL: Skip orphan-checking for files on inaccessible drives
@@ -782,7 +940,8 @@ impl ThumbnailDiskCache {
         let all_paths = all_entries
             .iter()
             .map(|(_, p)| p.as_str())
-            .chain(all_folders.iter().map(|p| p.as_str()));
+            .chain(all_folders.iter().map(|p| p.as_str()))
+            .chain(all_folder_previews.iter().map(|p| p.as_str()));
         let accessible = Self::accessible_drives(all_paths);
 
         let orphan_thumbs: Vec<String> = all_entries
@@ -800,7 +959,17 @@ impl ThumbnailDiskCache {
             })
             .collect();
 
-        if orphan_thumbs.is_empty() && orphan_folders.is_empty() {
+        let orphan_folder_previews: Vec<String> = all_folder_previews
+            .into_iter()
+            .filter(|path| {
+                Self::is_on_accessible_drive(path, &accessible) && !Self::path_exists_fast(path)
+            })
+            .collect();
+
+        if orphan_thumbs.is_empty()
+            && orphan_folders.is_empty()
+            && orphan_folder_previews.is_empty()
+        {
             eprintln!("[GC] No orphans found, skipping cleanup");
             return 0;
         }
@@ -817,6 +986,14 @@ impl ThumbnailDiskCache {
                     "folder_covers",
                     "folder_path",
                     &orphan_folders,
+                );
+            }
+            if !orphan_folder_previews.is_empty() {
+                removed += Self::execute_batch_delete(
+                    &db,
+                    "folder_previews",
+                    "folder_path",
+                    &orphan_folder_previews,
                 );
             }
             let _ = db.execute("COMMIT", []);

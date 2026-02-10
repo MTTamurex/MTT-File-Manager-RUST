@@ -417,6 +417,7 @@ impl ImageViewerApp {
                     folder_preview_rx.clone(),
                     folder_preview_res_tx.clone(),
                     ctx.clone(),
+                    disk_cache.clone(),
                 );
             }
         }

@@ -2,7 +2,12 @@
 //!
 //! Uses IThumbnailCache with WTS_FORCEEXTRACTION to bypass Windows thumbnail cache
 //! and avoid black background issues on folder previews.
+//!
+//! PERFORMANCE: Checks SQLite disk cache first (NVMe fast path) before calling
+//! Shell API. For OneDrive paths, uses cached Shell API (IShellItemImageFactory)
+//! instead of force extraction to avoid cloud filter driver latency.
 
+use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use eframe::egui;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
@@ -24,10 +29,12 @@ pub struct FolderPreviewData {
 /// * `rx` - Receiver for folder paths to process
 /// * `tx` - Sender for processed preview data
 /// * `ctx` - egui Context for repaint requests
+/// * `disk_cache` - SQLite disk cache for persistent folder preview storage
 pub fn spawn_folder_preview_worker(
     rx: Arc<Mutex<Receiver<PathBuf>>>,
     tx: Sender<FolderPreviewData>,
     ctx: egui::Context,
+    disk_cache: Arc<ThumbnailDiskCache>,
 ) {
     std::thread::spawn(move || {
         unsafe {
@@ -56,44 +63,86 @@ pub fn spawn_folder_preview_worker(
                 continue;
             }
 
-            // CRITICAL: Always use force_extract to bypass Windows thumbnail cache.
-            // This prevents black background issues that occur when Windows returns
-            // a corrupted cached preview.
-            match crate::infrastructure::windows::icons::force_extract_folder_preview(&path) {
+            // FAST PATH: Check SQLite disk cache first (NVMe read, ~1ms)
+            let cache_start = Instant::now();
+            if let Some((rgba_data, width, height)) =
+                disk_cache.get_folder_preview_cache(&path)
+            {
+                eprintln!(
+                    "[FOLDER PREVIEW] DB HIT {:?} ({}x{}, {:.1}ms)",
+                    path.file_name().unwrap_or_default(),
+                    width,
+                    height,
+                    cache_start.elapsed().as_secs_f64() * 1000.0
+                );
+                let _ = tx.send(FolderPreviewData {
+                    path,
+                    rgba_data,
+                    width,
+                    height,
+                });
+                throttle_repaint(&ctx, &mut last_repaint);
+                continue;
+            }
+            eprintln!(
+                "[FOLDER PREVIEW] DB MISS {:?} ({:.1}ms) → Shell API",
+                path.file_name().unwrap_or_default(),
+                cache_start.elapsed().as_secs_f64() * 1000.0
+            );
+
+            // SLOW PATH: Extract from Shell API
+            // Strategy differs for OneDrive vs normal folders:
+            // - OneDrive: Use cached Shell API first (fast), force_extract as fallback.
+            //   WTS_FORCEEXTRACTION is very slow on OneDrive because the cloud filter
+            //   driver adds latency to every file enumeration during preview generation.
+            // - Normal: Use force_extract first to bypass potentially corrupted cache,
+            //   then fall back to cached Shell API.
+            let is_onedrive = crate::infrastructure::onedrive::is_onedrive_path(&path);
+
+            let result = if is_onedrive {
+                // OneDrive: prefer cached preview (fast) over force extraction (slow)
+                match crate::infrastructure::windows::icons::get_folder_preview(&path) {
+                    Ok(data) => Ok(data),
+                    Err(_) => {
+                        crate::infrastructure::windows::icons::force_extract_folder_preview(&path)
+                    }
+                }
+            } else {
+                // Normal folders: force_extract to avoid black background from corrupted cache
+                match crate::infrastructure::windows::icons::force_extract_folder_preview(&path) {
+                    Ok(data) => Ok(data),
+                    Err(e) => {
+                        eprintln!(
+                            "[FOLDER PREVIEW] force_extract failed for {:?}: {}",
+                            path, e
+                        );
+                        crate::infrastructure::windows::icons::get_folder_preview(&path)
+                    }
+                }
+            };
+
+            match result {
                 Ok((rgba_data, width, height)) => {
+                    // Write to disk cache in-band (WebP encode is fast for 256x256)
+                    disk_cache.put_folder_preview_cache(&path, &rgba_data, width, height);
+
                     let _ = tx.send(FolderPreviewData {
                         path,
                         rgba_data,
                         width,
                         height,
                     });
-                    throttle_repaint(&ctx, &mut last_repaint);
                 }
-                Err(e) => {
-                    eprintln!("[FOLDER PREVIEW] Failed for {:?}: {}", path, e);
-                    // Fallback to regular get_folder_preview if force_extract fails
-                    match crate::infrastructure::windows::icons::get_folder_preview(&path) {
-                        Ok((rgba_data, width, height)) => {
-                            let _ = tx.send(FolderPreviewData {
-                                path,
-                                rgba_data,
-                                width,
-                                height,
-                            });
-                        }
-                        Err(_) => {
-                            // Send empty data to signal failure
-                            let _ = tx.send(FolderPreviewData {
-                                path,
-                                rgba_data: Vec::new(),
-                                width: 0,
-                                height: 0,
-                            });
-                        }
-                    }
-                    throttle_repaint(&ctx, &mut last_repaint);
+                Err(_) => {
+                    let _ = tx.send(FolderPreviewData {
+                        path,
+                        rgba_data: Vec::new(),
+                        width: 0,
+                        height: 0,
+                    });
                 }
             }
+            throttle_repaint(&ctx, &mut last_repaint);
         }
 
         unsafe {
