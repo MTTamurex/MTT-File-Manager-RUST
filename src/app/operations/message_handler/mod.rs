@@ -88,10 +88,10 @@ impl ImageViewerApp {
             return;
         }
 
-        if let Err(err) = self.disk_cache_invalidation_sender.send(paths) {
+        if let Err(_err) = self.disk_cache_invalidation_sender.send(paths) {
             debug_log!(
                 "[CACHE] Failed to enqueue disk cache invalidations: {:?}",
-                err
+                _err
             );
         }
     }

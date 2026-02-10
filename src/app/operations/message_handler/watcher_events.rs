@@ -356,9 +356,9 @@ impl ImageViewerApp {
                                 self.pending_auto_reload = true;
                             }
                         }
-                        Err(err) => {
+                        Err(_err) => {
                             #[cfg(debug_assertions)]
-                            eprintln!("Erro de watch: {:?}", err);
+                            eprintln!("Erro de watch: {:?}", _err);
                         }
                     }
                 }
