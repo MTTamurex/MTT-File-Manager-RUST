@@ -10,6 +10,14 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[derive(Debug, Clone)]
+pub struct ThumbnailCacheEntry {
+    pub data: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub requested_size: u32,
+}
+
 /// Manages persistent thumbnail storage in SQLite
 pub struct ThumbnailDiskCache {
     writer: Arc<Mutex<Connection>>, // For put, set_*, garbage_collect (DELETE)
@@ -148,6 +156,10 @@ impl ThumbnailDiskCache {
             "ALTER TABLE thumbnails ADD COLUMN height INTEGER DEFAULT 0",
             [],
         );
+        let _ = conn.execute(
+            "ALTER TABLE thumbnails ADD COLUMN requested_size INTEGER DEFAULT 0",
+            [],
+        );
 
         // OPTIMIZATION: Index on path to speed up directory clearing
         conn.execute(
@@ -233,9 +245,9 @@ impl ThumbnailDiskCache {
         format!("{:016x}", hasher.finish())
     }
 
-    /// Tries to retrieve a thumbnail from SQLite with dimensions
+    /// Tries to retrieve a thumbnail from SQLite with dimensions and request metadata.
     /// [READER] concurrency friendly
-    pub fn get(&self, path: &Path, modified: SystemTime) -> Option<(Vec<u8>, u32, u32)> {
+    pub fn get(&self, path: &Path, modified: SystemTime) -> Option<ThumbnailCacheEntry> {
         let id = Self::hash_path(path);
         let mod_time = modified
             .duration_since(UNIX_EPOCH)
@@ -245,15 +257,59 @@ impl ThumbnailDiskCache {
         let db = self.reader.lock().ok()?;
         let mut stmt = db
             .prepare_cached(
-                "SELECT data, width, height FROM thumbnails WHERE id = ? AND modified_at = ?",
+                "SELECT data, width, height, requested_size
+                 FROM thumbnails
+                 WHERE id = ? AND modified_at = ?",
             )
             .ok()?;
 
         stmt.query_row(params![id, mod_time], |row| {
-            let data: Vec<u8> = row.get(0)?;
-            let width_i64: i64 = row.get(1)?;
-            let height_i64: i64 = row.get(2)?;
-            Ok((data, width_i64 as u32, height_i64 as u32))
+            Ok(ThumbnailCacheEntry {
+                data: row.get(0)?,
+                width: row.get::<_, i64>(1)? as u32,
+                height: row.get::<_, i64>(2)? as u32,
+                requested_size: row.get::<_, i64>(3)? as u32,
+            })
+        })
+        .ok()
+    }
+
+    /// Retrieves the latest thumbnail entry for a path, ignoring modified time.
+    /// Useful for virtual filesystems where reported mtime can be unstable.
+    /// [READER] concurrency friendly
+    pub fn get_latest(&self, path: &Path) -> Option<ThumbnailCacheEntry> {
+        let id = Self::hash_path(path);
+        let db = self.reader.lock().ok()?;
+
+        // DEBUG: Check total row count for this id
+        let count: i64 = db
+            .prepare_cached("SELECT COUNT(*) FROM thumbnails WHERE id = ?")
+            .ok()
+            .and_then(|mut s| s.query_row(params![id], |r| r.get(0)).ok())
+            .unwrap_or(-1);
+        if count == 0 {
+            eprintln!(
+                "[DB-MISS] get_latest: id={} path={:?} → 0 rows in DB",
+                &id[..8],
+                path.file_name()
+            );
+        }
+
+        let mut stmt = db
+            .prepare_cached(
+                "SELECT data, width, height, requested_size
+                 FROM thumbnails
+                 WHERE id = ?",
+            )
+            .ok()?;
+
+        stmt.query_row(params![id], |row| {
+            Ok(ThumbnailCacheEntry {
+                data: row.get(0)?,
+                width: row.get::<_, i64>(1)? as u32,
+                height: row.get::<_, i64>(2)? as u32,
+                requested_size: row.get::<_, i64>(3)? as u32,
+            })
         })
         .ok()
     }
@@ -264,6 +320,7 @@ impl ThumbnailDiskCache {
         &self,
         path: &Path,
         modified: SystemTime,
+        requested_size: u32,
         rgba_data: &[u8],
         width: u32,
         height: u32,
@@ -316,9 +373,26 @@ impl ThumbnailDiskCache {
         let path_str = path.to_string_lossy().to_string();
 
         db.execute(
-            "INSERT OR REPLACE INTO thumbnails (id, path, data, modified_at, created_at, width, height) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            params![id, path_str, webp_data.to_vec(), mod_time, now, final_width as i64, final_height as i64],
+            "INSERT OR REPLACE INTO thumbnails
+             (id, path, data, modified_at, created_at, width, height, requested_size)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                id,
+                path_str,
+                webp_data.to_vec(),
+                mod_time,
+                now,
+                final_width as i64,
+                final_height as i64,
+                requested_size as i64
+            ],
         )?;
+
+        eprintln!(
+            "[DB-PUT] OK id={} {}x{} req_size={} path={:?}",
+            &id[..8], final_width, final_height, requested_size,
+            path.file_name()
+        );
 
         Ok(())
     }
@@ -493,6 +567,47 @@ impl ThumbnailDiskCache {
         crate::infrastructure::onedrive::fast_path_exists(Path::new(path))
     }
 
+    /// Extract drive root (e.g., "X:\\") from a path string.
+    fn extract_drive_root(path: &str) -> Option<String> {
+        if path.len() >= 3
+            && path.as_bytes()[0].is_ascii_alphabetic()
+            && path.as_bytes()[1] == b':'
+            && (path.as_bytes()[2] == b'\\' || path.as_bytes()[2] == b'/')
+        {
+            Some(format!("{}:\\", path.chars().next().unwrap()))
+        } else {
+            None
+        }
+    }
+
+    /// Build a set of drive roots that are currently accessible.
+    /// Entries on inaccessible drives (e.g., unmounted Cryptomator vaults)
+    /// are skipped during GC to prevent deleting valid cached thumbnails.
+    fn accessible_drives(paths: impl Iterator<Item = impl AsRef<str>>) -> std::collections::HashSet<String> {
+        let mut checked: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+        let mut accessible = std::collections::HashSet::new();
+
+        for path in paths {
+            if let Some(root) = Self::extract_drive_root(path.as_ref()) {
+                let is_ok = *checked.entry(root.clone()).or_insert_with(|| {
+                    Self::path_exists_fast(&root)
+                });
+                if is_ok {
+                    accessible.insert(root);
+                }
+            }
+        }
+        accessible
+    }
+
+    /// Check if a path's drive is accessible (using a pre-built set).
+    fn is_on_accessible_drive(path: &str, accessible: &std::collections::HashSet<String>) -> bool {
+        match Self::extract_drive_root(path) {
+            Some(root) => accessible.contains(&root),
+            None => true, // Network paths, etc. — always check
+        }
+    }
+
     fn execute_batch_delete(
         db: &Connection,
         table: &str,
@@ -563,15 +678,28 @@ impl ThumbnailDiskCache {
             return 0;
         }
 
+        // CRITICAL: Determine which drives are currently accessible.
+        // Skip orphan-checking for files on inaccessible drives (e.g., unmounted
+        // Cryptomator vaults) to prevent deleting valid cached thumbnails.
+        let all_paths = sampled_entries
+            .iter()
+            .map(|(_, p)| p.as_str())
+            .chain(sampled_folders.iter().map(|p| p.as_str()));
+        let accessible = Self::accessible_drives(all_paths);
+
         let orphan_thumbs: Vec<String> = sampled_entries
             .into_iter()
-            .filter(|(_, path)| !Self::path_exists_fast(path))
+            .filter(|(_, path)| {
+                Self::is_on_accessible_drive(path, &accessible) && !Self::path_exists_fast(path)
+            })
             .map(|(id, _)| id)
             .collect();
 
         let orphan_folders: Vec<String> = sampled_folders
             .into_iter()
-            .filter(|path| !Self::path_exists_fast(path))
+            .filter(|path| {
+                Self::is_on_accessible_drive(path, &accessible) && !Self::path_exists_fast(path)
+            })
             .collect();
 
         if orphan_thumbs.is_empty() && orphan_folders.is_empty() {
@@ -644,15 +772,27 @@ impl ThumbnailDiskCache {
                 .unwrap_or_default();
         }
 
+        // CRITICAL: Skip orphan-checking for files on inaccessible drives
+        // (e.g., unmounted Cryptomator vaults) to prevent mass-deleting valid cache.
+        let all_paths = all_entries
+            .iter()
+            .map(|(_, p)| p.as_str())
+            .chain(all_folders.iter().map(|p| p.as_str()));
+        let accessible = Self::accessible_drives(all_paths);
+
         let orphan_thumbs: Vec<String> = all_entries
             .into_iter()
-            .filter(|(_, path)| !Self::path_exists_fast(path))
+            .filter(|(_, path)| {
+                Self::is_on_accessible_drive(path, &accessible) && !Self::path_exists_fast(path)
+            })
             .map(|(id, _)| id)
             .collect();
 
         let orphan_folders: Vec<String> = all_folders
             .into_iter()
-            .filter(|path| !Self::path_exists_fast(path))
+            .filter(|path| {
+                Self::is_on_accessible_drive(path, &accessible) && !Self::path_exists_fast(path)
+            })
             .collect();
 
         if orphan_thumbs.is_empty() && orphan_folders.is_empty() {

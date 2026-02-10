@@ -117,6 +117,82 @@ pub fn sanitize_path(path: &Path, config: &SecurityConfig) -> Result<PathBuf, Se
     Ok(normalize_for_shell_apis(&canonical))
 }
 
+fn extract_local_drive(path: &Path) -> Option<String> {
+    let raw = path.to_string_lossy();
+    let normalized = if let Some(stripped) = raw.strip_prefix(r"\\?\") {
+        stripped
+    } else if let Some(stripped) = raw.strip_prefix(r"\\.\") {
+        stripped
+    } else {
+        &raw
+    };
+
+    let bytes = normalized.as_bytes();
+    if bytes.len() < 3 {
+        return None;
+    }
+
+    if bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/')
+    {
+        Some(format!("{}:", (bytes[0] as char).to_ascii_uppercase()))
+    } else {
+        None
+    }
+}
+
+fn drive_is_allowed(drive: &str, config: &SecurityConfig) -> bool {
+    config
+        .allowed_drives
+        .iter()
+        .any(|allowed| allowed.to_uppercase() == drive)
+}
+
+fn has_relative_components(path: &Path) -> bool {
+    path.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::ParentDir | std::path::Component::CurDir
+        )
+    })
+}
+
+/// Sanitizes a path and falls back to lexical validation for absolute local-drive paths.
+///
+/// This is useful for virtual drives where canonicalization can resolve to provider/UNC paths
+/// that fail strict drive validation despite the original path being a valid `X:\...` input.
+pub fn sanitize_path_with_local_drive_fallback(
+    path: &Path,
+    config: &SecurityConfig,
+) -> Result<PathBuf, SecurityError> {
+    match sanitize_path(path, config) {
+        Ok(valid) => Ok(valid),
+        Err(original_error) => {
+            let path_str = path.to_string_lossy();
+            if path_str.contains('\0') {
+                return Err(SecurityError::NullBytes(path_str.to_string()));
+            }
+
+            let Some(drive) = extract_local_drive(path) else {
+                return Err(original_error);
+            };
+
+            if !drive_is_allowed(&drive, config) {
+                return Err(SecurityError::OutsideAllowedDrive(path_str.to_string()));
+            }
+
+            if config.block_special_components && has_relative_components(path) {
+                return Err(SecurityError::PathTraversal(path_str.to_string()));
+            }
+
+            if !config.allow_symlinks {
+                check_symlink(path)?;
+            }
+
+            Ok(normalize_for_shell_apis(path))
+        }
+    }
+}
+
 /// Validate each path component.
 fn validate_path_components(path: &Path, config: &SecurityConfig) -> Result<(), SecurityError> {
     if config.block_special_components {
@@ -325,6 +401,49 @@ mod tests {
             normalize_for_shell_apis(&device),
             PathBuf::from(r"C:\Temp\file.txt")
         );
+    }
+
+    #[test]
+    fn test_local_drive_fallback_allows_virtual_drive_style_paths() {
+        let config = SecurityConfig {
+            allowed_drives: vec!["Z:".to_string()],
+            allow_symlinks: true,
+            ..SecurityConfig::default()
+        };
+
+        let result =
+            sanitize_path_with_local_drive_fallback(Path::new(r"Z:\vault\file.txt"), &config);
+        assert!(
+            result.is_ok(),
+            "Expected fallback to accept local drive path"
+        );
+        assert_eq!(result.unwrap(), PathBuf::from(r"Z:\vault\file.txt"));
+    }
+
+    #[test]
+    fn test_local_drive_fallback_blocks_relative_components() {
+        let config = SecurityConfig {
+            allowed_drives: vec!["Z:".to_string()],
+            allow_symlinks: true,
+            ..SecurityConfig::default()
+        };
+
+        let result =
+            sanitize_path_with_local_drive_fallback(Path::new(r"Z:\vault\..\secret.txt"), &config);
+        assert!(result.is_err(), "Path traversal should stay blocked");
+    }
+
+    #[test]
+    fn test_local_drive_fallback_respects_allowed_drives() {
+        let config = SecurityConfig {
+            allowed_drives: vec!["C:".to_string()],
+            allow_symlinks: true,
+            ..SecurityConfig::default()
+        };
+
+        let result =
+            sanitize_path_with_local_drive_fallback(Path::new(r"Z:\vault\file.txt"), &config);
+        assert!(result.is_err(), "Drive outside allow list must be blocked");
     }
 
     #[test]

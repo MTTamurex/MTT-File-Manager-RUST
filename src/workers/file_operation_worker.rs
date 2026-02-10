@@ -7,7 +7,7 @@ use std::sync::mpsc::Receiver;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
 
-use crate::infrastructure::security::{sanitize_path, SecurityConfig};
+use crate::infrastructure::security::{sanitize_path_with_local_drive_fallback, SecurityConfig};
 use crate::infrastructure::windows::recycle_bin;
 use crate::infrastructure::windows::shell_operations;
 
@@ -175,7 +175,7 @@ fn sanitize_operation_path(path: &Path) -> Result<PathBuf, String> {
         return Ok(path.to_path_buf());
     }
 
-    sanitize_path(path, &operation_security_config())
+    sanitize_path_with_local_drive_fallback(path, &operation_security_config())
         .map_err(|e| format!("Security validation failed for '{}': {}", path.display(), e))
 }
 

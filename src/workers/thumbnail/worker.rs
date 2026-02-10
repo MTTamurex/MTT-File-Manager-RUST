@@ -6,7 +6,7 @@
 //! worker thread blocking on cloud-only files.
 
 use crate::domain::thumbnail::ThumbnailData;
-use crate::infrastructure::disk_cache::ThumbnailDiskCache;
+use crate::infrastructure::disk_cache::{ThumbnailCacheEntry, ThumbnailDiskCache};
 use crate::infrastructure::io_priority::{self, IOPriority};
 use crate::infrastructure::onedrive::{self, IoTimeoutResult};
 use crate::workers::thumbnail::extraction::generate_thumbnail_hybrid;
@@ -198,32 +198,58 @@ fn process_thumbnail_request(
 
     if req_modified > 0 {
         let modified = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(req_modified);
-        if let Some((cached_bytes, cached_w, cached_h)) = disk_cache.get(path, modified) {
-            let cached_max_dim = cached_w.max(cached_h);
-            if cached_max_dim >= req_size && cached_max_dim > 0 {
-                // Cache hit — serve from SQLite DB, ZERO I/O on source drive
-                if let Ok(img) =
-                    image::load_from_memory_with_format(&cached_bytes, ImageFormat::WebP)
-                {
-                    let rgba = img.to_rgba8();
-                    final_result = Some((rgba.to_vec(), rgba.width(), rgba.height()));
-                }
+        if let Some(entry) = disk_cache.get(path, modified) {
+            let w = entry.width;
+            let h = entry.height;
+            let rs = entry.requested_size;
+            if let Some(decoded) = decode_cache_entry(entry, req_size) {
+                final_result = Some(decoded);
+            } else {
+                eprintln!(
+                    "[Thumbnail-CACHE] EXACT match found but decode_cache_entry rejected! path={:?}, cached={}x{}, requested_size_in_db={}, req_size={}",
+                    path.file_name(), w, h, rs, req_size
+                );
             }
         }
+    }
 
-        // If DB cache hit, send result and return — no source drive I/O needed
-        if let Some((data, w, h)) = final_result {
-            let _ = tx.send(ThumbnailData {
-                path: path.clone(),
-                image_data: data,
-                width: w,
-                height: h,
-                generation: req_gen,
-                not_found: false,
-            });
-            throttle_repaint_with_priority(ctx, last_repaint, req_priority);
-            return;
+    // Fallback: try get_latest (ignores mtime) when exact match missed.
+    // This handles virtual drives that report unstable mtimes between remounts,
+    // drives not auto-detected as virtual, and req_modified == 0 cases.
+    // Cost: one extra SQLite query on the local NVMe — negligible.
+    if final_result.is_none() {
+        if let Some(entry) = disk_cache.get_latest(path) {
+            let w = entry.width;
+            let h = entry.height;
+            let rs = entry.requested_size;
+            if let Some(decoded) = decode_cache_entry(entry, req_size) {
+                final_result = Some(decoded);
+            } else {
+                eprintln!(
+                    "[Thumbnail-CACHE] LATEST match found but decode_cache_entry rejected! path={:?}, cached={}x{}, requested_size_in_db={}, req_size={}",
+                    path.file_name(), w, h, rs, req_size
+                );
+            }
+        } else {
+            eprintln!(
+                "[Thumbnail-CACHE] NO entry in DB at all for path={:?}, req_modified={}, req_size={}",
+                path.file_name(), req_modified, req_size
+            );
         }
+    }
+
+    // If DB cache hit, send result and return — no source drive I/O needed
+    if let Some((data, w, h)) = final_result {
+        let _ = tx.send(ThumbnailData {
+            path: path.clone(),
+            image_data: data,
+            width: w,
+            height: h,
+            generation: req_gen,
+            not_found: false,
+        });
+        throttle_repaint_with_priority(ctx, last_repaint, req_priority);
+        return;
     }
 
     // --- CACHE MISS PATH: Now we need to access the source file ---
@@ -305,18 +331,12 @@ fn process_thumbnail_request(
         }
     };
 
-    // STEP 0: Check Disk Cache with SIZE VALIDATION (for req_modified == 0 fallback)
+    // STEP 0: Check Disk Cache with size validation (exact mtime, then fallback)
     if final_result.is_none() {
-        if let Some((cached_bytes, cached_w, cached_h)) = disk_cache.get(path, modified) {
-            let cached_max_dim = cached_w.max(cached_h);
-            if cached_max_dim >= req_size && cached_max_dim > 0 {
-                if let Ok(img) =
-                    image::load_from_memory_with_format(&cached_bytes, ImageFormat::WebP)
-                {
-                    let rgba = img.to_rgba8();
-                    final_result = Some((rgba.to_vec(), rgba.width(), rgba.height()));
-                }
-            }
+        if let Some(entry) = disk_cache.get(path, modified) {
+            final_result = decode_cache_entry(entry, req_size);
+        } else if let Some(entry) = disk_cache.get_latest(path) {
+            final_result = decode_cache_entry(entry, req_size);
         }
     }
 
@@ -339,7 +359,15 @@ fn process_thumbnail_request(
             let resized = resize_to_bucket(raw_data, w, h, bucket_size);
 
             // STEP 3: Salva versão otimizada em SQLite
-            let _ = disk_cache.put(path, modified, &resized.0, resized.1, resized.2);
+            if let Err(e) =
+                disk_cache.put(path, modified, req_size, &resized.0, resized.1, resized.2)
+            {
+                eprintln!(
+                    "[Thumbnail-CACHE] PUT FAILED for {:?}: {:?}",
+                    path.file_name(),
+                    e
+                );
+            }
 
             // STEP 4: Usa a versão resizada (já otimizada)
             final_result = Some(resized);
@@ -364,6 +392,25 @@ fn process_thumbnail_request(
         not_found: false,
     });
     throttle_repaint_with_priority(ctx, last_repaint, req_priority);
+}
+
+fn decode_cache_entry(entry: ThumbnailCacheEntry, req_size: u32) -> Option<(Vec<u8>, u32, u32)> {
+    if !cache_entry_satisfies_request(&entry, req_size) {
+        return None;
+    }
+
+    let img = image::load_from_memory_with_format(&entry.data, ImageFormat::WebP).ok()?;
+    let rgba = img.to_rgba8();
+    Some((rgba.to_vec(), rgba.width(), rgba.height()))
+}
+
+fn cache_entry_satisfies_request(entry: &ThumbnailCacheEntry, req_size: u32) -> bool {
+    let cached_max_dim = entry.width.max(entry.height);
+    if cached_max_dim == 0 {
+        return false;
+    }
+
+    cached_max_dim >= req_size || entry.requested_size >= req_size
 }
 
 /// PERFORMANCE: Adaptive repaint throttling based on priority
@@ -437,5 +484,27 @@ mod tests {
         for h in handles {
             h.join().unwrap();
         }
+    }
+
+    #[test]
+    fn test_cache_entry_satisfies_request_with_sufficient_dimensions() {
+        let entry = ThumbnailCacheEntry {
+            data: Vec::new(),
+            width: 512,
+            height: 320,
+            requested_size: 256,
+        };
+        assert!(cache_entry_satisfies_request(&entry, 512));
+    }
+
+    #[test]
+    fn test_cache_entry_satisfies_request_with_requested_size_fallback() {
+        let entry = ThumbnailCacheEntry {
+            data: Vec::new(),
+            width: 128,
+            height: 128,
+            requested_size: 512,
+        };
+        assert!(cache_entry_satisfies_request(&entry, 512));
     }
 }

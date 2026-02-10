@@ -439,6 +439,7 @@ impl ImageViewerApp {
 
         let aggressive = working_set_bytes >= HARD_LIMIT_BYTES;
         let max_pending = if aggressive { 24 } else { 48 };
+        let min_folder_previews_keep = self.estimated_visible_folder_previews();
 
         while self.pending_thumbnails.len() > max_pending {
             if let Some(old) = self.pending_thumbnails.pop_front() {
@@ -449,11 +450,17 @@ impl ImageViewerApp {
         }
 
         let (textures_removed, rgba_removed, folder_previews_removed) = if aggressive {
-            self.cache_manager
-                .trim_thumbnail_caches(96, 64 * 1024 * 1024, 24)
+            self.cache_manager.trim_thumbnail_caches(
+                96,
+                64 * 1024 * 1024,
+                min_folder_previews_keep.max(72),
+            )
         } else {
-            self.cache_manager
-                .trim_thumbnail_caches(140, 96 * 1024 * 1024, 48)
+            self.cache_manager.trim_thumbnail_caches(
+                140,
+                96 * 1024 * 1024,
+                min_folder_previews_keep.max(120),
+            )
         };
 
         if aggressive {
@@ -476,6 +483,37 @@ impl ImageViewerApp {
                 if aggressive { "hard" } else { "soft" }
             );
         }
+    }
+
+    fn estimated_visible_folder_previews(&self) -> usize {
+        if !matches!(self.view_mode, ViewMode::Grid)
+            || self.is_computer_view
+            || self.is_recycle_bin_view
+        {
+            return 0;
+        }
+
+        let screen = self.ui_ctx.screen_rect();
+        let mut central_width = screen.width()
+            - self.sidebar_left_width.clamp(150.0, 500.0)
+            - if self.show_preview_panel {
+                self.sidebar_right_width.clamp(250.0, 500.0)
+            } else {
+                0.0
+            };
+        central_width = (central_width - 24.0).max(0.0);
+
+        let thumbnail_size = self.thumbnail_size.max(96.0);
+        let padding = 8.0;
+        let cols = ((central_width - padding) / (thumbnail_size + padding))
+            .floor()
+            .max(1.0) as usize;
+
+        let central_height = (screen.height() - 72.0).max(0.0);
+        let row_height = thumbnail_size + 20.0 + padding;
+        let rows = (central_height / row_height).ceil().max(1.0) as usize;
+
+        cols.saturating_mul(rows.saturating_add(2)).clamp(48, 320)
     }
 }
 
