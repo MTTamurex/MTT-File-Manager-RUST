@@ -94,7 +94,7 @@ pub fn sanitize_path(path: &Path, config: &SecurityConfig) -> Result<PathBuf, Se
                         Some(name) => canonical_parent.join(name),
                         None => canonical_parent,
                     };
-                    return Ok(fallback);
+                    return Ok(normalize_for_shell_apis(&fallback));
                 }
             }
 
@@ -111,7 +111,7 @@ pub fn sanitize_path(path: &Path, config: &SecurityConfig) -> Result<PathBuf, Se
         check_symlink(&canonical)?;
     }
 
-    Ok(canonical)
+    Ok(normalize_for_shell_apis(&canonical))
 }
 
 /// Validate each path component.
@@ -145,6 +145,27 @@ fn normalize_windows_prefix(path_upper: &str) -> String {
     } else {
         path_upper.to_string()
     }
+}
+
+/// Converts Windows verbatim prefixes to regular paths for Shell APIs.
+///
+/// `std::fs::canonicalize` commonly returns paths like `\\?\C:\...`.
+/// Many shell operations (SHFileOperation / parsing-name based APIs) are
+/// more reliable with the regular `C:\...` representation.
+fn normalize_for_shell_apis(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+
+    if let Some(stripped) = s.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{}", stripped));
+    }
+    if let Some(stripped) = s.strip_prefix(r"\\?\") {
+        return PathBuf::from(stripped);
+    }
+    if let Some(stripped) = s.strip_prefix(r"\\.\") {
+        return PathBuf::from(stripped);
+    }
+
+    path.to_path_buf()
 }
 
 /// Validate that a path is inside an allowed drive.
@@ -267,6 +288,26 @@ mod tests {
         assert!(validate_file_extension(Path::new("script.bat"), &config).is_err());
         assert!(validate_file_extension(Path::new("document.txt"), &config).is_ok());
         assert!(validate_file_extension(Path::new("image.jpg"), &config).is_ok());
+    }
+
+    #[test]
+    fn test_normalize_for_shell_apis_strips_verbatim_prefixes() {
+        let local = PathBuf::from(r"\\?\C:\Temp\file.txt");
+        let unc = PathBuf::from(r"\\?\UNC\server\share\file.txt");
+        let device = PathBuf::from(r"\\.\C:\Temp\file.txt");
+
+        assert_eq!(
+            normalize_for_shell_apis(&local),
+            PathBuf::from(r"C:\Temp\file.txt")
+        );
+        assert_eq!(
+            normalize_for_shell_apis(&unc),
+            PathBuf::from(r"\\server\share\file.txt")
+        );
+        assert_eq!(
+            normalize_for_shell_apis(&device),
+            PathBuf::from(r"C:\Temp\file.txt")
+        );
     }
 
     #[test]

@@ -72,7 +72,8 @@ impl ImageViewerApp {
                             name: item.name,
                             is_dir: item.is_directory,
                             size: item.size,
-                            modified: 0,
+                            // Store deletion timestamp for stable numeric sort in Recycle Bin view.
+                            modified: item.date_deleted_unix,
                             folder_cover: None,
                             drive_info: None,
                             sync_status: crate::domain::file_entry::SyncStatus::None,

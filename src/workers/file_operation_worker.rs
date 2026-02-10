@@ -152,9 +152,22 @@ fn operation_security_config() -> SecurityConfig {
 
 fn should_bypass_sanitization(path: &Path) -> bool {
     let s = path.to_string_lossy();
-    s.starts_with("shell:")
-        || s.starts_with("\\\\")
+    if s.starts_with("shell:")
         || crate::infrastructure::windows::is_shell_navigation_path(path, false)
+    {
+        return true;
+    }
+
+    // Bypass only UNC network paths. Do NOT bypass local verbatim paths
+    // like `\\?\C:\...` because those should be normalized for Shell APIs.
+    if !s.starts_with(r"\\") {
+        return false;
+    }
+
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) => rest.starts_with("UNC\\"),
+        None => true,
+    }
 }
 
 fn sanitize_operation_path(path: &Path) -> Result<PathBuf, String> {

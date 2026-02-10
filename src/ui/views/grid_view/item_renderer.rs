@@ -137,9 +137,13 @@ pub(super) fn render_grid_item(
                         let (date_lbl, date_val) = if is_recycle {
                             (
                                 "Data de Exclusão",
-                                item.deletion_date
-                                    .clone()
-                                    .unwrap_or_else(|| "-".to_string()),
+                                if item.modified > 0 {
+                                    crate::infrastructure::windows::format_date(item.modified)
+                                } else {
+                                    item.deletion_date
+                                        .clone()
+                                        .unwrap_or_else(|| "-".to_string())
+                                },
                             )
                         } else {
                             (

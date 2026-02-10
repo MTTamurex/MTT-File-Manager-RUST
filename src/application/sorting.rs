@@ -52,13 +52,20 @@ fn parse_recycle_date_sort_key(date: &str) -> Option<(u32, u32, u32, u32, u32, u
 fn get_sort_date_for_comparison(a: &FileEntry, b: &FileEntry) -> Ordering {
     match (&a.deletion_date, &b.deletion_date) {
         // Ambos têm data de exclusão (lixeira): compara strings diretamente
-        (Some(a_date), Some(b_date)) => match (
-            parse_recycle_date_sort_key(a_date),
-            parse_recycle_date_sort_key(b_date),
-        ) {
-            (Some(a_key), Some(b_key)) => a_key.cmp(&b_key),
-            _ => a_date.cmp(b_date),
-        },
+        (Some(a_date), Some(b_date)) => {
+            let has_recycle_metadata =
+                a.recycle_original_path.is_some() && b.recycle_original_path.is_some();
+            if has_recycle_metadata && a.modified > 0 && b.modified > 0 {
+                return a.modified.cmp(&b.modified);
+            }
+            match (
+                parse_recycle_date_sort_key(a_date),
+                parse_recycle_date_sort_key(b_date),
+            ) {
+                (Some(a_key), Some(b_key)) => a_key.cmp(&b_key),
+                _ => a_date.cmp(b_date),
+            }
+        }
         // Apenas um tem data de exclusão: considera que items da lixeira vêm primeiro
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
@@ -446,5 +453,39 @@ mod tests {
         sort_items(&mut items, SortMode::Date, false, FoldersPosition::Mixed);
         assert_eq!(items[0].name, "jan.txt");
         assert_eq!(items[1].name, "fev.txt");
+    }
+    #[test]
+    fn test_sort_by_date_recycle_bin_prefers_numeric_timestamp() {
+        // Timestamps intentionally contradict display strings.
+        let mut items = vec![
+            FileEntry {
+                path: PathBuf::from("older.txt"),
+                name: "older.txt".to_string(),
+                is_dir: false,
+                size: 1,
+                modified: 1_704_067_200, // 2024-01-03 UTC
+                folder_cover: None,
+                drive_info: None,
+                sync_status: crate::domain::file_entry::SyncStatus::None,
+                deletion_date: Some("10/12/2029 10:00".to_string()),
+                recycle_original_path: Some(PathBuf::from(r"C:\orig\older.txt")),
+            },
+            FileEntry {
+                path: PathBuf::from("newer.txt"),
+                name: "newer.txt".to_string(),
+                is_dir: false,
+                size: 1,
+                modified: 1_704_153_600, // 2024-01-04 UTC
+                folder_cover: None,
+                drive_info: None,
+                sync_status: crate::domain::file_entry::SyncStatus::None,
+                deletion_date: Some("01/01/2000 00:00".to_string()),
+                recycle_original_path: Some(PathBuf::from(r"C:\orig\newer.txt")),
+            },
+        ];
+
+        sort_items(&mut items, SortMode::Date, false, FoldersPosition::Mixed);
+        assert_eq!(items[0].name, "older.txt");
+        assert_eq!(items[1].name, "newer.txt");
     }
 }
