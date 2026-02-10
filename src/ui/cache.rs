@@ -18,6 +18,17 @@ const DEFAULT_RGBA_CACHE_ITEMS: usize = 240;
 const DEFAULT_MAX_CONCURRENT_LOADS: usize = 80;
 const DEFAULT_RGBA_BUDGET_BYTES: usize = 128 * 1024 * 1024;
 
+#[inline]
+fn nz_cache_size(size: usize, cache_name: &str) -> NonZeroUsize {
+    if size == 0 {
+        eprintln!(
+            "[WARN] {} configured with 0 entries; clamping to 1",
+            cache_name
+        );
+    }
+    NonZeroUsize::new(size.max(1)).expect("size.max(1) is always non-zero")
+}
+
 /// Texture cache configuration
 pub struct TextureCacheConfig {
     pub max_size: usize,
@@ -64,19 +75,26 @@ impl CacheManager {
     pub fn new() -> Self {
         Self {
             // Bounded default keeps enough history for smooth scrolling without runaway RAM.
-            texture_cache: LruCache::new(NonZeroUsize::new(DEFAULT_TEXTURE_CACHE_ITEMS).unwrap()),
-            icon_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
+            texture_cache: LruCache::new(nz_cache_size(
+                DEFAULT_TEXTURE_CACHE_ITEMS,
+                "texture_cache",
+            )),
+            icon_cache: LruCache::new(nz_cache_size(100, "icon_cache")),
             loading_set: FxHashSet::default(),
             folder_icon_texture: None,
             computer_icon: None,
-            drive_icon_cache: LruCache::new(NonZeroUsize::new(10).unwrap()),
-            folder_preview_cache: LruCache::new(
-                NonZeroUsize::new(DEFAULT_FOLDER_PREVIEW_CACHE_ITEMS).unwrap(),
-            ),
+            drive_icon_cache: LruCache::new(nz_cache_size(10, "drive_icon_cache")),
+            folder_preview_cache: LruCache::new(nz_cache_size(
+                DEFAULT_FOLDER_PREVIEW_CACHE_ITEMS,
+                "folder_preview_cache",
+            )),
             folder_preview_loading: FxHashSet::default(),
-            failed_thumbnails: LruCache::new(NonZeroUsize::new(1000).unwrap()),
+            failed_thumbnails: LruCache::new(nz_cache_size(1000, "failed_thumbnails")),
             pending_upload_set: FxHashSet::default(),
-            rgba_data_cache: LruCache::new(NonZeroUsize::new(DEFAULT_RGBA_CACHE_ITEMS).unwrap()),
+            rgba_data_cache: LruCache::new(nz_cache_size(
+                DEFAULT_RGBA_CACHE_ITEMS,
+                "rgba_data_cache",
+            )),
             rgba_data_bytes: 0,
             max_rgba_data_bytes: DEFAULT_RGBA_BUDGET_BYTES,
 
@@ -91,19 +109,23 @@ impl CacheManager {
             (config.max_size * 1024 * 1024 / 2).clamp(DEFAULT_RGBA_BUDGET_BYTES, 256 * 1024 * 1024);
 
         Self {
-            texture_cache: LruCache::new(NonZeroUsize::new(config.max_size).unwrap()),
-            icon_cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
+            texture_cache: LruCache::new(nz_cache_size(
+                config.max_size,
+                "texture_cache(config.max_size)",
+            )),
+            icon_cache: LruCache::new(nz_cache_size(100, "icon_cache")),
             loading_set: FxHashSet::default(),
             folder_icon_texture: None,
             computer_icon: None,
-            drive_icon_cache: LruCache::new(NonZeroUsize::new(10).unwrap()),
-            folder_preview_cache: LruCache::new(
-                NonZeroUsize::new(DEFAULT_FOLDER_PREVIEW_CACHE_ITEMS).unwrap(),
-            ),
+            drive_icon_cache: LruCache::new(nz_cache_size(10, "drive_icon_cache")),
+            folder_preview_cache: LruCache::new(nz_cache_size(
+                DEFAULT_FOLDER_PREVIEW_CACHE_ITEMS,
+                "folder_preview_cache",
+            )),
             folder_preview_loading: FxHashSet::default(),
-            failed_thumbnails: LruCache::new(NonZeroUsize::new(1000).unwrap()),
+            failed_thumbnails: LruCache::new(nz_cache_size(1000, "failed_thumbnails")),
             pending_upload_set: FxHashSet::default(),
-            rgba_data_cache: LruCache::new(NonZeroUsize::new(rgba_cache_items).unwrap()),
+            rgba_data_cache: LruCache::new(nz_cache_size(rgba_cache_items, "rgba_data_cache")),
             rgba_data_bytes: 0,
             max_rgba_data_bytes: rgba_budget_bytes,
 

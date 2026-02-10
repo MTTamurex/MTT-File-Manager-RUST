@@ -55,7 +55,9 @@ impl IconLoader {
     pub fn new() -> Self {
         let (tx, rx) = mpsc::channel();
         Self {
-            icon_cache: LruCache::new(NonZeroUsize::new(100).unwrap()), // ICON_CACHE_SIZE
+            icon_cache: LruCache::new(
+                NonZeroUsize::new(100).expect("icon cache size must be non-zero"),
+            ), // ICON_CACHE_SIZE
             folder_icon_texture: None,
             computer_icon_texture: None,
             recycle_bin_icon_texture: None,

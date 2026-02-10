@@ -55,7 +55,7 @@ impl GifManager {
     pub fn new(ui_ctx: egui::Context) -> Self {
         Self {
             // Increase cache slots but use memory-based eviction logic
-            cache: LruCache::new(NonZeroUsize::new(100).unwrap()),
+            cache: LruCache::new(NonZeroUsize::new(100).expect("gif cache size must be non-zero")),
             current_generation: Arc::new(AtomicUsize::new(0)),
             ui_ctx,
             max_memory_bytes: 150 * 1024 * 1024, // 150 MB

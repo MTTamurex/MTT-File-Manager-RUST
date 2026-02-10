@@ -128,8 +128,6 @@ impl ImageViewerApp {
                 let clamped = new_idx.min(self.items.len().saturating_sub(1));
                 if let Some(item) = self.items.get(clamped) {
                     let item_path = item.path.clone();
-                    let is_dir = item.is_dir;
-                    let is_media = item.is_media(); // Extract before mutable borrow
 
                     // UPDATED: Decoupled Focus (selected_item) from Selection (multi_selection)
                     let old_focus = self.selected_item;
@@ -171,14 +169,6 @@ impl ImageViewerApp {
                     self.scroll_request = crate::app::state::ScrollRequest::EnsureVisible(clamped);
 
                     ui.ctx().request_repaint();
-
-                    if !is_dir
-                        && is_media
-                        && !self.cache_manager.has_thumbnail(&item_path)
-                        && !self.cache_manager.is_loading(&item_path)
-                    {
-                        self.request_thumbnail_load(item_path, 512);
-                    }
                 }
             }
 
@@ -367,19 +357,7 @@ impl ImageViewerApp {
                     }
 
                     // Common updates
-                    let item_path = item.path.clone();
-                    let is_dir = item.is_dir;
-                    let is_media = item.is_media(); // Extract before mutable borrow
                     self.update_selected_thumbnail();
-
-                    // Trigger thumbnail load for sidebar preview
-                    if !is_dir
-                        && is_media
-                        && !self.cache_manager.has_thumbnail(&item_path)
-                        && !self.cache_manager.is_loading(&item_path)
-                    {
-                        self.request_thumbnail_load(item_path, 512);
-                    }
                 }
             }
             Some(list_view::ListViewAction::DoubleClick(idx)) if !is_renaming => {

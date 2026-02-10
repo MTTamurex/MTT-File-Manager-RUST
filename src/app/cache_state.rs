@@ -38,7 +38,10 @@ impl CacheState {
             disk_cache,
             directory_cache: Arc::new(DirectoryCache::new()),
             directory_index: None,
-            metadata_cache: LruCache::new(std::num::NonZeroUsize::new(100).unwrap()),
+            metadata_cache: LruCache::new(
+                std::num::NonZeroUsize::new(100)
+                    .expect("cache_state metadata cache size must be non-zero"),
+            ),
             metadata_loading: FxHashSet::default(),
             last_metadata_refresh: Instant::now(),
             last_metadata_path: None,

@@ -133,11 +133,24 @@ pub fn render_file_info_table(
 
             // 3. Metadados do Arquivo (Data/Tamanho)
             if file.drive_info.is_none() && file.name != "Este Computador" {
-                add_detail(
-                    ui,
-                    "Data modificada:",
-                    crate::infrastructure::windows::format_date(file.modified),
-                );
+                let is_recycle_item =
+                    file.recycle_original_path.is_some() || file.deletion_date.is_some();
+                let (date_label, date_value) = if is_recycle_item {
+                    let value = if file.modified > 0 {
+                        crate::infrastructure::windows::format_date(file.modified)
+                    } else {
+                        file.deletion_date
+                            .clone()
+                            .unwrap_or_else(|| "-".to_string())
+                    };
+                    ("Data de exclusão:", value)
+                } else {
+                    (
+                        "Data modificada:",
+                        crate::infrastructure::windows::format_date(file.modified),
+                    )
+                };
+                add_detail(ui, date_label, date_value);
 
                 let size_str = if file.is_dir && !file.is_archive() {
                     if let Some(size) = folder_size {

@@ -22,7 +22,9 @@ use crate::ui::cache::FxHashSet;
 // Uses LruCache instead of HashMap to avoid full clear when limit is reached
 // Capacity: 5000 entries - least recently used entries are evicted automatically
 thread_local! {
-    static FONT_WIDTH_CACHE: RefCell<LruCache<u64, f32>> = RefCell::new(LruCache::new(NonZeroUsize::new(5000).unwrap()));
+    static FONT_WIDTH_CACHE: RefCell<LruCache<u64, f32>> = RefCell::new(LruCache::new(
+        NonZeroUsize::new(5000).expect("font width cache size must be non-zero")
+    ));
 }
 
 // PERFORMANCE: Thread-local cache for text truncation results to avoid redundant binary search

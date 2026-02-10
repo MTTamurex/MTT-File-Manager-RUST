@@ -574,7 +574,9 @@ impl ImageViewerApp {
             // Cover Worker
             cover_worker_sender: cover_req_tx,
             cover_worker_receiver: cover_res_rx,
-            scanned_folders: LruCache::new(NonZeroUsize::new(200).unwrap()),
+            scanned_folders: LruCache::new(
+                NonZeroUsize::new(200).expect("scanned_folders cache size must be non-zero"),
+            ),
             // audio_device, // Removed
             // Folder Preview Worker (Native Windows Shell)
             folder_preview_sender: folder_preview_tx,
@@ -664,7 +666,9 @@ impl ImageViewerApp {
             icon_req_sender: icon_req_tx,
             icon_res_receiver: icon_res_rx,
             loading_icons: FxHashSet::default(),
-            failed_icons: LruCache::new(NonZeroUsize::new(1000).unwrap()),
+            failed_icons: LruCache::new(
+                NonZeroUsize::new(1000).expect("failed_icons cache size must be non-zero"),
+            ),
 
             // NOTIFICATION SYSTEM
             notifications: crate::application::NotificationManager::new(),
@@ -715,7 +719,10 @@ impl ImageViewerApp {
             // METADATA ASYNC
             metadata_req_sender: meta_req_tx,
             metadata_res_receiver: meta_res_rx,
-            metadata_cache: LruCache::new(NonZeroUsize::new(theme::METADATA_CACHE_SIZE).unwrap()),
+            metadata_cache: LruCache::new(
+                NonZeroUsize::new(theme::METADATA_CACHE_SIZE.max(1))
+                    .expect("METADATA_CACHE_SIZE.max(1) must be non-zero"),
+            ),
             metadata_loading: FxHashSet::default(),
             last_metadata_refresh: Instant::now(),
             last_metadata_path: None,
@@ -733,11 +740,15 @@ impl ImageViewerApp {
             folder_size_req_sender: folder_size_req_tx,
             folder_size_res_receiver: folder_size_res_rx,
             folder_size_cancel,
-            folder_size_cache: LruCache::new(NonZeroUsize::new(500).unwrap()),
+            folder_size_cache: LruCache::new(
+                NonZeroUsize::new(500).expect("folder_size cache size must be non-zero"),
+            ),
             folder_size_loading: FxHashSet::default(),
 
             // RECYCLE BIN CACHE
-            deletion_date_cache: LruCache::new(NonZeroUsize::new(200).unwrap()),
+            deletion_date_cache: LruCache::new(
+                NonZeroUsize::new(200).expect("deletion_date cache size must be non-zero"),
+            ),
 
             // PERFORMANCE: Reusable buffers for grid rendering
             pending_ops: crate::ui::views::grid_view::PendingOperations::new(),

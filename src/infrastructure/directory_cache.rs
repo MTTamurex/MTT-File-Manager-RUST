@@ -23,7 +23,7 @@ impl DirectoryCache {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(LruCache::new(
-                NonZeroUsize::new(CACHE_CAPACITY).unwrap(),
+                NonZeroUsize::new(CACHE_CAPACITY).expect("CACHE_CAPACITY must be non-zero"),
             ))),
         }
     }
