@@ -557,9 +557,18 @@ impl ImageViewerApp {
         }
 
         // 6. Folder Previews (Native Sandwich effect)
-        // PERFORMANCE: Throttle folder preview uploads (Max 2 per frame - heavy textures)
+        // Folder previews are 256x256 RGBA (256KB each) — GPU upload is fast.
+        // With SQLite disk cache, many previews arrive at once on re-visits;
+        // a low per-frame limit causes visible spinner delays.
+        let max_folder_uploads = if is_performance_critical {
+            2
+        } else if is_video_playing {
+            6
+        } else {
+            20
+        };
         let mut folder_uploads = 0;
-        while folder_uploads < 2 {
+        while folder_uploads < max_folder_uploads {
             if let Ok(data) = self.folder_preview_receiver.try_recv() {
                 self.cache_manager.finish_folder_preview_loading(&data.path);
 
@@ -581,7 +590,7 @@ impl ImageViewerApp {
                 break;
             }
         }
-        if folder_uploads >= 2 {
+        if folder_uploads >= max_folder_uploads {
             ctx.request_repaint();
         }
 

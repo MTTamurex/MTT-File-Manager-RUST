@@ -352,6 +352,7 @@ impl ImageViewerApp {
                                             cleaned.file_name()
                                         );
                                         self.cache_manager.invalidate_folder_preview(&cleaned);
+                                        self.disk_cache.remove_folder_preview_cache(&cleaned);
                                     }
                                 }
 
@@ -372,6 +373,8 @@ impl ImageViewerApp {
                                             );
                                             self.cache_manager
                                                 .invalidate_folder_preview(&cleaned_parent);
+                                            self.disk_cache
+                                                .remove_folder_preview_cache(&cleaned_parent);
                                         }
                                     }
                                 }
