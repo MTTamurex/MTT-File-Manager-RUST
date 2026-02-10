@@ -18,7 +18,9 @@ impl SvgIconManager {
     /// Create a new SvgIconManager
     pub fn new() -> Self {
         Self {
-            cache: LruCache::new(NonZeroUsize::new(200).unwrap()),
+            cache: LruCache::new(
+                NonZeroUsize::new(200).expect("svg icon cache size must be non-zero"),
+            ),
         }
     }
 

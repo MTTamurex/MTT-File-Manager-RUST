@@ -30,6 +30,8 @@ impl ImageViewerApp {
 
         if let Some(selected) = &self.selected_file {
             let path = selected.path.clone();
+            let modified = selected.modified;
+            let is_media = selected.is_media();
             // Validate path exists before trying to load thumbnail
             // Skip this check for virtual paths (files inside ZIP archives)
             let is_virtual_path =
@@ -46,22 +48,28 @@ impl ImageViewerApp {
                 return;
             }
 
-            if let Some(tex) = self.cache_manager.texture_cache.peek(&path) {
-                self.selected_thumbnail = Some(tex.clone());
-            }
+            // Keep currently available texture, but only request 512px when the existing one
+            // is missing or smaller than needed for the detail panel.
+            let has_required_texture =
+                if let Some(tex) = self.cache_manager.texture_cache.peek(&path) {
+                    self.selected_thumbnail = Some(tex.clone());
+                    let tex_size = tex.size();
+                    (tex_size[0].max(tex_size[1]) as u32) >= 512
+                } else {
+                    false
+                };
 
-            // AUTO-RELOAD HIGH RES: If selected and it's a media file, request 512px for detail panel
-            // PERFORMANCE: Use is_media() method
-            let is_media = if let Some(ref entry) = self.selected_file {
-                entry.is_media()
-            } else {
-                path.extension()
-                    .and_then(|e| e.to_str())
-                    .map(crate::infrastructure::windows::is_media_extension)
-                    .unwrap_or(false)
-            };
-            if is_media {
-                self.request_thumbnail_load(path.clone(), 512);
+            // Avoid re-request loops: once 512px exists (or is already in-flight/pending upload),
+            // selection changes should not enqueue extraction again.
+            if is_media
+                && !has_required_texture
+                && !self.cache_manager.is_loading(&path)
+                && !self.cache_manager.is_pending_upload(&path)
+                && !self.cache_manager.is_failed(&path)
+            {
+                // Mark as loading here because selection-triggered requests bypass item slot code.
+                self.cache_manager.loading_set.insert(path.clone());
+                self.request_thumbnail_load_with_modified(path.clone(), 512, modified);
             }
 
             let active_tab_id = self.tab_manager.active().id;

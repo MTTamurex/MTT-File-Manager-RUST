@@ -4,6 +4,9 @@
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
+
 /// Path-related security errors.
 #[derive(Error, Debug)]
 pub enum SecurityError {
@@ -206,7 +209,7 @@ fn check_symlink(path: &Path) -> Result<(), SecurityError> {
 
     while current.exists() {
         if let Ok(metadata) = std::fs::symlink_metadata(&current) {
-            if metadata.file_type().is_symlink() {
+            if is_link_like_path(&metadata) {
                 return Err(SecurityError::SymlinkDetected(
                     current.to_string_lossy().to_string(),
                 ));
@@ -221,6 +224,20 @@ fn check_symlink(path: &Path) -> Result<(), SecurityError> {
     }
 
     Ok(())
+}
+
+#[cfg(windows)]
+#[inline]
+fn is_link_like_path(metadata: &std::fs::Metadata) -> bool {
+    // Windows reparse points include symlinks, junctions and mount points.
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+    (metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT) != 0
+}
+
+#[cfg(not(windows))]
+#[inline]
+fn is_link_like_path(metadata: &std::fs::Metadata) -> bool {
+    metadata.file_type().is_symlink()
 }
 
 /// Validate file extension against blocked list.

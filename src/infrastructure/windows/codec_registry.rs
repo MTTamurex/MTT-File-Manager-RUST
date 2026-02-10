@@ -30,7 +30,9 @@ static CODEC_NAME_CACHE: Mutex<Option<LruCache<String, String>>> = Mutex::new(No
 pub fn init_codec_cache() {
     let mut cache = CODEC_NAME_CACHE.lock().unwrap();
     if cache.is_none() {
-        *cache = Some(LruCache::new(NonZeroUsize::new(128).unwrap()));
+        *cache = Some(LruCache::new(
+            NonZeroUsize::new(128).expect("codec cache size must be non-zero"),
+        ));
     }
 }
 
