@@ -390,7 +390,10 @@ impl ThumbnailDiskCache {
 
         eprintln!(
             "[DB-PUT] OK id={} {}x{} req_size={} path={:?}",
-            &id[..8], final_width, final_height, requested_size,
+            &id[..8],
+            final_width,
+            final_height,
+            requested_size,
             path.file_name()
         );
 
@@ -583,15 +586,17 @@ impl ThumbnailDiskCache {
     /// Build a set of drive roots that are currently accessible.
     /// Entries on inaccessible drives (e.g., unmounted Cryptomator vaults)
     /// are skipped during GC to prevent deleting valid cached thumbnails.
-    fn accessible_drives(paths: impl Iterator<Item = impl AsRef<str>>) -> std::collections::HashSet<String> {
+    fn accessible_drives(
+        paths: impl Iterator<Item = impl AsRef<str>>,
+    ) -> std::collections::HashSet<String> {
         let mut checked: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
         let mut accessible = std::collections::HashSet::new();
 
         for path in paths {
             if let Some(root) = Self::extract_drive_root(path.as_ref()) {
-                let is_ok = *checked.entry(root.clone()).or_insert_with(|| {
-                    Self::path_exists_fast(&root)
-                });
+                let is_ok = *checked
+                    .entry(root.clone())
+                    .or_insert_with(|| Self::path_exists_fast(&root));
                 if is_ok {
                     accessible.insert(root);
                 }
