@@ -2,11 +2,12 @@
 //! Ensures COM is initialized as STA (COINIT_APARTMENTTHREADED) for correct shell behavior.
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
 
+use crate::infrastructure::security::{sanitize_path, SecurityConfig};
 use crate::infrastructure::windows::recycle_bin;
 use crate::infrastructure::windows::shell_operations;
 
@@ -137,6 +138,38 @@ impl FileOperationRequest {
     }
 }
 
+fn operation_security_config() -> SecurityConfig {
+    // Keep broad drive compatibility while still enforcing safe path shape
+    // and component sanitization.
+    let allowed_drives = ('A'..='Z').map(|c| format!("{}:", c)).collect();
+    SecurityConfig {
+        allowed_drives,
+        // Windows commonly uses junctions/reparse points in valid user paths.
+        allow_symlinks: true,
+        ..SecurityConfig::default()
+    }
+}
+
+fn should_bypass_sanitization(path: &Path) -> bool {
+    let s = path.to_string_lossy();
+    s.starts_with("shell:")
+        || s.starts_with("\\\\")
+        || crate::infrastructure::windows::is_shell_navigation_path(path, false)
+}
+
+fn sanitize_operation_path(path: &Path) -> Result<PathBuf, String> {
+    if should_bypass_sanitization(path) {
+        return Ok(path.to_path_buf());
+    }
+
+    sanitize_path(path, &operation_security_config())
+        .map_err(|e| format!("Security validation failed for '{}': {}", path.display(), e))
+}
+
+fn sanitize_operation_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
+    paths.iter().map(|p| sanitize_operation_path(p)).collect()
+}
+
 /// Starts the file operation worker thread.
 pub fn start_file_operation_worker(
     receiver: Receiver<FileOperationRequest>,
@@ -152,34 +185,73 @@ pub fn start_file_operation_worker(
         while let Ok(request) = receiver.recv() {
             match request {
                 FileOperationRequest::Delete { paths, hwnd } => {
-                    let _ = shell_operations::delete_items_with_shell(&paths, hwnd.0);
-                    let mut parents = HashSet::new();
-                    for path in &paths {
-                        if let Some(parent) = path.parent() {
-                            parents.insert(parent.to_path_buf());
+                    match sanitize_operation_paths(&paths) {
+                        Ok(valid_paths) => {
+                            if valid_paths.is_empty() {
+                                // no-op
+                            } else {
+                                let _ =
+                                    shell_operations::delete_items_with_shell(&valid_paths, hwnd.0);
+                                let mut parents = HashSet::new();
+                                for path in &valid_paths {
+                                    if let Some(parent) = path.parent() {
+                                        parents.insert(parent.to_path_buf());
+                                    }
+                                }
+                                if !parents.is_empty() {
+                                    let _ =
+                                        result_sender.send(FileOperationResult::DeleteCompleted {
+                                            parent_folders: parents.into_iter().collect(),
+                                        });
+                                }
+                                let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
+                            }
+                        }
+                        Err(err) => {
+                            eprintln!("[SECURITY] Delete blocked: {}", err);
                         }
                     }
-                    if !parents.is_empty() {
-                        let _ = result_sender.send(FileOperationResult::DeleteCompleted {
-                            parent_folders: parents.into_iter().collect(),
-                        });
-                    }
-                    let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
                 }
                 FileOperationRequest::Rename {
                     path,
                     new_name,
                     hwnd,
                 } => {
-                    let success =
-                        shell_operations::rename_item_with_shell(&path, &new_name, hwnd.0);
-                    if success {
-                        if let Some(parent) = path.parent() {
-                            let _ = result_sender.send(FileOperationResult::RenameCompleted {
-                                path: path.clone(),
-                                new_name: new_name.clone(),
-                                parent_folder: parent.to_path_buf(),
-                            });
+                    if new_name.contains('\0')
+                        || new_name.contains('\\')
+                        || new_name.contains('/')
+                        || new_name == "."
+                        || new_name == ".."
+                    {
+                        eprintln!(
+                            "[SECURITY] Rename blocked: invalid target name '{}'",
+                            new_name
+                        );
+                    } else {
+                        match sanitize_operation_path(&path) {
+                            Ok(valid_path) => {
+                                let success = shell_operations::rename_item_with_shell(
+                                    &valid_path,
+                                    &new_name,
+                                    hwnd.0,
+                                );
+                                if success {
+                                    if let Some(parent) =
+                                        valid_path.parent().map(|p| p.to_path_buf())
+                                    {
+                                        let _ = result_sender.send(
+                                            FileOperationResult::RenameCompleted {
+                                                path: valid_path,
+                                                new_name: new_name.clone(),
+                                                parent_folder: parent,
+                                            },
+                                        );
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                eprintln!("[SECURITY] Rename blocked: {}", err);
+                            }
                         }
                     }
                 }
@@ -188,34 +260,74 @@ pub fn start_file_operation_worker(
                     dest_folder,
                     hwnd,
                 } => {
-                    if crate::infrastructure::windows::is_shell_navigation_path(&path, false) {
-                        let _ =
-                            shell_operations::copy_item_with_file_op(&path, &dest_folder, hwnd.0);
-                    } else {
-                        let _ = shell_operations::copy_item_with_shell(&path, &dest_folder, hwnd.0);
+                    let valid_path = sanitize_operation_path(&path);
+                    let valid_dest = sanitize_operation_path(&dest_folder);
+                    match (valid_path, valid_dest) {
+                        (Ok(path), Ok(dest_folder)) => {
+                            if crate::infrastructure::windows::is_shell_navigation_path(
+                                &path, false,
+                            ) {
+                                let _ = shell_operations::copy_item_with_file_op(
+                                    &path,
+                                    &dest_folder,
+                                    hwnd.0,
+                                );
+                            } else {
+                                let _ = shell_operations::copy_item_with_shell(
+                                    &path,
+                                    &dest_folder,
+                                    hwnd.0,
+                                );
+                            }
+                            let _ = result_sender
+                                .send(FileOperationResult::CopyCompleted { dest_folder });
+                        }
+                        (Err(err), _) | (_, Err(err)) => {
+                            eprintln!("[SECURITY] Copy blocked: {}", err);
+                        }
                     }
-                    let _ = result_sender.send(FileOperationResult::CopyCompleted { dest_folder });
                 }
                 FileOperationRequest::Move {
                     path,
                     dest_folder,
                     hwnd,
                 } => {
-                    // Capture source folder before move
-                    let source_folder = path.parent().map(|p| p.to_path_buf());
-                    // Use IFileOperation for virtual paths (like items inside archives)
-                    let success = if crate::infrastructure::windows::is_shell_navigation_path(&path, false) {
-                        shell_operations::move_item_with_file_op(&path, &dest_folder, hwnd.0)
-                    } else {
-                        shell_operations::move_item_with_shell(&path, &dest_folder, hwnd.0)
-                    };
-                    // Notify source folder for cross-tab refresh
-                    if success {
-                        if let Some(src) = source_folder {
-                            let _ = result_sender.send(FileOperationResult::MoveCompleted {
-                                source_folder: src,
-                                dest_folder,
-                            });
+                    let valid_path = sanitize_operation_path(&path);
+                    let valid_dest = sanitize_operation_path(&dest_folder);
+                    match (valid_path, valid_dest) {
+                        (Ok(path), Ok(dest_folder)) => {
+                            // Capture source folder before move
+                            let source_folder = path.parent().map(|p| p.to_path_buf());
+                            // Use IFileOperation for virtual paths (like items inside archives)
+                            let success =
+                                if crate::infrastructure::windows::is_shell_navigation_path(
+                                    &path, false,
+                                ) {
+                                    shell_operations::move_item_with_file_op(
+                                        &path,
+                                        &dest_folder,
+                                        hwnd.0,
+                                    )
+                                } else {
+                                    shell_operations::move_item_with_shell(
+                                        &path,
+                                        &dest_folder,
+                                        hwnd.0,
+                                    )
+                                };
+
+                            if success {
+                                if let Some(src) = source_folder {
+                                    let _ =
+                                        result_sender.send(FileOperationResult::MoveCompleted {
+                                            source_folder: src,
+                                            dest_folder,
+                                        });
+                                }
+                            }
+                        }
+                        (Err(err), _) | (_, Err(err)) => {
+                            eprintln!("[SECURITY] Move blocked: {}", err);
                         }
                     }
                 }
@@ -224,18 +336,36 @@ pub fn start_file_operation_worker(
                     dest_folder,
                     hwnd,
                 } => {
-                    // Check if any path is a virtual path (inside archive)
-                    let has_virtual_path = paths.iter()
-                        .any(|p| crate::infrastructure::windows::is_shell_navigation_path(p, false));
+                    let valid_paths = sanitize_operation_paths(&paths);
+                    let valid_dest = sanitize_operation_path(&dest_folder);
+                    match (valid_paths, valid_dest) {
+                        (Ok(paths), Ok(dest_folder)) => {
+                            let has_virtual_path = paths.iter().any(|p| {
+                                crate::infrastructure::windows::is_shell_navigation_path(p, false)
+                            });
 
-                    let success = if has_virtual_path {
-                        shell_operations::copy_items_with_file_op(&paths, &dest_folder, hwnd.0)
-                    } else {
-                        shell_operations::copy_items_with_shell(&paths, &dest_folder, hwnd.0)
-                    };
+                            let success = if has_virtual_path {
+                                shell_operations::copy_items_with_file_op(
+                                    &paths,
+                                    &dest_folder,
+                                    hwnd.0,
+                                )
+                            } else {
+                                shell_operations::copy_items_with_shell(
+                                    &paths,
+                                    &dest_folder,
+                                    hwnd.0,
+                                )
+                            };
 
-                    if success {
-                        let _ = result_sender.send(FileOperationResult::CopyCompleted { dest_folder });
+                            if success {
+                                let _ = result_sender
+                                    .send(FileOperationResult::CopyCompleted { dest_folder });
+                            }
+                        }
+                        (Err(err), _) | (_, Err(err)) => {
+                            eprintln!("[SECURITY] Copy batch blocked: {}", err);
+                        }
                     }
                 }
                 FileOperationRequest::MoveBatch {
@@ -243,39 +373,69 @@ pub fn start_file_operation_worker(
                     dest_folder,
                     hwnd,
                 } => {
-                    // Collect unique source folders before move
-                    let mut source_folders = HashSet::new();
-                    for path in &paths {
-                        if let Some(parent) = path.parent() {
-                            source_folders.insert(parent.to_path_buf());
+                    let valid_paths = sanitize_operation_paths(&paths);
+                    let valid_dest = sanitize_operation_path(&dest_folder);
+                    match (valid_paths, valid_dest) {
+                        (Ok(paths), Ok(dest_folder)) => {
+                            // Collect unique source folders before move
+                            let mut source_folders = HashSet::new();
+                            for path in &paths {
+                                if let Some(parent) = path.parent() {
+                                    source_folders.insert(parent.to_path_buf());
+                                }
+                            }
+
+                            let has_virtual_path = paths.iter().any(|p| {
+                                crate::infrastructure::windows::is_shell_navigation_path(p, false)
+                            });
+
+                            let success = if has_virtual_path {
+                                shell_operations::move_items_with_file_op(
+                                    &paths,
+                                    &dest_folder,
+                                    hwnd.0,
+                                )
+                            } else {
+                                shell_operations::move_items_with_shell(
+                                    &paths,
+                                    &dest_folder,
+                                    hwnd.0,
+                                )
+                            };
+
+                            if success && !source_folders.is_empty() {
+                                let _ =
+                                    result_sender.send(FileOperationResult::MoveBatchCompleted {
+                                        source_folders: source_folders.into_iter().collect(),
+                                        dest_folder,
+                                        moved_files: paths,
+                                    });
+                            }
                         }
-                    }
-                    // Check if any path is a virtual path (inside archive)
-                    let has_virtual_path = paths.iter()
-                        .any(|p| crate::infrastructure::windows::is_shell_navigation_path(p, false));
-
-                    let success = if has_virtual_path {
-                        shell_operations::move_items_with_file_op(&paths, &dest_folder, hwnd.0)
-                    } else {
-                        shell_operations::move_items_with_shell(&paths, &dest_folder, hwnd.0)
-                    };
-
-                    if success && !source_folders.is_empty() {
-                        let _ = result_sender.send(FileOperationResult::MoveBatchCompleted {
-                            source_folders: source_folders.into_iter().collect(),
-                            dest_folder,
-                            moved_files: paths,
-                        });
+                        (Err(err), _) | (_, Err(err)) => {
+                            eprintln!("[SECURITY] Move batch blocked: {}", err);
+                        }
                     }
                 }
                 FileOperationRequest::RestoreFromRecycleBin { items } => {
                     let mut parents = HashSet::new();
                     for (physical_path, original_path) in items {
-                        if let Some(parent) = original_path.parent() {
-                            parents.insert(parent.to_path_buf());
+                        let valid_physical = sanitize_operation_path(&physical_path);
+                        let valid_original = sanitize_operation_path(&original_path);
+                        match (valid_physical, valid_original) {
+                            (Ok(physical_path), Ok(original_path)) => {
+                                if let Some(parent) = original_path.parent() {
+                                    parents.insert(parent.to_path_buf());
+                                }
+                                let _ = recycle_bin::restore_from_recycle_bin(
+                                    &physical_path,
+                                    &original_path,
+                                );
+                            }
+                            (Err(err), _) | (_, Err(err)) => {
+                                eprintln!("[SECURITY] Restore blocked: {}", err);
+                            }
                         }
-                        let _ =
-                            recycle_bin::restore_from_recycle_bin(&physical_path, &original_path);
                     }
                     if !parents.is_empty() {
                         let _ = result_sender.send(FileOperationResult::RestoreCompleted {
@@ -287,21 +447,26 @@ pub fn start_file_operation_worker(
                 FileOperationRequest::DeletePermanently {
                     physical_paths,
                     hwnd,
-                } => {
-                    for path in &physical_paths {
-                        if recycle_bin::delete_permanently(path, hwnd.0).is_err() {
-                            break; // User cancelled or error — stop batch
+                } => match sanitize_operation_paths(&physical_paths) {
+                    Ok(valid_paths) => {
+                        for path in &valid_paths {
+                            if recycle_bin::delete_permanently(path, hwnd.0).is_err() {
+                                break;
+                            }
                         }
+                        let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
                     }
-                    let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
-                }
+                    Err(err) => {
+                        eprintln!("[SECURITY] Permanent delete blocked: {}", err);
+                    }
+                },
                 FileOperationRequest::EmptyRecycleBin { hwnd } => {
                     let _ = recycle_bin::empty_recycle_bin(hwnd.0);
                     let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
                 }
             }
 
-            // Notify general completion for other operations
+            // Notify general completion for other operations.
             let _ = result_sender.send(FileOperationResult::Finished);
         }
 

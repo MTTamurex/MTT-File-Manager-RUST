@@ -1,10 +1,10 @@
-//! Módulo de segurança para sanitização e validação de paths
-//! Segue as regras do .cursorrules: sanitização de inputs externos
+//! Security module for path sanitization and validation.
+//! Applies defensive checks for path traversal, invalid prefixes and symlinks.
 
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-/// Erros de segurança relacionados a paths
+/// Path-related security errors.
 #[derive(Error, Debug)]
 pub enum SecurityError {
     #[error("Path traversal attempt detected: {0}")]
@@ -23,19 +23,19 @@ pub enum SecurityError {
     NullBytes(String),
 }
 
-/// Configuração de segurança para validação de paths
+/// Security configuration for path validation.
 #[derive(Clone, Debug)]
 pub struct SecurityConfig {
-    /// Drives permitidos (ex: ["C:", "D:"])
+    /// Allowed drives (example: ["C:", "D:"]).
     pub allowed_drives: Vec<String>,
 
-    /// Permitir symlinks? (padrão: false por segurança)
+    /// Allow symlinks? Default: false.
     pub allow_symlinks: bool,
 
-    /// Bloquear paths com componentes especiais (.., ., ~)
+    /// Block special components (`..`, `.`, `~`).
     pub block_special_components: bool,
 
-    /// Extensões bloqueadas (ex: [".exe", ".bat"])
+    /// Blocked file extensions (example: [".exe", ".bat"]).
     pub blocked_extensions: Vec<String>,
 }
 
@@ -63,37 +63,41 @@ impl Default for SecurityConfig {
     }
 }
 
-/// Sanitiza e valida um path, retornando o path canonicalizado e seguro
+/// Sanitize and validate a path, returning a canonicalized safe path.
 pub fn sanitize_path(path: &Path, config: &SecurityConfig) -> Result<PathBuf, SecurityError> {
-    // 1. Verifica bytes nulos (CWE-158)
     let path_str = path.to_string_lossy();
     if path_str.contains('\0') {
         return Err(SecurityError::NullBytes(path_str.to_string()));
     }
 
-    // 2. Tenta canonicalizar o path
+    // Validate user-provided components before canonicalization so patterns like
+    // `..\` are blocked even when canonicalization would normalize them away.
+    validate_path_components(path, config)?;
+
     let canonical = match path.canonicalize() {
         Ok(p) => p,
         Err(e) => {
-            // Se não conseguir canonicalizar, pode ser path que não existe ainda
-            // (ex: para criação de novo arquivo). Nesse caso, valida o path pai.
+            // Fallback for paths that do not exist yet (e.g. file creation):
+            // validate against the canonical parent and rebuild an absolute path.
             if let Some(parent) = path.parent() {
                 if parent.exists() {
-                    match parent.canonicalize() {
-                        Ok(_) => {
-                            // Path pai é válido, aceita o path original
-                            validate_path_components(path, config)?;
-                            return Ok(path.to_path_buf());
-                        }
-                        Err(_) => {
-                            return Err(SecurityError::InvalidPath(format!(
-                                "Parent directory invalid: {}",
-                                e
-                            )));
-                        }
+                    let canonical_parent = parent.canonicalize().map_err(|_| {
+                        SecurityError::InvalidPath(format!("Parent directory invalid: {}", e))
+                    })?;
+
+                    validate_drive(&canonical_parent, config)?;
+                    if !config.allow_symlinks {
+                        check_symlink(&canonical_parent)?;
                     }
+
+                    let fallback = match path.file_name() {
+                        Some(name) => canonical_parent.join(name),
+                        None => canonical_parent,
+                    };
+                    return Ok(fallback);
                 }
             }
+
             return Err(SecurityError::InvalidPath(format!(
                 "Cannot canonicalize: {}",
                 e
@@ -101,13 +105,8 @@ pub fn sanitize_path(path: &Path, config: &SecurityConfig) -> Result<PathBuf, Se
         }
     };
 
-    // 3. Valida componentes do path canonicalizado
     validate_path_components(&canonical, config)?;
-
-    // 4. Verifica se está em drive permitido
     validate_drive(&canonical, config)?;
-
-    // 5. Verifica symlinks (se configurado para bloquear)
     if !config.allow_symlinks {
         check_symlink(&canonical)?;
     }
@@ -115,27 +114,18 @@ pub fn sanitize_path(path: &Path, config: &SecurityConfig) -> Result<PathBuf, Se
     Ok(canonical)
 }
 
-/// Valida componentes individuais do path
+/// Validate each path component.
 fn validate_path_components(path: &Path, config: &SecurityConfig) -> Result<(), SecurityError> {
     if config.block_special_components {
         for component in path.components() {
             let comp_str = component.as_os_str().to_string_lossy();
 
-            // Bloqueia path traversal
-            if comp_str == ".." {
+            if comp_str == ".." || comp_str == "." {
                 return Err(SecurityError::PathTraversal(
                     path.to_string_lossy().to_string(),
                 ));
             }
 
-            // Bloqueia diretório corrente (pode ser usado em combinação)
-            if comp_str == "." {
-                return Err(SecurityError::PathTraversal(
-                    path.to_string_lossy().to_string(),
-                ));
-            }
-
-            // Bloqueia home directory shortcut (menos relevante no Windows)
             if comp_str == "~" {
                 return Err(SecurityError::InvalidPath(
                     "Home directory shortcut not allowed".to_string(),
@@ -147,50 +137,52 @@ fn validate_path_components(path: &Path, config: &SecurityConfig) -> Result<(), 
     Ok(())
 }
 
-/// Valida se o path está em um drive permitido
+fn normalize_windows_prefix(path_upper: &str) -> String {
+    if let Some(stripped) = path_upper.strip_prefix("\\\\?\\") {
+        stripped.to_string()
+    } else if let Some(stripped) = path_upper.strip_prefix("\\\\.\\") {
+        stripped.to_string()
+    } else {
+        path_upper.to_string()
+    }
+}
+
+/// Validate that a path is inside an allowed drive.
 fn validate_drive(path: &Path, config: &SecurityConfig) -> Result<(), SecurityError> {
-    let path_str = path.to_string_lossy().to_uppercase();
+    let path_upper = path.to_string_lossy().to_uppercase();
+    let normalized = normalize_windows_prefix(&path_upper);
 
-    // Handle Windows extended-length paths (\\?\C:\...) from canonicalize()
-    // These are NOT UNC paths but local paths with extended prefix
-    let normalized_path = if path_str.starts_with("\\\\?\\") {
-        path_str[4..].to_string() // Strip \\?\ prefix
-    } else if path_str.starts_with("\\\\.\\") {
-        path_str[4..].to_string() // Strip \\.\ prefix (device path)
-    } else {
-        path_str.clone()
-    };
+    // Extended UNC format: \\?\UNC\server\share\...
+    if normalized.starts_with("UNC\\") || normalized.starts_with("\\\\") {
+        return Err(SecurityError::OutsideAllowedDrive(
+            "UNC paths not allowed".to_string(),
+        ));
+    }
 
-    // Extrai a letra do drive (ex: "C:\" -> "C")
-    let drive_letter = normalized_path.chars().next().unwrap_or(' ');
+    let bytes = normalized.as_bytes();
+    if bytes.len() < 2 || bytes[1] != b':' || !(bytes[0] as char).is_ascii_alphabetic() {
+        return Err(SecurityError::InvalidPath(format!(
+            "Invalid drive prefix: {}",
+            normalized
+        )));
+    }
 
-    if drive_letter.is_alphabetic() {
-        let drive = format!("{}:", drive_letter);
-        if !config
-            .allowed_drives
-            .iter()
-            .any(|d| d.to_uppercase() == drive)
-        {
-            return Err(SecurityError::OutsideAllowedDrive(normalized_path));
-        }
-    } else {
-        // True UNC path (\\server\share) - not extended path prefix
-        // Por segurança, bloqueia UNC paths a menos que explicitamente permitido
-        if normalized_path.starts_with("\\\\") {
-            return Err(SecurityError::OutsideAllowedDrive(
-                "UNC paths not allowed".to_string(),
-            ));
-        }
+    let drive = format!("{}:", (bytes[0] as char).to_ascii_uppercase());
+    if !config
+        .allowed_drives
+        .iter()
+        .any(|d| d.to_uppercase() == drive)
+    {
+        return Err(SecurityError::OutsideAllowedDrive(normalized));
     }
 
     Ok(())
 }
 
-/// Verifica se o path ou qualquer componente pai é um symlink
+/// Check if path or any parent component is a symlink.
 fn check_symlink(path: &Path) -> Result<(), SecurityError> {
     let mut current = path.to_path_buf();
 
-    // Verifica cada componente do path
     while current.exists() {
         if let Ok(metadata) = std::fs::symlink_metadata(&current) {
             if metadata.file_type().is_symlink() {
@@ -200,7 +192,6 @@ fn check_symlink(path: &Path) -> Result<(), SecurityError> {
             }
         }
 
-        // Sobe para o diretório pai
         if let Some(parent) = current.parent() {
             current = parent.to_path_buf();
         } else {
@@ -211,7 +202,7 @@ fn check_symlink(path: &Path) -> Result<(), SecurityError> {
     Ok(())
 }
 
-/// Valida extensão de arquivo contra lista de extensões bloqueadas
+/// Validate file extension against blocked list.
 pub fn validate_file_extension(path: &Path, config: &SecurityConfig) -> Result<(), SecurityError> {
     if let Some(ext) = path.extension() {
         let ext_str = ext.to_string_lossy().to_lowercase();
@@ -230,10 +221,9 @@ pub fn validate_file_extension(path: &Path, config: &SecurityConfig) -> Result<(
     Ok(())
 }
 
-/// Função helper para sanitização rápida (usa configuração padrão)
+/// Quick helper using default security config.
 pub fn sanitize_path_quick(path: &Path) -> Result<PathBuf, SecurityError> {
-    let config = SecurityConfig::default();
-    sanitize_path(path, &config)
+    sanitize_path(path, &SecurityConfig::default())
 }
 
 #[cfg(test)]
@@ -246,7 +236,6 @@ mod tests {
     fn test_path_traversal_blocked() {
         let config = SecurityConfig::default();
 
-        // Path traversal deve ser bloqueado
         assert!(sanitize_path(Path::new("C:\\Windows\\..\\System32"), &config).is_err());
         assert!(sanitize_path(Path::new("..\\secret.txt"), &config).is_err());
         assert!(sanitize_path(Path::new(".\\..\\escape"), &config).is_err());
@@ -254,23 +243,18 @@ mod tests {
 
     #[test]
     fn test_valid_paths_allowed() {
-        // Use a permissive config for testing since temp directories
-        // on Windows may contain junction points (e.g., AppData\Local\Temp)
+        // Use permissive symlink mode for temp paths because on Windows temp
+        // directories may include junctions.
         let config = SecurityConfig {
-            allow_symlinks: true, // Temp paths may contain junction points
+            allow_symlinks: true,
             ..SecurityConfig::default()
         };
 
-        // Paths válidos devem passar (usa paths que existem no sistema)
-        let temp_dir = tempdir().unwrap();
+        let temp_dir = tempdir().expect("temp dir");
         let test_file = temp_dir.path().join("test.txt");
-        fs::write(&test_file, "test").unwrap();
+        fs::write(&test_file, "test").expect("write temp file");
 
         let result = sanitize_path(&test_file, &config);
-        if let Err(e) = &result {
-            eprintln!("test_file path: {:?}", test_file);
-            eprintln!("Error: {:?}", e);
-        }
         assert!(result.is_ok(), "Expected OK, got: {:?}", result);
         assert!(sanitize_path(temp_dir.path(), &config).is_ok());
     }
@@ -287,43 +271,51 @@ mod tests {
 
     #[test]
     fn test_symlink_detection() {
-        let temp_dir = tempdir().unwrap();
+        let temp_dir = tempdir().expect("temp dir");
         let real_file = temp_dir.path().join("real.txt");
         let link_file = temp_dir.path().join("link.txt");
 
-        fs::write(&real_file, "content").unwrap();
+        fs::write(&real_file, "content").expect("write real file");
 
-        // Creating symlinks on Windows requires elevated privileges (SeCreateSymbolicLinkPrivilege)
-        // Skip this test if we don't have the required permissions
         #[cfg(windows)]
         {
             match std::os::windows::fs::symlink_file(&real_file, &link_file) {
                 Ok(_) => {
-                    let mut config = SecurityConfig::default();
-                    config.allow_symlinks = false;
-                    assert!(sanitize_path(&link_file, &config).is_err());
+                    let config_block = SecurityConfig {
+                        allow_symlinks: false,
+                        ..SecurityConfig::default()
+                    };
+                    assert!(sanitize_path(&link_file, &config_block).is_err());
 
-                    config.allow_symlinks = true;
-                    assert!(sanitize_path(&link_file, &config).is_ok());
+                    let config_allow = SecurityConfig {
+                        allow_symlinks: true,
+                        ..SecurityConfig::default()
+                    };
+                    assert!(sanitize_path(&link_file, &config_allow).is_ok());
                 }
                 Err(e) if e.raw_os_error() == Some(1314) => {
-                    // ERROR_PRIVILEGE_NOT_HELD - skip test gracefully
+                    // ERROR_PRIVILEGE_NOT_HELD - skip gracefully.
                     eprintln!("Skipping symlink test: requires elevated privileges");
                 }
-                Err(e) => panic!("Unexpected error creating symlink: {}", e),
+                Err(e) => panic!("Unexpected symlink creation error: {}", e),
             }
         }
 
         #[cfg(unix)]
         {
-            std::os::unix::fs::symlink(&real_file, &link_file).unwrap();
+            std::os::unix::fs::symlink(&real_file, &link_file).expect("create symlink");
 
-            let mut config = SecurityConfig::default();
-            config.allow_symlinks = false;
-            assert!(sanitize_path(&link_file, &config).is_err());
+            let config_block = SecurityConfig {
+                allow_symlinks: false,
+                ..SecurityConfig::default()
+            };
+            assert!(sanitize_path(&link_file, &config_block).is_err());
 
-            config.allow_symlinks = true;
-            assert!(sanitize_path(&link_file, &config).is_ok());
+            let config_allow = SecurityConfig {
+                allow_symlinks: true,
+                ..SecurityConfig::default()
+            };
+            assert!(sanitize_path(&link_file, &config_allow).is_ok());
         }
     }
 }

@@ -1,5 +1,5 @@
-//! Application layer - state management, worker coordination, and high-level business logic
-//! Follows .cursorrules: separation of concerns, clean architecture
+//! Application layer - state management, worker coordination, and high-level business logic.
+//! Follows .cursorrules: separation of concerns, clean architecture.
 
 pub mod clipboard;
 pub mod context_menu;
@@ -8,7 +8,6 @@ pub mod navigation;
 pub mod notification;
 pub mod renaming;
 pub mod sorting;
-pub mod sorting_optimized;
 pub mod state;
 pub mod watcher;
 
@@ -21,5 +20,29 @@ pub use renaming::*;
 pub use state::*;
 pub use watcher::*;
 
-// Re-export funções otimizadas
-pub use sorting_optimized::{filter_items, filter_items_cow, filter_items_opt, sort_items};
+pub use sorting::sort_items;
+
+/// Backward-compatible wrapper for filtering items.
+pub fn filter_items(
+    items: &[crate::domain::file_entry::FileEntry],
+    query: &str,
+) -> Vec<crate::domain::file_entry::FileEntry> {
+    sorting::filter_items(items, query)
+}
+
+/// Backward-compatible wrapper:
+/// returns full list when query is empty.
+pub fn filter_items_opt(
+    items: &[crate::domain::file_entry::FileEntry],
+    query: &str,
+) -> Vec<crate::domain::file_entry::FileEntry> {
+    sorting::filter_items_opt(items, query).unwrap_or_else(|| items.to_vec())
+}
+
+/// Compatibility alias kept for old call-sites.
+pub fn filter_items_cow(
+    items: &[crate::domain::file_entry::FileEntry],
+    query: &str,
+) -> Vec<crate::domain::file_entry::FileEntry> {
+    sorting::filter_items(items, query)
+}

@@ -2,16 +2,63 @@ use crate::domain::file_entry::{is_archive_extension, FileEntry, FoldersPosition
 use rayon::prelude::*;
 use std::cmp::Ordering;
 
+/// Parse recycle bin dates like `dd/mm/yyyy hh:mm` (or with seconds) into
+/// sortable tuple `(year, month, day, hour, minute, second)`.
+#[inline]
+fn parse_recycle_date_sort_key(date: &str) -> Option<(u32, u32, u32, u32, u32, u32)> {
+    let trimmed = date.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let mut parts = trimmed.split_whitespace();
+    let date_part = parts.next()?;
+    let time_part = parts.next().unwrap_or("00:00:00");
+
+    let mut date_it = date_part.split(['/', '-', '.']);
+    let day = date_it.next()?.parse::<u32>().ok()?;
+    let month = date_it.next()?.parse::<u32>().ok()?;
+    let year = date_it.next()?.parse::<u32>().ok()?;
+    if !(1..=31).contains(&day) || !(1..=12).contains(&month) || year < 1601 {
+        return None;
+    }
+
+    let mut time_it = time_part.split(':');
+    let hour = time_it
+        .next()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(0);
+    let minute = time_it
+        .next()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(0);
+    let second = time_it
+        .next()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(0);
+    if hour > 23 || minute > 59 || second > 59 {
+        return None;
+    }
+
+    Some((year, month, day, hour, minute, second))
+}
+
 /// Helper function to get the appropriate date for sorting.
 /// For recycle bin items with deletion_date, uses the deletion date string for comparison.
 /// For all other items, uses the modified timestamp.
 ///
-/// PERFORMANCE: Para lixeira, compara strings de data diretamente (formato brasileiro dd/mm/yyyy)
-/// Para arquivos normais, usa o timestamp modificado como antes
+/// For recycle bin items, attempts semantic parsing of date string first, and
+/// falls back to lexicographic comparison only when parsing fails.
 fn get_sort_date_for_comparison(a: &FileEntry, b: &FileEntry) -> Ordering {
     match (&a.deletion_date, &b.deletion_date) {
         // Ambos têm data de exclusão (lixeira): compara strings diretamente
-        (Some(a_date), Some(b_date)) => a_date.cmp(b_date),
+        (Some(a_date), Some(b_date)) => match (
+            parse_recycle_date_sort_key(a_date),
+            parse_recycle_date_sort_key(b_date),
+        ) {
+            (Some(a_key), Some(b_key)) => a_key.cmp(&b_key),
+            _ => a_date.cmp(b_date),
+        },
         // Apenas um tem data de exclusão: considera que items da lixeira vêm primeiro
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
@@ -104,20 +151,25 @@ pub fn sort_items(
 /// For ASCII strings, uses fast byte-by-byte comparison without allocation.
 /// Falls back to Unicode-aware comparison for non-ASCII strings.
 #[inline]
-fn contains_ignore_case_precomputed(haystack: &str, needle_lower: &[char]) -> bool {
+fn contains_ignore_case_precomputed(
+    haystack: &str,
+    needle_lower: &[char],
+    needle_ascii_lower: Option<&[u8]>,
+) -> bool {
     if needle_lower.is_empty() {
         return true;
     }
 
     // PERFORMANCE: Fast path for ASCII strings (majority of filenames)
     // Uses byte-by-byte comparison without any allocation
-    if haystack.is_ascii() && needle_lower.iter().all(|c| c.is_ascii()) {
-        let needle_bytes: Vec<u8> = needle_lower.iter().map(|c| *c as u8).collect();
-        return haystack.as_bytes().windows(needle_bytes.len()).any(|w| {
-            w.iter()
-                .zip(needle_bytes.iter())
-                .all(|(h, n)| h.to_ascii_lowercase() == *n)
-        });
+    if haystack.is_ascii() {
+        if let Some(needle_bytes) = needle_ascii_lower {
+            return haystack.as_bytes().windows(needle_bytes.len()).any(|w| {
+                w.iter()
+                    .zip(needle_bytes.iter())
+                    .all(|(h, n)| h.to_ascii_lowercase() == *n)
+            });
+        }
     }
 
     // Fallback: Unicode-aware comparison using Vec<char>
@@ -142,11 +194,22 @@ pub fn filter_items_opt(items: &[FileEntry], query: &str) -> Option<Vec<FileEntr
 
     // PERFORMANCE: Precompute needle_lower once for the entire filter operation
     let needle_lower: Vec<char> = query.chars().flat_map(|c| c.to_lowercase()).collect();
+    let needle_ascii_lower: Option<Vec<u8>> = if needle_lower.iter().all(|c| c.is_ascii()) {
+        Some(needle_lower.iter().map(|c| *c as u8).collect())
+    } else {
+        None
+    };
 
     Some(
         items
             .iter()
-            .filter(|item| contains_ignore_case_precomputed(&item.name, &needle_lower))
+            .filter(|item| {
+                contains_ignore_case_precomputed(
+                    &item.name,
+                    &needle_lower,
+                    needle_ascii_lower.as_deref(),
+                )
+            })
             .cloned()
             .collect(),
     )
@@ -163,6 +226,7 @@ pub fn filter_items(items: &[FileEntry], query: &str) -> Vec<FileEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::file_entry::ends_with_ignore_case;
     use std::path::PathBuf;
 
     fn create_test_file(name: &str, size: u64, modified: u64) -> FileEntry {
@@ -348,5 +412,39 @@ mod tests {
         assert_eq!(items[0].name, "file1.txt");
         assert_eq!(items[1].name, "file2.txt");
         assert_eq!(items[2].name, "file3.txt");
+    }
+
+    #[test]
+    fn test_sort_by_date_recycle_bin_across_months() {
+        let mut items = vec![
+            FileEntry {
+                path: PathBuf::from("jan.txt"),
+                name: "jan.txt".to_string(),
+                is_dir: false,
+                size: 1,
+                modified: 0,
+                folder_cover: None,
+                drive_info: None,
+                sync_status: crate::domain::file_entry::SyncStatus::None,
+                deletion_date: Some("12/01/2024 10:00".to_string()),
+                recycle_original_path: None,
+            },
+            FileEntry {
+                path: PathBuf::from("fev.txt"),
+                name: "fev.txt".to_string(),
+                is_dir: false,
+                size: 1,
+                modified: 0,
+                folder_cover: None,
+                drive_info: None,
+                sync_status: crate::domain::file_entry::SyncStatus::None,
+                deletion_date: Some("02/02/2024 10:00".to_string()),
+                recycle_original_path: None,
+            },
+        ];
+
+        sort_items(&mut items, SortMode::Date, false, FoldersPosition::Mixed);
+        assert_eq!(items[0].name, "jan.txt");
+        assert_eq!(items[1].name, "fev.txt");
     }
 }

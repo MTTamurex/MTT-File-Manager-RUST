@@ -113,6 +113,9 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
 }
 
 pub fn handle_exit(app: &mut ImageViewerApp) {
+    // Gracefully stop thumbnail workers waiting on the queue.
+    app.thumbnail_queue.shutdown();
+
     // Force save sidebar widths before exit (bypass debounce)
     app.force_save_preferences();
     eprintln!(

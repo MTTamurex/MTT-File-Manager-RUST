@@ -20,7 +20,7 @@ pub struct ThumbnailDiskCache {
 
 impl ThumbnailDiskCache {
     /// Creates a new disk cache at the specified directory
-    pub fn new(cache_dir: PathBuf) -> Self {
+    pub fn new(cache_dir: PathBuf) -> rusqlite::Result<Self> {
         // Ensure directory exists
         if !cache_dir.exists() {
             let _ = fs::create_dir_all(&cache_dir);
@@ -30,23 +30,43 @@ impl ThumbnailDiskCache {
         Self::cleanup_legacy(&cache_dir);
 
         let db_path = cache_dir.join("thumbnails.db");
+        let temp_fallback_path = std::env::temp_dir()
+            .join("MTT-File-Manager")
+            .join("thumbnails_fallback.db");
 
-        // 1. Open WRITER connection (Primary)
+        let mut active_db_path: Option<PathBuf> = None;
+
+        // 1. Open WRITER connection (Primary -> Temp fallback -> Memory fallback)
         let writer_conn = match Connection::open(&db_path) {
-            Ok(c) => c,
-            Err(e) => {
+            Ok(c) => {
+                active_db_path = Some(db_path.clone());
+                c
+            }
+            Err(primary_err) => {
                 eprintln!(
-                    "[Cache] Failed to open database: {:?}. Using in-memory fallback.",
-                    e
+                    "[Cache] Failed to open database at {:?}: {:?}",
+                    db_path, primary_err
                 );
-                // Fallback to in-memory if disk database fails
-                match Connection::open_in_memory() {
-                    Ok(c) => c,
-                    Err(fatal_e) => {
-                        panic!(
-                            "[FATAL] Cannot create even an in-memory database: {:?}",
-                            fatal_e
+
+                if let Some(parent) = temp_fallback_path.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+
+                match Connection::open(&temp_fallback_path) {
+                    Ok(c) => {
+                        eprintln!(
+                            "[Cache] Using temporary fallback database at {:?}",
+                            temp_fallback_path
                         );
+                        active_db_path = Some(temp_fallback_path.clone());
+                        c
+                    }
+                    Err(temp_err) => {
+                        eprintln!(
+                            "[Cache] Failed to open temporary fallback database: {:?}. Using in-memory cache.",
+                            temp_err
+                        );
+                        Connection::open_in_memory()?
                     }
                 }
             }
@@ -58,27 +78,40 @@ impl ThumbnailDiskCache {
         let _ = writer_conn.execute("PRAGMA synchronous = NORMAL", []).ok();
 
         // 2. Open READER connection (Secondary)
-        // In WAL mode, this can read while writer is busy
-        let reader_conn = match Connection::open(&db_path) {
-            Ok(c) => c,
-            Err(_) => {
-                // Return a clone of writer if secondary fails (unlikely)
-                // or open in memory if original was in memory?
-                // Simplest fallback: Just open again.
-                // If main failed, we handled it. If main succeeded, this should too.
-                Connection::open(&db_path).unwrap_or_else(|_| Connection::open_in_memory().unwrap())
+        // In WAL mode, this can read while writer is busy. If reader cannot be opened,
+        // we safely share the writer connection.
+        let reader_conn = if let Some(path) = active_db_path.as_ref() {
+            match Connection::open(path) {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    eprintln!(
+                        "[Cache] Failed to open reader connection at {:?}: {:?}. Falling back to shared writer connection.",
+                        path, e
+                    );
+                    None
+                }
             }
+        } else {
+            // Writer is in-memory fallback: share writer connection to keep consistency.
+            None
         };
-        let _ = reader_conn.execute("PRAGMA synchronous = NORMAL", []).ok();
 
         // 3. Schema Migrations (Run on Writer)
         Self::run_migrations(&writer_conn);
 
-        Self {
-            writer: Arc::new(Mutex::new(writer_conn)),
-            reader: Arc::new(Mutex::new(reader_conn)),
+        let writer = Arc::new(Mutex::new(writer_conn));
+        let reader = if let Some(reader_conn) = reader_conn {
+            let _ = reader_conn.execute("PRAGMA synchronous = NORMAL", []).ok();
+            Arc::new(Mutex::new(reader_conn))
+        } else {
+            writer.clone()
+        };
+
+        Ok(Self {
+            writer,
+            reader,
             cache_dir,
-        }
+        })
     }
 
     fn run_migrations(conn: &Connection) {
