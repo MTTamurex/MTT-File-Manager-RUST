@@ -16,6 +16,10 @@ use crate::infrastructure::windows as windows_infra;
 // (device_event_receiver in message_handler.rs). This timer is only a safety fallback.
 const DRIVE_REFRESH_INTERVAL_MS: u64 = 30000;
 
+// Fast bitmask check interval for virtual/mapped drives that don't fire WM_DEVICECHANGE.
+// GetLogicalDrives() is instantaneous (kernel cache, no disk I/O).
+const DRIVE_BITMASK_CHECK_INTERVAL_MS: u64 = 3000;
+
 impl ImageViewerApp {
     pub fn setup_recycle_bin_view(&mut self) {
         self.current_path = "Lixeira".to_string();
@@ -236,6 +240,35 @@ impl ImageViewerApp {
                 // Invalidate cached drive types since drive list changed
                 crate::ui::sidebar::invalidate_drive_type_cache();
 
+                // Detect removed drives: if user is browsing inside a removed drive,
+                // navigate them to "Este Computador" to avoid showing stale cached data.
+                let removed_drives: Vec<String> = old_disks
+                    .iter()
+                    .filter(|(old_path, _)| !self.disks.iter().any(|(new_path, _)| new_path == old_path))
+                    .map(|(path, _)| path.clone())
+                    .collect();
+
+                if !removed_drives.is_empty() {
+                    eprintln!("[DRIVE-REFRESH] Drives removed: {:?}", removed_drives);
+
+                    // Check if user is currently browsing inside a removed drive
+                    let current = self.current_path.clone();
+                    let on_removed_drive = !self.is_computer_view
+                        && !self.is_recycle_bin_view
+                        && removed_drives.iter().any(|d| current.starts_with(d));
+
+                    if on_removed_drive {
+                        eprintln!(
+                            "[DRIVE-REFRESH] Current path '{}' is on a removed drive, redirecting to Este Computador",
+                            current
+                        );
+                        self.directory_cache.clear();
+                        self.drive_watcher.cleanup_unused_watchers(None);
+                        self.navigate_to_computer();
+                        return;
+                    }
+                }
+
                 // AUTO-FOCUS PARA ISO RECÉM-MONTADA
                 if let Some(_iso_path) = self.pending_iso_mount.take() {
                     let mut target_drive = None;
@@ -265,9 +298,26 @@ impl ImageViewerApp {
     }
 
     pub fn refresh_drives_if_needed(&mut self) {
-        if self.last_drive_refresh.elapsed() >= Duration::from_millis(DRIVE_REFRESH_INTERVAL_MS) {
-            self.last_drive_refresh = Instant::now();
-            self.reload_drive_list_async();
+        let elapsed = self.last_drive_refresh.elapsed();
+
+        // Fast check: compare drive bitmask every 3s (no disk I/O, reads kernel cache).
+        // This catches virtual/mapped drives (Cryptomator, VeraCrypt, subst, net use)
+        // that don't fire WM_DEVICECHANGE when unmounted.
+        if elapsed >= Duration::from_millis(DRIVE_BITMASK_CHECK_INTERVAL_MS) {
+            let current_bitmask = crate::infrastructure::windows::get_logical_drives_bitmask();
+            if current_bitmask != self.last_drive_bitmask {
+                eprintln!(
+                    "[DRIVE-REFRESH] Bitmask changed: 0x{:08X} -> 0x{:08X}",
+                    self.last_drive_bitmask, current_bitmask
+                );
+                self.last_drive_bitmask = current_bitmask;
+                self.last_drive_refresh = Instant::now();
+                self.reload_drive_list_async();
+            } else if elapsed >= Duration::from_millis(DRIVE_REFRESH_INTERVAL_MS) {
+                // Full fallback refresh every 30s (safety net)
+                self.last_drive_refresh = Instant::now();
+                self.reload_drive_list_async();
+            }
         }
     }
 

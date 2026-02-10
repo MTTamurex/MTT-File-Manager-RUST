@@ -61,6 +61,36 @@ impl ImageViewerApp {
         let drive_watcher_active = !drive_events.is_empty();
         let drive_event_count = drive_events.len();
 
+        // Handle DriveLost events immediately: the watcher thread detected that
+        // the drive handle became invalid (drive was unmounted/disconnected).
+        for event in &drive_events {
+            if let crate::infrastructure::drive_watcher::DriveWatcherEvent::DriveLost(drive_root) = event {
+                eprintln!("[FS-WATCH] DriveLost signal received for: {:?}", drive_root);
+                self.last_drive_refresh = Instant::now();
+                self.reload_drive_list_async();
+
+                // If user is browsing inside the lost drive, redirect immediately
+                let drive_prefix = drive_root.to_string_lossy().to_string();
+                if !self.is_computer_view
+                    && !self.is_recycle_bin_view
+                    && self.current_path.starts_with(&drive_prefix)
+                {
+                    eprintln!(
+                        "[FS-WATCH] Current path '{}' is on lost drive, redirecting to Este Computador",
+                        self.current_path
+                    );
+                    self.directory_cache.clear();
+                    self.drive_watcher.cleanup_unused_watchers(None);
+                    self.navigate_to_computer();
+                    return WatcherPerfMarks {
+                        watcher_start,
+                        drive_events_done: Instant::now(),
+                        auto_reload_done: Instant::now(),
+                    };
+                }
+            }
+        }
+
         // PERFORMANCE FIX: After long inactivity (OS sleep, display off), the watcher
         // thread accumulates many batches in the channel. Processing each event
         // individually does SQLite I/O (remove_cache_for_path = 6 SQL queries per DELETE).

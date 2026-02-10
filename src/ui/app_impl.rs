@@ -3,6 +3,9 @@ use crate::infrastructure::windows::window_subclass::is_in_size_move;
 use crate::ui::app;
 use eframe::egui;
 
+/// Periodic repaint interval to ensure drive bitmask checks run even when idle.
+const DRIVE_BITMASK_REPAINT_MS: u64 = 3000;
+
 impl eframe::App for ImageViewerApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let t_frame_start = std::time::Instant::now();
@@ -61,6 +64,9 @@ impl eframe::App for ImageViewerApp {
             self.process_incoming_messages(ctx);
             let t1 = std::time::Instant::now();
             self.refresh_drives_if_needed();
+            // Ensure the bitmask check runs even when the app is idle (no mouse/keyboard).
+            // Without this, egui won't repaint and the timer never fires.
+            ctx.request_repaint_after(std::time::Duration::from_millis(DRIVE_BITMASK_REPAINT_MS));
             let t2 = std::time::Instant::now();
             self.poll_drive_scan();
             self.poll_drive_info();

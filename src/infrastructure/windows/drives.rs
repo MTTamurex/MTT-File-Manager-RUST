@@ -72,6 +72,13 @@ pub fn get_volume_label(drive_path: &str) -> String {
     }
 }
 
+/// Returns a bitmask of currently available logical drives.
+/// Bit 0 = A:, bit 1 = B:, bit 2 = C:, etc.
+/// This is extremely fast (no disk I/O) — reads from kernel cache.
+pub fn get_logical_drives_bitmask() -> u32 {
+    unsafe { GetLogicalDrives() }
+}
+
 /// Enumerates all drives with their labels.
 pub fn get_all_drives() -> Vec<(String, String)> {
     unsafe {

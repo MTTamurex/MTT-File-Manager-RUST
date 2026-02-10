@@ -54,6 +54,8 @@ pub enum DriveWatcherEvent {
     Renamed(PathBuf, PathBuf),
     /// Unknown/unsupported event
     Unknown(PathBuf),
+    /// Drive became inaccessible (unmounted, disconnected)
+    DriveLost(PathBuf),
 }
 
 /// Internal command for the watcher thread
@@ -324,9 +326,10 @@ fn watcher_thread_main(
 
                 if result.is_err() {
                     eprintln!(
-                        "[DRIVE-WATCHER] ReadDirectoryChangesW failed: {:?}",
+                        "[DRIVE-WATCHER] ReadDirectoryChangesW failed (drive likely unmounted): {:?}",
                         result.err()
                     );
+                    let _ = event_tx.send(vec![DriveWatcherEvent::DriveLost(drive_root.clone())]);
                     break;
                 }
 
@@ -340,7 +343,17 @@ fn watcher_thread_main(
                 // Event signaled - I/O completed
                 let result = GetOverlappedResult(handle, &overlapped, &mut bytes_returned, false);
 
-                if result.is_ok() && bytes_returned > 0 {
+                if let Err(e) = &result {
+                    // Handle became invalid — drive was likely unmounted
+                    eprintln!(
+                        "[DRIVE-WATCHER] GetOverlappedResult failed (drive likely unmounted): {}",
+                        e
+                    );
+                    let _ = event_tx.send(vec![DriveWatcherEvent::DriveLost(drive_root.clone())]);
+                    break;
+                }
+
+                if bytes_returned > 0 {
                     // Parse the notification buffer
                     let events =
                         parse_notify_buffer(&buffer[..bytes_returned as usize], &drive_root);
@@ -493,6 +506,7 @@ fn path_matches_prefix(path: &Path, prefix: &Path) -> bool {
 /// Check if an event matches the current prefix.
 fn event_matches_prefix(event: &DriveWatcherEvent, prefix: &Path) -> bool {
     match event {
+        DriveWatcherEvent::DriveLost(_) => true, // Always propagate
         DriveWatcherEvent::Created(p)
         | DriveWatcherEvent::Deleted(p)
         | DriveWatcherEvent::Modified(p)
