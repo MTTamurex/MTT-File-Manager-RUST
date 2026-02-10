@@ -2,7 +2,7 @@
 //! Follows .cursorrules: single responsibility, < 300 lines
 
 use eframe::egui::{self, Sense, Ui};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::domain::file_entry::FileEntry;
 // PERFORMANCE: Use FxHashSet for PathBuf keys - faster hashing than std::collections::HashSet
@@ -81,6 +81,12 @@ impl ScrollPredictor {
                 (start, end)
             }
         }
+    }
+}
+
+impl Default for ScrollPredictor {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -177,7 +183,7 @@ pub struct GridViewContext<'a> {
 /// Operations that can be performed from grid view
 pub trait GridViewOperations {
     fn navigate_to(&mut self, path: &str);
-    fn open_with_shell(&mut self, path: &PathBuf);
+    fn open_with_shell(&mut self, path: &Path);
     fn request_thumbnail_load(&mut self, path: PathBuf, size: u32, modified: u64);
     fn request_thumbnail_load_with_index(
         &mut self,

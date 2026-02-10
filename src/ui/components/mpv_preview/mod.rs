@@ -280,8 +280,8 @@ impl MpvPreview {
         }
 
         // Apply docked-mode downscale + FPS limit (dynamic, reversible, no player restart)
-        if (!self.is_detached) != self.docked_downscale_applied
-            || (!self.is_detached) != self.docked_fps_limit_applied
+        if self.is_detached == self.docked_downscale_applied
+            || self.is_detached == self.docked_fps_limit_applied
         {
             self.update_docked_downscale(false);
         }

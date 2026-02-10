@@ -156,6 +156,7 @@ fn thumbnail_worker_loop(
 }
 
 /// Process a single thumbnail request
+#[allow(clippy::too_many_arguments)]
 fn process_thumbnail_request(
     path: &std::path::PathBuf,
     req_gen: usize,

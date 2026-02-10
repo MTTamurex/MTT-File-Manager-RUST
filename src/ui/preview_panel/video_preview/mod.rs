@@ -91,7 +91,7 @@ pub fn render_video_preview(
 
             // Central play button on hover
             let hover_pos = ui.input(|i| i.pointer.hover_pos());
-            let is_hovered = hover_pos.map_or(false, |pos| media_rect.contains(pos));
+            let is_hovered = hover_pos.is_some_and(|pos| media_rect.contains(pos));
 
             if is_hovered {
                 let center_size = 64.0;

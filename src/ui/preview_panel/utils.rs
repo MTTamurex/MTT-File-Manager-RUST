@@ -24,7 +24,7 @@ pub fn truncate_text_to_fit(
     let available_width = max_width - ellipsis_width;
 
     while left < right {
-        let mid = (left + right + 1) / 2;
+        let mid = (left + right).div_ceil(2);
         let truncated: String = text.chars().take(mid).collect();
         let test_galley =
             fonts.layout_no_wrap(truncated.clone(), font_id.clone(), egui::Color32::WHITE);

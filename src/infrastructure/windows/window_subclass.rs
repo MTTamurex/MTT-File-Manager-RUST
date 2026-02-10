@@ -388,10 +388,8 @@ impl Drop for BorderlessSubclass {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_resize_border_constant() {
-        // Ensure border width is reasonable
+    const _: () = {
         assert!(RESIZE_BORDER_WIDTH > 0);
         assert!(RESIZE_BORDER_WIDTH <= 20);
-    }
+    };
 }

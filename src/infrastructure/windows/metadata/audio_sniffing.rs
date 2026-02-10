@@ -123,7 +123,7 @@ fn sniff_mp4_audio_container(data: &[u8]) -> Option<AudioCodecGuess> {
 
 /// Sniff MKV audio track headers
 fn sniff_mkv_audio_container(data: &[u8]) -> Option<AudioCodecGuess> {
-    if data.len() < 4 || &data[0..4] != [0x1A, 0x45, 0xDF, 0xA3] {
+    if data.len() < 4 || data[0..4] != [0x1A, 0x45, 0xDF, 0xA3] {
         return None;
     }
 

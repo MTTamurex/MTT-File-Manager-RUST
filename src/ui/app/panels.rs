@@ -200,7 +200,8 @@ fn render_preview_panel_layout(
                                         // Set initial volume (will be applied when MPV is ready)
                                         player.initial_volume = app.saved_media_volume;
 
-                                        app.media_preview = Some(MediaPreview::Video(player));
+                                        app.media_preview =
+                                            Some(MediaPreview::Video(Box::new(player)));
                                         app.media_preview_owner_tab_id = Some(tab_id);
 
                                         // Final sync: hide/show correctly

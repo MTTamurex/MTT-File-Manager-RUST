@@ -32,6 +32,7 @@ pub enum TabBarAction {
 }
 
 /// Render the tab bar with custom title bar (Windows 11 style)
+#[allow(clippy::too_many_arguments)]
 pub fn render_tab_bar(
     ui: &mut egui::Ui,
     tab_manager: &TabManager,

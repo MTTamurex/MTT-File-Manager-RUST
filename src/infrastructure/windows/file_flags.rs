@@ -29,14 +29,9 @@ pub fn open_sequential(path: &Path) -> std::io::Result<File> {
     };
 
     match handle {
-        Ok(h) if h != INVALID_HANDLE_VALUE => {
-            Ok(unsafe { File::from_raw_handle(h.0 as *mut std::ffi::c_void) })
-        }
+        Ok(h) if h != INVALID_HANDLE_VALUE => Ok(unsafe { File::from_raw_handle(h.0) }),
         Ok(_) => Err(std::io::Error::last_os_error()),
-        Err(e) => Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            e.to_string(),
-        )),
+        Err(e) => Err(std::io::Error::other(e.to_string())),
     }
 }
 
@@ -60,14 +55,9 @@ pub fn open_random_access(path: &Path) -> std::io::Result<File> {
     };
 
     match handle {
-        Ok(h) if h != INVALID_HANDLE_VALUE => {
-            Ok(unsafe { File::from_raw_handle(h.0 as *mut std::ffi::c_void) })
-        }
+        Ok(h) if h != INVALID_HANDLE_VALUE => Ok(unsafe { File::from_raw_handle(h.0) }),
         Ok(_) => Err(std::io::Error::last_os_error()),
-        Err(e) => Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            e.to_string(),
-        )),
+        Err(e) => Err(std::io::Error::other(e.to_string())),
     }
 }
 

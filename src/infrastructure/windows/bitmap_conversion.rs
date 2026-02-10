@@ -19,7 +19,7 @@ pub fn hbitmap_to_rgba(
         );
 
         let width = bm.bmWidth as usize;
-        let height = bm.bmHeight.abs() as usize;
+        let height = bm.bmHeight.unsigned_abs() as usize;
 
         let mut buffer = vec![0u8; width * height * 4];
 
@@ -30,7 +30,7 @@ pub fn hbitmap_to_rgba(
                 biHeight: -(height as i32),
                 biPlanes: 1,
                 biBitCount: 32,
-                biCompression: BI_RGB.0 as u32,
+                biCompression: BI_RGB.0,
                 ..Default::default()
             },
             ..Default::default()
@@ -83,7 +83,7 @@ pub fn hicon_to_rgba(
         );
 
         let width = bm.bmWidth as usize;
-        let height = bm.bmHeight.abs() as usize;
+        let height = bm.bmHeight.unsigned_abs() as usize;
 
         // Validate size (icons are usually small, but be defensive)
         if width > 256 || height > 256 {
@@ -101,7 +101,7 @@ pub fn hicon_to_rgba(
                 biHeight: -(height as i32), // Top-down
                 biPlanes: 1,
                 biBitCount: 32,
-                biCompression: BI_RGB.0 as u32,
+                biCompression: BI_RGB.0,
                 ..Default::default()
             },
             ..Default::default()

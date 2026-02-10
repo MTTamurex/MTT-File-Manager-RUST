@@ -99,18 +99,17 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
                 .chain(std::iter::once(0))
                 .collect();
             let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
-            if let Ok(_) = SHParseDisplayName(PCWSTR(wide_path.as_ptr()), None, &mut pidl, 0, None)
+            if SHParseDisplayName(PCWSTR(wide_path.as_ptr()), None, &mut pidl, 0, None).is_ok()
+                && !pidl.is_null()
             {
-                if !pidl.is_null() {
-                    pidls_to_free.push(pidl);
+                pidls_to_free.push(pidl);
 
-                    let mut child: *mut ITEMIDLIST = std::ptr::null_mut();
-                    if let Ok(folder) = SHBindToParent(pidl, Some(&mut child)) {
-                        if parent_folder_opt.is_none() {
-                            parent_folder_opt = Some(folder);
-                        }
-                        child_pidls.push(child as *const ITEMIDLIST);
+                let mut child: *mut ITEMIDLIST = std::ptr::null_mut();
+                if let Ok(folder) = SHBindToParent(pidl, Some(&mut child)) {
+                    if parent_folder_opt.is_none() {
+                        parent_folder_opt = Some(folder);
                     }
+                    child_pidls.push(child as *const ITEMIDLIST);
                 }
             }
         }
@@ -194,7 +193,7 @@ pub fn warmup_shell_extensions(hwnd: HWND) {
     // Use a temporary file to trigger file-level shell extensions (e.g., 7-Zip, WinRAR)
     let temp_file = std::env::temp_dir().join("mtt_warmup_dummy.txt");
     let _ = std::fs::File::create(&temp_file);
-    if let Ok(_ctx) = extract_shell_menu(hwnd, &[temp_file.clone()]) {
+    if let Ok(_ctx) = extract_shell_menu(hwnd, std::slice::from_ref(&temp_file)) {
         eprintln!("[ShellMenu] File warmup complete");
     } else {
         eprintln!("[ShellMenu] File warmup failed");
@@ -272,12 +271,12 @@ unsafe fn extract_item_info(
         None
     };
 
-    let icon_rgba = if !info.hbmpItem.0.is_null() && info.hbmpItem.0 != HBMMENU_CALLBACK.0 as *mut _
-    {
-        hbitmap_to_rgba(info.hbmpItem).ok()
-    } else {
-        None
-    };
+    let icon_rgba =
+        if !info.hbmpItem.0.is_null() && !std::ptr::eq(info.hbmpItem.0, HBMMENU_CALLBACK.0) {
+            hbitmap_to_rgba(info.hbmpItem).ok()
+        } else {
+            None
+        };
 
     let mut sub_items = Vec::new();
     let mut pending_submenu_handle = None;
@@ -381,7 +380,7 @@ pub fn invoke_menu_command(
             fMask: CMIC_MASK_PTINVOKE,
             hwnd,
             lpVerb: PCSTR((command_id - 1) as usize as *const u8),
-            nShow: SW_SHOWNORMAL.0 as i32,
+            nShow: SW_SHOWNORMAL.0,
             ptInvoke: POINT {
                 x: screen_x,
                 y: screen_y,

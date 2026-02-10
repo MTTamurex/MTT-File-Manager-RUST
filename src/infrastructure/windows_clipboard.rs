@@ -110,8 +110,6 @@ pub fn get_clipboard_operation() -> Option<ClipboardFileOp> {
 
     if effect & DROPEFFECT_MOVE != 0 {
         Some(ClipboardFileOp::Move)
-    } else if effect & DROPEFFECT_COPY != 0 {
-        Some(ClipboardFileOp::Copy)
     } else {
         Some(ClipboardFileOp::Copy) // Default to copy
     }
@@ -119,7 +117,7 @@ pub fn get_clipboard_operation() -> Option<ClipboardFileOp> {
 
 /// Checks if the clipboard contains files
 pub fn has_files_in_clipboard() -> bool {
-    get_files_from_clipboard().map_or(false, |files| !files.is_empty())
+    get_files_from_clipboard().is_some_and(|files| !files.is_empty())
 }
 
 // --- Internal helper functions ---

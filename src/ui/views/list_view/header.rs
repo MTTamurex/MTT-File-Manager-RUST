@@ -7,6 +7,7 @@ use crate::domain::file_entry::SortMode;
 
 /// Draws a single resizable header column.
 /// Returns true if the column was clicked (for sorting).
+#[allow(clippy::too_many_arguments)]
 fn draw_header_resizable(
     ui: &mut Ui,
     text: &str,
@@ -123,141 +124,145 @@ pub(super) fn render_list_header(
 
     let mut sort_action: Option<SortMode> = None;
 
-    ui.horizontal(|ui| {
-        ui.style_mut().spacing.item_spacing.x = 0.0;
+    let maybe_sort_action = ui
+        .horizontal(|ui| {
+            ui.style_mut().spacing.item_spacing.x = 0.0;
 
-        // Calculate available space for columns (total - scrollbar - status column)
-        let available_for_columns = available_w - 8.0 - w_status;
+            // Calculate available space for columns (total - scrollbar - status column)
+            let available_for_columns = available_w - 8.0 - w_status;
 
-        // Calculate current widths for constraint checks
-        let current_date = *ctx.col_date_width;
-        let current_size = *ctx.col_size_width;
-
-        if draw_header_resizable(
-            ui,
-            "Nome",
-            ctx.col_name_width,
-            SortMode::Name,
-            100.0,
-            current_date + current_size,
-            sort_mode,
-            sort_descending,
-            available_for_columns,
-        ) {
-            return Some(SortMode::Name);
-        }
-
-        if ctx.is_computer_view {
-            // Computer View: apenas Nome, Espaço Total e Espaço Livre (sem Tipo)
-            // Recalculate after potential Name resize
-            let current_name = *ctx.col_name_width;
-            let current_size = *ctx.col_size_width;
-
-            if draw_header_resizable(
-                ui,
-                "Espaço Total",
-                ctx.col_date_width,
-                SortMode::DriveTotalSpace,
-                80.0,
-                current_name + current_size,
-                sort_mode,
-                sort_descending,
-                available_for_columns,
-            ) {
-                return Some(SortMode::DriveTotalSpace);
-            }
-
-            // Recalculate after potential Date resize
-            let current_name = *ctx.col_name_width;
+            // Calculate current widths for constraint checks
             let current_date = *ctx.col_date_width;
+            let current_size = *ctx.col_size_width;
 
             if draw_header_resizable(
                 ui,
-                "Espaço Livre",
-                ctx.col_size_width,
-                SortMode::DriveFreeSpace,
-                80.0,
-                current_name + current_date,
+                "Nome",
+                ctx.col_name_width,
+                SortMode::Name,
+                100.0,
+                current_date + current_size,
                 sort_mode,
                 sort_descending,
                 available_for_columns,
             ) {
-                return Some(SortMode::DriveFreeSpace);
+                return Some(SortMode::Name);
             }
-        } else {
-            // Regular view: Nome, Data, Tipo, Tamanho (+ Status se OneDrive)
-            // Recalculate after potential Name resize
-            let current_name = *ctx.col_name_width;
-            let current_type = *ctx.col_type_width;
-            let current_size = *ctx.col_size_width;
 
-            let date_label = if ctx.is_recycle_bin_view {
-                "Data de Exclusão"
+            if ctx.is_computer_view {
+                // Computer View: apenas Nome, Espaço Total e Espaço Livre (sem Tipo)
+                // Recalculate after potential Name resize
+                let current_name = *ctx.col_name_width;
+                let current_size = *ctx.col_size_width;
+
+                if draw_header_resizable(
+                    ui,
+                    "Espaço Total",
+                    ctx.col_date_width,
+                    SortMode::DriveTotalSpace,
+                    80.0,
+                    current_name + current_size,
+                    sort_mode,
+                    sort_descending,
+                    available_for_columns,
+                ) {
+                    return Some(SortMode::DriveTotalSpace);
+                }
+
+                // Recalculate after potential Date resize
+                let current_name = *ctx.col_name_width;
+                let current_date = *ctx.col_date_width;
+
+                if draw_header_resizable(
+                    ui,
+                    "Espaço Livre",
+                    ctx.col_size_width,
+                    SortMode::DriveFreeSpace,
+                    80.0,
+                    current_name + current_date,
+                    sort_mode,
+                    sort_descending,
+                    available_for_columns,
+                ) {
+                    return Some(SortMode::DriveFreeSpace);
+                }
             } else {
-                "Última modificação"
-            };
-            if draw_header_resizable(
-                ui,
-                date_label,
-                ctx.col_date_width,
-                SortMode::Date,
-                120.0,
-                current_name + current_type + current_size,
-                sort_mode,
-                sort_descending,
-                available_for_columns,
-            ) {
-                return Some(SortMode::Date);
+                // Regular view: Nome, Data, Tipo, Tamanho (+ Status se OneDrive)
+                // Recalculate after potential Name resize
+                let current_name = *ctx.col_name_width;
+                let current_type = *ctx.col_type_width;
+                let current_size = *ctx.col_size_width;
+
+                let date_label = if ctx.is_recycle_bin_view {
+                    "Data de Exclusão"
+                } else {
+                    "Última modificação"
+                };
+                if draw_header_resizable(
+                    ui,
+                    date_label,
+                    ctx.col_date_width,
+                    SortMode::Date,
+                    120.0,
+                    current_name + current_type + current_size,
+                    sort_mode,
+                    sort_descending,
+                    available_for_columns,
+                ) {
+                    return Some(SortMode::Date);
+                }
+
+                // Recalculate after potential Date resize
+                let current_name = *ctx.col_name_width;
+                let current_date = *ctx.col_date_width;
+                let current_size = *ctx.col_size_width;
+
+                if draw_header_resizable(
+                    ui,
+                    "Tipo",
+                    ctx.col_type_width,
+                    SortMode::Type,
+                    80.0,
+                    current_name + current_date + current_size,
+                    sort_mode,
+                    sort_descending,
+                    available_for_columns,
+                ) {
+                    return Some(SortMode::Type);
+                }
+
+                // Recalculate after potential Type resize
+                let current_name = *ctx.col_name_width;
+                let current_date = *ctx.col_date_width;
+                let current_type = *ctx.col_type_width;
+
+                if draw_header_resizable(
+                    ui,
+                    "Tamanho",
+                    ctx.col_size_width,
+                    SortMode::Size,
+                    80.0,
+                    current_name + current_date + current_type,
+                    sort_mode,
+                    sort_descending,
+                    available_for_columns,
+                ) {
+                    return Some(SortMode::Size);
+                }
+
+                // Status column (OneDrive only) - now resizable
+                if ctx.is_onedrive_folder {
+                    render_status_header(ui, ctx, available_w);
+                }
             }
 
-            // Recalculate after potential Date resize
-            let current_name = *ctx.col_name_width;
-            let current_date = *ctx.col_date_width;
-            let current_size = *ctx.col_size_width;
+            None
+        })
+        .inner;
 
-            if draw_header_resizable(
-                ui,
-                "Tipo",
-                ctx.col_type_width,
-                SortMode::Type,
-                80.0,
-                current_name + current_date + current_size,
-                sort_mode,
-                sort_descending,
-                available_for_columns,
-            ) {
-                return Some(SortMode::Type);
-            }
-
-            // Recalculate after potential Type resize
-            let current_name = *ctx.col_name_width;
-            let current_date = *ctx.col_date_width;
-            let current_type = *ctx.col_type_width;
-
-            if draw_header_resizable(
-                ui,
-                "Tamanho",
-                ctx.col_size_width,
-                SortMode::Size,
-                80.0,
-                current_name + current_date + current_type,
-                sort_mode,
-                sort_descending,
-                available_for_columns,
-            ) {
-                return Some(SortMode::Size);
-            }
-
-            // Status column (OneDrive only) - now resizable
-            if ctx.is_onedrive_folder {
-                render_status_header(ui, ctx, available_w);
-            }
-        }
-
-        None
-    })
-    .inner
-    .map(|mode| sort_action = Some(mode));
+    if let Some(mode) = maybe_sort_action {
+        sort_action = Some(mode);
+    }
 
     sort_action
 }

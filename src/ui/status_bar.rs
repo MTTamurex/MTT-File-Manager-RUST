@@ -84,6 +84,7 @@ pub enum StatusBarAction {
 
 /// Renders the application status bar.
 /// Returns an action that needs to be handled by the caller.
+#[allow(clippy::too_many_arguments)]
 pub fn render_status_bar(
     ui: &mut egui::Ui,
     is_loading_folder: &mut bool,
@@ -300,8 +301,9 @@ fn format_size(bytes: u64) -> String {
     let base = 1024_f64;
     let bytes_f64 = bytes as f64;
     let exponent = (bytes_f64.log10() / base.log10()).floor() as i32;
-    let unit_index = exponent.min(5).max(0) as usize;
-    let divisor = base.powi(exponent);
+    let clamped_exponent = exponent.clamp(0, 5);
+    let unit_index = clamped_exponent as usize;
+    let divisor = base.powi(clamped_exponent);
 
     format!("{:.1} {}", bytes_f64 / divisor, UNITS[unit_index])
 }

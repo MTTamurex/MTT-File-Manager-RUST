@@ -11,6 +11,7 @@ use crate::infrastructure::windows::{format_date, format_size};
 const TOOLTIP_DELAY_SECS: f32 = 0.3;
 
 /// Renders a single list item row
+#[allow(clippy::too_many_arguments)]
 pub(super) fn render_list_item(
     ui: &mut Ui,
     i: usize,
@@ -523,6 +524,7 @@ fn render_computer_view_columns(
 }
 
 /// Renders columns for regular view (Date, Type, Size, OneDrive status)
+#[allow(clippy::too_many_arguments)]
 fn render_regular_columns(
     ui: &mut Ui,
     item: &FileEntry,

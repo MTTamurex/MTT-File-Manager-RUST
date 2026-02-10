@@ -30,7 +30,7 @@ impl eframe::App for ImageViewerApp {
         // 2. Lifecycle: Startup sequence & window state tracking
         app::lifecycle::handle_startup_sequence(self, ctx);
         app::lifecycle::track_window_state(self, ctx);
-        let frame_ms = (ctx.input(|i| i.stable_dt) * 1000.0) as f32;
+        let frame_ms = ctx.input(|i| i.stable_dt) * 1000.0;
 
         if frame_ms > 0.0 {
             if self.frame_time_avg_ms <= 0.0 {

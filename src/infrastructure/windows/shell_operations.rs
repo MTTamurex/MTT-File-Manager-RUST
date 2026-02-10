@@ -142,7 +142,7 @@ pub fn show_shell_context_menu(
                 fMask: CMIC_MASK_PTINVOKE,
                 hwnd,
                 lpVerb: PCSTR((command_id - 1) as usize as *const u8),
-                nShow: SW_SHOWNORMAL.0 as i32,
+                nShow: SW_SHOWNORMAL.0,
                 ptInvoke: POINT {
                     x: screen_x,
                     y: screen_y,
@@ -151,7 +151,9 @@ pub fn show_shell_context_menu(
             };
 
             // SAFETY: invoke contains valid fields; lpVerb uses command offset from QueryContextMenu base.
-            context_menu.InvokeCommand(std::mem::transmute(&invoke))?;
+            context_menu.InvokeCommand(
+                &invoke as *const CMINVOKECOMMANDINFOEX as *const CMINVOKECOMMANDINFO,
+            )?;
         }
 
         DestroyMenu(hmenu)?;
@@ -426,7 +428,11 @@ pub fn copy_item_with_file_op(path: &Path, dest_folder: &Path, hwnd: HWND) -> bo
 
 /// Robust Copy of multiple items using IFileOperation (supports virtual paths like ZIP items)
 /// This produces a single progress dialog for all files.
-pub fn copy_items_with_file_op(paths: &[std::path::PathBuf], dest_folder: &Path, hwnd: HWND) -> bool {
+pub fn copy_items_with_file_op(
+    paths: &[std::path::PathBuf],
+    dest_folder: &Path,
+    hwnd: HWND,
+) -> bool {
     if paths.is_empty() {
         return false;
     }
@@ -449,10 +455,11 @@ pub fn copy_items_with_file_op(paths: &[std::path::PathBuf], dest_folder: &Path,
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
-        let dest_item: IShellItem = match SHCreateItemFromParsingName(PCWSTR(dest_wide.as_ptr()), None) {
-            Ok(i) => i,
-            Err(_) => return copy_items_with_shell(paths, dest_folder, hwnd),
-        };
+        let dest_item: IShellItem =
+            match SHCreateItemFromParsingName(PCWSTR(dest_wide.as_ptr()), None) {
+                Ok(i) => i,
+                Err(_) => return copy_items_with_shell(paths, dest_folder, hwnd),
+            };
 
         // Add each source item to the operation
         for path in paths {
@@ -461,16 +468,17 @@ pub fn copy_items_with_file_op(paths: &[std::path::PathBuf], dest_folder: &Path,
                 .encode_wide()
                 .chain(std::iter::once(0))
                 .collect();
-            let src_item: IShellItem = match SHCreateItemFromParsingName(PCWSTR(src_wide.as_ptr()), None) {
-                Ok(i) => i,
-                Err(_) => {
-                    // Fallback to shell copy for this item
-                    if !copy_item_with_shell(path, dest_folder, hwnd) {
-                        return false;
+            let src_item: IShellItem =
+                match SHCreateItemFromParsingName(PCWSTR(src_wide.as_ptr()), None) {
+                    Ok(i) => i,
+                    Err(_) => {
+                        // Fallback to shell copy for this item
+                        if !copy_item_with_shell(path, dest_folder, hwnd) {
+                            return false;
+                        }
+                        continue;
                     }
-                    continue;
-                }
-            };
+                };
 
             if file_op.CopyItem(&src_item, &dest_item, None, None).is_err() {
                 return false;
@@ -507,20 +515,22 @@ pub fn move_item_with_file_op(path: &Path, dest_folder: &Path, hwnd: HWND) -> bo
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
-        let src_item: IShellItem = match SHCreateItemFromParsingName(PCWSTR(src_wide.as_ptr()), None) {
-            Ok(i) => i,
-            Err(_) => return move_item_with_shell(path, dest_folder, hwnd),
-        };
+        let src_item: IShellItem =
+            match SHCreateItemFromParsingName(PCWSTR(src_wide.as_ptr()), None) {
+                Ok(i) => i,
+                Err(_) => return move_item_with_shell(path, dest_folder, hwnd),
+            };
 
         let dest_wide: Vec<u16> = dest_folder
             .as_os_str()
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
-        let dest_item: IShellItem = match SHCreateItemFromParsingName(PCWSTR(dest_wide.as_ptr()), None) {
-            Ok(i) => i,
-            Err(_) => return move_item_with_shell(path, dest_folder, hwnd),
-        };
+        let dest_item: IShellItem =
+            match SHCreateItemFromParsingName(PCWSTR(dest_wide.as_ptr()), None) {
+                Ok(i) => i,
+                Err(_) => return move_item_with_shell(path, dest_folder, hwnd),
+            };
 
         if file_op.MoveItem(&src_item, &dest_item, None, None).is_err() {
             return move_item_with_shell(path, dest_folder, hwnd);
@@ -531,7 +541,11 @@ pub fn move_item_with_file_op(path: &Path, dest_folder: &Path, hwnd: HWND) -> bo
 }
 
 /// Robust Move of multiple items using IFileOperation (supports virtual paths like ZIP items)
-pub fn move_items_with_file_op(paths: &[std::path::PathBuf], dest_folder: &Path, hwnd: HWND) -> bool {
+pub fn move_items_with_file_op(
+    paths: &[std::path::PathBuf],
+    dest_folder: &Path,
+    hwnd: HWND,
+) -> bool {
     if paths.is_empty() {
         return false;
     }
@@ -554,10 +568,11 @@ pub fn move_items_with_file_op(paths: &[std::path::PathBuf], dest_folder: &Path,
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
-        let dest_item: IShellItem = match SHCreateItemFromParsingName(PCWSTR(dest_wide.as_ptr()), None) {
-            Ok(i) => i,
-            Err(_) => return move_items_with_shell(paths, dest_folder, hwnd),
-        };
+        let dest_item: IShellItem =
+            match SHCreateItemFromParsingName(PCWSTR(dest_wide.as_ptr()), None) {
+                Ok(i) => i,
+                Err(_) => return move_items_with_shell(paths, dest_folder, hwnd),
+            };
 
         // Add each source item to the operation
         for path in paths {
@@ -573,16 +588,17 @@ pub fn move_items_with_file_op(paths: &[std::path::PathBuf], dest_folder: &Path,
                 .encode_wide()
                 .chain(std::iter::once(0))
                 .collect();
-            let src_item: IShellItem = match SHCreateItemFromParsingName(PCWSTR(src_wide.as_ptr()), None) {
-                Ok(i) => i,
-                Err(_) => {
-                    // Fallback to shell move for this item
-                    if !move_item_with_shell(path, dest_folder, hwnd) {
-                        return false;
+            let src_item: IShellItem =
+                match SHCreateItemFromParsingName(PCWSTR(src_wide.as_ptr()), None) {
+                    Ok(i) => i,
+                    Err(_) => {
+                        // Fallback to shell move for this item
+                        if !move_item_with_shell(path, dest_folder, hwnd) {
+                            return false;
+                        }
+                        continue;
                     }
-                    continue;
-                }
-            };
+                };
 
             if file_op.MoveItem(&src_item, &dest_item, None, None).is_err() {
                 return false;

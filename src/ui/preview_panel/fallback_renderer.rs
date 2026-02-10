@@ -26,7 +26,7 @@ pub fn render_fallback(
         } else {
             ui.label(egui::RichText::new("💻").size(icon_size * 0.6));
         }
-    } else if let Some(_) = &file.drive_info {
+    } else if file.drive_info.is_some() {
         if let Some(icon) =
             item_icon_loader.get_or_load_drive_icon(ui.ctx(), &file.path.to_string_lossy())
         {
@@ -131,7 +131,7 @@ pub fn render_fallback(
             if extension.eq_ignore_ascii_case("pdf") {
                 let media_rect = image_resp.rect;
                 let hover_pos = ui.input(|i| i.pointer.hover_pos());
-                let is_hovered = hover_pos.map_or(false, |pos| media_rect.contains(pos));
+                let is_hovered = hover_pos.is_some_and(|pos| media_rect.contains(pos));
 
                 if is_hovered {
                     let center_size = 48.0;

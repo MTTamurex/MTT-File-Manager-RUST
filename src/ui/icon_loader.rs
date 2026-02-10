@@ -44,6 +44,12 @@ pub struct IconLoader {
     icon_result_tx: mpsc::Sender<AsyncIconResult>,
 }
 
+impl Default for IconLoader {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IconLoader {
     /// Creates a new icon loader
     pub fn new() -> Self {

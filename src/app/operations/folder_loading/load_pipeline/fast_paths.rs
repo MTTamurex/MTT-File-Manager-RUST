@@ -152,7 +152,10 @@ pub(super) fn try_handle_fast_paths(
 
     // Check if we are navigating a virtual Shell folder (like an archive)
     if is_shell_navigation_path(&PathBuf::from(base_path), false) {
-        eprintln!("[FOLDER-LOADING] Shell navigation detected for {:?}", base_path);
+        eprintln!(
+            "[FOLDER-LOADING] Shell navigation detected for {:?}",
+            base_path
+        );
         match list_shell_folder(&PathBuf::from(base_path)) {
             Ok(shell_items) => {
                 eprintln!(

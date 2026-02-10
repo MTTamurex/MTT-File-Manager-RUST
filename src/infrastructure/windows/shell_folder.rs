@@ -10,8 +10,7 @@ use windows::Win32::UI::Shell::Common::*;
 use windows::Win32::UI::Shell::*;
 
 use crate::domain::file_entry::{
-    is_archive_extension, path_contains_archive_segment, FileEntry, SyncStatus,
-    ARCHIVE_EXTENSIONS,
+    is_archive_extension, path_contains_archive_segment, FileEntry, SyncStatus, ARCHIVE_EXTENSIONS,
 };
 
 /// RAII Guard for COM initialization ( Apartment Threaded )
@@ -250,10 +249,9 @@ unsafe fn process_shell_child(
     );
 
     // Size (System.Size)
-    let size = match item2.GetUInt64(&crate::infrastructure::windows::recycle_bin::PKEY_SIZE) {
-        Ok(s) => s,
-        Err(_) => 0,
-    };
+    let size: u64 = item2
+        .GetUInt64(&crate::infrastructure::windows::recycle_bin::PKEY_SIZE)
+        .unwrap_or_default();
 
     // Modified Date (System.DateModified)
     let pkey_date_modified: PROPERTYKEY = PROPERTYKEY {

@@ -513,7 +513,7 @@ pub fn restore_from_recycle_bin(
         let file_name = original_path
             .file_name()
             .and_then(|n| n.to_str())
-            .ok_or_else(|| Error::from_win32())?;
+            .ok_or_else(Error::from_win32)?;
         let name_wide: Vec<u16> = file_name.encode_utf16().chain(Some(0)).collect();
 
         // Move the item

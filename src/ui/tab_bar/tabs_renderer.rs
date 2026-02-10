@@ -153,7 +153,7 @@ pub(super) fn render_tabs(
             let mut high = boundaries.len().saturating_sub(1);
 
             while low < high {
-                let mid = (low + high + 1) / 2;
+                let mid = (low + high).div_ceil(2);
                 let byte_idx = boundaries[mid];
                 let test_text = format!("{}...", &full_text[..byte_idx]);
                 let test_galley =

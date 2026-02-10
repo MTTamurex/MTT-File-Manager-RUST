@@ -69,7 +69,11 @@ pub(super) fn try_handle_optimized_tiers(
                         path: full_path,
                         name: dir_entry.name,
                         is_dir,
-                        size: if is_dir && !is_archive { 0 } else { dir_entry.size },
+                        size: if is_dir && !is_archive {
+                            0
+                        } else {
+                            dir_entry.size
+                        },
                         modified: dir_entry.modified,
                         folder_cover: None,
                         drive_info: None,

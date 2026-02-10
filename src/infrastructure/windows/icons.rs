@@ -2,7 +2,7 @@
 //! Follows .cursorrules: single responsibility, < 300 lines
 
 use std::os::windows::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use windows::{
     core::*, Win32::Foundation::*, Win32::Graphics::Gdi::*, Win32::Storage::FileSystem::*,
     Win32::System::Com::*, Win32::UI::Shell::Common::*, Win32::UI::Shell::*,
@@ -70,7 +70,7 @@ pub fn extract_computer_icon(
 /// Uses COM interfaces (IShellItem, IShellItemImageFactory).
 /// DeleteObject is called on the returned HBITMAP.
 pub fn extract_thumbnail(
-    path: &PathBuf,
+    path: &Path,
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     unsafe {
         let path_str = path.to_string_lossy().to_string();

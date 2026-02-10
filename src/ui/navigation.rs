@@ -26,6 +26,7 @@ pub mod helpers {
     use super::*;
 
     /// Navigates to a specific path (implementation logic)
+    #[allow(clippy::too_many_arguments)]
     pub fn navigate_to_impl(
         current_path: &mut String,
         path_input: &mut String,
@@ -66,7 +67,7 @@ pub mod helpers {
     pub fn go_back_impl(
         current_path: &mut String,
         path_input: &mut String,
-        navigation_history: &Vec<String>,
+        navigation_history: &[String],
         history_index: &mut usize,
         watch_current_folder: &mut dyn FnMut(),
         load_folder: &mut dyn FnMut(),
@@ -87,7 +88,7 @@ pub mod helpers {
     pub fn go_forward_impl(
         current_path: &mut String,
         path_input: &mut String,
-        navigation_history: &Vec<String>,
+        navigation_history: &[String],
         history_index: &mut usize,
         watch_current_folder: &mut dyn FnMut(),
         load_folder: &mut dyn FnMut(),
@@ -105,6 +106,7 @@ pub mod helpers {
     }
 
     /// Navigates to "Este Computador" view
+    #[allow(clippy::too_many_arguments)]
     pub fn navigate_to_computer_impl(
         current_path: &mut String,
         path_input: &mut String,

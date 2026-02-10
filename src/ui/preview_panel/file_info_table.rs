@@ -25,7 +25,8 @@ pub fn render_file_info_table(
                 ui.add_space(5.0);
 
                 // Show button for: files (non-folders) that are not drives, OR for folders (to refresh preview)
-                let has_button = (!file.is_dir && file.drive_info.is_none()) || (file.is_dir && !file.is_archive());
+                let has_button = (!file.is_dir && file.drive_info.is_none())
+                    || (file.is_dir && !file.is_archive());
                 // Reserve space for button if needed
                 let button_width = if has_button { 22.0 } else { 0.0 };
                 // Calculate available width for text
@@ -155,7 +156,11 @@ pub fn render_file_info_table(
 
                 add_detail(ui, "Tamanho:", size_str);
 
-                if file.is_dir && !file.is_archive() && folder_size.is_none() && !is_folder_size_loading {
+                if file.is_dir
+                    && !file.is_archive()
+                    && folder_size.is_none()
+                    && !is_folder_size_loading
+                {
                     action = Some(PreviewPanelAction::CalculateFolderSize(file.path.clone()));
                 }
             }

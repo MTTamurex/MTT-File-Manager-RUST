@@ -11,17 +11,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::OnceLock;
 
-use windows::{core::PCWSTR, Win32::UI::Shell::AssocGetPerceivedType};
+use windows::{
+    core::PCWSTR,
+    Win32::UI::Shell::{AssocGetPerceivedType, Common::PERCEIVED},
+};
 
 // PERCEIVED type values from shlwapi.h
 const PERCEIVED_TYPE_IMAGE: i32 = 2;
 const PERCEIVED_TYPE_AUDIO: i32 = 3;
 const PERCEIVED_TYPE_VIDEO: i32 = 4;
-
-// PERCEIVED is a simple i32 wrapper - define it ourselves
-#[repr(transparent)]
-#[derive(Clone, Copy, Default)]
-struct PERCEIVED(i32);
 
 /// Perceived file type category
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -235,8 +233,7 @@ fn query_perceived_type(extension: &str) -> PerceivedType {
     let result = unsafe {
         AssocGetPerceivedType(
             PCWSTR(ext_wide.as_ptr()),
-            // Cast our PERCEIVED to the type windows-rs expects
-            std::mem::transmute::<*mut PERCEIVED, _>(&mut perceived_type),
+            &mut perceived_type,
             &mut perceived_flag,
             None,
         )

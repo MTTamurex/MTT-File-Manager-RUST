@@ -41,8 +41,9 @@ impl<'a> ListViewOperations for ListOps<'a> {
         self.actions.push(ListAction::NavigateTo(path.to_string()));
     }
 
-    fn open_with_shell(&mut self, path: &PathBuf) {
-        self.actions.push(ListAction::OpenWithShell(path.clone()));
+    fn open_with_shell(&mut self, path: &Path) {
+        self.actions
+            .push(ListAction::OpenWithShell(path.to_path_buf()));
     }
 
     fn request_thumbnail_load(&mut self, path: PathBuf, directory_index: usize, modified: u64) {

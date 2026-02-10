@@ -334,51 +334,43 @@ fn query_mf_codec_name(guid: &GUID) -> Option<String> {
                         );
 
                         // Get friendly name from first transform
-                        if let Some(activate) = activate_array.as_ref() {
-                            if let Some(act) = activate {
-                                use windows::core::PWSTR;
-                                let mut friendly_name_ptr = PWSTR::null();
-                                let mut length: u32 = 0;
+                        if let Some(Some(act)) = activate_array.as_ref() {
+                            use windows::core::PWSTR;
+                            let mut friendly_name_ptr = PWSTR::null();
+                            let mut length: u32 = 0;
 
-                                if act
-                                    .GetAllocatedString(
-                                        &MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
-                                        &mut friendly_name_ptr,
-                                        &mut length,
-                                    )
-                                    .is_ok()
-                                    && !friendly_name_ptr.is_null()
-                                {
-                                    let name =
-                                        String::from_utf16_lossy(std::slice::from_raw_parts(
-                                            friendly_name_ptr.as_ptr(),
-                                            length as usize,
-                                        ));
-                                    CoTaskMemFree(Some(friendly_name_ptr.as_ptr() as *const _));
+                            if act
+                                .GetAllocatedString(
+                                    &MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
+                                    &mut friendly_name_ptr,
+                                    &mut length,
+                                )
+                                .is_ok()
+                                && !friendly_name_ptr.is_null()
+                            {
+                                let name = String::from_utf16_lossy(std::slice::from_raw_parts(
+                                    friendly_name_ptr.as_ptr(),
+                                    length as usize,
+                                ));
+                                CoTaskMemFree(Some(friendly_name_ptr.as_ptr() as *const _));
 
-                                    // Cleanup activate array
-                                    for i in 0..count {
-                                        if let Some(act_ptr) =
-                                            activate_array.add(i as usize).as_ref()
-                                        {
-                                            if let Some(act) = act_ptr {
-                                                let _ = act.ShutdownObject();
-                                            }
-                                        }
+                                // Cleanup activate array
+                                for i in 0..count {
+                                    if let Some(Some(act)) = activate_array.add(i as usize).as_ref()
+                                    {
+                                        let _ = act.ShutdownObject();
                                     }
-                                    CoTaskMemFree(Some(activate_array as *const _));
-
-                                    return Some(name);
                                 }
+                                CoTaskMemFree(Some(activate_array as *const _));
+
+                                return Some(name);
                             }
                         }
 
                         // Cleanup if name extraction failed
                         for i in 0..count {
-                            if let Some(act_ptr) = activate_array.add(i as usize).as_ref() {
-                                if let Some(act) = act_ptr {
-                                    let _ = act.ShutdownObject();
-                                }
+                            if let Some(Some(act)) = activate_array.add(i as usize).as_ref() {
+                                let _ = act.ShutdownObject();
                             }
                         }
                         CoTaskMemFree(Some(activate_array as *const _));
@@ -587,51 +579,43 @@ fn query_mft_by_subtype(tag: u32) -> Option<String> {
                         );
 
                         // Get friendly name from first transform
-                        if let Some(activate) = activate_array.as_ref() {
-                            if let Some(act) = activate {
-                                use windows::core::PWSTR;
-                                let mut friendly_name_ptr = PWSTR::null();
-                                let mut length: u32 = 0;
+                        if let Some(Some(act)) = activate_array.as_ref() {
+                            use windows::core::PWSTR;
+                            let mut friendly_name_ptr = PWSTR::null();
+                            let mut length: u32 = 0;
 
-                                if act
-                                    .GetAllocatedString(
-                                        &MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
-                                        &mut friendly_name_ptr,
-                                        &mut length,
-                                    )
-                                    .is_ok()
-                                    && !friendly_name_ptr.is_null()
-                                {
-                                    let name =
-                                        String::from_utf16_lossy(std::slice::from_raw_parts(
-                                            friendly_name_ptr.as_ptr(),
-                                            length as usize,
-                                        ));
-                                    CoTaskMemFree(Some(friendly_name_ptr.as_ptr() as *const _));
+                            if act
+                                .GetAllocatedString(
+                                    &MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
+                                    &mut friendly_name_ptr,
+                                    &mut length,
+                                )
+                                .is_ok()
+                                && !friendly_name_ptr.is_null()
+                            {
+                                let name = String::from_utf16_lossy(std::slice::from_raw_parts(
+                                    friendly_name_ptr.as_ptr(),
+                                    length as usize,
+                                ));
+                                CoTaskMemFree(Some(friendly_name_ptr.as_ptr() as *const _));
 
-                                    // Cleanup activate array
-                                    for i in 0..count {
-                                        if let Some(act_ptr) =
-                                            activate_array.add(i as usize).as_ref()
-                                        {
-                                            if let Some(act) = act_ptr {
-                                                let _ = act.ShutdownObject();
-                                            }
-                                        }
+                                // Cleanup activate array
+                                for i in 0..count {
+                                    if let Some(Some(act)) = activate_array.add(i as usize).as_ref()
+                                    {
+                                        let _ = act.ShutdownObject();
                                     }
-                                    CoTaskMemFree(Some(activate_array as *const _));
-
-                                    return Some(name);
                                 }
+                                CoTaskMemFree(Some(activate_array as *const _));
+
+                                return Some(name);
                             }
                         }
 
                         // Cleanup if name extraction failed
                         for i in 0..count {
-                            if let Some(act_ptr) = activate_array.add(i as usize).as_ref() {
-                                if let Some(act) = act_ptr {
-                                    let _ = act.ShutdownObject();
-                                }
+                            if let Some(Some(act)) = activate_array.add(i as usize).as_ref() {
+                                let _ = act.ShutdownObject();
                             }
                         }
                         CoTaskMemFree(Some(activate_array as *const _));

@@ -85,7 +85,7 @@ fn detect_capabilities() -> HardwareCapabilities {
 
 fn get_ffmpeg_encoders() -> String {
     let mut cmd = Command::new("ffmpeg");
-    cmd.args(&["-hide_banner", "-encoders"]);
+    cmd.args(["-hide_banner", "-encoders"]);
 
     #[cfg(target_os = "windows")]
     {
@@ -108,12 +108,12 @@ fn smoke_test_backend(backend: TranscodeBackend) -> bool {
     let mut cmd = Command::new("ffmpeg");
 
     // Common quiet flags
-    cmd.args(&["-v", "error", "-hide_banner"]);
+    cmd.args(["-v", "error", "-hide_banner"]);
 
     match backend {
         TranscodeBackend::QSV => {
             // QSV initialization: 1280x720 is a safe standard
-            cmd.args(&[
+            cmd.args([
                 "-init_hw_device",
                 "qsv=hw",
                 "-filter_hw_device",
@@ -131,7 +131,7 @@ fn smoke_test_backend(backend: TranscodeBackend) -> bool {
         }
         TranscodeBackend::NVENC => {
             // Strict NVENC: Use 1920x1080 to avoid "invalid param" on some GPUs
-            cmd.args(&[
+            cmd.args([
                 "-init_hw_device",
                 "cuda=cuda",
                 "-filter_hw_device",
@@ -151,7 +151,7 @@ fn smoke_test_backend(backend: TranscodeBackend) -> bool {
         }
         TranscodeBackend::AMF => {
             // AMF: Use 1280x720
-            cmd.args(&[
+            cmd.args([
                 "-f",
                 "lavfi",
                 "-i",

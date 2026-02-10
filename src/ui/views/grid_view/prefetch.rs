@@ -55,19 +55,19 @@ pub(super) fn process_visible_range_prefetch(
                     continue;
                 }
                 let item = &ctx.items[index];
-                if !item.is_dir && item.is_media() {
-                    if !ctx.texture_cache.contains(&item.path)
-                        && !ctx.loading_set.contains(&item.path)
-                        && !ctx.pending_upload_set.contains(&item.path)
-                    {
-                        ctx.loading_set.insert(item.path.clone());
-                        ops.request_thumbnail_prefetch_with_index(
-                            item.path.clone(),
-                            ctx.thumbnail_size as u32,
-                            index,
-                            item.modified,
-                        );
-                    }
+                if !item.is_dir
+                    && item.is_media()
+                    && !ctx.texture_cache.contains(&item.path)
+                    && !ctx.loading_set.contains(&item.path)
+                    && !ctx.pending_upload_set.contains(&item.path)
+                {
+                    ctx.loading_set.insert(item.path.clone());
+                    ops.request_thumbnail_prefetch_with_index(
+                        item.path.clone(),
+                        ctx.thumbnail_size as u32,
+                        index,
+                        item.modified,
+                    );
                 }
             }
 

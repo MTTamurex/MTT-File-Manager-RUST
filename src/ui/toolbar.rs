@@ -28,6 +28,7 @@ pub enum ToolbarAction {
     CancelPathInput,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn render_toolbar(
     ui: &mut egui::Ui,
     current_path: &str,

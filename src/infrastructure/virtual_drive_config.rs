@@ -18,19 +18,11 @@ pub enum DiskTypeOverride {
 }
 
 /// Configuration for virtual drive disk types
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct VirtualDriveConfig {
     /// Map of drive letter to disk type override
     /// Key is uppercase drive letter (e.g., 'X', 'Y', 'Z')
     pub overrides: FxHashMap<char, DiskTypeOverride>,
-}
-
-impl Default for VirtualDriveConfig {
-    fn default() -> Self {
-        Self {
-            overrides: FxHashMap::default(),
-        }
-    }
 }
 
 impl VirtualDriveConfig {
