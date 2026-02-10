@@ -27,8 +27,65 @@ thread_local! {
 /// Cryptomator mounts encrypted vaults as virtual drives using CryptoFS.
 /// These should be treated as HDDs if the underlying storage is an HDD.
 fn is_virtual_drive(drive_letter: char) -> bool {
-    use windows::core::PCWSTR;
+    use windows::core::{PCWSTR, PWSTR};
+    use windows::Win32::Foundation::{ERROR_MORE_DATA, NO_ERROR};
+    use windows::Win32::NetworkManagement::WNet::WNetGetConnectionW;
     use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
+
+    fn has_virtual_markers(value: &str) -> bool {
+        let lower = value.to_lowercase();
+        lower.contains("cryptomator")
+            || lower.contains("cryptofs")
+            || lower.contains("dokan")
+            || lower.contains("winfsp")
+            || lower == "fuse"
+            || lower.contains("cryptomator-vault")
+    }
+
+    fn mapped_provider_name(drive_letter: char) -> Option<String> {
+        let local = format!("{}:", drive_letter);
+        let local_wide: Vec<u16> = local.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut required_len: u32 = 0;
+
+        unsafe {
+            let probe = WNetGetConnectionW(
+                PCWSTR(local_wide.as_ptr()),
+                None,
+                &mut required_len as *mut u32,
+            );
+
+            if probe != NO_ERROR && probe != ERROR_MORE_DATA {
+                return None;
+            }
+
+            if required_len == 0 {
+                return None;
+            }
+
+            let mut buffer: Vec<u16> = vec![0; required_len as usize + 1];
+            let status = WNetGetConnectionW(
+                PCWSTR(local_wide.as_ptr()),
+                Some(PWSTR(buffer.as_mut_ptr())),
+                &mut required_len as *mut u32,
+            );
+
+            if status != NO_ERROR {
+                return None;
+            }
+
+            let end = buffer
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(required_len as usize)
+                .min(buffer.len());
+
+            if end == 0 {
+                return None;
+            }
+
+            Some(String::from_utf16_lossy(&buffer[..end]))
+        }
+    }
 
     let root_path = format!("{}:\\", drive_letter);
     let wide_path: Vec<u16> = root_path.encode_utf16().chain(std::iter::once(0)).collect();
@@ -51,7 +108,10 @@ fn is_virtual_drive(drive_letter: char) -> bool {
     };
 
     if ok.is_err() {
-        return false;
+        // Cryptomator vaults can be mapped as remote drives where volume info is not available.
+        return mapped_provider_name(drive_letter)
+            .as_deref()
+            .is_some_and(has_virtual_markers);
     }
 
     let volume_len = volume_name
@@ -66,12 +126,49 @@ fn is_virtual_drive(drive_letter: char) -> bool {
     let volume = String::from_utf16_lossy(&volume_name[..volume_len]).to_lowercase();
     let file_system = String::from_utf16_lossy(&file_system_name[..fs_len]).to_lowercase();
 
-    // Detect virtual drive indicators (CryptoFS is the file system name used by Cryptomator on Windows)
-    volume.contains("cryptomator")
-        || file_system.contains("cryptofs")
-        || file_system.contains("dokan")
-        || file_system.contains("winfsp")
-        || file_system == "fuse"
+    // Detect virtual drive indicators from volume/fs metadata.
+    if has_virtual_markers(&volume) || has_virtual_markers(&file_system) {
+        return true;
+    }
+
+    // Fallback: mapped network provider name (ex: \\cryptomator-vault\...).
+    mapped_provider_name(drive_letter)
+        .as_deref()
+        .is_some_and(has_virtual_markers)
+}
+
+fn extract_drive_letter(path: &Path) -> Option<char> {
+    path.to_str()
+        .and_then(|s| {
+            if s.len() >= 2 && s.chars().nth(1) == Some(':') {
+                s.chars().next()
+            } else {
+                None
+            }
+        })
+        .map(|c| c.to_ascii_uppercase())
+}
+
+/// Checks whether a path belongs to a virtual drive (Cryptomator, Dokan, WinFSP, etc.).
+/// Manual drive overrides are also considered virtual for cache fallback purposes.
+pub fn is_virtual_drive_path(path: &Path) -> bool {
+    if path
+        .to_str()
+        .map(|s| s.to_lowercase().starts_with(r"\\cryptomator-vault\"))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+
+    let Some(drive_letter) = extract_drive_letter(path) else {
+        return false;
+    };
+
+    if crate::infrastructure::virtual_drive_config::get_drive_override(drive_letter).is_some() {
+        return true;
+    }
+
+    is_virtual_drive(drive_letter)
 }
 
 /// Priority levels for I/O operations
@@ -103,11 +200,8 @@ pub enum IOPriority {
 /// Results are cached per drive letter for performance (including user overrides).
 pub fn is_ssd(path: &Path) -> bool {
     // Extract drive letter (e.g., "C:" from "C:\Users\...")
-    let drive_letter = match path.to_str() {
-        Some(s) if s.len() >= 2 && s.chars().nth(1) == Some(':') => {
-            s.chars().next().unwrap().to_ascii_uppercase()
-        }
-        _ => return true, // Assume SSD for network paths, etc.
+    let Some(drive_letter) = extract_drive_letter(path) else {
+        return true; // Assume SSD for network paths, etc.
     };
 
     // Check cache first (fast path - no locks if cache hit)

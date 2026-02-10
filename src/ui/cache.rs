@@ -13,7 +13,7 @@ use std::path::PathBuf;
 pub use rustc_hash::FxHashSet;
 
 const DEFAULT_TEXTURE_CACHE_ITEMS: usize = 220;
-const DEFAULT_FOLDER_PREVIEW_CACHE_ITEMS: usize = 80;
+const DEFAULT_FOLDER_PREVIEW_CACHE_ITEMS: usize = 240;
 const DEFAULT_RGBA_CACHE_ITEMS: usize = 240;
 const DEFAULT_MAX_CONCURRENT_LOADS: usize = 80;
 const DEFAULT_RGBA_BUDGET_BYTES: usize = 128 * 1024 * 1024;

@@ -68,6 +68,7 @@ features = [
     "Win32_System_IO",
     "Win32_System_WindowsProgramming",
     "Win32_System_Time",
+    "Win32_NetworkManagement_WNet",
 ]
 
 [features]

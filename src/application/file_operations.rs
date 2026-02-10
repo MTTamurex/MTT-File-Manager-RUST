@@ -8,7 +8,7 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
 
-use crate::infrastructure::security::{sanitize_path, SecurityConfig};
+use crate::infrastructure::security::{sanitize_path_with_local_drive_fallback, SecurityConfig};
 use crate::infrastructure::windows as windows_infra;
 use crate::infrastructure::windows::recycle_bin;
 use crate::infrastructure::windows::shell_operations;
@@ -72,7 +72,8 @@ fn sanitize_operation_path(path: &Path) -> OpResult<PathBuf> {
     if should_bypass_sanitization(path) {
         return Ok(path.to_path_buf());
     }
-    sanitize_path(path, &operation_security_config()).map_err(|e| e.to_string())
+    sanitize_path_with_local_drive_fallback(path, &operation_security_config())
+        .map_err(|e| e.to_string())
 }
 
 /// Deletes a file or directory using Windows Shell (Recycle Bin).
