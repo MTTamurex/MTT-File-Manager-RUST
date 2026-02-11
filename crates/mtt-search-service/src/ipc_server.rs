@@ -1,3 +1,4 @@
+use std::hint::black_box;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
@@ -27,6 +28,8 @@ const PIPE_OPEN_MODE: u32 = 0x40000003;
 
 /// Start the IPC server loop.
 pub fn run_ipc_server(indices: Arc<RwLock<Vec<VolumeIndex>>>, shutdown: Arc<AtomicBool>) {
+    let is_warming = Arc::new(AtomicBool::new(false));
+
     loop {
         if shutdown.load(Ordering::Relaxed) {
             break;
@@ -62,11 +65,12 @@ pub fn run_ipc_server(indices: Arc<RwLock<Vec<VolumeIndex>>>, shutdown: Arc<Atom
 
         // Handle each client concurrently so one slow query doesn't block all connections.
         let indices_for_client = indices.clone();
+        let warming_for_client = is_warming.clone();
         let pipe_raw = pipe.0 as usize;
         std::thread::spawn(move || {
             let pipe = HANDLE(pipe_raw as *mut core::ffi::c_void);
             if let Err(e) = catch_unwind(AssertUnwindSafe(|| {
-                handle_client(pipe, &indices_for_client)
+                handle_client(pipe, &indices_for_client, &warming_for_client)
             })) {
                 eprintln!("[IPC] Client handler panic: {:?}", e);
             }
@@ -181,7 +185,7 @@ fn create_pipe() -> Result<HANDLE, String> {
     }
 }
 
-fn handle_client(pipe: HANDLE, indices: &Arc<RwLock<Vec<VolumeIndex>>>) {
+fn handle_client(pipe: HANDLE, indices: &Arc<RwLock<Vec<VolumeIndex>>>, is_warming: &Arc<AtomicBool>) {
     let request_data = match read_message(pipe) {
         Some(data) => data,
         None => return,
@@ -199,6 +203,38 @@ fn handle_client(pipe: HANDLE, indices: &Arc<RwLock<Vec<VolumeIndex>>>) {
     match request {
         SearchRequest::Ping => {
             let _ = send_response(pipe, &SearchResponse::Pong);
+        }
+        SearchRequest::WarmIndex => {
+            // Respond immediately so the client is not blocked.
+            let _ = send_response(pipe, &SearchResponse::WarmStarted);
+
+            // Only spawn the warming thread if one is not already running.
+            if is_warming
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed)
+                .is_ok()
+            {
+                let indices_clone = indices.clone();
+                let warming_flag = is_warming.clone();
+                std::thread::spawn(move || {
+                    eprintln!("[IPC] WarmIndex: warming in-memory index...");
+                    let start = std::time::Instant::now();
+                    if let Ok(lock) = indices_clone.read() {
+                        let mut touched = 0u64;
+                        for vol in lock.iter() {
+                            for (_, record) in &vol.records {
+                                black_box(&record.name_lower);
+                                touched += 1;
+                            }
+                        }
+                        eprintln!(
+                            "[IPC] WarmIndex: touched {} records in {:.2}s",
+                            touched,
+                            start.elapsed().as_secs_f64()
+                        );
+                    }
+                    warming_flag.store(false, Ordering::SeqCst);
+                });
+            }
         }
         SearchRequest::GetStatus => {
             let indices_lock = match indices.read() {

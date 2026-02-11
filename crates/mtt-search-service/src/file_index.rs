@@ -63,9 +63,12 @@ pub struct SearchResult {
 
 /// Search the indices for files matching a query string.
 /// Returns up to `max_results` matching records with their resolved paths.
+/// Enforces a time limit to avoid holding locks indefinitely on cold memory.
 pub fn search(indices: &[VolumeIndex], query: &str, max_results: usize) -> Vec<SearchResult> {
     let query_lower = query.to_lowercase();
     let mut results = Vec::with_capacity(max_results.min(1000));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut scanned: u64 = 0;
 
     for index in indices {
         if !matches!(index.state, IndexState::Ready) {
@@ -73,6 +76,17 @@ pub fn search(indices: &[VolumeIndex], query: &str, max_results: usize) -> Vec<S
         }
 
         for (&frn, record) in &index.records {
+            // Check deadline every 50K records to avoid Instant::now() overhead
+            scanned += 1;
+            if scanned % 50_000 == 0 && std::time::Instant::now() > deadline {
+                eprintln!(
+                    "[SEARCH] Time limit reached after scanning {} records, returning {} partial results",
+                    scanned,
+                    results.len()
+                );
+                return results;
+            }
+
             if record.name_lower.contains(&query_lower) {
                 if let Some(full_path) = path_resolver::resolve_path(frn, index) {
                     results.push(SearchResult {
