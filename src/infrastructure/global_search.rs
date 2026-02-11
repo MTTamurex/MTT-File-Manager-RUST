@@ -2,7 +2,7 @@
 
 use mtt_search_protocol::*;
 use windows::core::PCWSTR;
-use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_PIPE_BUSY, HANDLE};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, ReadFile, WriteFile, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_NONE, OPEN_EXISTING,
 };
@@ -11,22 +11,26 @@ use windows::Win32::Storage::FileSystem::{
 pub fn search(query: &str, max_results: u32) -> Result<Vec<SearchResultItem>, String> {
     let pipe = open_pipe()?;
 
-    let request = SearchRequest::Query {
-        text: query.to_string(),
-        max_results,
-    };
-    write_message(pipe, &request)?;
-    let response: SearchResponse = read_response(pipe)?;
+    let result = (|| {
+        let request = SearchRequest::Query {
+            text: query.to_string(),
+            max_results,
+        };
+        write_message(pipe, &request)?;
+        let response: SearchResponse = read_response(pipe)?;
+
+        match response {
+            SearchResponse::Results { items, .. } => Ok(items),
+            SearchResponse::Error(e) => Err(e),
+            _ => Err("Unexpected response type".into()),
+        }
+    })();
 
     unsafe {
         let _ = CloseHandle(pipe);
     }
 
-    match response {
-        SearchResponse::Results { items, .. } => Ok(items),
-        SearchResponse::Error(e) => Err(e),
-        _ => Err("Unexpected response type".into()),
-    }
+    result
 }
 
 /// Check if the service is running.
@@ -52,40 +56,59 @@ pub fn ping() -> bool {
 pub fn get_status() -> Result<IndexStatusInfo, String> {
     let pipe = open_pipe()?;
 
-    write_message(pipe, &SearchRequest::GetStatus)?;
-    let response: SearchResponse = read_response(pipe)?;
+    let result = (|| {
+        write_message(pipe, &SearchRequest::GetStatus)?;
+        let response: SearchResponse = read_response(pipe)?;
+
+        match response {
+            SearchResponse::Status(info) => Ok(info),
+            SearchResponse::Error(e) => Err(e),
+            _ => Err("Unexpected response type".into()),
+        }
+    })();
 
     unsafe {
         let _ = CloseHandle(pipe);
     }
 
-    match response {
-        SearchResponse::Status(info) => Ok(info),
-        SearchResponse::Error(e) => Err(e),
-        _ => Err("Unexpected response type".into()),
-    }
+    result
 }
 
 fn open_pipe() -> Result<HANDLE, String> {
-    let pipe_name_wide: Vec<u16> = PIPE_NAME
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
+    let pipe_name_wide: Vec<u16> = PIPE_NAME.encode_utf16().chain(std::iter::once(0)).collect();
 
-    unsafe {
-        let handle = CreateFileW(
-            PCWSTR(pipe_name_wide.as_ptr()),
-            0x80000000 | 0x40000000, // GENERIC_READ | GENERIC_WRITE
-            FILE_SHARE_NONE,
-            None,
-            OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL,
-            None,
-        )
-        .map_err(|e| format!("Search service not available: {}", e))?;
+    const RETRY_COUNT: usize = 12;
+    const WAIT_MS: u32 = 250;
 
-        Ok(handle)
+    let mut last_error = String::from("Search service not available");
+    for _ in 0..RETRY_COUNT {
+        unsafe {
+            match CreateFileW(
+                PCWSTR(pipe_name_wide.as_ptr()),
+                0x80000000 | 0x40000000, // GENERIC_READ | GENERIC_WRITE
+                FILE_SHARE_NONE,
+                None,
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL,
+                None,
+            ) {
+                Ok(handle) => return Ok(handle),
+                Err(e) => {
+                    last_error = format!("Search service not available: {}", e);
+                    let code = e.code();
+                    let retryable = code == ERROR_PIPE_BUSY.to_hresult()
+                        || code == ERROR_FILE_NOT_FOUND.to_hresult();
+                    if retryable {
+                        std::thread::sleep(std::time::Duration::from_millis(WAIT_MS as u64));
+                        continue;
+                    }
+                    return Err(last_error);
+                }
+            }
+        }
     }
+
+    Err(last_error)
 }
 
 fn write_message<T: serde::Serialize>(pipe: HANDLE, msg: &T) -> Result<(), String> {

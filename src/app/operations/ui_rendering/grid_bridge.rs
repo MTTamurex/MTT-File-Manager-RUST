@@ -124,11 +124,13 @@ impl ImageViewerApp {
             .max(1.0) as usize;
 
         // Keyboard navigation (ONLY when not renaming and media is NOT focused)
-        if should_handle_navigation(
-            ui,
-            self.renaming_state.is_some(),
-            self.is_media_keyboard_focused(),
-        ) {
+        if !self.global_search_active
+            && should_handle_navigation(
+                ui,
+                self.renaming_state.is_some(),
+                self.is_media_keyboard_focused(),
+            )
+        {
             let current_index = self.items.iter().position(|x| {
                 self.selected_file
                     .as_ref()
@@ -245,6 +247,7 @@ impl ImageViewerApp {
             scroll_to_selected,
             is_computer_view: self.is_computer_view,
             is_recycle_bin_view: self.is_recycle_bin_view,
+            global_search_active: self.global_search_active,
             texture_cache: &mut self.cache_manager.texture_cache,
             loading_set: &mut self.cache_manager.loading_set,
             loading_icons: &mut self.loading_icons,

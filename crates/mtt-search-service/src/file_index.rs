@@ -63,11 +63,7 @@ pub struct SearchResult {
 
 /// Search the indices for files matching a query string.
 /// Returns up to `max_results` matching records with their resolved paths.
-pub fn search(
-    indices: &[VolumeIndex],
-    query: &str,
-    max_results: usize,
-) -> Vec<SearchResult> {
+pub fn search(indices: &[VolumeIndex], query: &str, max_results: usize) -> Vec<SearchResult> {
     let query_lower = query.to_lowercase();
     let mut results = Vec::with_capacity(max_results.min(1000));
 

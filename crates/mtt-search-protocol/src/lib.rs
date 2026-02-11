@@ -7,10 +7,7 @@ pub const PIPE_NAME: &str = r"\\.\pipe\MTTFileManagerSearch";
 #[derive(Serialize, Deserialize, Debug)]
 pub enum SearchRequest {
     /// Search for files matching the query.
-    Query {
-        text: String,
-        max_results: u32,
-    },
+    Query { text: String, max_results: u32 },
     /// Get the current indexing status.
     GetStatus,
     /// Check if the service is alive.

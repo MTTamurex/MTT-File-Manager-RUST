@@ -64,7 +64,9 @@ impl ImageViewerApp {
         // Handle DriveLost events immediately: the watcher thread detected that
         // the drive handle became invalid (drive was unmounted/disconnected).
         for event in &drive_events {
-            if let crate::infrastructure::drive_watcher::DriveWatcherEvent::DriveLost(drive_root) = event {
+            if let crate::infrastructure::drive_watcher::DriveWatcherEvent::DriveLost(drive_root) =
+                event
+            {
                 eprintln!("[FS-WATCH] DriveLost signal received for: {:?}", drive_root);
                 self.last_drive_refresh = Instant::now();
                 self.reload_drive_list_async();

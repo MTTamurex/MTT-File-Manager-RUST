@@ -8,11 +8,11 @@ use windows::Win32::Security::{
     SECURITY_ATTRIBUTES,
 };
 use windows::Win32::Storage::FileSystem::{FlushFileBuffers, ReadFile, WriteFile};
-use windows::Win32::System::IO::OVERLAPPED;
 use windows::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_WAIT,
 };
 use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
+use windows::Win32::System::IO::OVERLAPPED;
 
 use windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES;
 
@@ -148,10 +148,7 @@ fn create_pipe() -> Result<HANDLE, String> {
             bInheritHandle: false.into(),
         };
 
-        let pipe_name: Vec<u16> = PIPE_NAME
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect();
+        let pipe_name: Vec<u16> = PIPE_NAME.encode_utf16().chain(std::iter::once(0)).collect();
 
         let pipe = CreateNamedPipeW(
             PCWSTR(pipe_name.as_ptr()),

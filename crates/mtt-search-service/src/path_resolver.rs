@@ -39,5 +39,9 @@ pub fn resolve_path(frn: u64, index: &VolumeIndex) -> Option<String> {
     components.reverse();
 
     // Build path: "C:\component1\component2\filename"
-    Some(format!("{}:\\{}", index.drive_letter, components.join("\\")))
+    Some(format!(
+        "{}:\\{}",
+        index.drive_letter,
+        components.join("\\")
+    ))
 }

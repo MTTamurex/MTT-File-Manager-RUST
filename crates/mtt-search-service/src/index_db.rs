@@ -131,10 +131,7 @@ impl IndexDb {
 
     /// Save the complete volume index to the database.
     pub fn save_volume(&self, index: &VolumeIndex) -> Result<(), String> {
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| format!("Lock error: {}", e))?;
+        let conn = self.conn.lock().map_err(|e| format!("Lock error: {}", e))?;
 
         let drive = index.drive_letter.to_string();
         let now = std::time::SystemTime::now()

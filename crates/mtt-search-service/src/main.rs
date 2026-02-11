@@ -93,7 +93,10 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
     }
 
     // Start IPC server (blocks until shutdown)
-    eprintln!("[SERVICE] Starting IPC server on {}...", mtt_search_protocol::PIPE_NAME);
+    eprintln!(
+        "[SERVICE] Starting IPC server on {}...",
+        mtt_search_protocol::PIPE_NAME
+    );
     ipc_server::run_ipc_server(indices.clone(), shutdown.clone());
 
     eprintln!("[SERVICE] Shutting down...");
@@ -128,7 +131,10 @@ fn index_volume(
     let journal_info = match usn_journal::query_usn_journal(volume_handle) {
         Ok(info) => info,
         Err(e) => {
-            eprintln!("[USN] Failed to query USN journal for {}:\\: {}", drive_letter, e);
+            eprintln!(
+                "[USN] Failed to query USN journal for {}:\\: {}",
+                drive_letter, e
+            );
             usn_journal::close_volume(volume_handle);
             return;
         }
@@ -156,17 +162,27 @@ fn index_volume(
             index.last_usn = state.last_usn;
 
             // Catch up from last USN
-            match usn_journal::read_usn_changes(volume_handle, &journal_info, index.last_usn, &mut index) {
+            match usn_journal::read_usn_changes(
+                volume_handle,
+                &journal_info,
+                index.last_usn,
+                &mut index,
+            ) {
                 Ok(new_usn) => {
                     index.last_usn = new_usn;
                     eprintln!(
                         "[USN] {}:\\ Caught up to USN {}, {} total records",
-                        drive_letter, new_usn, index.records.len()
+                        drive_letter,
+                        new_usn,
+                        index.records.len()
                     );
                     need_full_scan = false;
                 }
                 Err(e) => {
-                    eprintln!("[USN] {}:\\ Catch-up failed ({}), doing full scan", drive_letter, e);
+                    eprintln!(
+                        "[USN] {}:\\ Catch-up failed ({}), doing full scan",
+                        drive_letter, e
+                    );
                     index.records.clear();
                     need_full_scan = true;
                 }
@@ -222,7 +238,10 @@ fn index_volume(
         indices_lock.push(index);
     }
 
-    eprintln!("[USN] {}:\\ Index ready, starting incremental updates", drive_letter);
+    eprintln!(
+        "[USN] {}:\\ Index ready, starting incremental updates",
+        drive_letter
+    );
 
     // Incremental update loop
     let mut last_persist = std::time::Instant::now();
@@ -239,9 +258,17 @@ fn index_volume(
 
         // Read new changes
         let mut indices_lock = indices.write().unwrap();
-        if let Some(vol_index) = indices_lock.iter_mut().find(|v| v.drive_letter == drive_letter) {
+        if let Some(vol_index) = indices_lock
+            .iter_mut()
+            .find(|v| v.drive_letter == drive_letter)
+        {
             let current_usn = vol_index.last_usn;
-            match usn_journal::read_usn_changes(volume_handle, &journal_info, current_usn, vol_index) {
+            match usn_journal::read_usn_changes(
+                volume_handle,
+                &journal_info,
+                current_usn,
+                vol_index,
+            ) {
                 Ok(new_usn) => {
                     if new_usn != current_usn {
                         vol_index.last_usn = new_usn;

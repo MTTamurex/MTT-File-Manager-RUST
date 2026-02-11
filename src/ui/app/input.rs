@@ -11,7 +11,29 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             return;
         }
 
-        // Detectar teclas através dos eventos (Key events)
+        // While the global search modal is open, keep focus/input inside it.
+        // Prevent routing shortcuts/quick-search to the main file views.
+        if app.global_search_active {
+            if ctx.input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::F)) {
+                app.global_search_active = false;
+                user_active = true;
+            }
+
+            if !user_active {
+                user_active = ctx.input(|i| {
+                    i.pointer.any_pressed()
+                        || i.pointer.any_click()
+                        || i.raw_scroll_delta != egui::Vec2::ZERO
+                        || !i.events.is_empty()
+                });
+            }
+
+            if user_active {
+                let _ = app.idle_warmup_sender.send(IdleWarmupMessage::UserActive);
+            }
+            return;
+        }
+        // Detect key events
         let mut do_copy = false;
         let mut do_cut = false;
         let mut do_paste = false;
@@ -128,7 +150,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             app.paste_key_debounce = false;
         }
 
-        // Executar ações de clipboard
+        // Execute clipboard actions
         if do_copy {
             app.command_copy(None);
         }
@@ -157,14 +179,15 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         // Ctrl + Shift + F: Busca Global
         if ctx.input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::F)) {
             app.global_search_active = !app.global_search_active;
+            app.global_search_selected_index = None;
             if app.global_search_active {
                 app.global_search_query.clear();
                 app.global_search_results.clear();
                 app.global_search_loading = false;
                 // Check service availability
-                let _ = app.global_search_sender.send(
-                    crate::workers::global_search_worker::GlobalSearchRequest::CheckStatus,
-                );
+                let _ = app
+                    .global_search_sender
+                    .send(crate::workers::global_search_worker::GlobalSearchRequest::CheckStatus);
             }
             user_active = true;
         }
@@ -172,7 +195,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         // QUICK SEARCH: Type-to-search like Explorer
         handle_quick_search(app, ctx);
     } else {
-        // Durante renomeação: ESC cancela a operação
+        // During rename: ESC cancels the operation
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             app.renaming_state = None;
             app.focus_rename = false;

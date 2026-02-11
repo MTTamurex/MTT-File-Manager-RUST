@@ -5,6 +5,8 @@ use crate::app::state::ImageViewerApp;
 use eframe::egui;
 
 const MAX_RESULTS: u32 = 200;
+const BACKDROP_ALPHA: u8 = 72;
+const RESULT_ROW_HEIGHT: f32 = 40.0;
 
 /// Render the global search overlay. Returns true if the overlay should remain open.
 pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Context) {
@@ -12,25 +14,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
         return;
     }
 
-    // Semi-transparent backdrop
     let screen_rect = ctx.screen_rect();
-    let painter = ctx.layer_painter(egui::LayerId::new(
-        egui::Order::Foreground,
-        egui::Id::from("global_search_backdrop"),
-    ));
-    painter.rect_filled(
-        screen_rect,
-        0.0,
-        egui::Color32::from_black_alpha(120),
-    );
-
-    // Click on backdrop closes the overlay
-    let backdrop_resp = ctx.input(|i| {
-        i.pointer
-            .primary_clicked()
-            .then(|| i.pointer.interact_pos())
-            .flatten()
-    });
 
     // Modal window dimensions
     let modal_width = (screen_rect.width() * 0.5).clamp(400.0, 800.0);
@@ -43,12 +27,40 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
         egui::vec2(modal_width, modal_max_height),
     );
 
-    // Check if click was outside modal
-    if let Some(click_pos) = backdrop_resp {
-        if !modal_rect.contains(click_pos) {
-            app.global_search_active = false;
-            return;
-        }
+    // Full-screen interaction blocker + lighter backdrop.
+    // This prevents click/drag/scroll leakage to the main app while modal is open.
+    let mut close_from_backdrop = false;
+    egui::Area::new(egui::Id::from("global_search_backdrop_area"))
+        .fixed_pos(screen_rect.min)
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            ui.set_min_size(screen_rect.size());
+
+            let backdrop_rect = ui.max_rect();
+            let backdrop_resp = ui.interact(
+                backdrop_rect,
+                ui.id().with("global_search_backdrop_interact"),
+                egui::Sense::click_and_drag(),
+            );
+
+            ui.painter().rect_filled(
+                backdrop_rect,
+                0.0,
+                egui::Color32::from_black_alpha(BACKDROP_ALPHA),
+            );
+
+            if backdrop_resp.clicked() {
+                if let Some(click_pos) = backdrop_resp.interact_pointer_pos() {
+                    if !modal_rect.contains(click_pos) {
+                        close_from_backdrop = true;
+                    }
+                }
+            }
+        });
+
+    if close_from_backdrop {
+        app.global_search_active = false;
+        return;
     }
 
     // ESC closes
@@ -60,7 +72,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
     // Render modal
     egui::Area::new(egui::Id::from("global_search_modal"))
         .fixed_pos(egui::pos2(modal_x, modal_y))
-        .order(egui::Order::Foreground)
+        .order(egui::Order::Tooltip)
         .show(ctx, |ui| {
             egui::Frame::window(ui.style())
                 .inner_margin(egui::Margin::same(16))
@@ -76,11 +88,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
 
                     // Header
                     ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new("Busca Global")
-                                .size(16.0)
-                                .strong(),
-                        );
+                        ui.label(egui::RichText::new("Busca Global").size(16.0).strong());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if !app.global_search_available {
                                 ui.label(
@@ -113,14 +121,13 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                     );
 
                     // Auto-focus on open
-                    if search_resp.gained_focus()
-                        || ctx.memory(|m| !m.has_focus(search_resp.id))
-                    {
+                    if search_resp.gained_focus() || ctx.memory(|m| !m.has_focus(search_resp.id)) {
                         search_resp.request_focus();
                     }
 
                     // Trigger search on text change (with debounce)
                     if search_resp.changed() && !app.global_search_query.is_empty() {
+                        app.global_search_selected_index = None;
                         app.global_search_loading = true;
                         let _ = app.global_search_sender.send(
                             crate::workers::global_search_worker::GlobalSearchRequest::Search {
@@ -129,6 +136,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                             },
                         );
                     } else if app.global_search_query.is_empty() {
+                        app.global_search_selected_index = None;
                         app.global_search_results.clear();
                         app.global_search_loading = false;
                     }
@@ -156,6 +164,13 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                             );
                         });
                     } else if !app.global_search_results.is_empty() {
+                        if app
+                            .global_search_selected_index
+                            .is_some_and(|idx| idx >= app.global_search_results.len())
+                        {
+                            app.global_search_selected_index = None;
+                        }
+
                         // Header with count
                         ui.horizontal(|ui| {
                             ui.label(
@@ -179,38 +194,67 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                             .show(ui, |ui| {
                                 let mut navigate_to: Option<String> = None;
 
-                                for result in &app.global_search_results {
+                                for (row_idx, result) in
+                                    app.global_search_results.iter().enumerate()
+                                {
                                     let is_dir = result.is_dir;
                                     let icon_str = if is_dir { "\u{1F4C1}" } else { "\u{1F4C4}" };
 
-                                    let resp = ui
-                                        .horizontal(|ui| {
-                                            ui.set_min_height(28.0);
+                                    let (row_rect, _) = ui.allocate_exact_size(
+                                        egui::vec2(ui.available_width(), RESULT_ROW_HEIGHT),
+                                        egui::Sense::hover(),
+                                    );
 
-                                            // Icon
-                                            ui.label(
-                                                egui::RichText::new(icon_str).size(14.0),
-                                            );
+                                    let row_resp = ui.interact(
+                                        row_rect,
+                                        ui.id().with(("global_search_row", row_idx)),
+                                        egui::Sense::click(),
+                                    );
 
-                                            ui.vertical(|ui| {
-                                                // File name
-                                                ui.label(
-                                                    egui::RichText::new(&result.name)
-                                                        .strong()
-                                                        .size(13.0),
-                                                );
-                                                // Full path (smaller, gray)
-                                                ui.label(
-                                                    egui::RichText::new(&result.full_path)
-                                                        .size(11.0)
-                                                        .color(egui::Color32::from_gray(120)),
-                                                );
-                                            });
-                                        })
-                                        .response;
+                                    if row_resp.clicked() {
+                                        app.global_search_selected_index = Some(row_idx);
+                                    }
+
+                                    let is_selected =
+                                        app.global_search_selected_index == Some(row_idx);
+                                    if is_selected {
+                                        ui.painter().rect_filled(
+                                            row_rect,
+                                            4.0,
+                                            ui.style().visuals.selection.bg_fill,
+                                        );
+                                    } else if row_resp.hovered() {
+                                        ui.painter().rect_filled(
+                                            row_rect,
+                                            4.0,
+                                            egui::Color32::from_white_alpha(12),
+                                        );
+                                    }
+
+                                    let mut row_ui = ui.new_child(
+                                        egui::UiBuilder::new()
+                                            .max_rect(row_rect.shrink2(egui::vec2(8.0, 4.0)))
+                                            .layout(egui::Layout::left_to_right(
+                                                egui::Align::Center,
+                                            )),
+                                    );
+                                    row_ui.style_mut().interaction.selectable_labels = false;
+
+                                    row_ui.label(egui::RichText::new(icon_str).size(14.0));
+                                    row_ui.add_space(8.0);
+                                    row_ui.vertical(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(&result.name).strong().size(13.0),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(&result.full_path)
+                                                .size(11.0)
+                                                .color(egui::Color32::from_gray(120)),
+                                        );
+                                    });
 
                                     // Double-click navigates to location
-                                    if resp.double_clicked() {
+                                    if row_resp.double_clicked() {
                                         let path = std::path::Path::new(&result.full_path);
                                         if is_dir {
                                             navigate_to = Some(result.full_path.clone());
@@ -218,15 +262,6 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                                             navigate_to =
                                                 Some(parent.to_string_lossy().to_string());
                                         }
-                                    }
-
-                                    // Hover highlight
-                                    if resp.hovered() {
-                                        ui.painter().rect_filled(
-                                            resp.rect,
-                                            4.0,
-                                            egui::Color32::from_white_alpha(10),
-                                        );
                                     }
 
                                     ui.separator();

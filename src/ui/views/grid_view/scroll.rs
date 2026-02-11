@@ -6,11 +6,18 @@ struct ScrollState {
     visual_scroll_y: f32,
 }
 
-pub(super) fn apply_scroll_input(ui: &Ui, target_scroll: &mut f32, max_scroll: f32) {
-    let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
-    if scroll_delta != 0.0 {
-        let speed = 2.5;
-        *target_scroll -= scroll_delta * speed;
+pub(super) fn apply_scroll_input(
+    ui: &Ui,
+    target_scroll: &mut f32,
+    max_scroll: f32,
+    consume_scroll: bool,
+) {
+    if consume_scroll {
+        let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
+        if scroll_delta != 0.0 {
+            let speed = 2.5;
+            *target_scroll -= scroll_delta * speed;
+        }
     }
 
     *target_scroll = target_scroll.clamp(0.0, max_scroll);
