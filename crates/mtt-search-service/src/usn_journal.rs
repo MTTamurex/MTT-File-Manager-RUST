@@ -229,6 +229,31 @@ pub fn read_usn_changes(
     last_usn: i64,
     index: &mut VolumeIndex,
 ) -> Result<i64, String> {
+    let buf = read_usn_buffer(volume, journal_info, last_usn)?;
+    let Some((buffer, bytes_returned, new_last_usn)) = buf else {
+        return Ok(last_usn);
+    };
+
+    let mut dummy_count = 0;
+    parse_usn_records(
+        &buffer[8..bytes_returned as usize],
+        index,
+        &mut dummy_count,
+        true,
+    );
+
+    Ok(new_last_usn)
+}
+
+/// Read raw USN journal buffer without modifying any index.
+/// Returns None when there are no new records.
+/// Returns Some((buffer, bytes_returned, new_last_usn)) on success.
+/// This performs I/O (DeviceIoControl) and should be called WITHOUT holding locks.
+pub fn read_usn_buffer(
+    volume: HANDLE,
+    journal_info: &UsnJournalInfo,
+    last_usn: i64,
+) -> Result<Option<(Vec<u8>, u32, i64)>, String> {
     let read_data = ReadUsnJournalDataV0 {
         start_usn: last_usn,
         reason_mask: USN_REASON_FILE_CREATE
@@ -259,11 +284,9 @@ pub fn read_usn_changes(
 
     if result.is_err() {
         let err_code = unsafe { GetLastError() };
-        // ERROR_HANDLE_EOF: no new journal records — not a real error
         if err_code == ERROR_HANDLE_EOF {
-            return Ok(last_usn);
+            return Ok(None);
         }
-        // ERROR_JOURNAL_ENTRY_DELETED: cached USN is too old, journal wrapped around
         if err_code == ERROR_JOURNAL_ENTRY_DELETED {
             return Err("journal entries expired (USN too old, full re-scan needed)".to_string());
         }
@@ -274,28 +297,17 @@ pub fn read_usn_changes(
     }
 
     if bytes_returned < 8 {
-        return Ok(last_usn);
+        return Ok(None);
     }
 
-    // First 8 bytes = next USN
     let new_last_usn = i64::from_le_bytes(buffer[0..8].try_into().unwrap());
-
-    // Parse change records
-    let mut dummy_count = 0;
-    parse_usn_records(
-        &buffer[8..bytes_returned as usize],
-        index,
-        &mut dummy_count,
-        true, // apply changes (delete on FILE_DELETE, update on rename)
-    );
-
-    Ok(new_last_usn)
+    Ok(Some((buffer, bytes_returned, new_last_usn)))
 }
 
 /// Parse USN_RECORD_V2 entries from a buffer.
 /// If `apply_changes` is true, process DELETE/RENAME reasons.
 /// Otherwise, just insert all records (initial enumeration).
-fn parse_usn_records(data: &[u8], index: &mut VolumeIndex, count: &mut usize, apply_changes: bool) {
+pub fn parse_usn_records(data: &[u8], index: &mut VolumeIndex, count: &mut usize, apply_changes: bool) {
     let mut offset = 0usize;
 
     while offset + 64 <= data.len() {

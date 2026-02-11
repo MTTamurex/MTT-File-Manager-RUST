@@ -37,6 +37,29 @@ pub fn search(query: &str, max_results: u32) -> Result<Vec<SearchResultItem>, St
     result
 }
 
+/// Ask the service to warm its in-memory index, bringing paged-out memory back to RAM.
+/// Fire-and-forget: the service responds immediately and warms in the background.
+pub fn warm_index() -> Result<(), String> {
+    let pipe = open_pipe()?;
+
+    let result = (|| {
+        write_message(pipe, &SearchRequest::WarmIndex)?;
+        let response: SearchResponse = read_response(pipe)?;
+
+        match response {
+            SearchResponse::WarmStarted => Ok(()),
+            SearchResponse::Error(e) => Err(e),
+            _ => Err("Unexpected response type".into()),
+        }
+    })();
+
+    unsafe {
+        let _ = CloseHandle(pipe);
+    }
+
+    result
+}
+
 /// Check if the service is running.
 pub fn ping() -> bool {
     const ATTEMPTS: usize = 3;

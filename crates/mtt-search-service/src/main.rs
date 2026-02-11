@@ -231,6 +231,7 @@ fn index_volume(
     }
 
     index.state = file_index::IndexState::Ready;
+    let mut current_usn = index.last_usn;
 
     // Add to shared indices
     {
@@ -256,36 +257,49 @@ fn index_volume(
             break;
         }
 
-        // Read new changes
-        let mut indices_lock = indices.write().unwrap();
-        if let Some(vol_index) = indices_lock
-            .iter_mut()
-            .find(|v| v.drive_letter == drive_letter)
-        {
-            let current_usn = vol_index.last_usn;
-            match usn_journal::read_usn_changes(
-                volume_handle,
-                &journal_info,
-                current_usn,
-                vol_index,
-            ) {
-                Ok(new_usn) => {
-                    if new_usn != current_usn {
+        // 1. Read raw USN buffer (I/O) — NO lock held, so searches are never blocked.
+        match usn_journal::read_usn_buffer(volume_handle, &journal_info, current_usn) {
+            Ok(Some((buffer, bytes_returned, new_usn))) => {
+                // 2. Brief WRITE lock only for applying parsed changes to the HashMap.
+                //    Use try_write to avoid blocking search reads: if a search or warm is
+                //    holding a read lock, skip this cycle (retry in 2s). A pending write
+                //    on Windows SRWLock blocks ALL new reads, which cascades into timeouts.
+                if let Ok(mut indices_lock) = indices.try_write() {
+                    if let Some(vol_index) = indices_lock
+                        .iter_mut()
+                        .find(|v| v.drive_letter == drive_letter)
+                    {
+                        let mut dummy_count = 0;
+                        usn_journal::parse_usn_records(
+                            &buffer[8..bytes_returned as usize],
+                            vol_index,
+                            &mut dummy_count,
+                            true,
+                        );
                         vol_index.last_usn = new_usn;
                     }
+                    current_usn = new_usn;
                 }
-                Err(e) => {
-                    eprintln!("[USN] {}:\\ Incremental read error: {}", drive_letter, e);
-                }
+                // else: lock busy (search running), skip — will retry next cycle
             }
+            Ok(None) => {} // No new records
+            Err(e) => {
+                eprintln!("[USN] {}:\\ Incremental read error: {}", drive_letter, e);
+            }
+        }
 
-            // Persist every 5 minutes
-            if last_persist.elapsed() > std::time::Duration::from_secs(300) {
+        // 3. Persist every 5 minutes — under READ lock (save_volume takes &VolumeIndex).
+        if last_persist.elapsed() > std::time::Duration::from_secs(300) {
+            let indices_lock = indices.read().unwrap();
+            if let Some(vol_index) = indices_lock
+                .iter()
+                .find(|v| v.drive_letter == drive_letter)
+            {
                 if let Err(e) = db.save_volume(vol_index) {
                     eprintln!("[USN] {}:\\ Persist error: {}", drive_letter, e);
                 }
-                last_persist = std::time::Instant::now();
             }
+            last_persist = std::time::Instant::now();
         }
     }
 

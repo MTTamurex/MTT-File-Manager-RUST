@@ -12,6 +12,8 @@ pub enum SearchRequest {
     GetStatus,
     /// Check if the service is alive.
     Ping,
+    /// Ask the service to warm its in-memory index (bring paged-out memory back to RAM).
+    WarmIndex,
 }
 
 /// Responses sent from the search service to the app.
@@ -27,6 +29,8 @@ pub enum SearchResponse {
     Status(IndexStatusInfo),
     /// Response to Ping.
     Pong,
+    /// Acknowledge that index warming has started (or is already in progress).
+    WarmStarted,
     /// Error message.
     Error(String),
 }

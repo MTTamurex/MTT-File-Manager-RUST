@@ -102,6 +102,10 @@ pub fn start_global_search_worker(
             });
         };
 
+        // Warm the service's in-memory index so paged-out memory is brought back to RAM
+        // before the user opens global search.
+        let _ = crate::infrastructure::global_search::warm_index();
+
         // Prime status push at worker startup.
         send_status(&sender);
         ctx.request_repaint();
