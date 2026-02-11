@@ -7,7 +7,9 @@ use std::sync::mpsc::Receiver;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
 
-use crate::infrastructure::security::{sanitize_path_with_local_drive_fallback, SecurityConfig};
+use crate::infrastructure::security::{
+    sanitize_path_with_local_drive_fallback, sanitize_unc_path, SecurityConfig,
+};
 use crate::infrastructure::windows::recycle_bin;
 use crate::infrastructure::windows::shell_operations;
 
@@ -152,18 +154,22 @@ fn operation_security_config() -> SecurityConfig {
 
 fn should_bypass_sanitization(path: &Path) -> bool {
     let s = path.to_string_lossy();
-    if s.starts_with("shell:")
+    // Only true shell namespace paths (shell:, ::{GUID}) bypass sanitization.
+    // UNC network paths now go through basic validation instead of bypassing entirely.
+    s.starts_with("shell:")
         || crate::infrastructure::windows::is_shell_navigation_path(path, false)
-    {
-        return true;
-    }
+}
 
-    // Bypass only UNC network paths. Do NOT bypass local verbatim paths
-    // like `\\?\C:\...` because those should be normalized for Shell APIs.
+/// Returns true for UNC network paths that need lightweight validation
+/// instead of full drive-based sanitization.
+fn is_unc_path(path: &Path) -> bool {
+    let s = path.to_string_lossy();
     if !s.starts_with(r"\\") {
         return false;
     }
-
+    // \\?\C:\... is a local verbatim path, NOT UNC — handle via normal sanitization.
+    // \\?\UNC\server\share is a verbatim UNC path.
+    // \\server\share is a standard UNC path.
     match s.strip_prefix(r"\\?\") {
         Some(rest) => rest.starts_with("UNC\\"),
         None => true,
@@ -173,6 +179,9 @@ fn should_bypass_sanitization(path: &Path) -> bool {
 fn sanitize_operation_path(path: &Path) -> Result<PathBuf, String> {
     if should_bypass_sanitization(path) {
         return Ok(path.to_path_buf());
+    }
+    if is_unc_path(path) {
+        return sanitize_unc_path(path).map_err(|e| e.to_string());
     }
 
     sanitize_path_with_local_drive_fallback(path, &operation_security_config())

@@ -248,6 +248,12 @@ pub fn rename_item_with_shell(path: &Path, new_name: &str, hwnd: HWND) -> bool {
     // Se o destino JÁ EXISTE, o SHFileOperation com FOF_RENAME pode tentar mesclar (pastas) ou substituir silenciosamente se FOF_NOCONFIRMATION estiver ativo.
     // O usuário relatou que a pasta "sumiu" ao renomear para um nome existente.
     // A melhor proteção é impedir o rename se o destino já existe.
+    //
+    // NOTA DE SEGURANÇA: este check-then-act tem uma janela TOCTOU mínima
+    // (microssegundos entre exists() e SHFileOperationW). Explorar essa janela
+    // requer um atacante local capaz de criar arquivos no exato diretório no
+    // instante preciso. O check é mantido porque previne o bug UX de merge de pastas,
+    // e SHFileOperationW sem FOF_NOCONFIRMATION mostrará diálogo se o alvo aparecer.
     if new_path.exists() {
         return false;
     }

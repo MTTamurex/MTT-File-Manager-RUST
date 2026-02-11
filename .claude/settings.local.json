@@ -19,7 +19,9 @@
       "Bash(findstr:*)",
       "Bash(Select-String \"error\")",
       "Bash(ls:*)",
-      "Bash(git -C \"c:\\\\Users\\\\mtamu\\\\github\\\\MTT-File-Manager-RUST\" log --oneline -20)"
+      "Bash(git -C \"c:\\\\Users\\\\mtamu\\\\github\\\\MTT-File-Manager-RUST\" log --oneline -20)",
+      "Bash(wc:*)",
+      "Bash(sort:*)"
     ],
     "additionalDirectories": [
       "c:\\Users\\mtamu\\github\\MTT-File-Manager-RUST\\docs"
