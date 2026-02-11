@@ -2,7 +2,7 @@
 
 use mtt_search_protocol::*;
 use windows::core::PCWSTR;
-use windows::Win32::Foundation::{CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_PIPE_BUSY, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, ERROR_PIPE_BUSY, HANDLE};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, ReadFile, WriteFile, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_NONE, OPEN_EXISTING,
 };
@@ -39,29 +39,69 @@ pub fn search(query: &str, max_results: u32) -> Result<Vec<SearchResultItem>, St
 
 /// Check if the service is running.
 pub fn ping() -> bool {
-    let pipe = match open_pipe() {
-        Ok(pipe) => pipe,
-        Err(e) => {
-            // Service may be saturated but alive; don't mark as offline immediately.
-            if e.contains("All pipe instances are busy") {
-                eprintln!("[GLOBAL-SEARCH] Ping: service busy");
-                return true;
+    const ATTEMPTS: usize = 3;
+    for attempt in 0..ATTEMPTS {
+        let pipe = match open_pipe() {
+            Ok(pipe) => pipe,
+            Err(e) => {
+                // Service may be saturated but alive; don't mark as offline immediately.
+                if e.contains("All pipe instances are busy") {
+                    eprintln!("[GLOBAL-SEARCH] Ping: service busy");
+                    return true;
+                }
+                return false;
             }
-            return false;
+        };
+
+        let ping_write = write_message(pipe, &SearchRequest::Ping);
+        let ping_read = if ping_write.is_ok() {
+            read_response::<SearchResponse>(pipe)
+        } else {
+            Err(ping_write
+                .err()
+                .unwrap_or_else(|| "Ping write failed".to_string()))
+        };
+
+        unsafe {
+            let _ = CloseHandle(pipe);
         }
-    };
 
-    let ok = write_message(pipe, &SearchRequest::Ping).is_ok()
-        && matches!(
-            read_response::<SearchResponse>(pipe),
-            Ok(SearchResponse::Pong)
-        );
+        if matches!(ping_read, Ok(SearchResponse::Pong)) {
+            return true;
+        }
 
-    unsafe {
-        let _ = CloseHandle(pipe);
+        let transient = match &ping_read {
+            Ok(_) => false,
+            Err(e) => is_transient_pipe_error(e),
+        };
+        if transient && attempt + 1 < ATTEMPTS {
+            std::thread::sleep(std::time::Duration::from_millis(120));
+            continue;
+        }
+
+        if transient {
+            // Keep optimistic online signal for transient pipe races.
+            return true;
+        }
+
+        if let Err(e) = ping_read {
+            eprintln!("[GLOBAL-SEARCH] Ping failed: {}", e);
+        }
+        return false;
     }
 
-    ok
+    false
+}
+
+fn is_transient_pipe_error(message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    m.contains("all pipe instances are busy")
+        || m.contains("no process is on the other end of the pipe")
+        || m.contains("pipe closed during read")
+        || m.contains("peeknamedpipe failed")
+        || m.contains("search service timeout")
+        || m.contains("readfile failed")
+        || m.contains("writefile failed")
 }
 
 /// Get index status from the service.
@@ -89,11 +129,14 @@ pub fn get_status() -> Result<IndexStatusInfo, String> {
 fn open_pipe() -> Result<HANDLE, String> {
     let pipe_name_wide: Vec<u16> = PIPE_NAME.encode_utf16().chain(std::iter::once(0)).collect();
 
-    const RETRY_COUNT: usize = 24;
-    const WAIT_MS: u32 = 250;
+    // Only retry on PIPE_BUSY (service alive but all instances occupied).
+    // FILE_NOT_FOUND means the service isn't running — fail immediately
+    // instead of blocking the worker thread for seconds.
+    const BUSY_RETRY_COUNT: usize = 6;
+    const BUSY_WAIT_MS: u64 = 150;
 
     let mut last_error = String::from("Search service not available");
-    for _ in 0..RETRY_COUNT {
+    for _ in 0..BUSY_RETRY_COUNT {
         unsafe {
             match CreateFileW(
                 PCWSTR(pipe_name_wide.as_ptr()),
@@ -106,15 +149,16 @@ fn open_pipe() -> Result<HANDLE, String> {
             ) {
                 Ok(handle) => return Ok(handle),
                 Err(e) => {
-                    last_error = format!("Search service not available: {}", e);
                     let code = e.code();
-                    let retryable = code == ERROR_PIPE_BUSY.to_hresult()
-                        || code == ERROR_FILE_NOT_FOUND.to_hresult();
-                    if retryable {
-                        std::thread::sleep(std::time::Duration::from_millis(WAIT_MS as u64));
+                    if code == ERROR_PIPE_BUSY.to_hresult() {
+                        // Service is alive but all pipe instances are busy — worth retrying.
+                        last_error =
+                            "All pipe instances are busy".to_string();
+                        std::thread::sleep(std::time::Duration::from_millis(BUSY_WAIT_MS));
                         continue;
                     }
-                    return Err(last_error);
+                    // FILE_NOT_FOUND or any other error — service not running, fail fast.
+                    return Err(format!("Search service not available: {}", e));
                 }
             }
         }

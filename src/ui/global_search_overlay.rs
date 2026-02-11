@@ -237,6 +237,10 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                                                     is_dir,
                                                     false,
                                                 );
+                                            // Request async extraction for unique-icon files
+                                            // (.exe, .lnk, etc.) that aren't cached yet.
+                                            // icon_cache LRU (512) is large enough to hold
+                                            // all search results without thrashing.
                                             if icon_tex.is_none()
                                                 && !is_dir
                                                 && !app.loading_icons.contains(&path_buf)
