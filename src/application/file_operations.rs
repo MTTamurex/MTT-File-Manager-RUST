@@ -8,7 +8,9 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
 
-use crate::infrastructure::security::{sanitize_path_with_local_drive_fallback, SecurityConfig};
+use crate::infrastructure::security::{
+    sanitize_path_with_local_drive_fallback, sanitize_unc_path, SecurityConfig,
+};
 use crate::infrastructure::windows as windows_infra;
 use crate::infrastructure::windows::recycle_bin;
 use crate::infrastructure::windows::shell_operations;
@@ -52,16 +54,21 @@ fn operation_security_config() -> SecurityConfig {
 
 fn should_bypass_sanitization(path: &Path) -> bool {
     let s = path.to_string_lossy();
-    if s.starts_with("shell:") || windows_infra::is_shell_navigation_path(path, false) {
-        return true;
-    }
+    // Only true shell namespace paths (shell:, ::{GUID}) bypass sanitization.
+    // UNC network paths now go through basic validation instead of bypassing entirely.
+    s.starts_with("shell:") || windows_infra::is_shell_navigation_path(path, false)
+}
 
-    // Bypass only UNC network paths. Do NOT bypass local verbatim paths
-    // like `\\?\C:\...` because those should be normalized for Shell APIs.
+/// Returns true for UNC network paths that need lightweight validation
+/// instead of full drive-based sanitization.
+fn is_unc_path(path: &Path) -> bool {
+    let s = path.to_string_lossy();
     if !s.starts_with(r"\\") {
         return false;
     }
-
+    // \\?\C:\... is a local verbatim path, NOT UNC — handle via normal sanitization.
+    // \\?\UNC\server\share is a verbatim UNC path.
+    // \\server\share is a standard UNC path.
     match s.strip_prefix(r"\\?\") {
         Some(rest) => rest.starts_with("UNC\\"),
         None => true,
@@ -71,6 +78,9 @@ fn should_bypass_sanitization(path: &Path) -> bool {
 fn sanitize_operation_path(path: &Path) -> OpResult<PathBuf> {
     if should_bypass_sanitization(path) {
         return Ok(path.to_path_buf());
+    }
+    if is_unc_path(path) {
+        return sanitize_unc_path(path).map_err(|e| e.to_string());
     }
     sanitize_path_with_local_drive_fallback(path, &operation_security_config())
         .map_err(|e| e.to_string())
@@ -132,17 +142,23 @@ pub fn create_new_folder(base_path: &Path) -> OpResult<PathBuf> {
     let mut new_folder_name = "Nova Pasta".to_string();
     let mut counter = 1;
 
-    // Use fast_path_exists() to avoid blocking OneDrive recalls.
-    while crate::infrastructure::onedrive::fast_path_exists(&base_path.join(&new_folder_name)) {
-        counter += 1;
-        new_folder_name = format!("Nova Pasta ({})", counter);
-    }
-
-    let full_path = base_path.join(&new_folder_name);
-
-    match std::fs::create_dir(&full_path) {
-        Ok(_) => Ok(full_path),
-        Err(e) => Err(format!("Erro ao criar pasta: {}", e)),
+    // Atomic create-and-retry: call create_dir() directly and handle AlreadyExists.
+    // This eliminates the TOCTOU race between a prior existence check and the creation.
+    loop {
+        let full_path = base_path.join(&new_folder_name);
+        match std::fs::create_dir(&full_path) {
+            Ok(_) => return Ok(full_path),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                counter += 1;
+                new_folder_name = format!("Nova Pasta ({})", counter);
+                if counter > 1000 {
+                    return Err(
+                        "Erro ao criar pasta: limite de tentativas excedido".to_string()
+                    );
+                }
+            }
+            Err(e) => return Err(format!("Erro ao criar pasta: {}", e)),
+        }
     }
 }
 
@@ -201,9 +217,28 @@ pub fn create_shortcut(target: &Path, current_path: &str) -> OpResult<PathBuf> {
 
     let mut candidate = dest_dir.join(format!("{} - Atalho.lnk", base_name));
     let mut counter = 2;
-    while crate::infrastructure::onedrive::fast_path_exists(&candidate) {
-        candidate = dest_dir.join(format!("{} - Atalho ({}).lnk", base_name, counter));
-        counter += 1;
+    // Atomic filename reservation: use create_new to atomically claim the name.
+    // This eliminates the TOCTOU race between a prior existence check and the save.
+    loop {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(_placeholder) => {
+                // Placeholder file created; IPersistFile::Save will overwrite it below.
+                break;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                candidate =
+                    dest_dir.join(format!("{} - Atalho ({}).lnk", base_name, counter));
+                counter += 1;
+                if counter > 1000 {
+                    return Err("Muitas tentativas ao criar atalho".to_string());
+                }
+            }
+            Err(e) => return Err(format!("Erro ao criar atalho: {}", e)),
+        }
     }
 
     let _com = ComApartmentGuard::init_sta()?;

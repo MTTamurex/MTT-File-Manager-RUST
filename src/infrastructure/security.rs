@@ -340,6 +340,40 @@ pub fn sanitize_path_quick(path: &Path) -> Result<PathBuf, SecurityError> {
     sanitize_path(path, &SecurityConfig::default())
 }
 
+/// Validates a UNC network path for basic safety (null bytes, path traversal).
+///
+/// Unlike full `sanitize_path`, this does **not** check drive letters or attempt
+/// canonicalization since UNC paths (`\\server\share\...`) have no local drive prefix.
+/// It still blocks the most dangerous patterns that would allow an attacker to
+/// escape path boundaries.
+pub fn sanitize_unc_path(path: &Path) -> Result<PathBuf, SecurityError> {
+    let path_str = path.to_string_lossy();
+
+    if path_str.contains('\0') {
+        return Err(SecurityError::NullBytes(path_str.to_string()));
+    }
+
+    // Raw string check: Windows path parsing may normalize `.` and `..` away before
+    // the component iterator sees them. Check the raw string for traversal patterns.
+    for segment in path_str.split(&['\\', '/']) {
+        if segment == ".." || segment == "." {
+            return Err(SecurityError::PathTraversal(path_str.to_string()));
+        }
+    }
+
+    // Also check via the typed component API as a belt-and-suspenders defense.
+    for component in path.components() {
+        if matches!(
+            component,
+            std::path::Component::ParentDir | std::path::Component::CurDir
+        ) {
+            return Err(SecurityError::PathTraversal(path_str.to_string()));
+        }
+    }
+
+    Ok(path.to_path_buf())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -494,5 +528,26 @@ mod tests {
             };
             assert!(sanitize_path(&link_file, &config_allow).is_ok());
         }
+    }
+
+    #[test]
+    fn test_unc_path_traversal_blocked() {
+        assert!(sanitize_unc_path(Path::new(r"\\server\share\..\secret")).is_err());
+        assert!(sanitize_unc_path(Path::new(r"\\server\share\.\hidden")).is_err());
+        assert!(sanitize_unc_path(Path::new(r"\\evil\share\..\..\windows\system32")).is_err());
+    }
+
+    #[test]
+    fn test_unc_path_null_bytes_blocked() {
+        assert!(sanitize_unc_path(Path::new("\\\\server\\share\\file\0.txt")).is_err());
+    }
+
+    #[test]
+    fn test_unc_path_valid_allowed() {
+        let result = sanitize_unc_path(Path::new(r"\\server\share\folder\file.txt"));
+        assert!(result.is_ok(), "Legitimate UNC path should pass: {:?}", result);
+
+        let result2 = sanitize_unc_path(Path::new(r"\\192.168.1.1\share\doc.pdf"));
+        assert!(result2.is_ok(), "UNC with IP should pass: {:?}", result2);
     }
 }
