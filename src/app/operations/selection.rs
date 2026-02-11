@@ -119,6 +119,32 @@ impl ImageViewerApp {
         self.update_video_visibility();
     }
 
+    /// Selects a file/folder by full path in the current `items` snapshot.
+    /// Returns `true` when found and selected.
+    pub fn select_item_by_path(&mut self, target_path: &std::path::Path) -> bool {
+        let target = self.items.iter().enumerate().find_map(|(idx, item)| {
+            if item.path == target_path {
+                Some((idx, item.clone()))
+            } else {
+                None
+            }
+        });
+
+        let Some((idx, item)) = target else {
+            return false;
+        };
+
+        self.selected_item = Some(idx);
+        self.selected_file = Some(item.clone());
+        self.multi_selection.clear();
+        self.multi_selection.insert(item.path.clone());
+        self.selection_anchor = Some(idx);
+        self.scroll_to_selected = true;
+        self.update_selected_thumbnail();
+
+        true
+    }
+
     /// Limpa a seleção atual, o thumbnail persistente, metadados e a busca.
     /// Útil durante navegação entre pastas.
     /// NOTE: Only clears media_preview if current tab is the owner.

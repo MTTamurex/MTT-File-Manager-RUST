@@ -202,6 +202,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         ui.add_space(4.0);
 
                         // Scrollable results list (fixed viewport height)
+                        let mut activate_result: Option<(String, bool)> = None;
                         ui.allocate_ui_with_layout(
                             egui::vec2(ui.available_width(), results_height),
                             egui::Layout::top_down(egui::Align::Min),
@@ -209,7 +210,6 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                                 egui::ScrollArea::vertical()
                                     .auto_shrink([false, false])
                                     .show(ui, |ui| {
-                                        let mut navigate_to: Option<String> = None;
                                         let results = app.global_search_results.clone();
                                         for (row_idx, result) in results.iter().enumerate() {
                                             let path_buf =
@@ -333,26 +333,33 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
 
                                             // Double-click navigates to location
                                             if row_resp.double_clicked() {
-                                                let path = std::path::Path::new(&result.full_path);
-                                                if is_dir {
-                                                    navigate_to = Some(result.full_path.clone());
-                                                } else if let Some(parent) = path.parent() {
-                                                    navigate_to =
-                                                        Some(parent.to_string_lossy().to_string());
-                                                }
+                                                activate_result =
+                                                    Some((result.full_path.clone(), is_dir));
                                             }
 
                                             ui.separator();
                                         }
-
-                                        // Navigate after iteration (borrow checker)
-                                        if let Some(path) = navigate_to {
-                                            app.global_search_active = false;
-                                            app.navigate_to(&path);
-                                        }
                                     });
                             },
                         );
+
+                        // Enter opens selected result (or the first one when none is selected).
+                        if activate_result.is_none()
+                            && ctx.input(|i| i.key_pressed(egui::Key::Enter))
+                            && !app.global_search_results.is_empty()
+                        {
+                            let idx = app.global_search_selected_index.unwrap_or(0);
+                            let idx = idx.min(app.global_search_results.len() - 1);
+                            app.global_search_selected_index = Some(idx);
+
+                            if let Some(result) = app.global_search_results.get(idx).cloned() {
+                                activate_result = Some((result.full_path, result.is_dir));
+                            }
+                        }
+
+                        if let Some((full_path, is_dir)) = activate_result {
+                            activate_search_result(app, &full_path, is_dir);
+                        }
                     } else if app.global_search_query.is_empty() {
                         ui.allocate_ui_with_layout(
                             egui::vec2(ui.available_width(), results_height),
@@ -378,6 +385,52 @@ fn format_number(n: u64) -> String {
         format!("{:.1}K", n as f64 / 1_000.0)
     } else {
         n.to_string()
+    }
+}
+
+fn normalize_path_for_compare(path: &str) -> String {
+    let lower = path.to_lowercase();
+    let stripped = lower.strip_prefix(r"\\?\").unwrap_or(&lower);
+
+    if stripped.len() > 3 {
+        stripped.trim_end_matches('\\').to_string()
+    } else {
+        stripped.to_string()
+    }
+}
+
+fn activate_search_result(app: &mut ImageViewerApp, full_path: &str, is_dir: bool) {
+    app.global_search_active = false;
+
+    if is_dir {
+        app.navigate_to(full_path);
+        return;
+    }
+
+    let full_path_buf = std::path::PathBuf::from(full_path);
+    let Some(parent) = full_path_buf.parent() else {
+        app.navigate_to(full_path);
+        return;
+    };
+    let parent_path = parent.to_string_lossy().to_string();
+
+    app.pending_select_path = Some(full_path_buf.clone());
+
+    let current_norm = normalize_path_for_compare(&app.current_path);
+    let destination_norm = normalize_path_for_compare(&parent_path);
+
+    if current_norm == destination_norm {
+        // Already in destination folder: select now.
+        // If item list is stale, trigger a reload and pending_select_path
+        // will apply after rebuild.
+        if app.select_item_by_path(&full_path_buf) {
+            app.pending_select_path = None;
+        } else {
+            app.loaded_path.clear();
+            app.load_folder(false);
+        }
+    } else {
+        app.navigate_to(&parent_path);
     }
 }
 

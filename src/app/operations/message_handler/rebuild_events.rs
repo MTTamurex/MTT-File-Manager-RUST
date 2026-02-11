@@ -20,11 +20,7 @@ impl ImageViewerApp {
                     // After rebuild: if a pending selection was requested (e.g., after rename),
                     // find the item and select + scroll to it.
                     if let Some(target_path) = self.pending_select_path.take() {
-                        if let Some(idx) = self.items.iter().position(|i| i.path == target_path) {
-                            self.selected_item = Some(idx);
-                            self.selected_file = Some(self.items[idx].clone());
-                            self.scroll_to_selected = true;
-                        }
+                        let _ = self.select_item_by_path(&target_path);
                     }
 
                     ctx.request_repaint();
