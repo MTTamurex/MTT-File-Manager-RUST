@@ -126,6 +126,7 @@ pub struct ImageViewerApp {
     pub drive_scan_tx: Sender<Vec<(String, String)>>, // Sender cloned into background thread
     pub drive_info_rx: Receiver<Vec<(String, crate::domain::file_entry::DriveInfo)>>, // Background volume info
     pub drive_info_tx: Sender<Vec<(String, crate::domain::file_entry::DriveInfo)>>, // Sender for bg thread
+    pub drive_info_cache: std::collections::HashMap<String, crate::domain::file_entry::DriveInfo>, // Persistent cache surviving navigation
     pub thumbnail_size: f32,                                                        // Zoom: 64-512
     pub selected_item: Option<usize>,
     pub selected_file: Option<FileEntry>,

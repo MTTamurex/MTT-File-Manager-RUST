@@ -450,7 +450,9 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
                     item_str.starts_with(&app.current_path)
                         || app.current_path.starts_with(item_str.as_ref())
                 })
-                .and_then(|item| item.drive_info.clone());
+                .and_then(|item| item.drive_info.clone())
+                // Fallback: persistent drive_info_cache survives navigation away from computer view
+                .or_else(|| app.drive_info_cache.get(&app.current_path).cloned());
 
             if let Some(info) = cached_info {
                 entry.drive_info = Some(info);
