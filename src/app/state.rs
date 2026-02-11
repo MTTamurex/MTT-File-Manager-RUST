@@ -313,6 +313,17 @@ pub struct ImageViewerApp {
     // Explicit scroll request for keyboard navigation
     pub scroll_request: ScrollRequest,
 
+    // GLOBAL SEARCH (via MTT Search Service)
+    pub global_search_sender: Sender<crate::workers::global_search_worker::GlobalSearchRequest>,
+    pub global_search_receiver: Receiver<crate::workers::global_search_worker::GlobalSearchResponse>,
+    pub global_search_query: String,
+    pub global_search_results: Vec<mtt_search_protocol::SearchResultItem>,
+    pub global_search_active: bool,
+    pub global_search_loading: bool,
+    pub global_search_available: bool,
+    pub global_search_last_check: Instant,
+    pub global_search_total_indexed: u64,
+
     // FILE OPERATION WORKER
     pub file_op_sender: Sender<crate::workers::file_operation_worker::FileOperationRequest>,
     pub file_op_res_receiver: Receiver<crate::workers::file_operation_worker::FileOperationResult>,

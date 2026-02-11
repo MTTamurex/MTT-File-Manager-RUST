@@ -154,6 +154,21 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             user_active = true;
         }
 
+        // Ctrl + Shift + F: Busca Global
+        if ctx.input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::F)) {
+            app.global_search_active = !app.global_search_active;
+            if app.global_search_active {
+                app.global_search_query.clear();
+                app.global_search_results.clear();
+                app.global_search_loading = false;
+                // Check service availability
+                let _ = app.global_search_sender.send(
+                    crate::workers::global_search_worker::GlobalSearchRequest::CheckStatus,
+                );
+            }
+            user_active = true;
+        }
+
         // QUICK SEARCH: Type-to-search like Explorer
         handle_quick_search(app, ctx);
     } else {

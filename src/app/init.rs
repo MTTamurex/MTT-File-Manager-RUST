@@ -524,6 +524,15 @@ impl ImageViewerApp {
             file_op_res_tx,
         );
 
+        // --- GLOBAL SEARCH WORKER (IPC client to search service) ---
+        let (global_search_tx, global_search_rx_thread) = mpsc::channel();
+        let (global_search_res_tx, global_search_res_rx) = mpsc::channel();
+        crate::workers::global_search_worker::start_global_search_worker(
+            global_search_rx_thread,
+            global_search_res_tx,
+            ctx.clone(),
+        );
+
         // --- DISK CACHE INVALIDATION WORKER (async SQLite cleanup) ---
         let (disk_cache_invalidation_tx, disk_cache_invalidation_rx) =
             mpsc::channel::<Vec<PathBuf>>();
@@ -788,6 +797,17 @@ impl ImageViewerApp {
             saved_media_volume,
 
             scroll_request: crate::app::state::ScrollRequest::None,
+
+            // GLOBAL SEARCH
+            global_search_sender: global_search_tx,
+            global_search_receiver: global_search_res_rx,
+            global_search_query: String::new(),
+            global_search_results: Vec::new(),
+            global_search_active: false,
+            global_search_loading: false,
+            global_search_available: false,
+            global_search_last_check: Instant::now(),
+            global_search_total_indexed: 0,
 
             // FILE OPERATION WORKER
             file_op_sender: file_op_tx,

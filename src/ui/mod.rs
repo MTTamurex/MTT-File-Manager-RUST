@@ -5,6 +5,7 @@ pub mod app_impl; // NEW - eframe::App implementation
 pub mod cache;
 pub mod components;
 pub mod context_menu;
+pub mod global_search_overlay;
 
 pub mod icon_loader;
 pub mod navigation;

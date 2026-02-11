@@ -159,6 +159,9 @@ impl eframe::App for ImageViewerApp {
 
             // 12. Notifications
             app::notifications::render_notifications(self, ctx);
+
+            // 13. Global Search Overlay (on top of everything)
+            crate::ui::global_search_overlay::render_global_search_overlay(self, ctx);
         }
 
         // Keep drag feedback on top and avoid cursor override by later widgets.

@@ -18,7 +18,8 @@
       "Bash(cargo clippy:*)",
       "Bash(findstr:*)",
       "Bash(Select-String \"error\")",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(git -C \"c:\\\\Users\\\\mtamu\\\\github\\\\MTT-File-Manager-RUST\" log --oneline -20)"
     ],
     "additionalDirectories": [
       "c:\\Users\\mtamu\\github\\MTT-File-Manager-RUST\\docs"
