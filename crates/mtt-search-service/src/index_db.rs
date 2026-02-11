@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -25,7 +26,28 @@ pub fn get_db_path() -> PathBuf {
     // Use %PROGRAMDATA%\MTT-File-Manager\search_index.db
     let base = std::env::var("PROGRAMDATA").unwrap_or_else(|_| r"C:\ProgramData".to_string());
     let dir = Path::new(&base).join("MTT-File-Manager");
-    let _ = std::fs::create_dir_all(&dir);
+    let created = std::fs::create_dir_all(&dir);
+
+    // Harden directory permissions: remove inherited ACLs, grant SYSTEM and
+    // Administrators full control, grant Users read-only.
+    // This prevents non-admin malware from replacing the DB (cache poisoning).
+    if created.is_ok() {
+        let dir_str = dir.to_string_lossy();
+        // Remove inheritance and existing ACEs, then add explicit ones
+        let commands = [
+            format!("icacls \"{}\" /inheritance:r", dir_str),
+            format!("icacls \"{}\" /grant:r SYSTEM:(OI)(CI)F", dir_str),
+            format!("icacls \"{}\" /grant:r Administrators:(OI)(CI)F", dir_str),
+            format!("icacls \"{}\" /grant:r Users:(OI)(CI)RX", dir_str),
+        ];
+        for cmd in &commands {
+            let _ = std::process::Command::new("cmd")
+                .args(["/C", cmd])
+                .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                .status();
+        }
+    }
+
     dir.join("search_index.db")
 }
 

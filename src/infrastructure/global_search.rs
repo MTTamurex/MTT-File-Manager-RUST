@@ -175,8 +175,7 @@ fn open_pipe() -> Result<HANDLE, String> {
                     let code = e.code();
                     if code == ERROR_PIPE_BUSY.to_hresult() {
                         // Service is alive but all pipe instances are busy — worth retrying.
-                        last_error =
-                            "All pipe instances are busy".to_string();
+                        last_error = "All pipe instances are busy".to_string();
                         std::thread::sleep(std::time::Duration::from_millis(BUSY_WAIT_MS));
                         continue;
                     }
@@ -208,7 +207,7 @@ fn read_response<T: for<'de> serde::Deserialize<'de>>(pipe: HANDLE) -> Result<T,
     read_exact_with_timeout(pipe, &mut len_buf, PIPE_IO_TIMEOUT_MS)?;
 
     let payload_len = u32::from_le_bytes(len_buf) as usize;
-    if payload_len == 0 || payload_len > 10 * 1024 * 1024 {
+    if payload_len == 0 || payload_len > 1024 * 1024 {
         return Err(format!("Invalid payload length: {}", payload_len));
     }
 

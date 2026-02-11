@@ -1,6 +1,6 @@
 use std::hint::black_box;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, RwLock};
 
 use windows::core::PCWSTR;
@@ -26,9 +26,19 @@ const PIPE_MAX_INSTANCES: u32 = 32;
 /// PIPE_ACCESS_DUPLEX (0x3) | FILE_FLAG_OVERLAPPED (0x40000000)
 const PIPE_OPEN_MODE: u32 = 0x40000003;
 
+/// Maximum concurrent client handler threads (rate limiting).
+const MAX_ACTIVE_CLIENTS: u32 = 8;
+/// Maximum payload size for incoming requests (64 KB).
+const MAX_REQUEST_PAYLOAD: usize = 64 * 1024;
+/// Maximum search query text length in bytes.
+const MAX_QUERY_TEXT_LEN: usize = 1024;
+/// Maximum results per search query.
+const MAX_QUERY_RESULTS: usize = 10_000;
+
 /// Start the IPC server loop.
 pub fn run_ipc_server(indices: Arc<RwLock<Vec<VolumeIndex>>>, shutdown: Arc<AtomicBool>) {
     let is_warming = Arc::new(AtomicBool::new(false));
+    let active_clients = Arc::new(AtomicU32::new(0));
 
     loop {
         if shutdown.load(Ordering::Relaxed) {
@@ -63,9 +73,32 @@ pub fn run_ipc_server(indices: Arc<RwLock<Vec<VolumeIndex>>>, shutdown: Arc<Atom
             break;
         }
 
+        // Rate limiting: reject if too many concurrent clients
+        let current = active_clients.load(Ordering::Relaxed);
+        if current >= MAX_ACTIVE_CLIENTS {
+            eprintln!(
+                "[IPC] Rate limit: rejecting connection ({}/{} active)",
+                current, MAX_ACTIVE_CLIENTS
+            );
+            // Try to send an error response before disconnecting
+            let _ = send_response(
+                pipe,
+                &SearchResponse::Error("Server busy, try again later".to_string()),
+            );
+            unsafe {
+                let _ = FlushFileBuffers(pipe);
+                let _ = DisconnectNamedPipe(pipe);
+                let _ = CloseHandle(pipe);
+            }
+            continue;
+        }
+
+        active_clients.fetch_add(1, Ordering::Relaxed);
+
         // Handle each client concurrently so one slow query doesn't block all connections.
         let indices_for_client = indices.clone();
         let warming_for_client = is_warming.clone();
+        let active_for_client = active_clients.clone();
         let pipe_raw = pipe.0 as usize;
         std::thread::spawn(move || {
             let pipe = HANDLE(pipe_raw as *mut core::ffi::c_void);
@@ -79,6 +112,7 @@ pub fn run_ipc_server(indices: Arc<RwLock<Vec<VolumeIndex>>>, shutdown: Arc<Atom
                 let _ = DisconnectNamedPipe(pipe);
                 let _ = CloseHandle(pipe);
             }
+            active_for_client.fetch_sub(1, Ordering::Relaxed);
         });
     }
 }
@@ -143,7 +177,90 @@ fn wait_for_client(pipe: HANDLE, shutdown: &Arc<AtomicBool>) -> bool {
 
 fn create_pipe() -> Result<HANDLE, String> {
     unsafe {
-        // Allocate a security descriptor buffer (SECURITY_DESCRIPTOR is opaque, needs ~40 bytes)
+        // Build an explicit DACL that grants access only to BUILTIN\Users and SYSTEM.
+        // This replaces the previous NULL DACL (which allowed ALL access, including
+        // guest accounts, network service, and any local malware).
+        //
+        // ACL layout:
+        //   ACL header (8 bytes)
+        //   ACE 1: BUILTIN\Users  (SID S-1-5-32-545) — 12-byte SID → ACE size = 20
+        //   ACE 2: NT AUTHORITY\SYSTEM (SID S-1-5-18) — 12-byte SID → ACE size = 20
+        //
+        // Total ACL size = 8 + 20 + 20 = 48 bytes (we allocate 256 for safety).
+
+        // --- Build SIDs ---
+        // BUILTIN\Users: S-1-5-32-545
+        // SID structure: revision(1) + sub-authority-count(1) + identifier-authority(6) + sub-authorities(4*count)
+        // S-1-5-32-545 → revision=1, count=2, authority=[0,0,0,0,0,5], sub-auths=[32, 545]
+        let mut sid_users = [0u8; 16]; // 8 + 4*2 = 16 bytes
+        sid_users[0] = 1; // Revision
+        sid_users[1] = 2; // SubAuthorityCount
+        sid_users[7] = 5; // IdentifierAuthority (last byte = 5 for NT Authority)
+                          // SubAuthority[0] = 32 (SECURITY_BUILTIN_DOMAIN_RID)
+        sid_users[8..12].copy_from_slice(&32u32.to_le_bytes());
+        // SubAuthority[1] = 545 (DOMAIN_ALIAS_RID_USERS)
+        sid_users[12..16].copy_from_slice(&545u32.to_le_bytes());
+
+        // NT AUTHORITY\SYSTEM: S-1-5-18
+        // S-1-5-18 → revision=1, count=1, authority=[0,0,0,0,0,5], sub-auths=[18]
+        let mut sid_system = [0u8; 12]; // 8 + 4*1 = 12 bytes
+        sid_system[0] = 1; // Revision
+        sid_system[1] = 1; // SubAuthorityCount
+        sid_system[7] = 5; // IdentifierAuthority
+                           // SubAuthority[0] = 18 (SECURITY_LOCAL_SYSTEM_RID)
+        sid_system[8..12].copy_from_slice(&18u32.to_le_bytes());
+
+        // --- Build ACL with two ACCESS_ALLOWED_ACEs ---
+        // ACCESS_ALLOWED_ACE layout:
+        //   ACE_HEADER: AceType(1) + AceFlags(1) + AceSize(2) = 4 bytes
+        //   Mask: u32 = 4 bytes
+        //   SidStart: variable (rest of SID)
+        // Total ACE size = 4 (header) + 4 (mask) + SID_SIZE - 4 (SidStart overlaps first 4 bytes of SID... no)
+        // Actually: ACE size = sizeof(ACCESS_ALLOWED_ACE) - sizeof(DWORD) + GetLengthSid(pSid)
+        //         = 12 - 4 + sid_len = 8 + sid_len
+        let sid_users_len = sid_users.len(); // 16
+        let sid_system_len = sid_system.len(); // 12
+
+        let ace1_size = 8 + sid_users_len; // 24
+        let ace2_size = 8 + sid_system_len; // 20
+        let acl_size = 8 + ace1_size + ace2_size; // 8 + 24 + 20 = 52
+
+        let mut acl_buffer = vec![0u8; acl_size];
+
+        // ACL header (8 bytes):
+        //   AclRevision: u8 = 2 (ACL_REVISION)
+        //   Sbz1: u8 = 0
+        //   AclSize: u16 LE
+        //   AceCount: u16 LE
+        //   Sbz2: u16 = 0
+        acl_buffer[0] = 2; // ACL_REVISION
+        acl_buffer[2..4].copy_from_slice(&(acl_size as u16).to_le_bytes());
+        acl_buffer[4..6].copy_from_slice(&2u16.to_le_bytes()); // AceCount = 2
+
+        // FILE_ALL_ACCESS equivalent for pipes: GENERIC_READ | GENERIC_WRITE | SYNCHRONIZE
+        // For Named Pipes the relevant access is FILE_GENERIC_READ | FILE_GENERIC_WRITE
+        // We use 0x001F01FF (FILE_ALL_ACCESS) to allow full pipe operations.
+        let access_mask: u32 = 0x001F01FF;
+
+        // ACE 1: BUILTIN\Users
+        let ace1_offset = 8;
+        acl_buffer[ace1_offset] = 0; // ACCESS_ALLOWED_ACE_TYPE
+        acl_buffer[ace1_offset + 1] = 0; // AceFlags
+        acl_buffer[ace1_offset + 2..ace1_offset + 4]
+            .copy_from_slice(&(ace1_size as u16).to_le_bytes());
+        acl_buffer[ace1_offset + 4..ace1_offset + 8].copy_from_slice(&access_mask.to_le_bytes());
+        acl_buffer[ace1_offset + 8..ace1_offset + 8 + sid_users_len].copy_from_slice(&sid_users);
+
+        // ACE 2: SYSTEM
+        let ace2_offset = ace1_offset + ace1_size;
+        acl_buffer[ace2_offset] = 0; // ACCESS_ALLOWED_ACE_TYPE
+        acl_buffer[ace2_offset + 1] = 0; // AceFlags
+        acl_buffer[ace2_offset + 2..ace2_offset + 4]
+            .copy_from_slice(&(ace2_size as u16).to_le_bytes());
+        acl_buffer[ace2_offset + 4..ace2_offset + 8].copy_from_slice(&access_mask.to_le_bytes());
+        acl_buffer[ace2_offset + 8..ace2_offset + 8 + sid_system_len].copy_from_slice(&sid_system);
+
+        // --- Build Security Descriptor ---
         let mut sd_buffer = vec![0u8; 256];
         let sd_ptr = PSECURITY_DESCRIPTOR(sd_buffer.as_mut_ptr() as *mut _);
 
@@ -151,8 +268,9 @@ fn create_pipe() -> Result<HANDLE, String> {
         InitializeSecurityDescriptor(sd_ptr, 1)
             .map_err(|e| format!("InitializeSecurityDescriptor: {}", e))?;
 
-        // NULL DACL = allow all access (so non-admin app can connect)
-        SetSecurityDescriptorDacl(sd_ptr, true, None, false)
+        // Set our explicit DACL (not a NULL DACL)
+        let acl_ptr = acl_buffer.as_ptr() as *const windows::Win32::Security::ACL;
+        SetSecurityDescriptorDacl(sd_ptr, true, Some(acl_ptr), false)
             .map_err(|e| format!("SetSecurityDescriptorDacl: {}", e))?;
 
         let sa = SECURITY_ATTRIBUTES {
@@ -185,7 +303,11 @@ fn create_pipe() -> Result<HANDLE, String> {
     }
 }
 
-fn handle_client(pipe: HANDLE, indices: &Arc<RwLock<Vec<VolumeIndex>>>, is_warming: &Arc<AtomicBool>) {
+fn handle_client(
+    pipe: HANDLE,
+    indices: &Arc<RwLock<Vec<VolumeIndex>>>,
+    is_warming: &Arc<AtomicBool>,
+) {
     let request_data = match read_message(pipe) {
         Some(data) => data,
         None => return,
@@ -194,8 +316,9 @@ fn handle_client(pipe: HANDLE, indices: &Arc<RwLock<Vec<VolumeIndex>>>, is_warmi
     let request: SearchRequest = match decode_message(&request_data) {
         Ok(r) => r,
         Err(e) => {
+            // Log the real error internally, send generic message to client
             eprintln!("[IPC] Failed to decode request: {}", e);
-            let _ = send_response(pipe, &SearchResponse::Error(e));
+            let _ = send_response(pipe, &SearchResponse::Error("Invalid request".to_string()));
             return;
         }
     };
@@ -271,6 +394,32 @@ fn handle_client(pipe: HANDLE, indices: &Arc<RwLock<Vec<VolumeIndex>>>, is_warmi
             );
         }
         SearchRequest::Query { text, max_results } => {
+            // Input validation: cap max_results and text length
+            let max_results = (max_results as usize).min(MAX_QUERY_RESULTS);
+
+            let text = if text.len() > MAX_QUERY_TEXT_LEN {
+                // Truncate at a char boundary to avoid splitting multi-byte chars
+                let truncated = &text[..MAX_QUERY_TEXT_LEN];
+                match truncated.char_indices().last() {
+                    Some((idx, ch)) => text[..idx + ch.len_utf8()].to_string(),
+                    None => String::new(),
+                }
+            } else {
+                text
+            };
+
+            if text.is_empty() {
+                let _ = send_response(
+                    pipe,
+                    &SearchResponse::Results {
+                        items: Vec::new(),
+                        is_final: true,
+                        total_found: 0,
+                    },
+                );
+                return;
+            }
+
             let indices_lock = match indices.read() {
                 Ok(lock) => lock,
                 Err(poisoned) => {
@@ -278,7 +427,7 @@ fn handle_client(pipe: HANDLE, indices: &Arc<RwLock<Vec<VolumeIndex>>>, is_warmi
                     poisoned.into_inner()
                 }
             };
-            let results = file_index::search(&indices_lock, &text, max_results as usize);
+            let results = file_index::search(&indices_lock, &text, max_results);
 
             let items: Vec<SearchResultItem> = results
                 .into_iter()
@@ -314,7 +463,7 @@ fn read_message(pipe: HANDLE) -> Option<Vec<u8>> {
     }
 
     let payload_len = u32::from_le_bytes(len_buf) as usize;
-    if payload_len == 0 || payload_len > 10 * 1024 * 1024 {
+    if payload_len == 0 || payload_len > MAX_REQUEST_PAYLOAD {
         return None;
     }
 
