@@ -5,19 +5,26 @@ Este documento fornece um mapa detalhado do repositório, listando diretórios, 
 
 ## Estrutura de Diretórios
 
+O projeto é um Cargo Workspace com 3 crates:
+
 ```
-src/
-├── app/                    # Estado e lógica principal da aplicação
-├── application/            # Serviços de lógica de negócios
-├── domain/                 # Modelos de dados e regras de negócio
-├── infrastructure/         # Integrações com sistema e recursos externos
-├── pdf_viewer/            # Visualizador de PDF externo (WebView2)
-├── tabs/                  # Sistema de abas
-├── ui/                    # Interface do usuário
-├── workers/               # Threads de background
-├── embedded_assets.rs     # Recursos embarcados (fontes)
-├── lib.rs                 # Entry point da lib
-└── main.rs                # Entry point do binário
+MTT-File-Manager-RUST/
+├── Cargo.toml                        # Workspace root + pacote mtt-file-manager
+├── src/                              # App principal (mtt-file-manager)
+│   ├── app/                          # Estado e lógica principal da aplicação
+│   ├── application/                  # Serviços de lógica de negócios
+│   ├── domain/                       # Modelos de dados e regras de negócio
+│   ├── infrastructure/               # Integrações com sistema e recursos externos
+│   ├── pdf_viewer/                   # Visualizador de PDF externo (WebView2)
+│   ├── tabs/                         # Sistema de abas
+│   ├── ui/                           # Interface do usuário
+│   ├── workers/                      # Threads de background
+│   ├── embedded_assets.rs            # Recursos embarcados (fontes)
+│   ├── lib.rs                        # Entry point da lib
+│   └── main.rs                       # Entry point do binário
+├── crates/
+│   ├── mtt-search-protocol/          # Tipos IPC compartilhados
+│   └── mtt-search-service/           # Windows Service de indexação
 ```
 
 ## Módulos Detalhados
@@ -202,6 +209,7 @@ pub enum AppError {
 - **`virtual_drive_config.rs`** - Configuração de drives virtuais
 - **`watcher.rs`** - Watcher genérico de filesystem
 - **`windows_clipboard.rs`** - Clipboard Windows (CF_HDROP)
+- **`global_search.rs`** - Cliente IPC (Named Pipe) para o serviço de busca global
 
 **Submódulos refatorados**:
 - **`onedrive/`** - Módulo OneDrive segmentado por responsabilidade
@@ -357,6 +365,7 @@ pub fn is_active(&self) -> bool
 - **`theme.rs`** - Tema e cores
 - **`toolbar.rs`** - Barra de ferramentas
 - **`widgets.rs`** - Widgets customizados
+- **`global_search_overlay.rs`** - Overlay modal de busca global (Ctrl+Shift+F)
 
 **Submódulo de tab bar refatorado** (`src/ui/tab_bar/`):
 - **`mod.rs`** - Coordenador principal
@@ -385,6 +394,7 @@ pub fn is_active(&self) -> bool
 - **`file_operation_worker.rs`** - Operações de arquivo (copiar, mover, deletar)
 - **`folder_preview_worker.rs`** - Geração de previews de pastas
 - **`folder_scanner.rs`** - Scanner de pastas
+- **`global_search_worker.rs`** - Worker de busca global (IPC com mtt-search-service)
 - **`idle_warmup.rs`** - Warmup de cache em idle
 - **`predictive_prefetch.rs`** - Prefetch preditivo
 - **`prefetch_worker.rs`** - Worker de pré-carregamento
@@ -417,7 +427,54 @@ pub fn is_active(&self) -> bool
 
 ---
 
-### 9. Arquivos Raiz
+### 9. `crates/mtt-search-protocol/` - Protocolo IPC
+**Propósito**: Tipos compartilhados entre app e serviço de busca para comunicação via Named Pipes
+
+**Arquivos**:
+- **`src/lib.rs`** - Definições de tipos e funções de serialização
+
+**Principais structs/enums**:
+```rust
+pub const PIPE_NAME: &str = r"\\.\pipe\MTTFileManagerSearch";
+
+pub enum SearchRequest { Query { text, max_results }, GetStatus, Ping, WarmIndex }
+pub enum SearchResponse { Results { items, is_final, total_found }, Status(IndexStatusInfo), Pong, WarmStarted, Error(String) }
+pub struct SearchResultItem { name, full_path, is_dir, size }
+pub struct IndexStatusInfo { volumes: Vec<VolumeStatus>, total_files_indexed }
+pub struct VolumeStatus { drive_letter, state, files_indexed }
+
+pub fn encode_message<T: Serialize>(msg: &T) -> Result<Vec<u8>, String>  // 4-byte LE prefix + bincode
+pub fn decode_message<T: Deserialize>(data: &[u8]) -> Result<T, String>
+```
+
+**Dependências**: `serde`, `bincode`
+
+---
+
+### 10. `crates/mtt-search-service/` - Serviço de Busca
+**Propósito**: Windows Service que indexa todos os arquivos via USN Journal do NTFS e serve buscas via Named Pipes
+
+**Arquivos**:
+- **`main.rs`** - Entry point, command-line dispatch (`install`, `uninstall`, `run-console`), orquestração (`run_indexer`)
+- **`usn_journal.rs`** - API USN Journal: `discover_ntfs_volumes`, `open_volume`, `query_usn_journal`, `enumerate_all_files`, `read_usn_buffer`, `parse_usn_records`
+- **`file_index.rs`** - Índice in-memory: `VolumeIndex` (HashMap<u64, FileRecord>), `search()` com deadline de 5s
+- **`path_resolver.rs`** - `resolve_path(frn, index)` via cadeia de parent references até FRN 5 (root NTFS)
+- **`index_db.rs`** - SQLite em `%PROGRAMDATA%\MTT-File-Manager\search_index.db`: tables `volume_state`, `file_records`
+- **`ipc_server.rs`** - Named Pipe server com NULL DACL, overlapped I/O, handlers para Query/GetStatus/Ping/WarmIndex
+- **`service_control.rs`** - Install/uninstall via `windows-service` (nome: `MTTFileManagerSearch`, AutoStart, LocalSystem)
+
+**Principais structs**:
+```rust
+pub struct FileRecord { name, name_lower, parent_ref, is_dir, size }
+pub struct VolumeIndex { drive_letter, records: HashMap<u64, FileRecord>, last_usn, journal_id, state }
+pub enum IndexState { NotStarted, Scanning, Ready, Error(String) }
+```
+
+**Dependências**: `mtt-search-protocol`, `windows`, `windows-service`, `rusqlite`, `serde`, `bincode`
+
+---
+
+### 11. Arquivos Raiz
 
 **`src/main.rs`**:
 - Entry point do binário
@@ -462,9 +519,15 @@ lib.rs
     ├── app/ ────────┬──► application/
     │   │            ├──► domain/
     │   └──► workers/    ├──► infrastructure/
-    ├── ui/ ◄────────────┘
-    ├── tabs/
+    ├── ui/ ◄────────────┘         │
+    ├── tabs/                      └──► mtt-search-protocol (IPC types)
     └── pdf_viewer/
+
+mtt-search-service (processo separado)
+    ├──► mtt-search-protocol (IPC types)
+    ├──► windows (USN Journal, Named Pipes)
+    ├──► rusqlite (persistência)
+    └──► windows-service (SCM integration)
 ```
 
 **Regras de Dependência**:
@@ -474,11 +537,16 @@ lib.rs
 4. `workers` dependem de `infrastructure` e `domain`
 5. `app` depende de todos os outros módulos
 6. `ui` depende de `app`, `domain`, `application`, `infrastructure`
+7. `mtt-search-protocol` não depende de nenhum módulo local (apenas `serde`, `bincode`)
+8. `mtt-search-service` depende de `mtt-search-protocol`, `windows`, `rusqlite`, `windows-service`
+9. `mtt-file-manager` depende de `mtt-search-protocol` (para comunicação IPC com o serviço)
 
 ## Arquivos de Configuração do Projeto
 
-**`Cargo.toml`**:
-- Dependências do projeto
+**`Cargo.toml` (raiz)**:
+- Workspace com 3 members: `.`, `crates/mtt-search-protocol`, `crates/mtt-search-service`
+- Dependências do app principal
+- Workspace dependencies compartilhadas: `serde`, `bincode`, `rusqlite`
 - Features (notify-watcher)
 - Profile de release (LTO, opt-level 3)
 
@@ -487,5 +555,5 @@ lib.rs
 
 ---
 
-*Última atualização: 2026-02-08 (modularização de monólitos concluída)*
+*Última atualização: 2026-02-11 (adicionados crates mtt-search-protocol e mtt-search-service)*
 

@@ -43,8 +43,11 @@ winget install Microsoft.EdgeWebView2Runtime
 git clone <url-do-repositorio>
 cd MTT-File-Manager-RUST
 
-# Build debug (mais rápido, sem otimizações)
-cargo build
+# Build debug do workspace completo (app + serviço de busca)
+cargo build --workspace
+
+# Build debug apenas do app
+cargo build -p mtt-file-manager
 
 # Executar em modo debug
 cargo run
@@ -52,14 +55,20 @@ cargo run
 
 ### Build de Produção
 ```bash
-# Build release (otimizado, maior tempo de compilação)
-cargo build --release
+# Build release do workspace completo
+cargo build --release --workspace
 
-# Executar release
-cargo run --release
+# Build release apenas do app
+cargo build --release -p mtt-file-manager
 
-# Ou executar diretamente
+# Build release apenas do serviço de busca
+cargo build --release -p mtt-search-service
+
+# Executar app
 .\target\release\mtt-file-manager.exe
+
+# Executar serviço em modo console (debug)
+.\target\release\mtt-search-service.exe run-console
 ```
 
 ### Build com Features Específicas
@@ -70,6 +79,26 @@ cargo build
 # Build sem features opcionais
 # (sem fallback notify para UNC/rede; Drive Watcher local continua ativo)
 cargo build --no-default-features
+```
+
+### Serviço de Busca Global
+O serviço (`mtt-search-service`) roda como Windows Service e indexa todos os arquivos via USN Journal.
+
+```powershell
+# Instalar como serviço (requer PowerShell como Administrador)
+.\target\release\mtt-search-service.exe install
+
+# Iniciar o serviço
+sc.exe start MTTFileManagerSearch
+
+# Verificar status
+sc.exe query MTTFileManagerSearch
+
+# Parar o serviço
+sc.exe stop MTTFileManagerSearch
+
+# Remover o serviço
+.\target\release\mtt-search-service.exe uninstall
 ```
 
 ## Flags e Features do Cargo
@@ -246,16 +275,18 @@ jobs = 8
 
 ### Build e Execução
 ```bash
-# Desenvolvimento
-cargo build
+# Desenvolvimento (workspace completo)
+cargo build --workspace
 cargo run
 
 # Produção
-cargo build --release
-cargo run --release
+cargo build --release --workspace
 
-# Com logs
+# App com logs
 .\target\release\mtt-file-manager.exe 2>&1 | Tee-Object "debug.log"
+
+# Serviço em modo console
+.\target\release\mtt-search-service.exe run-console
 ```
 
 ### Debug e Testes
@@ -347,4 +378,4 @@ cargo check -p mtt-file-manager
 
 ---
 
-*Última atualização: 2026-02-08 (semântica de watcher atualizada)*
+*Última atualização: 2026-02-11 (adicionado build do workspace e serviço de busca)*

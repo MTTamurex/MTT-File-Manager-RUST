@@ -24,6 +24,7 @@ O MTT File Manager é um gerenciador de arquivos desktop que combina a performan
 - **Visualização lenta** de imagens e vídeos em exploradores tradicionais
 - **Falta de preview integrado** para múltiplos formatos de arquivo
 - **Navegação ineficiente** sem suporte a abas e histórico
+- **Busca lenta de arquivos** em grandes volumes de dados
 - **Cache inadequado** que não aproveita recursos do sistema
 - **Integração limitada** com funcionalidades nativas do Windows
 
@@ -42,6 +43,13 @@ O MTT File Manager é um gerenciador de arquivos desktop que combina a performan
 - **Visualizador de PDF** - Integração com WebView2 (Edge)
 - **Thumbnails inteligentes** - Cache multi-nível com geração otimizada
 - **Suporte a GIFs animados** - Reprodução otimizada e fluída
+
+### 🔍 Busca Global
+- **Busca instantânea** - Pesquisa em milhões de arquivos via USN Journal do NTFS
+- **Serviço em background** - Windows Service dedicado para indexação contínua
+- **Overlay tipo Spotlight** - Interface modal ativada por Ctrl+Shift+F
+- **Atualização incremental** - Índice atualizado automaticamente a cada 2 segundos
+- **Cache persistente** - Índice salvo em SQLite para restart rápido do serviço
 
 ### 📁 Operações de Arquivo
 - **Operações completas** - Copiar, cortar, colar, renomear, deletar
@@ -69,6 +77,8 @@ O MTT File Manager é um gerenciador de arquivos desktop que combina a performan
 | **Cache** | SQLite (rusqlite) | 0.32 | Persistência confiável |
 | **Imagens** | image crate | 0.25 | Processamento de imagens |
 | **Paralelismo** | rayon | 1.10 | Processamento paralelo |
+| **IPC** | Named Pipes + bincode | 1.3 | Comunicação app ↔ serviço de busca |
+| **Serviço Windows** | windows-service | 0.7 | Serviço de indexação em background |
 
 ## 📋 Requisitos
 
@@ -131,6 +141,7 @@ winget install Microsoft.EdgeWebView2Runtime
 - **F2** - Renomear
 - **Ctrl+R** - Recarregar pasta
 - **Alt+Enter** - Propriedades
+- **Ctrl+Shift+F** - Busca global (todos os volumes)
 - **Ctrl+L** - Focar barra de endereços
 - **Ctrl+D** - Duplicar aba
 
@@ -184,11 +195,17 @@ cargo --version
 
 ### Build e Testes
 ```bash
-# Build de desenvolvimento
-cargo build
+# Build de desenvolvimento (workspace completo)
+cargo build --workspace
 
 # Build otimizado
-cargo build --release
+cargo build --release --workspace
+
+# Build apenas o app principal
+cargo build -p mtt-file-manager
+
+# Build apenas o serviço de busca
+cargo build --release -p mtt-search-service
 
 # Executar com logs
 cargo run 2>&1 | Tee-Object "debug.log"
@@ -197,17 +214,57 @@ cargo run 2>&1 | Tee-Object "debug.log"
 cargo bench
 ```
 
+### Serviço de Busca Global
+O serviço de busca (`mtt-search-service`) roda como Windows Service e requer privilégios de administrador para acessar a USN Journal do NTFS.
+
+```powershell
+# Instalar o serviço (requer PowerShell como Administrador)
+.\target\release\mtt-search-service.exe install
+
+# Iniciar o serviço
+sc.exe start MTTFileManagerSearch
+
+# Verificar status
+sc.exe query MTTFileManagerSearch
+
+# Parar o serviço
+sc.exe stop MTTFileManagerSearch
+
+# Remover o serviço
+.\target\release\mtt-search-service.exe uninstall
+
+# Modo debug (sem instalar como serviço)
+.\target\release\mtt-search-service.exe run-console
+```
+
 ### Estrutura do Projeto
 ```
-src/
-├── app/                    # Estado e lógica principal
-├── application/            # Serviços de negócio
-├── domain/                 # Modelos de dados
-├── infrastructure/         # Integrações com sistema
-├── pdf_viewer/            # Visualizador PDF
-├── tabs/                  # Sistema de abas
-├── ui/                    # Interface do usuário
-└── workers/               # Processamento em background
+MTT-File-Manager-RUST/
+├── Cargo.toml                        # Workspace root + app principal
+├── src/                              # App principal (mtt-file-manager)
+│   ├── app/                          # Estado e lógica principal
+│   ├── application/                  # Serviços de negócio
+│   ├── domain/                       # Modelos de dados
+│   ├── infrastructure/               # Integrações com sistema
+│   │   └── global_search.rs          # Cliente IPC para serviço de busca
+│   ├── pdf_viewer/                   # Visualizador PDF
+│   ├── tabs/                         # Sistema de abas
+│   ├── ui/                           # Interface do usuário
+│   │   └── global_search_overlay.rs  # Overlay de busca global
+│   └── workers/                      # Processamento em background
+│       └── global_search_worker.rs   # Worker de busca global
+├── crates/
+│   ├── mtt-search-protocol/          # Tipos IPC compartilhados (bincode)
+│   └── mtt-search-service/           # Windows Service de indexação
+│       └── src/
+│           ├── main.rs               # Entry point + SCM
+│           ├── usn_journal.rs        # API USN Journal do NTFS
+│           ├── file_index.rs         # Índice in-memory (HashMap)
+│           ├── path_resolver.rs      # Reconstrução de paths
+│           ├── index_db.rs           # Persistência SQLite
+│           ├── ipc_server.rs         # Named Pipe server
+│           └── service_control.rs    # Install/uninstall do serviço
+└── docs/                             # Documentação técnica
 ```
 
 ### Debug e Profiling
@@ -232,6 +289,19 @@ cargo flamegraph --bin mtt-file-manager
 # Verificar dependências
 Get-Item "libmpv-2.dll" -ErrorAction SilentlyContinue
 winget install Microsoft.EdgeWebView2Runtime
+```
+
+#### Busca global não funciona / "Serviço offline"
+```powershell
+# Verificar se o serviço está rodando
+sc.exe query MTTFileManagerSearch
+
+# Reinstalar e iniciar
+.\target\release\mtt-search-service.exe install
+sc.exe start MTTFileManagerSearch
+
+# Verificar logs do serviço (modo console)
+.\target\release\mtt-search-service.exe run-console
 ```
 
 #### Performance lenta

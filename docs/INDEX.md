@@ -22,7 +22,9 @@ Este índice fornece navegação para todos os documentos técnicos do MTT File 
 
 ### [03_architecture.md](03_architecture.md)
 **Arquitetura do Sistema**
+- Estrutura do Cargo Workspace (3 crates)
 - Camadas e responsabilidades (UI, Application, Domain, Infrastructure)
+- Serviço de Busca Global (processo externo com USN Journal + Named Pipes)
 - Principais boundaries
 - Ciclo de vida da aplicação
 - Estado global e gerenciamento
@@ -31,8 +33,9 @@ Este índice fornece navegação para todos os documentos técnicos do MTT File 
 
 ### [04_module_map.md](04_module_map.md)
 **Mapa do Repositório**
-- Estrutura de diretórios completa
+- Estrutura de diretórios completa (workspace com 3 crates)
 - Responsabilidades por módulo
+- Crates: mtt-search-protocol e mtt-search-service
 - Principais structs e funções
 - Dependências entre módulos
 - Fluxo de dados principal
@@ -54,12 +57,14 @@ Este índice fornece navegação para todos os documentos técnicos do MTT File 
 - Menu de contexto
 - Lixeira
 - Navegação por teclado
+- Busca global (Ctrl+Shift+F → Named Pipe → USN Journal)
 - Debugging por fluxo
 
 ### [07_storage_config.md](07_storage_config.md)
 **Configuração e Storage**
-- Localização dos arquivos (%LOCALAPPDATA%)
-- Banco de dados SQLite (schema, operações)
+- Localização dos arquivos (%LOCALAPPDATA% e %PROGRAMDATA%)
+- Banco de dados SQLite do app (schema, operações)
+- Banco de dados SQLite do serviço de busca (índice de arquivos)
 - Configurações e preferências
 - Cache de thumbnails (WebP)
 - Cache em memória (LRU, DashMap)
@@ -120,6 +125,8 @@ Este índice fornece navegação para todos os documentos técnicos do MTT File 
 - `src/lib.rs` - Ponto de entrada da biblioteca
 - `src/app/state.rs` - Estado principal da aplicação (ImageViewerApp)
 - `src/app/init.rs` - Inicialização da aplicação
+- `crates/mtt-search-service/src/main.rs` - Entry point do serviço de busca
+- `crates/mtt-search-protocol/src/lib.rs` - Tipos IPC compartilhados
 
 ### Fluxos Principais
 - `src/app/operations/navigation/` - Navegação (mod.rs, keyboard.rs, selection.rs)
@@ -132,9 +139,11 @@ Este índice fornece navegação para todos os documentos técnicos do MTT File 
 
 ### Integrações Críticas
 - `src/infrastructure/windows/` - Integrações Windows (Shell, COM, Media Foundation)
+- `src/infrastructure/global_search.rs` - Cliente IPC para serviço de busca (Named Pipe)
 - `src/infrastructure/disk_cache.rs` - Cache em disco (SQLite)
 - `src/ui/cache.rs` - Cache de texturas GPU
 - `src/workers/` - Workers assíncronos
+- `src/workers/global_search_worker.rs` - Worker de busca global
 
 ### Sistema de Preview
 - `src/ui/preview_panel/` - Painel de preview
@@ -147,16 +156,18 @@ Este índice fornece navegação para todos os documentos técnicos do MTT File 
 
 ### Build e Execução
 ```bash
-# Desenvolvimento
-cargo build
+# Desenvolvimento (workspace completo)
+cargo build --workspace
 cargo run
 
 # Produção
-cargo build --release
-cargo run --release
+cargo build --release --workspace
 
-# Com logs (PowerShell)
+# App com logs (PowerShell)
 .\target\release\mtt-file-manager.exe 2>&1 | Tee-Object "debug.log"
+
+# Serviço de busca em modo console
+.\target\release\mtt-search-service.exe run-console
 
 # Sem fallback notify (UNC/rede)
 cargo build --no-default-features
@@ -194,52 +205,44 @@ Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager" -Recurse -Force
 ## Estrutura de Diretórios do Projeto
 
 ```
-src/
-├── app/                          # Estado e lógica principal
-│   ├── operations/               # Handlers de operações
-│   │   ├── navigation/           # Navegação
-│   │   ├── ui_rendering/         # Renderização UI
-│   │   └── *.rs                  # Outros handlers
-│   ├── state.rs                  # ImageViewerApp principal
-│   ├── init.rs                   # Inicialização
-│   └── *_state.rs                # Sub-estados
-├── application/                  # Lógica de negócios
-│   ├── clipboard.rs              # Gerenciamento de clipboard
-│   ├── file_operations.rs        # Operações de arquivo
-│   ├── navigation.rs             # Histórico de navegação
-│   ├── notification.rs           # Sistema de notificações
-│   ├── sorting_optimized.rs      # Ordenação otimizada
-│   └── ...
-├── domain/                       # Modelos de dados
-│   ├── errors.rs                 # AppError
-│   ├── file_entry.rs             # FileEntry, enums
-│   └── thumbnail.rs              # ThumbnailData
-├── infrastructure/               # Integrações Windows
-│   ├── windows/                  # APIs Windows
-│   │   ├── metadata/             # Metadados
+MTT-File-Manager-RUST/
+├── Cargo.toml                        # Workspace root + app principal
+├── src/                              # App principal (mtt-file-manager)
+│   ├── app/                          # Estado e lógica principal
+│   │   ├── operations/               # Handlers de operações
+│   │   │   ├── navigation/           # Navegação
+│   │   │   ├── ui_rendering/         # Renderização UI
+│   │   │   └── *.rs                  # Outros handlers
+│   │   ├── state.rs                  # ImageViewerApp principal
+│   │   ├── init.rs                   # Inicialização
+│   │   └── *_state.rs                # Sub-estados
+│   ├── application/                  # Lógica de negócios
+│   ├── domain/                       # Modelos de dados
+│   ├── infrastructure/               # Integrações Windows
+│   │   ├── global_search.rs          # Cliente IPC (Named Pipe)
 │   │   └── ...
-│   ├── media/                    # FFmpeg, hardware accel
-│   ├── disk_cache.rs             # Cache SQLite
-│   └── ...
-├── ui/                           # Interface do usuário
-│   ├── app_impl.rs               # eframe::App
-│   ├── app/                      # Input, lifecycle
-│   ├── components/               # Componentes reutilizáveis
-│   │   └── mpv/                  # Sub-sistema MPV
-│   ├── preview_panel/            # Painel de preview
-│   │   └── video_preview/        # Preview de vídeo
-│   ├── views/                    # Views (grid, list, computer)
-│   └── ...
-├── workers/                      # Threads de background
-│   ├── thumbnail/                # Sistema de thumbnails
-│   │   └── extraction/           # Estágios 1-5
-│   ├── folder_scanner.rs
-│   ├── file_operation_worker.rs
-│   └── ...
-├── pdf_viewer/                   # Visualizador PDF
-├── tabs/                         # Sistema de abas
-├── lib.rs                        # Entry point lib
-└── main.rs                       # Entry point bin
+│   ├── ui/                           # Interface do usuário
+│   │   ├── global_search_overlay.rs  # Overlay de busca global
+│   │   └── ...
+│   ├── workers/                      # Threads de background
+│   │   ├── global_search_worker.rs   # Worker de busca global
+│   │   └── ...
+│   ├── pdf_viewer/                   # Visualizador PDF
+│   ├── tabs/                         # Sistema de abas
+│   ├── lib.rs                        # Entry point lib
+│   └── main.rs                       # Entry point bin
+├── crates/
+│   ├── mtt-search-protocol/          # Tipos IPC compartilhados
+│   └── mtt-search-service/           # Windows Service de indexação
+│       └── src/
+│           ├── main.rs               # Entry point + orquestração
+│           ├── usn_journal.rs        # USN Journal API
+│           ├── file_index.rs         # Índice in-memory
+│           ├── path_resolver.rs      # Reconstrução de paths
+│           ├── index_db.rs           # Persistência SQLite
+│           ├── ipc_server.rs         # Named Pipe server
+│           └── service_control.rs    # Install/uninstall
+└── docs/                             # Documentação técnica
 ```
 
 ## Status da Documentação
@@ -282,5 +285,5 @@ src/
 
 ---
 
-*Última atualização: 2026-02-08 (módulos modularizados em `mod.rs`)*
+*Última atualização: 2026-02-11 (adicionado serviço de busca global ao índice)*
 

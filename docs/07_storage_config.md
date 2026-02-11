@@ -5,7 +5,9 @@ Este documento descreve onde e como o MTT File Manager armazena configurações,
 
 ## Localização dos Dados
 
-### Diretório Base
+O MTT File Manager armazena dados em dois diretórios distintos:
+
+### Diretório do App (por usuário)
 ```
 %LOCALAPPDATA%\MTT-File-Manager\
 ```
@@ -15,13 +17,26 @@ Exemplo típico:
 C:\Users\Username\AppData\Local\MTT-File-Manager\
 ```
 
+### Diretório do Serviço de Busca (compartilhado)
+```
+%PROGRAMDATA%\MTT-File-Manager\
+```
+
+Exemplo típico:
+```
+C:\ProgramData\MTT-File-Manager\
+```
+
 ### Estrutura de Diretórios
 ```
-MTT-File-Manager/
+%LOCALAPPDATA%\MTT-File-Manager/          # Dados do app (por usuário)
 ├── thumbnails/           # Cache de thumbnails
 │   ├── thumbnails.db    # Banco SQLite principal
 │   └── *.webp          # Arquivos de thumbnail individuais
 └── virtual_drive_config.json  # Config de drives virtuais
+
+%PROGRAMDATA%\MTT-File-Manager/            # Dados do serviço de busca (global)
+└── search_index.db      # Índice de arquivos do serviço de busca
 ```
 
 ## Banco de Dados SQLite
@@ -250,6 +265,75 @@ pub struct DirectoryIndex {
 }
 ```
 
+## Banco de Dados do Serviço de Busca
+
+### Schema
+**Arquivo**: `%PROGRAMDATA%\MTT-File-Manager\search_index.db`
+**Código**: `crates/mtt-search-service/src/index_db.rs`
+
+```sql
+-- Estado de cada volume indexado
+CREATE TABLE volume_state (
+    drive_letter TEXT PRIMARY KEY,
+    journal_id INTEGER NOT NULL,     -- USN Journal ID (para detectar resets)
+    last_usn INTEGER NOT NULL,       -- Último USN processado
+    files_indexed INTEGER NOT NULL,  -- Número total de registros
+    last_full_scan_epoch INTEGER NOT NULL  -- Timestamp do último full scan
+);
+
+-- Registros de arquivos (índice persistido)
+CREATE TABLE file_records (
+    frn INTEGER NOT NULL,            -- File Reference Number (MFT)
+    drive_letter TEXT NOT NULL,
+    name TEXT NOT NULL,              -- Nome do arquivo/pasta
+    name_lower TEXT NOT NULL,        -- Nome em lowercase (pré-computado para busca)
+    parent_frn INTEGER NOT NULL,     -- FRN do diretório pai
+    is_dir INTEGER NOT NULL,
+    size INTEGER NOT NULL,
+    PRIMARY KEY (drive_letter, frn)
+);
+```
+
+### Configuração SQLite
+- **Modo**: WAL (Write-Ahead Logging) para melhor concorrência
+- **Synchronous**: NORMAL (trade-off entre performance e durabilidade)
+
+### Fluxo de Startup
+1. Serviço abre/cria `search_index.db`
+2. Para cada volume NTFS detectado:
+   - Carrega `volume_state` → verifica se `journal_id` ainda bate com o journal atual
+   - Se sim: carrega `file_records` para HashMap in-memory + catch-up incremental via USN Journal
+   - Se não (journal resetado): descarta cache, faz full re-scan do MFT
+3. Persiste índice atualizado no SQLite a cada 5 minutos
+
+### Acesso ao Banco
+```rust
+pub struct IndexDb {
+    conn: Mutex<Connection>,
+}
+
+// Carregar estado do volume
+pub fn load_volume_state(&self, drive_letter: char) -> Option<PersistedVolumeState>
+
+// Carregar registros de arquivos
+pub fn load_file_records(&self, drive_letter: char) -> Option<HashMap<u64, FileRecord>>
+
+// Salvar índice completo
+pub fn save_volume(&self, index: &VolumeIndex) -> Result<(), String>
+```
+
+### Limpar Índice do Serviço de Busca
+```powershell
+# Parar o serviço antes
+sc.exe stop MTTFileManagerSearch
+
+# Remover banco do índice (será recriado com full scan)
+Remove-Item "$env:PROGRAMDATA\MTT-File-Manager\search_index.db" -Force
+
+# Reiniciar serviço
+sc.exe start MTTFileManagerSearch
+```
+
 ## Configuração de Drives Virtuais
 
 ### Arquivo de Configuração
@@ -308,11 +392,16 @@ Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager\thumbnails\thumbnails.db"
 
 ### Limpar Tudo (Fresh Start)
 ```powershell
-# Remove cache e preferências
+# Remove cache e preferências do app
 Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager" -Recurse -Force
 
 # Remove config de drives virtuais
 Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager\virtual_drive_config.json"
+
+# Remove índice do serviço de busca (requer admin)
+sc.exe stop MTTFileManagerSearch
+Remove-Item "$env:PROGRAMDATA\MTT-File-Manager" -Recurse -Force
+sc.exe start MTTFileManagerSearch
 ```
 
 ## Migração de Dados
@@ -350,4 +439,4 @@ Copy-Item $source $dest -Recurse -Force
 
 ---
 
-*Última atualização: 2026-02-03 (pós-refatoração)*
+*Última atualização: 2026-02-11 (adicionado banco de dados do serviço de busca)*

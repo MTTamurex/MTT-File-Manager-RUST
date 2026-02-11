@@ -3,6 +3,25 @@
 ## Objetivo do Documento
 Este documento descreve a arquitetura de alto nível do MTT File Manager, incluindo camadas, boundaries e ciclo de vida da aplicação.
 
+## Estrutura do Workspace
+
+O projeto é organizado como um Cargo Workspace com 3 crates:
+
+```
+MTT-File-Manager-RUST/
+├── Cargo.toml                    # Workspace root + pacote mtt-file-manager
+├── src/                          # App principal (GUI)
+├── crates/
+│   ├── mtt-search-protocol/     # Tipos IPC compartilhados (SearchRequest, SearchResponse)
+│   └── mtt-search-service/      # Windows Service de indexação (USN Journal + Named Pipes)
+```
+
+| Crate | Tipo | Descrição |
+|-------|------|-----------|
+| `mtt-file-manager` | bin (GUI) | App principal com eframe/egui |
+| `mtt-search-protocol` | lib | Tipos e serialização bincode para IPC |
+| `mtt-search-service` | bin (service) | Windows Service que indexa via USN Journal e serve buscas via Named Pipes |
+
 ## Visão Geral da Arquitetura
 
 O MTT File Manager segue uma arquitetura em camadas com separação clara de responsabilidades:
@@ -62,6 +81,20 @@ O MTT File Manager segue uma arquitetura em camadas com separação clara de res
 │  │  ┌────────────┬────────────┬────────────┬────────────┬──────────┐  │  │
 │  │  │Thumbnail   │File Ops    │Prefetch    │Folder      │Icon      │  │  │
 │  │  │Workers     │Worker      │Worker      │Scanner   │Worker    │  │  │
+│  │  └────────────┴────────────┴────────────┴────────────┴──────────┘  │  │
+│  │  ┌────────────────────────────────────────────────────────────────┐ │  │
+│  │  │Global Search Worker (Named Pipe client → mtt-search-service)  │ │  │
+│  │  └────────────────────────────────────────────────────────────────┘ │  │
+│  └─────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                │
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                  External: Search Service (separate process)               │
+│  ┌─────────────────────────────────────────────────────────────────────┐  │
+│  │                    mtt-search-service.exe                            │  │
+│  │  ┌────────────┬────────────┬────────────┬────────────┬──────────┐  │  │
+│  │  │USN Journal │File Index  │Path        │SQLite      │Named     │  │  │
+│  │  │Reader      │(HashMap)   │Resolver    │Persistence │Pipe IPC  │  │  │
 │  │  └────────────┴────────────┴────────────┴────────────┴──────────┘  │  │
 │  └─────────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -224,6 +257,38 @@ Threads de background para processamento assíncrono.
 - **`prefetch_worker.rs`** - Pré-carregamento de dados
 - **`predictive_prefetch.rs`** - Prefetch preditivo
 - **`idle_warmup.rs`** - Warmup de cache em idle
+
+### 6. Search Service (Processo Externo)
+**Localização**: `crates/mtt-search-service/`
+
+Serviço Windows separado que indexa todos os arquivos do sistema via USN Journal e serve buscas via Named Pipes. Roda como `LocalSystem` com privilégios de administrador (necessário para acesso à USN Journal).
+
+**Componentes**:
+- **`usn_journal.rs`** - Leitura da USN Journal do NTFS (FSCTL_ENUM_USN_DATA, FSCTL_READ_USN_JOURNAL)
+- **`file_index.rs`** - Índice in-memory: `HashMap<u64, FileRecord>` (FRN → registro)
+- **`path_resolver.rs`** - Reconstrução de path completo via cadeia de parent references
+- **`index_db.rs`** - Persistência SQLite em `%PROGRAMDATA%\MTT-File-Manager\search_index.db`
+- **`ipc_server.rs`** - Named Pipe server com NULL DACL (permite conexões de não-admin)
+- **`service_control.rs`** - Install/uninstall do serviço via `windows-service`
+
+**Protocolo IPC** (`crates/mtt-search-protocol/`):
+- Serialização via **bincode** com framing de 4 bytes (length prefix LE)
+- Pipe: `\\.\pipe\MTTFileManagerSearch`
+- Requests: `Query`, `GetStatus`, `Ping`, `WarmIndex`
+- Responses: `Results`, `Status`, `Pong`, `WarmStarted`, `Error`
+
+**Fluxo de indexação**:
+1. Detecta volumes NTFS via `GetVolumeInformationW`
+2. Tenta carregar índice do SQLite; se journal_id bate, faz catch-up incremental
+3. Se não há cache ou journal resetou, faz full MFT scan via `FSCTL_ENUM_USN_DATA`
+4. Loop incremental a cada 2s via `FSCTL_READ_USN_JOURNAL`
+5. Persiste índice no SQLite a cada 5 minutos
+
+**Integração no app** (`src/infrastructure/global_search.rs`):
+- Cliente Named Pipe que conecta ao serviço
+- Fail-fast em `FILE_NOT_FOUND` (serviço não rodando)
+- Retry apenas em `PIPE_BUSY` (serviço sobrecarregado)
+- Worker dedicado (`src/workers/global_search_worker.rs`) com coalescing de queries
 
 ## Principais Boundaries
 
@@ -389,6 +454,7 @@ while let Ok(result) = receiver.try_recv() {
 - **Metadata Worker**: `metadata_res_receiver` recebe `(PathBuf, u64, MediaMetadata)`
 - **Cover Worker**: `cover_worker_receiver` recebe `(PathBuf, Option<PathBuf>)`
 - **Folder Preview Worker**: `folder_preview_receiver` recebe `FolderPreviewData`
+- **Global Search Worker**: `global_search_receiver` recebe `GlobalSearchResponse` (Results, Status, Error)
 
 ### Shared State
 ```rust
@@ -453,5 +519,5 @@ pub struct SharedState {
 
 ---
 
-*Última atualização: 2026-02-08 (módulos modularizados em `mod.rs`)*
+*Última atualização: 2026-02-11 (adicionado serviço de busca global e estrutura de workspace)*
 

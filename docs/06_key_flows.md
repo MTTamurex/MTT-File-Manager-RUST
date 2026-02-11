@@ -507,5 +507,119 @@ eprintln!("[FS-WATCH] SMART DELETE: Removed from UI without reload");
 
 ---
 
-*Última atualização: 2026-02-08 (paths atualizados para módulos `mod.rs`)*
+## 9. Busca Global (Global Search)
+
+### Sequência de Chamadas
+```
+User pressiona Ctrl+Shift+F
+    ↓
+src/ui/app/input.rs - toggle global_search_active
+    ↓
+src/ui/global_search_overlay.rs - render overlay modal
+    ↓
+User digita query
+    ↓
+src/workers/global_search_worker.rs - GlobalSearchRequest::Search
+    ↓ (coalescing de queries rápidas)
+src/infrastructure/global_search.rs - search(query, max_results)
+    ↓
+open_pipe() → Named Pipe \\.\pipe\MTTFileManagerSearch
+    ↓
+write_message(SearchRequest::Query) → [4-byte LE length + bincode payload]
+    ↓
+mtt-search-service (processo separado):
+    crates/mtt-search-service/src/ipc_server.rs - handle_client()
+        ↓
+    crates/mtt-search-service/src/file_index.rs - search()
+        ↓ (busca substring em name_lower, max 5s deadline)
+    crates/mtt-search-service/src/path_resolver.rs - resolve_path()
+        ↓ (chain de parent FRNs até root)
+    SearchResponse::Results → Named Pipe
+    ↓
+src/infrastructure/global_search.rs - read_response()
+    ↓
+GlobalSearchResponse::Results → channel → UI
+    ↓
+src/ui/global_search_overlay.rs - renderiza lista de resultados
+    ↓
+User seleciona resultado (Enter)
+    ↓
+src/app/operations/navigation/mod.rs - navigate_to_path()
+```
+
+### Arquivos Envolvidos
+- **`src/ui/app/input.rs`** - Captura Ctrl+Shift+F
+- **`src/ui/global_search_overlay.rs`** - Overlay modal de busca
+- **`src/workers/global_search_worker.rs`** - Worker thread (coalescing, retry, status checks)
+- **`src/infrastructure/global_search.rs`** - Cliente IPC (Named Pipe)
+- **`crates/mtt-search-protocol/src/lib.rs`** - Tipos e serialização bincode
+- **`crates/mtt-search-service/src/ipc_server.rs`** - Servidor Named Pipe
+- **`crates/mtt-search-service/src/file_index.rs`** - Busca no índice in-memory
+- **`crates/mtt-search-service/src/path_resolver.rs`** - Reconstrução de paths
+
+### Fluxo de Startup do Serviço
+```
+mtt-search-service.exe (Windows Service / console)
+    ↓
+main.rs - run_indexer()
+    ↓
+usn_journal::discover_ntfs_volumes() - GetVolumeInformationW (A-Z)
+    ↓
+Para cada volume NTFS (thread separada):
+    ↓
+index_db.rs - load_volume_state() / load_file_records()
+    ↓
+Se cache válido (journal_id bate):
+    usn_journal::read_usn_changes() - catch-up incremental
+Se cache inválido ou ausente:
+    usn_journal::enumerate_all_files() - FSCTL_ENUM_USN_DATA (full MFT scan)
+    ↓
+file_index::VolumeIndex.state = Ready
+    ↓
+Loop incremental (a cada 2s):
+    usn_journal::read_usn_buffer() - sem lock (I/O pura)
+    indices.try_write() - aplica mudanças (lock breve, skip se busy)
+    ↓
+Persist SQLite a cada 5 minutos
+```
+
+### Pontos de Bug Comuns
+1. **"Serviço offline"**
+   - **Causa**: Serviço não instalado/iniciado, ou `ERROR_FILE_NOT_FOUND` no pipe
+   - **Debug**: `sc.exe query MTTFileManagerSearch`, verificar logs do serviço
+   - **Solução**: Instalar e iniciar o serviço
+
+2. **Busca retorna 0 resultados**
+   - **Causa**: Índice ainda em estado `Scanning`, ou query não corresponde a nenhum `name_lower`
+   - **Debug**: `GetStatus` retorna `state: "scanning"` nos volumes
+   - **Solução**: Aguardar indexação completar (primeira vez ~10-30s por volume)
+
+3. **Delay na primeira busca após idle longo**
+   - **Causa**: Páginas de memória do índice foram paged out pelo SO
+   - **Debug**: Verificar se `WarmIndex` foi chamado no startup do worker
+   - **Solução**: O worker chama `warm_index()` automaticamente no startup
+
+4. **Icon flickering nos resultados de busca**
+   - **Causa**: LRU cache de ícones muito pequeno para a quantidade de resultados
+   - **Debug**: Verificar tamanho do `icon_cache` no `icon_loader.rs`
+   - **Solução**: Cache LRU de 512 entradas (default atual)
+
+### Como Debugar
+```powershell
+# Verificar status do serviço
+sc.exe query MTTFileManagerSearch
+
+# Rodar serviço em modo console com logs
+.\target\release\mtt-search-service.exe run-console
+
+# Filtrar logs de busca no app
+.\target\release\mtt-file-manager.exe 2>&1 | Select-String "GLOBAL-SEARCH|IPC"
+
+# Verificar se o pipe existe
+[System.IO.Directory]::GetFiles("\\.\pipe\") | Select-String "MTTFileManager"
+```
+
+---
+
+*Última atualização: 2026-02-11 (adicionado fluxo de busca global)*
 

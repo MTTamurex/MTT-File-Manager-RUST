@@ -106,7 +106,8 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 ```
 - **Propósito**: SQLite embutido
 - **Feature**: `bundled` - SQLite estático (sem dependência externa)
-- **Uso**: Cache persistente de thumbnails e preferências
+- **Uso**: Cache persistente de thumbnails e preferências (app), índice de arquivos (serviço de busca)
+- **Nota**: Workspace dependency compartilhada (usado por `mtt-file-manager` e `mtt-search-service`)
 
 ### Vídeo e Mídia
 ```toml
@@ -122,12 +123,26 @@ raw-window-handle = "0.6"
 - **Propósito**: Acesso raw a handles de janela
 - **Uso**: Integração com mpv (necessário para embedding do player)
 
-### Serialização
+### Serialização e IPC
 ```toml
 serde_json = "1.0"
 ```
 - **Propósito**: JSON parsing/serialization
 - **Uso**: Configurações, metadados, virtual_drive_config.json
+
+```toml
+serde = { version = "1.0", features = ["derive"] }
+```
+- **Propósito**: Framework de serialização/deserialização
+- **Uso**: Protocolo IPC (bincode), configurações
+- **Nota**: Workspace dependency compartilhada entre os 3 crates
+
+```toml
+bincode = "1.3"
+```
+- **Propósito**: Serialização binária compacta e rápida
+- **Uso**: Protocolo IPC entre app e serviço de busca (Named Pipes)
+- **Nota**: Workspace dependency compartilhada
 
 ### Comunicação entre Threads
 ```toml
@@ -211,6 +226,7 @@ features = [
     "Win32_Storage_Vhd",                 # Virtual Hard Disk (ISO)
     "Win32_Security",                    # Segurança
     "Win32_System_IO",                   # I/O APIs
+    "Win32_System_Pipes",               # Named Pipes (IPC com serviço de busca)
     "Win32_System_WindowsProgramming",   # APIs gerais do Windows
 ]
 ```
@@ -228,6 +244,7 @@ features = [
 | `Win32_Storage_FileSystem` | Operações de arquivo nativas |
 | `Win32_UI_WindowsAndMessaging` | Janelas, mensagens, subclassing |
 | `Win32_Storage_Vhd` | Montagem de ISOs |
+| `Win32_System_Pipes` | Named Pipes para IPC com serviço de busca |
 
 ## Features do Cargo
 
@@ -242,6 +259,39 @@ notify-watcher = ["notify"]
 - Complementa o Drive Watcher nativo usado em drives locais
 - Não requer privilégios de administrador
 - Pode ser desabilitado com: `cargo build --no-default-features` (desativa apenas o fallback notify)
+
+## Dependências do Serviço de Busca (mtt-search-service)
+
+O serviço de busca é um binário separado com suas próprias dependências:
+
+### Windows Service
+```toml
+windows-service = "0.7"
+```
+- **Propósito**: Integração com Windows Service Control Manager (SCM)
+- **Uso**: Registro, controle de ciclo de vida e dispatch do serviço
+
+### Windows API (serviço)
+```toml
+[dependencies.windows]
+version = "0.61.0"
+features = [
+    "Win32_Foundation",          # Tipos básicos
+    "Win32_Storage_FileSystem",  # CreateFileW, GetVolumeInformationW
+    "Win32_System_Ioctl",        # DeviceIoControl (USN Journal)
+    "Win32_System_IO",           # Overlapped I/O
+    "Win32_System_Pipes",        # CreateNamedPipeW, ConnectNamedPipe
+    "Win32_Security",            # SECURITY_ATTRIBUTES (NULL DACL)
+    "Win32_System_Threading",    # CreateEventW, WaitForSingleObject
+]
+```
+
+### Protocolo IPC (mtt-search-protocol)
+```toml
+mtt-search-protocol = { path = "../mtt-search-protocol" }
+```
+- **Propósito**: Tipos compartilhados para comunicação via Named Pipes
+- **Dependências**: `serde`, `bincode`
 
 ## Build Dependencies
 
@@ -290,21 +340,31 @@ codegen-units = 1  # Single codegen unit (melhor otimização)
 ## Árvore de Dependências Simplificada
 
 ```
-mtt-file-manager
-├── eframe 0.31
-│   ├── egui
-│   ├── winit
-│   └── ...
-├── windows 0.61.0
-├── rusqlite 0.32
-│   └── libsqlite3-sys (bundled)
-├── image 0.25
-│   ├── webp
-│   └── gif
-├── libmpv2 5.0.3
-├── rayon 1.10
-├── crossbeam-channel 0.5.15
-└── ... (outras)
+[workspace]
+├── mtt-file-manager (app GUI)
+│   ├── eframe 0.31
+│   │   ├── egui
+│   │   ├── winit
+│   │   └── ...
+│   ├── windows 0.61.0
+│   ├── rusqlite 0.32 (workspace)
+│   ├── mtt-search-protocol (workspace)
+│   ├── serde + bincode (workspace)
+│   ├── image 0.25
+│   ├── libmpv2 5.0.3
+│   ├── rayon 1.10
+│   ├── crossbeam-channel 0.5.15
+│   └── ... (outras)
+├── mtt-search-protocol (lib IPC)
+│   ├── serde 1.0 (workspace)
+│   └── bincode 1.3 (workspace)
+└── mtt-search-service (Windows Service)
+    ├── mtt-search-protocol
+    ├── windows 0.61.0 (features mínimas)
+    ├── windows-service 0.7
+    ├── rusqlite 0.32 (workspace)
+    ├── serde + bincode (workspace)
+    └── ...
 ```
 
 ## Atualização de Dependências
@@ -353,4 +413,4 @@ cargo audit
 
 ---
 
-*Última atualização: 2026-02-08 (documentação de watcher/fallback atualizada)*
+*Última atualização: 2026-02-11 (adicionadas dependências do serviço de busca e workspace)*
