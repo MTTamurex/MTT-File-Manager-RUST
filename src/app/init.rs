@@ -804,6 +804,9 @@ impl ImageViewerApp {
             global_search_query: String::new(),
             global_search_results: Vec::new(),
             global_search_selected_index: None,
+            global_search_size_cache: LruCache::new(
+                NonZeroUsize::new(2000).expect("global_search_size_cache size must be non-zero"),
+            ),
             global_search_active: false,
             global_search_loading: false,
             global_search_available: false,
