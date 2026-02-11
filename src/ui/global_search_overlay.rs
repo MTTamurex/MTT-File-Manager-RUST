@@ -6,7 +6,8 @@ use eframe::egui;
 
 const MAX_RESULTS: u32 = 200;
 const BACKDROP_ALPHA: u8 = 72;
-const RESULT_ROW_HEIGHT: f32 = 40.0;
+const RESULT_ROW_HEIGHT: f32 = 46.0;
+const ICON_SIZE: f32 = 18.0;
 
 /// Render the global search overlay. Returns true if the overlay should remain open.
 pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Context) {
@@ -17,10 +18,10 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
     let screen_rect = ctx.screen_rect();
 
     // Modal window dimensions
-    let modal_width = (screen_rect.width() * 0.5).clamp(400.0, 800.0);
-    let modal_max_height = screen_rect.height() * 0.6;
+    let modal_width = (screen_rect.width() * 0.40).clamp(360.0, 640.0);
+    let modal_max_height = (screen_rect.height() * 0.72).clamp(400.0, 780.0);
     let modal_x = (screen_rect.width() - modal_width) / 2.0;
-    let modal_y = screen_rect.height() * 0.15;
+    let modal_y = ((screen_rect.height() - modal_max_height) * 0.5).max(8.0);
 
     let modal_rect = egui::Rect::from_min_size(
         egui::pos2(modal_x, modal_y),
@@ -85,6 +86,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                 })
                 .show(ui, |ui| {
                     ui.set_width(modal_width - 32.0);
+                    ui.set_min_height(modal_max_height - 32.0);
 
                     // Header
                     ui.horizontal(|ui| {
@@ -143,26 +145,34 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
 
                     ui.add_space(8.0);
 
-                    // Results area
-                    let results_height = (modal_max_height - 120.0).max(100.0);
+                    // Results area height is fixed from modal height to avoid dynamic growth.
+                    let results_height = (modal_max_height - 172.0).max(220.0);
 
                     if app.global_search_loading && app.global_search_results.is_empty() {
-                        ui.vertical_centered(|ui| {
-                            ui.add_space(20.0);
-                            ui.spinner();
-                            ui.label("Buscando...");
-                        });
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(ui.available_width(), results_height),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                ui.add_space(20.0);
+                                ui.spinner();
+                                ui.label("Buscando...");
+                            },
+                        );
                     } else if app.global_search_results.is_empty()
                         && !app.global_search_query.is_empty()
                         && !app.global_search_loading
                     {
-                        ui.vertical_centered(|ui| {
-                            ui.add_space(20.0);
-                            ui.label(
-                                egui::RichText::new("Nenhum resultado encontrado")
-                                    .color(egui::Color32::from_gray(120)),
-                            );
-                        });
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(ui.available_width(), results_height),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                ui.add_space(20.0);
+                                ui.label(
+                                    egui::RichText::new("Nenhum resultado encontrado")
+                                        .color(egui::Color32::from_gray(120)),
+                                );
+                            },
+                        );
                     } else if !app.global_search_results.is_empty() {
                         if app
                             .global_search_selected_index
@@ -188,100 +198,171 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
 
                         ui.add_space(4.0);
 
-                        // Scrollable results list
-                        egui::ScrollArea::vertical()
-                            .max_height(results_height)
-                            .show(ui, |ui| {
-                                let mut navigate_to: Option<String> = None;
+                        // Scrollable results list (fixed viewport height)
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(ui.available_width(), results_height),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                egui::ScrollArea::vertical()
+                                    .auto_shrink([false, false])
+                                    .show(ui, |ui| {
+                                        let mut navigate_to: Option<String> = None;
+                                        let results = app.global_search_results.clone();
+                                        for (row_idx, result) in results.iter().enumerate() {
+                                            let path_buf =
+                                                std::path::PathBuf::from(&result.full_path);
+                                            let is_dir = result.is_dir;
+                                            let file_type =
+                                                file_type_label(&result.full_path, is_dir);
+                                            let size_opt = resolve_result_size(
+                                                app,
+                                                &result.full_path,
+                                                is_dir,
+                                                result.size,
+                                            );
+                                            let size_text = size_opt
+                                                .map(crate::infrastructure::windows::format_size)
+                                                .unwrap_or_else(|| "—".to_string());
+                                            let meta_text =
+                                                format!("{} • {}", file_type, size_text);
 
-                                for (row_idx, result) in
-                                    app.global_search_results.iter().enumerate()
-                                {
-                                    let is_dir = result.is_dir;
-                                    let icon_str = if is_dir { "\u{1F4C1}" } else { "\u{1F4C4}" };
+                                            let icon_tex =
+                                                app.item_icon_loader.get_or_load_icon_sized(
+                                                    ctx,
+                                                    &path_buf,
+                                                    crate::domain::file_entry::IconSize::Small,
+                                                    is_dir,
+                                                    false,
+                                                );
+                                            if icon_tex.is_none()
+                                                && !is_dir
+                                                && !app.loading_icons.contains(&path_buf)
+                                                && app.failed_icons.peek(&path_buf).is_none()
+                                            {
+                                                app.request_icon_load(path_buf.clone());
+                                            }
 
-                                    let (row_rect, _) = ui.allocate_exact_size(
-                                        egui::vec2(ui.available_width(), RESULT_ROW_HEIGHT),
-                                        egui::Sense::hover(),
-                                    );
+                                            let (row_rect, _) = ui.allocate_exact_size(
+                                                egui::vec2(ui.available_width(), RESULT_ROW_HEIGHT),
+                                                egui::Sense::hover(),
+                                            );
 
-                                    let row_resp = ui.interact(
-                                        row_rect,
-                                        ui.id().with(("global_search_row", row_idx)),
-                                        egui::Sense::click(),
-                                    );
+                                            let row_resp = ui.interact(
+                                                row_rect,
+                                                ui.id().with(("global_search_row", row_idx)),
+                                                egui::Sense::click(),
+                                            );
 
-                                    if row_resp.clicked() {
-                                        app.global_search_selected_index = Some(row_idx);
-                                    }
+                                            if row_resp.clicked() {
+                                                app.global_search_selected_index = Some(row_idx);
+                                            }
 
-                                    let is_selected =
-                                        app.global_search_selected_index == Some(row_idx);
-                                    if is_selected {
-                                        ui.painter().rect_filled(
-                                            row_rect,
-                                            4.0,
-                                            ui.style().visuals.selection.bg_fill,
-                                        );
-                                    } else if row_resp.hovered() {
-                                        ui.painter().rect_filled(
-                                            row_rect,
-                                            4.0,
-                                            egui::Color32::from_white_alpha(12),
-                                        );
-                                    }
+                                            let is_selected =
+                                                app.global_search_selected_index == Some(row_idx);
+                                            if is_selected {
+                                                ui.painter().rect_filled(
+                                                    row_rect,
+                                                    4.0,
+                                                    ui.style().visuals.selection.bg_fill,
+                                                );
+                                            } else if row_resp.hovered() {
+                                                ui.painter().rect_filled(
+                                                    row_rect,
+                                                    4.0,
+                                                    egui::Color32::from_white_alpha(12),
+                                                );
+                                            }
 
-                                    let mut row_ui = ui.new_child(
-                                        egui::UiBuilder::new()
-                                            .max_rect(row_rect.shrink2(egui::vec2(8.0, 4.0)))
-                                            .layout(egui::Layout::left_to_right(
-                                                egui::Align::Center,
-                                            )),
-                                    );
-                                    row_ui.style_mut().interaction.selectable_labels = false;
+                                            let mut row_ui = ui.new_child(
+                                                egui::UiBuilder::new()
+                                                    .max_rect(
+                                                        row_rect.shrink2(egui::vec2(8.0, 4.0)),
+                                                    )
+                                                    .layout(egui::Layout::left_to_right(
+                                                        egui::Align::Center,
+                                                    )),
+                                            );
+                                            row_ui.style_mut().interaction.selectable_labels =
+                                                false;
 
-                                    row_ui.label(egui::RichText::new(icon_str).size(14.0));
-                                    row_ui.add_space(8.0);
-                                    row_ui.vertical(|ui| {
-                                        ui.label(
-                                            egui::RichText::new(&result.name).strong().size(13.0),
-                                        );
-                                        ui.label(
-                                            egui::RichText::new(&result.full_path)
-                                                .size(11.0)
-                                                .color(egui::Color32::from_gray(120)),
-                                        );
-                                    });
+                                            if let Some(icon) = icon_tex {
+                                                row_ui
+                                                    .add(egui::Image::new(&icon).max_size(
+                                                        egui::vec2(ICON_SIZE, ICON_SIZE),
+                                                    ));
+                                            } else {
+                                                let icon_str =
+                                                    if is_dir { "\u{1F4C1}" } else { "\u{1F4C4}" };
+                                                row_ui.label(
+                                                    egui::RichText::new(icon_str).size(14.0),
+                                                );
+                                            }
 
-                                    // Double-click navigates to location
-                                    if row_resp.double_clicked() {
-                                        let path = std::path::Path::new(&result.full_path);
-                                        if is_dir {
-                                            navigate_to = Some(result.full_path.clone());
-                                        } else if let Some(parent) = path.parent() {
-                                            navigate_to =
-                                                Some(parent.to_string_lossy().to_string());
+                                            row_ui.add_space(8.0);
+                                            row_ui.vertical(|ui| {
+                                                ui.add(
+                                                    egui::Label::new(
+                                                        egui::RichText::new(&result.name)
+                                                            .strong()
+                                                            .size(13.0),
+                                                    )
+                                                    .truncate(),
+                                                );
+                                                ui.horizontal(|ui| {
+                                                    ui.label(
+                                                        egui::RichText::new(&meta_text)
+                                                            .size(10.0)
+                                                            .color(egui::Color32::from_gray(140)),
+                                                    );
+                                                    ui.add_space(6.0);
+                                                    ui.add(
+                                                        egui::Label::new(
+                                                            egui::RichText::new(&result.full_path)
+                                                                .size(10.0)
+                                                                .color(egui::Color32::from_gray(
+                                                                    120,
+                                                                )),
+                                                        )
+                                                        .truncate(),
+                                                    );
+                                                });
+                                            });
+
+                                            // Double-click navigates to location
+                                            if row_resp.double_clicked() {
+                                                let path = std::path::Path::new(&result.full_path);
+                                                if is_dir {
+                                                    navigate_to = Some(result.full_path.clone());
+                                                } else if let Some(parent) = path.parent() {
+                                                    navigate_to =
+                                                        Some(parent.to_string_lossy().to_string());
+                                                }
+                                            }
+
+                                            ui.separator();
                                         }
-                                    }
 
-                                    ui.separator();
-                                }
-
-                                // Navigate after iteration (borrow checker)
-                                if let Some(path) = navigate_to {
-                                    app.global_search_active = false;
-                                    app.navigate_to(&path);
-                                }
-                            });
+                                        // Navigate after iteration (borrow checker)
+                                        if let Some(path) = navigate_to {
+                                            app.global_search_active = false;
+                                            app.navigate_to(&path);
+                                        }
+                                    });
+                            },
+                        );
                     } else if app.global_search_query.is_empty() {
-                        ui.vertical_centered(|ui| {
-                            ui.add_space(20.0);
-                            ui.label(
-                                egui::RichText::new("Ctrl+Shift+F para abrir/fechar")
-                                    .size(11.0)
-                                    .color(egui::Color32::from_gray(100)),
-                            );
-                        });
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(ui.available_width(), results_height),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                ui.add_space(20.0);
+                                ui.label(
+                                    egui::RichText::new("Ctrl+Shift+F para abrir/fechar")
+                                        .size(11.0)
+                                        .color(egui::Color32::from_gray(100)),
+                                );
+                            },
+                        );
                     }
                 });
         });
@@ -295,4 +376,48 @@ fn format_number(n: u64) -> String {
     } else {
         n.to_string()
     }
+}
+
+fn file_type_label(full_path: &str, is_dir: bool) -> String {
+    if is_dir {
+        return "Pasta".to_string();
+    }
+
+    let path = std::path::Path::new(full_path);
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        if !ext.is_empty() {
+            return format!("Arquivo {}", ext.to_uppercase());
+        }
+    }
+
+    "Arquivo".to_string()
+}
+
+fn resolve_result_size(
+    app: &mut ImageViewerApp,
+    full_path: &str,
+    is_dir: bool,
+    size: u64,
+) -> Option<u64> {
+    if is_dir {
+        return None;
+    }
+
+    if size > 0 {
+        return Some(size);
+    }
+
+    if let Some(cached) = app.global_search_size_cache.get(full_path) {
+        return *cached;
+    }
+
+    // Avoid I/O for UNC paths; network metadata can block.
+    let computed = if full_path.starts_with("\\\\") {
+        None
+    } else {
+        std::fs::metadata(full_path).ok().map(|m| m.len())
+    };
+    app.global_search_size_cache
+        .put(full_path.to_string(), computed);
+    computed
 }

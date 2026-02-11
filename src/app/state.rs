@@ -320,6 +320,7 @@ pub struct ImageViewerApp {
     pub global_search_query: String,
     pub global_search_results: Vec<mtt_search_protocol::SearchResultItem>,
     pub global_search_selected_index: Option<usize>,
+    pub global_search_size_cache: LruCache<String, Option<u64>>,
     pub global_search_active: bool,
     pub global_search_loading: bool,
     pub global_search_available: bool,
