@@ -77,7 +77,31 @@ pub fn start_global_search_worker(
                             let _ = sender.send(GlobalSearchResponse::Results { query, items });
                         }
                         Err(e) => {
-                            let _ = sender.send(GlobalSearchResponse::Error { query, message: e });
+                            if e.contains("All pipe instances are busy") {
+                                std::thread::sleep(std::time::Duration::from_millis(200));
+                                match crate::infrastructure::global_search::search(
+                                    &query,
+                                    max_results,
+                                ) {
+                                    Ok(items) => {
+                                        let _ = sender
+                                            .send(GlobalSearchResponse::Results { query, items });
+                                        if pending_status_check {
+                                            send_status(&sender);
+                                        }
+                                        continue;
+                                    }
+                                    Err(e2) => {
+                                        let _ = sender.send(GlobalSearchResponse::Error {
+                                            query,
+                                            message: e2,
+                                        });
+                                    }
+                                }
+                            } else {
+                                let _ =
+                                    sender.send(GlobalSearchResponse::Error { query, message: e });
+                            }
                         }
                     }
 

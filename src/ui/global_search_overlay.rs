@@ -131,12 +131,15 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                     if search_resp.changed() && !app.global_search_query.is_empty() {
                         app.global_search_selected_index = None;
                         app.global_search_loading = true;
-                        let _ = app.global_search_sender.send(
+                        if let Err(e) = app.global_search_sender.send(
                             crate::workers::global_search_worker::GlobalSearchRequest::Search {
                                 query: app.global_search_query.clone(),
                                 max_results: MAX_RESULTS,
                             },
-                        );
+                        ) {
+                            app.global_search_loading = false;
+                            eprintln!("[GLOBAL-SEARCH] Failed to queue search request: {}", e);
+                        }
                     } else if app.global_search_query.is_empty() {
                         app.global_search_selected_index = None;
                         app.global_search_results.clear();

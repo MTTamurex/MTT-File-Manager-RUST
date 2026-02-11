@@ -1,3 +1,4 @@
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
@@ -20,6 +21,7 @@ use crate::file_index::{self, IndexState, VolumeIndex};
 use mtt_search_protocol::*;
 
 const PIPE_BUFFER_SIZE: u32 = 64 * 1024;
+const PIPE_MAX_INSTANCES: u32 = 32;
 /// PIPE_ACCESS_DUPLEX (0x3) | FILE_FLAG_OVERLAPPED (0x40000000)
 const PIPE_OPEN_MODE: u32 = 0x40000003;
 
@@ -40,33 +42,40 @@ pub fn run_ipc_server(indices: Arc<RwLock<Vec<VolumeIndex>>>, shutdown: Arc<Atom
         };
 
         // Wait for client with overlapped I/O so we can check shutdown periodically
-        let client_connected = match wait_for_client(pipe, &shutdown) {
-            true => true,
-            false => {
-                unsafe {
-                    let _ = CloseHandle(pipe);
-                }
-                if shutdown.load(Ordering::Relaxed) {
-                    break;
-                }
-                continue;
+        let client_connected = wait_for_client(pipe, &shutdown);
+        if !client_connected {
+            unsafe {
+                let _ = CloseHandle(pipe);
             }
-        };
+            if shutdown.load(Ordering::Relaxed) {
+                break;
+            }
+            continue;
+        }
 
-        if !client_connected || shutdown.load(Ordering::Relaxed) {
+        if shutdown.load(Ordering::Relaxed) {
             unsafe {
                 let _ = CloseHandle(pipe);
             }
             break;
         }
 
-        handle_client(pipe, &indices);
-
-        unsafe {
-            let _ = FlushFileBuffers(pipe);
-            let _ = DisconnectNamedPipe(pipe);
-            let _ = CloseHandle(pipe);
-        }
+        // Handle each client concurrently so one slow query doesn't block all connections.
+        let indices_for_client = indices.clone();
+        let pipe_raw = pipe.0 as usize;
+        std::thread::spawn(move || {
+            let pipe = HANDLE(pipe_raw as *mut core::ffi::c_void);
+            if let Err(e) = catch_unwind(AssertUnwindSafe(|| {
+                handle_client(pipe, &indices_for_client)
+            })) {
+                eprintln!("[IPC] Client handler panic: {:?}", e);
+            }
+            unsafe {
+                let _ = FlushFileBuffers(pipe);
+                let _ = DisconnectNamedPipe(pipe);
+                let _ = CloseHandle(pipe);
+            }
+        });
     }
 }
 
@@ -154,7 +163,7 @@ fn create_pipe() -> Result<HANDLE, String> {
             PCWSTR(pipe_name.as_ptr()),
             FILE_FLAGS_AND_ATTRIBUTES(PIPE_OPEN_MODE),
             PIPE_WAIT, // BYTE mode — our protocol already does length-prefix framing
-            1,
+            PIPE_MAX_INSTANCES,
             PIPE_BUFFER_SIZE,
             PIPE_BUFFER_SIZE,
             0,
@@ -192,7 +201,13 @@ fn handle_client(pipe: HANDLE, indices: &Arc<RwLock<Vec<VolumeIndex>>>) {
             let _ = send_response(pipe, &SearchResponse::Pong);
         }
         SearchRequest::GetStatus => {
-            let indices_lock = indices.read().unwrap();
+            let indices_lock = match indices.read() {
+                Ok(lock) => lock,
+                Err(poisoned) => {
+                    eprintln!("[IPC] indices lock poisoned on GetStatus");
+                    poisoned.into_inner()
+                }
+            };
             let mut total_indexed = 0u64;
             let mut volumes = Vec::new();
 
@@ -220,7 +235,13 @@ fn handle_client(pipe: HANDLE, indices: &Arc<RwLock<Vec<VolumeIndex>>>) {
             );
         }
         SearchRequest::Query { text, max_results } => {
-            let indices_lock = indices.read().unwrap();
+            let indices_lock = match indices.read() {
+                Ok(lock) => lock,
+                Err(poisoned) => {
+                    eprintln!("[IPC] indices lock poisoned on Query");
+                    poisoned.into_inner()
+                }
+            };
             let results = file_index::search(&indices_lock, &text, max_results as usize);
 
             let items: Vec<SearchResultItem> = results

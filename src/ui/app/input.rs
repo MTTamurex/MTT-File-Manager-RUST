@@ -185,9 +185,12 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 app.global_search_results.clear();
                 app.global_search_loading = false;
                 // Check service availability
-                let _ = app
+                if let Err(e) = app
                     .global_search_sender
-                    .send(crate::workers::global_search_worker::GlobalSearchRequest::CheckStatus);
+                    .send(crate::workers::global_search_worker::GlobalSearchRequest::CheckStatus)
+                {
+                    eprintln!("[GLOBAL-SEARCH] Failed to queue status check: {}", e);
+                }
             }
             user_active = true;
         }
