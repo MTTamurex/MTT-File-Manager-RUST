@@ -618,6 +618,7 @@ impl ImageViewerApp {
             drive_scan_tx,
             drive_info_rx,
             drive_info_tx,
+            drive_info_cache: std::collections::HashMap::new(),
             thumbnail_size, // Loaded from SQLite
             selected_item: None,
             multi_selection: FxHashSet::default(),
@@ -861,6 +862,35 @@ impl ImageViewerApp {
 
         // Inicia monitoramento inicial
         app.watch_current_folder();
+
+        // Pre-populate drive_info_cache at startup so the details panel can show
+        // drive info even if the user never visits "Este Computador".
+        {
+            let disks_snapshot: Vec<String> =
+                app.disks.iter().map(|(p, _)| p.clone()).collect();
+            let tx = app.drive_info_tx.clone();
+            let startup_ctx = ctx.clone();
+            std::thread::spawn(move || {
+                use crate::domain::file_entry::DriveInfo;
+                use crate::infrastructure::windows::get_volume_info;
+                let mut results = Vec::new();
+                for path in &disks_snapshot {
+                    let vol = get_volume_info(path);
+                    let drive_type = crate::infrastructure::windows::detect_drive_type(path);
+                    results.push((
+                        path.clone(),
+                        DriveInfo {
+                            file_system: vol.file_system,
+                            total_space: vol.total_space,
+                            free_space: vol.free_space,
+                            drive_type,
+                        },
+                    ));
+                }
+                let _ = tx.send(results);
+                startup_ctx.request_repaint();
+            });
+        }
 
         // Garbage Collector em background (incremental + idle window)
         // Avoids aggressive startup I/O and keeps cleanup bounded on HDD.

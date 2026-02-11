@@ -166,6 +166,15 @@ impl ImageViewerApp {
             computer_items.push(entry);
         }
 
+        // Populate drive_info_cache with skeleton entries so the details panel
+        // can show drive_type immediately, even before background volume info arrives.
+        for item in &computer_items {
+            if let Some(info) = &item.drive_info {
+                let path_str = item.path.to_string_lossy().to_string();
+                self.drive_info_cache.insert(path_str, info.clone());
+            }
+        }
+
         self.all_items = computer_items.clone();
         self.items = Arc::new(computer_items);
 
@@ -325,8 +334,14 @@ impl ImageViewerApp {
     /// Updates drive_info (total_space, free_space, file_system) in existing items.
     pub fn poll_drive_info(&mut self) {
         if let Ok(results) = self.drive_info_rx.try_recv() {
+            // Always persist drive info in the dedicated cache so it survives
+            // navigation away from computer view (used by details panel).
+            for (path, info) in &results {
+                self.drive_info_cache.insert(path.clone(), info.clone());
+            }
+
             if !self.is_computer_view {
-                return; // Only update if still in computer view
+                return; // Only update all_items if still in computer view
             }
 
             // Update all_items with the received drive info
