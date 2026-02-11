@@ -88,6 +88,45 @@ pub fn render_fullscreen_video(
                 }
             }
 
+            // Keyboard shortcuts: volume (Up/Down) and seek (Left/Right)
+            // OSD feedback rendered natively by MPV via show-text command
+            let vol_step = 0.05_f32;
+            let seek_step = 5.0_f64;
+            let osd_duration_ms = 2000_i64;
+
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                let new_vol = (volume + vol_step).min(1.0);
+                preview.set_volume(new_vol);
+                let msg = format!("Volume: {}%", (new_vol * 100.0).round() as i32);
+                preview.show_osd(&msg, osd_duration_ms);
+                preview.reset_mouse_activity();
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                let new_vol = (volume - vol_step).max(0.0);
+                preview.set_volume(new_vol);
+                let msg = format!("Volume: {}%", (new_vol * 100.0).round() as i32);
+                preview.show_osd(&msg, osd_duration_ms);
+                preview.reset_mouse_activity();
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
+                let new_time = (current_time + seek_step).min(duration);
+                preview.seek(new_time);
+                let display_time = crate::ui::components::media_preview::format_time(new_time);
+                let display_dur = crate::ui::components::media_preview::format_time(duration);
+                let msg = format!("{} / {}", display_time, display_dur);
+                preview.show_osd(&msg, osd_duration_ms);
+                preview.reset_mouse_activity();
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
+                let new_time = (current_time - seek_step).max(0.0);
+                preview.seek(new_time);
+                let display_time = crate::ui::components::media_preview::format_time(new_time);
+                let display_dur = crate::ui::components::media_preview::format_time(duration);
+                let msg = format!("{} / {}", display_time, display_dur);
+                preview.show_osd(&msg, osd_duration_ms);
+                preview.reset_mouse_activity();
+            }
+
             // Render Video
             let mut video_ui = ui.new_child(egui::UiBuilder::new().max_rect(video_rect));
             preview.set_forced_size(Some(video_rect.size()));

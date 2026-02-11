@@ -88,6 +88,14 @@ impl MpvPreview {
         }));
     }
 
+    /// Show OSD text on the video using MPV's native show-text command
+    pub fn show_osd_text(&self, text: &str, duration_ms: i64) {
+        if let Some(m) = &self.mpv {
+            let dur_str = duration_ms.to_string();
+            let _ = m.command("show-text", &[text, &dur_str]);
+        }
+    }
+
     pub fn controls_active(&self) -> bool {
         self.last_mouse_activity
             .map(|t| t.elapsed() < Duration::from_secs(3))

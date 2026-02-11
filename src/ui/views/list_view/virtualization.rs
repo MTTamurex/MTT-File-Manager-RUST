@@ -35,10 +35,13 @@ pub(super) fn render_virtualized_content(
     let viewport_h = viewport_rect.height();
 
     // 1. Handle mouse wheel scroll (Manual Source of Truth)
-    let pointer_over_viewport = ui
-        .ctx()
-        .pointer_hover_pos()
-        .is_some_and(|pos| viewport_rect.contains(pos));
+    let pointer_over_viewport = ui.ctx().pointer_hover_pos().is_some_and(|pos| {
+        viewport_rect.contains(pos)
+            && !ui
+                .ctx()
+                .layer_id_at(pos)
+                .is_some_and(|layer| layer.order == egui::Order::Foreground)
+    });
     if pointer_over_viewport && !ctx.global_search_active {
         let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
         if scroll_delta != 0.0 {
