@@ -21,6 +21,7 @@ macro_rules! debug_log {
 }
 
 mod file_op_events;
+mod global_search_events;
 mod helpers;
 mod rebuild_events;
 mod thumbnail_events;
@@ -68,6 +69,9 @@ impl ImageViewerApp {
         let _t_auto_reload_done = watcher_perf.auto_reload_done;
 
         let _t_streaming_done = self.process_streaming_and_thumbnail_events(ctx);
+
+        // GLOBAL SEARCH: Process search results from worker
+        self.process_global_search_events();
 
         // PERF: Log detailed breakdown when process_incoming_messages is slow
         let _t_msg_total = _t_msg_start.elapsed().as_millis();

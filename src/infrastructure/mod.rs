@@ -13,4 +13,5 @@ pub mod onedrive;
 pub mod security;
 pub mod virtual_drive_config;
 pub mod windows;
+pub mod global_search;
 pub mod windows_clipboard;
