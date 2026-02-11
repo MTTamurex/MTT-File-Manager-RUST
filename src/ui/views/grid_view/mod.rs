@@ -256,10 +256,13 @@ pub fn render_grid_view(
     let viewport_rect = ui.available_rect_before_wrap();
     let viewport_h = viewport_rect.height();
     let max_scroll = (total_content_height - viewport_h).max(0.0);
-    let pointer_over_viewport = ui
-        .ctx()
-        .pointer_hover_pos()
-        .is_some_and(|pos| viewport_rect.contains(pos));
+    let pointer_over_viewport = ui.ctx().pointer_hover_pos().is_some_and(|pos| {
+        viewport_rect.contains(pos)
+            && !ui
+                .ctx()
+                .layer_id_at(pos)
+                .is_some_and(|layer| layer.order == egui::Order::Foreground)
+    });
     let consume_scroll = pointer_over_viewport && !ctx.global_search_active;
 
     scroll::apply_scroll_input(ui, ctx.mut_scroll_offset_y, max_scroll, consume_scroll);

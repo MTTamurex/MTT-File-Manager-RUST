@@ -513,6 +513,13 @@ impl MediaPreview {
         }
     }
 
+    /// Show OSD text on the video using MPV's native show-text command
+    pub fn show_osd(&mut self, text: &str, duration_ms: i64) {
+        if let MediaPreview::Video(player) = self {
+            player.show_osd_text(text, duration_ms);
+        }
+    }
+
     /// Access to controls state (for inline menus)
     pub fn controls_state_mut(
         &mut self,
