@@ -134,6 +134,7 @@ pub struct GridViewContext<'a> {
     pub scroll_to_selected: bool, // Scroll to selected item on keyboard navigation
     pub is_computer_view: bool,
     pub is_recycle_bin_view: bool,
+    pub global_search_active: bool,
     pub texture_cache: &'a mut lru::LruCache<PathBuf, egui::TextureHandle>,
     pub loading_set: &'a mut FxHashSet<PathBuf>,
     /// Set of icons currently loading (async)
@@ -255,8 +256,13 @@ pub fn render_grid_view(
     let viewport_rect = ui.available_rect_before_wrap();
     let viewport_h = viewport_rect.height();
     let max_scroll = (total_content_height - viewport_h).max(0.0);
+    let pointer_over_viewport = ui
+        .ctx()
+        .pointer_hover_pos()
+        .is_some_and(|pos| viewport_rect.contains(pos));
+    let consume_scroll = pointer_over_viewport && !ctx.global_search_active;
 
-    scroll::apply_scroll_input(ui, ctx.mut_scroll_offset_y, max_scroll);
+    scroll::apply_scroll_input(ui, ctx.mut_scroll_offset_y, max_scroll, consume_scroll);
     let (current_scroll, scroll_delta) =
         scroll::compute_visual_scroll(ui, *ctx.mut_scroll_offset_y, viewport_h);
 

@@ -236,6 +236,7 @@ pub struct ListViewContext<'a> {
     pub is_computer_view: bool,
     pub is_recycle_bin_view: bool,
     pub is_onedrive_folder: bool,
+    pub global_search_active: bool,
     pub texture_cache: &'a mut lru::LruCache<PathBuf, egui::TextureHandle>,
     pub loading_set: &'a mut FxHashSet<PathBuf>,
     pub loading_icons: &'a mut FxHashSet<PathBuf>,

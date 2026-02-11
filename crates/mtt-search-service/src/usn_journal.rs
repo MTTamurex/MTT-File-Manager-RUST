@@ -100,7 +100,10 @@ pub fn discover_ntfs_volumes() -> Vec<(char, String)> {
 /// Requires admin/SYSTEM privileges.
 pub fn open_volume(drive_letter: char) -> Result<HANDLE, String> {
     let volume_path = format!("\\\\.\\{}:", drive_letter);
-    let wide: Vec<u16> = volume_path.encode_utf16().chain(std::iter::once(0)).collect();
+    let wide: Vec<u16> = volume_path
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
 
     unsafe {
         CreateFileW(
@@ -200,7 +203,12 @@ pub fn enumerate_all_files(
         let next_frn = u64::from_le_bytes(buffer[0..8].try_into().unwrap());
 
         // Parse USN_RECORD_V2 entries starting after the 8-byte header
-        parse_usn_records(&buffer[8..bytes_returned as usize], index, &mut total_records, false);
+        parse_usn_records(
+            &buffer[8..bytes_returned as usize],
+            index,
+            &mut total_records,
+            false,
+        );
 
         // Advance to next batch
         enum_data.starting_file_reference_number = next_frn;
@@ -287,12 +295,7 @@ pub fn read_usn_changes(
 /// Parse USN_RECORD_V2 entries from a buffer.
 /// If `apply_changes` is true, process DELETE/RENAME reasons.
 /// Otherwise, just insert all records (initial enumeration).
-fn parse_usn_records(
-    data: &[u8],
-    index: &mut VolumeIndex,
-    count: &mut usize,
-    apply_changes: bool,
-) {
+fn parse_usn_records(data: &[u8], index: &mut VolumeIndex, count: &mut usize, apply_changes: bool) {
     let mut offset = 0usize;
 
     while offset + 64 <= data.len() {

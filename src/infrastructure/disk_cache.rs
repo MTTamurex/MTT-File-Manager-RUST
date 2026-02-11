@@ -538,29 +538,24 @@ impl ThumbnailDiskCache {
     /// Retrieves a cached folder preview (Shell sandwich icon) from SQLite.
     /// Returns decoded RGBA data ready for GPU upload.
     /// [READER]
-    pub fn get_folder_preview_cache(
-        &self,
-        folder_path: &Path,
-    ) -> Option<(Vec<u8>, u32, u32)> {
+    pub fn get_folder_preview_cache(&self, folder_path: &Path) -> Option<(Vec<u8>, u32, u32)> {
         let db = self.reader.lock().ok()?;
         let mut stmt = db
-            .prepare_cached(
-                "SELECT data, width, height FROM folder_previews WHERE folder_path = ?",
-            )
+            .prepare_cached("SELECT data, width, height FROM folder_previews WHERE folder_path = ?")
             .ok()?;
 
         let folder_path_str = folder_path.to_string_lossy();
-        let (webp_data, _db_width, _db_height): (Vec<u8>, u32, u32) = match stmt
-            .query_row([&*folder_path_str], |row| {
+        let (webp_data, _db_width, _db_height): (Vec<u8>, u32, u32) =
+            match stmt.query_row([&*folder_path_str], |row| {
                 Ok((
                     row.get::<_, Vec<u8>>(0)?,
                     row.get::<_, i64>(1)? as u32,
                     row.get::<_, i64>(2)? as u32,
                 ))
             }) {
-            Ok(row) => row,
-            Err(_) => return None,
-        };
+                Ok(row) => row,
+                Err(_) => return None,
+            };
 
         // Decode WebP back to RGBA
         let decoder = webp::Decoder::new(&webp_data);

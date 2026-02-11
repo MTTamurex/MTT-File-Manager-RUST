@@ -803,6 +803,7 @@ impl ImageViewerApp {
             global_search_receiver: global_search_res_rx,
             global_search_query: String::new(),
             global_search_results: Vec::new(),
+            global_search_selected_index: None,
             global_search_active: false,
             global_search_loading: false,
             global_search_available: false,
@@ -886,8 +887,7 @@ impl ImageViewerApp {
         // Pre-populate drive_info_cache at startup so the details panel can show
         // drive info even if the user never visits "Este Computador".
         {
-            let disks_snapshot: Vec<String> =
-                app.disks.iter().map(|(p, _)| p.clone()).collect();
+            let disks_snapshot: Vec<String> = app.disks.iter().map(|(p, _)| p.clone()).collect();
             let tx = app.drive_info_tx.clone();
             let startup_ctx = ctx.clone();
             std::thread::spawn(move || {

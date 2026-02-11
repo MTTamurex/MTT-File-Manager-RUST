@@ -65,9 +65,7 @@ pub fn spawn_folder_preview_worker(
 
             // FAST PATH: Check SQLite disk cache first (NVMe read, ~1ms)
             let cache_start = Instant::now();
-            if let Some((rgba_data, width, height)) =
-                disk_cache.get_folder_preview_cache(&path)
-            {
+            if let Some((rgba_data, width, height)) = disk_cache.get_folder_preview_cache(&path) {
                 eprintln!(
                     "[FOLDER PREVIEW] DB HIT {:?} ({}x{}, {:.1}ms)",
                     path.file_name().unwrap_or_default(),

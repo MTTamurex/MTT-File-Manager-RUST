@@ -16,10 +16,8 @@ const SERVICE_DISPLAY_NAME: &str = "MTT File Manager Search Indexer";
 
 /// Install the service into the Windows Service Control Manager.
 pub fn install_service() {
-    let manager = ServiceManager::local_computer(
-        None::<&str>,
-        ServiceManagerAccess::CREATE_SERVICE,
-    );
+    let manager =
+        ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CREATE_SERVICE);
 
     let manager = match manager {
         Ok(m) => m,
@@ -65,10 +63,7 @@ pub fn install_service() {
 
 /// Uninstall the service from the Windows Service Control Manager.
 pub fn uninstall_service() {
-    let manager = ServiceManager::local_computer(
-        None::<&str>,
-        ServiceManagerAccess::CONNECT,
-    );
+    let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT);
 
     let manager = match manager {
         Ok(m) => m,
@@ -113,17 +108,15 @@ fn handle_service_main(_args: Vec<OsString>) {
     let shutdown = Arc::new(AtomicBool::new(false));
     let shutdown_clone = shutdown.clone();
 
-    let status_handle = service_control_handler::register(
-        SERVICE_NAME,
-        move |control| match control {
+    let status_handle =
+        service_control_handler::register(SERVICE_NAME, move |control| match control {
             ServiceControl::Stop | ServiceControl::Shutdown => {
                 shutdown_clone.store(true, Ordering::Relaxed);
                 ServiceControlHandlerResult::NoError
             }
             ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
             _ => ServiceControlHandlerResult::NotImplemented,
-        },
-    );
+        });
 
     let status_handle = match status_handle {
         Ok(h) => h,

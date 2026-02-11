@@ -253,7 +253,9 @@ impl ImageViewerApp {
                 // navigate them to "Este Computador" to avoid showing stale cached data.
                 let removed_drives: Vec<String> = old_disks
                     .iter()
-                    .filter(|(old_path, _)| !self.disks.iter().any(|(new_path, _)| new_path == old_path))
+                    .filter(|(old_path, _)| {
+                        !self.disks.iter().any(|(new_path, _)| new_path == old_path)
+                    })
                     .map(|(path, _)| path.clone())
                     .collect();
 

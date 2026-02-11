@@ -120,14 +120,14 @@ pub struct ImageViewerApp {
     // UI state
     pub disks: Vec<(String, String)>, // (path, label)
     pub last_drive_refresh: Instant,
-    pub last_drive_bitmask: u32,  // Fast bitmask from GetLogicalDrives() for quick change detection
+    pub last_drive_bitmask: u32, // Fast bitmask from GetLogicalDrives() for quick change detection
     pub drive_scan_pending: bool, // Whether a background drive scan is in progress
     pub drive_scan_rx: Receiver<Vec<(String, String)>>, // Background drive scan results
     pub drive_scan_tx: Sender<Vec<(String, String)>>, // Sender cloned into background thread
     pub drive_info_rx: Receiver<Vec<(String, crate::domain::file_entry::DriveInfo)>>, // Background volume info
     pub drive_info_tx: Sender<Vec<(String, crate::domain::file_entry::DriveInfo)>>, // Sender for bg thread
     pub drive_info_cache: std::collections::HashMap<String, crate::domain::file_entry::DriveInfo>, // Persistent cache surviving navigation
-    pub thumbnail_size: f32,                                                        // Zoom: 64-512
+    pub thumbnail_size: f32, // Zoom: 64-512
     pub selected_item: Option<usize>,
     pub selected_file: Option<FileEntry>,
     pub multi_selection: FxHashSet<PathBuf>,
@@ -315,9 +315,11 @@ pub struct ImageViewerApp {
 
     // GLOBAL SEARCH (via MTT Search Service)
     pub global_search_sender: Sender<crate::workers::global_search_worker::GlobalSearchRequest>,
-    pub global_search_receiver: Receiver<crate::workers::global_search_worker::GlobalSearchResponse>,
+    pub global_search_receiver:
+        Receiver<crate::workers::global_search_worker::GlobalSearchResponse>,
     pub global_search_query: String,
     pub global_search_results: Vec<mtt_search_protocol::SearchResultItem>,
+    pub global_search_selected_index: Option<usize>,
     pub global_search_active: bool,
     pub global_search_loading: bool,
     pub global_search_available: bool,
