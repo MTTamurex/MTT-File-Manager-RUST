@@ -6,6 +6,10 @@ use windows::Win32::Foundation::{CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_PIPE_B
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, ReadFile, WriteFile, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_NONE, OPEN_EXISTING,
 };
+use windows::Win32::System::Pipes::PeekNamedPipe;
+
+const PIPE_IO_TIMEOUT_MS: u64 = 8000;
+const PIPE_POLL_INTERVAL_MS: u64 = 15;
 
 /// Send a search query to the service and return results.
 pub fn search(query: &str, max_results: u32) -> Result<Vec<SearchResultItem>, String> {
@@ -35,8 +39,16 @@ pub fn search(query: &str, max_results: u32) -> Result<Vec<SearchResultItem>, St
 
 /// Check if the service is running.
 pub fn ping() -> bool {
-    let Ok(pipe) = open_pipe() else {
-        return false;
+    let pipe = match open_pipe() {
+        Ok(pipe) => pipe,
+        Err(e) => {
+            // Service may be saturated but alive; don't mark as offline immediately.
+            if e.contains("All pipe instances are busy") {
+                eprintln!("[GLOBAL-SEARCH] Ping: service busy");
+                return true;
+            }
+            return false;
+        }
     };
 
     let ok = write_message(pipe, &SearchRequest::Ping).is_ok()
@@ -77,7 +89,7 @@ pub fn get_status() -> Result<IndexStatusInfo, String> {
 fn open_pipe() -> Result<HANDLE, String> {
     let pipe_name_wide: Vec<u16> = PIPE_NAME.encode_utf16().chain(std::iter::once(0)).collect();
 
-    const RETRY_COUNT: usize = 12;
+    const RETRY_COUNT: usize = 24;
     const WAIT_MS: u32 = 250;
 
     let mut last_error = String::from("Search service not available");
@@ -126,16 +138,7 @@ fn write_message<T: serde::Serialize>(pipe: HANDLE, msg: &T) -> Result<(), Strin
 fn read_response<T: for<'de> serde::Deserialize<'de>>(pipe: HANDLE) -> Result<T, String> {
     // Read 4-byte length prefix
     let mut len_buf = [0u8; 4];
-    let mut bytes_read: u32 = 0;
-
-    unsafe {
-        ReadFile(pipe, Some(&mut len_buf), Some(&mut bytes_read), None)
-            .map_err(|e| format!("ReadFile (length) failed: {}", e))?;
-    }
-
-    if bytes_read != 4 {
-        return Err("Incomplete length prefix".into());
-    }
+    read_exact_with_timeout(pipe, &mut len_buf, PIPE_IO_TIMEOUT_MS)?;
 
     let payload_len = u32::from_le_bytes(len_buf) as usize;
     if payload_len == 0 || payload_len > 10 * 1024 * 1024 {
@@ -144,26 +147,53 @@ fn read_response<T: for<'de> serde::Deserialize<'de>>(pipe: HANDLE) -> Result<T,
 
     // Read payload
     let mut payload = vec![0u8; payload_len];
-    let mut total_read = 0usize;
+    read_exact_with_timeout(pipe, &mut payload, PIPE_IO_TIMEOUT_MS)?;
 
-    while total_read < payload_len {
-        let mut chunk_read: u32 = 0;
+    decode_message(&payload)
+}
+
+fn read_exact_with_timeout(pipe: HANDLE, buf: &mut [u8], timeout_ms: u64) -> Result<(), String> {
+    let start = std::time::Instant::now();
+    let mut offset = 0usize;
+
+    while offset < buf.len() {
+        if start.elapsed() > std::time::Duration::from_millis(timeout_ms) {
+            return Err(format!(
+                "Search service timeout waiting response ({}ms)",
+                timeout_ms
+            ));
+        }
+
+        let mut total_avail: u32 = 0;
+        unsafe {
+            PeekNamedPipe(pipe, None, 0, None, Some(&mut total_avail), None)
+                .map_err(|e| format!("PeekNamedPipe failed: {}", e))?;
+        }
+
+        if total_avail == 0 {
+            std::thread::sleep(std::time::Duration::from_millis(PIPE_POLL_INTERVAL_MS));
+            continue;
+        }
+
+        let remaining = buf.len() - offset;
+        let to_read = remaining.min(total_avail as usize);
+        let mut bytes_read: u32 = 0;
         unsafe {
             ReadFile(
                 pipe,
-                Some(&mut payload[total_read..]),
-                Some(&mut chunk_read),
+                Some(&mut buf[offset..offset + to_read]),
+                Some(&mut bytes_read),
                 None,
             )
-            .map_err(|e| format!("ReadFile (payload) failed: {}", e))?;
+            .map_err(|e| format!("ReadFile failed: {}", e))?;
         }
 
-        if chunk_read == 0 {
+        if bytes_read == 0 {
             return Err("Pipe closed during read".into());
         }
 
-        total_read += chunk_read as usize;
+        offset += bytes_read as usize;
     }
 
-    decode_message(&payload)
+    Ok(())
 }
