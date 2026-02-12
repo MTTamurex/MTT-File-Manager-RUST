@@ -110,7 +110,7 @@ impl ImageViewerApp {
                     }
                 }
                 Err(e) => {
-                    eprintln!("[RECYCLE BIN] Erro ao enumerar: {:?}", e);
+                    log::error!("[RECYCLE BIN] Erro ao enumerar: {:?}", e);
                     let _ = file_entry_sender.send((my_gen, Vec::new()));
                     ctx.request_repaint();
                 }
@@ -260,7 +260,7 @@ impl ImageViewerApp {
                     .collect();
 
                 if !removed_drives.is_empty() {
-                    eprintln!("[DRIVE-REFRESH] Drives removed: {:?}", removed_drives);
+                    log::info!("[DRIVE-REFRESH] Drives removed: {:?}", removed_drives);
 
                     // Check if user is currently browsing inside a removed drive
                     let current = self.current_path.clone();
@@ -269,7 +269,7 @@ impl ImageViewerApp {
                         && removed_drives.iter().any(|d| current.starts_with(d));
 
                     if on_removed_drive {
-                        eprintln!(
+                        log::warn!(
                             "[DRIVE-REFRESH] Current path '{}' is on a removed drive, redirecting to Este Computador",
                             current
                         );
@@ -317,7 +317,7 @@ impl ImageViewerApp {
         if elapsed >= Duration::from_millis(DRIVE_BITMASK_CHECK_INTERVAL_MS) {
             let current_bitmask = crate::infrastructure::windows::get_logical_drives_bitmask();
             if current_bitmask != self.last_drive_bitmask {
-                eprintln!(
+                log::debug!(
                     "[DRIVE-REFRESH] Bitmask changed: 0x{:08X} -> 0x{:08X}",
                     self.last_drive_bitmask, current_bitmask
                 );

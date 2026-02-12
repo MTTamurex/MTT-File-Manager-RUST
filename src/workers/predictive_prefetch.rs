@@ -188,7 +188,7 @@ pub fn spawn_predictive_prefetcher(
                                         .collect();
 
                                 directory_cache.put(prediction.path.clone(), file_entries);
-                                eprintln!(
+                                log::debug!(
                                     "[PERF] Prefetch cached: {:?} ({})",
                                     prediction.path.file_name(),
                                     prediction.reason

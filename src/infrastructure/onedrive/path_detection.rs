@@ -10,7 +10,7 @@ pub(super) fn init_onedrive_paths() {
                 }
             }
         }
-        eprintln!("[OneDrive] Detected roots: {:?}", roots);
+        log::info!("[OneDrive] Detected roots: {:?}", roots);
         roots
     });
 }

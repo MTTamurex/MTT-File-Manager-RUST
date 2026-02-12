@@ -50,7 +50,7 @@ pub(super) fn try_handle_fast_paths(
             if !is_onedrive_base {
                 let dir_mtime_ms = directory_mtime_ms(base_path_buf);
                 if dir_mtime_ms > cached_at_ms {
-                    eprintln!(
+                    log::debug!(
                         "[FOLDER-LOADING] DirectoryCache stale for {:?} (dir_mtime_ms={} > cached_at_ms={}), invalidating",
                         base_path_buf, dir_mtime_ms, cached_at_ms
                     );
@@ -59,7 +59,7 @@ pub(super) fn try_handle_fast_paths(
                         let _ = di.invalidate(base_path_buf);
                     }
                 } else {
-                    eprintln!(
+                    log::debug!(
                         "[FOLDER-LOADING] Phase 1: Cache hit for {:?} - {} entries, sending to UI immediately",
                         base_path_buf,
                         cached_entries.len()
@@ -92,14 +92,14 @@ pub(super) fn try_handle_fast_paths(
                     // directory and invalidates the cache on changes. We don't need to poll
                     // the filesystem to check for modifications — the watcher handles this.
                     // This eliminates std::fs::metadata() syscalls on HDD per navigation.
-                    eprintln!(
+                    log::debug!(
                         "[FOLDER-LOADING] Phase 2: Cache valid, trusting watcher for {:?} - HDD silence maintained",
                         base_path_buf
                     );
                     return true;
                 }
             } else {
-                eprintln!(
+                log::debug!(
                     "[FOLDER-LOADING] Phase 1: Cache hit for {:?} - {} entries, sending to UI immediately",
                     base_path_buf,
                     cached_entries.len()
@@ -131,34 +131,34 @@ pub(super) fn try_handle_fast_paths(
                 // directory and invalidates the cache on changes. We don't need to poll
                 // the filesystem to check for modifications — the watcher handles this.
                 // This eliminates std::fs::metadata() syscalls on HDD per navigation.
-                eprintln!(
+                log::debug!(
                     "[FOLDER-LOADING] Phase 2: Cache valid, trusting watcher for {:?} - HDD silence maintained",
                     base_path_buf
                 );
                 return true;
             }
         } else {
-            eprintln!(
+            log::debug!(
                 "[FOLDER-LOADING] Phase 1: Cache miss for {:?}, proceeding to Phase 3 (disk load)",
                 base_path_buf
             );
         }
     }
 
-    eprintln!(
+    log::debug!(
         "[FOLDER-LOADING] Phase 3: Starting disk scan for {:?} (batch_size={}, is_ssd={})",
         current_path, *batch_size, is_ssd
     );
 
     // Check if we are navigating a virtual Shell folder (like an archive)
     if is_shell_navigation_path(&PathBuf::from(base_path), false) {
-        eprintln!(
+        log::debug!(
             "[FOLDER-LOADING] Shell navigation detected for {:?}",
             base_path
         );
         match list_shell_folder(&PathBuf::from(base_path)) {
             Ok(shell_items) => {
-                eprintln!(
+                log::debug!(
                     "[FOLDER-LOADING] Shell folder listed OK: {} items for {:?}",
                     shell_items.len(),
                     base_path
@@ -171,14 +171,14 @@ pub(super) fn try_handle_fast_paths(
                 }
             }
             Err(e) => {
-                eprintln!(
+                log::error!(
                     "[FOLDER-LOADING] Shell folder FAILED for {:?}: {:?}",
                     base_path, e
                 );
             }
         }
     } else {
-        eprintln!(
+        log::debug!(
             "[FOLDER-LOADING] NOT detected as shell path: {:?}",
             base_path
         );
@@ -208,14 +208,14 @@ pub(super) fn try_handle_fast_paths(
 
                 if dir_modified > meta.last_scan {
                     // Index is stale - directory was modified after last scan
-                    eprintln!(
+                    log::debug!(
                         "[FOLDER-LOADING] DirectoryIndex stale for {:?} (dir_mtime={} > index_time={}), invalidating",
                         base, dir_modified, meta.last_scan
                     );
                     let _ = di.invalidate(&base);
                     // Fall through to disk scan below
                 } else {
-                    eprintln!(
+                    log::debug!(
                         "[FOLDER-LOADING] Using DirectoryIndex (pre-built index) for {:?}",
                         base
                     );
@@ -289,7 +289,7 @@ pub(super) fn try_handle_fast_paths(
             if !is_onedrive_base {
                 let dir_mtime_ms = directory_mtime_ms(&base_path_buf_owned);
                 if dir_mtime_ms > cached_at_ms {
-                    eprintln!(
+                    log::debug!(
                         "[FOLDER-LOADING] Secondary DirectoryCache stale for {:?} (dir_mtime_ms={} > cached_at_ms={}), invalidating",
                         base_path_buf_owned, dir_mtime_ms, cached_at_ms
                     );
@@ -301,7 +301,7 @@ pub(super) fn try_handle_fast_paths(
                 }
             }
 
-            eprintln!(
+            log::debug!(
                 "[FOLDER-LOADING] Using secondary DirectoryCache for {:?}",
                 base_path
             );

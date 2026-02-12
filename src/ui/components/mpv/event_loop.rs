@@ -19,12 +19,12 @@ pub fn start_event_loop(
 
     // Spawn background polling thread
     thread::spawn(move || {
-        eprintln!("[MpvPreview] Async polling thread started");
+        log::info!("[MpvPreview] Async polling thread started");
 
         loop {
             // Check shutdown flag
             if !running.load(Ordering::Acquire) {
-                eprintln!("[MpvPreview] Async polling thread stopping...");
+                log::info!("[MpvPreview] Async polling thread stopping...");
                 break;
             }
 
@@ -82,14 +82,14 @@ pub fn start_event_loop(
             thread::sleep(Duration::from_millis(250));
         }
 
-        eprintln!("[MpvPreview] Async polling thread exited");
+        log::info!("[MpvPreview] Async polling thread exited");
     })
 }
 
 /// Stop the event loop gracefully
 pub fn stop_event_loop(running: Arc<AtomicBool>, handle: Option<thread::JoinHandle<()>>) {
     if running.load(Ordering::Relaxed) {
-        eprintln!("[MpvPreview] Shutting down event loop thread...");
+        log::info!("[MpvPreview] Shutting down event loop thread...");
 
         // Signal thread to stop
         running.store(false, Ordering::Release);
@@ -104,8 +104,8 @@ pub fn stop_event_loop(running: Arc<AtomicBool>, handle: Option<thread::JoinHand
 
             // Join or warn if still running
             match handle.join() {
-                Ok(_) => eprintln!("[MpvPreview] Event loop thread joined successfully"),
-                Err(_) => eprintln!("[MpvPreview] Warning: Event loop thread panicked"),
+                Ok(_) => log::info!("[MpvPreview] Event loop thread joined successfully"),
+                Err(_) => log::warn!("[MpvPreview] Event loop thread panicked"),
             }
         }
     }

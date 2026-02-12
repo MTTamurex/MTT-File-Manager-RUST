@@ -65,7 +65,7 @@ pub fn extract_media_metadata(path: &Path) -> MediaMetadata {
     // CRITICAL FIX: Skip metadata extraction for cloud-only OneDrive files
     // Reading metadata requires file I/O which can block indefinitely on cloud-only files
     if onedrive::is_onedrive_path(path) && !onedrive::is_locally_available(path) {
-        eprintln!("[METADATA] Skipping cloud-only OneDrive file: {:?}", path);
+        log::debug!("[METADATA] Skipping cloud-only OneDrive file: {:?}", path);
         return MediaMetadata::default();
     }
 
@@ -114,7 +114,7 @@ fn extract_media_metadata_with_timeout(path: &Path, is_image: bool) -> MediaMeta
 
     loop {
         if start.elapsed() >= timeout {
-            eprintln!(
+            log::warn!(
                 "[METADATA TIMEOUT] Extraction exceeded {}ms for {:?} — returning empty",
                 METADATA_EXTRACTION_TIMEOUT_MS, path_for_log
             );

@@ -18,13 +18,20 @@ fn load_app_icon() -> Option<egui::IconData> {
             })
         }
         Err(e) => {
-            eprintln!("Warning: Failed to load embedded app icon: {}", e);
+            log::warn!("Failed to load embedded app icon: {}", e);
             None
         }
     }
 }
 
 fn main() -> eframe::Result<()> {
+    // Initialize logging: default=warn, MTT modules=info, RUST_LOG env overrides
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,mtt_file_manager=info"))
+        .format_timestamp_millis()
+        .init();
+
+    log::info!("MTT File Manager starting");
+
     // Initialize codec name cache (queries Windows Registry on-demand)
     mtt_file_manager::infrastructure::windows::codec_registry::init_codec_cache();
 

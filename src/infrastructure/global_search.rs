@@ -69,7 +69,7 @@ pub fn ping() -> bool {
             Err(e) => {
                 // Service may be saturated but alive; don't mark as offline immediately.
                 if e.contains("All pipe instances are busy") {
-                    eprintln!("[GLOBAL-SEARCH] Ping: service busy");
+                    log::debug!("[GLOBAL-SEARCH] Ping: service busy");
                     return true;
                 }
                 return false;
@@ -108,7 +108,7 @@ pub fn ping() -> bool {
         }
 
         if let Err(e) = ping_read {
-            eprintln!("[GLOBAL-SEARCH] Ping failed: {}", e);
+            log::warn!("[GLOBAL-SEARCH] Ping failed: {}", e);
         }
         return false;
     }

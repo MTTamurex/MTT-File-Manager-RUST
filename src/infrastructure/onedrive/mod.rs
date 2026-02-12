@@ -194,12 +194,12 @@ fn onedrive_io_pool() -> &'static OneDriveIoPool {
 /// When minimized, timeout operations are cancelled more aggressively.
 pub fn set_app_minimized(minimized: bool) {
     APP_MINIMIZED.store(minimized, Ordering::SeqCst);
-    eprintln!(
+    log::debug!(
         "[ONEDRIVE LIFECYCLE] App minimized state changed: {}",
         minimized
     );
     if minimized {
-        eprintln!(
+        log::debug!(
             "[ONEDRIVE LIFECYCLE] Active timeout threads at minimize: {}",
             ACTIVE_TIMEOUT_THREADS.load(Ordering::SeqCst)
         );

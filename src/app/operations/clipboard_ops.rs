@@ -62,7 +62,7 @@ impl ImageViewerApp {
 
     /// Colar: Lê do clipboard usando ClipboardManager via Background Worker
     pub fn command_paste(&mut self, idx: Option<usize>) {
-        eprintln!("[DEBUG] command_paste called with idx: {:?}", idx);
+        log::debug!("[DEBUG] command_paste called with idx: {:?}", idx);
 
         // Destination folder
         let dest_folder = if let Some(idx) = idx {
@@ -112,7 +112,7 @@ impl ImageViewerApp {
 
     pub fn copy_path_to_clipboard(&self, path: &Path) {
         if let Err(e) = file_operations::copy_path_to_clipboard(path) {
-            eprintln!("Erro clipboard: {}", e);
+            log::error!("Erro clipboard: {}", e);
         }
     }
 }

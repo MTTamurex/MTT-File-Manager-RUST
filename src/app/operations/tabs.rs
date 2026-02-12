@@ -125,7 +125,7 @@ impl ImageViewerApp {
             && !self.current_path.is_empty();
 
         if needs_reload {
-            eprintln!(
+            log::debug!(
                 "[TAB] Detected cleared items cache, reloading folder: {}",
                 self.current_path
             );

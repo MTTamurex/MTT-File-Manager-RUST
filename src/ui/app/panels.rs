@@ -217,18 +217,18 @@ fn render_preview_panel_layout(
 
                                         if is_folder {
                                             // Handle folder preview refresh
-                                            eprintln!(
+                                            log::debug!(
                                                 "[REFRESH FOLDER PREVIEW] Starting refresh for: {:?}",
                                                 path
                                             );
                                             // Clear folder preview cache
                                             app.cache_manager.folder_preview_cache.pop(&path);
-                                            eprintln!("[REFRESH FOLDER PREVIEW] Folder preview cache cleared");
+                                            log::debug!("[REFRESH FOLDER PREVIEW] Folder preview cache cleared");
                                             app.cache_manager.finish_folder_preview_loading(&path);
-                                            eprintln!("[REFRESH FOLDER PREVIEW] Loading state cleared");
+                                            log::debug!("[REFRESH FOLDER PREVIEW] Loading state cleared");
                                             // Re-request folder preview
                                             let _ = app.folder_preview_sender.send(path.clone());
-                                            eprintln!(
+                                            log::debug!(
                                                 "[REFRESH FOLDER PREVIEW] Request sent for: {:?}",
                                                 path
                                             );
@@ -239,31 +239,31 @@ fn render_preview_panel_layout(
                                             );
                                         } else {
                                             // Handle file thumbnail refresh (existing logic)
-                                            eprintln!(
+                                            log::debug!(
                                                 "[REFRESH THUMBNAIL] Starting refresh for: {:?}",
                                                 path
                                             );
                                             // Clear all caches to allow retry
                                             app.disk_cache.remove_cache_for_path(&path);
-                                            eprintln!("[REFRESH THUMBNAIL] Disk cache cleared");
+                                            log::debug!("[REFRESH THUMBNAIL] Disk cache cleared");
                                             app.cache_manager.texture_cache.pop(&path);
-                                            eprintln!("[REFRESH THUMBNAIL] Texture cache cleared");
+                                            log::debug!("[REFRESH THUMBNAIL] Texture cache cleared");
                                             app.cache_manager.loading_set.remove(&path);
-                                            eprintln!("[REFRESH THUMBNAIL] Loading set cleared");
+                                            log::debug!("[REFRESH THUMBNAIL] Loading set cleared");
                                             // CRITICAL: Also clear RAM cache (rgba_data_cache) or
                                             // request_thumbnail_load will return early without re-extracting
                                             app.cache_manager.pop_rgba_data(&path);
-                                            eprintln!("[REFRESH THUMBNAIL] RGBA cache cleared");
+                                            log::debug!("[REFRESH THUMBNAIL] RGBA cache cleared");
                                             // Clear failure cache so it will be retried
                                             crate::workers::thumbnail::clear_failure_cache(&path);
-                                            eprintln!("[REFRESH THUMBNAIL] Failure cache cleared");
+                                            log::debug!("[REFRESH THUMBNAIL] Failure cache cleared");
                                             // Force regeneration by passing modified=0 (will trigger new extraction)
                                             app.request_thumbnail_load_with_modified(
                                                 path.clone(),
                                                 512,
                                                 0,
                                             );
-                                            eprintln!(
+                                            log::debug!(
                                                 "[REFRESH THUMBNAIL] Request sent to worker for: {:?}",
                                                 path
                                             );

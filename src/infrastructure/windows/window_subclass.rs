@@ -196,7 +196,7 @@ pub fn install_borderless_subclass(hwnd: HWND) -> bool {
         SUBCLASS_INSTALLED.store(true, Ordering::SeqCst);
         true
     } else {
-        eprintln!("Failed to install borderless window subclass");
+        log::error!("Failed to install borderless window subclass");
         false
     }
 }

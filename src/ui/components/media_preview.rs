@@ -45,7 +45,7 @@ impl GifPlayer {
                     (Some(frame.clone()), frame.delay_ms, d.is_complete)
                 }
                 Err(_) => {
-                    eprintln!("[GifPlayer] Erro ao lock dados - Mutex poisonado");
+                    log::error!("[GifPlayer] Erro ao lock dados - Mutex poisonado");
                     return;
                 }
             }
@@ -70,7 +70,7 @@ impl GifPlayer {
                     match self.data.lock() {
                         Ok(d) => self.current_frame % d.frames.len(),
                         Err(_) => {
-                            eprintln!(
+                            log::error!(
                                 "[GifPlayer] Erro ao lock dados para next_idx - Mutex poisonado"
                             );
                             return;
@@ -82,7 +82,7 @@ impl GifPlayer {
                     match self.data.lock() {
                         Ok(d) => d.frames[next_idx].clone(),
                         Err(_) => {
-                            eprintln!(
+                            log::error!(
                                 "[GifPlayer] Erro ao lock dados para next_frame - Mutex poisonado"
                             );
                             return;

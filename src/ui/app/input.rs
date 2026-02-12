@@ -189,7 +189,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     .global_search_sender
                     .send(crate::workers::global_search_worker::GlobalSearchRequest::CheckStatus)
                 {
-                    eprintln!("[GLOBAL-SEARCH] Failed to queue status check: {}", e);
+                    log::error!("[GLOBAL-SEARCH] Failed to queue status check: {}", e);
                 }
             }
             user_active = true;
@@ -251,7 +251,7 @@ fn handle_media_hardware_input(app: &mut ImageViewerApp, ctx: &egui::Context) ->
                     consumed = true;
                 }
                 Err(e) => {
-                    eprintln!("Error toggling VSR (Ctrl+Shift+U): {}", e);
+                    log::error!("toggling VSR (Ctrl+Shift+U): {}", e);
                 }
             }
         } else if ctrl_down && shift_down && a_down {
@@ -350,7 +350,7 @@ fn handle_quick_search(app: &mut ImageViewerApp, ctx: &egui::Context) {
     if timeout_elapsed && !buffer_is_empty {
         let active_tab = app.tab_manager.active_mut();
         active_tab.quick_search_buffer.clear();
-        eprintln!(
+        log::debug!(
             "[QUICK_SEARCH] Buffer cleared due to timeout (Tab {})",
             active_tab.id
         );
@@ -378,7 +378,7 @@ fn handle_quick_search(app: &mut ImageViewerApp, ctx: &egui::Context) {
         if !active_tab.quick_search_buffer.is_empty() {
             active_tab.quick_search_buffer.pop();
             active_tab.quick_search_last_input = std::time::Instant::now();
-            eprintln!(
+            log::debug!(
                 "[QUICK_SEARCH] Backspace - Buffer: '{}' (Tab {})",
                 active_tab.quick_search_buffer, active_tab.id
             );
@@ -391,7 +391,7 @@ fn handle_quick_search(app: &mut ImageViewerApp, ctx: &egui::Context) {
         let active_tab = app.tab_manager.active_mut();
         active_tab.quick_search_buffer.push_str(&text);
         active_tab.quick_search_last_input = std::time::Instant::now();
-        eprintln!(
+        log::debug!(
             "[QUICK_SEARCH] Input: '{}' - Buffer: '{}' (Tab {})",
             text, active_tab.quick_search_buffer, active_tab.id
         );
@@ -416,7 +416,7 @@ fn perform_quick_search(app: &mut ImageViewerApp) {
 
     if let Some(index) = found_index {
         let tab_id = app.tab_manager.active().id;
-        eprintln!(
+        log::debug!(
             "[QUICK_SEARCH] Found match at index {} - '{}' (Tab {})",
             index, app.items[index].name, tab_id
         );
@@ -439,7 +439,7 @@ fn perform_quick_search(app: &mut ImageViewerApp) {
         app.last_input = crate::app::state::LastInput::Keyboard;
     } else {
         let tab_id = app.tab_manager.active().id;
-        eprintln!(
+        log::debug!(
             "[QUICK_SEARCH] No match found for '{}' (Tab {})",
             search_lower, tab_id
         );

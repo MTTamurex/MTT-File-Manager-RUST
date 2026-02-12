@@ -29,7 +29,7 @@ static EGUI_CONTEXT: OnceLock<egui::Context> = OnceLock::new();
 pub fn start_device_change_listener(sender: Sender<()>, ctx: egui::Context) {
     std::thread::spawn(move || {
         if let Err(err) = run_device_listener(sender, ctx) {
-            eprintln!("[device_change] listener failed: {:?}", err);
+            log::error!("[device_change] listener failed: {:?}", err);
         }
     });
 }

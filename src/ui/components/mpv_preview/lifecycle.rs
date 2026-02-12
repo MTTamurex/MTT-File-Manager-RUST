@@ -23,7 +23,7 @@ impl MpvPreview {
     /// Performs explicit MPV teardown to release decode buffers and caches immediately.
     /// This is used when closing preview/tab to avoid waiting for eventual allocator cleanup.
     pub fn shutdown(&mut self) {
-        eprintln!("[VIDEO] Teardown MPV preview: {}", self.path.display());
+        log::info!("[VIDEO] Teardown MPV preview: {}", self.path.display());
 
         if let Some(m) = &self.mpv {
             let _ = m.set_property("pause", true);

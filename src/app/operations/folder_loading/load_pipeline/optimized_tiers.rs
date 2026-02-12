@@ -41,7 +41,7 @@ pub(super) fn try_handle_optimized_tiers(
 
     // TIER 1: Try NTFS native API first (fastest for NTFS drives)
     if is_hdd && ntfs_api_available {
-        eprintln!(
+        log::debug!(
             "[FOLDER-LOADING] TIER 1: Trying NTFS native API (NtQueryDirectoryFile) for {:?}",
             base_path
         );
@@ -168,7 +168,7 @@ pub(super) fn try_handle_optimized_tiers(
             return true;
         }
         // NTFS API returned None - filesystem may not be NTFS (e.g., exFAT)
-        eprintln!(
+        log::debug!(
             "[FOLDER-LOADING] NTFS API returned None for {:?}, trying HDD-optimized path",
             base_path
         );
@@ -181,7 +181,7 @@ pub(super) fn try_handle_optimized_tiers(
             is_onedrive_base,
         ) {
             Ok(batches) => {
-                eprintln!(
+                log::debug!(
                     "[FOLDER-LOADING] TIER 2: Using HDD-optimized FindFirstFileExW for {:?}",
                     base_path
                 );
@@ -248,7 +248,7 @@ pub(super) fn try_handle_optimized_tiers(
                 return true;
             }
             Err(e) => {
-                eprintln!(
+                log::warn!(
                     "[FOLDER-LOADING] TIER 2 failed: {}, falling back to standard Win32",
                     e
                 );

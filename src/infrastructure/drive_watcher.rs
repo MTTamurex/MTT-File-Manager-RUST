@@ -110,7 +110,7 @@ impl DriveWatcher {
         let thread = thread::spawn(move || {
             // Open handle inside the thread to avoid Send issues
             let Some(handle) = Self::open_drive_handle(&drive_root_clone) else {
-                eprintln!(
+                log::error!(
                     "[DRIVE-WATCHER] Failed to open drive: {:?}",
                     drive_root_clone
                 );
@@ -203,7 +203,7 @@ impl DriveWatcher {
             match handle {
                 Ok(h) if h != INVALID_HANDLE_VALUE => Some(h),
                 _ => {
-                    eprintln!("[DRIVE-WATCHER] Failed to open drive: {:?}", drive_root);
+                    log::error!("[DRIVE-WATCHER] Failed to open drive: {:?}", drive_root);
                     None
                 }
             }
@@ -254,14 +254,14 @@ fn watcher_thread_main(
     shutdown: Arc<AtomicBool>,
     mut current_prefix: PathBuf,
 ) {
-    eprintln!("[DRIVE-WATCHER] Thread started for drive: {:?}", drive_root);
+    log::info!("[DRIVE-WATCHER] Thread started for drive: {:?}", drive_root);
 
     unsafe {
         // Create events for overlapped I/O
         let h_event = match CreateEventW(None, true, false, None) {
             Ok(event) => event,
             Err(e) => {
-                eprintln!("[DRIVE-WATCHER] Failed to create event: {}", e);
+                log::error!("[DRIVE-WATCHER] Failed to create event: {}", e);
                 let _ = CloseHandle(handle);
                 return;
             }
@@ -325,7 +325,7 @@ fn watcher_thread_main(
                 );
 
                 if result.is_err() {
-                    eprintln!(
+                    log::error!(
                         "[DRIVE-WATCHER] ReadDirectoryChangesW failed (drive likely unmounted): {:?}",
                         result.err()
                     );
@@ -345,7 +345,7 @@ fn watcher_thread_main(
 
                 if let Err(e) = &result {
                     // Handle became invalid — drive was likely unmounted
-                    eprintln!(
+                    log::error!(
                         "[DRIVE-WATCHER] GetOverlappedResult failed (drive likely unmounted): {}",
                         e
                     );
@@ -394,7 +394,7 @@ fn watcher_thread_main(
         let _ = CancelIoEx(handle, None);
         let _ = CloseHandle(handle);
         let _ = CloseHandle(h_event);
-        eprintln!("[DRIVE-WATCHER] Thread shutdown complete");
+        log::info!("[DRIVE-WATCHER] Thread shutdown complete");
     }
 }
 

@@ -157,7 +157,7 @@ pub unsafe fn read_f64(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<f64>
         VT_UI4 => Some(unsafe { raw.Anonymous.ulVal as f64 }),
         VT_I4 => Some(unsafe { raw.Anonymous.lVal as f64 }),
         _ => {
-            eprintln!("    [DEBUG] Unexpected VT type for f64: {:?}", vt);
+            log::debug!("    [DEBUG] Unexpected VT type for f64: {:?}", vt);
             None
         }
     }
@@ -232,7 +232,7 @@ pub unsafe fn read_string(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<S
         }
         other => {
             if other != 0 {
-                eprintln!(
+                log::debug!(
                     "[DEBUG] read_string: unexpected VT type {} for PKEY {{pid={}}}",
                     other, key.pid
                 );
@@ -272,7 +272,7 @@ pub unsafe fn read_fourcc(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<S
             ];
             let codec_str = String::from_utf8(bytes.to_vec()).ok()?;
             // Debug log para verificar FourCC do Property Store
-            eprintln!(
+            log::trace!(
                 "[DEBUG] read_fourcc VT_UI4: fourcc=0x{:08X}, bytes={:?}, codec_str='{}'",
                 fourcc, bytes, codec_str
             );
@@ -289,7 +289,7 @@ pub unsafe fn read_fourcc(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<S
                 let slice = unsafe { std::slice::from_raw_parts(ptr.0, len) };
                 let result = String::from_utf16_lossy(slice);
                 // Debug log para verificar FourCC do Property Store
-                eprintln!("[DEBUG] read_fourcc VT_LPWSTR: result='{}'", result);
+                log::trace!("[DEBUG] read_fourcc VT_LPWSTR: result='{}'", result);
                 Some(result)
             } else {
                 None

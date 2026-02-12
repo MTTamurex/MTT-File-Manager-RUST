@@ -204,7 +204,7 @@ fn render_drive_row(ui: &mut egui::Ui, drive_info: &VirtualDriveInfo) {
             .clicked()
         {
             if let Err(e) = set_drive_override(drive_info.letter, DiskTypeOverride::SSD) {
-                eprintln!("[Config] Failed to set SSD override: {}", e);
+                log::error!("[Config] Failed to set SSD override: {}", e);
             } else {
                 io_priority::invalidate_drive_cache(drive_info.letter);
             }
@@ -216,7 +216,7 @@ fn render_drive_row(ui: &mut egui::Ui, drive_info: &VirtualDriveInfo) {
             .clicked()
         {
             if let Err(e) = set_drive_override(drive_info.letter, DiskTypeOverride::HDD) {
-                eprintln!("[Config] Failed to set HDD override: {}", e);
+                log::error!("[Config] Failed to set HDD override: {}", e);
             } else {
                 io_priority::invalidate_drive_cache(drive_info.letter);
             }
@@ -232,7 +232,7 @@ fn render_drive_row(ui: &mut egui::Ui, drive_info: &VirtualDriveInfo) {
                 .clicked()
             {
                 if let Err(e) = remove_drive_override(drive_info.letter) {
-                    eprintln!("[Config] Failed to remove override: {}", e);
+                    log::error!("[Config] Failed to remove override: {}", e);
                 } else {
                     io_priority::invalidate_drive_cache(drive_info.letter);
                 }

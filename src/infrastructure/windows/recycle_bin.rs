@@ -102,7 +102,7 @@ pub fn enumerate_recycle_bin_streaming(
     batch_size: usize,
 ) {
     unsafe {
-        eprintln!("[Lixeira] Starting streaming enumeration (Shell API)...");
+        log::debug!("[Lixeira] Starting streaming enumeration (Shell API)...");
 
         let _com = ComApartmentGuard::init_sta_best_effort();
 
@@ -110,7 +110,7 @@ pub fn enumerate_recycle_bin_streaming(
         let desktop: IShellFolder = match SHGetDesktopFolder() {
             Ok(d) => d,
             Err(e) => {
-                eprintln!("[Lixeira] Failed to get desktop folder: {:?}", e);
+                log::error!("[Lixeira] Failed to get desktop folder: {:?}", e);
                 let _ = sender.send(Vec::new());
                 return;
             }
@@ -120,7 +120,7 @@ pub fn enumerate_recycle_bin_streaming(
         let recycle_bin_pidl = match SHGetKnownFolderIDList(&FOLDERID_RecycleBinFolder, 0, None) {
             Ok(pidl) => pidl,
             Err(e) => {
-                eprintln!("[Lixeira] Failed to get Recycle Bin PIDL: {:?}", e);
+                log::error!("[Lixeira] Failed to get Recycle Bin PIDL: {:?}", e);
                 let _ = sender.send(Vec::new());
                 return;
             }
@@ -130,7 +130,7 @@ pub fn enumerate_recycle_bin_streaming(
         let recycle_bin_folder: IShellFolder = match desktop.BindToObject(recycle_bin_pidl, None) {
             Ok(f) => f,
             Err(e) => {
-                eprintln!("[Lixeira] Failed to bind to Recycle Bin folder: {:?}", e);
+                log::error!("[Lixeira] Failed to bind to Recycle Bin folder: {:?}", e);
                 CoTaskMemFree(Some(recycle_bin_pidl as *mut _));
                 let _ = sender.send(Vec::new());
                 return;
@@ -151,7 +151,7 @@ pub fn enumerate_recycle_bin_streaming(
             )
             .is_err()
         {
-            eprintln!("[Lixeira] Failed to get enumerator");
+            log::error!("[Lixeira] Failed to get enumerator");
             let _ = sender.send(Vec::new());
             return;
         }
@@ -221,7 +221,7 @@ pub fn enumerate_recycle_bin_streaming(
 
         // Completion signal
         let _ = sender.send(Vec::new());
-        eprintln!(
+        log::debug!(
             "[Lixeira] Enumeration complete (Shell API). Total items: {}",
             total_count
         );
@@ -424,7 +424,7 @@ fn format_recycle_date(raw: &str) -> String {
 /// Legacy function for backwards compatibility - enumerates all at once
 pub fn enumerate_recycle_bin() -> Result<Vec<RecycleBinItem>> {
     unsafe {
-        eprintln!("[Lixeira] Starting enumeration...");
+        log::debug!("[Lixeira] Starting enumeration...");
 
         let mut items = Vec::new();
         let _com = ComApartmentGuard::init_sta_best_effort();
@@ -454,7 +454,7 @@ pub fn enumerate_recycle_bin() -> Result<Vec<RecycleBinItem>> {
             }
         }
 
-        eprintln!(
+        log::debug!(
             "[Lixeira] Enumeration complete. Total items: {}",
             items.len()
         );
@@ -470,7 +470,7 @@ unsafe fn get_date_deleted_from_pidl(folder: &IShellFolder, pidl: *const ITEMIDL
     let folder2: IShellFolder2 = match folder.cast() {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("[Lixeira] Failed to cast to IShellFolder2: {:?}", e);
+            log::error!("[Lixeira] Failed to cast to IShellFolder2: {:?}", e);
             return "N/A".to_string();
         }
     };
@@ -501,13 +501,13 @@ unsafe fn get_date_deleted_from_pidl(folder: &IShellFolder, pidl: *const ITEMIDL
                         .collect::<String>()
                         .trim()
                         .to_string();
-                    eprintln!("[Lixeira] Date from column 2: '{}'", cleaned);
+                    log::trace!("[Lixeira] Date from column 2: '{}'", cleaned);
                     return cleaned;
                 }
             }
         }
         Err(e) => {
-            eprintln!("[Lixeira] GetDetailsOf failed: {:?}", e);
+            log::warn!("[Lixeira] GetDetailsOf failed: {:?}", e);
         }
     }
 
@@ -526,7 +526,7 @@ unsafe fn get_date_deleted_from_pidl(folder: &IShellFolder, pidl: *const ITEMIDL
                 let col_str = PCWSTR::from_raw(buffer.as_ptr())
                     .to_string()
                     .unwrap_or_default();
-                eprintln!("[Lixeira] Column {} value: '{}'", col_idx, col_str);
+                log::trace!("[Lixeira] Column {} value: '{}'", col_idx, col_str);
             }
         }
     }

@@ -335,7 +335,7 @@ fn query_disk_seek_penalty(drive_letter: char) -> bool {
             // incurs_seek_penalty == 0 means SSD (no seek penalty)
             // incurs_seek_penalty == 1 means HDD (has seek penalty)
             let is_ssd = result.incurs_seek_penalty == 0;
-            eprintln!(
+            log::debug!(
                 "[DISK-DETECT] Drive {}: DeviceIoControl succeeded, is_ssd={}",
                 drive_letter, is_ssd
             );

@@ -22,7 +22,7 @@ pub fn extract(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
     }
 
     let mf_start = std::time::Instant::now();
-    eprintln!(
+    log::trace!(
         "[Thumbnail] Stage 5 (Media Foundation) attempting: {:?}",
         path.file_name()
     );
@@ -45,7 +45,7 @@ pub fn extract(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
             match MFCreateSourceReaderFromURL(PCWSTR(wide_path.as_ptr()), None) {
                 Ok(r) => r,
                 Err(e) => {
-                    eprintln!(
+                    log::trace!(
                         "[Thumbnail] Stage 5: Failed to create source reader: {:?}",
                         e
                     );
@@ -60,7 +60,7 @@ pub fn extract(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
         ) {
             Ok(mt) => mt,
             Err(e) => {
-                eprintln!("[Thumbnail] Stage 5: No video stream found: {:?}", e);
+                log::trace!("[Thumbnail] Stage 5: No video stream found: {:?}", e);
                 return None;
             }
         };
@@ -71,7 +71,7 @@ pub fn extract(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
         let height = (frame_size & 0xFFFFFFFF) as u32;
 
         if width == 0 || height == 0 {
-            eprintln!("[Thumbnail] Stage 5: Invalid dimensions");
+            log::trace!("[Thumbnail] Stage 5: Invalid dimensions");
             return None;
         }
 
@@ -98,14 +98,14 @@ pub fn extract(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
             .SetCurrentMediaType(0xFFFFFFFC, None, &output_type)
             .is_err()
         {
-            eprintln!("[Thumbnail] Stage 5: RGB32 not supported, falling back to NV12");
+            log::trace!("[Thumbnail] Stage 5: RGB32 not supported, falling back to NV12");
             // Fallback to NV12 (universally supported by video decoders)
             let _ = output_type.SetGUID(&MF_MT_SUBTYPE, &nv12_guid);
             if reader
                 .SetCurrentMediaType(0xFFFFFFFC, None, &output_type)
                 .is_err()
             {
-                eprintln!("[Thumbnail] Stage 5: Failed to set NV12 output");
+                log::trace!("[Thumbnail] Stage 5: Failed to set NV12 output");
                 return None;
             }
             true
@@ -132,14 +132,14 @@ pub fn extract(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
         );
 
         if result.is_err() {
-            eprintln!("[Thumbnail] Stage 5: ReadSample failed: {:?}", result.err());
+            log::trace!("[Thumbnail] Stage 5: ReadSample failed: {:?}", result.err());
             return None;
         }
 
         let sample = match sample {
             Some(s) => s,
             None => {
-                eprintln!("[Thumbnail] Stage 5: No sample returned");
+                log::trace!("[Thumbnail] Stage 5: No sample returned");
                 return None;
             }
         };
@@ -148,7 +148,7 @@ pub fn extract(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
         let buffer = match sample.ConvertToContiguousBuffer() {
             Ok(b) => b,
             Err(e) => {
-                eprintln!(
+                log::trace!(
                     "[Thumbnail] Stage 5: ConvertToContiguousBuffer failed: {:?}",
                     e
                 );
@@ -164,7 +164,7 @@ pub fn extract(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
             .Lock(&mut data_ptr, Some(&mut max_len), Some(&mut current_len))
             .is_err()
         {
-            eprintln!("[Thumbnail] Stage 5: Lock failed");
+            log::trace!("[Thumbnail] Stage 5: Lock failed");
             return None;
         }
 
@@ -176,7 +176,7 @@ pub fn extract(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
             let expected_size = y_size + uv_size;
 
             if (current_len as usize) < expected_size {
-                eprintln!(
+                log::trace!(
                     "[Thumbnail] Stage 5: NV12 buffer size mismatch: {} vs expected {}",
                     current_len, expected_size
                 );
@@ -190,7 +190,7 @@ pub fn extract(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
             // RGB32 format: straight BGRA copy and swap
             let expected_size = (width * height * 4) as usize;
             if (current_len as usize) < expected_size {
-                eprintln!(
+                log::trace!(
                     "[Thumbnail] Stage 5: RGB32 buffer size mismatch: {} vs expected {}",
                     current_len, expected_size
                 );
@@ -214,7 +214,7 @@ pub fn extract(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
         }
 
         let mf_elapsed = mf_start.elapsed();
-        eprintln!(
+        log::trace!(
             "[Thumbnail] Stage 5 SUCCESS: {:?} ({}x{}) in {:.2}s",
             path.file_name(),
             width,

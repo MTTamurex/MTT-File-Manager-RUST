@@ -19,7 +19,7 @@ impl ImageViewerApp {
     /// recriar o watcher a cada mudança de pasta no mesmo drive.
     pub fn watch_current_folder(&mut self) {
         let current_path = self.current_path.clone();
-        eprintln!("[WATCHER] Setting up for: {}", current_path);
+        log::debug!("[WATCHER] Setting up for: {}", current_path);
 
         // Tenta usar drive-wide watcher primeiro (File Pilot optimization)
         let path_buf = PathBuf::from(&current_path);
@@ -29,7 +29,7 @@ impl ImageViewerApp {
         let is_local_drive = path_buf.to_string_lossy().chars().nth(1) == Some(':');
 
         if is_local_drive {
-            eprintln!(
+            log::debug!(
                 "[WATCHER] Using DRIVE-WATCHER for local drive: {:?}",
                 path_buf
             );
@@ -37,17 +37,17 @@ impl ImageViewerApp {
 
             // Se drive watcher está ativo, NÃO usa notify (evita duplicados)
             if self.drive_watcher.is_active() {
-                eprintln!("[WATCHER] Drive watcher is active - skipping notify-watcher");
+                log::debug!("[WATCHER] Drive watcher is active - skipping notify-watcher");
                 // Drop notify watcher se existir para economizar recursos
                 #[cfg(feature = "notify-watcher")]
                 if self.watcher.is_some() {
-                    eprintln!("[WATCHER] Dropping notify-watcher to save resources");
+                    log::debug!("[WATCHER] Dropping notify-watcher to save resources");
                     self.watcher = None;
                 }
                 return;
             }
         } else {
-            eprintln!("[WATCHER] UNC/Network path detected - using notify-watcher only");
+            log::debug!("[WATCHER] UNC/Network path detected - using notify-watcher only");
         }
 
         // FALLBACK: Usa notify-watcher para UNC paths ou se drive watcher falhou
@@ -62,16 +62,16 @@ impl ImageViewerApp {
 
         // Canonicaliza o path para compatibilidade com Windows
         let path_to_watch = if let Ok(p) = Path::new(&current_path).canonicalize() {
-            eprintln!("[NOTIFY-WATCHER] Canonicalized path: {:?}", p);
+            log::debug!("[NOTIFY-WATCHER] Canonicalized path: {:?}", p);
             p
         } else {
-            eprintln!("[NOTIFY-WATCHER] Using original path (canonicalize failed)");
+            log::warn!("[NOTIFY-WATCHER] Using original path (canonicalize failed)");
             PathBuf::from(&current_path)
         };
 
         // Drop o watcher anterior se existir
         if self.watcher.is_some() {
-            eprintln!("[NOTIFY-WATCHER] Dropping previous watcher");
+            log::debug!("[NOTIFY-WATCHER] Dropping previous watcher");
             self.watcher = None;
         }
 
@@ -83,13 +83,13 @@ impl ImageViewerApp {
             notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
                 match &res {
                     Ok(event) => {
-                        eprintln!(
+                        log::trace!(
                             "[NOTIFY-WATCHER] Event received: kind={:?}, paths={:?}",
                             event.kind, event.paths
                         );
                     }
                     Err(e) => {
-                        eprintln!("[NOTIFY-WATCHER] Event error: {}", e);
+                        log::error!("[NOTIFY-WATCHER] Event error: {}", e);
                     }
                 }
                 let _ = tx.send(res);
@@ -99,21 +99,21 @@ impl ImageViewerApp {
         match watcher_result {
             Ok(mut watcher) => match watcher.watch(&path_to_watch, RecursiveMode::NonRecursive) {
                 Ok(_) => {
-                    eprintln!(
+                    log::debug!(
                         "[NOTIFY-WATCHER] Successfully watching: {:?}",
                         path_to_watch
                     );
                     self.watcher = Some(watcher);
                 }
                 Err(e) => {
-                    eprintln!(
+                    log::error!(
                         "[NOTIFY-WATCHER] Failed to watch path: {:?} - Error: {}",
                         path_to_watch, e
                     );
                 }
             },
             Err(e) => {
-                eprintln!("[NOTIFY-WATCHER] Failed to create watcher: {}", e);
+                log::error!("[NOTIFY-WATCHER] Failed to create watcher: {}", e);
             }
         }
     }

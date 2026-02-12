@@ -105,14 +105,14 @@ impl ImageViewerApp {
 
             if is_onedrive {
                 // Use timeout-protected directory reading for OneDrive
-                eprintln!(
+                log::debug!(
                     "[FOLDER-LOADING] Using timeout-protected directory enumeration for OneDrive: {:?}",
                     base_path
                 );
                 let onedrive_enum_start = std::time::Instant::now();
                 match onedrive::onedrive_read_directory(&PathBuf::from(&base_path)) {
                     onedrive::IoTimeoutResult::Ok(entries) => {
-                        eprintln!(
+                        log::debug!(
                             "[PERF] OneDrive enum complete: {:?} items={} elapsed={}ms",
                             base_path,
                             entries.len(),
@@ -214,7 +214,7 @@ impl ImageViewerApp {
                             }
                         }
 
-                        eprintln!(
+                        log::debug!(
                             "[FOLDER-LOADING] OneDrive directory enumeration completed successfully in {}ms (visible_items={})",
                             onedrive_enum_start.elapsed().as_millis(),
                             all_entries_disk.len()
@@ -222,7 +222,7 @@ impl ImageViewerApp {
                         return;
                     }
                     onedrive::IoTimeoutResult::Timeout => {
-                        eprintln!("[FOLDER-LOADING] CRITICAL: OneDrive directory enumeration timed out after 5s for {:?}", base_path);
+                        log::error!("[FOLDER-LOADING] CRITICAL: OneDrive directory enumeration timed out after 5s for {:?}", base_path);
                         // CRITICAL FIX: Do NOT fall through to standard FindFirstFileW!
                         // Standard FindFirstFileW can block for 30-60s on OneDrive folders
                         // with cloud-only files, freezing the background thread and preventing
@@ -230,13 +230,13 @@ impl ImageViewerApp {
                         // Send empty results to signal "could not load" gracefully.
                         let _ = file_entry_sender.send((my_gen, Vec::new()));
                         ctx.request_repaint();
-                        eprintln!(
+                        log::warn!(
                             "[FOLDER-LOADING] OneDrive enumeration timed out - sent empty results"
                         );
                         return;
                     }
                     onedrive::IoTimeoutResult::Err(_) => {
-                        eprintln!("[FOLDER-LOADING] Error in OneDrive directory enumeration, falling back to standard");
+                        log::warn!("[FOLDER-LOADING] Error in OneDrive directory enumeration, falling back to standard");
                         // On error (not timeout), fall through to standard Win32 —
                         // errors are usually fast (milliseconds), not blocking.
                     }
@@ -434,7 +434,7 @@ impl ImageViewerApp {
             // Envia vetor VAZIO para sinalizar FIM do carregamento (apenas se a geração for a mesma)
             if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                 let scan_elapsed = scan_start.elapsed();
-                eprintln!(
+                log::debug!(
                     "[PERF] Folder scan complete: {:?} took {:.2}s",
                     current_path,
                     scan_elapsed.as_secs_f64()

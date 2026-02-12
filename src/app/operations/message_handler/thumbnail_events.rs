@@ -42,7 +42,7 @@ impl ImageViewerApp {
         // SAFETY TIMEOUT: Clear is_loading_folder if stuck for more than 30 seconds
         // This prevents infinite spinner if the loading thread fails silently
         if self.is_loading_folder && self.loading_started_at.elapsed().as_secs() > 30 {
-            eprintln!("[FOLDER-LOADING] TIMEOUT: Loading took more than 30 seconds, clearing loading state");
+            log::warn!("[FOLDER-LOADING] TIMEOUT: Loading took more than 30 seconds, clearing loading state");
             self.is_loading_folder = false;
         }
 
@@ -87,7 +87,7 @@ impl ImageViewerApp {
                     let _ = self.select_item_by_path(&target_path);
                 }
 
-                eprintln!(
+                log::debug!(
                     "[PERF] Inline items rebuild (end-of-load): {} items",
                     self.total_items
                 );
@@ -160,7 +160,7 @@ impl ImageViewerApp {
                     queued += 1;
                 }
                 if queued > 0 {
-                    eprintln!(
+                    log::debug!(
                         "[PERF] OneDrive eager folder preview queue: {} folders",
                         queued
                     );

@@ -25,7 +25,7 @@ impl CacheState {
         let disk_cache = match ThumbnailDiskCache::new(cache_dir.clone()) {
             Ok(cache) => Arc::new(cache),
             Err(e) => {
-                eprintln!(
+                log::error!(
                     "[Cache] Fatal: failed to initialize cache state at {:?}: {:?}",
                     cache_dir, e
                 );

@@ -21,8 +21,8 @@ const DEFAULT_RGBA_BUDGET_BYTES: usize = 128 * 1024 * 1024;
 #[inline]
 fn nz_cache_size(size: usize, cache_name: &str) -> NonZeroUsize {
     if size == 0 {
-        eprintln!(
-            "[WARN] {} configured with 0 entries; clamping to 1",
+        log::warn!(
+            "{} configured with 0 entries; clamping to 1",
             cache_name
         );
     }

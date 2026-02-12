@@ -488,7 +488,7 @@ impl ImageViewerApp {
         self.gif_manager.cleanup(false);
 
         if textures_removed > 0 || rgba_removed > 0 || folder_previews_removed > 0 {
-            eprintln!(
+            log::debug!(
                 "[MEMORY] RAM {:.1}MB -> trimmed textures={} rgba={} folder_previews={} pending={} mode={}",
                 working_set_bytes as f64 / 1024.0 / 1024.0,
                 textures_removed,

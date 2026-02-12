@@ -36,7 +36,7 @@ impl ImageViewerApp {
                     None => {
                         // Skip items with unknown original path rather than guessing
                         // a destination that could expose files to a public directory.
-                        eprintln!(
+                        log::warn!(
                             "[RecycleBin] Skipping '{}': original path unknown, cannot restore safely",
                             item.name
                         );
@@ -48,7 +48,7 @@ impl ImageViewerApp {
             } else {
                 // Item not in self.items and no original path — skip rather than
                 // guessing a destination that could expose files publicly.
-                eprintln!(
+                log::warn!(
                     "[RecycleBin] Skipping '{}': item not found, cannot determine original path",
                     physical_path.display()
                 );
