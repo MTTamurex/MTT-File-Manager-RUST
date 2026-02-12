@@ -50,13 +50,6 @@ fn truncation_cache_key(text: &str, max_width: f32) -> u64 {
     hasher.finish()
 }
 
-/// Clear the font width cache periodically to prevent unbounded growth
-#[allow(dead_code)]
-pub fn clear_font_width_cache() {
-    FONT_WIDTH_CACHE.with(|cache| {
-        cache.borrow_mut().clear();
-    });
-}
 
 /// Compute hash key for (text, font_size) pair
 /// PERFORMANCE: Uses precomputed hash to avoid String allocation for cache key
