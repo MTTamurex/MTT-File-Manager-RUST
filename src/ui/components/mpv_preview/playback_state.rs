@@ -2,7 +2,7 @@ use super::*;
 use std::path::Path;
 
 impl MpvPreview {
-    /// Retorna o estado atual de forma segura, com valor padrão em caso de erro
+    /// Returns the current state safely, with default value on error
     pub fn get_state(&self) -> MpvState {
         match self.state.read() {
             Ok(state) => MpvState::clone(&state),
@@ -13,7 +13,7 @@ impl MpvPreview {
         }
     }
 
-    /// Tenta obter o estado com tratamento de erro explícito
+    /// Tries to get the state with explicit error handling
     pub fn try_get_state(&self) -> Result<MpvState, String> {
         self.state
             .read()

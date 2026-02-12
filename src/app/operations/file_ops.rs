@@ -161,7 +161,7 @@ impl ImageViewerApp {
         file_operations::create_shortcut(target, &self.current_path)
     }
 
-    /// Monta uma ISO programaticamente e marca para auto-navegação
+    /// Mounts an ISO programmatically and marks it for auto-navigation
     pub fn mount_and_navigate_iso(&mut self, path: PathBuf) {
         use crate::infrastructure::windows::mount_iso;
 
@@ -169,7 +169,7 @@ impl ImageViewerApp {
 
         match mount_iso(&path) {
             Ok(_) => {
-                // Notifica o início da montagem
+                // Notify the start of the mount operation
                 self.notifications
                     .push(crate::application::AppNotification::info(format!(
                         "Montando ISO: {}",

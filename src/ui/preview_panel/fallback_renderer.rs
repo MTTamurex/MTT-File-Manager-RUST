@@ -14,12 +14,12 @@ pub fn render_fallback(
     is_folder_preview_loading: bool,
 ) -> Option<PreviewPanelAction> {
     let mut val_action = None;
-    // Pasta ou Drive ou Arquivo sem Thumbnail
+    // Folder, Drive, or File without Thumbnail
     let max_w: f32 = ui.available_width() - 40.0;
     let icon_size: f32 = (120.0f32).min(max_w);
 
     if file.name == "Este Computador" {
-        // ESTE COMPUTADOR - usa o ícone de computador
+        // THIS PC - uses the computer icon
         item_icon_loader.ensure_computer_icon(ui.ctx());
         if let Some(icon) = item_icon_loader.computer_icon() {
             ui.add(egui::Image::new(icon).max_size(egui::vec2(icon_size, icon_size)));
@@ -35,14 +35,14 @@ pub fn render_fallback(
             ui.label(egui::RichText::new("??").size(icon_size * 0.8));
         }
     } else if is_recycle_bin_view && file.name == "Lixeira" {
-        // LIXEIRA
+        // RECYCLE BIN
         if let Some(icon) = item_icon_loader.ensure_recycle_bin_icon(ui.ctx()) {
             ui.add(egui::Image::new(&icon).max_size(egui::vec2(icon_size, icon_size)));
         } else {
             ui.label(egui::RichText::new("🗑").size(icon_size * 0.6));
         }
     } else if file.is_dir && !file.is_archive() {
-        // PASTA (Exceto arquivos compactados)
+        // FOLDER (Except compressed files)
         if is_recycle_bin_view {
             item_icon_loader.ensure_folder_icon(ui.ctx());
             if let Some(icon) = item_icon_loader.folder_icon() {
@@ -95,7 +95,7 @@ pub fn render_fallback(
                     .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
                 ui.add(egui::Spinner::new());
             } else {
-                // Dispara carregamento
+                // Trigger loading
                 val_action = Some(PreviewPanelAction::LoadFolderPreview(file.path.clone()));
 
                 // Placeholder
@@ -165,7 +165,7 @@ pub fn render_fallback(
                         );
                     }
                 }
-                // Área de clique = todo o thumbnail
+                // Click area = entire thumbnail
                 if ui
                     .interact(
                         media_rect,

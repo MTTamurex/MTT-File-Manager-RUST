@@ -2,7 +2,7 @@ use crate::application::navigation::NavigationHistory;
 use crate::domain::file_entry::ViewMode;
 use std::time::Instant;
 
-/// Estado de navegação
+/// Navigation state
 #[derive(Clone, Debug)]
 pub struct NavigationState {
     pub current_path: String,

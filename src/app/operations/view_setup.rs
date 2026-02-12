@@ -31,7 +31,7 @@ impl ImageViewerApp {
         self.all_items.clear();
         self.total_items = 0;
 
-        // Incrementa geração para invalidar thumbnails antigos
+        // Increment generation to invalidate old thumbnails
         self.generation += 1;
         self.current_generation
             .store(self.generation, AtomicOrdering::Relaxed);
@@ -41,26 +41,26 @@ impl ImageViewerApp {
         let file_entry_sender = self.file_entry_sender.clone();
         let ctx = self.ui_ctx.clone();
 
-        // Carrega itens da lixeira em thread separada (ASYNC) com batching
+        // Load Recycle Bin items in a separate thread (ASYNC) with batching
         std::thread::spawn(move || {
             use crate::infrastructure::windows::recycle_bin::enumerate_recycle_bin;
 
-            // Enumera itens da lixeira via COM
+            // Enumerate Recycle Bin items via COM
             match enumerate_recycle_bin() {
                 Ok(recycle_items) => {
                     const BATCH_SIZE: usize = 100;
                     let mut batch = Vec::with_capacity(BATCH_SIZE);
 
                     for item in recycle_items {
-                        // Verifica se a geração ainda é válida (cancelamento rápido)
+                        // Check if generation is still valid (fast cancellation)
                         if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
                             return;
                         }
 
-                        // Cria um path "virtual" baseado na extensão para carregar ícone correto
-                        // O path real não existe mais, mas o ícone é baseado na extensão
-                        // O path real ($R) é necessário para ler a data de exclusão ($I creation time)
-                        // Se physical_path estiver vazio (falha ao ler), usamos a lógica antiga de dummy.
+                        // Create a "virtual" path based on extension to load the correct icon
+                        // The real path no longer exists, but the icon is based on the extension
+                        // The real path ($R) is needed to read the deletion date ($I creation time)
+                        // If physical_path is empty (read failure), fall back to the old dummy logic.
                         let file_path = if !item.physical_path.as_os_str().is_empty() {
                             item.physical_path.clone()
                         } else if item.is_directory {
@@ -72,7 +72,7 @@ impl ImageViewerApp {
                         };
 
                         let entry = FileEntry {
-                            path: file_path, // Path físico ($R) para permitir get_deletion_date
+                            path: file_path, // Physical path ($R) to allow get_deletion_date
                             name: item.name,
                             is_dir: item.is_directory,
                             size: item.size,
@@ -86,7 +86,7 @@ impl ImageViewerApp {
                         };
                         batch.push(entry);
 
-                        // Envia batch quando cheio
+                        // Send batch when full
                         if batch.len() >= BATCH_SIZE {
                             if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
                                 return;
@@ -97,20 +97,20 @@ impl ImageViewerApp {
                         }
                     }
 
-                    // Envia itens restantes
+                    // Send remaining items
                     if !batch.is_empty() && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                         let _ = file_entry_sender.send((my_gen, batch));
                         ctx.request_repaint();
                     }
 
-                    // Sinal de fim do carregamento
+                    // End-of-loading signal
                     if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                         let _ = file_entry_sender.send((my_gen, Vec::new()));
                         ctx.request_repaint();
                     }
                 }
                 Err(e) => {
-                    log::error!("[RECYCLE BIN] Erro ao enumerar: {:?}", e);
+                    log::error!("[RECYCLE BIN] Error enumerating: {:?}", e);
                     let _ = file_entry_sender.send((my_gen, Vec::new()));
                     ctx.request_repaint();
                 }
@@ -118,7 +118,7 @@ impl ImageViewerApp {
         });
     }
 
-    /// Configura a visão de "Este Computador" sem afetar o histórico
+    /// Sets up the "This PC" view without affecting history
     pub fn setup_computer_view(&mut self) {
         // CRITICAL: Increment generation to invalidate any pending items_rebuild results
         // from the previous folder load. Without this, stale rebuild results (matching
@@ -280,7 +280,7 @@ impl ImageViewerApp {
                     }
                 }
 
-                // AUTO-FOCUS PARA ISO RECÉM-MONTADA
+                // AUTO-FOCUS FOR RECENTLY MOUNTED ISO
                 if let Some(_iso_path) = self.pending_iso_mount.take() {
                     let mut target_drive = None;
                     for (new_path, _label) in &self.disks {

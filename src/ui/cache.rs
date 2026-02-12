@@ -420,21 +420,21 @@ impl CacheManager {
         extract_fn: impl Fn(&PathBuf) -> Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>>,
         extension: &str,
     ) -> Option<egui::TextureHandle> {
-        // Decide cache key: path completo para executáveis, extensão para demais
+        // Decide cache key: full path for executables, extension for others
         let cache_key = if matches!(extension, "exe" | "lnk" | "ico") {
-            // Cache por path completo - cada executável tem ícone único
+            // Cache by full path - each executable has a unique icon
             path.to_string_lossy().to_string()
         } else {
-            // Cache por extensão - todos .txt compartilham ícone
+            // Cache by extension - all .txt share the same icon
             format!(".{}", extension)
         };
 
-        // Cache hit? Clone do handle (barato)
+        // Cache hit? Clone handle (cheap)
         if let Some(texture) = self.icon_cache.get(&cache_key) {
             return Some(texture.clone());
         }
 
-        // Cache miss -> carrega ícone
+        // Cache miss -> load icon
         match extract_fn(path) {
             Ok((rgba_data, width, height)) => {
                 let texture = ctx.load_texture(
@@ -477,7 +477,7 @@ impl CacheManager {
                 self.folder_icon_texture = Some(texture);
             }
             Err(_) => {
-                // Fallback: mantém emoji
+                // Fallback: keep emoji
             }
         }
     }

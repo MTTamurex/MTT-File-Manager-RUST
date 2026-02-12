@@ -244,16 +244,16 @@ pub fn rename_item_with_shell(path: &Path, new_name: &str, hwnd: HWND) -> bool {
 
     let new_path = parent.join(new_name);
 
-    // CRITICO: Verificação manual de colisão.
-    // Se o destino JÁ EXISTE, o SHFileOperation com FOF_RENAME pode tentar mesclar (pastas) ou substituir silenciosamente se FOF_NOCONFIRMATION estiver ativo.
-    // O usuário relatou que a pasta "sumiu" ao renomear para um nome existente.
-    // A melhor proteção é impedir o rename se o destino já existe.
+    // CRITICAL: Manual collision check.
+    // If the destination ALREADY EXISTS, SHFileOperation with FOF_RENAME may try to merge (folders) or silently replace if FOF_NOCONFIRMATION is active.
+    // The user reported that a folder "disappeared" when renaming to an existing name.
+    // The best protection is to prevent the rename if the destination already exists.
     //
-    // NOTA DE SEGURANÇA: este check-then-act tem uma janela TOCTOU mínima
-    // (microssegundos entre exists() e SHFileOperationW). Explorar essa janela
-    // requer um atacante local capaz de criar arquivos no exato diretório no
-    // instante preciso. O check é mantido porque previne o bug UX de merge de pastas,
-    // e SHFileOperationW sem FOF_NOCONFIRMATION mostrará diálogo se o alvo aparecer.
+    // SECURITY NOTE: this check-then-act has a minimal TOCTOU window
+    // (microseconds between exists() and SHFileOperationW). Exploiting this window
+    // requires a local attacker able to create files in the exact directory at the
+    // precise moment. The check is kept because it prevents the folder merge UX bug,
+    // and SHFileOperationW without FOF_NOCONFIRMATION will show a dialog if the target appears.
     if new_path.exists() {
         return false;
     }
@@ -269,8 +269,8 @@ pub fn rename_item_with_shell(path: &Path, new_name: &str, hwnd: HWND) -> bool {
         wFunc: FO_RENAME,
         pFrom: PCWSTR(from_vec.as_ptr()),
         pTo: PCWSTR(to_vec.as_ptr()),
-        // REMOVIDO FOF_NO_UI para permitir que o Windows mostre erros se algo der errado
-        // MANTIDO FOF_ALLOWUNDO para permitir Ctrl+Z
+        // REMOVED FOF_NO_UI to allow Windows to show errors if something goes wrong
+        // KEPT FOF_ALLOWUNDO to allow Ctrl+Z
         fFlags: (FOF_ALLOWUNDO).0 as u16,
         ..Default::default()
     };

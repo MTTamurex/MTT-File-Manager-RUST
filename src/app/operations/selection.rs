@@ -145,8 +145,8 @@ impl ImageViewerApp {
         true
     }
 
-    /// Limpa a seleção atual, o thumbnail persistente, metadados e a busca.
-    /// Útil durante navegação entre pastas.
+    /// Clears the current selection, persistent thumbnail, metadata and search.
+    /// Useful during navigation between folders.
     /// NOTE: Only clears media_preview if current tab is the owner.
     pub fn reset_selection_and_search(&mut self) {
         // Selection change only updates the persistent thumbnail and metadata.

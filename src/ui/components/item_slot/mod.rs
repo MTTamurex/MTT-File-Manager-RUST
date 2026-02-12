@@ -17,9 +17,9 @@ use drive_slot::render_drive_slot;
 use file_slot::render_file_slot;
 use folder_slot::render_directory_slot;
 
-/// Trait para operações necessárias para renderizar um item slot
+/// Trait for operations needed to render an item slot
 pub trait ItemSlotOperations {
-    /// Requisita carregamento de thumbnail
+    /// Requests thumbnail loading
     /// `modified`: file modification time (seconds since epoch) from folder enumeration.
     /// Pass 0 if unknown (worker will fall back to metadata syscall).
     fn request_thumbnail_load(
@@ -29,57 +29,57 @@ pub trait ItemSlotOperations {
         directory_index: Option<usize>,
         modified: u64,
     );
-    /// Requisita scan de pasta
+    /// Requests folder scan
     fn request_folder_scan(&mut self, path: std::path::PathBuf);
-    /// Requisita carregamento de preview nativo da pasta (sandwich effect)
+    /// Requests native folder preview loading (sandwich effect)
     fn request_folder_preview_load(&mut self, path: std::path::PathBuf);
-    /// Requisita carregamento de ícone assíncrono (ex: .exe)
+    /// Requests async icon loading (e.g.: .exe)
     fn request_icon_load(&mut self, path: std::path::PathBuf);
-    /// Executa rename
+    /// Executes rename
     fn rename_item(&mut self, idx: usize);
 }
 
-/// Contexto para renderização de item slot
+/// Context for item slot rendering
 pub struct ItemSlotContext<'a> {
-    /// O item a ser renderizado
+    /// The item to be rendered
     pub item: &'a FileEntry,
-    /// Índice do item na lista
+    /// Item index in the list
     pub idx: usize,
-    /// Tamanho do thumbnail
+    /// Thumbnail size
     pub thumbnail_size: f32,
-    /// Se está renomeando
+    /// Whether renaming is active
     pub is_renaming: bool,
-    /// Texto de renomeação (se aplicável)
+    /// Rename text (if applicable)
     pub renaming_text: Option<&'a mut String>,
-    /// Se deve focar no input de rename
+    /// Whether to focus the rename input
     pub focus_rename: bool,
-    /// Se estamos na view de Lixeira (evita IO pesado e thumbnails)
+    /// Whether in Recycle Bin view (avoids heavy IO and thumbnails)
     pub is_recycle_bin_view: bool,
     /// Cache de texturas (LRU)
     pub texture_cache: &'a mut lru::LruCache<std::path::PathBuf, egui::TextureHandle>,
-    /// Carregador de ícones (PERSISTENTE - não crie novo a cada chamada!)
+    /// Icon loader (PERSISTENT - do not create a new one each call!)
     pub icon_loader: &'a mut IconLoader,
-    /// Conjunto de pastas escaneadas
+    /// Set of scanned folders
     pub scanned_folders: &'a mut lru::LruCache<std::path::PathBuf, ()>,
-    /// Conjunto de itens carregando (thumbnails de arquivos)
+    /// Set of items loading (file thumbnails)
     pub loading_set: &'a mut FxHashSet<std::path::PathBuf>,
-    /// Conjunto de itens carregando ícones (ex: .exe)
+    /// Set of items loading icons (e.g.: .exe)
     pub loading_icons: &'a mut FxHashSet<std::path::PathBuf>,
-    /// Conjunto de ícones que falharam (evita retry infinito)
+    /// Set of icons that failed (prevents infinite retry)
     pub failed_icons: &'a lru::LruCache<std::path::PathBuf, ()>,
-    /// Cache de previews de pastas (Native Sandwich)
+    /// Folder preview cache (Native Sandwich)
     pub folder_preview_cache: &'a mut lru::LruCache<std::path::PathBuf, egui::TextureHandle>,
-    /// Conjunto de pastas carregando preview nativo
+    /// Set of folders loading native preview
     pub folder_preview_loading: &'a mut FxHashSet<std::path::PathBuf>,
-    /// Caminhos que falharam no thumbnail (LRU bounded)
+    /// Paths that failed thumbnail generation (LRU bounded)
     pub failed_thumbnails: &'a lru::LruCache<std::path::PathBuf, ()>,
-    /// Conjunto de itens aguardando upload GPU
+    /// Set of items awaiting GPU upload
     pub pending_upload_set: &'a mut FxHashSet<std::path::PathBuf>,
     pub is_dense_mode: bool,
     pub is_scrolling: bool,
 }
 
-/// Renderiza um item slot para grid view
+/// Renders an item slot for grid view
 pub fn render_item_slot<O: ItemSlotOperations>(
     ui: &mut egui::Ui,
     rect: egui::Rect,

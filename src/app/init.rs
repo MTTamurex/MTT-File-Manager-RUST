@@ -30,8 +30,8 @@ use crate::ui::theme;
 
 use super::state::{ImageViewerApp, ItemsRebuildResult, LastInput};
 
-/// Determina o path inicial baseado na última pasta salva
-/// Retorna (path, is_computer_view) - se a pasta não estiver disponível, retorna "Este Computador"
+/// Determines the initial path based on the last saved folder
+/// Returns (path, is_computer_view) - if the folder is unavailable, returns "This PC"
 fn determine_initial_path(disk_cache: &ThumbnailDiskCache) -> (String, bool) {
     // Try to load last folder from database
     if let Some(last_folder) = disk_cache.get_preference("last_folder") {
@@ -56,19 +56,19 @@ fn determine_initial_path(disk_cache: &ThumbnailDiskCache) -> (String, bool) {
         }
     }
 
-    // Default to "Este Computador" if no valid last folder
+    // Default to "This PC" if no valid last folder
     log::info!("[INIT] No valid last folder found, starting at Este Computador");
     ("Este Computador".to_string(), true)
 }
 
-// Função auxiliar que também está em main.rs - pode ser movida para infrastructure se necessário
+// Helper function also present in main.rs - could be moved to infrastructure if needed
 // Function removed: using crate::infrastructure::windows::get_all_drives instead
 
 impl ImageViewerApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let ctx = cc.egui_ctx.clone();
 
-        // 1. Canais para comunicação Workers → UI
+        // 1. Channels for Workers → UI communication
         let (file_entry_sender, file_entry_receiver) = mpsc::channel::<(usize, Vec<FileEntry>)>();
         let (items_rebuild_sender, items_rebuild_receiver) = mpsc::channel::<ItemsRebuildResult>();
 
@@ -95,7 +95,7 @@ impl ImageViewerApp {
             }
         };
 
-        // COVER WORKER: Worker único para processar capas de pasta
+        // COVER WORKER: Single worker to process folder covers
         let (cover_req_tx, cover_req_rx) = mpsc::channel::<PathBuf>(); // UI → Worker
         let (cover_res_tx, cover_res_rx) = mpsc::channel(); // Worker → UI
         #[cfg(feature = "notify-watcher")]
@@ -105,7 +105,7 @@ impl ImageViewerApp {
         windows_infra::start_device_change_listener(device_event_sender, ctx.clone());
 
         let cover_worker_cache = disk_cache.clone();
-        // Spawna WORKER THREAD: fica em loop processando fila
+        // Spawn WORKER THREAD: loops processing the queue
         std::thread::spawn(move || {
             // PERFORMANCE: Set background priority to minimize HDD contention with video playback
             // This worker scans folders to find first image - low priority I/O
@@ -113,9 +113,9 @@ impl ImageViewerApp {
                 crate::infrastructure::io_priority::IOPriority::Background,
             );
 
-            // Loop infinito: consome requisições da fila
+            // Infinite loop: consumes requests from the queue
             while let Ok(folder_path) = cover_req_rx.recv() {
-                // Executa busca (imagem ou vídeo) usando detecção dinâmica baseado no Registro do Windows
+                // Execute search (image or video) using dynamic detection based on Windows Registry
                 let cover = windows_infra::find_folder_preview_item(&folder_path);
 
                 // SAVE TO DB IN WORKER THREAD (Avoids Main Thread Lock Contention)
@@ -123,12 +123,12 @@ impl ImageViewerApp {
                     cover_worker_cache.set_folder_cover(&folder_path, c);
                 }
 
-                // Devolve resultado para UI thread
+                // Send result back to UI thread
                 let _ = cover_res_tx.send((folder_path, cover));
             }
         });
 
-        // --- SISTEMA DE THUMBNAILS (WORKER POOL OTIMIZADO) ---
+        // --- THUMBNAIL SYSTEM (OPTIMIZED WORKER POOL) ---
         let (img_tx, img_rx) = mpsc::channel();
         use crate::workers::thumbnail::PriorityThumbnailQueue;
         let thumbnail_queue = Arc::new(PriorityThumbnailQueue::new());
@@ -187,7 +187,7 @@ impl ImageViewerApp {
                 .unwrap_or_else(|| PathBuf::from("C:\\Windows"));
             let fonts_dir = windows_dir.join("Fonts");
 
-            // 1. Segoe UI (fonte principal)
+            // 1. Segoe UI (main font)
             let segoe_path = fonts_dir.join("segoeui.ttf");
             if let Ok(font_data) = std::fs::read(&segoe_path) {
                 fonts.font_data.insert(
@@ -197,7 +197,7 @@ impl ImageViewerApp {
                 loaded_fonts.push("segoe_ui".to_owned());
             }
 
-            // 2. Segoe UI Symbol (fallback 1 - símbolos)
+            // 2. Segoe UI Symbol (fallback 1 - symbols)
             let symbol_path = fonts_dir.join("seguisym.ttf");
             if let Ok(font_data) = std::fs::read(&symbol_path) {
                 fonts.font_data.insert(
@@ -207,8 +207,8 @@ impl ImageViewerApp {
                 loaded_fonts.push("segoe_ui_symbol".to_owned());
             }
 
-            // 3. Arial Unicode MS (fallback 2 - se disponível)
-            // ESTE ARQUIVO É GRANDE (~22MB) - O carregamento síncrono trava o startup
+            // 3. Arial Unicode MS (fallback 2 - if available)
+            // THIS FILE IS LARGE (~22MB) - Synchronous loading blocks startup
             let arial_path = fonts_dir.join("ARIALUNI.TTF");
             if let Ok(font_data) = std::fs::read(&arial_path) {
                 fonts.font_data.insert(
@@ -218,7 +218,7 @@ impl ImageViewerApp {
                 loaded_fonts.push("arial_unicode".to_owned());
             }
 
-            // 4. Remix Icon (Fonte de Ícones dedicada) - Embarcada no executável
+            // 4. Remix Icon (dedicated Icon Font) - Embedded in the executable
             {
                 let data = crate::embedded_assets::REMIXICON_TTF.to_vec();
                 fonts.font_data.insert(
@@ -231,7 +231,7 @@ impl ImageViewerApp {
                 );
             }
 
-            // Adiciona apenas fontes carregadas
+            // Add only loaded fonts
             if !loaded_fonts.is_empty() {
                 fonts
                     .families
@@ -330,7 +330,7 @@ impl ImageViewerApp {
         let pending_deletions: Arc<dashmap::DashMap<PathBuf, ()>> =
             Arc::new(dashmap::DashMap::new());
 
-        // 8 threads: equilíbrio ideal entre SSD e HDD USB
+        // 8 threads: optimal balance between SSD and USB HDD
         use crate::workers::thumbnail::spawn_thumbnail_workers;
         spawn_thumbnail_workers(
             thumbnail_queue.clone(),
@@ -341,7 +341,7 @@ impl ImageViewerApp {
             pending_deletions.clone(),
         );
 
-        // --- ASYNC ICON WORKER (single thread, evita I/O bloqueante) ---
+        // --- ASYNC ICON WORKER (single thread, avoids blocking I/O) ---
         let (icon_req_tx, icon_req_rx) = mpsc::channel::<PathBuf>();
         let (icon_res_tx, icon_res_rx) = mpsc::channel::<(PathBuf, Vec<u8>, u32, u32)>();
         let icon_ctx = ctx.clone();
@@ -384,7 +384,7 @@ impl ImageViewerApp {
             }
         });
 
-        // --- METADATA WORKER (assíncrono para HDD lentos) ---
+        // --- METADATA WORKER (async for slow HDDs) ---
         let (meta_req_tx, meta_req_rx) = mpsc::channel::<(PathBuf, u64)>();
         let (meta_res_tx, meta_res_rx) = mpsc::channel();
         let meta_ctx = ctx.clone();
@@ -593,7 +593,7 @@ impl ImageViewerApp {
             folder_preview_receiver: folder_preview_res_rx,
             // Cache Manager (unifica texture_cache, icon_cache, loading_set, etc.)
             cache_manager: crate::ui::cache::CacheManager::new(),
-            // Sorting - carregado do SQLite ou defaults
+            // Sorting - loaded from SQLite or defaults
             sort_mode,
             sort_mode_computer,
             sort_mode_normal,
@@ -671,7 +671,7 @@ impl ImageViewerApp {
             // CONTEXT MENU STATE
             context_menu: ContextMenuState::new(),
 
-            // ICON LOADER PERSISTENTE
+            // PERSISTENT ICON LOADER
             item_icon_loader: IconLoader::new(),
 
             // ASYNC ICON WORKER
@@ -685,7 +685,7 @@ impl ImageViewerApp {
             // NOTIFICATION SYSTEM
             notifications: crate::application::NotificationManager::new(),
 
-            // GIF MANAGER OTIMIZADO
+            // OPTIMIZED GIF MANAGER
             gif_manager: crate::ui::components::gif_manager::GifManager::new(ctx.clone()),
 
             // ONEDRIVE SIDEBAR SHORTCUT
@@ -695,10 +695,10 @@ impl ImageViewerApp {
                 .or_else(|| std::env::var("OneDriveCommercial").ok()),
             onedrive_icon: None, // Will be loaded lazily on first sidebar render
 
-            // NAVEGAÇÃO / ADDRESS BAR
+            // NAVIGATION / ADDRESS BAR
             is_address_editing: false,
 
-            // SCROLL TO SELECTED (para navegação por teclado)
+            // SCROLL TO SELECTED (for keyboard navigation)
             scroll_to_selected: false,
             selection_anchor: None,
             pending_select_path: None,
@@ -709,7 +709,7 @@ impl ImageViewerApp {
             // Debounce for paste key (keys_down can fire multiple times)
             paste_key_debounce: false,
 
-            // HWND nativo (capturado na primeira atualização)
+            // Native HWND (captured on first update)
             native_hwnd: None,
 
             // 3-stage startup counter
@@ -739,7 +739,7 @@ impl ImageViewerApp {
             last_metadata_refresh: Instant::now(),
             last_metadata_path: None,
 
-            // SVG ICON MANAGER - usando recursos embarcados
+            // SVG ICON MANAGER - using embedded resources
             svg_icon_manager: SvgIconManager::new(),
 
             // LAST INPUT STATE
@@ -884,11 +884,11 @@ impl ImageViewerApp {
                 .unwrap_or(120.0),
         };
 
-        // Inicia monitoramento inicial
+        // Start initial folder monitoring
         app.watch_current_folder();
 
         // Pre-populate drive_info_cache at startup so the details panel can show
-        // drive info even if the user never visits "Este Computador".
+        // drive info even if the user never visits "This PC".
         {
             let disks_snapshot: Vec<String> = app.disks.iter().map(|(p, _)| p.clone()).collect();
             let tx = app.drive_info_tx.clone();
@@ -915,7 +915,7 @@ impl ImageViewerApp {
             });
         }
 
-        // Garbage Collector em background (incremental + idle window)
+        // Background Garbage Collector (incremental + idle window)
         // Avoids aggressive startup I/O and keeps cleanup bounded on HDD.
         let gc_cache = app.disk_cache.clone();
         std::thread::spawn(move || {

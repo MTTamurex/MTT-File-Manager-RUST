@@ -60,7 +60,7 @@ impl ImageViewerApp {
         }
     }
 
-    /// Colar: Lê do clipboard usando ClipboardManager via Background Worker
+    /// Paste: Reads from clipboard using ClipboardManager via Background Worker
     pub fn command_paste(&mut self, idx: Option<usize>) {
         log::debug!("[DEBUG] command_paste called with idx: {:?}", idx);
 

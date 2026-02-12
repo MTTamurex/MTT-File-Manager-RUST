@@ -23,7 +23,7 @@ pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
 
-            // FINAL INITIALIZATION: Agora que a UI está pronta, garante que a aba inicial está populada
+            // FINAL INITIALIZATION: Now that the UI is ready, ensure the initial tab is populated
             if app.is_computer_view {
                 app.setup_computer_view();
             } else {

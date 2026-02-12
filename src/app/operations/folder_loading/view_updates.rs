@@ -3,21 +3,21 @@ use crate::application::sorting;
 use std::sync::Arc;
 
 impl ImageViewerApp {
-    /// Filtra e ordena itens baseado na query de busca atual.
+    /// Filters and sorts items based on the current search query.
     ///
-    /// PERFORMANCE: Usa filter_items_opt() que evita clone quando query está vazia.
-    /// Isso elimina alocações desnecessárias em 99% dos casos de uso.
+    /// PERFORMANCE: Uses filter_items_opt() which avoids cloning when query is empty.
+    /// This eliminates unnecessary allocations in 99% of use cases.
     pub fn filter_items(&mut self) {
         // PERFORMANCE: filter_items_opt returns None when query is empty,
         // signaling we should use all_items directly without cloning.
         match sorting::filter_items_opt(&self.all_items, &self.search_query) {
             Some(filtered) => {
-                // Query presente: usa o vetor filtrado
+                // Query present: use the filtered vector
                 self.items = Arc::new(filtered);
             }
             None => {
-                // Query vazia: ordena all_items in-place e usa diretamente
-                // Isso evita um clone completo de todo o vetor
+                // Empty query: sort all_items in-place and use directly
+                // This avoids a full clone of the entire vector
                 sorting::sort_items(
                     &mut self.all_items,
                     self.sort_mode,
@@ -29,20 +29,20 @@ impl ImageViewerApp {
         }
         self.total_items = self.items.len();
 
-        // Se houve filtragem, ainda precisamos ordenar o resultado
+        // If filtering was applied, we still need to sort the result
         if !self.search_query.is_empty() {
             self.sort_items();
         }
     }
 
-    /// Ordena itens baseado no modo atual e preferência de posição de pastas.
+    /// Sorts items based on the current mode and folder position preference.
     ///
-    /// OTIMIZADO:
-    /// - Usa par_sort_by para listas >5000 itens (rayon)
-    /// - Usa comparações case-insensitive sem alocação (natord::compare_ignore_case)
+    /// OPTIMIZED:
+    /// - Uses par_sort_by for lists >5000 items (rayon)
+    /// - Uses case-insensitive comparisons without allocation (natord::compare_ignore_case)
     pub fn sort_items(&mut self) {
-        // PERFORMANCE: Se temos ownership único do Arc, podemos modificar in-place
-        // usando Arc::make_mut(). Caso contrário, precisamos clonar.
+        // PERFORMANCE: If we have unique ownership of the Arc, we can modify in-place
+        // using Arc::make_mut(). Otherwise, we need to clone.
         let items = Arc::make_mut(&mut self.items);
         sorting::sort_items(
             items,

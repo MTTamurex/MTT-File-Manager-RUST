@@ -22,7 +22,7 @@ impl ImageViewerApp {
             .ensure_folder_icon(ctx, || windows_infra::extract_folder_icon(icon_size));
     }
 
-    /// Garante que ícone de "Este Computador" está carregado.
+    /// Ensures the "This PC" icon is loaded.
     pub fn ensure_computer_icon(&mut self, ctx: &egui::Context) {
         self.cache_manager.ensure_computer_icon(ctx, || {
             windows_infra::extract_computer_icon(IconSize::Small)

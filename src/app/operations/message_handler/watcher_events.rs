@@ -178,7 +178,7 @@ impl ImageViewerApp {
                                     .unwrap_or(false);
 
                                 if removed_from_all {
-                                    // Atualiza items (Arc) - recria sem o item deletado
+                                    // Update items (Arc) - recreate without the deleted item
                                     let filtered: Vec<_> = self
                                         .items
                                         .iter()
@@ -192,7 +192,7 @@ impl ImageViewerApp {
                                         "[FS-WATCH] SMART DELETE: Removed from UI without reload"
                                     );
 
-                                    // Ajusta selecao se necessario
+                                    // Adjust selection if necessary
                                     if let Some(selected) = self.selected_item {
                                         if selected >= self.items.len() && !self.items.is_empty() {
                                             self.selected_item = Some(self.items.len() - 1);
@@ -202,7 +202,7 @@ impl ImageViewerApp {
                                         }
                                     }
 
-                                    // Previne reload desnecessario - UI ja foi atualizada
+                                    // Prevent unnecessary reload - UI was already updated
                                     self.skip_next_auto_reload = true;
                                 }
                             }
@@ -288,8 +288,8 @@ impl ImageViewerApp {
             );
         }
 
-        // LEGACY: Processa eventos do notify-watcher (mantido para compatibilidade)
-        // Se drive-watcher ja detectou eventos, skip notify-watcher para evitar duplicados
+        // LEGACY: Process notify-watcher events (kept for compatibility)
+        // If drive-watcher already detected events, skip notify-watcher to avoid duplicates
         #[cfg(feature = "notify-watcher")]
         if !drive_watcher_active {
             // PERFORMANCE: Count events first to detect flood
@@ -402,7 +402,7 @@ impl ImageViewerApp {
 
         self.enqueue_disk_cache_invalidations(pending_disk_cache_invalidations);
 
-        // Executa reload apenas quando debounce permitir
+        // Execute reload only when debounce allows
         // SUPPRESS auto-reload while file operations are in progress to prevent
         // screen flashing (watcher fires repeatedly as files grow during copy)
         // Skip auto-reload if smart delete already updated the UI

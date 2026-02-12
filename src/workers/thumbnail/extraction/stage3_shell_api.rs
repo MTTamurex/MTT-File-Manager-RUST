@@ -45,9 +45,9 @@ pub fn extract(path: &Path) -> Result<(Vec<u8>, u32, u32), Box<dyn std::error::E
             cy: size_px,
         };
 
-        // Para vídeos: usa THUMBNAILONLY para FALHAR se só tiver ícone
-        // Isso permite que Stage 4 (force extraction) seja acionado
-        // Para outros arquivos: usa RESIZETOFIT que aceita ícones
+        // For videos: use THUMBNAILONLY to FAIL if only an icon is available
+        // This allows Stage 4 (force extraction) to be triggered
+        // For other files: use RESIZETOFIT which accepts icons
         let flags = if is_video {
             SIIGBF_THUMBNAILONLY
         } else {

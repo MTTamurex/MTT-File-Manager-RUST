@@ -1,28 +1,28 @@
 use crate::infrastructure::windows::system_info::DriveType;
 use std::path::{Path, PathBuf};
 
-/// Informações de volume/drive para a view "Este Computador"
+/// Volume/drive information for the "This PC" view
 #[derive(Clone, Debug)]
 pub struct DriveInfo {
     pub file_system: String,
     pub total_space: u64,
     pub free_space: u64,
-    pub drive_type: DriveType, // Tipo do drive (local, rede, removível, etc)
+    pub drive_type: DriveType, // Drive type (local, network, removable, etc.)
 }
 
-/// Entry de arquivo/pasta com metadados cacheados para ordenação
+/// File/folder entry with cached metadata for sorting
 #[derive(Clone, Debug)]
 pub struct FileEntry {
     pub path: PathBuf,
-    pub name: String,                           // Cache do nome para sort rápido
-    pub is_dir: bool,                           // Pastas primeiro
-    pub size: u64,                              // Tamanho em bytes (0 para diretórios)
-    pub modified: u64,                          // Timestamp (segundos desde UNIX_EPOCH)
-    pub folder_cover: Option<PathBuf>, // Primeira imagem encontrada na pasta (para preview)
-    pub drive_info: Option<DriveInfo>, // Metadados de drive (opcional)
-    pub sync_status: SyncStatus,       // Status de sincronização OneDrive
-    pub deletion_date: Option<String>, // Data de exclusão (apenas Lixeira)
-    pub recycle_original_path: Option<PathBuf>, // Caminho original para restauração (apenas Lixeira)
+    pub name: String,                           // Cached name for fast sorting
+    pub is_dir: bool,                           // Folders first
+    pub size: u64,                              // Size in bytes (0 for directories)
+    pub modified: u64,                          // Timestamp (seconds since UNIX_EPOCH)
+    pub folder_cover: Option<PathBuf>, // First image found in the folder (for preview)
+    pub drive_info: Option<DriveInfo>, // Drive metadata (optional)
+    pub sync_status: SyncStatus,       // OneDrive sync status
+    pub deletion_date: Option<String>, // Deletion date (Recycle Bin only)
+    pub recycle_original_path: Option<PathBuf>, // Original path for restoration (Recycle Bin only)
 }
 
 impl FileEntry {
@@ -33,7 +33,7 @@ impl FileEntry {
             .unwrap_or("")
             .to_string();
 
-        // Tenta ler metadata, usa defaults em caso de erro (arquivos travados, etc)
+        // Try to read metadata, use defaults on error (locked files, etc.)
         let (size, modified) = std::fs::metadata(&path)
             .ok()
             .map(|m| {
@@ -48,8 +48,8 @@ impl FileEntry {
             })
             .unwrap_or((0, 0));
 
-        // OTIMIZAÇÃO: Lazy loading - sempre None inicialmente.
-        // O scan será disparado por request_folder_scan() quando a pasta ficar visível.
+        // OPTIMIZATION: Lazy loading - always None initially.
+        // The scan will be triggered by request_folder_scan() when the folder becomes visible.
         let folder_cover = None;
         let drive_info = None;
 
@@ -107,14 +107,14 @@ pub fn ends_with_ignore_case(s: &str, suffix: &str) -> bool {
         .all(|(a, b)| a.eq_ignore_ascii_case(b))
 }
 
-/// Extensões de arquivo compactado suportadas para navegação via Windows Shell Namespace.
-/// Extensões compostas (.tar.gz) devem vir antes das simples (.gz).
+/// Supported archive file extensions for navigation via Windows Shell Namespace.
+/// Compound extensions (.tar.gz) must come before simple ones (.gz).
 pub const ARCHIVE_EXTENSIONS: &[&str] = &[
     ".tar.gz", ".tgz", ".tar.bz2", ".tbz2", ".tar.zst", ".tzst", ".tar.xz", ".txz", ".tar", ".zip",
     ".7z", ".rar", ".gz", ".gzip",
 ];
 
-/// Checa se um nome de arquivo termina com uma extensão de arquivo compactado (case-insensitive).
+/// Checks if a filename ends with an archive file extension (case-insensitive).
 #[inline]
 pub fn is_archive_extension(name: &str) -> bool {
     ARCHIVE_EXTENSIONS
@@ -122,8 +122,8 @@ pub fn is_archive_extension(name: &str) -> bool {
         .any(|ext| ends_with_ignore_case(name, ext))
 }
 
-/// Checa se um caminho (já em lowercase) passa por dentro de um arquivo compactado.
-/// Ex: "C:\arquivo.7z\subdir\file.txt" → true
+/// Checks if a path (already in lowercase) passes through an archive file.
+/// E.g.: "C:\archive.7z\subdir\file.txt" → true
 pub fn path_contains_archive_segment(path_lower: &str) -> bool {
     ARCHIVE_EXTENSIONS.iter().any(|ext| {
         let with_backslash = format!("{}\\", ext);
@@ -132,8 +132,8 @@ pub fn path_contains_archive_segment(path_lower: &str) -> bool {
     })
 }
 
-/// Retorna o label de tipo para exibição de um arquivo compactado.
-/// Ex: "Arquivo ZIP", "Arquivo RAR". Retorna None se não for arquivo compactado.
+/// Returns the type label for displaying an archive file.
+/// E.g.: "Arquivo ZIP", "Arquivo RAR". Returns None if not an archive file.
 pub fn archive_type_label(name: &str) -> Option<&'static str> {
     let lower = name.to_ascii_lowercase();
     if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
@@ -159,7 +159,7 @@ pub fn archive_type_label(name: &str) -> Option<&'static str> {
     }
 }
 
-/// Helper para exibir tipo do arquivo na Lista
+/// Helper to display file type in the List view
 pub fn get_file_type_string(entry: &FileEntry) -> String {
     if let Some(label) = archive_type_label(&entry.name) {
         return label.to_string();
@@ -173,43 +173,43 @@ pub fn get_file_type_string(entry: &FileEntry) -> String {
     "Arquivo".to_string()
 }
 
-/// Modo de ordenação
+/// Sort mode
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum SortMode {
     Name,
     Date,
     Size,
     Type,
-    /// Espaço total do drive (apenas para Computer View)
+    /// Total drive space (Computer View only)
     DriveTotalSpace,
-    /// Espaço livre do drive (apenas para Computer View)
+    /// Free drive space (Computer View only)
     DriveFreeSpace,
 }
 
-/// Modo de visualização
+/// View mode
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum ViewMode {
     Grid,
     List,
 }
 
-/// Tamanho de ícones
+/// Icon size
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum IconSize {
-    Small, // 16x16 ou 32x32 (depende do DPI)
-    Large, // 32x32 ou 48x48
+    Small, // 16x16 or 32x32 (depends on DPI)
+    Large, // 32x32 or 48x48
     Jumbo, // 256x256 (via Shell Image Factory)
 }
 
-/// Posição das pastas na listagem
+/// Folder position in the listing
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum FoldersPosition {
-    First, // Pastas antes de arquivos (padrão)
-    Last,  // Arquivos antes de pastas
-    Mixed, // Misturados por critério de ordenação
+    First, // Folders before files (default)
+    Last,  // Files before folders
+    Mixed, // Mixed by sort criteria
 }
 
-/// Status de sincronização OneDrive
+/// OneDrive sync status
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum SyncStatus {
     #[default]

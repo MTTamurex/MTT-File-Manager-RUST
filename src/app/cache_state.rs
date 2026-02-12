@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-/// Estado de gerenciamento de cache
+/// Cache management state
 pub struct CacheState {
     pub cache_manager: Arc<Mutex<CacheManager>>,
     pub disk_cache: Arc<ThumbnailDiskCache>,
@@ -48,7 +48,7 @@ impl CacheState {
         }
     }
 
-    /// Limpa todos os caches
+    /// Clear all caches
     pub fn clear_all(&mut self) {
         if let Ok(mut cache_manager) = self.cache_manager.lock() {
             cache_manager.clear_all();

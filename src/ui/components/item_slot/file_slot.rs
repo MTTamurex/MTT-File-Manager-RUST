@@ -1,7 +1,7 @@
 use super::badges::render_sync_badge;
 use super::*;
 
-/// Renderiza um slot de arquivo
+/// Renders a file slot
 pub(super) fn render_file_slot<O: ItemSlotOperations>(
     ui: &mut egui::Ui,
     rect: egui::Rect,
@@ -13,7 +13,7 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
     // PERFORMANCE: Use is_media() method to avoid registry lookups per frame
     let is_media_file = item.is_media();
 
-    // Thumbnail loading para arquivos de mídia (desabilitado na Lixeira)
+    // Thumbnail loading for media files (disabled in Recycle Bin)
     if is_media_file && !ctx.is_recycle_bin_view {
         let has_texture = ctx.texture_cache.contains(&item.path);
         let is_loading = ctx.loading_set.contains(&item.path);
@@ -37,15 +37,15 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
         }
     }
 
-    // Carrega ícone (sempre, servirá como fallback)
-    // Na Lixeira, usa get_or_load_icon que agora suporta paths virtuais com extensão
+    // Load icon (always, serves as fallback)
+    // In Recycle Bin, uses get_or_load_icon which now supports virtual paths with extension
     // PERFORMANCE: allow_blocking=false prevents UI stutter on slow icons (exe/lnk)
     let file_icon = ctx
         .icon_loader
         .get_or_load_icon(ui.ctx(), &item.path, false, false);
 
-    // Se ícone não está cacheado E não está carregando E não falhou:
-    // Dispara carregamento assíncrono (apenas para casos lentos onde allow_blocking=false retornou None)
+    // If icon is not cached AND not loading AND not failed:
+    // Triggers async loading (only for slow cases where allow_blocking=false returned None)
     // NOTE: Do NOT insert into loading_icons here - request_icon_load handles it.
     // Inserting here would cause the deferred request_icon_load to skip (already in set).
     // NOTE: Also works for Recycle Bin - physical_path ($R files) contain embedded icons.
@@ -56,7 +56,7 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
         ops.request_icon_load(item.path.clone());
     }
 
-    // GEOMETRIA - reduz tamanho para caber na área com margem
+    // GEOMETRY - reduce size to fit area with margin
     let available_h = rect.height();
     let available_w = rect.width();
     let thumb_size = (ctx.thumbnail_size - 6.0).min(available_w - 4.0); // 6px margem total
@@ -64,16 +64,16 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
     let content_h = thumb_size + text_height;
     let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
 
-    // Centraliza horizontalmente na área disponível
+    // Center horizontally in available area
     let x_offset = (available_w - thumb_size) / 2.0;
     let start_pos = rect.min + egui::vec2(x_offset.max(0.0), vertical_margin);
     let thumb_rect = egui::Rect::from_min_size(start_pos, egui::vec2(thumb_size, thumb_size));
 
-    // Desenha thumbnail ou ícone
+    // Draw thumbnail or icon
     let mut drew_something = false;
     if is_media_file {
         if let Some(texture) = ctx.texture_cache.get(&item.path) {
-            // Thumbnail carregado - mantém aspect ratio
+            // Thumbnail loaded - maintain aspect ratio
             let tex_size = texture.size_vec2();
             let aspect = tex_size.x / tex_size.y;
             let (draw_w, draw_h) = if aspect > 1.0 {
@@ -98,7 +98,7 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
     }
 
     if !drew_something {
-        // Fallback para ícone do Windows ou placeholder
+        // Fallback to Windows icon or placeholder
         ui.painter()
             .rect_filled(thumb_rect, 4.0, egui::Color32::from_gray(248));
         if let Some(icon_texture) = file_icon {
@@ -112,7 +112,7 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
                 egui::Color32::WHITE,
             );
         } else {
-            // Se nem o ícone carregou, mostra "..." se for mídia ou ícone genérico
+            // If even the icon hasn't loaded, show "..." for media or generic icon
             let text = if is_media_file { "..." } else { "📄" };
             let font_id = if is_media_file {
                 egui::FontId::proportional(thumb_size * 0.3)
@@ -134,10 +134,10 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
         render_sync_badge(ui, thumb_rect, item.sync_status);
     }
 
-    // Aloca espaço do thumbnail
+    // Allocate thumbnail space
     ui.allocate_rect(thumb_rect, egui::Sense::hover());
 
-    // Texto do nome - igual às pastas
+    // Name text - same as folders
     let text_start_y = thumb_rect.bottom() + 4.0;
 
     if !ctx.is_dense_mode {

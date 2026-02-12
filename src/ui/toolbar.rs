@@ -50,7 +50,7 @@ pub fn render_toolbar(
     ui.horizontal(|ui| {
         ui.style_mut().spacing.item_spacing.x = 8.0;
 
-        // 1. NAVEGAÇÃO (ESQUERDA) - Bloqueados durante renomeação
+        // 1. NAVIGATION (LEFT) - Blocked during renaming
         let can_back = navigation.can_go_back() && !_is_renaming;
         if widgets::icon_button(ui, svg_manager, theme::ICON_ARROW_LEFT, "Voltar", None).clicked()
             && can_back
@@ -100,7 +100,7 @@ pub fn render_toolbar(
             action = Some(ToolbarAction::NavigateToComputer);
         }
 
-        // 2. ELEMENTOS DA DIREITA (DIREITA -> ESQUERDA)
+        // 2. RIGHT-SIDE ELEMENTS (RIGHT -> LEFT)
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(4.0);
 
@@ -119,16 +119,16 @@ pub fn render_toolbar(
 
             ui.separator();
 
-            // Busca
+            // Search
             let search_width = 250.0;
             let input_height = 26.0;
-            // Cria um container visualmente similar a um input, mas manual para conter o botão
+            // Creates a container visually similar to an input, but manual to contain the button
             let (search_rect, search_resp) = ui.allocate_exact_size(
                 egui::vec2(search_width, input_height),
                 egui::Sense::click_and_drag(),
             );
 
-            // Desenha o fundo branco para campo de busca
+            // Draw white background for search field
             let visuals = ui.style().interact(&search_resp);
             ui.painter()
                 .rect_filled(search_rect, visuals.corner_radius, egui::Color32::WHITE);
@@ -145,17 +145,17 @@ pub fn render_toolbar(
                     .layout(egui::Layout::left_to_right(egui::Align::Center)),
             );
 
-            // Padding esquerdo
+            // Left padding
             search_ui.add_space(6.0);
 
-            // Ícone de busca (agora dentro da barra, à esquerda, estilo premium)
+            // Search icon (now inside the bar, on the left, premium style)
             crate::ui::svg_icons::icon_image(&mut search_ui, svg_manager, "search", 14.0);
             search_ui.add_space(4.0);
 
             let has_text = !search_query.is_empty();
-            // Lógica para largura do texto: Total - Ícones - Paddings
-            // Total (250) - Icon(14) - Pad(6+4) - ClearBtn(18 se houver) - Pad(4) - RightPad(4)
-            // Antes faltava o RightPad no cálculo e na adição.
+            // Text width logic: Total - Icons - Paddings
+            // Total (250) - Icon(14) - Pad(6+4) - ClearBtn(18 if present) - Pad(4) - RightPad(4)
+            // Previously RightPad was missing from the calculation and addition.
             let text_available_w =
                 search_ui.available_width() - if has_text { 22.0 + 4.0 } else { 4.0 };
 
@@ -174,7 +174,7 @@ pub fn render_toolbar(
                 action = Some(ToolbarAction::Search(search_query.clone()));
             }
 
-            // Botão Limpar (X)
+            // Clear Button (X)
             if has_text {
                 if search_ui
                     .add(
@@ -191,20 +191,20 @@ pub fn render_toolbar(
                 search_ui.add_space(4.0);
             }
 
-            // Foca no input se clicar no container vazio
+            // Focus input when clicking empty container
             if search_resp.clicked() {
                 text_resp.request_focus();
             }
 
             ui.separator();
 
-            // 3. BARRA DE ENDEREÇO (Breadcrumbs ou Edição)
-            // Mesma técnica da barra de busca: allocate + new_child
+            // 3. ADDRESS BAR (Breadcrumbs or Editing)
+            // Same technique as search bar: allocate + new_child
             let addr_width = (ui.available_width() - 4.0).max(100.0);
             let (addr_rect, addr_resp) =
                 ui.allocate_exact_size(egui::vec2(addr_width, input_height), egui::Sense::click());
 
-            // Desenha fundo branco
+            // Draw white background
             ui.painter()
                 .rect_filled(addr_rect, 4.0, egui::Color32::WHITE);
             ui.painter().rect_stroke(
@@ -214,7 +214,7 @@ pub fn render_toolbar(
                 egui::StrokeKind::Inside,
             );
 
-            // Cria UI filha dentro do retângulo (igual à busca)
+            // Create child UI inside the rectangle (same as search)
             let mut addr_ui = ui.new_child(
                 egui::UiBuilder::new()
                     .max_rect(addr_rect.shrink(4.0))
@@ -283,7 +283,7 @@ pub fn render_toolbar(
                             display_name.to_string()
                         };
 
-                        // Breadcrumb clicável - transparente, cinza claro no hover
+                        // Clickable breadcrumb - transparent, light gray on hover
                         let btn_resp = addr_ui
                             .scope(|ui| {
                                 let hover_color = if ui.visuals().dark_mode {
@@ -324,7 +324,7 @@ pub fn render_toolbar(
                     }
                 }
 
-                // Clique na área vazia abre edição
+                // Click on empty area opens editing
                 if addr_resp.clicked() && action.is_none() {
                     action = Some(ToolbarAction::StartAddressEdit);
                 }

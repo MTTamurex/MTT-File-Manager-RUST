@@ -360,25 +360,25 @@ fn process_thumbnail_request(
         }
     }
 
-    // STEP 1: Se não está em cache, decodifica com limite de concorrência
+    // STEP 1: If not cached, decode with concurrency limit
     if final_result.is_none() {
         // CANCELLATION: Skip extraction if file is pending deletion
         if pending_deletions.contains_key(path) {
             return;
         }
 
-        // Aguarda até ter um slot disponível (max 4 decodes simultâneos)
+        // Wait until a slot is available (max 4 simultaneous decodes)
         semaphore.acquire();
 
         // HYBRID PIPELINE com resize imediato
         if let Some((raw_data, w, h)) =
             generate_thumbnail_hybrid(path, req_priority, pending_deletions)
         {
-            // STEP 2: Resize to bucket (libera RAM e otimiza upload GPU)
+            // STEP 2: Resize to bucket (frees RAM and optimizes GPU upload)
             let bucket_size = get_bucket_size(req_size);
             let resized = resize_to_bucket(raw_data, w, h, bucket_size);
 
-            // STEP 3: Salva versão otimizada em SQLite
+            // STEP 3: Save optimized version to SQLite
             if let Err(e) =
                 disk_cache.put(path, modified, req_size, &resized.0, resized.1, resized.2)
             {
@@ -389,15 +389,15 @@ fn process_thumbnail_request(
                 );
             }
 
-            // STEP 4: Usa a versão resizada (já otimizada)
+            // STEP 4: Use the resized version (already optimized)
             final_result = Some(resized);
         } else {
             // EXTRACTION FAILED: Mark as failed to skip future attempts
             mark_as_failed(path.clone());
         }
-        // raw_data é dropado aqui automaticamente (libera RAM)
+        // raw_data is dropped here automatically (frees RAM)
 
-        // Libera slot
+        // Release slot
         semaphore.release();
     }
 

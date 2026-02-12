@@ -67,15 +67,15 @@ pub struct ImageViewerApp {
     pub current_path: String,
     pub loaded_path: String, // Tracks the last path we actually requested (prevents spam)
 
-    // --- SISTEMA DE THUMBNAILS OTIMIZADO ---
+    // --- OPTIMIZED THUMBNAIL SYSTEM ---
     pub thumbnail_queue: Arc<PriorityThumbnailQueue>, // UI -> Worker Pool (Priority Queue)
     pub image_receiver: Receiver<ThumbnailData>,      // Worker Pool -> UI
     pub pending_thumbnails: VecDeque<ThumbnailData>,  // PERFORMANCE: Buffer for throttled uploads
 
     // File system
-    pub items: Arc<Vec<FileEntry>>, // Arc para clone barato em render loops (60 FPS)
+    pub items: Arc<Vec<FileEntry>>, // Arc for cheap clone in render loops (60 FPS)
 
-    // Async loading (evita freeze da UI ao ler metadata)
+    // Async loading (prevents UI freeze when reading metadata)
     pub file_entry_receiver: Receiver<(usize, Vec<FileEntry>)>,
     pub file_entry_sender: Sender<(usize, Vec<FileEntry>)>,
     pub is_loading_folder: bool,
@@ -86,10 +86,10 @@ pub struct ImageViewerApp {
     pub items_rebuild_receiver: Receiver<ItemsRebuildResult>,
     pub items_rebuild_request_id: usize,
 
-    // COVER WORKER: Sistema de capas de pasta (Single Thread Worker)
-    pub cover_worker_sender: Sender<PathBuf>, // UI → Worker: Envia pasta para processar
-    pub cover_worker_receiver: Receiver<(PathBuf, Option<PathBuf>)>, // Worker → UI: Resultado
-    pub scanned_folders: LruCache<PathBuf, ()>, // Cache: evita re-scan (LRU bounded)
+    // COVER WORKER: Folder cover system (Single Thread Worker)
+    pub cover_worker_sender: Sender<PathBuf>, // UI → Worker: Sends folder to process
+    pub cover_worker_receiver: Receiver<(PathBuf, Option<PathBuf>)>, // Worker → UI: Result
+    pub scanned_folders: LruCache<PathBuf, ()>, // Cache: avoids re-scan (LRU bounded)
 
     // FOLDER PREVIEW WORKER: Native Windows Shell folder previews (sandwich effect)
     pub folder_preview_sender: Sender<PathBuf>,
@@ -100,9 +100,9 @@ pub struct ImageViewerApp {
 
     // Sorting state
     pub sort_mode: SortMode,
-    pub sort_mode_computer: SortMode, // Sort mode for "Este Computador" view
+    pub sort_mode_computer: SortMode, // Sort mode for "This PC" view
     pub sort_mode_normal: SortMode,   // Sort mode for normal folder views
-    pub sort_descending: bool,        // true = Z-A, Mais Novo, Maior
+    pub sort_descending: bool,        // true = Z-A, Newest, Largest
     pub folders_position: FoldersPosition, // First, Last, Mixed
 
     // Persistence Layer
@@ -113,9 +113,9 @@ pub struct ImageViewerApp {
     // View Mode
     pub view_mode: ViewMode,
 
-    // Navigation state (histórico linear)
+    // Navigation state (linear history)
     pub navigation: NavigationHistory,
-    pub path_input: String, // Barra de endereço editável
+    pub path_input: String, // Editable address bar
 
     // UI state
     pub disks: Vec<(String, String)>, // (path, label)
@@ -149,32 +149,32 @@ pub struct ImageViewerApp {
     pub last_metadata_refresh: Instant,
     pub last_metadata_path: Option<PathBuf>,
     pub show_preview_panel: bool,
-    pub is_computer_view: bool, // Se estamos na view "Este Computador"
+    pub is_computer_view: bool, // Whether we're in the "This PC" view
     pub computer_view_local_indices: Vec<usize>, // Pre-computed indices for local drives (virtualization)
     pub computer_view_network_indices: Vec<usize>, // Pre-computed indices for network drives (virtualization)
-    pub is_recycle_bin_view: bool,                 // Se estamos na view da Lixeira
-    pub show_virtual_drive_settings: bool,         // Modal de configuração de drives virtuais
+    pub is_recycle_bin_view: bool,                 // Whether we're in the Recycle Bin view
+    pub show_virtual_drive_settings: bool,         // Virtual drive settings modal
 
     pub total_items: usize,
 
     // Search & Navigation (NEW)
-    pub all_items: Vec<FileEntry>,            // Cache mestre para busca
-    pub search_query: String,                 // Texto da busca
-    pub last_grid_cols: usize,                // Memória para navegação vertical (teclado)
-    pub generation: usize,                    // Contador local (Main Thread)
-    pub current_generation: Arc<AtomicUsize>, // Contador compartilhado (Workers)
-    pub ui_ctx: egui::Context, // Referência ao contexto da UI para repaints assíncronos
-    // PERFORMANCE: Throttle rebuild de lista durante streaming
+    pub all_items: Vec<FileEntry>,            // Master cache for search
+    pub search_query: String,                 // Search text
+    pub last_grid_cols: usize,                // Memory for vertical navigation (keyboard)
+    pub generation: usize,                    // Local counter (Main Thread)
+    pub current_generation: Arc<AtomicUsize>, // Shared counter (Workers)
+    pub ui_ctx: egui::Context, // Reference to UI context for async repaints
+    // PERFORMANCE: Throttle list rebuild during streaming
     pub last_items_rebuild: Instant,
     pub pending_items_rebuild: bool,
     pub pending_items_count: usize,
 
-    // ESTADO DE RENOMEAÇÃO
-    pub renaming_state: Option<(usize, String)>, // (Index, Texto Editável)
-    pub focus_rename: bool,                      // Trigger para focar no input
+    // RENAME STATE
+    pub renaming_state: Option<(usize, String)>, // (Index, Editable Text)
+    pub focus_rename: bool,                      // Trigger to focus the input
 
-    // SISTEMA DE WATCHER (AUTO-REFRESH)
-    // Drive-wide watcher (novo - monitora drive inteiro)
+    // WATCHER SYSTEM (AUTO-REFRESH)
+    // Drive-wide watcher (new - monitors entire drive)
     pub drive_watcher: crate::infrastructure::drive_watcher_integration::DriveWatcherManager,
 
     // Legacy notify-based watcher (fallback)
@@ -189,19 +189,19 @@ pub struct ImageViewerApp {
     pub pending_auto_reload: bool,
     pub skip_next_auto_reload: bool, // SMART DELETE: Prevent reload after direct UI update
 
-    // CLIPBOARD (Copiar/Recortar/Colar)
+    // CLIPBOARD (Copy/Cut/Paste)
     pub clipboard: ClipboardManager,
 
     // CONTEXT MENU STATE
     pub context_menu: ContextMenuState,
 
-    // ICON LOADER PERSISTENTE (evita criar novo a cada frame)
+    // PERSISTENT ICON LOADER (avoids creating a new one each frame)
     pub item_icon_loader: IconLoader,
 
-    // GIF MANAGER OTIMIZADO
+    // OPTIMIZED GIF MANAGER
     pub gif_manager: crate::ui::components::gif_manager::GifManager,
 
-    // ASYNC ICON WORKER (evita I/O bloqueante no render loop)
+    // ASYNC ICON WORKER (avoids blocking I/O in the render loop)
     pub icon_req_sender: Sender<PathBuf>, // UI → Worker
     pub icon_res_receiver: Receiver<(PathBuf, Vec<u8>, u32, u32)>, // Worker → UI
     pub loading_icons: FxHashSet<PathBuf>, // Tracking in-progress
@@ -211,16 +211,16 @@ pub struct ImageViewerApp {
     pub notifications: crate::application::NotificationManager,
 
     // ONEDRIVE SIDEBAR SHORTCUT
-    pub onedrive_path: Option<String>, // Caminho do OneDrive (se instalado)
-    pub onedrive_icon: Option<egui::TextureHandle>, // Ícone nativo do OneDrive
+    pub onedrive_path: Option<String>, // OneDrive path (if installed)
+    pub onedrive_icon: Option<egui::TextureHandle>, // Native OneDrive icon
 
     // STARTUP OPTIMIZATION: Async Font Loading
     pub font_loader_rx: Option<Receiver<egui::FontDefinitions>>,
 
-    // NAVEGAÇÃO / ADDRESS BAR (Breadcrumbs vs Edit)
+    // NAVIGATION / ADDRESS BAR (Breadcrumbs vs Edit)
     pub is_address_editing: bool,
 
-    // SCROLL TO SELECTED (para navegação por teclado)
+    // SCROLL TO SELECTED (for keyboard navigation)
     pub scroll_to_selected: bool,
     pub selection_anchor: Option<usize>,
 

@@ -1,7 +1,7 @@
 use super::badges::render_sync_badge;
 use super::*;
 
-/// Renderiza um slot de diretório
+/// Renders a directory slot
 pub(super) fn render_directory_slot<O: ItemSlotOperations>(
     ui: &mut egui::Ui,
     rect: egui::Rect,
@@ -10,14 +10,14 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
 ) {
     let item = ctx.item;
     if !ctx.is_recycle_bin_view {
-        // --- GATILHO LAZY LOAD ---
-        // Se não tem capa E ainda não foi escaneado: Dispara Scan.
+        // --- LAZY LOAD TRIGGER ---
+        // If no cover AND not yet scanned: Trigger Scan.
         if item.folder_cover.is_none() && ctx.scanned_folders.peek(&item.path).is_none() {
             ctx.scanned_folders.put(item.path.clone(), ());
             ops.request_folder_scan(item.path.clone());
         }
 
-        // Se TEM capa (de SQLite ou descoberta recente) MAS a textura não está carregada: Carrega!
+        // If HAS cover (from SQLite or recent discovery) BUT texture not loaded: Load!
         if let Some(ref cover_path) = item.folder_cover {
             if !ctx.texture_cache.contains(cover_path)
                 && !ctx.loading_set.contains(cover_path)
@@ -29,7 +29,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
         }
     }
 
-    // GEOMETRIA - Aumentado para 0.85 para folder preview maior
+    // GEOMETRY - Increased to 0.85 for larger folder preview
     let available_h = rect.height();
     let folder_w = ctx.thumbnail_size * 0.85;
     let folder_h = folder_w * 0.85;
@@ -37,14 +37,14 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
     let content_h = folder_h + text_height;
     let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
 
-    // Centraliza a pasta horizontalmente na célula
+    // Center folder horizontally in cell
     let cell_width = rect.width();
     let x_offset = (cell_width - folder_w) / 2.0;
     let start_pos = rect.min + egui::vec2(x_offset.max(0.0), vertical_margin);
     let folder_rect = egui::Rect::from_min_size(start_pos, egui::vec2(folder_w, folder_h));
 
-    // === DESENHO DA PASTA ===
-    // 1. Tenta usar o preview nativo (Shell Sandwich)
+    // === FOLDER DRAWING ===
+    // 1. Try to use the native preview (Shell Sandwich)
     let native_preview = if ctx.is_recycle_bin_view {
         None
     } else {
@@ -53,18 +53,18 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
     let is_loading = !ctx.is_recycle_bin_view && ctx.folder_preview_loading.contains(&item.path);
 
     if let Some(tex) = native_preview {
-        // Se temos o preview nativo, desenha mantendo aspect ratio e centralizando
+        // If we have the native preview, draw maintaining aspect ratio and centering
         let tex_size = tex.size_vec2();
         let aspect = tex_size.x / tex_size.y;
 
-        // Calcula tamanho mantendo aspect ratio
+        // Calculate size maintaining aspect ratio
         let (draw_w, draw_h) = if aspect > 1.0 {
             (folder_rect.width(), folder_rect.width() / aspect)
         } else {
             (folder_rect.height() * aspect, folder_rect.height())
         };
 
-        // Centraliza no folder_rect
+        // Center in folder_rect
         let offset_x = (folder_rect.width() - draw_w) / 2.0;
         let offset_y = (folder_rect.height() - draw_h) / 2.0;
         let draw_rect = egui::Rect::from_min_size(
@@ -79,7 +79,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
             egui::Color32::WHITE,
         );
     } else {
-        // Se não tem preview nativo
+        // If no native preview
         let is_virtual_path = ctx.is_recycle_bin_view
             || crate::infrastructure::windows::shell_folder::is_shell_navigation_path(
                 &item.path,
@@ -87,7 +87,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
             );
 
         if is_virtual_path {
-            // NA LIXEIRA ou ZIP (Paths Virtuais)
+            // IN RECYCLE BIN or ZIP (Virtual Paths)
             // Use System Folder Icon for these virtual folders
             ctx.icon_loader.ensure_folder_icon(ui.ctx());
             if let Some(sys_icon) = ctx.icon_loader.folder_icon() {
@@ -107,7 +107,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
                 ctx.icon_loader
                     .get_or_load_icon(ui.ctx(), &item.path, true, true)
             {
-                // Fallback para ícone específico do item (allow_blocking=true for folders usually safe, or use false if needed)
+                // Fallback to item-specific icon (allow_blocking=true for folders usually safe, or use false if needed)
                 let icon_size = folder_w.min(folder_h);
                 let icon_rect = egui::Rect::from_center_size(
                     folder_rect.center(),
@@ -119,37 +119,37 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
                     egui::Image::new(&icon).max_size(egui::vec2(icon_size, icon_size)),
                 );
             } else {
-                // Final Fallback para virtual paths: área vazia estilizada
+                // Final Fallback for virtual paths: styled empty area
                 ui.painter()
                     .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
             }
         } else {
-            // PASTA NORMAL: Dispara carregamento se ainda não iniciou
+            // NORMAL FOLDER: Trigger loading if not yet started
             if !is_loading {
                 ops.request_folder_preview_load(item.path.clone());
             }
 
-            // SEMPRE mostra loading spinner para pastas normais sem preview
-            // (NUNCA mostra ícone de pasta genérico/customizado como placeholder)
+            // ALWAYS show loading spinner for normal folders without preview
+            // (NEVER show generic/custom folder icon as placeholder)
             let spinner_size = folder_rect.width().min(folder_rect.height()) * 0.3;
             let spinner_rect = egui::Rect::from_center_size(
                 folder_rect.center(),
                 egui::vec2(spinner_size, spinner_size),
             );
 
-            // Desenha fundo leve
+            // Draw light background
             ui.painter()
                 .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
 
             let time = ui.input(|i| i.time);
             let angle = (time * 3.0) as f32;
 
-            // Desenha arco do spinner
+            // Draw spinner arc
             let center = spinner_rect.center();
             let radius = spinner_size / 2.0 - 2.0;
             let stroke = egui::Stroke::new(3.0, egui::Color32::from_rgb(100, 150, 220));
 
-            // Desenha um arco (semi-círculo rotativo)
+            // Draw an arc (rotating semi-circle)
             let points: Vec<egui::Pos2> = (0..20)
                 .map(|i| {
                     let t = i as f32 / 19.0 * std::f32::consts::PI * 1.5; // 270 graus
@@ -175,7 +175,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
 
     // NOTE: Allocation for interaction is handled by caller using `rect`
 
-    // TEXTO: Usa Label com truncate (igual aos arquivos) para respeitar limites
+    // TEXT: Uses Label with truncate (same as files) to respect bounds
     let text_start_y = folder_rect.bottom() + 6.0;
 
     if !ctx.is_dense_mode {

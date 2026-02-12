@@ -40,7 +40,7 @@ pub fn render_preview_panel(
     is_owner: bool,
     is_failed: bool,
 ) -> Option<PreviewPanelAction> {
-    // Metadados são processados de forma assíncrona; se chegarem, o metadata será Some(...)
+    // Metadata is processed asynchronously; when it arrives, metadata will be Some(...)
     let mut action = None;
 
     // Check if this is a video file
