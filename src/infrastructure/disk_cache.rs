@@ -544,7 +544,7 @@ impl ThumbnailDiskCache {
         results
     }
 
-    /// Salva a capa (thumbnail) descoberta para uma pasta
+    /// Saves the discovered cover (thumbnail) for a folder
     /// [WRITER]
     pub fn set_folder_cover(&self, folder_path: &Path, cover_path: &Path) {
         if let Ok(db) = self.writer.lock() {

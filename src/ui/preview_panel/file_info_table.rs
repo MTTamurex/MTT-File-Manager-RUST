@@ -104,7 +104,7 @@ pub fn render_file_info_table(
                 ui.add_space(4.0);
             };
 
-            // 2. Tipo (General)
+            // 2. Type (General)
             if file.name == "Este Computador" {
                 add_detail(ui, "Tipo:", "Visão do Sistema".to_string());
                 let drive_count = file.size as usize; // drive count stored in size field
@@ -131,7 +131,7 @@ pub fn render_file_info_table(
                 add_detail(ui, "Tipo:", format!("Arquivo {}", ext));
             }
 
-            // 3. Metadados do Arquivo (Data/Tamanho)
+            // 3. File Metadata (Date/Size)
             if file.drive_info.is_none() && file.name != "Este Computador" {
                 let is_recycle_item =
                     file.recycle_original_path.is_some() || file.deletion_date.is_some();
@@ -178,7 +178,7 @@ pub fn render_file_info_table(
                 }
             }
 
-            // 4. Metadados de Mídia (Imagens/Vídeos)
+            // 4. Media Metadata (Images/Videos)
             if is_metadata_loading {
                 add_detail(ui, "Metadados:", "Carregando...".to_string());
             } else if let Some(meta) = metadata {

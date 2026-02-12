@@ -21,12 +21,12 @@ pub fn resize_to_bucket(
     height: u32,
     max_dim: u32,
 ) -> (Vec<u8>, u32, u32) {
-    // Se já é pequeno o suficiente, retorna como está
+    // If already small enough, return as-is
     if width <= max_dim && height <= max_dim {
         return (rgba_data, width, height);
     }
 
-    // Calcula novo tamanho mantendo aspect ratio
+    // Calculate new size preserving aspect ratio
     let scale = (max_dim as f32) / (width.max(height) as f32);
     let new_w = ((width as f32) * scale).round() as u32;
     let new_h = ((height as f32) * scale).round() as u32;
@@ -42,7 +42,7 @@ pub fn resize_to_bucket(
     };
 
     if rgba_data.len() >= min_len {
-        // Usa image crate para resize
+        // Use image crate for resize
         // Safe to unwrap because we checked the dimensions
         let img = ImageBuffer::from_raw(width, height, rgba_data)
             .expect("Buffer size check passed but from_raw failed");
@@ -56,7 +56,7 @@ pub fn resize_to_bucket(
         return (rgba.into_vec(), w, h);
     }
 
-    // Fallback: retorna original se resize falhar ou tamanho incorreto
+    // Fallback: return original if resize fails or size is incorrect
     (rgba_data, width, height)
 }
 

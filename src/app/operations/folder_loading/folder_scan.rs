@@ -3,8 +3,8 @@ use crate::infrastructure::windows::{is_image_extension, is_video_extension};
 use std::path::PathBuf;
 
 impl ImageViewerApp {
-    /// Requisita scan assíncrono de uma pasta para descobrir primeira imagem.
-    /// OTIMIZADO: Envia mensagem para worker único (zero overhead de threads)
+    /// Requests an async scan of a folder to discover the first image.
+    /// OPTIMIZED: Sends message to a single worker (zero thread overhead)
     pub fn request_folder_scan(&mut self, folder_path: PathBuf) {
         // FAST PATH: Check folder cover in DB (no HDD hit)
         let mut cover_opt = self

@@ -106,8 +106,8 @@ pub fn generate_thumbnail_hybrid(
         }
     }
 
-    // Stage 4: IThumbnailCache with WTS_FORCEEXTRACTION (bypassa cache do Windows)
-    // Útil quando o cache do Windows retornou um ícone em vez do thumbnail real
+    // Stage 4: IThumbnailCache with WTS_FORCEEXTRACTION (bypasses Windows cache)
+    // Useful when Windows cache returned an icon instead of the actual thumbnail
     // Single attempt - if fails, Stage 5 takes over
     log::trace!("[Thumbnail] Trying Stage 4 (Force Extract)...");
     match stage4_force_extract::extract(path) {

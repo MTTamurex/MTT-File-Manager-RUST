@@ -262,7 +262,7 @@ impl ImageViewerApp {
                 // before the scope ends.
                 if let Ok(handle) = FindFirstFileW(PCWSTR(wide_path.as_ptr()), &mut find_data) {
                     loop {
-                        // Verifica se a geração mudou -> Aborta scan antigo
+                        // Check if generation changed -> Abort old scan
                         if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
                             break;
                         }
@@ -362,11 +362,11 @@ impl ImageViewerApp {
                                     recycle_original_path: None,
                                 };
 
-                                // Adiciona ao lote
+                                // Add to batch
                                 all_entries_disk.push(entry.clone());
                                 batch.push(entry);
 
-                                // SE o lote encheu, envia e limpa (tamanho adaptado para SSD/HDD)
+                                // If batch is full, send and clear (size adapted for SSD/HDD)
                                 if batch.len() >= batch_size {
                                     // PRE-FETCH COVERS (Batch Optimization)
                                     let folders: Vec<PathBuf> = batch
@@ -405,7 +405,7 @@ impl ImageViewerApp {
                 }
             }
 
-            // Envia o restante (último lote) se sobrou algo e a geração ainda é válida
+            // Send remaining (last batch) if there's anything left and generation is still valid
             if !batch.is_empty() && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                 // PRE-FETCH COVERS (Batch Optimization) - Last batch
                 let folders: Vec<PathBuf> = batch
@@ -431,7 +431,7 @@ impl ImageViewerApp {
                 ctx.request_repaint();
             }
 
-            // Envia vetor VAZIO para sinalizar FIM do carregamento (apenas se a geração for a mesma)
+            // Send EMPTY vector to signal END of loading (only if generation matches)
             if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                 let scan_elapsed = scan_start.elapsed();
                 log::debug!(

@@ -34,13 +34,13 @@ pub struct SidebarContext<'a> {
     pub is_computer_view: bool,
     pub is_recycle_bin_view: bool,
     pub computer_icon: Option<&'a egui::TextureHandle>,
-    pub is_renaming: bool, // Bloqueia navegação durante renomeação
+    pub is_renaming: bool, // Blocks navigation during renaming
     pub icon_loader: &'a mut crate::ui::icon_loader::IconLoader,
-    pub onedrive_path: Option<&'a str>, // Caminho do OneDrive (se instalado)
-    pub onedrive_icon: Option<&'a egui::TextureHandle>, // Ícone nativo do OneDrive
+    pub onedrive_path: Option<&'a str>, // OneDrive path (if installed)
+    pub onedrive_icon: Option<&'a egui::TextureHandle>, // Native OneDrive icon
 }
 
-/// Ações que podem ser disparadas pela sidebar
+/// Actions that can be triggered by the sidebar
 pub enum SidebarAction {
     NavigateTo(String),
     NavigateToComputer,
@@ -52,11 +52,11 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
     let mut action = None;
     ui.add_space(10.0);
 
-    // Header "Este Computador" com ícone nativo
+    // "This PC" header with native icon
     let (header_rect, header_response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 32.0), egui::Sense::click());
 
-    // Alinha header_rect com as bordas da sidebar
+    // Align header_rect with sidebar edges
     let mut header_rect_full = header_rect;
     header_rect_full.min.x = ui.clip_rect().min.x;
     header_rect_full.max.x = ui.clip_rect().max.x;
@@ -78,7 +78,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
 
         let mut cursor_x = header_rect_full.min.x + 8.0;
 
-        // Ícone
+        // Icon
         if let Some(icon) = ctx.computer_icon {
             let icon_rect = Rect::from_center_size(
                 Pos2::new(cursor_x + 8.0, header_rect_full.center().y),
@@ -93,7 +93,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
             cursor_x += 24.0;
         }
 
-        // Texto
+        // Text
         ui.painter().text(
             Pos2::new(cursor_x, header_rect_full.center().y),
             egui::Align2::LEFT_CENTER,
@@ -147,7 +147,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
 
             let mut cursor_x = rect.min.x + 12.0;
 
-            // Ícone OneDrive
+            // OneDrive icon
             let onedrive_icon = ctx
                 .icon_loader
                 .get_or_load_folder_path_icon(ui.ctx(), onedrive_path);
@@ -212,7 +212,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
 
             let mut cursor_x = rect.min.x + 12.0;
 
-            // Ícone da Lixeira
+            // Recycle Bin icon
             let recycle_bin_path = "shell:RecycleBinFolder";
             let recycle_icon = ctx
                 .icon_loader
@@ -314,9 +314,9 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
                         .rect_filled(rect, 0.0, crate::ui::theme::color_selection_hover());
                 }
 
-                let mut cursor_x = rect.min.x + 12.0; // Identação para discos
+                let mut cursor_x = rect.min.x + 12.0; // Indentation for drives
 
-                // Tenta carregar ícone real do drive (via IconLoader)
+                // Try to load real drive icon (via IconLoader)
                 let drive_icon = ctx.icon_loader.get_or_load_drive_icon(ui.ctx(), disk_path);
 
                 if let Some(icon) = drive_icon {

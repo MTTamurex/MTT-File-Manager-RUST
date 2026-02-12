@@ -529,11 +529,11 @@ pub fn get_file_type_icon(
         SHGFI_USEFILEATTRIBUTES,
     };
 
-    // Debug: Verifique se a extensão está chegando limpa no console
-    // println!("Buscando ícone para extensão: '{}', is_folder: {}", extension, is_folder);
+    // Debug: Check if the extension is arriving clean in the console
+    // println!("Fetching icon for extension: '{}', is_folder: {}", extension, is_folder);
 
     unsafe {
-        // Inicializa COM para garantir acesso ao Registro do Windows
+        // Initialize COM to ensure access to the Windows Registry
         let _ = CoInitialize(None);
 
         if matches!(size, IconSize::Jumbo) && is_folder {
@@ -557,12 +557,12 @@ pub fn get_file_type_icon(
             windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL
         };
 
-        // ESTRATÉGIA CORRIGIDA:
-        // Não use caminhos absolutos (C:\...). Use apenas um nome simples.
+        // CORRECTED STRATEGY:
+        // Do not use absolute paths (C:\...). Use only a simple name.
         let dummy_name = if is_folder {
             "folder".to_string()
         } else {
-            // Remove pontos extras e garante um único ponto
+            // Remove extra dots and ensure a single dot
             let clean_ext = extension.trim_start_matches('.');
             format!("file.{}", clean_ext) // ex: "file.rar"
         };
@@ -586,7 +586,7 @@ pub fn get_file_type_icon(
 
         let hicon = shfi.hIcon;
 
-        // Reutilize a função hicon_to_rgba que já implementamos e funciona
+        // Reuse the hicon_to_rgba function we already implemented
         let conversion_result = super::bitmap_conversion::hicon_to_rgba(hicon);
 
         let _ = windows::Win32::UI::WindowsAndMessaging::DestroyIcon(hicon);

@@ -172,7 +172,7 @@ impl ImageViewerApp {
                             } else {
                                 (clamped, anchor)
                             };
-                            // Add range between anchor and focus (NÃO limpar seleção fora do range)
+                            // Add range between anchor and focus (do NOT clear selection outside range)
                             for i in start..=end {
                                 if let Some(it) = self.items.get(i) {
                                     self.multi_selection.insert(it.path.clone());

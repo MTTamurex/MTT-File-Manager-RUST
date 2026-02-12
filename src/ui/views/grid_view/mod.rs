@@ -15,7 +15,7 @@ mod virtualization;
 
 // PERFORMANCE: Tooltip debounce to avoid creation/destruction during scroll
 const TOOLTIP_DELAY_SECS: f32 = 0.3; // Only show tooltip after 300ms hover
-                                     // STRICT LIMIT: Mínimo zoom permitido para evitar degradação de performance
+                                     // STRICT LIMIT: Minimum zoom allowed to prevent performance degradation
 const MIN_THUMBNAIL_SIZE: f32 = 96.0;
 
 #[derive(Clone, Copy)]
@@ -150,7 +150,7 @@ pub struct GridViewContext<'a> {
     pub folder_preview_loading: &'a mut FxHashSet<PathBuf>,
     /// PERFORMANCE: Shared buffer for pending operations (reused across items)
     pub pending_ops: &'a mut PendingOperations,
-    /// Caminhos que falharam no thumbnail (LRU bounded)
+    /// Paths that failed thumbnail generation (LRU bounded)
     pub failed_thumbnails: &'a lru::LruCache<PathBuf, ()>,
     /// Scroll offset for manual virtualization
     pub scroll_offset_y: f32,
@@ -161,7 +161,7 @@ pub struct GridViewContext<'a> {
     /// PERFORMANCE: Scroll state tracking for GPU upload throttling
     pub last_scroll_time: &'a mut std::time::Instant,
     pub last_scroll_offset: &'a mut f32,
-    /// Conjunto de itens aguardando upload GPU
+    /// Set of items awaiting GPU upload
     pub pending_upload_set: &'a mut FxHashSet<PathBuf>,
     pub is_video_docked_visible: bool,
     pub prefetch_rows: usize,
@@ -223,7 +223,7 @@ pub fn render_grid_view(
     ops: &mut dyn GridViewOperations,
 ) -> Option<GridViewAction> {
     // ENFORCE MINIMUM ZOOM (Hard Floor)
-    // Impede qualquer cálculo ou render com tamanho menor que 96px
+    // Prevents any calculation or render with size smaller than 96px
     ctx.thumbnail_size = ctx.thumbnail_size.max(MIN_THUMBNAIL_SIZE);
 
     let padding = 8.0;

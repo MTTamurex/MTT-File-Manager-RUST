@@ -36,7 +36,7 @@ impl ImageViewerApp {
         &mut self,
         ctx: &egui::Context,
     ) -> Instant {
-        // 1. STREAMING: Recebe lotes incrementais de FileEntry (Filtrado por geração)
+        // 1. STREAMING: Receive incremental batches of FileEntry (filtered by generation)
         // BLOCKING: Process all available file entries in batch
 
         // SAFETY TIMEOUT: Clear is_loading_folder if stuck for more than 30 seconds
@@ -51,14 +51,14 @@ impl ImageViewerApp {
             match self.file_entry_receiver.try_recv() {
                 Ok((gen_id, new_batch)) => {
                     if gen_id != self.generation {
-                        continue; // Descarta dados de uma navegação/refresh anterior
+                        continue; // Discard data from a previous navigation/refresh
                     }
 
                     if new_batch.is_empty() {
-                        // Lote vazio = Sinal de "Fim do Carregamento" da thread
+                        // Empty batch = "End of Loading" signal from thread
                         saw_end_of_load = true;
                     } else {
-                        // Chegou dados! Adiciona à lista mestre
+                        // Data arrived! Add to master list
                         self.pending_items_count =
                             self.pending_items_count.saturating_add(new_batch.len());
                         self.pending_items_rebuild = true;
@@ -169,7 +169,7 @@ impl ImageViewerApp {
             self.last_items_rebuild = Instant::now();
             ctx.request_repaint();
         } else if self.pending_items_rebuild {
-            // Throttle rebuild para evitar sort a cada lote
+            // Throttle rebuild to avoid sorting on every batch
             let elapsed = self.last_items_rebuild.elapsed();
             if elapsed > Duration::from_millis(80) || self.pending_items_count >= 1200 {
                 self.items_rebuild_request_id = self.items_rebuild_request_id.wrapping_add(1);
@@ -218,17 +218,17 @@ impl ImageViewerApp {
             }
         }
 
-        // 2. Cover Worker: Recebe resultados de capas de folder
+        // 2. Cover Worker: Receive folder cover results
         let mut folder_updates = false;
         while let Ok((folder_path, cover_opt)) = self.cover_worker_receiver.try_recv() {
             if let Some(cover) = cover_opt {
-                // Atualiza em all_items (fonte mutável)
+                // Update in all_items (mutable source)
                 if let Some(item) = self.all_items.iter_mut().find(|i| i.path == folder_path) {
                     item.folder_cover = Some(cover.clone());
                     // PERFORMANCE: DB write moved to worker thread to avoid main thread stutter
                     folder_updates = true;
 
-                    // Requisita thumbnail se necessário (Marcando como em carregamento para evitar loop)
+                    // Request thumbnail if needed (marking as loading to avoid loop)
                     if !self.cache_manager.has_thumbnail(&cover)
                         && self.cache_manager.start_loading(cover.clone())
                     {
@@ -237,7 +237,7 @@ impl ImageViewerApp {
                 }
             }
         }
-        // Reconstrói items a partir de all_items se houve updates
+        // Rebuild items from all_items if there were updates
         if folder_updates {
             self.filter_items();
             ctx.request_repaint();
@@ -245,7 +245,7 @@ impl ImageViewerApp {
 
         let _t_streaming_done = Instant::now();
 
-        // 3. Icon Worker: Recebe resultados de ícones assíncronos
+        // 3. Icon Worker: Receive async icon results
         // PERFORMANCE: Throttle icon uploads - reduce when video is playing
         let max_icon_uploads = if self.is_video_playing_docked() { 2 } else { 5 };
         let mut icon_uploads = 0;
@@ -261,7 +261,7 @@ impl ImageViewerApp {
                     continue;
                 }
 
-                // Carrega textura no cache de ícones
+                // Load texture into icon cache
                 // FIX: Cache key must match icon_loader.rs format (path + size)
                 // Icon worker uses IconSize::Jumbo for high-quality icons
                 let cache_key = format!("{}_Jumbo", path.to_string_lossy());
@@ -312,15 +312,15 @@ impl ImageViewerApp {
         const MAX_PENDING_THUMBNAILS: usize = 64;
 
         while let Ok(thumbnail_data) = self.image_receiver.try_recv() {
-            // Se a imagem pertence a uma geração anterior (outra folder), descarta.
+            // If the image belongs to a previous generation (another folder), discard it.
             if thumbnail_data.generation != self.generation {
                 continue;
             }
 
-            // Sempre libera o slot de loading, mesmo em falhas
+            // Always free the loading slot, even on failures
             self.cache_manager.finish_loading(&thumbnail_data.path);
 
-            // Se a imagem veio vazia, marca como falha para evitar retry infinito
+            // If the image came back empty, mark as failed to avoid infinite retry
             if thumbnail_data.image_data.is_empty() {
                 self.cache_manager
                     .mark_as_failed(thumbnail_data.path.clone());
@@ -350,7 +350,7 @@ impl ImageViewerApp {
                 }
             }
 
-            // Adiciona ao buffer persistente para upload posterior
+            // Add to persistent buffer for later upload
             self.cache_manager
                 .start_pending_upload(thumbnail_data.path.clone());
             self.pending_thumbnails.push_back(thumbnail_data);
@@ -512,7 +512,7 @@ impl ImageViewerApp {
                 let height = thumbnail_data.height;
                 let rgba_data = thumbnail_data.image_data; // Extract data before move
 
-                // Carrega textura no GPU using local data (no cache lookup needed)
+                // Load texture to GPU using local data (no cache lookup needed)
                 let texture = ctx.load_texture(
                     path.to_string_lossy().to_string(),
                     egui::ColorImage::from_rgba_unmultiplied(
@@ -530,7 +530,7 @@ impl ImageViewerApp {
                 self.cache_manager
                     .put_thumbnail(path.clone(), texture.clone());
 
-                // Limpa status de pending upload
+                // Clear pending upload status
                 self.cache_manager.finish_pending_upload(&path);
 
                 // Update selected_thumbnail if it matches the selected_file

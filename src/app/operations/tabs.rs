@@ -39,7 +39,7 @@ impl ImageViewerApp {
         active.sort_descending = self.sort_descending;
         active.folders_position = self.folders_position;
 
-        // No Windows, Path::new("Este Computador").file_name() é None
+        // On Windows, Path::new("Este Computador").file_name() is None
         if active.is_computer_view {
             active.title = "Este Computador".to_string();
         } else {
@@ -50,7 +50,7 @@ impl ImageViewerApp {
         }
     }
 
-    /// Sincroniza o estado da aba ativa para o app
+    /// Syncs the active tab state to the app
     pub fn sync_from_tab(&mut self) {
         {
             let active = self.tab_manager.active_mut();

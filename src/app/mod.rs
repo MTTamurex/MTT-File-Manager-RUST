@@ -4,7 +4,7 @@
 //! - `state`: Defines the application state structure.
 //! - `init`: Handles initialization and startup.
 //! - `operations`: Implements business logic and operations.
-//! - Sub-módulos de estado para melhor organização
+//! - State sub-modules for better organization
 
 pub mod cache_state;
 pub mod init;

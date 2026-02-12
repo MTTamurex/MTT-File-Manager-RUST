@@ -138,8 +138,8 @@ impl ImageViewerApp {
             }
         }
 
-        // REMOVIDO: Lazy loading que impedia carregamento de vídeos
-        // Agora todos os thumbnails são carregados, mas com priorização inteligente
+        // REMOVED: Lazy loading that prevented video thumbnail generation
+        // Now all thumbnails are loaded, but with intelligent prioritization
 
         // Not in RAM cache - send to worker (will read from disk cache or generate)
         if let Some(index) = directory_index {

@@ -9,23 +9,23 @@ use notify::{RecursiveMode, Watcher};
 use std::path::{Path, PathBuf};
 
 impl ImageViewerApp {
-    /// Configura o monitoramento da pasta atual
+    /// Sets up monitoring for the current folder
     ///
-    /// USO DUAL:
-    /// 1. Novo: Drive-wide watcher (monitora drive inteiro, filtra por prefixo)
-    /// 2. Legacy: notify-watcher (monitora pasta específica)
+    /// DUAL USE:
+    /// 1. New: Drive-wide watcher (monitors entire drive, filters by prefix)
+    /// 2. Legacy: notify-watcher (monitors specific folder)
     ///
-    /// O drive watcher é mais eficiente para navegação rápida pois não precisa
-    /// recriar o watcher a cada mudança de pasta no mesmo drive.
+    /// The drive watcher is more efficient for fast navigation since it doesn't need
+    /// to recreate the watcher on every folder change within the same drive.
     pub fn watch_current_folder(&mut self) {
         let current_path = self.current_path.clone();
         log::debug!("[WATCHER] Setting up for: {}", current_path);
 
-        // Tenta usar drive-wide watcher primeiro (File Pilot optimization)
+        // Try using drive-wide watcher first (File Pilot optimization)
         let path_buf = PathBuf::from(&current_path);
 
-        // Drive watcher só funciona para drives locais (C:\, D:\, etc.)
-        // NÃO funciona para UNC paths (\\server\share) ou drives de rede
+        // Drive watcher only works for local drives (C:\, D:\, etc.)
+        // Does NOT work for UNC paths (\\server\share) or network drives
         let is_local_drive = path_buf.to_string_lossy().chars().nth(1) == Some(':');
 
         if is_local_drive {
@@ -35,10 +35,10 @@ impl ImageViewerApp {
             );
             self.drive_watcher.watch_path(path_buf);
 
-            // Se drive watcher está ativo, NÃO usa notify (evita duplicados)
+            // If drive watcher is active, do NOT use notify (avoid duplicates)
             if self.drive_watcher.is_active() {
                 log::debug!("[WATCHER] Drive watcher is active - skipping notify-watcher");
-                // Drop notify watcher se existir para economizar recursos
+                // Drop notify watcher if it exists to save resources
                 #[cfg(feature = "notify-watcher")]
                 if self.watcher.is_some() {
                     log::debug!("[WATCHER] Dropping notify-watcher to save resources");
@@ -50,7 +50,7 @@ impl ImageViewerApp {
             log::debug!("[WATCHER] UNC/Network path detected - using notify-watcher only");
         }
 
-        // FALLBACK: Usa notify-watcher para UNC paths ou se drive watcher falhou
+        // FALLBACK: Use notify-watcher for UNC paths or if drive watcher failed
         #[cfg(feature = "notify-watcher")]
         self.setup_notify_watcher();
     }
@@ -60,7 +60,7 @@ impl ImageViewerApp {
     fn setup_notify_watcher(&mut self) {
         let current_path = self.current_path.clone();
 
-        // Canonicaliza o path para compatibilidade com Windows
+        // Canonicalize the path for Windows compatibility
         let path_to_watch = if let Ok(p) = Path::new(&current_path).canonicalize() {
             log::debug!("[NOTIFY-WATCHER] Canonicalized path: {:?}", p);
             p
@@ -69,13 +69,13 @@ impl ImageViewerApp {
             PathBuf::from(&current_path)
         };
 
-        // Drop o watcher anterior se existir
+        // Drop the previous watcher if it exists
         if self.watcher.is_some() {
             log::debug!("[NOTIFY-WATCHER] Dropping previous watcher");
             self.watcher = None;
         }
 
-        // Cria ou recria o watcher
+        // Create or recreate the watcher
         let tx = self.fs_event_sender.clone();
         let ctx_clone = self.ui_ctx.clone();
 

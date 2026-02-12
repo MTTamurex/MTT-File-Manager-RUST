@@ -25,7 +25,7 @@ pub(super) fn render_list_item(
     col_widths: &ColumnWidths,
     row_height: f32,
 ) {
-    // GATILHO LAZY LOAD PARA PASTAS: Descobre capa se ainda não tem
+    // LAZY LOAD TRIGGER FOR FOLDERS: Discover cover if not yet available
     if item.is_dir
         && !ctx.is_computer_view
         && !ctx.is_recycle_bin_view
@@ -36,7 +36,7 @@ pub(super) fn render_list_item(
         ops.request_folder_scan(item.path.clone());
     }
 
-    // GATILHO LAZY LOAD PARA ARQUIVOS DE MÍDIA: Carrega thumbnail proativamente
+    // LAZY LOAD TRIGGER FOR MEDIA FILES: Proactively load thumbnail
     if !item.is_dir && !ctx.is_recycle_bin_view {
         // PERFORMANCE: Use is_media() method to avoid registry lookups
         if item.is_media()
@@ -211,7 +211,7 @@ pub(super) fn render_list_item(
                     }
                 }
 
-                // Confirma renomeação com Enter (enquanto tem foco)
+                // Confirm rename with Enter (while focused)
                 if ui.input(|i_in| i_in.key_pressed(egui::Key::Enter)) {
                     ops.rename_with_shell(i);
                 }
@@ -501,7 +501,7 @@ fn render_computer_view_columns(
     w_date: f32,
     secondary_color: Color32,
 ) {
-    // 2. Total Size (Espaço Total) - positioned at w_name
+    // 2. Total Size - positioned at w_name
     let total_str = if let Some(di) = &item.drive_info {
         format_size(di.total_space)
     } else {
@@ -515,7 +515,7 @@ fn render_computer_view_columns(
         secondary_color,
     );
 
-    // 3. Free Space (Espaço Livre) - positioned at w_name + w_date
+    // 3. Free Space - positioned at w_name + w_date
     let free_str = if let Some(di) = &item.drive_info {
         format_size(di.free_space)
     } else {

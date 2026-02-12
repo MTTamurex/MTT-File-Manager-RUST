@@ -113,7 +113,7 @@ pub fn render_video_preview(
                     );
                 }
             }
-            // Área de clique = todo o thumbnail
+            // Click area = entire thumbnail
             if ui
                 .interact(
                     media_rect,

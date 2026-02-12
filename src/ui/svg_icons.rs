@@ -177,15 +177,15 @@ pub fn icon_button(
     // Use 1:1 physical rendering (logical_size * ppp)
     let render_size = size as u32;
 
-    // Aloca espaço para o botão (tamanho do ícone + padding implícito se desejar,
-    // mas aqui mantemos 'size' para consistência layout)
-    // Para um botão mais clicável, adicionamos um padding leve na área de interação
+    // Allocate space for the button (icon size + implicit padding if desired,
+    // but here we keep 'size' for layout consistency)
+    // For a more clickable button, we add light padding to the interaction area
     let padding = 4.0;
     let button_size = egui::vec2(size + padding * 2.0, size + padding * 2.0);
 
     let (rect, response) = ui.allocate_exact_size(button_size, egui::Sense::click());
 
-    // Desenha background se hover
+    // Draw background on hover
     if response.hovered() {
         let bg_color = if ui.visuals().dark_mode {
             egui::Color32::from_white_alpha(30)
@@ -195,7 +195,7 @@ pub fn icon_button(
         ui.painter().rect_filled(rect, 4.0, bg_color);
     }
 
-    // Desenha ícone
+    // Draw icon
     if let Some(texture) = icon_manager.get_icon(ui.ctx(), icon_name, render_size, color) {
         let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(size, size));
         ui.painter().image(

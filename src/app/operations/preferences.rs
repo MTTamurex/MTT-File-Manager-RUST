@@ -123,7 +123,7 @@ impl ImageViewerApp {
             },
         );
 
-        // Sidebar widths persistence - só salva valores válidos
+        // Sidebar widths persistence - only save valid values
         let left_to_save = self.sidebar_left_width.max(150.0);
         let right_to_save = self.sidebar_right_width.max(250.0);
         self.disk_cache

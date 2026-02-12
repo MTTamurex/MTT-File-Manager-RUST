@@ -150,7 +150,7 @@ pub(super) fn render_list_header(
             }
 
             if ctx.is_computer_view {
-                // Computer View: apenas Nome, Espaço Total e Espaço Livre (sem Tipo)
+                // Computer View: only Name, Total Space and Free Space (no Type)
                 // Recalculate after potential Name resize
                 let current_name = *ctx.col_name_width;
                 let current_size = *ctx.col_size_width;
@@ -187,7 +187,7 @@ pub(super) fn render_list_header(
                     return Some(SortMode::DriveFreeSpace);
                 }
             } else {
-                // Regular view: Nome, Data, Tipo, Tamanho (+ Status se OneDrive)
+                // Regular view: Name, Date, Type, Size (+ Status if OneDrive)
                 // Recalculate after potential Name resize
                 let current_name = *ctx.col_name_width;
                 let current_type = *ctx.col_type_width;

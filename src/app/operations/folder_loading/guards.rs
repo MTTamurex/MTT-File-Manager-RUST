@@ -38,13 +38,13 @@ impl ImageViewerApp {
     }
 
     pub(super) fn bump_folder_load_generation(&mut self) {
-        self.generation += 1; // Incrementa a geração local
+        self.generation += 1; // Increment local generation
         self.current_generation
-            .store(self.generation, AtomicOrdering::Relaxed); // Sincroniza com workers
+            .store(self.generation, AtomicOrdering::Relaxed); // Sync with workers
     }
 
     pub(super) fn reset_folder_loading_state(&mut self, force_refresh: bool) {
-        // 1. Limpeza de Estado (UI Thread)
+        // 1. State Cleanup (UI Thread)
         if force_refresh {
             self.cache_manager.texture_cache.clear();
             self.cache_manager.folder_preview_cache.clear();
@@ -53,13 +53,13 @@ impl ImageViewerApp {
             self.directory_cache.clear();
         }
 
-        self.items = Arc::new(Vec::new()); // Novo Arc vazio (antigo é dropped automaticamente)
-        self.all_items.clear(); // Limpa backup mestre também
-        self.cache_manager.loading_set.clear(); // Limpa apenas requisições pendentes, mantém cache de texturas
-        self.cache_manager.folder_preview_loading.clear(); // Limpa folder preview loading
-        self.cache_manager.pending_upload_set.clear(); // Limpa thumbnails aguardando upload GPU
-        self.pending_thumbnails.clear(); // Limpa buffer de thumbnails pendentes
-        self.loading_icons.clear(); // Limpa icon loading requests
+        self.items = Arc::new(Vec::new()); // New empty Arc (old one is dropped automatically)
+        self.all_items.clear(); // Clear master backup too
+        self.cache_manager.loading_set.clear(); // Clear only pending requests, keep texture cache
+        self.cache_manager.folder_preview_loading.clear(); // Clear folder preview loading
+        self.cache_manager.pending_upload_set.clear(); // Clear thumbnails awaiting GPU upload
+        self.pending_thumbnails.clear(); // Clear pending thumbnails buffer
+        self.loading_icons.clear(); // Clear icon loading requests
         self.scanned_folders.clear();
         self.selected_item = None;
         self.is_loading_folder = true;

@@ -240,8 +240,8 @@ pub struct ListViewContext<'a> {
     pub computer_icon: Option<&'a egui::TextureHandle>,
     pub drive_icon_cache: &'a mut lru::LruCache<String, egui::TextureHandle>,
     pub item_icon_loader: &'a mut crate::ui::icon_loader::IconLoader,
-    pub deletion_date_cache: Option<&'a mut lru::LruCache<String, String>>, // Cache para datas de exclusão (Path string -> Data)
-    /// Caminhos que falharam no thumbnail (LRU bounded)
+    pub deletion_date_cache: Option<&'a mut lru::LruCache<String, String>>, // Cache for deletion dates (Path string -> Date)
+    /// Paths that failed thumbnail generation (LRU bounded)
     pub failed_thumbnails: &'a lru::LruCache<PathBuf, ()>,
     /// Scroll offset for manual virtualization
     pub scroll_offset_y: f32,
@@ -251,7 +251,7 @@ pub struct ListViewContext<'a> {
     /// PERFORMANCE: Scroll state tracking for GPU upload throttling
     pub last_scroll_time: &'a mut std::time::Instant,
     pub last_scroll_offset: &'a mut f32,
-    /// Conjunto de itens aguardando upload GPU
+    /// Set of items awaiting GPU upload
     pub pending_upload_set: &'a mut FxHashSet<PathBuf>,
     pub is_video_docked_visible: bool,
     /// PERFORMANCE: True when current path is on HDD (not SSD)
@@ -395,7 +395,7 @@ fn scale_column_widths(
 
     // Calculate total based on which columns are actually visible
     let current_total = if ctx.is_computer_view {
-        // Computer View: Name + Date (as "Espaço Total") + Size (as "Espaço Livre")
+        // Computer View: Name + Date (as "Total Space") + Size (as "Free Space")
         w_name + w_date + w_size
     } else if ctx.is_onedrive_folder {
         // OneDrive View: Name + Date + Type + Size + Status

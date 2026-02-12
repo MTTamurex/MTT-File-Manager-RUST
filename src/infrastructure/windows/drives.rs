@@ -134,14 +134,14 @@ pub fn get_volume_info(drive_path: &str) -> VolumeInfo {
         let mut max_component_len = 0u32;
         let mut file_system_flags = 0u32;
 
-        // Usa wrapper do windows-rs com slices; evita buffer errado
+        // Use windows-rs wrapper with slices; avoids wrong buffer
         if GetVolumeInformationW(
             PCWSTR(path_wide.as_ptr()),
-            None,                          // nome do volume (não precisamos)
-            Some(&mut volume_serial),      // serial opcional
-            Some(&mut max_component_len),  // tamanho máximo componente
+            None,                          // volume name (not needed)
+            Some(&mut volume_serial),      // optional serial
+            Some(&mut max_component_len),  // max component length
             Some(&mut file_system_flags),  // flags
-            Some(&mut file_system_buffer), // nome do sistema de arquivos
+            Some(&mut file_system_buffer), // file system name
         )
         .is_ok()
         {

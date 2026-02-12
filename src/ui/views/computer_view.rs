@@ -1,4 +1,4 @@
-//! Computer view rendering (Este Computador)
+//! Computer view rendering (This PC)
 //! Follows .cursorrules: single responsibility, < 300 lines
 
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Ui};
@@ -24,7 +24,7 @@ pub trait ComputerViewOperations {
     ) -> Option<egui::TextureHandle>;
 }
 
-/// Renders the computer view (Este Computador)
+/// Renders the computer view (This PC)
 pub fn render_computer_view(
     ui: &mut Ui,
     ctx: &mut ComputerViewContext,
@@ -33,11 +33,11 @@ pub fn render_computer_view(
     let mut clicked_disk = None;
 
     for (disk_path, disk_label) in ctx.disks {
-        // Pré-carrega ícone do drive se não estiver no cache
+        // Preload drive icon if not in cache
         let drive_icon = if let Some(icon) = ctx.drive_icon_cache.get(disk_path) {
             Some(icon.clone())
         } else {
-            // Tenta carregar ícone real do drive
+            // Try loading real drive icon
             if let Ok((rgba_data, width, height)) =
                 windows::extract_drive_icon(disk_path, IconSize::Small)
             {
@@ -57,26 +57,26 @@ pub fn render_computer_view(
             }
         };
 
-        // Renderiza drive com ícone + label usando interact() para controle total do cursor
+        // Render drive with icon + label using interact() for full cursor control
         let is_selected = ctx.selected_disk == Some(disk_path.as_str());
 
-        // Desenha conteúdo no horizontal layout
+        // Draw content in horizontal layout
         let (mut rect, response) = ui.allocate_exact_size(
             egui::vec2(ui.available_width(), 24.0),
-            Sense::click(), // Captura cliques, sem texto selecionável
+            Sense::click(), // Capture clicks, no selectable text
         );
 
-        // Expande rect para preencher toda a largura da sidebar (remove gaps)
+        // Expand rect to fill entire sidebar width (remove gaps)
         rect.min.x = ui.clip_rect().min.x;
         rect.max.x = ui.clip_rect().max.x;
 
-        // Só desenha se visível
+        // Only draw if visible
         if ui.is_rect_visible(rect) {
-            // Background de seleção
+            // Selection background
             if is_selected {
                 ui.painter().rect_filled(
                     rect,
-                    0.0, // Sem cantos arredondados para ficar flush com as bordas
+                    0.0, // No rounded corners to stay flush with edges
                     Color32::from_rgb(200, 220, 240),
                 );
             }
@@ -90,10 +90,10 @@ pub fn render_computer_view(
                 );
             }
 
-            // Desenha ícone e texto manualmente
+            // Draw icon and text manually
             let mut cursor_x = rect.min.x + 5.0;
 
-            // Ícone
+            // Icon
             if let Some(icon) = drive_icon {
                 let icon_rect = Rect::from_min_size(
                     Pos2::new(cursor_x, rect.center().y - 8.0),

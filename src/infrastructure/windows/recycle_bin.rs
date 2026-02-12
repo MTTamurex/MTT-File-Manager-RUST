@@ -466,7 +466,7 @@ pub fn enumerate_recycle_bin() -> Result<Vec<RecycleBinItem>> {
 /// The $I file contains the Int64 FILETIME at offset 16.
 /// Extracts the "Date Deleted" from the Recycle Bin's detailed view (Column Index 2)
 unsafe fn get_date_deleted_from_pidl(folder: &IShellFolder, pidl: *const ITEMIDLIST) -> String {
-    // Tenta converter (cast) a pasta para IShellFolder2
+    // Try to cast the folder to IShellFolder2
     let folder2: IShellFolder2 = match folder.cast() {
         Ok(f) => f,
         Err(e) => {
@@ -477,11 +477,11 @@ unsafe fn get_date_deleted_from_pidl(folder: &IShellFolder, pidl: *const ITEMIDL
 
     let mut sd = SHELLDETAILS::default();
 
-    // O índice 2 na Lixeira (Recycle Bin) é padrão para "Data de Exclusão" no Windows
-    // GetDetailsOf espera *const ITEMIDLIST, não Option
+    // Index 2 in the Recycle Bin is the standard column for "Date Deleted" on Windows
+    // GetDetailsOf expects *const ITEMIDLIST, not Option
     match folder2.GetDetailsOf(pidl, 2, &mut sd) {
         Ok(_) => {
-            // Converter o formato STRRET (que é arcaico) para string Rust
+            // Convert the archaic STRRET format to a Rust string
             let mut buffer = [0u16; 260]; // MAX_PATH
             if windows::Win32::UI::Shell::StrRetToBufW(
                 std::ptr::addr_of_mut!(sd.str),
@@ -494,7 +494,7 @@ unsafe fn get_date_deleted_from_pidl(folder: &IShellFolder, pidl: *const ITEMIDL
                     .to_string()
                     .unwrap_or_default();
                 if !date_str.is_empty() {
-                    // Remove caracteres de controle invisíveis LTR/RTL que o Windows às vezes insere
+                    // Remove invisible LTR/RTL control characters that Windows sometimes inserts
                     let cleaned = date_str
                         .chars()
                         .filter(|c: &char| !c.is_control())

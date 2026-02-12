@@ -176,7 +176,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             user_active = true;
         }
 
-        // Ctrl + Shift + F: Busca Global
+        // Ctrl + Shift + F: Global Search
         if ctx.input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::F)) {
             app.global_search_active = !app.global_search_active;
             app.global_search_selected_index = None;

@@ -87,7 +87,7 @@ impl UIState {
         }
     }
 
-    /// Limpa estado de UI
+    /// Clears UI state
     pub fn clear(&mut self) {
         self.selected_items.clear();
         self.hovered_item = None;

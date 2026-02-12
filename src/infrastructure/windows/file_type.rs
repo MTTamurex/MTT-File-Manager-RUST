@@ -275,8 +275,8 @@ pub fn is_image_extension(extension: &str) -> bool {
     get_perceived_type(extension) == PerceivedType::Image
 }
 
-/// Busca primeiro item de mídia (imagem ou vídeo) em uma pasta para usar como preview
-/// Verifica apenas os primeiros 15 arquivos para performance
+/// Finds the first media item (image or video) in a folder to use as a preview
+/// Checks only the first 15 files for performance
 /// CRITICAL: Uses timeout-protected enumeration for OneDrive to prevent indefinite blocking
 pub fn find_folder_preview_item(folder_path: &Path) -> Option<PathBuf> {
     use crate::infrastructure::onedrive::{
@@ -317,7 +317,7 @@ pub fn find_folder_preview_item(folder_path: &Path) -> Option<PathBuf> {
             let path = entry.path();
             if path.is_file() {
                 if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                    // Para preview de pasta, queremos apenas imagens ou vídeos
+                    // For folder preview, we only want images or videos
                     let ptype = get_perceived_type(ext);
                     if ptype == PerceivedType::Image || ptype == PerceivedType::Video {
                         return Some(path);

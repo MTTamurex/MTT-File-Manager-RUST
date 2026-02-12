@@ -10,9 +10,9 @@ use windows::core::PCWSTR;
 use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
 
 impl ImageViewerApp {
-    /// Captura e armazena o HWND nativo a partir do título da janela principal.
-    /// Na primeira captura, também faz warmup das shell extensions para evitar
-    /// lentidão na primeira abertura do menu de contexto.
+    /// Captures and stores the native HWND from the main window title.
+    /// On first capture, also warms up shell extensions to avoid
+    /// slowness on the first context menu opening.
     ///
     /// # Borderless Window Support
     /// When HWND is obtained, installs a native subclass to handle WM_NCHITTEST
@@ -22,9 +22,9 @@ impl ImageViewerApp {
             return;
         }
 
-        // Tenta encontrar a janela pelo título
-        // Nota: Isso é um hack porque eframe ainda não expõe HWND diretamente de forma safe/fácil no Windows
-        // O título deve bater com o definido em main.rs
+        // Try to find the window by title
+        // Note: This is a hack because eframe doesn't yet expose HWND directly in a safe/easy way on Windows
+        // The title must match the one defined in main.rs
         let window_title = "MTT File Manager\0".encode_utf16().collect::<Vec<u16>>();
 
         unsafe {

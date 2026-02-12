@@ -51,7 +51,7 @@ fn parse_recycle_date_sort_key(date: &str) -> Option<(u32, u32, u32, u32, u32, u
 /// falls back to lexicographic comparison only when parsing fails.
 fn get_sort_date_for_comparison(a: &FileEntry, b: &FileEntry) -> Ordering {
     match (&a.deletion_date, &b.deletion_date) {
-        // Ambos têm data de exclusão (lixeira): compara strings diretamente
+        // Both have deletion date (recycle bin): compare strings directly
         (Some(a_date), Some(b_date)) => {
             let has_recycle_metadata =
                 a.recycle_original_path.is_some() && b.recycle_original_path.is_some();
@@ -66,10 +66,10 @@ fn get_sort_date_for_comparison(a: &FileEntry, b: &FileEntry) -> Ordering {
                 _ => a_date.cmp(b_date),
             }
         }
-        // Apenas um tem data de exclusão: considera que items da lixeira vêm primeiro
+        // Only one has a deletion date: recycle bin items come first
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
-        // Nenhum tem data de exclusão: usa modified como antes
+        // Neither has a deletion date: use modified as before
         (None, None) => a.modified.cmp(&b.modified),
     }
 }
@@ -123,13 +123,13 @@ pub fn sort_items(
                 }
             }
             SortMode::DriveTotalSpace => {
-                // Ordena por espaço total do drive (do maior para o menor por padrão)
+                // Sort by total drive space (largest to smallest by default)
                 let total_a = a.drive_info.as_ref().map(|d| d.total_space).unwrap_or(0);
                 let total_b = b.drive_info.as_ref().map(|d| d.total_space).unwrap_or(0);
                 total_a.cmp(&total_b)
             }
             SortMode::DriveFreeSpace => {
-                // Ordena por espaço livre do drive (do maior para o menor por padrão)
+                // Sort by free drive space (largest to smallest by default)
                 let free_a = a.drive_info.as_ref().map(|d| d.free_space).unwrap_or(0);
                 let free_b = b.drive_info.as_ref().map(|d| d.free_space).unwrap_or(0);
                 free_a.cmp(&free_b)
@@ -353,14 +353,14 @@ mod tests {
 
     #[test]
     fn test_sort_by_date_recycle_bin() {
-        // Testa ordenação por data na lixeira (usa deletion_date)
+        // Test sorting by date in recycle bin (uses deletion_date)
         let mut items = vec![
             FileEntry {
                 path: PathBuf::from("file1.txt"),
                 name: "file1.txt".to_string(),
                 is_dir: false,
                 size: 100,
-                modified: 1000, // data antiga
+                modified: 1000, // old date
                 folder_cover: None,
                 drive_info: None,
                 sync_status: crate::domain::file_entry::SyncStatus::None,
@@ -372,7 +372,7 @@ mod tests {
                 name: "file2.txt".to_string(),
                 is_dir: false,
                 size: 200,
-                modified: 2000, // data mais recente
+                modified: 2000, // more recent date
                 folder_cover: None,
                 drive_info: None,
                 sync_status: crate::domain::file_entry::SyncStatus::None,
@@ -384,7 +384,7 @@ mod tests {
                 name: "file3.txt".to_string(),
                 is_dir: false,
                 size: 300,
-                modified: 3000, // data mais recente ainda
+                modified: 3000, // even more recent date
                 folder_cover: None,
                 drive_info: None,
                 sync_status: crate::domain::file_entry::SyncStatus::None,
@@ -393,11 +393,11 @@ mod tests {
             },
         ];
 
-        // Ordena por data (ascendente)
+        // Sort by date (ascending)
         sort_items(&mut items, SortMode::Date, false, FoldersPosition::Mixed);
 
-        // Verifica se está ordenado pelas datas de exclusão (não por modified)
-        // file2 foi excluído primeiro (01/01), depois file1 (02/01), depois file3 (03/01)
+        // Verify sorted by deletion dates (not by modified)
+        // file2 was deleted first (01/01), then file1 (02/01), then file3 (03/01)
         assert_eq!(items[0].name, "file2.txt");
         assert_eq!(items[1].name, "file1.txt");
         assert_eq!(items[2].name, "file3.txt");
@@ -405,17 +405,17 @@ mod tests {
 
     #[test]
     fn test_sort_by_date_normal_files() {
-        // Testa ordenação por data para arquivos normais (usa modified)
+        // Test sorting by date for normal files (uses modified)
         let mut items = vec![
-            create_test_file("file1.txt", 100, 1000), // modified antigo
-            create_test_file("file2.txt", 200, 2000), // modified recente
-            create_test_file("file3.txt", 300, 3000), // modified mais recente
+            create_test_file("file1.txt", 100, 1000), // old modified
+            create_test_file("file2.txt", 200, 2000), // recent modified
+            create_test_file("file3.txt", 300, 3000), // most recent modified
         ];
 
-        // Ordena por data (ascendente)
+        // Sort by date (ascending)
         sort_items(&mut items, SortMode::Date, false, FoldersPosition::Mixed);
 
-        // Verifica se está ordenado pelas datas de modificação
+        // Verify sorted by modification dates
         assert_eq!(items[0].name, "file1.txt");
         assert_eq!(items[1].name, "file2.txt");
         assert_eq!(items[2].name, "file3.txt");
