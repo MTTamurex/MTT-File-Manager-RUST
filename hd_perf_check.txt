@@ -1,8 +1,0 @@
-﻿cargo :    Compiling mtt-file-manager v0.1.0 (C:\Users\mtamu\github\MTT-File-Manager-RUST)
-At line:1 char:267
-+ ... omaticLocation -DevCmdArguments '-arch=x64'; cargo check 2>&1 | Out-F ...
-+                                                  ~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (   Compiling mt...e-Manager-RUST):String) [], RemoteException
-    + FullyQualifiedErrorId : NativeCommandError
- 
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.65s
