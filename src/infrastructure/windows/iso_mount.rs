@@ -29,7 +29,7 @@ pub fn mount_iso(path: &Path) -> Result<()> {
             ..Default::default()
         };
 
-        eprintln!("[ISO] Opening virtual disk (V1): {:?}", path);
+        log::debug!("[ISO] Opening virtual disk (V1): {:?}", path);
         OpenVirtualDisk(
             &storage_type,
             PCWSTR(path_wide.as_ptr()),
@@ -40,7 +40,7 @@ pub fn mount_iso(path: &Path) -> Result<()> {
         )
         .ok()
         .map_err(|e| {
-            eprintln!("[ISO] OpenVirtualDisk failed: {:?}", e);
+            log::error!("[ISO] OpenVirtualDisk failed: {:?}", e);
             e
         })?;
 
@@ -50,7 +50,7 @@ pub fn mount_iso(path: &Path) -> Result<()> {
             ..Default::default()
         };
 
-        eprintln!("[ISO] Attaching virtual disk handle: {:?}", handle);
+        log::debug!("[ISO] Attaching virtual disk handle: {:?}", handle);
         // PERMANENT_LIFETIME keeps the mount active after CloseHandle
         AttachVirtualDisk(
             handle,
@@ -62,12 +62,12 @@ pub fn mount_iso(path: &Path) -> Result<()> {
         )
         .ok()
         .map_err(|e| {
-            eprintln!("[ISO] AttachVirtualDisk failed: {:?}", e);
+            log::error!("[ISO] AttachVirtualDisk failed: {:?}", e);
             let _ = CloseHandle(handle);
             e
         })?;
 
-        eprintln!("[ISO] Successfully mounted: {:?}", path);
+        log::info!("[ISO] Successfully mounted: {:?}", path);
         let _ = CloseHandle(handle);
         Ok(())
     }

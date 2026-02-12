@@ -96,7 +96,7 @@ impl GifManager {
                 ui_ctx,
                 running_total,
             ) {
-                eprintln!("GifWorker error: {}", e);
+                log::error!("GifWorker: {}", e);
             }
         });
 

@@ -3,7 +3,7 @@ use eframe::egui;
 
 #[cfg(debug_assertions)]
 macro_rules! debug_log {
-    ($($arg:tt)*) => { eprintln!($($arg)*) }
+    ($($arg:tt)*) => { log::debug!($($arg)*) }
 }
 
 #[cfg(not(debug_assertions))]

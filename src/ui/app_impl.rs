@@ -84,7 +84,7 @@ impl eframe::App for ImageViewerApp {
             let prefs_ms = t4.duration_since(t3).as_millis();
             let memory_ms = t5.duration_since(t4).as_millis();
             if msg_ms + drives_ms + poll_ms + prefs_ms + memory_ms > 50 {
-                eprintln!(
+                log::warn!(
                     "[PERF] Slow infrastructure: messages={}ms drives={}ms poll={}ms prefs={}ms memory={}ms",
                     msg_ms, drives_ms, poll_ms, prefs_ms, memory_ms
                 );
@@ -98,7 +98,7 @@ impl eframe::App for ImageViewerApp {
         let t_icons_end = std::time::Instant::now();
         let icons_ms = t_icons_end.duration_since(t_icons_start).as_millis();
         if icons_ms > 50 {
-            eprintln!("[PERF] Slow ensure_icons: {}ms", icons_ms);
+            log::warn!("[PERF] Slow ensure_icons: {}ms", icons_ms);
         }
 
         // Poll background icon extractions (sidebar drive/folder icons)
@@ -139,7 +139,7 @@ impl eframe::App for ImageViewerApp {
             app::panels::render_panels(self, ctx, frame);
             let panels_ms = t_panels.elapsed().as_millis();
             if panels_ms > 50 {
-                eprintln!("[PERF] Slow render_panels: {}ms", panels_ms);
+                log::warn!("[PERF] Slow render_panels: {}ms", panels_ms);
             }
 
             // 9. Operations: Context Menu (Rendering & Actions)
@@ -183,7 +183,7 @@ impl eframe::App for ImageViewerApp {
         // PERF: Log total frame time when slow (helps diagnose post-inactivity freezes)
         let frame_total_ms = t_frame_start.elapsed().as_millis();
         if frame_total_ms > 100 {
-            eprintln!(
+            log::warn!(
                 "[PERF] SLOW FRAME: {}ms total (stable_dt={:.0}ms)",
                 frame_total_ms, frame_ms
             );

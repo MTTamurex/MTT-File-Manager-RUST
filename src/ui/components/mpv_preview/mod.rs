@@ -151,7 +151,7 @@ impl MpvPreview {
         if MPV_OSC_POC_ENABLED {
             let config_dir = Self::resolve_mpv_ui_config_dir();
             if config_dir.is_none() {
-                eprintln!(
+                log::warn!(
                     "[MpvPreview] MPV UI folder not found (expected mpv_ui/portable_config with scripts/osc.lua)"
                 );
             }
@@ -159,28 +159,28 @@ impl MpvPreview {
             mpv::Mpv::with_initializer(|init| {
                 // POC: load MPV UI assets from local folder and keep MPV default input bindings.
                 if let Err(e) = init.set_option("load-scripts", true) {
-                    eprintln!("[MpvPreview] Failed to set load-scripts=yes: {:?}", e);
+                    log::warn!("[MpvPreview] Failed to set load-scripts=yes: {:?}", e);
                 }
                 if let Err(e) = init.set_option("osc", false) {
-                    eprintln!("[MpvPreview] Failed to set osc=no: {:?}", e);
+                    log::warn!("[MpvPreview] Failed to set osc=no: {:?}", e);
                 }
                 if let Err(e) = init.set_option("input-default-bindings", true) {
-                    eprintln!(
+                    log::warn!(
                         "[MpvPreview] Failed to set input-default-bindings=yes: {:?}",
                         e
                     );
                 }
                 if let Err(e) = init.set_option("input-vo-keyboard", true) {
-                    eprintln!("[MpvPreview] Failed to set input-vo-keyboard=yes: {:?}", e);
+                    log::warn!("[MpvPreview] Failed to set input-vo-keyboard=yes: {:?}", e);
                 }
                 if let Err(e) = init.set_option("input-cursor", true) {
-                    eprintln!("[MpvPreview] Failed to set input-cursor=yes: {:?}", e);
+                    log::warn!("[MpvPreview] Failed to set input-cursor=yes: {:?}", e);
                 }
                 if let Err(e) = init.set_option("cursor-autohide", 1000_i64) {
-                    eprintln!("[MpvPreview] Failed to set cursor-autohide=1000: {:?}", e);
+                    log::warn!("[MpvPreview] Failed to set cursor-autohide=1000: {:?}", e);
                 }
                 if let Err(e) = init.set_option("script-opts", MPV_OSC_POC_SCRIPT_OPTS) {
-                    eprintln!(
+                    log::warn!(
                         "[MpvPreview] Failed to set script-opts={} : {:?}",
                         MPV_OSC_POC_SCRIPT_OPTS, e
                     );
@@ -189,10 +189,10 @@ impl MpvPreview {
                 if let Some(dir) = &config_dir {
                     let dir_str = Self::mpv_path_string(dir.as_path());
                     if let Err(e) = init.set_option("config", true) {
-                        eprintln!("[MpvPreview] Failed to set config=yes: {:?}", e);
+                        log::warn!("[MpvPreview] Failed to set config=yes: {:?}", e);
                     }
                     if let Err(e) = init.set_option("config-dir", dir_str.as_str()) {
-                        eprintln!(
+                        log::warn!(
                             "[MpvPreview] Failed to set config-dir={} : {:?}",
                             dir_str, e
                         );
@@ -200,7 +200,7 @@ impl MpvPreview {
 
                     let osc_script = dir.join("scripts").join("osc.lua");
                     if !osc_script.is_file() {
-                        eprintln!(
+                        log::warn!(
                             "[MpvPreview] osc.lua not found at {}",
                             osc_script.to_string_lossy()
                         );
@@ -291,7 +291,7 @@ impl MpvPreview {
         if self.last_osc_enabled != Some(desired_custom_osc_visible) {
             // Keep built-in OSC disabled and control only the custom script visibility.
             if let Err(e) = mpv.set_property("osc", false) {
-                eprintln!("[MpvPreview] Failed to force osc=no : {:?}", e);
+                log::warn!("[MpvPreview] Failed to force osc=no : {:?}", e);
             }
 
             let visibility_mode = if desired_custom_osc_visible {
@@ -300,7 +300,7 @@ impl MpvPreview {
                 "never"
             };
             if let Err(e) = mpv.command("script-message", &["osc-visibility", visibility_mode, "1"]) {
-                eprintln!(
+                log::warn!(
                     "[MpvPreview] Failed to set custom osc-visibility={} : {:?}",
                     visibility_mode, e
                 );
@@ -317,7 +317,7 @@ impl MpvPreview {
         let desired_fullscreen = self.is_fullscreen();
         if self.last_mpv_fullscreen != Some(desired_fullscreen) {
             if let Err(e) = mpv.set_property("fullscreen", desired_fullscreen) {
-                eprintln!(
+                log::warn!(
                     "[MpvPreview] Failed to set fullscreen={} : {:?}",
                     desired_fullscreen, e
                 );
@@ -479,16 +479,16 @@ impl MpvPreview {
                     // Mandatory configuration for NVIDIA RTX VSR
                     // We must use D3D11 backend and D3D11 VA hardware decoding
                     if let Err(e) = m.set_property("vo", "gpu") {
-                        eprintln!("[MpvPreview] Failed to set vo=gpu: {:?}", e);
+                        log::warn!("[MpvPreview] Failed to set vo=gpu: {:?}", e);
                     }
                     if let Err(e) = m.set_property("gpu-api", "d3d11") {
-                        eprintln!("[MpvPreview] Failed to set gpu-api=d3d11: {:?}", e);
+                        log::warn!("[MpvPreview] Failed to set gpu-api=d3d11: {:?}", e);
                     }
                     if let Err(e) = m.set_property("gpu-context", "d3d11") {
-                        eprintln!("[MpvPreview] Failed to set gpu-context=d3d11: {:?}", e);
+                        log::warn!("[MpvPreview] Failed to set gpu-context=d3d11: {:?}", e);
                     }
                     if let Err(e) = m.set_property("hwdec", "d3d11va") {
-                        eprintln!("[MpvPreview] Failed to set hwdec=d3d11va: {:?}", e);
+                        log::warn!("[MpvPreview] Failed to set hwdec=d3d11va: {:?}", e);
                     }
 
                     // Use a balanced baseline profile for 4K stability.
@@ -522,7 +522,7 @@ impl MpvPreview {
                         if let Some(mpv_ref) = &self.mpv {
                             let input_cursor = mpv_ref.get_property::<bool>("input-cursor").ok();
                             let script_count = mpv_ref.get_property::<i64>("script-list/count").ok();
-                            eprintln!(
+                            log::debug!(
                                 "[MpvPreview][OSC-POC] input-cursor={:?}, script-list/count={:?}",
                                 input_cursor, script_count
                             );
@@ -530,7 +530,7 @@ impl MpvPreview {
                     }
                 }
                 Err(e) => {
-                    eprintln!("[MpvPreview] Failed to create MPV: {:?}", e);
+                    log::error!("[MpvPreview] Failed to create MPV: {:?}", e);
                     return;
                 }
             }
@@ -587,7 +587,7 @@ impl MpvPreview {
             if file_ready {
                 if let Some(sidecar) = self.pending_external_subtitle.take() {
                     if let Err(e) = self.load_external_subtitle(&sidecar) {
-                        eprintln!("[MPV] Failed to auto-load sidecar subtitle: {}", e);
+                        log::error!("[MPV] Failed to auto-load sidecar subtitle: {}", e);
                     }
                 }
             }

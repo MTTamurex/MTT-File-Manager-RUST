@@ -57,7 +57,7 @@ impl DriveWatcherManager {
         let elapsed = self.startup_time.elapsed().as_millis() as u64;
         if elapsed < self.startup_delay_ms && self.watchers.is_empty() {
             // Store path for later activation
-            eprintln!("[DRIVE-WATCHER-MGR] Startup delay active ({}ms / {}ms), deferring watcher creation for: {:?}",
+            log::debug!("[DRIVE-WATCHER-MGR] Startup delay active ({}ms / {}ms), deferring watcher creation for: {:?}",
                 elapsed, self.startup_delay_ms, path);
             self.pending_watch = Some(path);
             return;
@@ -70,7 +70,7 @@ impl DriveWatcherManager {
         let drive_root = match DriveWatcher::extract_drive_root(&path_to_watch) {
             Some(root) => root,
             None => {
-                eprintln!(
+                log::warn!(
                     "[DRIVE-WATCHER-MGR] Could not extract drive root from: {:?}",
                     path_to_watch
                 );
@@ -80,7 +80,7 @@ impl DriveWatcherManager {
 
         // Create watcher for this drive if not exists
         if !self.watchers.contains_key(&drive_root) {
-            eprintln!(
+            log::debug!(
                 "[DRIVE-WATCHER-MGR] Creating new watcher for drive: {:?}",
                 drive_root
             );
@@ -89,7 +89,7 @@ impl DriveWatcherManager {
                     self.watchers.insert(drive_root.clone(), watcher);
                 }
                 None => {
-                    eprintln!(
+                    log::error!(
                         "[DRIVE-WATCHER-MGR] Failed to create watcher for: {:?}",
                         drive_root
                     );
@@ -99,7 +99,7 @@ impl DriveWatcherManager {
         } else {
             // Update prefix on existing watcher
             if let Some(watcher) = self.watchers.get(&drive_root) {
-                eprintln!(
+                log::debug!(
                     "[DRIVE-WATCHER-MGR] Updating prefix for drive {:?} to: {:?}",
                     drive_root, path_to_watch
                 );
@@ -117,7 +117,7 @@ impl DriveWatcherManager {
         if let Some(pending) = self.pending_watch.take() {
             let elapsed = self.startup_time.elapsed().as_millis() as u64;
             if elapsed >= self.startup_delay_ms {
-                eprintln!("[DRIVE-WATCHER-MGR] Startup delay complete ({}ms), activating watcher for: {:?}",
+                log::debug!("[DRIVE-WATCHER-MGR] Startup delay complete ({}ms), activating watcher for: {:?}",
                     elapsed, pending);
                 self.watch_path(pending);
             } else {

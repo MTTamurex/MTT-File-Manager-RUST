@@ -244,7 +244,7 @@ pub(crate) fn start_file_operation_worker(
                             }
                         }
                         Err(err) => {
-                            eprintln!("[SECURITY] Delete blocked: {}", err);
+                            log::warn!("[SECURITY] Delete blocked: {}", err);
                         }
                     }
                 }
@@ -271,7 +271,7 @@ pub(crate) fn start_file_operation_worker(
                         || new_name.ends_with(' ')
                         || crate::infrastructure::security::is_windows_reserved_name(base_name)
                     {
-                        eprintln!(
+                        log::warn!(
                             "[SECURITY] Rename blocked: invalid target name '{}'",
                             new_name
                         );
@@ -298,7 +298,7 @@ pub(crate) fn start_file_operation_worker(
                                 }
                             }
                             Err(err) => {
-                                eprintln!("[SECURITY] Rename blocked: {}", err);
+                                log::warn!("[SECURITY] Rename blocked: {}", err);
                             }
                         }
                     }
@@ -331,7 +331,7 @@ pub(crate) fn start_file_operation_worker(
                                 .send(FileOperationResult::CopyCompleted { dest_folder });
                         }
                         (Err(err), _) | (_, Err(err)) => {
-                            eprintln!("[SECURITY] Copy blocked: {}", err);
+                            log::warn!("[SECURITY] Copy blocked: {}", err);
                         }
                     }
                 }
@@ -375,7 +375,7 @@ pub(crate) fn start_file_operation_worker(
                             }
                         }
                         (Err(err), _) | (_, Err(err)) => {
-                            eprintln!("[SECURITY] Move blocked: {}", err);
+                            log::warn!("[SECURITY] Move blocked: {}", err);
                         }
                     }
                 }
@@ -412,7 +412,7 @@ pub(crate) fn start_file_operation_worker(
                             }
                         }
                         (Err(err), _) | (_, Err(err)) => {
-                            eprintln!("[SECURITY] Copy batch blocked: {}", err);
+                            log::warn!("[SECURITY] Copy batch blocked: {}", err);
                         }
                     }
                 }
@@ -461,7 +461,7 @@ pub(crate) fn start_file_operation_worker(
                             }
                         }
                         (Err(err), _) | (_, Err(err)) => {
-                            eprintln!("[SECURITY] Move batch blocked: {}", err);
+                            log::warn!("[SECURITY] Move batch blocked: {}", err);
                         }
                     }
                 }
@@ -481,7 +481,7 @@ pub(crate) fn start_file_operation_worker(
                                 );
                             }
                             (Err(err), _) | (_, Err(err)) => {
-                                eprintln!("[SECURITY] Restore blocked: {}", err);
+                                log::warn!("[SECURITY] Restore blocked: {}", err);
                             }
                         }
                     }
@@ -505,7 +505,7 @@ pub(crate) fn start_file_operation_worker(
                         let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
                     }
                     Err(err) => {
-                        eprintln!("[SECURITY] Permanent delete blocked: {}", err);
+                        log::warn!("[SECURITY] Permanent delete blocked: {}", err);
                     }
                 },
                 FileOperationRequest::EmptyRecycleBin { hwnd } => {

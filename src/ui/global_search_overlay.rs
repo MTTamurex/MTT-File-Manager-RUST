@@ -138,7 +138,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                             },
                         ) {
                             app.global_search_loading = false;
-                            eprintln!("[GLOBAL-SEARCH] Failed to queue search request: {}", e);
+                            log::error!("[GLOBAL-SEARCH] Failed to queue search request: {}", e);
                         }
                     } else if app.global_search_query.is_empty() {
                         app.global_search_selected_index = None;

@@ -78,7 +78,7 @@ macro_rules! safe_unwrap {
         match $expr {
             Ok(val) => val,
             Err(e) => {
-                eprintln!("[ERROR] {}: {:?}", $context, e);
+                log::error!("{}: {:?}", $context, e);
                 return Err($crate::domain::errors::AppError::from(e));
             }
         }
@@ -88,7 +88,7 @@ macro_rules! safe_unwrap {
         match $expr {
             Ok(val) => val,
             Err(e) => {
-                eprintln!("[WARN] {}: {:?}, using default", $context, e);
+                log::warn!("{}: {:?}, using default", $context, e);
                 $default
             }
         }
@@ -102,7 +102,7 @@ macro_rules! safe_expect {
         match $expr {
             Some(val) => val,
             None => {
-                eprintln!("[ERROR] {}", $message);
+                log::error!("{}", $message);
                 return Err($crate::domain::errors::AppError::InvalidState(
                     $message.to_string(),
                 ));
@@ -120,7 +120,7 @@ impl<T> OptionExt<T> for Option<T> {
     fn ok_or_app_error(self, context: &str) -> AppResult<T> {
         self.ok_or_else(|| {
             let error = AppError::InvalidState(context.to_string());
-            eprintln!("[ERROR] {:?}", error);
+            log::error!("{:?}", error);
             error
         })
     }
@@ -135,7 +135,7 @@ impl<T, E: std::error::Error + Send + Sync + 'static> ResultExt<T, E> for Result
     fn map_to_app_error(self, context: &str) -> AppResult<T> {
         self.map_err(|e| {
             let error = AppError::InvalidState(format!("{}: {}", context, e));
-            eprintln!("[ERROR] {:?}", error);
+            log::error!("{:?}", error);
             error
         })
     }

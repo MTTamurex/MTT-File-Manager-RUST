@@ -29,7 +29,7 @@
 - [x] Substituir `DefaultHasher` por `blake3` em [disk_cache.rs](file:///c:/Users/mtamu/github/MTT-File-Manager-RUST/src/infrastructure/disk_cache.rs)
 
 ## Fase 6 — SEC-02/PERF-04: Logging Framework
-- [ ] Substituir `eprintln!` por [log](file:///c:/Users/mtamu/github/MTT-File-Manager-RUST/src/infrastructure/windows/native_menu.rs#396-407) crate (338 ocorrências)
+- [x] Substituir `eprintln!` por [log](file:///c:/Users/mtamu/github/MTT-File-Manager-RUST/src/infrastructure/windows/native_menu.rs#396-407) crate (338 ocorrências)
 
 ## Fase 7 — Refactors Grandes (sessão separada)
 - [ ] STB-02, STB-05, CODE-01, CODE-06, SEC-04, STB-07, PERF-03/06/07, SEC-06, CODE-03

@@ -74,7 +74,7 @@ pub(crate) fn render_tab_bar_layer(
                     app.update_video_visibility();
                 }
                 TabBarAction::CloseTab(idx) => {
-                    eprintln!(
+                    log::debug!(
                         "[DEBUG] Closing Tab index: {}. Active was: {}",
                         idx, app.tab_manager.active_tab
                     );
@@ -82,7 +82,7 @@ pub(crate) fn render_tab_bar_layer(
                     if let Some(tab) = app.tab_manager.tabs.get(idx) {
                         let tab_id = tab.id;
                         if app.media_preview_owner_tab_id == Some(tab_id) {
-                            eprintln!("[DEBUG] Closing tab owns media player. Destroying player.");
+                            log::debug!("[DEBUG] Closing tab owns media player. Destroying player.");
                             app.destroy_media_preview();
                         }
                     }
@@ -90,17 +90,17 @@ pub(crate) fn render_tab_bar_layer(
                     let closing_active_tab = idx == app.tab_manager.active_tab;
 
                     if app.tab_manager.close_tab(idx) {
-                        eprintln!("[DEBUG] Last tab closed. Closing app.");
+                        log::debug!("[DEBUG] Last tab closed. Closing app.");
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     } else {
                         if closing_active_tab {
-                            eprintln!(
+                            log::debug!(
                                 "[DEBUG] Active tab closed. Switching to new active tab index: {}",
                                 app.tab_manager.active_tab
                             );
                             app.sync_from_tab();
                         } else {
-                            eprintln!(
+                            log::debug!(
                                 "[DEBUG] Background tab closed. current active index adjusted to: {}. Saving live state to it.",
                                 app.tab_manager.active_tab
                             );

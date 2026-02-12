@@ -35,9 +35,9 @@ impl ImageViewerApp {
                     // Install borderless subclass for resize borders
                     // This handles WM_NCHITTEST to provide resize zones on window edges
                     if install_borderless_subclass(hwnd) {
-                        eprintln!("Borderless resize subclass installed successfully");
+                        log::info!("Borderless resize subclass installed successfully");
                     } else {
-                        eprintln!("Warning: Failed to install borderless resize subclass");
+                        log::warn!("Failed to install borderless resize subclass");
                     }
 
                     // Warmup shell extensions to avoid first-use delay on context menu

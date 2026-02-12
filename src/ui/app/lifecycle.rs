@@ -84,7 +84,7 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
         onedrive::set_app_minimized(is_minimized);
 
         if is_minimized {
-            eprintln!("[LIFECYCLE] App minimized - canceling OneDrive operations");
+            log::info!("[LIFECYCLE] App minimized - canceling OneDrive operations");
             // Track when we were minimized to calculate inactivity duration on restore
             app.last_restore_time = std::time::Instant::now();
         } else {
@@ -92,7 +92,7 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
             let minimized_secs = app.last_restore_time.elapsed().as_secs_f64();
             app.minimized_duration_secs = minimized_secs;
             app.last_restore_time = std::time::Instant::now();
-            eprintln!(
+            log::info!(
                 "[LIFECYCLE] App restored after {:.1}s of inactivity - throttling operations",
                 minimized_secs
             );
@@ -118,7 +118,7 @@ pub fn handle_exit(app: &mut ImageViewerApp) {
 
     // Force save sidebar widths before exit (bypass debounce)
     app.force_save_preferences();
-    eprintln!(
+    log::info!(
         "[EXIT] Saved sidebar widths: L={}, R={}",
         app.sidebar_left_width, app.sidebar_right_width
     );

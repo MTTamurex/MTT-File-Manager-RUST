@@ -76,10 +76,10 @@ impl ThumbnailDiskCache {
                         .status()
                     {
                         Err(e) => {
-                            eprintln!("[DISK-CACHE] icacls failed for {:?}: {}", cache_dir, e)
+                            log::warn!("[DISK-CACHE] icacls failed for {:?}: {}", cache_dir, e)
                         }
                         Ok(status) if !status.success() => {
-                            eprintln!("[DISK-CACHE] icacls exited with {}", status);
+                            log::warn!("[DISK-CACHE] icacls exited with {}", status);
                         }
                         Ok(_) => {}
                     }
@@ -104,7 +104,7 @@ impl ThumbnailDiskCache {
                 c
             }
             Err(primary_err) => {
-                eprintln!(
+                log::warn!(
                     "[Cache] Failed to open database at {:?}: {:?}",
                     db_path, primary_err
                 );
@@ -115,7 +115,7 @@ impl ThumbnailDiskCache {
 
                 match Connection::open(&temp_fallback_path) {
                     Ok(c) => {
-                        eprintln!(
+                        log::warn!(
                             "[Cache] Using temporary fallback database at {:?}",
                             temp_fallback_path
                         );
@@ -123,7 +123,7 @@ impl ThumbnailDiskCache {
                         c
                     }
                     Err(temp_err) => {
-                        eprintln!(
+                        log::warn!(
                             "[Cache] Failed to open temporary fallback database: {:?}. Using in-memory cache.",
                             temp_err
                         );
@@ -145,7 +145,7 @@ impl ThumbnailDiskCache {
             match Connection::open(path) {
                 Ok(c) => Some(c),
                 Err(e) => {
-                    eprintln!(
+                    log::warn!(
                         "[Cache] Failed to open reader connection at {:?}: {:?}. Falling back to shared writer connection.",
                         path, e
                     );
@@ -190,8 +190,8 @@ impl ThumbnailDiskCache {
             [],
         )
         .unwrap_or_else(|e| {
-            eprintln!(
-                "[Cache] Warning: Failed to create thumbnails table: {:?}",
+            log::warn!(
+                "[Cache] Failed to create thumbnails table: {:?}",
                 e
             );
             0
@@ -355,7 +355,7 @@ impl ThumbnailDiskCache {
             .and_then(|mut s| s.query_row(params![id], |r| r.get(0)).ok())
             .unwrap_or(-1);
         if count == 0 {
-            eprintln!(
+            log::trace!(
                 "[DB-MISS] get_latest: id={} path={:?} → 0 rows in DB",
                 &id[..8],
                 path.file_name()
@@ -458,7 +458,7 @@ impl ThumbnailDiskCache {
             ],
         )?;
 
-        eprintln!(
+        log::trace!(
             "[DB-PUT] OK id={} {}x{} req_size={} path={:?}",
             &id[..8],
             final_width,
@@ -594,7 +594,7 @@ impl ThumbnailDiskCache {
         // This catches obvious corruption/tampering before the codec processes
         // the data, reducing attack surface against WebP decoder vulnerabilities.
         if webp_data.len() < 12 || &webp_data[0..4] != b"RIFF" || &webp_data[8..12] != b"WEBP" {
-            eprintln!(
+            log::warn!(
                 "[FOLDER PREVIEW CACHE] Invalid WebP header for {:?} ({} bytes)",
                 folder_path.file_name(),
                 webp_data.len()
@@ -607,7 +607,7 @@ impl ThumbnailDiskCache {
         let decoded = match decoder.decode() {
             Some(img) => img,
             None => {
-                eprintln!(
+                log::warn!(
                     "[FOLDER PREVIEW CACHE] WebP decode failed for {:?} ({} bytes)",
                     folder_path.file_name(),
                     webp_data.len()
@@ -722,7 +722,7 @@ impl ThumbnailDiskCache {
             // Log cleanup (VACUUM is not called here to avoid UI thread blocking;
             // it runs during garbage_collect() which is called at controlled times)
             if deleted > 0 {
-                eprintln!("[Cache] Cleaned {} entries for: {}", deleted, path_str);
+                log::debug!("[Cache] Cleaned {} entries for: {}", deleted, path_str);
             }
         }
     }
@@ -792,7 +792,7 @@ impl ThumbnailDiskCache {
 
             match db.execute(&sql, rusqlite::params_from_iter(chunk.iter())) {
                 Ok(c) => count += c,
-                Err(e) => eprintln!(
+                Err(e) => log::error!(
                     "[GC] Failed to delete batch from {}: {:?}",
                     table.table_name(),
                     e
@@ -816,7 +816,7 @@ impl ThumbnailDiskCache {
             let db = match self.reader.lock() {
                 Ok(db) => db,
                 Err(_) => {
-                    eprintln!("[GC] Incremental pass skipped: reader lock failed");
+                    log::warn!("[GC] Incremental pass skipped: reader lock failed");
                     return 0;
                 }
             };
@@ -917,7 +917,7 @@ impl ThumbnailDiskCache {
         }
 
         if removed > 0 {
-            eprintln!("[GC] Incremental pass removed {} entries", removed);
+            log::debug!("[GC] Incremental pass removed {} entries", removed);
         }
         removed
     }
@@ -932,7 +932,7 @@ impl ThumbnailDiskCache {
 
     /// Full GC: scans all cache rows. Use sparingly.
     pub fn garbage_collect(&self) -> usize {
-        eprintln!("[GC] Starting full garbage collection...");
+        log::info!("[GC] Starting full garbage collection...");
 
         let all_entries: Vec<(String, String)>;
         let all_folders: Vec<String>;
@@ -942,7 +942,7 @@ impl ThumbnailDiskCache {
             let db = match self.reader.lock() {
                 Ok(db) => db,
                 Err(_) => {
-                    eprintln!("[GC] Failed to acquire database lock!");
+                    log::error!("[GC] Failed to acquire database lock!");
                     return 0;
                 }
             };
@@ -1009,7 +1009,7 @@ impl ThumbnailDiskCache {
             && orphan_folders.is_empty()
             && orphan_folder_previews.is_empty()
         {
-            eprintln!("[GC] No orphans found, skipping cleanup");
+            log::debug!("[GC] No orphans found, skipping cleanup");
             return 0;
         }
 
@@ -1034,7 +1034,7 @@ impl ThumbnailDiskCache {
         }
 
         if removed > 0 {
-            eprintln!(
+            log::debug!(
                 "[GC] Full GC removed {} entries (VACUUM not automatic)",
                 removed
             );

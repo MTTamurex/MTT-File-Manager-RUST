@@ -7,7 +7,7 @@ impl MpvPreview {
         match self.state.read() {
             Ok(state) => MpvState::clone(&state),
             Err(_) => {
-                eprintln!("[MpvPreview] Erro ao ler estado - RwLock poisonado");
+                log::error!("[MpvPreview] Erro ao ler estado - RwLock poisonado");
                 MpvState::default()
             }
         }
@@ -39,7 +39,7 @@ impl MpvPreview {
                 }
             }
             Err(_) => {
-                eprintln!("[MpvPreview] Erro ao toggle play - RwLock poisonado");
+                log::error!("[MpvPreview] Erro ao toggle play - RwLock poisonado");
                 self.pause();
             }
         }
@@ -78,7 +78,7 @@ impl MpvPreview {
         let current_muted = match self.state.try_read() {
             Ok(state) => state.is_muted,
             Err(_) => {
-                eprintln!("[MpvPreview] Erro ao ler estado mute - RwLock poisonado ou ocupado");
+                log::error!("[MpvPreview] Erro ao ler estado mute - RwLock poisonado ou ocupado");
                 false
             }
         };

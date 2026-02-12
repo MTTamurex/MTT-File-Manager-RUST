@@ -66,7 +66,7 @@ pub fn spawn_folder_preview_worker(
             // FAST PATH: Check SQLite disk cache first (NVMe read, ~1ms)
             let cache_start = Instant::now();
             if let Some((rgba_data, width, height)) = disk_cache.get_folder_preview_cache(&path) {
-                eprintln!(
+                log::debug!(
                     "[FOLDER PREVIEW] DB HIT {:?} ({}x{}, {:.1}ms)",
                     path.file_name().unwrap_or_default(),
                     width,
@@ -82,7 +82,7 @@ pub fn spawn_folder_preview_worker(
                 throttle_repaint(&ctx, &mut last_repaint);
                 continue;
             }
-            eprintln!(
+            log::debug!(
                 "[FOLDER PREVIEW] DB MISS {:?} ({:.1}ms) → Shell API",
                 path.file_name().unwrap_or_default(),
                 cache_start.elapsed().as_secs_f64() * 1000.0
@@ -110,7 +110,7 @@ pub fn spawn_folder_preview_worker(
                 match crate::infrastructure::windows::icons::force_extract_folder_preview(&path) {
                     Ok(data) => Ok(data),
                     Err(e) => {
-                        eprintln!(
+                        log::warn!(
                             "[FOLDER PREVIEW] force_extract failed for {:?}: {}",
                             path, e
                         );

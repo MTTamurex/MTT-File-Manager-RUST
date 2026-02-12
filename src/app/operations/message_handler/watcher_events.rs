@@ -67,7 +67,7 @@ impl ImageViewerApp {
             if let crate::infrastructure::drive_watcher::DriveWatcherEvent::DriveLost(drive_root) =
                 event
             {
-                eprintln!("[FS-WATCH] DriveLost signal received for: {:?}", drive_root);
+                log::warn!("[FS-WATCH] DriveLost signal received for: {:?}", drive_root);
                 self.last_drive_refresh = Instant::now();
                 self.reload_drive_list_async();
 
@@ -77,7 +77,7 @@ impl ImageViewerApp {
                     && !self.is_recycle_bin_view
                     && self.current_path.starts_with(&drive_prefix)
                 {
-                    eprintln!(
+                    log::warn!(
                         "[FS-WATCH] Current path '{}' is on lost drive, redirecting to Este Computador",
                         self.current_path
                     );
@@ -105,7 +105,7 @@ impl ImageViewerApp {
         let mut pending_disk_cache_invalidations: Vec<PathBuf> = Vec::new();
 
         if drive_events.len() > MAX_EVENTS_INDIVIDUAL {
-            eprintln!(
+            log::warn!(
                 "[FS-WATCH] Event flood detected: {} events (threshold {}). Skipping individual processing, triggering full reload.",
                 drive_events.len(),
                 MAX_EVENTS_INDIVIDUAL
@@ -135,7 +135,7 @@ impl ImageViewerApp {
                                 // Only invalidate active folder cache to keep watcher handling O(1).
                                 self.directory_cache.invalidate(&parent.to_path_buf());
                                 #[cfg(debug_assertions)]
-                                eprintln!(
+                                log::trace!(
                                     "[FS-WATCH] CREATE: {:?}",
                                     path.file_name().unwrap_or_default()
                                 );
@@ -160,7 +160,7 @@ impl ImageViewerApp {
                                 self.directory_cache.invalidate_children(&cleaned);
 
                                 #[cfg(debug_assertions)]
-                                eprintln!(
+                                log::trace!(
                                     "[FS-WATCH] DELETE: {:?}",
                                     path.file_name().unwrap_or_default()
                                 );
@@ -188,7 +188,7 @@ impl ImageViewerApp {
                                     self.items = Arc::new(filtered);
                                     self.total_items = self.items.len();
                                     #[cfg(debug_assertions)]
-                                    eprintln!(
+                                    log::debug!(
                                         "[FS-WATCH] SMART DELETE: Removed from UI without reload"
                                     );
 
@@ -230,7 +230,7 @@ impl ImageViewerApp {
                             if parent_norm == current_path_norm {
                                 self.directory_cache.invalidate(&parent.to_path_buf());
                                 #[cfg(debug_assertions)]
-                                eprintln!(
+                                log::trace!(
                                     "[FS-WATCH] MODIFY: {:?}",
                                     path.file_name().unwrap_or_default()
                                 );
@@ -280,7 +280,7 @@ impl ImageViewerApp {
 
         let drive_events_done = Instant::now();
         if drive_events_done.duration_since(watcher_start).as_millis() > 50 {
-            eprintln!(
+            log::debug!(
                 "[PERF-MSG] DriveWatcher: poll={}ms process={}ms events={}",
                 t_poll_done.duration_since(watcher_start).as_millis(),
                 drive_events_done.duration_since(t_poll_done).as_millis(),
@@ -299,7 +299,7 @@ impl ImageViewerApp {
             }
 
             if legacy_events.len() > MAX_EVENTS_INDIVIDUAL {
-                eprintln!(
+                log::warn!(
                     "[FS-WATCH-LEGACY] Event flood detected: {} events. Triggering full reload.",
                     legacy_events.len()
                 );
@@ -326,7 +326,7 @@ impl ImageViewerApp {
                                     }
                                     self.directory_cache.invalidate_children(&cleaned);
                                     #[cfg(debug_assertions)]
-                                    eprintln!(
+                                    log::trace!(
                                         "[FS-WATCH-LEGACY] REMOVE: {:?}",
                                         path.file_name().unwrap_or_default()
                                     );
@@ -349,7 +349,7 @@ impl ImageViewerApp {
                                                 .invalidate(&cache_parent.to_path_buf());
                                         }
                                         #[cfg(debug_assertions)]
-                                        eprintln!(
+                                        log::trace!(
                                             "[FS] Direct subfolder modified: {:?}",
                                             cleaned.file_name()
                                         );
@@ -369,7 +369,7 @@ impl ImageViewerApp {
                                                     .invalidate(&cache_parent.to_path_buf());
                                             }
                                             #[cfg(debug_assertions)]
-                                            eprintln!(
+                                            log::trace!(
                                                 "[FS] File in subfolder modified, invalidating: {:?}",
                                                 cleaned_parent.file_name()
                                             );
@@ -393,7 +393,7 @@ impl ImageViewerApp {
                         }
                         Err(_err) => {
                             #[cfg(debug_assertions)]
-                            eprintln!("Erro de watch: {:?}", _err);
+                            log::warn!("Erro de watch: {:?}", _err);
                         }
                     }
                 }
@@ -410,7 +410,7 @@ impl ImageViewerApp {
             self.skip_next_auto_reload = false;
             self.pending_auto_reload = false;
             #[cfg(debug_assertions)]
-            eprintln!("[DEBUG] Skipping auto-reload - UI already updated by smart delete");
+            log::debug!("[DEBUG] Skipping auto-reload - UI already updated by smart delete");
         }
 
         // NOTE: Inactivity recovery cooldown removed - no longer needed.
@@ -421,7 +421,7 @@ impl ImageViewerApp {
             let elapsed = self.last_auto_reload.elapsed();
             if elapsed > Duration::from_millis(theme::AUTO_RELOAD_MS) {
                 #[cfg(debug_assertions)]
-                eprintln!(
+                log::debug!(
                     "[DEBUG] Checking auto-reload for path: '{}'",
                     self.current_path
                 );
@@ -430,7 +430,7 @@ impl ImageViewerApp {
                     self.pending_auto_reload = false;
                 } else {
                     #[cfg(debug_assertions)]
-                    eprintln!(
+                    log::debug!(
                         "[DEBUG] Auto-reloading with force_refresh=false (watcher-triggered)."
                     );
                     // PERFORMANCE: Use force_refresh=false for watcher-triggered reloads.

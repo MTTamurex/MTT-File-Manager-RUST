@@ -646,7 +646,7 @@ mod tests {
                 }
                 Err(e) if e.raw_os_error() == Some(1314) => {
                     // ERROR_PRIVILEGE_NOT_HELD - skip gracefully.
-                    eprintln!("Skipping symlink test: requires elevated privileges");
+                    log::warn!("Skipping symlink test: requires elevated privileges");
                 }
                 Err(e) => panic!("Unexpected symlink creation error: {}", e),
             }

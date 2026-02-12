@@ -6,13 +6,13 @@ use std::time::Instant;
 impl ImageViewerApp {
     pub(super) fn should_skip_folder_load(&self, force_refresh: bool) -> bool {
         // GUARD CLAUSE: Prevent spam by checking if we're already on this path
-        eprintln!(
+        log::debug!(
             "[GUARD] Checking load_folder: current_path={:?}, loaded_path={:?}, force_refresh={}",
             self.current_path, self.loaded_path, force_refresh
         );
 
         if !force_refresh && self.current_path == self.loaded_path {
-            eprintln!(
+            log::debug!(
                 "[GUARD] Skipping load_folder for {:?} - already loaded",
                 self.current_path
             );
@@ -23,7 +23,7 @@ impl ImageViewerApp {
     }
 
     pub(super) fn mark_folder_load_started(&mut self, force_refresh: bool) {
-        eprintln!(
+        log::debug!(
             "[GUARD] load_folder called for {:?} (force_refresh={}, loaded_path={:?})",
             self.current_path, force_refresh, self.loaded_path
         );
@@ -31,7 +31,7 @@ impl ImageViewerApp {
         // Mark as loaded immediately to prevent spam.
         self.loaded_path = self.current_path.clone();
 
-        eprintln!(
+        log::debug!(
             "[GUARD] Starting folder loading process for {:?}",
             self.current_path
         );

@@ -45,10 +45,10 @@ fn determine_initial_path(disk_cache: &ThumbnailDiskCache) -> (String, bool) {
             // folders, freezing the app at startup.
             // GetFileAttributesW reads cached attributes — no network I/O.
             if onedrive::fast_path_exists(&path_buf) && onedrive::fast_is_dir(&path_buf) {
-                eprintln!("[INIT] Restoring last folder: {}", last_folder);
+                log::info!("[INIT] Restoring last folder: {}", last_folder);
                 return (last_folder, false);
             } else {
-                eprintln!(
+                log::warn!(
                     "[INIT] Last folder no longer exists or not accessible: {}, using Este Computador",
                     last_folder
                 );
@@ -57,7 +57,7 @@ fn determine_initial_path(disk_cache: &ThumbnailDiskCache) -> (String, bool) {
     }
 
     // Default to "Este Computador" if no valid last folder
-    eprintln!("[INIT] No valid last folder found, starting at Este Computador");
+    log::info!("[INIT] No valid last folder found, starting at Este Computador");
     ("Este Computador".to_string(), true)
 }
 
@@ -80,7 +80,7 @@ impl ImageViewerApp {
         let disk_cache = Arc::new(match ThumbnailDiskCache::new(cache_dir.clone()) {
             Ok(cache) => cache,
             Err(e) => {
-                eprintln!(
+                log::error!(
                     "[Cache] Fatal: failed to initialize thumbnail cache at {:?}: {:?}",
                     cache_dir, e
                 );
@@ -90,7 +90,7 @@ impl ImageViewerApp {
         let directory_index = match DirectoryIndex::open(&cache_dir.join("thumbnails.db")) {
             Ok(index) => Some(Arc::new(index)),
             Err(e) => {
-                eprintln!("[Cache] Warning: Failed to open directory index: {:?}", e);
+                log::warn!("[Cache] Failed to open directory index: {:?}", e);
                 None
             }
         };
@@ -302,7 +302,7 @@ impl ImageViewerApp {
         let sidebar_left_raw = disk_cache.get_preference("sidebar_left_width");
         let sidebar_right_raw = disk_cache.get_preference("sidebar_right_width");
 
-        eprintln!(
+        log::debug!(
             "[INIT] Raw sidebar values from DB: L={:?}, R={:?}",
             sidebar_left_raw, sidebar_right_raw
         );
@@ -314,7 +314,7 @@ impl ImageViewerApp {
             .and_then(|s| s.parse::<f32>().ok())
             .unwrap_or(300.0);
 
-        eprintln!(
+        log::debug!(
             "[INIT] Parsed sidebar widths: L={}, R={}",
             sidebar_left_width, sidebar_right_width
         );
@@ -947,7 +947,7 @@ impl ImageViewerApp {
                     && removed_since_vacuum >= GC_VACUUM_THRESHOLD
                     && gc_cache.run_vacuum()
                 {
-                    eprintln!(
+                    log::info!(
                         "[GC] VACUUM completed after removing {} entries",
                         removed_since_vacuum
                     );

@@ -81,7 +81,7 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
     }
 
     unsafe {
-        eprintln!(
+        log::debug!(
             "[ShellMenu] ===== EXTRACTION #{} for: {:?} items =====",
             call_num,
             paths.len()
@@ -133,7 +133,7 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
             .ok()?;
 
         let count = GetMenuItemCount(Some(hmenu));
-        eprintln!("[ShellMenu] Total menu items: {}", count);
+        log::debug!("[ShellMenu] Total menu items: {}", count);
 
         // Extract items
         let mut items = Vec::new();
@@ -142,9 +142,9 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
             if let Some(item) = extract_item_info(&context_menu, hmenu, i as u32, false) {
                 if item.pending_submenu_handle.is_some() {
                     pending_count += 1;
-                    eprintln!("[ShellMenu] Item '{}' has PENDING submenu", item.text);
+                    log::trace!("[ShellMenu] Item '{}' has PENDING submenu", item.text);
                 } else if !item.sub_items.is_empty() {
-                    eprintln!(
+                    log::trace!(
                         "[ShellMenu] Item '{}' has {} sub-items",
                         item.text,
                         item.sub_items.len()
@@ -153,7 +153,7 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
                 items.push(item);
             }
         }
-        eprintln!(
+        log::debug!(
             "[ShellMenu] Extracted {} items, {} with pending submenus",
             items.len(),
             pending_count
@@ -179,15 +179,15 @@ pub fn warmup_shell_extensions(hwnd: HWND) {
     let system_drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_string());
     let warmup_path = std::path::PathBuf::from(format!("{}\\", system_drive));
 
-    eprintln!(
+    log::debug!(
         "[ShellMenu] Warming up shell extensions with {:?}...",
         warmup_path
     );
 
     if let Ok(_ctx) = extract_shell_menu(hwnd, &[warmup_path]) {
-        eprintln!("[ShellMenu] Folder warmup complete");
+        log::debug!("[ShellMenu] Folder warmup complete");
     } else {
-        eprintln!("[ShellMenu] Folder warmup failed");
+        log::warn!("[ShellMenu] Folder warmup failed");
     }
 
     // Use a temporary file to trigger file-level shell extensions (e.g., 7-Zip, WinRAR)
@@ -195,13 +195,13 @@ pub fn warmup_shell_extensions(hwnd: HWND) {
         std::env::temp_dir().join(format!("mtt_warmup_{}.txt", std::process::id()));
     let _ = std::fs::File::create(&temp_file);
     if let Ok(_ctx) = extract_shell_menu(hwnd, std::slice::from_ref(&temp_file)) {
-        eprintln!("[ShellMenu] File warmup complete");
+        log::debug!("[ShellMenu] File warmup complete");
     } else {
-        eprintln!("[ShellMenu] File warmup failed");
+        log::warn!("[ShellMenu] File warmup failed");
     }
     let _ = std::fs::remove_file(&temp_file);
 
-    eprintln!("[ShellMenu] Shell extensions initialized");
+    log::info!("[ShellMenu] Shell extensions initialized");
 }
 
 /// Get command string (verb) for a menu item

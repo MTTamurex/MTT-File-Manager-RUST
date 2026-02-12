@@ -49,7 +49,7 @@ pub fn read_image_metadata(path: &Path) -> Result<MediaMetadata, image::ImageErr
 }
 
 pub fn read_image_exif_metadata(path: &Path) -> Result<MediaMetadata, windows::core::Error> {
-    eprintln!("[EXIF DEBUG] Reading EXIF for: {:?}", path.file_name());
+    log::trace!("[EXIF DEBUG] Reading EXIF for: {:?}", path.file_name());
 
     let mut camera_maker = None;
     let mut camera_model = None;
@@ -66,7 +66,7 @@ pub fn read_image_exif_metadata(path: &Path) -> Result<MediaMetadata, windows::c
     if let Ok(file) = std::fs::File::open(path) {
         let mut bufreader = std::io::BufReader::new(&file);
         if let Ok(exifreader) = ExifReader::new().read_from_container(&mut bufreader) {
-            eprintln!("  [EXIF] Successfully parsed EXIF data");
+            log::trace!("  [EXIF] Successfully parsed EXIF data");
 
             if let Some(field) = exifreader.get_field(Tag::Make, In::PRIMARY) {
                 camera_maker = Some(field.display_value().to_string());
@@ -116,7 +116,7 @@ pub fn read_image_exif_metadata(path: &Path) -> Result<MediaMetadata, windows::c
                 subject = Some(field.display_value().to_string());
             }
         } else {
-            eprintln!("  [EXIF] Failed to parse EXIF data, trying Property Store fallback");
+            log::debug!("  [EXIF] Failed to parse EXIF data, trying Property Store fallback");
 
             let _com_guard = ComGuard::new();
             if let Ok(store) = unsafe { open_property_store(path) } {

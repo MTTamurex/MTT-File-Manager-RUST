@@ -270,7 +270,7 @@ fn draw_subtitle_track_picker(
 
             if let Some(subtitle_path) = file_dialog.pick_file() {
                 if let Err(e) = preview.load_external_subtitle(&subtitle_path) {
-                    eprintln!("[MPV] Failed to load subtitle from picker: {}", e);
+                    log::error!("[MPV] Failed to load subtitle from picker: {}", e);
                 }
             }
         }
@@ -477,7 +477,7 @@ fn draw_detached_buttons(
             .clicked()
         {
             if let Err(e) = preview.toggle_vsr() {
-                eprintln!("Error toggling VSR: {}", e);
+                log::error!("toggling VSR: {}", e);
             }
         }
     });

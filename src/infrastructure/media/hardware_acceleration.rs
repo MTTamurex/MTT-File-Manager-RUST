@@ -97,7 +97,7 @@ fn get_ffmpeg_encoders() -> String {
     match cmd.output() {
         Ok(output) => String::from_utf8_lossy(&output.stdout).to_string(),
         Err(e) => {
-            eprintln!("[HardwareDetection] Failed to run -encoders: {}", e);
+            log::warn!("[HardwareDetection] Failed to run -encoders: {}", e);
             String::new()
         }
     }

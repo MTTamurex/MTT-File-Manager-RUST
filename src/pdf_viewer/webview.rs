@@ -133,7 +133,7 @@ impl Drop for WebViewState {
 // API
 pub fn init(hwnd: HWND, url: String) -> Result<()> {
     unsafe {
-        eprintln!("WebView2: Loading WebView2Loader.dll");
+        log::debug!("WebView2: Loading WebView2Loader.dll");
         // Try loading DLL from the executable's directory first (prevents
         // DLL search-order hijacking via CWD). If the DLL is not bundled
         // alongside the exe (e.g. dev builds), fall back to standard search.
@@ -153,7 +153,7 @@ pub fn init(hwnd: HWND, url: String) -> Result<()> {
             }
         };
 
-        eprintln!("WebView2: Getting ProcAddress");
+        log::debug!("WebView2: Getting ProcAddress");
         let func_name = s!("CreateCoreWebView2EnvironmentWithOptions");
         let create_env_ptr = GetProcAddress(hmodule, func_name).ok_or(Error::from_win32())?;
 
@@ -168,14 +168,14 @@ pub fn init(hwnd: HWND, url: String) -> Result<()> {
         let handler = EnvironmentCompletedHandler::create(hwnd, url);
         let handler_ptr: *mut c_void = handler;
 
-        eprintln!("WebView2: Calling CreateCoreWebView2EnvironmentWithOptions");
+        log::debug!("WebView2: Calling CreateCoreWebView2EnvironmentWithOptions");
         let hr = create_env(
             PCWSTR::null(),
             PCWSTR::null(),
             std::ptr::null_mut(),
             handler_ptr,
         );
-        eprintln!("WebView2: CreateEnv result: {:?}", hr);
+        log::debug!("WebView2: CreateEnv result: {:?}", hr);
         hr.ok()
     }
 }
@@ -266,7 +266,7 @@ impl EnvironmentCompletedHandler {
         result: HRESULT,
         env: *mut c_void,
     ) -> HRESULT {
-        eprintln!(
+        log::debug!(
             "WebView2: EnvHandler::Invoke called. Result: {:?}, Env: {:p}",
             result, env
         );
@@ -276,13 +276,13 @@ impl EnvironmentCompletedHandler {
         let handler = &*(this as *mut Self);
 
         // Env -> CreateController
-        eprintln!("WebView2: Creating Controller");
+        log::debug!("WebView2: Creating Controller");
         let vtbl = *(env as *mut *mut ICoreWebView2Environment_Vtbl);
         let controller_handler =
             ControllerCompletedHandler::create(handler.hwnd, handler.url.clone());
 
         let hr = ((*vtbl).CreateCoreWebView2Controller)(env, handler.hwnd, controller_handler);
-        eprintln!("WebView2: CreateController result: {:?}", hr);
+        log::debug!("WebView2: CreateController result: {:?}", hr);
         HRESULT(0)
     }
 }

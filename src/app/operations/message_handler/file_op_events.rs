@@ -98,7 +98,7 @@ impl ImageViewerApp {
     fn handle_recycle_bin_changed(&mut self) {
         if self.is_recycle_bin_view {
             #[cfg(debug_assertions)]
-            eprintln!("[RECYCLE] Operation finished, refreshing view.");
+            log::debug!("[RECYCLE] Operation finished, refreshing view.");
             self.setup_recycle_bin_view();
             // Keep tab manager synchronized with recycle-bin virtual view.
             self.sync_to_tab();
@@ -135,7 +135,7 @@ impl ImageViewerApp {
 
         if dest_str == current_path_norm {
             #[cfg(debug_assertions)]
-            eprintln!(
+            log::debug!(
                 "[COPY] Dest folder matches current view, reloading: {}",
                 self.current_path
             );
@@ -163,7 +163,7 @@ impl ImageViewerApp {
 
         if current_path_norm == source_str {
             #[cfg(debug_assertions)]
-            eprintln!(
+            log::debug!(
                 "[MOVE] Source folder matches current view, reloading: {}",
                 self.current_path
             );
@@ -173,7 +173,7 @@ impl ImageViewerApp {
 
         if current_path_norm == dest_str {
             #[cfg(debug_assertions)]
-            eprintln!(
+            log::debug!(
                 "[MOVE] Dest folder matches current view, reloading: {}",
                 self.current_path
             );
@@ -210,7 +210,7 @@ impl ImageViewerApp {
                     self.cache_manager.folder_preview_cache.pop(source_folder);
                     let _ = self.cover_worker_sender.send(source_folder.clone());
                     #[cfg(debug_assertions)]
-                    eprintln!(
+                    log::debug!(
                         "[MOVE-BATCH] Moved file was folder cover for {:?}, requesting recalculation",
                         source_folder
                     );
@@ -235,7 +235,7 @@ impl ImageViewerApp {
 
         if current_path_norm == dest_str {
             #[cfg(debug_assertions)]
-            eprintln!(
+            log::debug!(
                 "[MOVE-BATCH] Dest folder matches current view, reloading: {}",
                 self.current_path
             );

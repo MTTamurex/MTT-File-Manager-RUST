@@ -275,7 +275,7 @@ fn query_mf_codec_name(guid: &GUID) -> Option<String> {
     use windows::Win32::System::Com::CoTaskMemFree;
 
     // Convert GUID to tag format used by Media Foundation
-    eprintln!(
+    log::trace!(
         "[CODEC DEBUG] Querying MF codec name for GUID: {{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
         guid.data1, guid.data2, guid.data3,
         guid.data4[0], guid.data4[1], guid.data4[2], guid.data4[3],
@@ -330,7 +330,7 @@ fn query_mf_codec_name(guid: &GUID) -> Option<String> {
                     );
 
                     if result.is_ok() && count > 0 {
-                        eprintln!(
+                        log::trace!(
                             "[CODEC DEBUG] Found {} MFTs for codec (cat={:?}, media_type={:?})",
                             count, category, media_type
                         );
@@ -522,7 +522,7 @@ fn query_mft_by_subtype(tag: u32) -> Option<String> {
         data4: [0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71],
     };
 
-    eprintln!(
+    log::trace!(
         "[CODEC DEBUG] Searching MFT with GUID: {{{:08X}-0000-0010-8000-00AA00389B71}}",
         tag
     );
@@ -575,7 +575,7 @@ fn query_mft_by_subtype(tag: u32) -> Option<String> {
                     );
 
                     if result.is_ok() && count > 0 {
-                        eprintln!(
+                        log::trace!(
                             "[CODEC DEBUG] Found {} MFTs (input={}, cat={:?}, media_type={:?})",
                             count, use_input, category, media_type
                         );
@@ -845,9 +845,9 @@ mod tests {
         // Different systems may have different names for H.264
         if let Some(codec_name) = name {
             assert!(!codec_name.is_empty(), "Codec name should not be empty");
-            eprintln!("Found H.264 codec name: {}", codec_name);
+            log::debug!("Found H.264 codec name: {}", codec_name);
         } else {
-            eprintln!(
+            log::debug!(
                 "H.264 codec not found in Media Foundation - this is normal if not installed"
             );
         }
@@ -863,9 +863,9 @@ mod tests {
         // Should return Some(name) for common audio codecs
         if let Some(codec_name) = name {
             assert!(!codec_name.is_empty(), "Codec name should not be empty");
-            eprintln!("Found AAC codec name: {}", codec_name);
+            log::debug!("Found AAC codec name: {}", codec_name);
         } else {
-            eprintln!("AAC codec not found in Media Foundation");
+            log::debug!("AAC codec not found in Media Foundation");
         }
     }
 
@@ -910,7 +910,7 @@ mod tests {
             "div3 should also be identified as DivX 3"
         );
 
-        eprintln!("DIV3 codec correctly identified as: {}", name);
+        log::debug!("DIV3 codec correctly identified as: {}", name);
     }
 
     #[test]
@@ -927,7 +927,7 @@ mod tests {
 
         for codec_guid in &video_codecs {
             let name = resolve_codec_guid(codec_guid);
-            eprintln!("Video codec {} resolved to: {}", codec_guid, name);
+            log::debug!("Video codec {} resolved to: {}", codec_guid, name);
             // Should not panic and should return some reasonable name
             assert!(!name.is_empty(), "Video codec name should not be empty");
         }

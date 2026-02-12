@@ -17,7 +17,7 @@ where
     F: FnOnce(PathBuf) -> IoTimeoutResult<T> + Send + 'static,
 {
     if super::is_app_minimized() {
-        eprintln!(
+        log::debug!(
             "[ONEDRIVE] App minimized - skipping {} for {:?}",
             op_name, path
         );
@@ -26,7 +26,7 @@ where
 
     let current_threads = super::ACTIVE_TIMEOUT_THREADS.load(Ordering::SeqCst);
     if current_threads >= super::MAX_CONCURRENT_TIMEOUT_THREADS {
-        eprintln!(
+        log::warn!(
             "[ONEDRIVE] Thread limit reached ({}/{}), rejecting {} for {:?}",
             current_threads,
             super::MAX_CONCURRENT_TIMEOUT_THREADS,
@@ -37,7 +37,7 @@ where
     }
 
     let active_before = super::ACTIVE_TIMEOUT_THREADS.fetch_add(1, Ordering::SeqCst);
-    eprintln!(
+    log::trace!(
         "[ONEDRIVE] Active timeout threads: {} -> {}",
         active_before,
         active_before + 1
@@ -51,7 +51,7 @@ where
         let _ = result_tx.send(operation(path_buf));
     }) {
         let active_after = super::ACTIVE_TIMEOUT_THREADS.fetch_sub(1, Ordering::SeqCst);
-        eprintln!(
+        log::trace!(
             "[ONEDRIVE] Active timeout threads: {} -> {}",
             active_after,
             active_after - 1
@@ -65,7 +65,7 @@ where
 
     let result = loop {
         if super::is_app_minimized() {
-            eprintln!(
+            log::debug!(
                 "[ONEDRIVE] App minimized during operation - aborting {} for {:?}",
                 op_name, path_for_log
             );
@@ -73,7 +73,7 @@ where
         }
 
         if start.elapsed() >= timeout {
-            eprintln!(
+            log::warn!(
                 "[ONEDRIVE TIMEOUT] {} exceeded {}ms for {:?}",
                 op_name, timeout_ms, path_for_log
             );
@@ -97,7 +97,7 @@ where
     };
 
     let active_after = super::ACTIVE_TIMEOUT_THREADS.fetch_sub(1, Ordering::SeqCst);
-    eprintln!(
+    log::trace!(
         "[ONEDRIVE] Active timeout threads: {} -> {}",
         active_after,
         active_after - 1

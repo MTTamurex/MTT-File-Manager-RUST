@@ -68,7 +68,7 @@ pub fn create_and_run(path: PathBuf, title_prefix: &str) -> Result<()> {
                 .replace('?', "%3F")
         );
         if let Err(e) = webview::init(hwnd, url) {
-            eprintln!("Failed to init WebView2: {}", e);
+            log::error!("Failed to init WebView2: {}", e);
         }
 
         let mut msg = MSG::default();

@@ -140,7 +140,7 @@ fn thumbnail_worker_loop(
     let _mf = {
         let mf_ok = unsafe { MFStartup(0x00020070, MFSTARTUP_NOSOCKET).is_ok() };
         if !mf_ok {
-            eprintln!("[ThumbnailWorker] Failed to initialize Media Foundation");
+            log::error!("[ThumbnailWorker] Failed to initialize Media Foundation");
         }
         ComMfGuard {
             com_initialized: false,
@@ -225,7 +225,7 @@ fn process_thumbnail_request(
             if let Some(decoded) = decode_cache_entry(entry, req_size) {
                 final_result = Some(decoded);
             } else {
-                eprintln!(
+                log::warn!(
                     "[Thumbnail-CACHE] EXACT match found but decode_cache_entry rejected! path={:?}, cached={}x{}, requested_size_in_db={}, req_size={}",
                     path.file_name(), w, h, rs, req_size
                 );
@@ -245,13 +245,13 @@ fn process_thumbnail_request(
             if let Some(decoded) = decode_cache_entry(entry, req_size) {
                 final_result = Some(decoded);
             } else {
-                eprintln!(
+                log::warn!(
                     "[Thumbnail-CACHE] LATEST match found but decode_cache_entry rejected! path={:?}, cached={}x{}, requested_size_in_db={}, req_size={}",
                     path.file_name(), w, h, rs, req_size
                 );
             }
         } else {
-            eprintln!(
+            log::debug!(
                 "[Thumbnail-CACHE] NO entry in DB at all for path={:?}, req_modified={}, req_size={}",
                 path.file_name(), req_modified, req_size
             );
@@ -293,7 +293,7 @@ fn process_thumbnail_request(
                 return;
             }
             IoTimeoutResult::Timeout => {
-                eprintln!("[THUMB WORKER] exists() timeout for {:?}", path);
+                log::warn!("[THUMB WORKER] exists() timeout for {:?}", path);
             }
             IoTimeoutResult::Ok(true) => {}
             IoTimeoutResult::Err(_) => {
@@ -344,7 +344,7 @@ fn process_thumbnail_request(
         match onedrive::onedrive_metadata(path) {
             IoTimeoutResult::Ok(metadata) => metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
             IoTimeoutResult::Timeout => {
-                eprintln!("[THUMB WORKER] metadata() timeout for {:?}", path);
+                log::warn!("[THUMB WORKER] metadata() timeout for {:?}", path);
                 SystemTime::UNIX_EPOCH
             }
             IoTimeoutResult::Err(_) => SystemTime::UNIX_EPOCH,
@@ -382,7 +382,7 @@ fn process_thumbnail_request(
             if let Err(e) =
                 disk_cache.put(path, modified, req_size, &resized.0, resized.1, resized.2)
             {
-                eprintln!(
+                log::error!(
                     "[Thumbnail-CACHE] PUT FAILED for {:?}: {:?}",
                     path.file_name(),
                     e

@@ -134,7 +134,7 @@ impl ImageViewerApp {
                 self.ui_ctx.request_repaint();
             }
             Err(e) => {
-                eprintln!("Erro ao criar pasta: {}", e);
+                log::error!("Erro ao criar pasta: {}", e);
             }
         }
     }

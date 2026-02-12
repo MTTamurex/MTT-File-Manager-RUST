@@ -218,7 +218,7 @@ impl MpvPreview {
             m.set_property("vf", "d3d11vpp=scale=2:scaling-mode=nvidia")
                 .map_err(|e| format!("Failed to enable VSR: {:?}", e))?;
             self.is_vsr_enabled = true;
-            eprintln!("[MpvPreview] NVIDIA VSR Enabled");
+            log::info!("[MpvPreview] NVIDIA VSR Enabled");
             self.update_docked_downscale(true);
             Ok(())
         } else {
@@ -232,7 +232,7 @@ impl MpvPreview {
             m.set_property("vf", "")
                 .map_err(|e| format!("Failed to disable VSR: {:?}", e))?;
             self.is_vsr_enabled = false;
-            eprintln!("[MpvPreview] VSR Disabled");
+            log::info!("[MpvPreview] VSR Disabled");
             self.update_docked_downscale(true);
             Ok(())
         } else {

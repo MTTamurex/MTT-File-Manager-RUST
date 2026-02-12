@@ -68,14 +68,14 @@ impl VirtualDriveConfig {
                         }
                     }
 
-                    eprintln!(
+                    log::info!(
                         "[Config] Loaded virtual drive configuration from {:?}",
                         path
                     );
                     config
                 }
                 Err(e) => {
-                    eprintln!(
+                    log::warn!(
                         "[Config] Failed to parse config file: {} - using defaults",
                         e
                     );
@@ -83,7 +83,7 @@ impl VirtualDriveConfig {
                 }
             },
             Err(e) => {
-                eprintln!(
+                log::warn!(
                     "[Config] Failed to read config file: {} - using defaults",
                     e
                 );
@@ -118,7 +118,7 @@ impl VirtualDriveConfig {
 
         fs::write(&path, json).map_err(|e| format!("Failed to write config file: {}", e))?;
 
-        eprintln!("[Config] Saved virtual drive configuration to {:?}", path);
+        log::info!("[Config] Saved virtual drive configuration to {:?}", path);
         Ok(())
     }
 

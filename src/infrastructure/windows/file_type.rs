@@ -304,7 +304,7 @@ pub fn find_folder_preview_item(folder_path: &Path) -> Option<PathBuf> {
                 return None;
             }
             IoTimeoutResult::Timeout => {
-                eprintln!("[COVER] OneDrive folder scan timed out: {:?}", folder_path);
+                log::warn!("[COVER] OneDrive folder scan timed out: {:?}", folder_path);
                 return None;
             }
             IoTimeoutResult::Err(_) => return None,

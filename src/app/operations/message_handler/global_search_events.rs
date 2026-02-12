@@ -26,7 +26,7 @@ impl ImageViewerApp {
                     if query == self.global_search_query {
                         self.global_search_loading = false;
                     }
-                    eprintln!("[GLOBAL-SEARCH] Error for '{}': {}", query, message);
+                    log::error!("[GLOBAL-SEARCH] Error for '{}': {}", query, message);
 
                     // Service IPC can be temporarily unstable after app/service restart.
                     // Trigger an expedited status check to recover UI state quickly.

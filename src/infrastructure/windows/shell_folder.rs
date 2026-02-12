@@ -63,11 +63,11 @@ pub fn list_shell_folder(path: &Path) -> Result<Vec<FileEntry>> {
         // Try direct path resolution first (works for ZIP and top-level archives)
         let folder = match bind_to_shell_folder_direct(path) {
             Ok(f) => {
-                eprintln!("[SHELL-FOLDER] Direct bind OK for {:?}", path);
+                log::debug!("[SHELL-FOLDER] Direct bind OK for {:?}", path);
                 f
             }
             Err(e) => {
-                eprintln!(
+                log::warn!(
                     "[SHELL-FOLDER] Direct bind FAILED for {:?}: {:?}, trying stepwise...",
                     path, e
                 );
@@ -77,7 +77,7 @@ pub fn list_shell_folder(path: &Path) -> Result<Vec<FileEntry>> {
         };
 
         let items = enumerate_shell_children(&folder, path)?;
-        eprintln!(
+        log::debug!(
             "[SHELL-FOLDER] Enumerated {} items for {:?}",
             items.len(),
             path
@@ -243,7 +243,7 @@ unsafe fn process_shell_child(
     // so we also check if size == 0 and no extension as a heuristic.
     let is_dir = sfgao_folder;
 
-    eprintln!(
+    log::trace!(
         "[SHELL-CHILD] name={:?}, attributes=0x{:08X}, FOLDER={}, STREAM={}, is_dir={}",
         name, attributes, sfgao_folder, sfgao_stream, is_dir
     );

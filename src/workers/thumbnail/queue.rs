@@ -140,7 +140,7 @@ impl PriorityThumbnailQueue {
         let is_ssd = io_priority::is_ssd(path);
         state.drive_is_ssd.insert(drive.clone(), is_ssd);
         if !is_ssd {
-            eprintln!(
+            log::info!(
                 "[IO] HDD detected on drive {:?} - enabling directory grouping for seek optimization",
                 drive
             );
