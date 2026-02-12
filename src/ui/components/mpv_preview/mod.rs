@@ -299,13 +299,19 @@ impl MpvPreview {
             } else {
                 "never"
             };
-            if let Err(e) = mpv.command("script-message", &["osc-visibility", visibility_mode]) {
+            if let Err(e) = mpv.command("script-message", &["osc-visibility", visibility_mode, "1"]) {
                 eprintln!(
                     "[MpvPreview] Failed to set custom osc-visibility={} : {:?}",
                     visibility_mode, e
                 );
             }
             self.last_osc_enabled = Some(desired_custom_osc_visible);
+        }
+
+        // Custom OSC script switches to "always" when paused.
+        // While docked, keep forcing "never" to prevent ghost overlay when pause toggles it.
+        if !desired_custom_osc_visible {
+            let _ = mpv.command("script-message", &["osc-visibility", "never", "1"]);
         }
 
         let desired_fullscreen = self.is_fullscreen();

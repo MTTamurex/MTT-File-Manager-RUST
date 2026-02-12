@@ -254,17 +254,55 @@ fn handle_media_hardware_input(app: &mut ImageViewerApp, ctx: &egui::Context) ->
             consumed = true;
         } else if (GetAsyncKeyState(0x26) as u16 & 0x8000) != 0 {
             let vol = preview.get_video_state().map(|s| s.volume).unwrap_or(1.0);
-            preview.set_volume((vol + 0.05).min(1.0));
+            let new_vol = (vol + 0.05).min(1.0);
+            preview.set_volume(new_vol);
+            let msg = format!("Volume: {}%", (new_vol * 100.0).round() as i32);
+            preview.show_osd(&msg, 2000);
             consumed = true;
         } else if (GetAsyncKeyState(0x28) as u16 & 0x8000) != 0 {
             let vol = preview.get_video_state().map(|s| s.volume).unwrap_or(1.0);
-            preview.set_volume((vol - 0.05).max(0.0));
+            let new_vol = (vol - 0.05).max(0.0);
+            preview.set_volume(new_vol);
+            let msg = format!("Volume: {}%", (new_vol * 100.0).round() as i32);
+            preview.show_osd(&msg, 2000);
             consumed = true;
         } else if (GetAsyncKeyState(0x27) as u16 & 0x8000) != 0 {
+            let state = preview.get_video_state();
+            let current = state.as_ref().map(|s| s.current_time).unwrap_or(0.0);
+            let duration = state.as_ref().map(|s| s.duration).unwrap_or(0.0);
             preview.seek_relative(5.0);
+            let new_time = if duration > 0.0 {
+                (current + 5.0).min(duration)
+            } else {
+                current + 5.0
+            };
+            let msg = if duration > 0.0 {
+                format!(
+                    "{} / {}",
+                    crate::ui::components::media_preview::format_time(new_time),
+                    crate::ui::components::media_preview::format_time(duration)
+                )
+            } else {
+                crate::ui::components::media_preview::format_time(new_time)
+            };
+            preview.show_osd(&msg, 2000);
             consumed = true;
         } else if (GetAsyncKeyState(0x25) as u16 & 0x8000) != 0 {
+            let state = preview.get_video_state();
+            let current = state.as_ref().map(|s| s.current_time).unwrap_or(0.0);
+            let duration = state.as_ref().map(|s| s.duration).unwrap_or(0.0);
             preview.seek_relative(-5.0);
+            let new_time = (current - 5.0).max(0.0);
+            let msg = if duration > 0.0 {
+                format!(
+                    "{} / {}",
+                    crate::ui::components::media_preview::format_time(new_time),
+                    crate::ui::components::media_preview::format_time(duration)
+                )
+            } else {
+                crate::ui::components::media_preview::format_time(new_time)
+            };
+            preview.show_osd(&msg, 2000);
             consumed = true;
         }
     }
