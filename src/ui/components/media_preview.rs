@@ -301,10 +301,10 @@ impl MediaPreview {
         }
     }
 
-    /// Check if video is detached
+    /// Check if video is detached (windowed or fullscreen, i.e. not docked)
     pub fn is_detached(&self) -> bool {
         if let MediaPreview::Video(player) = self {
-            player.is_detached
+            player.is_detached()
         } else {
             false
         }
@@ -323,10 +323,10 @@ impl MediaPreview {
     /// Set detached state
     pub fn set_detached(&mut self, detached: bool) {
         if let MediaPreview::Video(player) = self {
-            player.is_detached = detached;
-            if !detached {
-                player.is_maximized = false;
-                player.forced_size = None;
+            if detached {
+                player.detach();
+            } else {
+                player.dock();
             }
         }
     }
@@ -334,19 +334,14 @@ impl MediaPreview {
     /// Toggle detached state
     pub fn toggle_detached(&mut self) {
         if let MediaPreview::Video(player) = self {
-            player.is_detached = !player.is_detached;
-            // Reset maximize state and forced_size when re-attaching
-            if !player.is_detached {
-                player.is_maximized = false;
-                player.forced_size = None;
-            }
+            player.toggle_detached();
         }
     }
 
-    /// Check if video is maximized
+    /// Check if video is in fullscreen mode
     pub fn is_maximized(&self) -> bool {
         if let MediaPreview::Video(player) = self {
-            player.is_maximized
+            player.is_fullscreen()
         } else {
             false
         }
@@ -382,18 +377,10 @@ impl MediaPreview {
         }
     }
 
-    /// Toggle maximized state
+    /// Toggle between detached and fullscreen modes
     pub fn toggle_maximized(&mut self) {
         if let MediaPreview::Video(player) = self {
-            if player.is_maximized {
-                // Going from Maximized -> Normal
-                player.is_maximized = false;
-                player.restore_frames = 10;
-            } else {
-                // Going from Normal -> Maximized
-                player.is_maximized = true;
-                // No restore needed logic here, resizing handled by fixed_rect
-            }
+            player.toggle_fullscreen();
         }
     }
 
@@ -517,6 +504,20 @@ impl MediaPreview {
     pub fn show_osd(&mut self, text: &str, duration_ms: i64) {
         if let MediaPreview::Video(player) = self {
             player.show_osd_text(text, duration_ms);
+        }
+    }
+
+    /// Temporarily hides the video surface (for popups over the video area)
+    pub fn hide_for_overlay(&mut self) {
+        if let MediaPreview::Video(player) = self {
+            player.hide_for_overlay();
+        }
+    }
+
+    /// Restores the video surface after closing an overlay
+    pub fn restore_from_overlay(&mut self) {
+        if let MediaPreview::Video(player) = self {
+            player.restore_from_overlay();
         }
     }
 

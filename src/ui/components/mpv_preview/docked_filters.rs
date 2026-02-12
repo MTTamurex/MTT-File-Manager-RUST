@@ -4,7 +4,7 @@ impl MpvPreview {
     /// Applies or removes docked-mode downscale and FPS limiting without restarting playback.
     /// `force_reapply` is used when external changes (e.g., VSR) replace the filter chain.
     pub(super) fn update_docked_downscale(&mut self, force_reapply: bool) {
-        let should_limit = !self.is_detached;
+        let should_limit = self.is_docked();
         let Some(m) = &self.mpv else {
             return;
         };
