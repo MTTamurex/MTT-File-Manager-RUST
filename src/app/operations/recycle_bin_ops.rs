@@ -31,21 +31,27 @@ impl ImageViewerApp {
             });
 
             if let Some(item) = entry {
-                let original = item.recycle_original_path.clone().unwrap_or_else(|| {
-                    // Critical fallback: if missing original path, try to guess from physical filename
-                    PathBuf::from("C:\\Users\\Public\\Desktop").join(&item.name)
-                });
+                let original = match item.recycle_original_path.clone() {
+                    Some(p) => p,
+                    None => {
+                        // Skip items with unknown original path rather than guessing
+                        // a destination that could expose files to a public directory.
+                        eprintln!(
+                            "[RecycleBin] Skipping '{}': original path unknown, cannot restore safely",
+                            item.name
+                        );
+                        continue;
+                    }
+                };
 
                 restore_items.push((physical_path.clone(), original));
             } else {
-                // Handle case where item is not in self.items (should be rare)
-                let name = physical_path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "Item".to_string());
-
-                let original = PathBuf::from("C:\\Users\\Public\\Desktop").join(&name);
-                restore_items.push((physical_path.clone(), original));
+                // Item not in self.items and no original path — skip rather than
+                // guessing a destination that could expose files publicly.
+                eprintln!(
+                    "[RecycleBin] Skipping '{}': item not found, cannot determine original path",
+                    physical_path.display()
+                );
             }
         }
 

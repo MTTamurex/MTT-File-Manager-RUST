@@ -152,7 +152,46 @@ Todas as correções são cirúrgicas, sem alterar comportamento funcional, UI/U
 ### Fix H3+H4: Hardening do WebView2 (settings + navigation handlers)
 ### Fix H5: Percentencodar conversão path para URL
 ### Fix H6: Carregar DLL com caminho completo ou SetDllDirectoryW("")
-### Fix H7: Integrar validate_file_extension no pipeline sanitize_path
+### Fix H7: Integrar validate_file_extension nos entry points externos
+
+> **Status:** Pendente -- requer análise de entry points antes da implementação.
+
+A função `validate_file_extension` (security.rs) bloqueia extensões perigosas
+(.exe, .bat, .cmd, .ps1, .vbs, .js) mas nunca é chamada em nenhum lugar do código.
+
+**Por que NÃO integrar no pipeline geral (`sanitize_path` / `sanitize_operation_path`):**
+
+O `sanitize_operation_path` é invocado em todas as operações de arquivo (copiar,
+mover, deletar, renomear, criar atalho, restaurar da lixeira). Integrar o bloqueio
+de extensões nesse ponto impediria o file manager de operar sobre executáveis e
+scripts -- uma regressão funcional direta, já que gerenciar arquivos de qualquer
+tipo é a função principal do aplicativo.
+
+**Abordagem correta -- validação nos entry points de paths externos:**
+
+O risco real é path injection: um path malicioso que entra no app por uma fonte
+externa e resulta em execução de código sem que o usuário tenha escolhido
+explicitamente o arquivo. A validação deve ser aplicada nos pontos onde paths
+de fontes não confiáveis entram no sistema:
+
+1. **Argumentos de linha de comando** -- paths passados via CLI (`--open`, etc.)
+2. **Clipboard** -- paths colados na barra de endereço ou em diálogos
+3. **Drag-and-drop externo** -- arquivos arrastados de outro aplicativo para o app
+4. **IPC / protocol handlers** -- paths recebidos de outros processos
+5. **Ações automáticas** -- qualquer fluxo que execute um arquivo sem interação
+   explícita do usuário (e.g., abrir arquivo passado por argumento)
+
+Ações manuais do usuário sobre arquivos já listados na UI (duplo-clique,
+menu de contexto) NÃO precisam dessa validação, pois o usuário vê o arquivo
+e decide conscientemente interagir com ele.
+
+**Passos para implementação:**
+
+1. Mapear todos os entry points de paths externos no código
+2. Criar uma função de sanitização específica para esses entry points que
+   inclua `validate_file_extension` além das validações existentes
+3. Manter `sanitize_operation_path` inalterado para operações internas
+4. Avaliar se a lista de extensões bloqueadas deve ser configurável pelo usuário
 ### Fix H8: Detectar drives montados via GetLogicalDrives()
 ### Fix H9: Normalizar trailing dots/spaces antes de checar extensão
 ### Fix H10: Retornar erro em vez de fallback para Public Desktop

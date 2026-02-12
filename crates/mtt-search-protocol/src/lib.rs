@@ -68,8 +68,19 @@ pub fn encode_message<T: Serialize>(msg: &T) -> Result<Vec<u8>, String> {
 }
 
 /// Read the length prefix from a buffer and decode the message.
+///
+/// Uses an explicit byte limit to prevent malicious length-prefix inflation
+/// (a small payload declaring multi-GB strings/vecs) from causing OOM panics.
+/// The limit is set to the actual buffer size so bincode will reject any
+/// internal length that exceeds it.
 pub fn decode_message<T: for<'de> Deserialize<'de>>(data: &[u8]) -> Result<T, String> {
-    bincode::deserialize(data).map_err(|e| format!("deserialization failed: {}", e))
+    use bincode::Options;
+    bincode::DefaultOptions::new()
+        .with_fixint_encoding()
+        .allow_trailing_bytes()
+        .with_limit(data.len() as u64)
+        .deserialize(data)
+        .map_err(|e| format!("deserialization failed: {}", e))
 }
 
 #[cfg(test)]
