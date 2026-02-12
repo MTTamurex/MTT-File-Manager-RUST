@@ -31,18 +31,18 @@ pub fn get_db_path() -> PathBuf {
     // Harden directory permissions: remove inherited ACLs, grant SYSTEM and
     // Administrators full control, grant Users read-only.
     // This prevents non-admin malware from replacing the DB (cache poisoning).
+    // icacls is called directly (not via cmd /C) to prevent shell metacharacter injection.
     if created.is_ok() {
-        let dir_str = dir.to_string_lossy();
-        // Remove inheritance and existing ACEs, then add explicit ones
-        let commands = [
-            format!("icacls \"{}\" /inheritance:r", dir_str),
-            format!("icacls \"{}\" /grant:r SYSTEM:(OI)(CI)F", dir_str),
-            format!("icacls \"{}\" /grant:r Administrators:(OI)(CI)F", dir_str),
-            format!("icacls \"{}\" /grant:r Users:(OI)(CI)RX", dir_str),
+        let dir_str = dir.to_string_lossy().to_string();
+        let acl_commands: &[&[&str]] = &[
+            &[&dir_str, "/inheritance:r"],
+            &[&dir_str, "/grant:r", "SYSTEM:(OI)(CI)F"],
+            &[&dir_str, "/grant:r", "Administrators:(OI)(CI)F"],
+            &[&dir_str, "/grant:r", "Users:(OI)(CI)RX"],
         ];
-        for cmd in &commands {
-            let _ = std::process::Command::new("cmd")
-                .args(["/C", cmd])
+        for args in acl_commands {
+            let _ = std::process::Command::new("icacls")
+                .args(*args)
                 .creation_flags(0x08000000) // CREATE_NO_WINDOW
                 .status();
         }

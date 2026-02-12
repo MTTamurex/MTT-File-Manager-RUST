@@ -34,7 +34,12 @@ pub fn resize_to_bucket(
     // Ensure we don't lose the buffer if from_raw fails (which consumes it)
     // We check the condition beforehand.
     // ImageBuffer::from_raw requires buffer.len() >= width * height * 4
-    let min_len = (width as usize) * (height as usize) * 4;
+    let Some(min_len) = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|n| n.checked_mul(4))
+    else {
+        return (rgba_data, width, height); // dimensions overflow, return unchanged
+    };
 
     if rgba_data.len() >= min_len {
         // Usa image crate para resize
