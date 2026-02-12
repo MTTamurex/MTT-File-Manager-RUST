@@ -198,6 +198,29 @@ fn sanitize_operation_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
     paths.iter().map(|p| sanitize_operation_path(p)).collect()
 }
 
+/// RAII guard for COM apartment initialization.
+/// Ensures `CoUninitialize` is called even if the thread panics.
+struct ComGuard {
+    initialized: bool,
+}
+
+impl ComGuard {
+    fn init_sta() -> Self {
+        let initialized = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok() };
+        Self { initialized }
+    }
+}
+
+impl Drop for ComGuard {
+    fn drop(&mut self) {
+        if self.initialized {
+            unsafe {
+                CoUninitialize();
+            }
+        }
+    }
+}
+
 /// Starts the file operation worker thread.
 pub fn start_file_operation_worker(
     receiver: Receiver<FileOperationRequest>,
@@ -205,10 +228,8 @@ pub fn start_file_operation_worker(
 ) {
     std::thread::spawn(move || {
         // Initialize COM as Single-Threaded Apartment (STA)
-        // This is critical for shell progress dialogs and proper COM behavior.
-        unsafe {
-            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-        }
+        // RAII guard ensures CoUninitialize even on panic.
+        let _com = ComGuard::init_sta();
 
         while let Ok(request) = receiver.recv() {
             match request {
@@ -509,9 +530,6 @@ pub fn start_file_operation_worker(
             // Notify general completion for other operations.
             let _ = result_sender.send(FileOperationResult::Finished);
         }
-
-        unsafe {
-            CoUninitialize();
-        }
+        // COM cleanup handled by _com (ComGuard) RAII Drop
     });
 }

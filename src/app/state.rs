@@ -190,7 +190,6 @@ pub struct ImageViewerApp {
     pub skip_next_auto_reload: bool, // SMART DELETE: Prevent reload after direct UI update
 
     // CLIPBOARD (Copiar/Recortar/Colar)
-    // CLIPBOARD (Copiar/Recortar/Colar)
     pub clipboard: ClipboardManager,
 
     // CONTEXT MENU STATE
