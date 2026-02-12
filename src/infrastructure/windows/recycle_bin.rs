@@ -155,7 +155,14 @@ pub fn enumerate_recycle_bin_streaming(
             let _ = sender.send(Vec::new());
             return;
         }
-        let enum_list = enum_list_opt.unwrap();
+        let enum_list = match enum_list_opt {
+            Some(list) => list,
+            None => {
+                // EnumObjects succeeded but returned no enumerator (e.g., empty bin)
+                let _ = sender.send(Vec::new());
+                return;
+            }
+        };
 
         let mut batch = Vec::with_capacity(batch_size);
         let mut total_count = 0;

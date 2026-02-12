@@ -7,7 +7,7 @@ fn load_app_icon() -> Option<egui::IconData> {
     match image::load_from_memory(mtt_file_manager::embedded_assets::APP_ICON_PNG) {
         Ok(img) => {
             // Resize to 256x256 for optimal display (Windows icon standard)
-            let resized = img.resize_exact(256, 256, image::imageops::FilterType::Lanczos3);
+            let resized = img.resize_exact(256, 256, image::imageops::FilterType::CatmullRom);
             let rgba_image = resized.to_rgba8();
             let pixels = rgba_image.into_raw();
 
