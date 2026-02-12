@@ -95,6 +95,26 @@ pub fn spawn_thumbnail_workers(
     }
 }
 
+/// RAII guard for COM and Media Foundation initialization.
+/// Ensures cleanup (CoUninitialize / MFShutdown) even if the thread panics.
+struct ComMfGuard {
+    com_initialized: bool,
+    mf_initialized: bool,
+}
+
+impl Drop for ComMfGuard {
+    fn drop(&mut self) {
+        unsafe {
+            if self.mf_initialized {
+                let _ = MFShutdown();
+            }
+            if self.com_initialized {
+                CoUninitialize();
+            }
+        }
+    }
+}
+
 /// Main worker thread loop for thumbnail extraction
 fn thumbnail_worker_loop(
     queue: Arc<PriorityThumbnailQueue>,
@@ -107,21 +127,26 @@ fn thumbnail_worker_loop(
 ) {
     let mut last_repaint = Instant::now();
 
-    unsafe {
-        // SAFETY: Initializing COM with Multithreaded support for this worker thread.
-        // It is paired with `CoUninitialize` at the end of the thread loop.
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-
-        // SAFETY: Initialize Media Foundation ONCE per thread working with video processing.
-        // This avoids the expensive overhead of MFStartup/MFShutdown for every single file.
-        // MF_VERSION = 0x00020070, MFSTARTUP_NOSOCKET = 0x1
-        if let Err(e) = MFStartup(0x00020070, MFSTARTUP_NOSOCKET) {
-            eprintln!(
-                "[ThumbnailWorker] Failed to initialize Media Foundation: {:?}",
-                e
-            );
+    // RAII guards: guarantee COM and Media Foundation cleanup even on panic.
+    let _com = {
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         }
-    }
+        ComMfGuard {
+            com_initialized: true,
+            mf_initialized: false,
+        }
+    };
+    let _mf = {
+        let mf_ok = unsafe { MFStartup(0x00020070, MFSTARTUP_NOSOCKET).is_ok() };
+        if !mf_ok {
+            eprintln!("[ThumbnailWorker] Failed to initialize Media Foundation");
+        }
+        ComMfGuard {
+            com_initialized: false,
+            mf_initialized: mf_ok,
+        }
+    };
 
     // PERFORMANCE: Set background priority to minimize HDD contention with video playback
     // This applies to all 4 thumbnail worker threads
@@ -147,12 +172,7 @@ fn thumbnail_worker_loop(
             &mut last_repaint,
         );
     }
-
-    unsafe {
-        // SAFETY: Cleaning up COM for this thread before exit.
-        let _ = MFShutdown();
-        CoUninitialize();
-    }
+    // _mf and _com dropped here — MFShutdown() then CoUninitialize() guaranteed
 }
 
 /// Process a single thumbnail request
