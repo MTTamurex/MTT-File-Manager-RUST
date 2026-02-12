@@ -6,19 +6,14 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 #[cfg(target_os = "windows")]
-use windows::core::w;
-#[cfg(target_os = "windows")]
 use windows::Win32::Foundation::HWND;
-#[cfg(target_os = "windows")]
-use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, MoveWindow, ShowWindow, CW_USEDEFAULT, SW_HIDE, SW_SHOW,
-    WINDOW_EX_STYLE, WS_CHILD, WS_CLIPSIBLINGS, WS_VISIBLE,
-};
 
 mod docked_filters;
 mod lifecycle;
 mod playback_state;
 mod window_embed;
+
+pub use window_embed::VideoSurface;
 
 // Re-export from sub-modules for backward compatibility
 use crate::ui::components::mpv::event_loop as mpv_event_loop;
@@ -37,15 +32,26 @@ const MPV_DOCKED_READAHEAD_SECS: f64 = 6.0;
 const MPV_DOCKED_DEMUXER_MAX_BYTES: i64 = 48_i64 * 1024 * 1024;
 const MPV_DOCKED_DEMUXER_MAX_BACK_BYTES: i64 = 12_i64 * 1024 * 1024;
 
-/// MPV video preview (WIP). This is a scaffold for the migration.
+/// Represents the current display mode of the video player.
+#[derive(Debug, Clone, PartialEq)]
+pub enum VideoMode {
+    /// Embedded in the right sidebar preview panel
+    Docked,
+    /// Floating egui::Window
+    Detached,
+    /// Full viewport
+    Fullscreen,
+}
+
+/// MPV video preview component.
 pub struct MpvPreview {
     pub path: PathBuf,
     pub show_player: bool,
     pub play_on_init: bool,
     pub state: Arc<RwLock<MpvState>>,
     pub is_visible: bool,
-    pub is_detached: bool,
-    pub is_maximized: bool,
+    /// Current display mode of the video player
+    pub mode: VideoMode,
     pub fullscreen_applied: bool,
     pub prev_app_maximized: bool,
     pub restore_frames: u8,
@@ -93,11 +99,8 @@ pub struct MpvPreview {
     cached_tracks: Option<(Vec<TrackInfo>, Vec<TrackInfo>)>,
     pending_external_subtitle: Option<PathBuf>,
 
-    #[cfg(target_os = "windows")]
-    mpv_hwnd: Option<HWND>,
-    #[cfg(target_os = "windows")]
-    main_hwnd: Option<HWND>,
-    last_rect: egui::Rect,
+    /// Native window surface for video rendering (encapsulates all HWND logic)
+    pub surface: VideoSurface,
     mpv: Option<Arc<mpv::Mpv>>,
     loaded_path: Option<PathBuf>,
     pub controls_state: crate::ui::components::video_controls_state::VideoControlsState,
@@ -119,8 +122,7 @@ impl MpvPreview {
                 subtitle_tracks: Vec::new(),
             })),
             is_visible: true,
-            is_detached: false,
-            is_maximized: false,
+            mode: VideoMode::Docked,
             fullscreen_applied: false,
             prev_app_maximized: false,
             restore_frames: 0,
@@ -149,20 +151,79 @@ impl MpvPreview {
             cached_duration: None,
             cached_tracks: None,
             pending_external_subtitle: None,
-            #[cfg(target_os = "windows")]
-            mpv_hwnd: None,
-            #[cfg(target_os = "windows")]
-            main_hwnd: None,
-            last_rect: egui::Rect::NAN,
+            surface: VideoSurface::new(),
             mpv: None,
             loaded_path: None,
             controls_state: Default::default(),
         }
     }
 
+    /// Returns true if the player is in docked mode
+    pub fn is_docked(&self) -> bool {
+        self.mode == VideoMode::Docked
+    }
+
+    /// Returns true if the player is detached (windowed or fullscreen)
+    pub fn is_detached(&self) -> bool {
+        self.mode != VideoMode::Docked
+    }
+
+    /// Returns true if the player is in fullscreen mode
+    pub fn is_fullscreen(&self) -> bool {
+        self.mode == VideoMode::Fullscreen
+    }
+
+    /// Transition to docked mode
+    pub fn dock(&mut self) {
+        self.mode = VideoMode::Docked;
+        self.forced_size = None;
+    }
+
+    /// Transition to detached (windowed) mode
+    pub fn detach(&mut self) {
+        self.mode = VideoMode::Detached;
+    }
+
+    /// Transition to fullscreen mode
+    pub fn enter_fullscreen(&mut self) {
+        self.mode = VideoMode::Fullscreen;
+    }
+
+    /// Transition from fullscreen back to detached
+    pub fn exit_fullscreen(&mut self) {
+        self.mode = VideoMode::Detached;
+        self.restore_frames = 10;
+    }
+
+    /// Toggle between docked and detached
+    pub fn toggle_detached(&mut self) {
+        match self.mode {
+            VideoMode::Docked => self.detach(),
+            _ => self.dock(),
+        }
+    }
+
+    /// Toggle between detached and fullscreen
+    pub fn toggle_fullscreen(&mut self) {
+        match self.mode {
+            VideoMode::Fullscreen => self.exit_fullscreen(),
+            _ => self.enter_fullscreen(),
+        }
+    }
+
     /// Reset the last rect to force window resize on next frame
     pub fn reset_last_rect(&mut self) {
-        self.last_rect = egui::Rect::NAN;
+        self.surface.reset_rect();
+    }
+
+    /// Temporarily hides the video surface (for popups over the video area)
+    pub fn hide_for_overlay(&mut self) {
+        self.surface.set_visible(false);
+    }
+
+    /// Restores the video surface after closing an overlay
+    pub fn restore_from_overlay(&mut self) {
+        self.surface.set_visible(self.is_visible);
     }
 
     pub fn update(&mut self, _ui: &mut egui::Ui, _frame: Option<&eframe::Frame>) {
@@ -176,7 +237,7 @@ impl MpvPreview {
         // Reserve space for the video. If forced_size is set (detached mode with control bar), use it.
         let size = if let Some(forced) = self.forced_size {
             forced
-        } else if self.is_detached {
+        } else if self.is_detached() {
             ui.available_size()
         } else {
             let available = ui.available_size();
@@ -255,8 +316,10 @@ impl MpvPreview {
             }
         }
 
-        self.ensure_main_hwnd_from_frame(_frame);
-        self.ensure_mpv_hwnd_child();
+        self.surface.ensure_main_hwnd(_frame);
+        if let Some(m) = &self.mpv {
+            self.surface.ensure_child_window(m);
+        }
 
         // Load file once
         if self.loaded_path.as_ref() != Some(&self.path) {
@@ -280,8 +343,9 @@ impl MpvPreview {
         }
 
         // Apply docked-mode downscale + FPS limit (dynamic, reversible, no player restart)
-        if self.is_detached == self.docked_downscale_applied
-            || self.is_detached == self.docked_fps_limit_applied
+        let is_detached = self.is_detached();
+        if is_detached == self.docked_downscale_applied
+            || is_detached == self.docked_fps_limit_applied
         {
             self.update_docked_downscale(false);
         }
@@ -326,7 +390,8 @@ impl MpvPreview {
             self.last_deinterlace_check = Instant::now();
         }
 
-        self.sync_child_window_rect(ui, rect);
+        self.surface.sync_rect(ui, rect);
+        self.surface.ensure_focus_on_main();
 
         // Context menu removed - controls now in control bar
         // Double-click to toggle fullscreen is handled in preview_panel.rs
@@ -344,18 +409,36 @@ impl MpvPreview {
     }
 
     pub fn is_initialized(&self) -> bool {
-        self.mpv_hwnd.is_some()
+        self.surface.is_initialized()
     }
 
     pub fn set_visibility(&mut self, visible: bool) {
         self.is_visible = visible;
-        // Não desligar mais o vídeo - apenas controlar visibilidade da janela
-        #[cfg(target_os = "windows")]
-        if let Some(hwnd) = self.mpv_hwnd {
-            unsafe {
-                let _ = ShowWindow(hwnd, if visible { SW_SHOW } else { SW_HIDE });
-            }
-        }
+        self.surface.set_visible(visible);
+    }
+
+    /// Get native HWND for the video surface
+    #[cfg(target_os = "windows")]
+    pub fn get_hwnd(&self) -> Option<HWND> {
+        self.surface.hwnd()
+    }
+
+    /// Check if the given HWND matches the video surface
+    #[cfg(target_os = "windows")]
+    pub fn has_hwnd(&self, hwnd: HWND) -> bool {
+        self.surface.has_hwnd(hwnd)
+    }
+
+    /// No-op for MPV. Kept for API parity.
+    #[cfg(target_os = "windows")]
+    pub fn release_focus(&self, main_hwnd: HWND) {
+        self.surface.release_focus(main_hwnd);
+    }
+
+    /// No-op for MPV. Kept for API parity.
+    #[cfg(target_os = "windows")]
+    pub fn release_focus_auto(&self) {
+        self.surface.release_focus_auto();
     }
 }
 

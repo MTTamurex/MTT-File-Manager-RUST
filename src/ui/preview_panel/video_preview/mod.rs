@@ -38,33 +38,31 @@ pub fn render_video_preview(
 
     if paths_match && is_owner {
         // === ACTIVE PLAYER (OWNER) ===
-        if preview.is_detached() {
-            if preview.is_maximized() {
-                render_fullscreen_video(
-                    ui,
-                    preview,
-                    svg_manager,
-                    frame,
-                    current_time,
-                    duration,
-                    volume,
-                    is_muted,
-                    is_playing,
-                );
-            } else {
-                render_detached_video(
-                    ui,
-                    preview,
-                    svg_manager,
-                    frame,
-                    &file.name,
-                    current_time,
-                    duration,
-                    volume,
-                    is_muted,
-                    is_playing,
-                );
-            }
+        if preview.is_maximized() {
+            render_fullscreen_video(
+                ui,
+                preview,
+                svg_manager,
+                frame,
+                current_time,
+                duration,
+                volume,
+                is_muted,
+                is_playing,
+            );
+        } else if preview.is_detached() {
+            render_detached_video(
+                ui,
+                preview,
+                svg_manager,
+                frame,
+                &file.name,
+                current_time,
+                duration,
+                volume,
+                is_muted,
+                is_playing,
+            );
         } else {
             render_docked_video(
                 ui,

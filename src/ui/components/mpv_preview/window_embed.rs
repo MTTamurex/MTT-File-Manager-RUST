@@ -1,28 +1,45 @@
-use super::*;
+use eframe::egui;
 
-impl MpvPreview {
-    #[cfg(target_os = "windows")]
-    pub fn release_focus(&self, _main_hwnd: HWND) {
-        // MPV does not capture focus by default.
+#[cfg(target_os = "windows")]
+use windows::core::w;
+#[cfg(target_os = "windows")]
+use windows::Win32::Foundation::HWND;
+#[cfg(target_os = "windows")]
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetFocus, SetFocus};
+#[cfg(target_os = "windows")]
+use windows::Win32::UI::WindowsAndMessaging::{
+    CreateWindowExW, DestroyWindow, MoveWindow, ShowWindow, CW_USEDEFAULT, SW_HIDE, SW_SHOW,
+    WINDOW_EX_STYLE, WS_CHILD, WS_CLIPSIBLINGS, WS_VISIBLE,
+};
+
+/// Encapsulates all native window (HWND) management for the MPV video surface.
+///
+/// This struct isolates all platform-specific window operations so that the rest
+/// of the codebase never needs to interact with HWND directly.
+#[cfg(target_os = "windows")]
+pub struct VideoSurface {
+    mpv_hwnd: Option<HWND>,
+    main_hwnd: Option<HWND>,
+    last_rect: egui::Rect,
+}
+
+#[cfg(not(target_os = "windows"))]
+pub struct VideoSurface {
+    last_rect: egui::Rect,
+}
+
+#[cfg(target_os = "windows")]
+impl VideoSurface {
+    pub fn new() -> Self {
+        Self {
+            mpv_hwnd: None,
+            main_hwnd: None,
+            last_rect: egui::Rect::NAN,
+        }
     }
 
-    #[cfg(target_os = "windows")]
-    pub fn release_focus_auto(&self) {
-        // No-op for MPV. Keep for API parity.
-    }
-
-    #[cfg(target_os = "windows")]
-    pub fn has_hwnd(&self, hwnd: HWND) -> bool {
-        self.mpv_hwnd == Some(hwnd)
-    }
-
-    #[cfg(target_os = "windows")]
-    pub fn get_hwnd(&self) -> Option<HWND> {
-        self.mpv_hwnd
-    }
-
-    #[cfg(target_os = "windows")]
-    pub(super) fn ensure_main_hwnd_from_frame(&mut self, frame: Option<&eframe::Frame>) {
+    /// Captures the main application HWND from the eframe::Frame (called once).
+    pub fn ensure_main_hwnd(&mut self, frame: Option<&eframe::Frame>) {
         if self.main_hwnd.is_some() {
             return;
         }
@@ -42,11 +59,9 @@ impl MpvPreview {
         }
     }
 
-    #[cfg(not(target_os = "windows"))]
-    pub(super) fn ensure_main_hwnd_from_frame(&mut self, _frame: Option<&eframe::Frame>) {}
-
-    #[cfg(target_os = "windows")]
-    pub(super) fn ensure_mpv_hwnd_child(&mut self) {
+    /// Creates the child window for MPV rendering (called once).
+    /// Sets the `wid` property on the MPV instance so it renders into this window.
+    pub fn ensure_child_window(&mut self, mpv: &mpv::Mpv) {
         if self.mpv_hwnd.is_some() {
             return;
         }
@@ -74,18 +89,14 @@ impl MpvPreview {
 
             if !h_video.is_invalid() {
                 self.mpv_hwnd = Some(h_video);
-                if let Some(m) = &self.mpv {
-                    let _ = m.set_property("wid", h_video.0 as i64);
-                }
+                let _ = mpv.set_property("wid", h_video.0 as i64);
             }
         }
     }
 
-    #[cfg(not(target_os = "windows"))]
-    pub(super) fn ensure_mpv_hwnd_child(&mut self) {}
-
-    #[cfg(target_os = "windows")]
-    pub(super) fn sync_child_window_rect(&mut self, ui: &egui::Ui, rect: egui::Rect) {
+    /// Synchronizes the child window position/size with the egui allocated rect.
+    /// Only calls MoveWindow when position/size actually changes (~95% reduction).
+    pub fn sync_rect(&mut self, ui: &egui::Ui, rect: egui::Rect) {
         if rect == self.last_rect {
             return;
         }
@@ -105,10 +116,112 @@ impl MpvPreview {
         }
     }
 
-    #[cfg(not(target_os = "windows"))]
-    pub(super) fn sync_child_window_rect(&mut self, _ui: &egui::Ui, rect: egui::Rect) {
+    /// Shows or hides the video surface.
+    /// Use this to resolve Z-order issues when popups need to appear over the video area.
+    pub fn set_visible(&self, visible: bool) {
+        if let Some(hwnd) = self.mpv_hwnd {
+            unsafe {
+                let _ = ShowWindow(hwnd, if visible { SW_SHOW } else { SW_HIDE });
+            }
+        }
+    }
+
+    /// Returns the MPV child window HWND.
+    pub fn hwnd(&self) -> Option<HWND> {
+        self.mpv_hwnd
+    }
+
+    /// Returns the main application HWND.
+    pub fn main_hwnd(&self) -> Option<HWND> {
+        self.main_hwnd
+    }
+
+    /// Checks if the given HWND matches the MPV child window.
+    pub fn has_hwnd(&self, hwnd: HWND) -> bool {
+        self.mpv_hwnd == Some(hwnd)
+    }
+
+    /// Restores keyboard focus to the main application window if the MPV child
+    /// window has captured it. This prevents the HWND from stealing keyboard
+    /// shortcuts from egui.
+    pub fn ensure_focus_on_main(&self) {
+        if let (Some(mpv_h), Some(main_h)) = (self.mpv_hwnd, self.main_hwnd) {
+            unsafe {
+                if GetFocus() == mpv_h {
+                    let _ = SetFocus(Some(main_h));
+                }
+            }
+        }
+    }
+
+    /// Returns true if the child window has been created.
+    pub fn is_initialized(&self) -> bool {
+        self.mpv_hwnd.is_some()
+    }
+
+    /// Destroys the child window and releases resources.
+    pub fn destroy(&mut self) {
+        if let Some(hwnd) = self.mpv_hwnd.take() {
+            unsafe {
+                let _ = ShowWindow(hwnd, SW_HIDE);
+                let _ = DestroyWindow(hwnd);
+            }
+        }
+    }
+
+    /// Resets the last rect to force a MoveWindow call on the next frame.
+    pub fn reset_rect(&mut self) {
+        self.last_rect = egui::Rect::NAN;
+    }
+
+    /// No-op for MPV. Kept for API parity.
+    pub fn release_focus(&self, _main_hwnd: HWND) {
+        // MPV does not capture focus by default.
+    }
+
+    /// No-op for MPV. Kept for API parity.
+    pub fn release_focus_auto(&self) {
+        // No-op for MPV.
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+impl VideoSurface {
+    pub fn new() -> Self {
+        Self {
+            last_rect: egui::Rect::NAN,
+        }
+    }
+
+    pub fn ensure_main_hwnd(&mut self, _frame: Option<&eframe::Frame>) {}
+
+    pub fn ensure_child_window(&mut self, _mpv: &mpv::Mpv) {}
+
+    pub fn sync_rect(&mut self, _ui: &egui::Ui, rect: egui::Rect) {
         if rect != self.last_rect {
             self.last_rect = rect;
         }
+    }
+
+    pub fn set_visible(&self, _visible: bool) {}
+
+    pub fn hwnd(&self) -> Option<()> {
+        None
+    }
+
+    pub fn main_hwnd(&self) -> Option<()> {
+        None
+    }
+
+    pub fn ensure_focus_on_main(&self) {}
+
+    pub fn is_initialized(&self) -> bool {
+        false
+    }
+
+    pub fn destroy(&mut self) {}
+
+    pub fn reset_rect(&mut self) {
+        self.last_rect = egui::Rect::NAN;
     }
 }

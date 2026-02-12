@@ -42,20 +42,14 @@ impl MpvPreview {
             self.event_thread_handle.take(),
         );
 
-        #[cfg(target_os = "windows")]
-        if let Some(hwnd) = self.mpv_hwnd.take() {
-            unsafe {
-                let _ = ShowWindow(hwnd, SW_HIDE);
-                let _ = DestroyWindow(hwnd);
-            }
-        }
+        self.surface.destroy();
 
         self.cached_duration = None;
         self.cached_tracks = None;
         self.loaded_path = None;
         self.show_player = false;
         self.is_visible = false;
-        self.last_rect = egui::Rect::NAN;
+        self.surface.reset_rect();
         self.mpv = None;
     }
 }
