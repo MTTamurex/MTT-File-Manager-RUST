@@ -8,6 +8,27 @@ mod usn_journal;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
+/// Redact filesystem paths from error messages to prevent information leakage.
+/// Replaces tokens that look like paths (containing `\` or starting with a drive letter)
+/// with `<path>`.
+fn redact_paths(msg: &str) -> String {
+    msg.split_whitespace()
+        .map(|word| {
+            let trimmed = word.trim_matches(|c: char| c == '\'' || c == '"' || c == ':');
+            if trimmed.contains('\\')
+                || trimmed.contains('/')
+                    && trimmed.len() > 1
+                    && !trimmed.starts_with("http")
+            {
+                "<path>"
+            } else {
+                word
+            }
+        })
+        .collect::<Vec<&str>>()
+        .join(" ")
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
@@ -71,11 +92,11 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
 
     // Load persisted index or do fresh scan for each volume
     let db_path = index_db::get_db_path();
-    eprintln!("[SERVICE] Index database: {}", db_path.display());
+    eprintln!("[SERVICE] Index database ready");
     let db = match index_db::IndexDb::open(&db_path) {
         Ok(db) => Arc::new(db),
         Err(e) => {
-            eprintln!("[SERVICE] Failed to open index database: {}", e);
+            eprintln!("[SERVICE] Failed to open index database: {}", redact_paths(&e.to_string()));
             return;
         }
     };
@@ -226,7 +247,7 @@ fn index_volume(
 
         // Persist to database
         if let Err(e) = db.save_volume(&index) {
-            eprintln!("[USN] {}:\\ Failed to save index: {}", drive_letter, e);
+            eprintln!("[USN] {}:\\ Failed to save index: {}", drive_letter, redact_paths(&e.to_string()));
         }
     }
 
@@ -235,7 +256,7 @@ fn index_volume(
 
     // Add to shared indices
     {
-        let mut indices_lock = indices.write().unwrap();
+        let mut indices_lock = indices.write().unwrap_or_else(|e| e.into_inner());
         indices_lock.push(index);
     }
 
@@ -290,13 +311,13 @@ fn index_volume(
 
         // 3. Persist every 5 minutes — under READ lock (save_volume takes &VolumeIndex).
         if last_persist.elapsed() > std::time::Duration::from_secs(300) {
-            let indices_lock = indices.read().unwrap();
+            let indices_lock = indices.read().unwrap_or_else(|e| e.into_inner());
             if let Some(vol_index) = indices_lock
                 .iter()
                 .find(|v| v.drive_letter == drive_letter)
             {
                 if let Err(e) = db.save_volume(vol_index) {
-                    eprintln!("[USN] {}:\\ Persist error: {}", drive_letter, e);
+                    eprintln!("[USN] {}:\\ Persist error: {}", drive_letter, redact_paths(&e.to_string()));
                 }
             }
             last_persist = std::time::Instant::now();

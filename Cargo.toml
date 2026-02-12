@@ -82,6 +82,7 @@ features = [
     "Win32_System_WindowsProgramming",
     "Win32_System_Time",
     "Win32_NetworkManagement_WNet",
+    "Win32_Globalization",
 ]
 
 [features]

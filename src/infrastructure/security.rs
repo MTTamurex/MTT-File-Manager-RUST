@@ -193,6 +193,47 @@ pub fn sanitize_path_with_local_drive_fallback(
     }
 }
 
+/// Normalize a string to Unicode NFC (Normalization Form Composed) using the
+/// Windows `NormalizeString` API.  This prevents bypasses where decomposed
+/// characters (NFD) could trick security checks — e.g. a decomposed "ñ"
+/// (U+006E U+0303) looks identical to precomposed "ñ" (U+00F1) but has
+/// different bytes.  Returns the original string unchanged if normalization
+/// fails or the input is already pure ASCII.
+#[cfg(windows)]
+fn normalize_nfc(s: &str) -> String {
+    // Fast path: pure ASCII needs no normalization.
+    if s.is_ascii() {
+        return s.to_string();
+    }
+
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::Globalization::{NormalizeString, NORM_FORM};
+    const NFC: NORM_FORM = NORM_FORM(1);
+
+    let wide: Vec<u16> = std::ffi::OsStr::new(s)
+        .encode_wide()
+        .collect();
+
+    unsafe {
+        // First call: query required buffer length.
+        let needed = NormalizeString(NFC, &wide, None);
+        if needed <= 0 {
+            return s.to_string();
+        }
+        let mut buf = vec![0u16; needed as usize];
+        let actual = NormalizeString(NFC, &wide, Some(&mut buf));
+        if actual <= 0 {
+            return s.to_string();
+        }
+        String::from_utf16_lossy(&buf[..actual as usize])
+    }
+}
+
+#[cfg(not(windows))]
+fn normalize_nfc(s: &str) -> String {
+    s.to_string()
+}
+
 /// Validate each path component.
 fn validate_path_components(path: &Path, config: &SecurityConfig) -> Result<(), SecurityError> {
     if config.block_special_components {
@@ -213,7 +254,7 @@ fn validate_path_components(path: &Path, config: &SecurityConfig) -> Result<(), 
 
             // Only check Normal components (not Prefix like "C:" or RootDir)
             if let std::path::Component::Normal(name) = component {
-                let name_str = name.to_string_lossy();
+                let name_str = normalize_nfc(&name.to_string_lossy());
 
                 // Block NTFS Alternate Data Streams: a colon in a normal
                 // filename component indicates a hidden data stream

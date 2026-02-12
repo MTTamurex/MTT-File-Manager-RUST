@@ -122,7 +122,7 @@ pub fn get_perceived_type(extension: &str) -> PerceivedType {
     let cache = PERCEIVED_TYPE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
 
     {
-        let cache_guard = cache.lock().unwrap();
+        let cache_guard = cache.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(&cached_type) = cache_guard.get(&ext_with_dot) {
             return cached_type;
         }
@@ -212,7 +212,7 @@ pub fn get_perceived_type(extension: &str) -> PerceivedType {
 
     // Only cache successful results (not Other)
     if perceived != PerceivedType::Other {
-        let mut cache_guard = cache.lock().unwrap();
+        let mut cache_guard = cache.lock().unwrap_or_else(|e| e.into_inner());
         cache_guard.insert(ext_with_dot, perceived);
     }
 
