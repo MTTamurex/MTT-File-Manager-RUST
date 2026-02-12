@@ -134,19 +134,22 @@ impl Drop for WebViewState {
 pub fn init(hwnd: HWND, url: String) -> Result<()> {
     unsafe {
         eprintln!("WebView2: Loading WebView2Loader.dll");
-        // Load DLL from the executable's directory to prevent DLL search-order
-        // hijacking via CWD or PATH manipulation.
+        // Try loading DLL from the executable's directory first (prevents
+        // DLL search-order hijacking via CWD). If the DLL is not bundled
+        // alongside the exe (e.g. dev builds), fall back to standard search.
         let hmodule = {
             use std::os::windows::ffi::OsStrExt;
-            let full_path = std::env::current_exe()
+            let from_exe_dir = std::env::current_exe()
                 .ok()
-                .and_then(|exe| exe.parent().map(|d| d.join("WebView2Loader.dll")));
-            if let Some(ref path) = full_path {
-                let wide: Vec<u16> =
-                    path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
-                LoadLibraryW(PCWSTR(wide.as_ptr()))?
-            } else {
-                LoadLibraryW(w!("WebView2Loader.dll"))?
+                .and_then(|exe| exe.parent().map(|d| d.join("WebView2Loader.dll")))
+                .and_then(|path| {
+                    let wide: Vec<u16> =
+                        path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+                    LoadLibraryW(PCWSTR(wide.as_ptr())).ok()
+                });
+            match from_exe_dir {
+                Some(h) => h,
+                None => LoadLibraryW(w!("WebView2Loader.dll"))?,
             }
         };
 
@@ -504,22 +507,25 @@ static WARMUP_HANDLER_VTBL: EnvironmentCompletedHandler_Vtbl = EnvironmentComple
 
 pub fn warmup_env() -> Result<()> {
     unsafe {
-        // Load DLL from the executable's directory to prevent DLL search-order
-        // hijacking via CWD or PATH manipulation.
+        // Try loading DLL from the executable's directory first (prevents
+        // DLL search-order hijacking via CWD). If the DLL is not bundled
+        // alongside the exe (e.g. dev builds), fall back to standard search.
         // We use LoadLibraryW directly. If it's already loaded, it just increments ref count.
         let hmodule = {
             use std::os::windows::ffi::OsStrExt;
-            let full_path = std::env::current_exe()
+            let from_exe_dir = std::env::current_exe()
                 .ok()
-                .and_then(|exe| exe.parent().map(|d| d.join("WebView2Loader.dll")));
-            if let Some(ref path) = full_path {
-                let wide: Vec<u16> =
-                    path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
-                LoadLibraryW(PCWSTR(wide.as_ptr())).ok().ok_or(Error::from_win32())?
-            } else {
-                LoadLibraryW(w!("WebView2Loader.dll"))
+                .and_then(|exe| exe.parent().map(|d| d.join("WebView2Loader.dll")))
+                .and_then(|path| {
+                    let wide: Vec<u16> =
+                        path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+                    LoadLibraryW(PCWSTR(wide.as_ptr())).ok()
+                });
+            match from_exe_dir {
+                Some(h) => h,
+                None => LoadLibraryW(w!("WebView2Loader.dll"))
                     .ok()
-                    .ok_or(Error::from_win32())?
+                    .ok_or(Error::from_win32())?,
             }
         };
 

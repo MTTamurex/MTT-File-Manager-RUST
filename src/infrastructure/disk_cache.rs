@@ -10,6 +10,32 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Allowed table targets for batch-delete operations.
+/// Using an enum instead of raw &str prevents SQL injection through
+/// table or column names.
+#[derive(Clone, Copy)]
+enum CacheTable {
+    Thumbnails,
+    FolderCovers,
+    FolderPreviews,
+}
+
+impl CacheTable {
+    fn table_name(self) -> &'static str {
+        match self {
+            Self::Thumbnails => "thumbnails",
+            Self::FolderCovers => "folder_covers",
+            Self::FolderPreviews => "folder_previews",
+        }
+    }
+    fn key_col(self) -> &'static str {
+        match self {
+            Self::Thumbnails => "id",
+            Self::FolderCovers | Self::FolderPreviews => "folder_path",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ThumbnailCacheEntry {
     pub data: Vec<u8>,
@@ -30,8 +56,28 @@ impl ThumbnailDiskCache {
     /// Creates a new disk cache at the specified directory
     pub fn new(cache_dir: PathBuf) -> rusqlite::Result<Self> {
         // Ensure directory exists
-        if !cache_dir.exists() {
+        let created = !cache_dir.exists();
+        if created {
             let _ = fs::create_dir_all(&cache_dir);
+        }
+
+        // Harden directory permissions on first creation: restrict to owner
+        // to prevent cache poisoning by other local users.
+        if created {
+            if let Ok(username) = std::env::var("USERNAME") {
+                use std::os::windows::process::CommandExt;
+                let dir_str = cache_dir.to_string_lossy().to_string();
+                let grant_arg = format!("{}:(OI)(CI)F", username);
+                for args in [
+                    vec![dir_str.as_str(), "/inheritance:r"],
+                    vec![dir_str.as_str(), "/grant:r", grant_arg.as_str()],
+                ] {
+                    let _ = std::process::Command::new("icacls")
+                        .args(&args)
+                        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                        .status();
+                }
+            }
         }
 
         // Clean up legacy files if they exist (Migration)
@@ -349,7 +395,10 @@ impl ThumbnailDiskCache {
             .as_secs() as i64;
 
         // STEP 1: Process Image (Resize + Strip)
-        if rgba_data.len() != (width * height * 4) as usize {
+        let expected_len = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|n| n.checked_mul(4));
+        if expected_len.map_or(true, |n| rgba_data.len() != n) {
             return Err("Invalid RGBA data length".into());
         }
 
@@ -557,6 +606,18 @@ impl ThumbnailDiskCache {
                 Err(_) => return None,
             };
 
+        // Validate WebP container header before passing to decoder.
+        // This catches obvious corruption/tampering before the codec processes
+        // the data, reducing attack surface against WebP decoder vulnerabilities.
+        if webp_data.len() < 12 || &webp_data[0..4] != b"RIFF" || &webp_data[8..12] != b"WEBP" {
+            eprintln!(
+                "[FOLDER PREVIEW CACHE] Invalid WebP header for {:?} ({} bytes)",
+                folder_path.file_name(),
+                webp_data.len()
+            );
+            return None;
+        }
+
         // Decode WebP back to RGBA
         let decoder = webp::Decoder::new(&webp_data);
         let decoded = match decoder.decode() {
@@ -584,7 +645,10 @@ impl ThumbnailDiskCache {
         width: u32,
         height: u32,
     ) {
-        if rgba_data.len() != (width * height * 4) as usize {
+        let expected_len = (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|n| n.checked_mul(4));
+        if expected_len.map_or(true, |n| rgba_data.len() != n) {
             return;
         }
 
@@ -728,8 +792,7 @@ impl ThumbnailDiskCache {
 
     fn execute_batch_delete(
         db: &Connection,
-        table: &str,
-        key_col: &str,
+        table: CacheTable,
         items: &[String],
     ) -> usize {
         let mut count = 0;
@@ -742,12 +805,14 @@ impl ThumbnailDiskCache {
 
             let sql = format!(
                 "DELETE FROM {} WHERE {} IN ({})",
-                table, key_col, placeholders
+                table.table_name(),
+                table.key_col(),
+                placeholders
             );
 
             match db.execute(&sql, rusqlite::params_from_iter(chunk.iter())) {
                 Ok(c) => count += c,
-                Err(e) => eprintln!("[GC] Failed to delete batch from {}: {:?}", table, e),
+                Err(e) => eprintln!("[GC] Failed to delete batch from {}: {:?}", table.table_name(), e),
             }
         }
 
@@ -851,21 +916,19 @@ impl ThumbnailDiskCache {
         if let Ok(db) = self.writer.lock() {
             let _ = db.execute("BEGIN TRANSACTION", []);
             if !orphan_thumbs.is_empty() {
-                removed += Self::execute_batch_delete(&db, "thumbnails", "id", &orphan_thumbs);
+                removed += Self::execute_batch_delete(&db, CacheTable::Thumbnails, &orphan_thumbs);
             }
             if !orphan_folders.is_empty() {
                 removed += Self::execute_batch_delete(
                     &db,
-                    "folder_covers",
-                    "folder_path",
+                    CacheTable::FolderCovers,
                     &orphan_folders,
                 );
             }
             if !orphan_folder_previews.is_empty() {
                 removed += Self::execute_batch_delete(
                     &db,
-                    "folder_previews",
-                    "folder_path",
+                    CacheTable::FolderPreviews,
                     &orphan_folder_previews,
                 );
             }
@@ -973,21 +1036,19 @@ impl ThumbnailDiskCache {
         if let Ok(db) = self.writer.lock() {
             let _ = db.execute("BEGIN TRANSACTION", []);
             if !orphan_thumbs.is_empty() {
-                removed += Self::execute_batch_delete(&db, "thumbnails", "id", &orphan_thumbs);
+                removed += Self::execute_batch_delete(&db, CacheTable::Thumbnails, &orphan_thumbs);
             }
             if !orphan_folders.is_empty() {
                 removed += Self::execute_batch_delete(
                     &db,
-                    "folder_covers",
-                    "folder_path",
+                    CacheTable::FolderCovers,
                     &orphan_folders,
                 );
             }
             if !orphan_folder_previews.is_empty() {
                 removed += Self::execute_batch_delete(
                     &db,
-                    "folder_previews",
-                    "folder_path",
+                    CacheTable::FolderPreviews,
                     &orphan_folder_previews,
                 );
             }

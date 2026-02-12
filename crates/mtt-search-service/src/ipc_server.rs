@@ -11,7 +11,7 @@ use windows::Win32::Security::{
 };
 use windows::Win32::Storage::FileSystem::{FlushFileBuffers, ReadFile, WriteFile};
 use windows::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_WAIT,
+    ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_REJECT_REMOTE_CLIENTS, PIPE_WAIT,
 };
 use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 use windows::Win32::System::IO::OVERLAPPED;
@@ -34,6 +34,8 @@ const MAX_REQUEST_PAYLOAD: usize = 64 * 1024;
 const MAX_QUERY_TEXT_LEN: usize = 1024;
 /// Maximum results per search query.
 const MAX_QUERY_RESULTS: usize = 10_000;
+/// Per-connection I/O timeout in seconds (prevents slowloris DoS).
+const IO_TIMEOUT_SECS: u64 = 30;
 
 /// Start the IPC server loop.
 pub fn run_ipc_server(indices: Arc<RwLock<Vec<VolumeIndex>>>, shutdown: Arc<AtomicBool>) {
@@ -102,11 +104,35 @@ pub fn run_ipc_server(indices: Arc<RwLock<Vec<VolumeIndex>>>, shutdown: Arc<Atom
         let pipe_raw = pipe.0 as usize;
         std::thread::spawn(move || {
             let pipe = HANDLE(pipe_raw as *mut core::ffi::c_void);
+
+            // Watchdog thread: disconnects the pipe if the client exceeds
+            // IO_TIMEOUT_SECS, preventing slowloris-style DoS that would
+            // exhaust the MAX_ACTIVE_CLIENTS handler pool.
+            let client_done = Arc::new(AtomicBool::new(false));
+            let watchdog_done = client_done.clone();
+            let watchdog_pipe = pipe_raw;
+            std::thread::spawn(move || {
+                for _ in 0..IO_TIMEOUT_SECS {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    if watchdog_done.load(Ordering::Relaxed) {
+                        return;
+                    }
+                }
+                if !watchdog_done.load(Ordering::Relaxed) {
+                    eprintln!("[IPC] Client timeout after {}s, disconnecting", IO_TIMEOUT_SECS);
+                    unsafe {
+                        let handle = HANDLE(watchdog_pipe as *mut core::ffi::c_void);
+                        let _ = DisconnectNamedPipe(handle);
+                    }
+                }
+            });
+
             if let Err(e) = catch_unwind(AssertUnwindSafe(|| {
                 handle_client(pipe, &indices_for_client, &warming_for_client)
             })) {
                 eprintln!("[IPC] Client handler panic: {:?}", e);
             }
+            client_done.store(true, Ordering::Relaxed);
             unsafe {
                 let _ = FlushFileBuffers(pipe);
                 let _ = DisconnectNamedPipe(pipe);
@@ -296,7 +322,7 @@ fn create_pipe() -> Result<HANDLE, String> {
         let pipe = CreateNamedPipeW(
             PCWSTR(pipe_name.as_ptr()),
             FILE_FLAGS_AND_ATTRIBUTES(PIPE_OPEN_MODE),
-            PIPE_WAIT, // BYTE mode — our protocol already does length-prefix framing
+            PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, // BYTE mode + reject network clients
             PIPE_MAX_INSTANCES,
             PIPE_BUFFER_SIZE,
             PIPE_BUFFER_SIZE,
@@ -410,12 +436,7 @@ fn handle_client(
             let max_results = (max_results as usize).min(MAX_QUERY_RESULTS);
 
             let text = if text.len() > MAX_QUERY_TEXT_LEN {
-                // Truncate at a char boundary to avoid splitting multi-byte chars
-                let truncated = &text[..MAX_QUERY_TEXT_LEN];
-                match truncated.char_indices().last() {
-                    Some((idx, ch)) => text[..idx + ch.len_utf8()].to_string(),
-                    None => String::new(),
-                }
+                text[..text.floor_char_boundary(MAX_QUERY_TEXT_LEN)].to_string()
             } else {
                 text
             };

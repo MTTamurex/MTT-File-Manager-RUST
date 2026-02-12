@@ -133,8 +133,20 @@ pub fn read_directory_fast(dir_path: &Path) -> Option<Vec<DirectoryEntry>> {
                 break;
             }
 
+            // Bounds check: ensure the fixed-size entry header fits in the buffer
+            let entry_end = offset + std::mem::size_of::<FileDirectoryInfo>();
+            if entry_end > io_status.information {
+                break;
+            }
+
             let entry_ptr = unsafe { buffer.as_ptr().add(offset) as *const FileDirectoryInfo };
             let entry = unsafe { &*entry_ptr };
+
+            // Bounds check: ensure the variable-length filename fits in the buffer
+            let name_end = entry_end + entry.file_name_length as usize;
+            if name_end > io_status.information {
+                break;
+            }
 
             let name_ptr =
                 unsafe { (entry_ptr as *const u8).add(std::mem::size_of::<FileDirectoryInfo>()) }

@@ -210,10 +210,66 @@ fn validate_path_components(path: &Path, config: &SecurityConfig) -> Result<(), 
                     "Home directory shortcut not allowed".to_string(),
                 ));
             }
+
+            // Only check Normal components (not Prefix like "C:" or RootDir)
+            if let std::path::Component::Normal(name) = component {
+                let name_str = name.to_string_lossy();
+
+                // Block NTFS Alternate Data Streams: a colon in a normal
+                // filename component indicates a hidden data stream
+                // (e.g. "file.txt:hidden:$DATA").
+                if name_str.contains(':') {
+                    return Err(SecurityError::InvalidPath(format!(
+                        "NTFS Alternate Data Stream not allowed: {}",
+                        name_str
+                    )));
+                }
+
+                // Block Windows reserved device names (CON, NUL, PRN, AUX,
+                // COM1-9, LPT1-9).  Windows silently redirects these to
+                // kernel device objects regardless of extension.
+                let base_name = name_str.split('.').next().unwrap_or("");
+                if is_windows_reserved_name(base_name) {
+                    return Err(SecurityError::InvalidPath(format!(
+                        "Windows reserved device name not allowed: {}",
+                        name_str
+                    )));
+                }
+            }
         }
     }
 
     Ok(())
+}
+
+/// Returns true if `name` is a Windows reserved device name.
+fn is_windows_reserved_name(name: &str) -> bool {
+    let upper = name.to_uppercase();
+    matches!(
+        upper.as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    )
 }
 
 fn normalize_windows_prefix(path_upper: &str) -> String {
@@ -399,6 +455,26 @@ mod tests {
         assert!(sanitize_path(Path::new("C:\\Windows\\..\\System32"), &config).is_err());
         assert!(sanitize_path(Path::new("..\\secret.txt"), &config).is_err());
         assert!(sanitize_path(Path::new(".\\..\\escape"), &config).is_err());
+    }
+
+    #[test]
+    fn test_ads_blocked() {
+        let config = SecurityConfig::default();
+
+        assert!(sanitize_path(Path::new("C:\\temp\\file.txt:hidden"), &config).is_err());
+        assert!(sanitize_path(Path::new("C:\\temp\\file.txt:evil:$DATA"), &config).is_err());
+    }
+
+    #[test]
+    fn test_reserved_names_blocked() {
+        let config = SecurityConfig::default();
+
+        assert!(sanitize_path(Path::new("C:\\temp\\CON"), &config).is_err());
+        assert!(sanitize_path(Path::new("C:\\temp\\NUL"), &config).is_err());
+        assert!(sanitize_path(Path::new("C:\\temp\\COM1"), &config).is_err());
+        assert!(sanitize_path(Path::new("C:\\temp\\LPT1.txt"), &config).is_err());
+        assert!(sanitize_path(Path::new("C:\\temp\\PRN"), &config).is_err());
+        assert!(sanitize_path(Path::new("C:\\temp\\AUX"), &config).is_err());
     }
 
     #[test]
