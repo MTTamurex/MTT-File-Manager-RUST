@@ -94,10 +94,10 @@ pub fn render_status_bar(
     sort_descending: &mut bool,
     folders_position: &mut FoldersPosition,
     texture_cache: &LruCache<PathBuf, egui::TextureHandle>,
-    frame_time_avg_ms: f32,
-    frame_time_peak_ms: f32,
-    fps_avg: f32,
-    upload_budget_ms: f32,
+    _frame_time_avg_ms: f32,
+    _frame_time_peak_ms: f32,
+    _fps_avg: f32,
+    _upload_budget_ms: f32,
     is_computer_view: bool,
 ) -> StatusBarAction {
     let mut action = StatusBarAction::None;
@@ -232,22 +232,9 @@ pub fn render_status_bar(
 
             // === RIGHT SIDE: System info (push to right with available space) ===
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if upload_budget_ms > 0.0 {
-                    ui.label(format!("Upload: {:.0} ms", upload_budget_ms));
-                }
-                if fps_avg > 0.0 {
-                    ui.label(format!("FPS: {:.0}", fps_avg));
-                }
-                if frame_time_avg_ms > 0.0 {
-                    if frame_time_peak_ms > 0.0 {
-                        ui.label(format!(
-                            "Frame: {:.1} ms ({:.1} ms)",
-                            frame_time_avg_ms, frame_time_peak_ms
-                        ));
-                    } else {
-                        ui.label(format!("Frame: {:.1} ms", frame_time_avg_ms));
-                    }
-                }
+                ui.label("MTT File Manager");
+                ui.separator();
+
                 // RAM usage (cached with 1s TTL — avoids kernel syscall every frame)
                 if let Some(ram_usage) = get_ram_usage_cached() {
                     ui.label(format!("RAM: {}", format_size(ram_usage)));
