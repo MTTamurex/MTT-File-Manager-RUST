@@ -237,10 +237,20 @@ fn create_pipe() -> Result<HANDLE, String> {
         acl_buffer[2..4].copy_from_slice(&(acl_size as u16).to_le_bytes());
         acl_buffer[4..6].copy_from_slice(&2u16.to_le_bytes()); // AceCount = 2
 
-        // FILE_ALL_ACCESS equivalent for pipes: GENERIC_READ | GENERIC_WRITE | SYNCHRONIZE
-        // For Named Pipes the relevant access is FILE_GENERIC_READ | FILE_GENERIC_WRITE
-        // We use 0x001F01FF (FILE_ALL_ACCESS) to allow full pipe operations.
-        let access_mask: u32 = 0x001F01FF;
+        // Separate access masks per principal:
+        //
+        // Users: FILE_GENERIC_READ | FILE_GENERIC_WRITE minus DELETE, WRITE_DAC,
+        //   WRITE_OWNER, FILE_EXECUTE, FILE_DELETE_CHILD.  This is the minimum set
+        //   required for GENERIC_READ | GENERIC_WRITE pipe clients.
+        //   NOTE: FILE_APPEND_DATA (0x0004) shares the same bit as
+        //   FILE_CREATE_PIPE_INSTANCE and is included in Windows' GENERIC_WRITE
+        //   mapping, so it cannot be removed without breaking client connections.
+        //   Pipe squatting is mitigated by PIPE_MAX_INSTANCES and the restricted DACL
+        //   (only BUILTIN\Users + SYSTEM, no guest/network).
+        //
+        // SYSTEM: FILE_ALL_ACCESS — the service creates and owns pipe instances.
+        let access_mask_users: u32 = 0x0012019F;
+        let access_mask_system: u32 = 0x001F01FF;
 
         // ACE 1: BUILTIN\Users
         let ace1_offset = 8;
@@ -248,7 +258,8 @@ fn create_pipe() -> Result<HANDLE, String> {
         acl_buffer[ace1_offset + 1] = 0; // AceFlags
         acl_buffer[ace1_offset + 2..ace1_offset + 4]
             .copy_from_slice(&(ace1_size as u16).to_le_bytes());
-        acl_buffer[ace1_offset + 4..ace1_offset + 8].copy_from_slice(&access_mask.to_le_bytes());
+        acl_buffer[ace1_offset + 4..ace1_offset + 8]
+            .copy_from_slice(&access_mask_users.to_le_bytes());
         acl_buffer[ace1_offset + 8..ace1_offset + 8 + sid_users_len].copy_from_slice(&sid_users);
 
         // ACE 2: SYSTEM
@@ -257,7 +268,8 @@ fn create_pipe() -> Result<HANDLE, String> {
         acl_buffer[ace2_offset + 1] = 0; // AceFlags
         acl_buffer[ace2_offset + 2..ace2_offset + 4]
             .copy_from_slice(&(ace2_size as u16).to_le_bytes());
-        acl_buffer[ace2_offset + 4..ace2_offset + 8].copy_from_slice(&access_mask.to_le_bytes());
+        acl_buffer[ace2_offset + 4..ace2_offset + 8]
+            .copy_from_slice(&access_mask_system.to_le_bytes());
         acl_buffer[ace2_offset + 8..ace2_offset + 8 + sid_system_len].copy_from_slice(&sid_system);
 
         // --- Build Security Descriptor ---

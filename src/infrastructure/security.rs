@@ -317,8 +317,20 @@ fn is_link_like_path(metadata: &std::fs::Metadata) -> bool {
 }
 
 /// Validate file extension against blocked list.
+///
+/// Normalizes trailing dots/spaces that Windows silently strips from filenames
+/// before checking the extension. Without this, a name like `malware.exe.` would
+/// yield `None` from `Path::extension()` while Windows still treats it as `.exe`.
 pub fn validate_file_extension(path: &Path, config: &SecurityConfig) -> Result<(), SecurityError> {
-    if let Some(ext) = path.extension() {
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    // Strip trailing dots/spaces that Windows ignores but bypass extension checks.
+    let normalized = file_name.trim_end_matches(['.', ' ']);
+    let check_path = Path::new(normalized);
+
+    if let Some(ext) = check_path.extension() {
         let ext_str = ext.to_string_lossy().to_lowercase();
         let ext_with_dot = format!(".{}", ext_str);
 
@@ -415,6 +427,19 @@ mod tests {
         assert!(validate_file_extension(Path::new("script.bat"), &config).is_err());
         assert!(validate_file_extension(Path::new("document.txt"), &config).is_ok());
         assert!(validate_file_extension(Path::new("image.jpg"), &config).is_ok());
+    }
+
+    #[test]
+    fn test_blocked_extensions_trailing_dots_bypass() {
+        let config = SecurityConfig::default();
+
+        // Windows strips trailing dots/spaces, so "virus.exe." is actually "virus.exe"
+        assert!(validate_file_extension(Path::new("virus.exe."), &config).is_err());
+        assert!(validate_file_extension(Path::new("virus.exe.."), &config).is_err());
+        assert!(validate_file_extension(Path::new("virus.exe. "), &config).is_err());
+        assert!(validate_file_extension(Path::new("script.bat."), &config).is_err());
+        // Normal safe files should still pass
+        assert!(validate_file_extension(Path::new("document.txt."), &config).is_ok());
     }
 
     #[test]

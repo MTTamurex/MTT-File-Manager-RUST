@@ -79,7 +79,26 @@ struct ICoreWebView2_Vtbl {
     pub get_Settings: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT,
     pub get_Source: unsafe extern "system" fn(*mut c_void, *mut PWSTR) -> HRESULT,
     pub Navigate: unsafe extern "system" fn(*mut c_void, PCWSTR) -> HRESULT,
-    // ... many more, but we only need Navigate for now
+    // ... many more, but we only need Navigate and get_Settings
+}
+
+/// ICoreWebView2Settings vtable (WebView2 SDK ordering).
+/// Only the entries up to put_AreDevToolsEnabled are needed.
+#[repr(C)]
+struct ICoreWebView2Settings_Vtbl {
+    pub base: IUnknown_Vtbl,
+    pub get_IsScriptEnabled: unsafe extern "system" fn(*mut c_void, *mut BOOL) -> HRESULT,
+    pub put_IsScriptEnabled: unsafe extern "system" fn(*mut c_void, BOOL) -> HRESULT,
+    pub get_IsWebMessageEnabled: unsafe extern "system" fn(*mut c_void, *mut BOOL) -> HRESULT,
+    pub put_IsWebMessageEnabled: unsafe extern "system" fn(*mut c_void, BOOL) -> HRESULT,
+    pub get_AreDefaultScriptDialogsEnabled:
+        unsafe extern "system" fn(*mut c_void, *mut BOOL) -> HRESULT,
+    pub put_AreDefaultScriptDialogsEnabled:
+        unsafe extern "system" fn(*mut c_void, BOOL) -> HRESULT,
+    pub get_IsStatusBarEnabled: unsafe extern "system" fn(*mut c_void, *mut BOOL) -> HRESULT,
+    pub put_IsStatusBarEnabled: unsafe extern "system" fn(*mut c_void, BOOL) -> HRESULT,
+    pub get_AreDevToolsEnabled: unsafe extern "system" fn(*mut c_void, *mut BOOL) -> HRESULT,
+    pub put_AreDevToolsEnabled: unsafe extern "system" fn(*mut c_void, BOOL) -> HRESULT,
 }
 
 // Wrapper Structs
@@ -115,9 +134,21 @@ impl Drop for WebViewState {
 pub fn init(hwnd: HWND, url: String) -> Result<()> {
     unsafe {
         eprintln!("WebView2: Loading WebView2Loader.dll");
-        // Load DLL
-        let dll_name = w!("WebView2Loader.dll");
-        let hmodule = LoadLibraryW(dll_name)?;
+        // Load DLL from the executable's directory to prevent DLL search-order
+        // hijacking via CWD or PATH manipulation.
+        let hmodule = {
+            use std::os::windows::ffi::OsStrExt;
+            let full_path = std::env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent().map(|d| d.join("WebView2Loader.dll")));
+            if let Some(ref path) = full_path {
+                let wide: Vec<u16> =
+                    path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+                LoadLibraryW(PCWSTR(wide.as_ptr()))?
+            } else {
+                LoadLibraryW(w!("WebView2Loader.dll"))?
+            }
+        };
 
         eprintln!("WebView2: Getting ProcAddress");
         let func_name = s!("CreateCoreWebView2EnvironmentWithOptions");
@@ -333,6 +364,23 @@ impl ControllerCompletedHandler {
         ((*ctrl_vtbl).get_CoreWebView2)(controller_ptr, &mut webview_ptr);
 
         if !webview_ptr.is_null() {
+            // Harden WebView2 settings: this viewer is for PDFs/images only,
+            // so disable features that increase attack surface.
+            let wv_vtbl = *(webview_ptr as *mut *mut ICoreWebView2_Vtbl);
+            let mut settings_ptr: *mut c_void = null_mut();
+            let hr_settings = ((*wv_vtbl).get_Settings)(webview_ptr, &mut settings_ptr);
+            if hr_settings.is_ok() && !settings_ptr.is_null() {
+                let sv = *(settings_ptr as *mut *mut ICoreWebView2Settings_Vtbl);
+                // Disable DevTools (F12) — no debugging needed for PDF viewer
+                ((*sv).put_AreDevToolsEnabled)(settings_ptr, BOOL(0));
+                // Disable script dialogs (alert/confirm/prompt) — prevents UI spoofing
+                ((*sv).put_AreDefaultScriptDialogsEnabled)(settings_ptr, BOOL(0));
+                // Disable status bar — no need for link preview on hover
+                ((*sv).put_IsStatusBarEnabled)(settings_ptr, BOOL(0));
+                // Release settings COM object
+                ((*sv).base.Release)(settings_ptr);
+            }
+
             // Resize to window
             let mut rect = RECT::default();
             GetClientRect(handler.hwnd, &mut rect);
@@ -341,7 +389,6 @@ impl ControllerCompletedHandler {
             // Navigate
             let mut wide_url: Vec<u16> = handler.url.encode_utf16().collect();
             wide_url.push(0);
-            let wv_vtbl = *(webview_ptr as *mut *mut ICoreWebView2_Vtbl);
             ((*wv_vtbl).Navigate)(webview_ptr, PCWSTR::from_raw(wide_url.as_ptr()));
 
             // Store state
@@ -457,10 +504,24 @@ static WARMUP_HANDLER_VTBL: EnvironmentCompletedHandler_Vtbl = EnvironmentComple
 
 pub fn warmup_env() -> Result<()> {
     unsafe {
-        // Load DLL silently
-        let dll_name = w!("WebView2Loader.dll");
+        // Load DLL from the executable's directory to prevent DLL search-order
+        // hijacking via CWD or PATH manipulation.
         // We use LoadLibraryW directly. If it's already loaded, it just increments ref count.
-        let hmodule = LoadLibraryW(dll_name).ok().ok_or(Error::from_win32())?;
+        let hmodule = {
+            use std::os::windows::ffi::OsStrExt;
+            let full_path = std::env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent().map(|d| d.join("WebView2Loader.dll")));
+            if let Some(ref path) = full_path {
+                let wide: Vec<u16> =
+                    path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+                LoadLibraryW(PCWSTR(wide.as_ptr())).ok().ok_or(Error::from_win32())?
+            } else {
+                LoadLibraryW(w!("WebView2Loader.dll"))
+                    .ok()
+                    .ok_or(Error::from_win32())?
+            }
+        };
 
         let func_name = s!("CreateCoreWebView2EnvironmentWithOptions");
         let create_env_ptr = GetProcAddress(hmodule, func_name).ok_or(Error::from_win32())?;

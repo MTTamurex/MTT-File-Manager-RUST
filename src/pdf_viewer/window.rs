@@ -55,7 +55,18 @@ pub fn create_and_run(path: PathBuf, title_prefix: &str) -> Result<()> {
 
         // Initialize WebView
         // We pass the HWND to the webview module to attach the browser
-        let url = format!("file:///{}", path.display().to_string().replace("\\", "/"));
+        // Percent-encode characters that have special meaning in URLs but can
+        // appear in Windows filenames, to prevent URL parsing issues.
+        // '%' must be encoded first to avoid double-encoding.
+        let path_str = path.display().to_string().replace('\\', "/");
+        let url = format!(
+            "file:///{}",
+            path_str
+                .replace('%', "%25")
+                .replace(' ', "%20")
+                .replace('#', "%23")
+                .replace('?', "%3F")
+        );
         if let Err(e) = webview::init(hwnd, url) {
             eprintln!("Failed to init WebView2: {}", e);
         }

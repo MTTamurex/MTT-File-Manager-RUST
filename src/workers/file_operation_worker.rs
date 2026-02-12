@@ -141,9 +141,16 @@ impl FileOperationRequest {
 }
 
 fn operation_security_config() -> SecurityConfig {
-    // Keep broad drive compatibility while still enforcing safe path shape
-    // and component sanitization.
-    let allowed_drives = ('A'..='Z').map(|c| format!("{}:", c)).collect();
+    // Only allow drives that are actually mounted, detected via GetLogicalDrives().
+    let mask = crate::infrastructure::windows::get_logical_drives_bitmask();
+    let allowed_drives = if mask != 0 {
+        (0u8..26)
+            .filter(|i| mask & (1 << i) != 0)
+            .map(|i| format!("{}:", (b'A' + i) as char))
+            .collect()
+    } else {
+        vec!["C:".to_string()]
+    };
     SecurityConfig {
         allowed_drives,
         // Windows commonly uses junctions/reparse points in valid user paths.

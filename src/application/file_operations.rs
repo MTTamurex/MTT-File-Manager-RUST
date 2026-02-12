@@ -43,7 +43,16 @@ impl Drop for ComApartmentGuard {
 }
 
 fn operation_security_config() -> SecurityConfig {
-    let allowed_drives = ('A'..='Z').map(|c| format!("{}:", c)).collect();
+    // Only allow drives that are actually mounted, detected via GetLogicalDrives().
+    let mask = windows_infra::get_logical_drives_bitmask();
+    let allowed_drives = if mask != 0 {
+        (0u8..26)
+            .filter(|i| mask & (1 << i) != 0)
+            .map(|i| format!("{}:", (b'A' + i) as char))
+            .collect()
+    } else {
+        vec!["C:".to_string()]
+    };
     SecurityConfig {
         allowed_drives,
         // Windows paths commonly include junctions/reparse points in valid locations.
