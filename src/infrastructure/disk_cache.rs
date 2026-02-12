@@ -3,9 +3,7 @@
 
 use image::{DynamicImage, ImageBuffer, Rgba};
 use rusqlite::{params, Connection};
-use std::collections::hash_map::DefaultHasher;
 use std::fs;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -306,11 +304,12 @@ impl ThumbnailDiskCache {
         }
     }
 
-    /// Generates a unique hash for a file path
+    /// Generates a stable, collision-resistant hash for a file path.
+    /// Uses blake3 (128-bit) instead of DefaultHasher (64-bit, unstable across Rust versions).
     fn hash_path(path: &Path) -> String {
-        let mut hasher = DefaultHasher::new();
-        path.hash(&mut hasher);
-        format!("{:016x}", hasher.finish())
+        let hash = blake3::hash(path.as_os_str().as_encoded_bytes());
+        // Use first 128 bits (32 hex chars) — collision probability ~1 in 2^64 at 10B entries
+        hash.to_hex()[..32].to_string()
     }
 
     /// Tries to retrieve a thumbnail from SQLite with dimensions and request metadata.
