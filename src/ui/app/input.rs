@@ -249,7 +249,24 @@ fn handle_media_hardware_input(app: &mut ImageViewerApp, ctx: &egui::Context) ->
     let mut consumed = false;
     unsafe {
         // VK_SPACE = 0x20, VK_UP = 0x26, VK_DOWN = 0x28, VK_RIGHT = 0x27, VK_LEFT = 0x25
-        if (GetAsyncKeyState(0x20) as u16 & 0x8000) != 0 {
+        // VK_CTRL = 0x11, VK_SHIFT = 0x10, VK_U = 0x55
+        let ctrl_down = (GetAsyncKeyState(0x11) as u16 & 0x8000) != 0;
+        let shift_down = (GetAsyncKeyState(0x10) as u16 & 0x8000) != 0;
+        let u_down = (GetAsyncKeyState(0x55) as u16 & 0x8000) != 0;
+
+        if ctrl_down && shift_down && u_down {
+            match preview.toggle_vsr() {
+                Ok(_) => {
+                    let vsr_on = preview.is_vsr_enabled();
+                    let msg = if vsr_on { "NVIDIA VSR: ON" } else { "NVIDIA VSR: OFF" };
+                    preview.show_osd(msg, 2000);
+                    consumed = true;
+                }
+                Err(e) => {
+                    eprintln!("Error toggling VSR (Ctrl+Shift+U): {}", e);
+                }
+            }
+        } else if (GetAsyncKeyState(0x20) as u16 & 0x8000) != 0 {
             preview.toggle_play();
             consumed = true;
         } else if (GetAsyncKeyState(0x26) as u16 & 0x8000) != 0 {
