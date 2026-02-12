@@ -327,7 +327,7 @@ pub struct ImageViewerApp {
     pub global_search_total_indexed: u64,
 
     // FILE OPERATION WORKER
-    pub file_op_sender: Sender<crate::workers::file_operation_worker::FileOperationRequest>,
+    pub(crate) file_op_sender: Sender<crate::workers::file_operation_worker::FileOperationRequest>,
     pub file_op_res_receiver: Receiver<crate::workers::file_operation_worker::FileOperationResult>,
     pub disk_cache_invalidation_sender: Sender<Vec<PathBuf>>,
     pub prefetch_sender: Sender<crate::workers::prefetch_worker::PrefetchMessage>,

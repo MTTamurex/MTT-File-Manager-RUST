@@ -168,7 +168,10 @@ pub(super) fn render_list_item(
             .as_ref()
             .is_some_and(|(idx, _)| *idx == i);
         if is_renaming_this {
-            let mut text = ctx.renaming_state.as_ref().unwrap().1.clone();
+            let Some((_, ref rename_text)) = ctx.renaming_state else {
+                return;
+            };
+            let mut text = rename_text.clone();
             let name_rect = Rect::from_min_size(
                 rect.min + egui::vec2(24.0, 2.0),
                 egui::vec2(w_name - 30.0, row_height - 4.0),

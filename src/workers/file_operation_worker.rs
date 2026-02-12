@@ -47,11 +47,12 @@ pub enum FileOperationResult {
 /// Transparent wrapper for HWND to make it Send.
 /// SAFETY: HWNDs are globally valid in Windows and can be used from any thread.
 #[derive(Clone, Copy)]
-pub struct SendHwnd(pub HWND);
+pub(crate) struct SendHwnd(pub(crate) HWND);
 unsafe impl Send for SendHwnd {}
 
 /// Requests that can be sent to the file operation worker.
-pub enum FileOperationRequest {
+#[allow(dead_code)] // Copy/Move variants intentionally kept for single-file operations
+pub(crate) enum FileOperationRequest {
     Delete {
         paths: Vec<PathBuf>,
         hwnd: SendHwnd,
@@ -107,20 +108,6 @@ impl FileOperationRequest {
         Self::Rename {
             path,
             new_name,
-            hwnd: SendHwnd(hwnd),
-        }
-    }
-    pub fn copy(path: PathBuf, dest_folder: PathBuf, hwnd: HWND) -> Self {
-        Self::Copy {
-            path,
-            dest_folder,
-            hwnd: SendHwnd(hwnd),
-        }
-    }
-    pub fn file_move(path: PathBuf, dest_folder: PathBuf, hwnd: HWND) -> Self {
-        Self::Move {
-            path,
-            dest_folder,
             hwnd: SendHwnd(hwnd),
         }
     }
@@ -222,7 +209,7 @@ impl Drop for ComGuard {
 }
 
 /// Starts the file operation worker thread.
-pub fn start_file_operation_worker(
+pub(crate) fn start_file_operation_worker(
     receiver: Receiver<FileOperationRequest>,
     result_sender: std::sync::mpsc::Sender<FileOperationResult>,
 ) {

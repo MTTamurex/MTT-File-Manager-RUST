@@ -210,23 +210,6 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
     }
 }
 
-/// Handle resize borders for borderless window.
-///
-/// NOTE: This is now a no-op. Resize hit-testing is handled by the native
-/// WM_NCHITTEST subclass in `infrastructure::windows::window_subclass`.
-/// Keeping this function signature for compatibility but removing the
-/// expensive egui Area overlays that were created every frame.
-#[allow(dead_code)]
-pub fn handle_resize_borders(_app: &mut ImageViewerApp, _ctx: &egui::Context) {
-    // Resize borders are now handled natively via WM_NCHITTEST subclass
-    // See: infrastructure/windows/window_subclass.rs
-    //
-    // The native approach:
-    // 1. Has zero per-frame cost (no egui widgets)
-    // 2. Provides proper Windows resize cursors automatically
-    // 3. Integrates with Windows DWM for smooth resize
-}
-
 fn handle_media_hardware_input(app: &mut ImageViewerApp, ctx: &egui::Context) -> bool {
     // Check focus and mode first
     if !app.is_media_keyboard_focused() {
@@ -259,7 +242,11 @@ fn handle_media_hardware_input(app: &mut ImageViewerApp, ctx: &egui::Context) ->
             match preview.toggle_vsr() {
                 Ok(_) => {
                     let vsr_on = preview.is_vsr_enabled();
-                    let msg = if vsr_on { "NVIDIA VSR: ON" } else { "NVIDIA VSR: OFF" };
+                    let msg = if vsr_on {
+                        "NVIDIA VSR: ON"
+                    } else {
+                        "NVIDIA VSR: OFF"
+                    };
                     preview.show_osd(msg, 2000);
                     consumed = true;
                 }

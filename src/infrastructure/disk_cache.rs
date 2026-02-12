@@ -72,10 +72,19 @@ impl ThumbnailDiskCache {
                     vec![dir_str.as_str(), "/inheritance:r"],
                     vec![dir_str.as_str(), "/grant:r", grant_arg.as_str()],
                 ] {
-                    let _ = std::process::Command::new("icacls")
+                    match std::process::Command::new("icacls")
                         .args(&args)
                         .creation_flags(0x08000000) // CREATE_NO_WINDOW
-                        .status();
+                        .status()
+                    {
+                        Err(e) => {
+                            eprintln!("[DISK-CACHE] icacls failed for {:?}: {}", cache_dir, e)
+                        }
+                        Ok(status) if !status.success() => {
+                            eprintln!("[DISK-CACHE] icacls exited with {}", status);
+                        }
+                        Ok(_) => {}
+                    }
                 }
             }
         }
@@ -534,30 +543,6 @@ impl ThumbnailDiskCache {
         }
 
         results
-    }
-
-    /// Obtém a capa (thumbnail) de uma pasta se já foi descoberta
-    /// [READER]
-    #[allow(dead_code)]
-    pub fn get_folder_cover(&self, folder_path: &Path) -> Option<PathBuf> {
-        let db = self.reader.lock().ok()?;
-        let mut stmt = db
-            .prepare_cached("SELECT cover_path FROM folder_covers WHERE folder_path = ?")
-            .ok()?;
-        let cover_path = stmt
-            .query_row([folder_path.to_string_lossy()], |row| {
-                let path_str: String = row.get(0)?;
-                Ok(PathBuf::from(path_str))
-            })
-            .ok()?;
-
-        // Validate that the cover path still exists before returning it
-        // CRITICAL: Use fast_path_exists() instead of exists() to avoid blocking on OneDrive cloud-only files
-        if crate::infrastructure::onedrive::fast_path_exists(&cover_path) {
-            Some(cover_path)
-        } else {
-            None
-        }
     }
 
     /// Salva a capa (thumbnail) descoberta para uma pasta

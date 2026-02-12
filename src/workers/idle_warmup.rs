@@ -1,16 +1,12 @@
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::io_priority::{self, IOPriority};
 use crate::workers::prefetch_worker::PrefetchMessage;
 use crate::workers::thumbnail::PriorityThumbnailQueue;
-
-const IDLE_THRESHOLD: Duration = Duration::from_secs(5);
-#[allow(dead_code)]
-const _WARMUP_INTERVAL: Duration = Duration::from_millis(200);
 
 pub enum IdleWarmupMessage {
     UserActive,
@@ -19,7 +15,6 @@ pub enum IdleWarmupMessage {
     Shutdown,
 }
 
-#[allow(dead_code)]
 pub struct IdleWarmupWorker {
     last_activity: Instant,
     current_directory: Option<PathBuf>,
@@ -35,11 +30,6 @@ impl IdleWarmupWorker {
             pending_thumbnails: Vec::new(),
             is_warming: false,
         }
-    }
-
-    #[allow(dead_code)]
-    pub fn is_idle(&self) -> bool {
-        self.last_activity.elapsed() >= IDLE_THRESHOLD
     }
 
     pub fn on_activity(&mut self) {
