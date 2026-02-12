@@ -294,6 +294,14 @@ impl MediaPreview {
         }
     }
 
+    pub fn native_osc_active(&self) -> bool {
+        if let MediaPreview::Video(player) = self {
+            player.is_native_osc_active()
+        } else {
+            false
+        }
+    }
+
     /// Reset mouse activity timer to keep controls visible
     pub fn reset_mouse_activity(&mut self) {
         if let MediaPreview::Video(player) = self {

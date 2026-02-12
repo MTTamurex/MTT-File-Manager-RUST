@@ -31,6 +31,9 @@ const MPV_DOCKED_CACHE_SECS: f64 = 12.0;
 const MPV_DOCKED_READAHEAD_SECS: f64 = 6.0;
 const MPV_DOCKED_DEMUXER_MAX_BYTES: i64 = 48_i64 * 1024 * 1024;
 const MPV_DOCKED_DEMUXER_MAX_BACK_BYTES: i64 = 12_i64 * 1024 * 1024;
+const MPV_OSC_POC_ENABLED: bool = true;
+const MPV_OSC_POC_DETACHED_ONLY: bool = true;
+const MPV_OSC_POC_SCRIPT_OPTS: &str = "osc-scalewindowed=1.8,osc-scalefullscreen=2.8";
 
 /// Represents the current display mode of the video player.
 #[derive(Debug, Clone, PartialEq)]
@@ -59,6 +62,12 @@ pub struct MpvPreview {
     pub forced_size: Option<egui::Vec2>,
     pub last_mouse_activity: Option<Instant>,
     pub last_mouse_pos: Option<egui::Pos2>,
+    /// POC OSC: track pointer state to forward input events to MPV when embedded.
+    osc_pointer_inside: bool,
+    osc_primary_down: bool,
+    osc_secondary_down: bool,
+    osc_last_mouse_pos_px: Option<(i64, i64)>,
+    osc_active: bool,
     /// Tracks if app was minimized to force window restoration
     pub was_minimized: bool,
     /// Initial volume to apply when MPV is ready
@@ -103,10 +112,107 @@ pub struct MpvPreview {
     pub surface: VideoSurface,
     mpv: Option<Arc<mpv::Mpv>>,
     loaded_path: Option<PathBuf>,
+    last_osc_enabled: Option<bool>,
+    last_observed_mpv_fullscreen: Option<bool>,
+    last_mpv_fullscreen: Option<bool>,
     pub controls_state: crate::ui::components::video_controls_state::VideoControlsState,
 }
 
 impl MpvPreview {
+    fn mpv_path_string(path: &std::path::Path) -> String {
+        path.to_string_lossy().replace('\\', "/")
+    }
+
+    fn resolve_mpv_ui_config_dir() -> Option<PathBuf> {
+        let mut candidates: Vec<PathBuf> = Vec::new();
+
+        if let Ok(cwd) = std::env::current_dir() {
+            candidates.push(cwd.join("mpv_ui").join("portable_config"));
+        }
+
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(exe_dir) = exe.parent() {
+                candidates.push(exe_dir.join("mpv_ui").join("portable_config"));
+                candidates.push(exe_dir.join("..").join("mpv_ui").join("portable_config"));
+                candidates.push(
+                    exe_dir
+                        .join("..")
+                        .join("..")
+                        .join("mpv_ui")
+                        .join("portable_config"),
+                );
+            }
+        }
+
+        candidates.into_iter().find(|dir| dir.join("scripts").join("osc.lua").is_file())
+    }
+
+    fn create_mpv_instance() -> Result<mpv::Mpv, mpv::Error> {
+        if MPV_OSC_POC_ENABLED {
+            let config_dir = Self::resolve_mpv_ui_config_dir();
+            if config_dir.is_none() {
+                eprintln!(
+                    "[MpvPreview] MPV UI folder not found (expected mpv_ui/portable_config with scripts/osc.lua)"
+                );
+            }
+
+            mpv::Mpv::with_initializer(|init| {
+                // POC: load MPV UI assets from local folder and keep MPV default input bindings.
+                if let Err(e) = init.set_option("load-scripts", true) {
+                    eprintln!("[MpvPreview] Failed to set load-scripts=yes: {:?}", e);
+                }
+                if let Err(e) = init.set_option("osc", false) {
+                    eprintln!("[MpvPreview] Failed to set osc=no: {:?}", e);
+                }
+                if let Err(e) = init.set_option("input-default-bindings", true) {
+                    eprintln!(
+                        "[MpvPreview] Failed to set input-default-bindings=yes: {:?}",
+                        e
+                    );
+                }
+                if let Err(e) = init.set_option("input-vo-keyboard", true) {
+                    eprintln!("[MpvPreview] Failed to set input-vo-keyboard=yes: {:?}", e);
+                }
+                if let Err(e) = init.set_option("input-cursor", true) {
+                    eprintln!("[MpvPreview] Failed to set input-cursor=yes: {:?}", e);
+                }
+                if let Err(e) = init.set_option("cursor-autohide", 1000_i64) {
+                    eprintln!("[MpvPreview] Failed to set cursor-autohide=1000: {:?}", e);
+                }
+                if let Err(e) = init.set_option("script-opts", MPV_OSC_POC_SCRIPT_OPTS) {
+                    eprintln!(
+                        "[MpvPreview] Failed to set script-opts={} : {:?}",
+                        MPV_OSC_POC_SCRIPT_OPTS, e
+                    );
+                }
+
+                if let Some(dir) = &config_dir {
+                    let dir_str = Self::mpv_path_string(dir.as_path());
+                    if let Err(e) = init.set_option("config", true) {
+                        eprintln!("[MpvPreview] Failed to set config=yes: {:?}", e);
+                    }
+                    if let Err(e) = init.set_option("config-dir", dir_str.as_str()) {
+                        eprintln!(
+                            "[MpvPreview] Failed to set config-dir={} : {:?}",
+                            dir_str, e
+                        );
+                    }
+
+                    let osc_script = dir.join("scripts").join("osc.lua");
+                    if !osc_script.is_file() {
+                        eprintln!(
+                            "[MpvPreview] osc.lua not found at {}",
+                            osc_script.to_string_lossy()
+                        );
+                    }
+                }
+                Ok(())
+            })
+        } else {
+            mpv::Mpv::new()
+        }
+    }
+
     pub fn new(path: PathBuf) -> Self {
         Self {
             path,
@@ -130,6 +236,11 @@ impl MpvPreview {
             forced_size: None,
             last_mouse_activity: None,
             last_mouse_pos: None,
+            osc_pointer_inside: false,
+            osc_primary_down: false,
+            osc_secondary_down: false,
+            osc_last_mouse_pos_px: None,
+            osc_active: false,
             was_minimized: false,
             initial_volume: 1.0,
             is_vsr_enabled: false,
@@ -154,7 +265,89 @@ impl MpvPreview {
             surface: VideoSurface::new(),
             mpv: None,
             loaded_path: None,
+            last_osc_enabled: None,
+            last_observed_mpv_fullscreen: None,
+            last_mpv_fullscreen: None,
             controls_state: Default::default(),
+        }
+    }
+
+    pub fn is_native_osc_active(&self) -> bool {
+        self.osc_active
+    }
+
+    fn desired_osc_enabled(&self) -> bool {
+        if !MPV_OSC_POC_ENABLED {
+            return false;
+        }
+        if MPV_OSC_POC_DETACHED_ONLY {
+            return self.is_detached();
+        }
+        true
+    }
+
+    fn sync_osc_runtime_state(&mut self, mpv: &mpv::Mpv) {
+        let desired_custom_osc_visible = self.desired_osc_enabled();
+        if self.last_osc_enabled != Some(desired_custom_osc_visible) {
+            // Keep built-in OSC disabled and control only the custom script visibility.
+            if let Err(e) = mpv.set_property("osc", false) {
+                eprintln!("[MpvPreview] Failed to force osc=no : {:?}", e);
+            }
+
+            let visibility_mode = if desired_custom_osc_visible {
+                "auto"
+            } else {
+                "never"
+            };
+            if let Err(e) = mpv.command("script-message", &["osc-visibility", visibility_mode]) {
+                eprintln!(
+                    "[MpvPreview] Failed to set custom osc-visibility={} : {:?}",
+                    visibility_mode, e
+                );
+            }
+            self.last_osc_enabled = Some(desired_custom_osc_visible);
+        }
+
+        let desired_fullscreen = self.is_fullscreen();
+        if self.last_mpv_fullscreen != Some(desired_fullscreen) {
+            if let Err(e) = mpv.set_property("fullscreen", desired_fullscreen) {
+                eprintln!(
+                    "[MpvPreview] Failed to set fullscreen={} : {:?}",
+                    desired_fullscreen, e
+                );
+            }
+            self.last_mpv_fullscreen = Some(desired_fullscreen);
+        }
+
+        if !desired_custom_osc_visible {
+            self.osc_pointer_inside = false;
+            self.osc_primary_down = false;
+            self.osc_secondary_down = false;
+            self.osc_last_mouse_pos_px = None;
+        }
+        self.osc_active = desired_custom_osc_visible;
+    }
+
+    fn sync_fullscreen_from_mpv(&mut self, ui: &egui::Ui, mpv: &mpv::Mpv) {
+        let Ok(mpv_fullscreen) = mpv.get_property::<bool>("fullscreen") else {
+            return;
+        };
+
+        if self.last_observed_mpv_fullscreen == Some(mpv_fullscreen) {
+            return;
+        }
+        self.last_observed_mpv_fullscreen = Some(mpv_fullscreen);
+
+        // Map OSC fullscreen button to real app fullscreen transitions.
+        if mpv_fullscreen && !self.is_fullscreen() && self.is_detached() {
+            let was_maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+            self.prev_app_maximized = was_maximized;
+            self.mode = VideoMode::Fullscreen;
+            self.fullscreen_applied = false;
+        } else if !mpv_fullscreen && self.is_fullscreen() {
+            self.mode = VideoMode::Detached;
+            self.fullscreen_applied = false;
+            self.restore_frames = 10;
         }
     }
 
@@ -228,6 +421,7 @@ impl MpvPreview {
 
     pub fn update(&mut self, _ui: &mut egui::Ui, _frame: Option<&eframe::Frame>) {
         if !self.show_player {
+            self.osc_active = false;
             self.set_visibility(false);
             return;
         }
@@ -262,7 +456,7 @@ impl MpvPreview {
 
         // Init MPV and child window
         if self.mpv.is_none() {
-            match mpv::Mpv::new() {
+            match Self::create_mpv_instance() {
                 Ok(m) => {
                     let m = Arc::new(m);
                     let _ = m.set_property("keep-open", "yes");
@@ -308,6 +502,17 @@ impl MpvPreview {
 
                     // Apply initial volume
                     self.set_volume(self.initial_volume);
+
+                    if MPV_OSC_POC_ENABLED {
+                        if let Some(mpv_ref) = &self.mpv {
+                            let input_cursor = mpv_ref.get_property::<bool>("input-cursor").ok();
+                            let script_count = mpv_ref.get_property::<i64>("script-list/count").ok();
+                            eprintln!(
+                                "[MpvPreview][OSC-POC] input-cursor={:?}, script-list/count={:?}",
+                                input_cursor, script_count
+                            );
+                        }
+                    }
                 }
                 Err(e) => {
                     eprintln!("[MpvPreview] Failed to create MPV: {:?}", e);
@@ -319,6 +524,11 @@ impl MpvPreview {
         self.surface.ensure_main_hwnd(_frame);
         if let Some(m) = &self.mpv {
             self.surface.ensure_child_window(m);
+        }
+
+        if let Some(m) = self.mpv.clone() {
+            self.sync_fullscreen_from_mpv(ui, &m);
+            self.sync_osc_runtime_state(&m);
         }
 
         // Load file once
@@ -390,13 +600,93 @@ impl MpvPreview {
             self.last_deinterlace_check = Instant::now();
         }
 
+        if self.osc_active {
+            if let Some(m) = self.mpv.clone() {
+                self.forward_osc_input(ui, rect, &m);
+            }
+        }
+
         self.surface.sync_rect(ui, rect);
-        self.surface.ensure_focus_on_main();
+
+        // Keep MPV focus while native OSC is active so it can handle input events.
+        let should_force_main_focus = !self.osc_active;
+        if should_force_main_focus {
+            self.surface.ensure_focus_on_main();
+        }
 
         // Context menu removed - controls now in control bar
         // Double-click to toggle fullscreen is handled in preview_panel.rs
 
         self.set_visibility(self.is_visible);
+    }
+
+    fn forward_osc_input(&mut self, ui: &egui::Ui, rect: egui::Rect, mpv: &mpv::Mpv) {
+        let (hover_pos, primary_down, secondary_down, scroll_y) = ui.input(|i| {
+            (
+                i.pointer.hover_pos(),
+                i.pointer.button_down(egui::PointerButton::Primary),
+                i.pointer.button_down(egui::PointerButton::Secondary),
+                i.raw_scroll_delta.y,
+            )
+        });
+
+        let is_inside = hover_pos.map(|p| rect.contains(p)).unwrap_or(false);
+
+        let current_mouse_px = if is_inside {
+            hover_pos.map(|pos| {
+                let factor = ui.ctx().pixels_per_point();
+                let x = ((pos.x - rect.min.x) * factor).max(0.0) as i64;
+                let y = ((pos.y - rect.min.y) * factor).max(0.0) as i64;
+                (x, y)
+            })
+        } else {
+            None
+        };
+
+        let moved = match (self.osc_last_mouse_pos_px, current_mouse_px) {
+            (Some(prev), Some(cur)) => prev != cur,
+            (None, Some(_)) => true,
+            _ => false,
+        };
+
+        if is_inside && (moved || !self.osc_pointer_inside) {
+            if let Some((x, y)) = current_mouse_px {
+                let x_str = x.to_string();
+                let y_str = y.to_string();
+                let _ = mpv.command("mouse", &[x_str.as_str(), y_str.as_str()]);
+            }
+            let _ = mpv.command("keypress", &["MOUSE_MOVE"]);
+        } else if self.osc_pointer_inside && !is_inside {
+            let _ = mpv.command("keypress", &["MOUSE_LEAVE"]);
+        }
+
+        if primary_down != self.osc_primary_down {
+            let cmd = if primary_down { "keydown" } else { "keyup" };
+            let _ = mpv.command(cmd, &["MBTN_LEFT"]);
+        }
+
+        if secondary_down != self.osc_secondary_down {
+            let cmd = if secondary_down { "keydown" } else { "keyup" };
+            let _ = mpv.command(cmd, &["MBTN_RIGHT"]);
+        }
+
+        if is_inside {
+            if let Some((x, y)) = current_mouse_px {
+                let x_str = x.to_string();
+                let y_str = y.to_string();
+                let _ = mpv.command("mouse", &[x_str.as_str(), y_str.as_str()]);
+            }
+            if scroll_y > 0.0 {
+                let _ = mpv.command("keypress", &["WHEEL_UP"]);
+            } else if scroll_y < 0.0 {
+                let _ = mpv.command("keypress", &["WHEEL_DOWN"]);
+            }
+        }
+
+        self.osc_pointer_inside = is_inside;
+        self.osc_last_mouse_pos_px = current_mouse_px;
+        self.osc_primary_down = primary_down;
+        self.osc_secondary_down = secondary_down;
     }
 
     pub fn try_init(
@@ -413,8 +703,10 @@ impl MpvPreview {
     }
 
     pub fn set_visibility(&mut self, visible: bool) {
-        self.is_visible = visible;
-        self.surface.set_visible(visible);
+        if self.is_visible != visible {
+            self.is_visible = visible;
+            self.surface.set_visible(visible);
+        }
     }
 
     /// Get native HWND for the video surface
