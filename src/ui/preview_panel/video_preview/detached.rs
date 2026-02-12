@@ -60,6 +60,42 @@ pub fn render_detached_video(
     let min_window_height = 450.0;
     let default_window_width = 800.0;
     let default_window_height = 500.0;
+    let screen = ui.ctx().screen_rect();
+    let max_window_width = (screen.width() * 0.92).max(min_window_width);
+    let max_window_height = (screen.height() * 0.90).max(min_window_height);
+    let target_aspect: f32 = preview
+        .video_aspect()
+        .filter(|a| a.is_finite() && *a > 0.2 && *a < 5.0)
+        .map(|a| a as f32)
+        .unwrap_or(16.0_f32 / 9.0_f32);
+
+    let sanitize_rect = |rect: egui::Rect| {
+        let mut w = rect.width().max(min_window_width).min(max_window_width);
+        let mut h = rect.height().max(min_window_height).min(max_window_height);
+
+        // If restored geometry diverges too much from video DAR, normalize it.
+        let current_aspect = if h > 0.0 { w / h } else { target_aspect };
+        let drift = (current_aspect / target_aspect - 1.0).abs();
+        if drift > 0.22 {
+            let h_from_w = (w / target_aspect).clamp(min_window_height, max_window_height);
+            let w_from_h = (h * target_aspect).clamp(min_window_width, max_window_width);
+
+            let cost_keep_w = (h_from_w - h).abs();
+            let cost_keep_h = (w_from_h - w).abs();
+            if cost_keep_w <= cost_keep_h {
+                h = h_from_w;
+            } else {
+                w = w_from_h;
+                h = (w / target_aspect).clamp(min_window_height, max_window_height);
+            }
+        }
+
+        let max_x = (screen.max.x - w).max(screen.min.x);
+        let max_y = (screen.max.y - h).max(screen.min.y);
+        let x = rect.min.x.clamp(screen.min.x, max_x);
+        let y = rect.min.y.clamp(screen.min.y, max_y);
+        egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(w, h))
+    };
 
     let mut window_builder = egui::Window::new(filename)
         .open(&mut open)
@@ -67,17 +103,17 @@ pub fn render_detached_video(
         .title_bar(true)
         // Fix Z-Order overlap with Resize Handles (which are Foreground)
         .order(egui::Order::Foreground)
-        .min_size([min_window_width, min_window_height]);
+        .min_size([min_window_width, min_window_height])
+        .max_size([max_window_width, max_window_height]);
 
     if should_restore {
         // Force restoration to previous size for one frame
         if let Some(rect) = last_known_rect {
-            // Ensure restored size respects minimum
-            let w = rect.width().max(min_window_width);
-            let h = rect.height().max(min_window_height);
+            let rect = sanitize_rect(rect);
+            let w = rect.width();
+            let h = rect.height();
             window_builder = window_builder.current_pos(rect.min).fixed_size([w, h]);
         } else {
-            let screen = ui.ctx().screen_rect();
             let center = screen.center();
             let w = default_window_width;
             let h = default_window_height;
@@ -90,9 +126,9 @@ pub fn render_detached_video(
     } else {
         // Normal Floating State - use last known position if available
         if let Some(rect) = last_known_rect {
-            // Ensure restored size respects minimum
-            let w = rect.width().max(min_window_width);
-            let h = rect.height().max(min_window_height);
+            let rect = sanitize_rect(rect);
+            let w = rect.width();
+            let h = rect.height();
             window_builder = window_builder
                 .default_pos(rect.min)
                 .default_size([w, h])
@@ -256,7 +292,18 @@ pub fn render_detached_video(
         if let Some(inner) = &window_response {
             let r = inner.response.rect;
             if r.width() > 50.0 && r.height() > 50.0 {
-                preview.set_last_window_rect(r);
+                let corrected = sanitize_rect(r);
+                preview.set_last_window_rect(corrected);
+
+                // If runtime rect drifts too much from desired video DAR, schedule one-frame restore
+                // so the user does not need to close/reopen detached mode.
+                if use_native_osc {
+                    let raw_aspect = r.width() / r.height();
+                    let drift = (raw_aspect / target_aspect - 1.0).abs();
+                    if drift > 0.22 {
+                        preview.set_restore_needed(true);
+                    }
+                }
             }
         }
     }

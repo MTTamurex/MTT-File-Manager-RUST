@@ -78,8 +78,24 @@ impl MpvPreview {
 
             self.docked_downscale_applied = true;
             self.docked_fps_limit_applied = true;
-        } else if self.docked_downscale_applied || self.docked_fps_limit_applied {
-            let restore_vf = self.docked_prev_vf.clone().unwrap_or_default();
+        } else if self.docked_downscale_applied
+            || self.docked_fps_limit_applied
+            || has_downscale
+            || has_fps_limit
+        {
+            // Robust detach cleanup: ensure docked-only filters are removed even if
+            // internal flags drift from the actual vf chain.
+            let cleaned_vf = mpv_filters::remove_vf_filter(
+                &mpv_filters::remove_vf_filter(&current_vf, mpv_filters::DOCKED_DOWNSCALE_MARKER),
+                mpv_filters::DOCKED_FPS_MARKER,
+            );
+            let restore_vf = if has_downscale || has_fps_limit {
+                cleaned_vf
+            } else {
+                self.docked_prev_vf
+                    .clone()
+                    .unwrap_or_else(|| current_vf.clone())
+            };
             let _ = m.set_property("vf", restore_vf);
             self.docked_prev_vf = None;
 
