@@ -294,16 +294,6 @@ pub fn render_detached_video(
             if r.width() > 50.0 && r.height() > 50.0 {
                 let corrected = sanitize_rect(r);
                 preview.set_last_window_rect(corrected);
-
-                // If runtime rect drifts too much from desired video DAR, schedule one-frame restore
-                // so the user does not need to close/reopen detached mode.
-                if use_native_osc {
-                    let raw_aspect = r.width() / r.height();
-                    let drift = (raw_aspect / target_aspect - 1.0).abs();
-                    if drift > 0.22 {
-                        preview.set_restore_needed(true);
-                    }
-                }
             }
         }
     }
