@@ -408,7 +408,7 @@ impl ThumbnailDiskCache {
         let dynamic_img = DynamicImage::ImageRgba8(img);
 
         let resized = if width > 1024 || height > 1024 {
-            dynamic_img.resize(1024, 1024, image::imageops::FilterType::Lanczos3)
+            dynamic_img.resize(1024, 1024, image::imageops::FilterType::CatmullRom)
         } else {
             dynamic_img
         };
@@ -790,11 +790,7 @@ impl ThumbnailDiskCache {
         }
     }
 
-    fn execute_batch_delete(
-        db: &Connection,
-        table: CacheTable,
-        items: &[String],
-    ) -> usize {
+    fn execute_batch_delete(db: &Connection, table: CacheTable, items: &[String]) -> usize {
         let mut count = 0;
         const BATCH_SIZE: usize = 500;
 
@@ -812,7 +808,11 @@ impl ThumbnailDiskCache {
 
             match db.execute(&sql, rusqlite::params_from_iter(chunk.iter())) {
                 Ok(c) => count += c,
-                Err(e) => eprintln!("[GC] Failed to delete batch from {}: {:?}", table.table_name(), e),
+                Err(e) => eprintln!(
+                    "[GC] Failed to delete batch from {}: {:?}",
+                    table.table_name(),
+                    e
+                ),
             }
         }
 
@@ -919,11 +919,8 @@ impl ThumbnailDiskCache {
                 removed += Self::execute_batch_delete(&db, CacheTable::Thumbnails, &orphan_thumbs);
             }
             if !orphan_folders.is_empty() {
-                removed += Self::execute_batch_delete(
-                    &db,
-                    CacheTable::FolderCovers,
-                    &orphan_folders,
-                );
+                removed +=
+                    Self::execute_batch_delete(&db, CacheTable::FolderCovers, &orphan_folders);
             }
             if !orphan_folder_previews.is_empty() {
                 removed += Self::execute_batch_delete(
@@ -1039,11 +1036,8 @@ impl ThumbnailDiskCache {
                 removed += Self::execute_batch_delete(&db, CacheTable::Thumbnails, &orphan_thumbs);
             }
             if !orphan_folders.is_empty() {
-                removed += Self::execute_batch_delete(
-                    &db,
-                    CacheTable::FolderCovers,
-                    &orphan_folders,
-                );
+                removed +=
+                    Self::execute_batch_delete(&db, CacheTable::FolderCovers, &orphan_folders);
             }
             if !orphan_folder_previews.is_empty() {
                 removed += Self::execute_batch_delete(

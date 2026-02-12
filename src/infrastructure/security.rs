@@ -210,9 +210,7 @@ fn normalize_nfc(s: &str) -> String {
     use windows::Win32::Globalization::{NormalizeString, NORM_FORM};
     const NFC: NORM_FORM = NORM_FORM(1);
 
-    let wide: Vec<u16> = std::ffi::OsStr::new(s)
-        .encode_wide()
-        .collect();
+    let wide: Vec<u16> = std::ffi::OsStr::new(s).encode_wide().collect();
 
     unsafe {
         // First call: query required buffer length.
@@ -284,7 +282,7 @@ fn validate_path_components(path: &Path, config: &SecurityConfig) -> Result<(), 
 }
 
 /// Returns true if `name` is a Windows reserved device name.
-fn is_windows_reserved_name(name: &str) -> bool {
+pub fn is_windows_reserved_name(name: &str) -> bool {
     let upper = name.to_uppercase();
     matches!(
         upper.as_str(),
@@ -687,7 +685,11 @@ mod tests {
     #[test]
     fn test_unc_path_valid_allowed() {
         let result = sanitize_unc_path(Path::new(r"\\server\share\folder\file.txt"));
-        assert!(result.is_ok(), "Legitimate UNC path should pass: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Legitimate UNC path should pass: {:?}",
+            result
+        );
 
         let result2 = sanitize_unc_path(Path::new(r"\\192.168.1.1\share\doc.pdf"));
         assert!(result2.is_ok(), "UNC with IP should pass: {:?}", result2);

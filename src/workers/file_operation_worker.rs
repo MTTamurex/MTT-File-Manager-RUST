@@ -163,8 +163,7 @@ fn should_bypass_sanitization(path: &Path) -> bool {
     let s = path.to_string_lossy();
     // Only true shell namespace paths (shell:, ::{GUID}) bypass sanitization.
     // UNC network paths now go through basic validation instead of bypassing entirely.
-    s.starts_with("shell:")
-        || crate::infrastructure::windows::is_shell_navigation_path(path, false)
+    s.starts_with("shell:") || crate::infrastructure::windows::is_shell_navigation_path(path, false)
 }
 
 /// Returns true for UNC network paths that need lightweight validation
@@ -246,11 +245,23 @@ pub fn start_file_operation_worker(
                     new_name,
                     hwnd,
                 } => {
-                    if new_name.contains('\0')
+                    let invalid_chars = new_name.contains('\0')
                         || new_name.contains('\\')
                         || new_name.contains('/')
+                        || new_name.contains('<')
+                        || new_name.contains('>')
+                        || new_name.contains(':')
+                        || new_name.contains('"')
+                        || new_name.contains('|')
+                        || new_name.contains('?')
+                        || new_name.contains('*');
+                    let base_name = new_name.split('.').next().unwrap_or("");
+                    if invalid_chars
                         || new_name == "."
                         || new_name == ".."
+                        || new_name.ends_with('.')
+                        || new_name.ends_with(' ')
+                        || crate::infrastructure::security::is_windows_reserved_name(base_name)
                     {
                         eprintln!(
                             "[SECURITY] Rename blocked: invalid target name '{}'",
