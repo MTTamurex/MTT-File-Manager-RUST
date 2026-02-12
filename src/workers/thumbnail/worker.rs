@@ -43,15 +43,15 @@ impl Semaphore {
     }
 
     fn acquire(&self) {
-        let mut count = self.count.lock().unwrap();
+        let mut count = self.count.lock().unwrap_or_else(|e| e.into_inner());
         while *count >= self.max {
-            count = self.condvar.wait(count).unwrap();
+            count = self.condvar.wait(count).unwrap_or_else(|e| e.into_inner());
         }
         *count += 1;
     }
 
     fn release(&self) {
-        let mut count = self.count.lock().unwrap();
+        let mut count = self.count.lock().unwrap_or_else(|e| e.into_inner());
         if *count > 0 {
             *count -= 1;
         }

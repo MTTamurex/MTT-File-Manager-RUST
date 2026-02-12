@@ -68,7 +68,7 @@ impl GifManager {
         if let Some(data) = self.cache.get(path) {
             let d_clone = data.clone();
             {
-                let mut d = data.lock().unwrap();
+                let mut d = data.lock().unwrap_or_else(|e| e.into_inner());
                 d.last_used = Instant::now();
             }
             return d_clone;
@@ -108,7 +108,7 @@ impl GifManager {
     pub fn cleanup(&mut self, force_all: bool) {
         if force_all {
             for (_, data) in self.cache.iter() {
-                let d = data.lock().unwrap();
+                let d = data.lock().unwrap_or_else(|e| e.into_inner());
                 d.cancelled.store(true, Ordering::SeqCst);
             }
             self.cache.clear();
@@ -122,7 +122,7 @@ impl GifManager {
         // 1. TTL Cleanup - collect expired paths without holding locks
         let mut to_remove = Vec::new();
         for (path, data) in self.cache.iter() {
-            let d = data.lock().unwrap();
+            let d = data.lock().unwrap_or_else(|e| e.into_inner());
             if now.duration_since(d.last_used) > ttl {
                 d.cancelled.store(true, Ordering::SeqCst);
                 to_remove.push((path.clone(), d.total_bytes));
@@ -139,7 +139,7 @@ impl GifManager {
         {
             // Pop least recently used
             if let Some((_, data)) = self.cache.pop_lru() {
-                let d = data.lock().unwrap();
+                let d = data.lock().unwrap_or_else(|e| e.into_inner());
                 d.cancelled.store(true, Ordering::SeqCst);
                 self.running_total_bytes
                     .fetch_sub(d.total_bytes, Ordering::SeqCst);
@@ -161,7 +161,7 @@ impl GifManager {
         let frames = decoder.into_frames();
 
         let cancelled = {
-            let d = data.lock().unwrap();
+            let d = data.lock().unwrap_or_else(|e| e.into_inner());
             d.cancelled.clone()
         };
 
@@ -201,7 +201,7 @@ impl GifManager {
             let frame_bytes = rgba.len();
 
             {
-                let mut d = data.lock().unwrap();
+                let mut d = data.lock().unwrap_or_else(|e| e.into_inner());
                 // Check generation and cancellation inside lock
                 if d.generation != generation || d.cancelled.load(Ordering::SeqCst) {
                     return Ok(());
@@ -234,7 +234,7 @@ impl GifManager {
             }
         }
 
-        let mut d = data.lock().unwrap();
+        let mut d = data.lock().unwrap_or_else(|e| e.into_inner());
         if d.generation == generation && !d.cancelled.load(Ordering::SeqCst) {
             d.is_complete = true;
             ui_ctx.request_repaint();

@@ -52,7 +52,7 @@ impl PriorityThumbnailQueue {
     }
 
     pub fn shutdown(&self) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.shutdown = true;
         self.condvar.notify_all();
     }
@@ -78,7 +78,7 @@ impl PriorityThumbnailQueue {
         directory_index: Option<usize>,
         modified: u64,
     ) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 
         // Group by parent directory (for HDD seek optimization)
         let parent = path.parent().unwrap_or(&path).to_path_buf();
@@ -219,7 +219,7 @@ impl PriorityThumbnailQueue {
 
     /// Remove specific paths from the queue (e.g., files being deleted)
     pub fn remove_paths(&self, paths: &[PathBuf]) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         for path in paths {
             if state.pending.remove(path) {
                 // Remove from the directory-grouped map
@@ -238,7 +238,7 @@ impl PriorityThumbnailQueue {
 
     /// Pop the next request, optimizing for disk locality on HDDs
     pub fn pop(&self) -> Option<(PathBuf, usize, u32, IOPriority, u64)> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 
         loop {
             if state.shutdown {
@@ -262,7 +262,7 @@ impl PriorityThumbnailQueue {
             }
 
             // Wait for new work
-            state = self.condvar.wait(state).unwrap();
+            state = self.condvar.wait(state).unwrap_or_else(|e| e.into_inner());
         }
     }
 
