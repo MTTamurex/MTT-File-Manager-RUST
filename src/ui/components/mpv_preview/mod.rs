@@ -345,9 +345,18 @@ impl MpvPreview {
             self.mode = VideoMode::Fullscreen;
             self.fullscreen_applied = false;
         } else if !mpv_fullscreen && self.is_fullscreen() {
+            // Mirror ESC fullscreen-exit flow to avoid viewport desync artifacts.
             self.mode = VideoMode::Detached;
             self.fullscreen_applied = false;
             self.restore_frames = 10;
+            self.forced_size = None;
+            self.reset_last_rect();
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+            if self.prev_app_maximized {
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+            }
         }
     }
 
