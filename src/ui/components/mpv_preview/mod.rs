@@ -565,6 +565,9 @@ impl MpvPreview {
             // Clear cached values for new file
             self.cached_duration = None;
             self.cached_tracks = None;
+
+            // Defensive cleanup: ensure docked-only filters are not carried across files.
+            self.update_docked_downscale(false);
         }
 
         // Apply docked-mode downscale + FPS limit (dynamic, reversible, no player restart)

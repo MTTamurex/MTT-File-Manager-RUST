@@ -294,6 +294,14 @@ impl MediaPreview {
         }
     }
 
+    pub fn video_aspect(&self) -> Option<f64> {
+        if let MediaPreview::Video(player) = self {
+            player.video_aspect()
+        } else {
+            None
+        }
+    }
+
     pub fn native_osc_active(&self) -> bool {
         if let MediaPreview::Video(player) = self {
             player.is_native_osc_active()
