@@ -104,6 +104,8 @@ pub fn render_detached_video(
         }
     }
 
+    let use_native_osc = preview.native_osc_active();
+
     let window_response = window_builder.show(ui.ctx(), |ui| {
         // === TRUE AUTOHIDE IMPLEMENTATION ===
         // Video takes 100% when idle, shrinks when controls are shown
@@ -118,21 +120,27 @@ pub fn render_detached_video(
             egui::vec2(total_size.x, control_height_base),
         );
 
-        // Check if mouse is over control area and keep visible
-        let mouse_over_controls = ui.input(|i| {
-            i.pointer
-                .hover_pos()
-                .map(|p| control_rect_hover.contains(p))
-                .unwrap_or(false)
-        });
+        if !use_native_osc {
+            // Check if mouse is over control area and keep visible
+            let mouse_over_controls = ui.input(|i| {
+                i.pointer
+                    .hover_pos()
+                    .map(|p| control_rect_hover.contains(p))
+                    .unwrap_or(false)
+            });
 
-        if mouse_over_controls {
-            preview.reset_mouse_activity();
+            if mouse_over_controls {
+                preview.reset_mouse_activity();
+            }
         }
 
         // Determine if controls should be visible
         // Primary: MPV area reports mouse activity
-        let show_controls = preview.controls_active();
+        let show_controls = if use_native_osc {
+            false
+        } else {
+            preview.controls_active()
+        };
 
         // Control bar height (only when visible)
         let control_height = if show_controls { 75.0 } else { 0.0 };
@@ -162,37 +170,39 @@ pub fn render_detached_video(
         let seek_step = 5.0_f64;
         let osd_duration_ms = 2000_i64;
 
-        if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
-            let new_vol = (volume + vol_step).min(1.0);
-            preview.set_volume(new_vol);
-            let msg = format!("Volume: {}%", (new_vol * 100.0).round() as i32);
-            preview.show_osd(&msg, osd_duration_ms);
-            preview.reset_mouse_activity();
-        }
-        if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
-            let new_vol = (volume - vol_step).max(0.0);
-            preview.set_volume(new_vol);
-            let msg = format!("Volume: {}%", (new_vol * 100.0).round() as i32);
-            preview.show_osd(&msg, osd_duration_ms);
-            preview.reset_mouse_activity();
-        }
-        if ui.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
-            let new_time = (current_time + seek_step).min(duration);
-            preview.seek(new_time);
-            let display_time = crate::ui::components::media_preview::format_time(new_time);
-            let display_dur = crate::ui::components::media_preview::format_time(duration);
-            let msg = format!("{} / {}", display_time, display_dur);
-            preview.show_osd(&msg, osd_duration_ms);
-            preview.reset_mouse_activity();
-        }
-        if ui.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
-            let new_time = (current_time - seek_step).max(0.0);
-            preview.seek(new_time);
-            let display_time = crate::ui::components::media_preview::format_time(new_time);
-            let display_dur = crate::ui::components::media_preview::format_time(duration);
-            let msg = format!("{} / {}", display_time, display_dur);
-            preview.show_osd(&msg, osd_duration_ms);
-            preview.reset_mouse_activity();
+        if !use_native_osc {
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                let new_vol = (volume + vol_step).min(1.0);
+                preview.set_volume(new_vol);
+                let msg = format!("Volume: {}%", (new_vol * 100.0).round() as i32);
+                preview.show_osd(&msg, osd_duration_ms);
+                preview.reset_mouse_activity();
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                let new_vol = (volume - vol_step).max(0.0);
+                preview.set_volume(new_vol);
+                let msg = format!("Volume: {}%", (new_vol * 100.0).round() as i32);
+                preview.show_osd(&msg, osd_duration_ms);
+                preview.reset_mouse_activity();
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
+                let new_time = (current_time + seek_step).min(duration);
+                preview.seek(new_time);
+                let display_time = crate::ui::components::media_preview::format_time(new_time);
+                let display_dur = crate::ui::components::media_preview::format_time(duration);
+                let msg = format!("{} / {}", display_time, display_dur);
+                preview.show_osd(&msg, osd_duration_ms);
+                preview.reset_mouse_activity();
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
+                let new_time = (current_time - seek_step).max(0.0);
+                preview.seek(new_time);
+                let display_time = crate::ui::components::media_preview::format_time(new_time);
+                let display_dur = crate::ui::components::media_preview::format_time(duration);
+                let msg = format!("{} / {}", display_time, display_dur);
+                preview.show_osd(&msg, osd_duration_ms);
+                preview.reset_mouse_activity();
+            }
         }
 
         // 1. Render Video (full height when controls hidden)
