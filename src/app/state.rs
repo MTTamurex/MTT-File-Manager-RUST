@@ -65,6 +65,13 @@ pub enum FolderSizeMessage {
 
 pub struct ImageViewerApp {
     pub current_path: String,
+    /// Last known modified timestamp for the currently browsed folder.
+    /// Filled at navigation time from the already selected/listed folder entry
+    /// to avoid blocking filesystem calls in the render loop.
+    pub current_folder_modified_hint: Option<(PathBuf, u64)>,
+    /// Cache of known folder modified timestamps by folder path.
+    /// Used to preserve "Data modificada" in preview panel across back/forward navigation.
+    pub folder_modified_hints: std::collections::HashMap<PathBuf, u64>,
     pub loaded_path: String, // Tracks the last path we actually requested (prevents spam)
 
     // --- OPTIMIZED THUMBNAIL SYSTEM ---

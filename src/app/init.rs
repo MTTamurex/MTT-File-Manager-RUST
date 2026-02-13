@@ -568,6 +568,8 @@ impl ImageViewerApp {
 
         let mut app = Self {
             current_path: initial_path.clone(),
+            current_folder_modified_hint: None,
+            folder_modified_hints: std::collections::HashMap::new(),
             loaded_path: String::new(), // Start empty - will be set when first folder loads
             thumbnail_queue,
             image_receiver: img_rx,
