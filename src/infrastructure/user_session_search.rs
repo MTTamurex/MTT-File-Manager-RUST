@@ -47,6 +47,7 @@ struct ScanOutcome {
 pub struct UserSessionSearchIndex {
     volumes: HashMap<char, IndexedVolume>,
     last_discovery: Option<Instant>,
+    last_scanned_letter: Option<char>,
 }
 
 impl UserSessionSearchIndex {
@@ -54,6 +55,7 @@ impl UserSessionSearchIndex {
         Self {
             volumes: HashMap::new(),
             last_discovery: None,
+            last_scanned_letter: None,
         }
     }
 
@@ -77,8 +79,10 @@ impl UserSessionSearchIndex {
         }
 
         self.last_discovery = Some(Instant::now());
-        let candidates = discover_candidate_volumes(service_volumes, service_online);
+        let mut candidates = discover_candidate_volumes(service_volumes, service_online);
+        candidates.sort_by_key(|c| c.drive_letter);
         let mut active_letters = HashSet::with_capacity(candidates.len());
+        let mut stale_candidates = Vec::new();
 
         for candidate in candidates {
             active_letters.insert(candidate.drive_letter);
@@ -97,6 +101,12 @@ impl UserSessionSearchIndex {
                 continue;
             }
 
+            stale_candidates.push(candidate);
+        }
+
+        if let Some(candidate) =
+            pick_next_stale_candidate(&stale_candidates, self.last_scanned_letter)
+        {
             match scan_volume(candidate.drive_letter) {
                 Ok(scan) => {
                     let count = scan.items.len();
@@ -109,6 +119,7 @@ impl UserSessionSearchIndex {
                             items: scan.items,
                         },
                     );
+                    self.last_scanned_letter = Some(candidate.drive_letter);
                     log::info!(
                         "[SESSION-SEARCH] {}:\\ indexed {} entries in {:.2}s (dirs: {}, errors: {})",
                         candidate.drive_letter,
@@ -170,6 +181,28 @@ impl UserSessionSearchIndex {
     pub fn has_indexed_items(&self) -> bool {
         self.volumes.values().any(|v| !v.items.is_empty())
     }
+}
+
+fn pick_next_stale_candidate(
+    stale_candidates: &[CandidateVolume],
+    last_scanned_letter: Option<char>,
+) -> Option<&CandidateVolume> {
+    if stale_candidates.is_empty() {
+        return None;
+    }
+
+    let Some(last_letter) = last_scanned_letter else {
+        return stale_candidates.first();
+    };
+
+    if let Some(next) = stale_candidates
+        .iter()
+        .find(|c| c.drive_letter > last_letter)
+    {
+        return Some(next);
+    }
+
+    stale_candidates.first()
 }
 
 fn discover_candidate_volumes(

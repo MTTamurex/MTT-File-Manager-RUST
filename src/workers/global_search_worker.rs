@@ -2,6 +2,7 @@
 //! Follows the same Request/Response pattern as file_operation_worker.rs.
 
 use std::collections::HashSet;
+use std::path::Path;
 use std::sync::mpsc::{Receiver, Sender};
 
 use mtt_search_protocol::{IndexStatusInfo, SearchResultItem};
@@ -86,6 +87,27 @@ fn query_service_with_retry(
         }
         Err(e) => Err(e),
     }
+}
+
+fn filter_existing_results(
+    items: Vec<SearchResultItem>,
+    max_results: usize,
+) -> Vec<SearchResultItem> {
+    if items.is_empty() || max_results == 0 {
+        return Vec::new();
+    }
+
+    let mut filtered = Vec::with_capacity(items.len().min(max_results));
+    for item in items {
+        if crate::infrastructure::onedrive::fast_path_exists(Path::new(&item.full_path)) {
+            filtered.push(item);
+            if filtered.len() >= max_results {
+                break;
+            }
+        }
+    }
+
+    filtered
 }
 
 fn refresh_and_send_status(
@@ -205,13 +227,15 @@ pub fn start_global_search_worker(
                         }
                     }
 
-                    session_index.refresh(&last_known_service_volumes, last_known_available, true);
+                    // Never scan drives in the query path; use cached session index only.
+                    // Refresh happens in status cycles to keep typing/search latency stable.
                     let local_items = session_index.search(&query, max_results as usize);
 
                     match query_service_with_retry(&query, max_results) {
                         Ok(service_items) => {
-                            let items =
+                            let merged =
                                 merge_results(service_items, local_items, max_results as usize);
+                            let items = filter_existing_results(merged, max_results as usize);
                             let _ = sender.send(GlobalSearchResponse::Results { query, items });
                         }
                         Err(e) => {
@@ -223,8 +247,9 @@ pub fn start_global_search_worker(
                                     "[GLOBAL-SEARCH] Service query failed, returning session index results: {}",
                                     e
                                 );
-                                let items =
+                                let merged =
                                     merge_results(Vec::new(), local_items, max_results as usize);
+                                let items = filter_existing_results(merged, max_results as usize);
                                 let _ = sender.send(GlobalSearchResponse::Results { query, items });
                             }
                         }
