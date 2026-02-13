@@ -1,11 +1,10 @@
-use std::collections::HashMap;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use rusqlite::{params, Connection};
 
-use crate::file_index::{FileRecord, VolumeIndex};
+use crate::file_index::VolumeIndex;
 
 /// Persisted volume state for fast restart.
 pub struct PersistedVolumeState {
@@ -59,7 +58,7 @@ impl IndexDb {
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
             .map_err(|e| format!("PRAGMA error: {}", e))?;
 
-        // Create tables
+        // Create tables (compact schema — no name_lower, no size)
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS volume_state (
                 drive_letter TEXT PRIMARY KEY,
@@ -72,18 +71,52 @@ impl IndexDb {
                 frn INTEGER NOT NULL,
                 drive_letter TEXT NOT NULL,
                 name TEXT NOT NULL,
-                name_lower TEXT NOT NULL,
                 parent_frn INTEGER NOT NULL,
                 is_dir INTEGER NOT NULL,
-                size INTEGER NOT NULL,
                 PRIMARY KEY (drive_letter, frn)
             );",
         )
         .map_err(|e| format!("Table creation error: {}", e))?;
 
+        // Migrate from old schema: if legacy columns exist, drop and recreate
+        Self::migrate_schema(&conn)?;
+
         Ok(Self {
             conn: Mutex::new(conn),
         })
+    }
+
+    /// Migrate from old 7-column schema (with name_lower, size) to compact 5-column schema.
+    /// Detects the old layout by checking column count via PRAGMA, then recreates the table.
+    fn migrate_schema(conn: &Connection) -> Result<(), String> {
+        let col_count: u32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('file_records')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        // Old schema had 7 columns (frn, drive_letter, name, name_lower, parent_frn, is_dir, size).
+        // New schema has 5 columns.  If we see 7, migrate.
+        if col_count == 7 {
+            eprintln!("[DB] Migrating file_records from old 7-column schema to compact 5-column schema...");
+            conn.execute_batch(
+                "DROP TABLE IF EXISTS file_records;
+                 CREATE TABLE file_records (
+                     frn INTEGER NOT NULL,
+                     drive_letter TEXT NOT NULL,
+                     name TEXT NOT NULL,
+                     parent_frn INTEGER NOT NULL,
+                     is_dir INTEGER NOT NULL,
+                     PRIMARY KEY (drive_letter, frn)
+                 );",
+            )
+            .map_err(|e| format!("Schema migration error: {}", e))?;
+            eprintln!("[DB] Migration complete. Index will be rebuilt on next scan.");
+        }
+
+        Ok(())
     }
 
     /// Load persisted volume state.
@@ -106,49 +139,43 @@ impl IndexDb {
         .ok()
     }
 
-    /// Load all file records for a volume.
-    pub fn load_file_records(&self, drive_letter: char) -> Option<HashMap<u64, FileRecord>> {
+    /// Stream file records from DB directly into the VolumeIndex's arena.
+    /// Returns the number of records loaded, or None if no records found.
+    ///
+    /// This avoids creating a temporary `Vec<String>` (~110 MB for 1.5M files)
+    /// by inserting each record into the arena as it's read from SQLite.
+    pub fn load_into_index(
+        &self,
+        index: &mut crate::file_index::VolumeIndex,
+    ) -> Option<usize> {
         let conn = self.conn.lock().ok()?;
         let mut stmt = conn
             .prepare(
-                "SELECT frn, name, name_lower, parent_frn, is_dir, size
+                "SELECT frn, name, parent_frn, is_dir
                  FROM file_records WHERE drive_letter = ?1",
             )
             .ok()?;
 
-        let mut records = HashMap::new();
+        let mut count = 0usize;
         let rows = stmt
-            .query_map(params![drive_letter.to_string()], |row| {
+            .query_map(params![index.drive_letter.to_string()], |row| {
                 let frn: i64 = row.get(0)?;
                 let name: String = row.get(1)?;
-                let name_lower: String = row.get(2)?;
-                let parent_frn: i64 = row.get(3)?;
-                let is_dir: bool = row.get(4)?;
-                let size: i64 = row.get(5)?;
-                Ok((
-                    frn as u64,
-                    FileRecord {
-                        name,
-                        name_lower,
-                        parent_ref: parent_frn as u64,
-                        is_dir,
-                        size: size as u64,
-                    },
-                ))
+                let parent_frn: i64 = row.get(2)?;
+                let is_dir: bool = row.get(3)?;
+                Ok((frn as u64, name, parent_frn as u64, is_dir))
             })
             .ok()?;
 
         for row in rows {
-            if let Ok((frn, record)) = row {
-                records.insert(frn, record);
+            if let Ok((frn, name, parent_ref, is_dir)) = row {
+                index.insert_record(frn, &name, parent_ref, is_dir);
+                count += 1;
+                // `name` (String) is dropped here — no memory buildup
             }
         }
 
-        if records.is_empty() {
-            None
-        } else {
-            Some(records)
-        }
+        if count == 0 { None } else { Some(count) }
     }
 
     /// Save the complete volume index to the database.
@@ -190,21 +217,20 @@ impl IndexDb {
         {
             let mut insert_stmt = tx
                 .prepare(
-                    "INSERT INTO file_records (frn, drive_letter, name, name_lower, parent_frn, is_dir, size)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    "INSERT INTO file_records (frn, drive_letter, name, parent_frn, is_dir)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
                 )
                 .map_err(|e| format!("Prepare insert error: {}", e))?;
 
             for (&frn, record) in &index.records {
+                let name = index.names.get(record.name_ref());
                 insert_stmt
                     .execute(params![
                         frn as i64,
                         drive,
-                        record.name,
-                        record.name_lower,
+                        name,
                         record.parent_ref as i64,
-                        record.is_dir,
-                        record.size as i64
+                        record.is_dir
                     ])
                     .map_err(|e| format!("Insert record error: {}", e))?;
             }

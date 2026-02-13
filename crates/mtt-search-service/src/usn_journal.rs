@@ -12,7 +12,7 @@ const ERROR_HANDLE_EOF: WIN32_ERROR = WIN32_ERROR(38);
 /// (journal wrapped around). A full re-scan is needed.
 const ERROR_JOURNAL_ENTRY_DELETED: WIN32_ERROR = WIN32_ERROR(1181);
 
-use crate::file_index::{FileRecord, VolumeIndex};
+use crate::file_index::VolumeIndex;
 
 const BUFFER_SIZE: usize = 64 * 1024; // 64KB buffer
 
@@ -369,36 +369,16 @@ pub fn parse_usn_records(data: &[u8], index: &mut VolumeIndex, count: &mut usize
             if apply_changes {
                 // Incremental update: process reason flags
                 if reason & USN_REASON_FILE_DELETE != 0 {
-                    index.records.remove(&frn);
+                    index.remove_record(frn);
                 } else {
                     // Create or update
                     let is_dir = (file_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-                    let name_lower = name.to_lowercase();
-                    index.records.insert(
-                        frn,
-                        FileRecord {
-                            name,
-                            name_lower,
-                            parent_ref: parent_frn,
-                            is_dir,
-                            size: 0,
-                        },
-                    );
+                    index.insert_record(frn, &name, parent_frn, is_dir);
                 }
             } else {
                 // Initial enumeration: just insert
                 let is_dir = (file_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-                let name_lower = name.to_lowercase();
-                index.records.insert(
-                    frn,
-                    FileRecord {
-                        name,
-                        name_lower,
-                        parent_ref: parent_frn,
-                        is_dir,
-                        size: 0,
-                    },
-                );
+                index.insert_record(frn, &name, parent_frn, is_dir);
                 *count += 1;
             }
         }

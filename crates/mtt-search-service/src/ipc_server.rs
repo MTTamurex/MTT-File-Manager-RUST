@@ -382,10 +382,14 @@ fn handle_client(
                     if let Ok(lock) = indices_clone.read() {
                         let mut touched = 0u64;
                         for vol in lock.iter() {
-                            for (_, record) in &vol.records {
-                                black_box(&record.name_lower);
-                                touched += 1;
+                            // Touch the contiguous arena buffer to bring pages into RAM.
+                            // This is much more cache-friendly than the old per-record
+                            // String approach because all name data is contiguous.
+                            let arena_bytes = vol.names.as_bytes();
+                            for chunk in arena_bytes.chunks(4096) {
+                                black_box(&chunk[0]);
                             }
+                            touched += vol.records.len() as u64;
                         }
                         eprintln!(
                             "[IPC] WarmIndex: touched {} records in {:.2}s",
@@ -468,7 +472,7 @@ fn handle_client(
                     name: r.name,
                     full_path: r.full_path,
                     is_dir: r.is_dir,
-                    size: r.size,
+                    size: 0,
                 })
                 .collect();
 
