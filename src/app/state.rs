@@ -19,7 +19,7 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 // PERFORMANCE: FxHashSet uses faster hashing for PathBuf keys
 use crate::ui::cache::FxHashSet;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::time::Instant;
@@ -338,6 +338,11 @@ pub struct ImageViewerApp {
     pub file_ops_in_progress: usize,
     /// Paths currently being deleted — shared with worker threads to cancel in-flight extractions
     pub pending_deletions: Arc<dashmap::DashMap<PathBuf, ()>>,
+
+    // BULK THUMBNAIL SCAN
+    pub bulk_thumbnail_scanning: Arc<AtomicBool>,
+    pub bulk_thumbnail_was_scanning: bool,
+    pub bulk_thumbnail_total: Arc<AtomicUsize>,
 
     // ISO MOUNTING
     pub pending_iso_mount: Option<PathBuf>,
