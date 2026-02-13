@@ -407,6 +407,17 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
         })
     } else {
         let path = std::path::PathBuf::from(&app.current_path);
+        let current_folder_modified = app
+            .current_folder_modified_hint
+            .as_ref()
+            .and_then(|(hint_path, modified)| {
+                if hint_path == &path && *modified > 0 {
+                    Some(*modified)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0);
         // CRITICAL FIX: Do NOT use FileEntry::from_path() here!
         // from_path() calls std::fs::metadata() which uses CreateFileW internally.
         // On OneDrive, this can block the UI thread for 30-60s on cloud-only files.
@@ -423,7 +434,7 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             name,
             is_dir: true,
             size: 0,
-            modified: 0,
+            modified: current_folder_modified,
             folder_cover: None,
             drive_info: None,
             sync_status: SyncStatus::None,
