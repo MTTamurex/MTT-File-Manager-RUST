@@ -20,11 +20,12 @@
 ║       - Isso foi explicitamente solicitado? → SE NÃO, NÃO FAÇA             ║
 ║       - Estou adicionando algo "extra"? → SE SIM, PARE E PERGUNTE          ║
 ║       - Isso pode quebrar algo existente? → SE SIM, ALERTE O USUÁRIO       ║
-║                                                                              ║
-║  □ 4. COMANDO DESTRUTIVO?                                                   ║
+║                                                                           ║  ║                                                                            ║
+║  □ 4. COMANDO DESTRUTIVO?                                                  ║
 ║       - É um comando que deleta/limpa dados? (rm, clean, reset, etc)       ║
 ║       - → SE SIM: NUNCA execute sem permissão EXPLÍCITA do usuário         ║
-║       - → Alerte sobre consequências ANTES de executar                      ║
+║       - → Alerte sobre consequências ANTES de executar                    ║  
+║                                                                            ║
 ║  □ 5. ESSA ALTERAÇÃO IRÁ "QUEBRAR" A FUNCIONALIDADE DE OUTRAS FUNÇÕES?     ║
 ║                                                                            ║
 ║       - → SE SIM: NUNCA execute sem permissão EXPLÍCITA do usuário         ║
@@ -62,3 +63,8 @@
 - Se algo não é usado, DELETE completamente
 - Não mantenha código morto "por precaução"
 - Siga a Regra dos Três: três linhas similares são melhores que uma abstração prematura
+  
+### 6. Proibido “God Files” / Monólitos (modularização obrigatória)
+- Nunca crie ou concentre grandes mudanças em um único arquivo “monolito” (“god file”). 
+- Se a implementação começar a ficar grande (400~500 linhas), divida obrigatoriamente em módulos/coisas menores, com responsabilidades claras e limites bem definidos.
+- Tamanho e complexidade como gatilho: ao perceber que um arquivo está crescendo demais (muitas responsabilidades, muitas funções não relacionadas, muitos tipos/structs/classes), pare e proponha a divisão antes de continuar.
