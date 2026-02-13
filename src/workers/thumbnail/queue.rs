@@ -57,6 +57,15 @@ impl PriorityThumbnailQueue {
         self.condvar.notify_all();
     }
 
+    /// Returns the number of pending requests in the queue
+    pub fn pending_count(&self) -> usize {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .pending
+            .len()
+    }
+
     /// Push a thumbnail request with the new IOPriority system
     pub fn push(
         &self,

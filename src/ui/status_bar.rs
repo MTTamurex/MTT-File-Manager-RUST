@@ -78,6 +78,8 @@ pub enum StatusBarAction {
     ViewModeChanged,
     /// Open virtual drive settings
     OpenVirtualDriveSettings,
+    /// Start bulk thumbnail extraction for current folder and subfolders
+    BulkThumbnailScan,
     /// No action
     None,
 }
@@ -99,6 +101,7 @@ pub fn render_status_bar(
     _fps_avg: f32,
     _upload_budget_ms: f32,
     is_computer_view: bool,
+    bulk_progress: Option<(usize, usize)>,
 ) -> StatusBarAction {
     let mut action = StatusBarAction::None;
 
@@ -130,6 +133,24 @@ pub fn render_status_bar(
                 .clicked()
             {
                 action = StatusBarAction::OpenVirtualDriveSettings;
+            }
+
+            // === BULK THUMBNAIL SCAN button ===
+            if let Some((done, total)) = bulk_progress {
+                ui.spinner();
+                ui.label(
+                    egui::RichText::new(format!("{}/{}", done, total))
+                        .color(egui::Color32::BLACK)
+                        .small()
+                );
+            } else if !is_computer_view {
+                if ui
+                    .button(egui::RichText::new("🖼").color(egui::Color32::BLACK))
+                    .on_hover_text("Gerar thumbnails para todas as subpastas")
+                    .clicked()
+                {
+                    action = StatusBarAction::BulkThumbnailScan;
+                }
             }
 
             ui.separator();

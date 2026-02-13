@@ -825,6 +825,11 @@ impl ImageViewerApp {
             file_ops_in_progress: 0,
             pending_deletions,
 
+            // BULK THUMBNAIL SCAN
+            bulk_thumbnail_scanning: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            bulk_thumbnail_was_scanning: false,
+            bulk_thumbnail_total: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+
             // ISO MOUNTING
             pending_iso_mount: None,
 
