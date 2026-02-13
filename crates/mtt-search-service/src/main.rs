@@ -1,4 +1,5 @@
 mod file_index;
+mod fs_walker;
 mod index_db;
 mod ipc_server;
 mod name_arena;
@@ -6,8 +7,9 @@ mod path_resolver;
 mod service_control;
 mod usn_journal;
 
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 /// Redact filesystem paths from error messages to prevent information leakage.
 /// Replaces tokens that look like paths (containing `\` or starting with a drive letter)
@@ -17,9 +19,7 @@ fn redact_paths(msg: &str) -> String {
         .map(|word| {
             let trimmed = word.trim_matches(|c: char| c == '\'' || c == '"' || c == ':');
             if trimmed.contains('\\')
-                || trimmed.contains('/')
-                    && trimmed.len() > 1
-                    && !trimmed.starts_with("http")
+                || trimmed.contains('/') && trimmed.len() > 1 && !trimmed.starts_with("http")
             {
                 "<path>"
             } else {
@@ -77,42 +77,76 @@ fn ctrlc_handler(_shutdown: Arc<AtomicBool>) -> Result<(), String> {
 /// Main indexer loop. Shared between console mode and service mode.
 pub fn run_indexer(shutdown: Arc<AtomicBool>) {
     eprintln!("[SERVICE] mtt-search-service v2 (compact-arena index)");
-    eprintln!("[SERVICE] FileRecord size: {} bytes", std::mem::size_of::<file_index::FileRecord>());
+    eprintln!(
+        "[SERVICE] FileRecord size: {} bytes",
+        std::mem::size_of::<file_index::FileRecord>()
+    );
     eprintln!("[SERVICE] Starting indexer...");
 
-    // Discover NTFS volumes
-    let volumes = usn_journal::discover_ntfs_volumes();
-    if volumes.is_empty() {
-        eprintln!("[SERVICE] No NTFS volumes found.");
-        return;
-    }
-    for (letter, label) in &volumes {
-        eprintln!("[SERVICE] Found NTFS volume: {}:\\ ({})", letter, label);
+    let discovered = usn_journal::discover_volumes();
+    if discovered.is_empty() {
+        eprintln!("[SERVICE] No accessible volumes found at startup.");
+    } else {
+        for volume in &discovered {
+            if volume.usn_supported {
+                eprintln!(
+                    "[SERVICE] Found USN-capable volume: {}:\\ ({}, {})",
+                    volume.drive_letter, volume.label, volume.file_system
+                );
+            } else {
+                eprintln!(
+                    "[SERVICE] Found fallback volume: {}:\\ ({}, {})",
+                    volume.drive_letter, volume.label, volume.file_system
+                );
+            }
+        }
     }
 
     // Create shared index
     let indices = Arc::new(RwLock::new(Vec::new()));
+    let tracked_volumes = Arc::new(Mutex::new(HashSet::<char>::new()));
 
-    // Load persisted index or do fresh scan for each volume
+    // Open persistence
     let db_path = index_db::get_db_path();
     eprintln!("[SERVICE] Index database ready");
     let db = match index_db::IndexDb::open(&db_path) {
         Ok(db) => Arc::new(db),
         Err(e) => {
-            eprintln!("[SERVICE] Failed to open index database: {}", redact_paths(&e.to_string()));
+            eprintln!(
+                "[SERVICE] Failed to open index database: {}",
+                redact_paths(&e.to_string())
+            );
             return;
         }
     };
 
-    // Index each volume
-    for (drive_letter, _label) in &volumes {
-        let letter = *drive_letter;
+    // Start indexers for currently mounted volumes.
+    spawn_indexers_for_discovered_volumes(discovered, &tracked_volumes, &indices, &db, &shutdown);
+
+    // Keep discovering newly mounted drives (e.g., Cryptomator mounts).
+    {
+        let tracked_volumes = tracked_volumes.clone();
         let indices = indices.clone();
         let db = db.clone();
         let shutdown = shutdown.clone();
 
         std::thread::spawn(move || {
-            index_volume(letter, indices, db, shutdown);
+            const DISCOVERY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(20);
+
+            loop {
+                if wait_for_shutdown_or_timeout(&shutdown, DISCOVERY_INTERVAL) {
+                    break;
+                }
+
+                let discovered = usn_journal::discover_volumes();
+                spawn_indexers_for_discovered_volumes(
+                    discovered,
+                    &tracked_volumes,
+                    &indices,
+                    &db,
+                    &shutdown,
+                );
+            }
         });
     }
 
@@ -124,6 +158,193 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
     ipc_server::run_ipc_server(indices.clone(), shutdown.clone());
 
     eprintln!("[SERVICE] Shutting down...");
+}
+
+fn spawn_indexers_for_discovered_volumes(
+    discovered: Vec<usn_journal::DiscoveredVolume>,
+    tracked_volumes: &Arc<Mutex<HashSet<char>>>,
+    indices: &Arc<RwLock<Vec<file_index::VolumeIndex>>>,
+    db: &Arc<index_db::IndexDb>,
+    shutdown: &Arc<AtomicBool>,
+) {
+    for volume in discovered {
+        let drive_letter = volume.drive_letter;
+        let should_spawn = {
+            let mut tracked = tracked_volumes.lock().unwrap_or_else(|e| e.into_inner());
+            tracked.insert(drive_letter)
+        };
+
+        if !should_spawn {
+            continue;
+        }
+
+        spawn_volume_indexer(
+            volume,
+            tracked_volumes.clone(),
+            indices.clone(),
+            db.clone(),
+            shutdown.clone(),
+        );
+    }
+}
+
+fn spawn_volume_indexer(
+    volume: usn_journal::DiscoveredVolume,
+    tracked_volumes: Arc<Mutex<HashSet<char>>>,
+    indices: Arc<RwLock<Vec<file_index::VolumeIndex>>>,
+    db: Arc<index_db::IndexDb>,
+    shutdown: Arc<AtomicBool>,
+) {
+    let drive_letter = volume.drive_letter;
+    let label = if volume.label.is_empty() {
+        "(no label)"
+    } else {
+        volume.label.as_str()
+    };
+
+    if volume.usn_supported {
+        eprintln!(
+            "[SERVICE] Starting USN indexer for {}:\\ ({}, {})",
+            drive_letter, label, volume.file_system
+        );
+    } else {
+        eprintln!(
+            "[SERVICE] Starting fallback scanner for {}:\\ ({}, {})",
+            drive_letter, label, volume.file_system
+        );
+    }
+
+    std::thread::spawn(move || {
+        if volume.usn_supported {
+            index_volume(drive_letter, indices, db, shutdown);
+        } else {
+            index_non_ntfs_volume(drive_letter, volume.file_system, indices, db, shutdown);
+        }
+
+        let mut tracked = tracked_volumes.lock().unwrap_or_else(|e| e.into_inner());
+        tracked.remove(&drive_letter);
+    });
+}
+
+fn wait_for_shutdown_or_timeout(shutdown: &Arc<AtomicBool>, timeout: std::time::Duration) -> bool {
+    const STEP: std::time::Duration = std::time::Duration::from_millis(500);
+    let start = std::time::Instant::now();
+
+    while start.elapsed() < timeout {
+        if shutdown.load(Ordering::Relaxed) {
+            return true;
+        }
+
+        let remaining = timeout.saturating_sub(start.elapsed());
+        std::thread::sleep(STEP.min(remaining));
+    }
+
+    shutdown.load(Ordering::Relaxed)
+}
+
+fn upsert_volume_index(
+    indices: &mut Vec<file_index::VolumeIndex>,
+    new_index: file_index::VolumeIndex,
+) {
+    if let Some(existing) = indices
+        .iter_mut()
+        .find(|v| v.drive_letter == new_index.drive_letter)
+    {
+        *existing = new_index;
+    } else {
+        indices.push(new_index);
+    }
+}
+
+fn index_non_ntfs_volume(
+    drive_letter: char,
+    file_system: String,
+    indices: Arc<RwLock<Vec<file_index::VolumeIndex>>>,
+    db: Arc<index_db::IndexDb>,
+    shutdown: Arc<AtomicBool>,
+) {
+    const RESCAN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(300);
+
+    eprintln!(
+        "[SCAN] Starting fallback indexer for {}:\\ (filesystem: {})",
+        drive_letter, file_system
+    );
+
+    // Fast startup path: reuse persisted snapshot while a fresh scan runs.
+    let mut cached_index = file_index::VolumeIndex::new(drive_letter);
+    if let Some(cached_count) = db.load_into_index(&mut cached_index) {
+        cached_index.names.shrink_to_fit();
+        cached_index.journal_id = 0;
+        cached_index.last_usn = 0;
+        cached_index.state = file_index::IndexState::Ready;
+
+        let mut indices_lock = indices.write().unwrap_or_else(|e| e.into_inner());
+        upsert_volume_index(&mut indices_lock, cached_index);
+        eprintln!(
+            "[SCAN] {}:\\ Loaded {} cached records for fallback index",
+            drive_letter, cached_count
+        );
+    }
+
+    loop {
+        if shutdown.load(Ordering::Relaxed) {
+            break;
+        }
+
+        let mut scanned_index = file_index::VolumeIndex::new(drive_letter);
+        scanned_index.state = file_index::IndexState::Scanning;
+
+        match fs_walker::scan_volume(drive_letter, &mut scanned_index) {
+            Ok(stats) => {
+                scanned_index.names.shrink_to_fit();
+                scanned_index.journal_id = 0;
+                scanned_index.last_usn = 0;
+                scanned_index.state = file_index::IndexState::Ready;
+
+                if let Err(e) = db.save_volume(&scanned_index) {
+                    eprintln!(
+                        "[SCAN] {}:\\ Failed to save fallback index: {}",
+                        drive_letter,
+                        redact_paths(&e.to_string())
+                    );
+                }
+
+                let records = stats.records_indexed;
+                {
+                    let mut indices_lock = indices.write().unwrap_or_else(|e| e.into_inner());
+                    upsert_volume_index(&mut indices_lock, scanned_index);
+                }
+
+                eprintln!(
+                    "[SCAN] {}:\\ Indexed {} records ({} directories, {} read errors) in {:.2}s",
+                    drive_letter,
+                    records,
+                    stats.directories_scanned,
+                    stats.errors,
+                    stats.elapsed.as_secs_f64()
+                );
+            }
+            Err(e) => {
+                eprintln!("[SCAN] {}:\\ Full scan failed: {}", drive_letter, e);
+
+                let mut indices_lock = indices.write().unwrap_or_else(|poison| poison.into_inner());
+                if let Some(existing) = indices_lock
+                    .iter_mut()
+                    .find(|v| v.drive_letter == drive_letter)
+                {
+                    if existing.records.is_empty() {
+                        existing.state = file_index::IndexState::Error(e.clone());
+                    }
+                }
+            }
+        }
+
+        if wait_for_shutdown_or_timeout(&shutdown, RESCAN_INTERVAL) {
+            break;
+        }
+    }
+
+    eprintln!("[SCAN] {}:\\ Fallback indexer stopped", drive_letter);
 }
 
 fn index_volume(
@@ -176,9 +397,7 @@ fn index_volume(
                 let (arena_used, _arena_cap, map_est) = index.memory_usage();
                 eprintln!(
                     "[USN] {}:\\ Loaded {} cached records, catching up from USN {}...",
-                    drive_letter,
-                    count,
-                    state.last_usn
+                    drive_letter, count, state.last_usn
                 );
                 eprintln!(
                     "[USN] {}:\\ Memory after DB load: arena {:.1} MB, map ~{:.1} MB",
@@ -275,7 +494,11 @@ fn index_volume(
 
         // Persist to database
         if let Err(e) = db.save_volume(&index) {
-            eprintln!("[USN] {}:\\ Failed to save index: {}", drive_letter, redact_paths(&e.to_string()));
+            eprintln!(
+                "[USN] {}:\\ Failed to save index: {}",
+                drive_letter,
+                redact_paths(&e.to_string())
+            );
         }
     }
 
@@ -285,7 +508,7 @@ fn index_volume(
     // Add to shared indices
     {
         let mut indices_lock = indices.write().unwrap_or_else(|e| e.into_inner());
-        indices_lock.push(index);
+        upsert_volume_index(&mut indices_lock, index);
     }
 
     eprintln!(
@@ -340,12 +563,13 @@ fn index_volume(
         // 3. Persist every 5 minutes — under READ lock (save_volume takes &VolumeIndex).
         if last_persist.elapsed() > std::time::Duration::from_secs(300) {
             let indices_lock = indices.read().unwrap_or_else(|e| e.into_inner());
-            if let Some(vol_index) = indices_lock
-                .iter()
-                .find(|v| v.drive_letter == drive_letter)
-            {
+            if let Some(vol_index) = indices_lock.iter().find(|v| v.drive_letter == drive_letter) {
                 if let Err(e) = db.save_volume(vol_index) {
-                    eprintln!("[USN] {}:\\ Persist error: {}", drive_letter, redact_paths(&e.to_string()));
+                    eprintln!(
+                        "[USN] {}:\\ Persist error: {}",
+                        drive_letter,
+                        redact_paths(&e.to_string())
+                    );
                 }
             }
             last_persist = std::time::Instant::now();

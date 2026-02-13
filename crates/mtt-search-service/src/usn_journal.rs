@@ -37,6 +37,15 @@ pub struct UsnJournalInfo {
     pub next_usn: i64,
 }
 
+/// Logical volume discovered on the machine.
+#[derive(Clone, Debug)]
+pub struct DiscoveredVolume {
+    pub drive_letter: char,
+    pub label: String,
+    pub file_system: String,
+    pub usn_supported: bool,
+}
+
 /// Input structure for FSCTL_ENUM_USN_DATA.
 #[repr(C)]
 struct MftEnumDataV0 {
@@ -56,9 +65,8 @@ struct ReadUsnJournalDataV0 {
     usn_journal_id: u64,
 }
 
-/// Discover all NTFS volumes on the system.
-/// Returns a list of (drive_letter, volume_label) pairs.
-pub fn discover_ntfs_volumes() -> Vec<(char, String)> {
+/// Discover all mounted logical volumes that expose filesystem information.
+pub fn discover_volumes() -> Vec<DiscoveredVolume> {
     let mut volumes = Vec::new();
 
     for letter in 'A'..='Z' {
@@ -84,12 +92,21 @@ pub fn discover_ntfs_volumes() -> Vec<(char, String)> {
                 .trim_end_matches('\0')
                 .to_string();
 
-            if fs == "NTFS" || fs == "ReFS" {
-                let label = String::from_utf16_lossy(&vol_name)
-                    .trim_end_matches('\0')
-                    .to_string();
-                volumes.push((letter, label));
+            if fs.is_empty() {
+                continue;
             }
+
+            let label = String::from_utf16_lossy(&vol_name)
+                .trim_end_matches('\0')
+                .to_string();
+            let usn_supported = fs.eq_ignore_ascii_case("NTFS") || fs.eq_ignore_ascii_case("ReFS");
+
+            volumes.push(DiscoveredVolume {
+                drive_letter: letter,
+                label,
+                file_system: fs,
+                usn_supported,
+            });
         }
     }
 
@@ -307,7 +324,12 @@ pub fn read_usn_buffer(
 /// Parse USN_RECORD_V2 entries from a buffer.
 /// If `apply_changes` is true, process DELETE/RENAME reasons.
 /// Otherwise, just insert all records (initial enumeration).
-pub fn parse_usn_records(data: &[u8], index: &mut VolumeIndex, count: &mut usize, apply_changes: bool) {
+pub fn parse_usn_records(
+    data: &[u8],
+    index: &mut VolumeIndex,
+    count: &mut usize,
+    apply_changes: bool,
+) {
     let mut offset = 0usize;
 
     while offset + 64 <= data.len() {
