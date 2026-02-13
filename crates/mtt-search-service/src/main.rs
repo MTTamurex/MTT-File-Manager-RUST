@@ -263,7 +263,7 @@ fn index_non_ntfs_volume(
     db: Arc<index_db::IndexDb>,
     shutdown: Arc<AtomicBool>,
 ) {
-    const RESCAN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(300);
+    let rescan_interval = non_usn_rescan_interval(&file_system);
 
     eprintln!(
         "[SCAN] Starting fallback indexer for {}:\\ (filesystem: {})",
@@ -339,12 +339,27 @@ fn index_non_ntfs_volume(
             }
         }
 
-        if wait_for_shutdown_or_timeout(&shutdown, RESCAN_INTERVAL) {
+        if wait_for_shutdown_or_timeout(&shutdown, rescan_interval) {
             break;
         }
     }
 
     eprintln!("[SCAN] {}:\\ Fallback indexer stopped", drive_letter);
+}
+
+fn non_usn_rescan_interval(file_system: &str) -> std::time::Duration {
+    let fs = file_system.to_ascii_lowercase();
+    if fs.contains("cryptofs")
+        || fs.contains("fuse")
+        || fs.contains("dokan")
+        || fs.contains("winfsp")
+    {
+        // Virtual/encrypted mounts change frequently and usually have fewer entries.
+        std::time::Duration::from_secs(30)
+    } else {
+        // Physical non-USN filesystems (e.g., exFAT/FAT32) keep a safer cadence.
+        std::time::Duration::from_secs(120)
+    }
 }
 
 fn index_volume(

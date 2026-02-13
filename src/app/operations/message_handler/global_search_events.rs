@@ -44,10 +44,10 @@ impl ImageViewerApp {
         }
 
         // Check availability faster while offline, slower while stable online.
-        let interval = if self.global_search_available {
-            std::time::Duration::from_secs(30)
-        } else if self.global_search_active {
+        let interval = if self.global_search_active {
             std::time::Duration::from_secs(1)
+        } else if self.global_search_available {
+            std::time::Duration::from_secs(30)
         } else {
             std::time::Duration::from_secs(3)
         };

@@ -229,6 +229,7 @@ pub fn start_global_search_worker(
 
                     // Never scan drives in the query path; use cached session index only.
                     // Refresh happens in status cycles to keep typing/search latency stable.
+                    session_index.poll_fast_updates();
                     let local_items = session_index.search(&query, max_results as usize);
 
                     match query_service_with_retry(&query, max_results) {
