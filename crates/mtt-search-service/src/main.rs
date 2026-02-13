@@ -1,6 +1,7 @@
 mod file_index;
 mod index_db;
 mod ipc_server;
+mod name_arena;
 mod path_resolver;
 mod service_control;
 mod usn_journal;
@@ -75,6 +76,8 @@ fn ctrlc_handler(_shutdown: Arc<AtomicBool>) -> Result<(), String> {
 
 /// Main indexer loop. Shared between console mode and service mode.
 pub fn run_indexer(shutdown: Arc<AtomicBool>) {
+    eprintln!("[SERVICE] mtt-search-service v2 (compact-arena index)");
+    eprintln!("[SERVICE] FileRecord size: {} bytes", std::mem::size_of::<file_index::FileRecord>());
     eprintln!("[SERVICE] Starting indexer...");
 
     // Discover NTFS volumes
@@ -133,11 +136,6 @@ fn index_volume(
 
     // Try to load cached state from database
     let cached_state = db.load_volume_state(drive_letter);
-    let cached_records = if cached_state.is_some() {
-        db.load_file_records(drive_letter)
-    } else {
-        None
-    };
 
     // Open volume handle
     let volume_handle = match usn_journal::open_volume(drive_letter) {
@@ -170,43 +168,59 @@ fn index_volume(
     let need_full_scan;
 
     // Check if we can use cached data
-    if let (Some(state), Some(records)) = (cached_state, cached_records) {
+    if let Some(state) = cached_state {
         if state.journal_id == journal_info.journal_id {
-            eprintln!(
-                "[USN] {}:\\ Loading {} cached records, catching up from USN {}...",
-                drive_letter,
-                records.len(),
-                state.last_usn
-            );
-            index.records = records;
-            index.journal_id = state.journal_id;
-            index.last_usn = state.last_usn;
+            // Stream records from DB directly into arena (no intermediate Vec<String>)
+            if let Some(count) = db.load_into_index(&mut index) {
+                index.names.shrink_to_fit();
+                let (arena_used, _arena_cap, map_est) = index.memory_usage();
+                eprintln!(
+                    "[USN] {}:\\ Loaded {} cached records, catching up from USN {}...",
+                    drive_letter,
+                    count,
+                    state.last_usn
+                );
+                eprintln!(
+                    "[USN] {}:\\ Memory after DB load: arena {:.1} MB, map ~{:.1} MB",
+                    drive_letter,
+                    arena_used as f64 / 1_048_576.0,
+                    map_est as f64 / 1_048_576.0,
+                );
+                index.journal_id = state.journal_id;
+                index.last_usn = state.last_usn;
 
-            // Catch up from last USN
-            match usn_journal::read_usn_changes(
-                volume_handle,
-                &journal_info,
-                index.last_usn,
-                &mut index,
-            ) {
-                Ok(new_usn) => {
-                    index.last_usn = new_usn;
-                    eprintln!(
-                        "[USN] {}:\\ Caught up to USN {}, {} total records",
-                        drive_letter,
-                        new_usn,
-                        index.records.len()
-                    );
-                    need_full_scan = false;
+                // Catch up from last USN
+                match usn_journal::read_usn_changes(
+                    volume_handle,
+                    &journal_info,
+                    index.last_usn,
+                    &mut index,
+                ) {
+                    Ok(new_usn) => {
+                        index.last_usn = new_usn;
+                        eprintln!(
+                            "[USN] {}:\\ Caught up to USN {}, {} total records",
+                            drive_letter,
+                            new_usn,
+                            index.records.len()
+                        );
+                        need_full_scan = false;
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[USN] {}:\\ Catch-up failed ({}), doing full scan",
+                            drive_letter, e
+                        );
+                        index.clear();
+                        need_full_scan = true;
+                    }
                 }
-                Err(e) => {
-                    eprintln!(
-                        "[USN] {}:\\ Catch-up failed ({}), doing full scan",
-                        drive_letter, e
-                    );
-                    index.records.clear();
-                    need_full_scan = true;
-                }
+            } else {
+                eprintln!(
+                    "[USN] {}:\\ No cached records found, full scan needed",
+                    drive_letter
+                );
+                need_full_scan = true;
             }
         } else {
             eprintln!(
@@ -235,6 +249,20 @@ fn index_volume(
                     drive_letter,
                     index.records.len(),
                     elapsed.as_secs_f64()
+                );
+
+                // Compact arena: eliminate dead space from duplicate MFT
+                // name attributes (long name + 8.3 short name per file)
+                let arena_before = index.names.len();
+                index.compact_arena();
+                let (arena_used, arena_cap, map_est) = index.memory_usage();
+                eprintln!(
+                    "[USN] {}:\\ Arena compacted: {:.1} MB -> {:.1} MB, map ~{:.1} MB, total ~{:.1} MB",
+                    drive_letter,
+                    arena_before as f64 / 1_048_576.0,
+                    arena_used as f64 / 1_048_576.0,
+                    map_est as f64 / 1_048_576.0,
+                    (arena_cap + map_est) as f64 / 1_048_576.0
                 );
             }
             Err(e) => {

@@ -20,7 +20,7 @@ pub fn resolve_path(frn: u64, index: &VolumeIndex) -> Option<String> {
             break;
         }
 
-        components.push(record.name.as_str());
+        components.push(index.names.get(record.name_ref()));
 
         let parent = record.parent_ref;
 
