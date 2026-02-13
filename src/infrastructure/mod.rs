@@ -12,6 +12,7 @@ pub mod media;
 pub mod ntfs_reader;
 pub mod onedrive;
 pub mod security;
+pub mod user_session_search;
 pub mod virtual_drive_config;
 pub mod windows;
 pub mod windows_clipboard;
