@@ -82,7 +82,8 @@ impl ImageViewerApp {
             Err(e) => {
                 log::error!(
                     "[Cache] Fatal: failed to initialize thumbnail cache at {:?}: {:?}",
-                    cache_dir, e
+                    cache_dir,
+                    e
                 );
                 std::process::exit(1);
             }
@@ -304,7 +305,8 @@ impl ImageViewerApp {
 
         log::debug!(
             "[INIT] Raw sidebar values from DB: L={:?}, R={:?}",
-            sidebar_left_raw, sidebar_right_raw
+            sidebar_left_raw,
+            sidebar_right_raw
         );
 
         let sidebar_left_width = sidebar_left_raw
@@ -316,7 +318,8 @@ impl ImageViewerApp {
 
         log::debug!(
             "[INIT] Parsed sidebar widths: L={}, R={}",
-            sidebar_left_width, sidebar_right_width
+            sidebar_left_width,
+            sidebar_right_width
         );
 
         // Load media player volume from SQLite
@@ -806,9 +809,12 @@ impl ImageViewerApp {
             global_search_query: String::new(),
             global_search_results: Vec::new(),
             global_search_selected_index: None,
+            global_search_focus_request: false,
             global_search_size_cache: LruCache::new(
                 NonZeroUsize::new(2000).expect("global_search_size_cache size must be non-zero"),
             ),
+            global_search_category: crate::app::state::GlobalSearchCategory::All,
+            global_search_drive_filter: None,
             global_search_active: false,
             global_search_loading: false,
             global_search_available: false,

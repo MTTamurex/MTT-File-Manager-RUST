@@ -1,7 +1,7 @@
 //! Global search overlay modal (Spotlight-style).
 //! Activated via Ctrl+Shift+F.
 
-use crate::app::state::ImageViewerApp;
+use crate::app::state::{GlobalSearchCategory, ImageViewerApp};
 use eframe::egui;
 
 const MAX_RESULTS: u32 = 200;
@@ -33,7 +33,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
     let mut close_from_backdrop = false;
     egui::Area::new(egui::Id::from("global_search_backdrop_area"))
         .fixed_pos(screen_rect.min)
-        .order(egui::Order::Foreground)
+        .order(egui::Order::Middle)
         .show(ctx, |ui| {
             ui.set_min_size(screen_rect.size());
 
@@ -51,9 +51,12 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
             );
 
             if backdrop_resp.clicked() {
-                if let Some(click_pos) = backdrop_resp.interact_pointer_pos() {
-                    if !modal_rect.contains(click_pos) {
-                        close_from_backdrop = true;
+                let popup_open = ctx.memory(|m| m.any_popup_open());
+                if !popup_open {
+                    if let Some(click_pos) = backdrop_resp.interact_pointer_pos() {
+                        if !modal_rect.contains(click_pos) {
+                            close_from_backdrop = true;
+                        }
                     }
                 }
             }
@@ -61,19 +64,21 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
 
     if close_from_backdrop {
         app.global_search_active = false;
+        app.global_search_focus_request = false;
         return;
     }
 
     // ESC closes
     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         app.global_search_active = false;
+        app.global_search_focus_request = false;
         return;
     }
 
     // Render modal
     egui::Area::new(egui::Id::from("global_search_modal"))
         .fixed_pos(egui::pos2(modal_x, modal_y))
-        .order(egui::Order::Tooltip)
+        .order(egui::Order::Foreground)
         .show(ctx, |ui| {
             egui::Frame::window(ui.style())
                 .inner_margin(egui::Margin::same(16))
@@ -123,8 +128,9 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                     );
 
                     // Auto-focus on open
-                    if search_resp.gained_focus() || ctx.memory(|m| !m.has_focus(search_resp.id)) {
+                    if app.global_search_focus_request {
                         search_resp.request_focus();
+                        app.global_search_focus_request = false;
                     }
 
                     // Trigger search on text change (with debounce)
@@ -147,9 +153,17 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                     }
 
                     ui.add_space(8.0);
+                    render_filter_controls(ui, app);
+                    ui.add_space(8.0);
+
+                    let filtered_indices = build_filtered_indices(
+                        &app.global_search_results,
+                        app.global_search_category,
+                        app.global_search_drive_filter,
+                    );
 
                     // Results area height is fixed from modal height to avoid dynamic growth.
-                    let results_height = (modal_max_height - 172.0).max(220.0);
+                    let results_height = (modal_max_height - 212.0).max(200.0);
 
                     if app.global_search_loading && app.global_search_results.is_empty() {
                         ui.allocate_ui_with_layout(
@@ -176,11 +190,30 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                                 );
                             },
                         );
-                    } else if !app.global_search_results.is_empty() {
+                    } else if !app.global_search_results.is_empty() && filtered_indices.is_empty() {
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(ui.available_width(), results_height),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                ui.add_space(20.0);
+                                ui.label(
+                                    egui::RichText::new("Nenhum resultado com os filtros atuais")
+                                        .color(egui::Color32::from_gray(120)),
+                                );
+                            },
+                        );
+                    } else if !filtered_indices.is_empty() {
                         if app
                             .global_search_selected_index
                             .is_some_and(|idx| idx >= app.global_search_results.len())
                         {
+                            app.global_search_selected_index = None;
+                        }
+                        if app.global_search_selected_index.is_some_and(|idx| {
+                            !filtered_indices
+                                .iter()
+                                .any(|filtered_idx| *filtered_idx == idx)
+                        }) {
                             app.global_search_selected_index = None;
                         }
 
@@ -188,7 +221,8 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         ui.horizontal(|ui| {
                             ui.label(
                                 egui::RichText::new(format!(
-                                    "{} resultados",
+                                    "{} resultados (de {})",
+                                    filtered_indices.len(),
                                     app.global_search_results.len()
                                 ))
                                 .size(11.0)
@@ -210,8 +244,12 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                                 egui::ScrollArea::vertical()
                                     .auto_shrink([false, false])
                                     .show(ui, |ui| {
-                                        let results = app.global_search_results.clone();
-                                        for (row_idx, result) in results.iter().enumerate() {
+                                        for &source_idx in &filtered_indices {
+                                            let Some(result) =
+                                                app.global_search_results.get(source_idx).cloned()
+                                            else {
+                                                continue;
+                                            };
                                             let path_buf =
                                                 std::path::PathBuf::from(&result.full_path);
                                             let is_dir = result.is_dir;
@@ -225,9 +263,9 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                                             );
                                             let size_text = size_opt
                                                 .map(crate::infrastructure::windows::format_size)
-                                                .unwrap_or_else(|| "—".to_string());
+                                                .unwrap_or_else(|| "-".to_string());
                                             let meta_text =
-                                                format!("{} • {}", file_type, size_text);
+                                                format!("{} | {}", file_type, size_text);
 
                                             let icon_tex =
                                                 app.item_icon_loader.get_or_load_icon_sized(
@@ -256,16 +294,16 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
 
                                             let row_resp = ui.interact(
                                                 row_rect,
-                                                ui.id().with(("global_search_row", row_idx)),
+                                                ui.id().with(("global_search_row", source_idx)),
                                                 egui::Sense::click(),
                                             );
 
                                             if row_resp.clicked() {
-                                                app.global_search_selected_index = Some(row_idx);
+                                                app.global_search_selected_index = Some(source_idx);
                                             }
 
-                                            let is_selected =
-                                                app.global_search_selected_index == Some(row_idx);
+                                            let is_selected = app.global_search_selected_index
+                                                == Some(source_idx);
                                             if is_selected {
                                                 ui.painter().rect_filled(
                                                     row_rect,
@@ -347,16 +385,20 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                             },
                         );
 
-                        // Enter opens selected result (or the first one when none is selected).
+                        // Enter opens selected result (or the first visible one when none is selected).
                         if activate_result.is_none()
                             && ctx.input(|i| i.key_pressed(egui::Key::Enter))
-                            && !app.global_search_results.is_empty()
+                            && !filtered_indices.is_empty()
                         {
-                            let idx = app.global_search_selected_index.unwrap_or(0);
-                            let idx = idx.min(app.global_search_results.len() - 1);
-                            app.global_search_selected_index = Some(idx);
+                            let selected_idx = app
+                                .global_search_selected_index
+                                .filter(|idx| filtered_indices.iter().any(|v| v == idx))
+                                .unwrap_or(filtered_indices[0]);
+                            app.global_search_selected_index = Some(selected_idx);
 
-                            if let Some(result) = app.global_search_results.get(idx).cloned() {
+                            if let Some(result) =
+                                app.global_search_results.get(selected_idx).cloned()
+                            {
                                 activate_result = Some((result.full_path, result.is_dir));
                             }
                         }
@@ -382,6 +424,229 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
         });
 }
 
+fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
+    let categories = [
+        GlobalSearchCategory::All,
+        GlobalSearchCategory::Files,
+        GlobalSearchCategory::Folders,
+        GlobalSearchCategory::Images,
+        GlobalSearchCategory::Videos,
+        GlobalSearchCategory::Audio,
+        GlobalSearchCategory::Documents,
+    ];
+
+    let drives = available_drives(&app.global_search_results);
+    if app
+        .global_search_drive_filter
+        .is_some_and(|drive| !drives.contains(&drive))
+    {
+        app.global_search_drive_filter = None;
+        app.global_search_selected_index = None;
+    }
+
+    ui.horizontal(|ui| {
+        let right_width = 190.0;
+        let left_width = (ui.available_width() - right_width).max(120.0);
+
+        ui.allocate_ui_with_layout(
+            egui::vec2(left_width, 28.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.label(
+                    egui::RichText::new("Filtros:")
+                        .size(10.0)
+                        .color(egui::Color32::from_gray(140)),
+                );
+
+                for category in categories {
+                    let selected = app.global_search_category == category;
+                    if ui
+                        .selectable_label(selected, category_label(category))
+                        .clicked()
+                    {
+                        app.global_search_category = category;
+                        app.global_search_selected_index = None;
+                    }
+                }
+            },
+        );
+
+        ui.allocate_ui_with_layout(
+            egui::vec2(right_width, 28.0),
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                egui::ComboBox::from_id_salt("global_search_drive_filter")
+                    .width(120.0)
+                    .selected_text(match app.global_search_drive_filter {
+                        Some(drive) => format!("{}:\\", drive),
+                        None => "Todos".to_string(),
+                    })
+                    .show_ui(ui, |ui| {
+                        if ui
+                            .selectable_label(app.global_search_drive_filter.is_none(), "Todos")
+                            .clicked()
+                        {
+                            app.global_search_drive_filter = None;
+                            app.global_search_selected_index = None;
+                        }
+
+                        for drive in &drives {
+                            let selected = app.global_search_drive_filter == Some(*drive);
+                            if ui
+                                .selectable_label(selected, format!("{}:\\", drive))
+                                .clicked()
+                            {
+                                app.global_search_drive_filter = Some(*drive);
+                                app.global_search_selected_index = None;
+                            }
+                        }
+                    });
+
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new("Drive:")
+                        .size(10.0)
+                        .color(egui::Color32::from_gray(140)),
+                );
+            },
+        );
+
+        if ui.available_width() > 0.0 {
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), 0.0),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |_| {},
+            );
+        }
+    });
+}
+
+fn category_label(category: GlobalSearchCategory) -> &'static str {
+    match category {
+        GlobalSearchCategory::All => "Tudo",
+        GlobalSearchCategory::Files => "Arquivos",
+        GlobalSearchCategory::Folders => "Pastas",
+        GlobalSearchCategory::Images => "Imagens",
+        GlobalSearchCategory::Videos => "Videos",
+        GlobalSearchCategory::Audio => "Audio",
+        GlobalSearchCategory::Documents => "Documentos",
+    }
+}
+
+fn build_filtered_indices(
+    results: &[mtt_search_protocol::SearchResultItem],
+    category: GlobalSearchCategory,
+    drive_filter: Option<char>,
+) -> Vec<usize> {
+    let mut filtered = Vec::with_capacity(results.len());
+
+    for (idx, result) in results.iter().enumerate() {
+        if let Some(drive) = drive_filter {
+            if extract_drive_letter(&result.full_path) != Some(drive) {
+                continue;
+            }
+        }
+
+        if matches_category(result, category) {
+            filtered.push(idx);
+        }
+    }
+
+    filtered
+}
+
+fn available_drives(results: &[mtt_search_protocol::SearchResultItem]) -> Vec<char> {
+    let mut drives: Vec<char> = results
+        .iter()
+        .filter_map(|r| extract_drive_letter(&r.full_path))
+        .collect();
+    drives.sort_unstable();
+    drives.dedup();
+    drives
+}
+
+fn extract_drive_letter(path: &str) -> Option<char> {
+    use std::path::{Component, Path, Prefix};
+
+    // Accept regular and verbatim Windows paths:
+    // - C:\foo
+    // - \\?\C:\foo
+    // - \\.\C:\foo
+    if let Some(Component::Prefix(prefix_component)) = Path::new(path).components().next() {
+        match prefix_component.kind() {
+            Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => {
+                return Some((letter as char).to_ascii_uppercase());
+            }
+            _ => {}
+        }
+    }
+
+    // Fallback for uncommon string forms (e.g., slashes normalized by other layers).
+    let normalized = path
+        .strip_prefix(r"\\?\")
+        .or_else(|| path.strip_prefix(r"\\.\"))
+        .or_else(|| path.strip_prefix("//?/"))
+        .or_else(|| path.strip_prefix("//./"))
+        .or_else(|| path.strip_prefix(r"\??\"))
+        .unwrap_or(path);
+
+    let mut chars = normalized.chars();
+    let drive = chars.next()?.to_ascii_uppercase();
+    if drive.is_ascii_alphabetic() && chars.next() == Some(':') {
+        return Some(drive);
+    }
+
+    None
+}
+
+fn matches_category(
+    result: &mtt_search_protocol::SearchResultItem,
+    category: GlobalSearchCategory,
+) -> bool {
+    match category {
+        GlobalSearchCategory::All => true,
+        GlobalSearchCategory::Files => !result.is_dir,
+        GlobalSearchCategory::Folders => result.is_dir,
+        GlobalSearchCategory::Images => extension_in(
+            &result.full_path,
+            &[
+                "jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff", "tif", "svg", "heic", "avif",
+                "ico",
+            ],
+        ),
+        GlobalSearchCategory::Videos => extension_in(
+            &result.full_path,
+            &[
+                "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v", "mpeg", "mpg", "ts",
+            ],
+        ),
+        GlobalSearchCategory::Audio => extension_in(
+            &result.full_path,
+            &["mp3", "wav", "flac", "aac", "ogg", "wma", "m4a", "opus"],
+        ),
+        GlobalSearchCategory::Documents => extension_in(
+            &result.full_path,
+            &[
+                "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "rtf", "odt",
+                "csv",
+            ],
+        ),
+    }
+}
+
+fn extension_in(path: &str, allowed: &[&str]) -> bool {
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
+
+    let Some(ext) = ext else {
+        return false;
+    };
+
+    allowed.iter().any(|candidate| *candidate == ext)
+}
+
 fn format_number(n: u64) -> String {
     if n >= 1_000_000 {
         format!("{:.1}M", n as f64 / 1_000_000.0)
@@ -405,6 +670,7 @@ fn normalize_path_for_compare(path: &str) -> String {
 
 fn activate_search_result(app: &mut ImageViewerApp, full_path: &str, is_dir: bool) {
     app.global_search_active = false;
+    app.global_search_focus_request = false;
 
     if is_dir {
         app.navigate_to(full_path);
@@ -480,4 +746,27 @@ fn resolve_result_size(
     app.global_search_size_cache
         .put(full_path.to_string(), computed);
     computed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_drive_letter;
+
+    #[test]
+    fn extract_drive_letter_accepts_regular_windows_path() {
+        assert_eq!(extract_drive_letter(r"C:\Users\foo.txt"), Some('C'));
+        assert_eq!(extract_drive_letter(r"z:\vault\file.docx"), Some('Z'));
+    }
+
+    #[test]
+    fn extract_drive_letter_accepts_verbatim_windows_path() {
+        assert_eq!(extract_drive_letter(r"\\?\D:\data\file.bin"), Some('D'));
+        assert_eq!(extract_drive_letter(r"\\.\E:\media\movie.mkv"), Some('E'));
+    }
+
+    #[test]
+    fn extract_drive_letter_rejects_non_drive_paths() {
+        assert_eq!(extract_drive_letter(r"\\server\share\file.txt"), None);
+        assert_eq!(extract_drive_letter(r"/home/user/file.txt"), None);
+    }
 }

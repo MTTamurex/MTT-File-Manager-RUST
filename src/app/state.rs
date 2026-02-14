@@ -14,6 +14,17 @@ pub enum LastInput {
     Keyboard,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GlobalSearchCategory {
+    All,
+    Files,
+    Folders,
+    Images,
+    Videos,
+    Audio,
+    Documents,
+}
+
 use std::collections::VecDeque;
 // use std::num::NonZeroUsize;
 use std::path::PathBuf;
@@ -170,7 +181,7 @@ pub struct ImageViewerApp {
     pub last_grid_cols: usize,                // Memory for vertical navigation (keyboard)
     pub generation: usize,                    // Local counter (Main Thread)
     pub current_generation: Arc<AtomicUsize>, // Shared counter (Workers)
-    pub ui_ctx: egui::Context, // Reference to UI context for async repaints
+    pub ui_ctx: egui::Context,                // Reference to UI context for async repaints
     // PERFORMANCE: Throttle list rebuild during streaming
     pub last_items_rebuild: Instant,
     pub pending_items_rebuild: bool,
@@ -326,7 +337,10 @@ pub struct ImageViewerApp {
     pub global_search_query: String,
     pub global_search_results: Vec<mtt_search_protocol::SearchResultItem>,
     pub global_search_selected_index: Option<usize>,
+    pub global_search_focus_request: bool,
     pub global_search_size_cache: LruCache<String, Option<u64>>,
+    pub global_search_category: GlobalSearchCategory,
+    pub global_search_drive_filter: Option<char>,
     pub global_search_active: bool,
     pub global_search_loading: bool,
     pub global_search_available: bool,

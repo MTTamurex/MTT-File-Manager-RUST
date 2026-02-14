@@ -16,6 +16,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         if app.global_search_active {
             if ctx.input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::F)) {
                 app.global_search_active = false;
+                app.global_search_focus_request = false;
                 user_active = true;
             }
 
@@ -181,6 +182,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             app.global_search_active = !app.global_search_active;
             app.global_search_selected_index = None;
             if app.global_search_active {
+                app.global_search_focus_request = true;
                 app.global_search_query.clear();
                 app.global_search_results.clear();
                 app.global_search_loading = false;
@@ -191,6 +193,8 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 {
                     log::error!("[GLOBAL-SEARCH] Failed to queue status check: {}", e);
                 }
+            } else {
+                app.global_search_focus_request = false;
             }
             user_active = true;
         }
