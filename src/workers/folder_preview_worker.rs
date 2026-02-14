@@ -42,13 +42,20 @@ pub fn spawn_folder_preview_worker(
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         }
 
-        // Preview is user-visible; keep it above background to reduce first-paint latency.
-        crate::infrastructure::io_priority::set_thread_priority(
-            crate::infrastructure::io_priority::IOPriority::Prefetch,
-        );
-
         let mut last_repaint = Instant::now();
+        let mut last_ssd_state: Option<bool> = None;
         while let Some(path) = rx.lock().ok().and_then(|lock| lock.recv().ok()) {
+            let is_ssd = crate::infrastructure::io_priority::is_ssd(&path);
+            if last_ssd_state != Some(is_ssd) {
+                let priority = if is_ssd {
+                    crate::infrastructure::io_priority::IOPriority::Prefetch
+                } else {
+                    crate::infrastructure::io_priority::IOPriority::Background
+                };
+                crate::infrastructure::io_priority::set_thread_priority(priority);
+                last_ssd_state = Some(is_ssd);
+            }
+
             // Skip cloud-only OneDrive folders — Shell API can block on network I/O
             if crate::infrastructure::onedrive::is_onedrive_path(&path)
                 && !crate::infrastructure::onedrive::is_locally_available(&path)
@@ -142,6 +149,8 @@ pub fn spawn_folder_preview_worker(
             }
             throttle_repaint(&ctx, &mut last_repaint);
         }
+
+        crate::infrastructure::io_priority::reset_thread_priority();
 
         unsafe {
             // SAFETY: Cleanup COM for this thread

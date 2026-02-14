@@ -225,7 +225,6 @@ impl ImageViewerApp {
                             continue;
                         }
                         let cleaned = Self::clean_path(path);
-                        register_changed_folder(&cleaned, &mut folders_with_changed_contents);
                         self.cache_manager.texture_cache.pop(&cleaned);
                         self.cache_manager.failed_thumbnails.pop(&cleaned);
                         crate::workers::thumbnail::clear_failure_cache(&cleaned);
@@ -294,19 +293,11 @@ impl ImageViewerApp {
         // Folder preview cache invalidation for content changes inside folders.
         // Needed so subfolder thumbnails/previews update when files are added/removed/renamed.
         for folder_path in folders_with_changed_contents {
-            self.cache_manager.invalidate_folder_preview(&folder_path);
+            // Keep in-memory preview visible until a fresh one is ready to avoid
+            // rapid fallback<->preview flicker in the details panel.
             self.disk_cache.remove_folder_preview_cache(&folder_path);
             self.disk_cache.remove_folder_cover(&folder_path);
             self.scanned_folders.pop(&folder_path);
-
-            // Clear stale in-memory cover immediately for visible folders.
-            if let Some(item) = self
-                .all_items
-                .iter_mut()
-                .find(|item| item.is_dir && item.path == folder_path)
-            {
-                item.folder_cover = None;
-            }
 
             // Force a fresh cover discovery for this folder so changes from external apps
             // (Explorer, scripts, etc.) are reflected without manual refresh.
@@ -388,7 +379,6 @@ impl ImageViewerApp {
                                             "[FS] Direct subfolder modified: {:?}",
                                             cleaned.file_name()
                                         );
-                                        self.cache_manager.invalidate_folder_preview(&cleaned);
                                         self.disk_cache.remove_folder_preview_cache(&cleaned);
                                     }
                                 }
@@ -408,8 +398,6 @@ impl ImageViewerApp {
                                                 "[FS] File in subfolder modified, invalidating: {:?}",
                                                 cleaned_parent.file_name()
                                             );
-                                            self.cache_manager
-                                                .invalidate_folder_preview(&cleaned_parent);
                                             self.disk_cache
                                                 .remove_folder_preview_cache(&cleaned_parent);
                                         }
