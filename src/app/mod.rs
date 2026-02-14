@@ -13,6 +13,7 @@ pub mod folder_size_state;
 pub mod global_search_state;
 pub mod init;
 mod init_preferences;
+mod init_workers;
 pub mod layout_state;
 pub mod navigation_state;
 pub mod operations;

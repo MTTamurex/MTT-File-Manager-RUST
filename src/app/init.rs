@@ -29,9 +29,16 @@ use crate::ui::theme;
 
 use super::drive_state::DriveState;
 use super::file_operation_state::FileOperationState;
-use super::folder_size_state::{FolderSizeMessage, FolderSizeState};
+use super::folder_size_state::FolderSizeState;
 use super::global_search_state::GlobalSearchState;
 use super::init_preferences::StartupPreferences;
+use super::init_workers::{
+    spawn_async_font_loader, spawn_cover_worker, spawn_disk_cache_invalidation_worker,
+    spawn_file_operation_worker, spawn_folder_preview_workers, spawn_folder_size_worker,
+    spawn_global_search_worker, spawn_icon_worker, spawn_incremental_gc_worker,
+    spawn_metadata_worker, spawn_prefetching_workers, spawn_startup_drive_info_preload,
+    PrefetchWorkerHandles,
+};
 use super::layout_state::LayoutState;
 use super::navigation_state::NavigationState;
 use super::state::{ImageViewerApp, ItemsRebuildResult, LastInput};
@@ -49,7 +56,7 @@ fn determine_initial_path(disk_cache: &ThumbnailDiskCache) -> (String, bool) {
             // path.exists() + std::fs::read_dir(). The original calls use CreateFileW
             // and FindFirstFileW which can block for 30-60s on OneDrive cloud-only
             // folders, freezing the app at startup.
-            // GetFileAttributesW reads cached attributes — no network I/O.
+            // GetFileAttributesW reads cached attributes - no network I/O.
             if onedrive::fast_path_exists(&path_buf) && onedrive::fast_is_dir(&path_buf) {
                 log::info!("[INIT] Restoring last folder: {}", last_folder);
                 return (last_folder, false);
@@ -74,7 +81,7 @@ impl ImageViewerApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let ctx = cc.egui_ctx.clone();
 
-        // 1. Channels for Workers → UI communication
+        // 1. Channels for Workers -> UI communication
         let (file_entry_sender, file_entry_receiver) = mpsc::channel::<(usize, Vec<FileEntry>)>();
         let (items_rebuild_sender, items_rebuild_receiver) = mpsc::channel::<ItemsRebuildResult>();
 
@@ -103,37 +110,12 @@ impl ImageViewerApp {
         };
 
         // COVER WORKER: Single worker to process folder covers
-        let (cover_req_tx, cover_req_rx) = mpsc::channel::<PathBuf>(); // UI → Worker
-        let (cover_res_tx, cover_res_rx) = mpsc::channel(); // Worker → UI
+        let (cover_req_tx, cover_res_rx) = spawn_cover_worker(disk_cache.clone());
         #[cfg(feature = "notify-watcher")]
         let (fs_tx, fs_rx) = mpsc::channel();
         let (device_event_sender, device_event_receiver) = mpsc::channel();
 
         windows_infra::start_device_change_listener(device_event_sender, ctx.clone());
-
-        let cover_worker_cache = disk_cache.clone();
-        // Spawn WORKER THREAD: loops processing the queue
-        std::thread::spawn(move || {
-            // PERFORMANCE: Set background priority to minimize HDD contention with video playback
-            // This worker scans folders to find first image - low priority I/O
-            crate::infrastructure::io_priority::set_thread_priority(
-                crate::infrastructure::io_priority::IOPriority::Background,
-            );
-
-            // Infinite loop: consumes requests from the queue
-            while let Ok(folder_path) = cover_req_rx.recv() {
-                // Execute search (image or video) using dynamic detection based on Windows Registry
-                let cover = windows_infra::find_folder_preview_item(&folder_path);
-
-                // SAVE TO DB IN WORKER THREAD (Avoids Main Thread Lock Contention)
-                if let Some(c) = &cover {
-                    cover_worker_cache.set_folder_cover(&folder_path, c);
-                }
-
-                // Send result back to UI thread
-                let _ = cover_res_tx.send((folder_path, cover));
-            }
-        });
 
         // --- THUMBNAIL SYSTEM (OPTIMIZED WORKER POOL) ---
         let (img_tx, img_rx) = mpsc::channel();
@@ -166,76 +148,7 @@ impl ImageViewerApp {
 
         // STARTUP OPTIMIZATION: Async Font Loader
         // Spawns a thread to load fonts while the app frame initializes
-        let (font_tx, font_rx) = mpsc::channel();
-        std::thread::spawn(move || {
-            let mut fonts = eframe::egui::FontDefinitions::default();
-            let mut loaded_fonts = Vec::new();
-            let windows_dir = std::env::var_os("WINDIR")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("C:\\Windows"));
-            let fonts_dir = windows_dir.join("Fonts");
-
-            // 1. Segoe UI (main font)
-            let segoe_path = fonts_dir.join("segoeui.ttf");
-            if let Ok(font_data) = std::fs::read(&segoe_path) {
-                fonts.font_data.insert(
-                    "segoe_ui".to_owned(),
-                    std::sync::Arc::new(eframe::egui::FontData::from_owned(font_data)),
-                );
-                loaded_fonts.push("segoe_ui".to_owned());
-            }
-
-            // 2. Segoe UI Symbol (fallback 1 - symbols)
-            let symbol_path = fonts_dir.join("seguisym.ttf");
-            if let Ok(font_data) = std::fs::read(&symbol_path) {
-                fonts.font_data.insert(
-                    "segoe_ui_symbol".to_owned(),
-                    std::sync::Arc::new(eframe::egui::FontData::from_owned(font_data)),
-                );
-                loaded_fonts.push("segoe_ui_symbol".to_owned());
-            }
-
-            // 3. Arial Unicode MS (fallback 2 - if available)
-            // THIS FILE IS LARGE (~22MB) - Synchronous loading blocks startup
-            let arial_path = fonts_dir.join("ARIALUNI.TTF");
-            if let Ok(font_data) = std::fs::read(&arial_path) {
-                fonts.font_data.insert(
-                    "arial_unicode".to_owned(),
-                    std::sync::Arc::new(eframe::egui::FontData::from_owned(font_data)),
-                );
-                loaded_fonts.push("arial_unicode".to_owned());
-            }
-
-            // 4. Remix Icon (dedicated Icon Font) - Embedded in the executable
-            {
-                let data = crate::embedded_assets::REMIXICON_TTF.to_vec();
-                fonts.font_data.insert(
-                    "remix_icon".to_owned(),
-                    std::sync::Arc::new(eframe::egui::FontData::from_owned(data)),
-                );
-                fonts.families.insert(
-                    eframe::egui::FontFamily::Name("icons".into()),
-                    vec!["remix_icon".to_owned()],
-                );
-            }
-
-            // Add only loaded fonts
-            if !loaded_fonts.is_empty() {
-                fonts
-                    .families
-                    .get_mut(&eframe::egui::FontFamily::Proportional)
-                    .unwrap()
-                    .extend(loaded_fonts.clone());
-
-                fonts
-                    .families
-                    .get_mut(&eframe::egui::FontFamily::Monospace)
-                    .unwrap()
-                    .extend(loaded_fonts.clone());
-            }
-
-            let _ = font_tx.send(fonts);
-        });
+        let font_rx = spawn_async_font_loader();
 
         // Shared pending_deletions for worker cancellation
         let pending_deletions: Arc<dashmap::DashMap<PathBuf, ()>> =
@@ -252,209 +165,36 @@ impl ImageViewerApp {
             pending_deletions.clone(),
         );
 
-        // --- ASYNC ICON WORKER (single thread, avoids blocking I/O) ---
-        let (icon_req_tx, icon_req_rx) = mpsc::channel::<PathBuf>();
-        let (icon_res_tx, icon_res_rx) = mpsc::channel::<(PathBuf, Vec<u8>, u32, u32)>();
-        let icon_ctx = ctx.clone();
+        // --- ASYNC ICON + METADATA WORKERS ---
+        let (icon_req_tx, icon_res_rx) = spawn_icon_worker(&ctx);
+        let (meta_req_tx, meta_res_rx) = spawn_metadata_worker(&ctx);
 
-        std::thread::spawn(move || {
-            use crate::domain::file_entry::IconSize;
-            use crate::infrastructure::windows::extract_file_icon_by_path;
-            use windows::Win32::System::Com::{
-                CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED,
-            };
+        // --- FOLDER PREVIEW WORKERS ---
+        let (folder_preview_tx, folder_preview_res_rx) =
+            spawn_folder_preview_workers(&ctx, disk_cache.clone());
 
-            // Initialize COM for this thread (multithreaded like other workers)
-            unsafe {
-                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-            }
+        // --- FOLDER SIZE WORKER ---
+        let (folder_size_req_tx, folder_size_res_rx, folder_size_cancel) =
+            spawn_folder_size_worker(&ctx);
 
-            // PERFORMANCE: Set background priority to minimize HDD contention with video playback
-            crate::infrastructure::io_priority::set_thread_priority(
-                crate::infrastructure::io_priority::IOPriority::Background,
-            );
-
-            while let Ok(path) = icon_req_rx.recv() {
-                // Use IconSize::Jumbo (256x256) for high-quality icons
-                // IShellItemImageFactory properly extracts embedded icons from .exe/.lnk files
-                match extract_file_icon_by_path(&path, IconSize::Jumbo) {
-                    Ok((pixels, width, height)) => {
-                        let _ = icon_res_tx.send((path, pixels, width, height));
-                    }
-                    Err(_) => {
-                        // Send empty data to signal failure - this clears loading_icons
-                        // so the UI can show a fallback icon
-                        let _ = icon_res_tx.send((path, Vec::new(), 0, 0));
-                    }
-                }
-                icon_ctx.request_repaint();
-            }
-
-            unsafe {
-                CoUninitialize();
-            }
-        });
-
-        // --- METADATA WORKER (async for slow HDDs) ---
-        let (meta_req_tx, meta_req_rx) = mpsc::channel::<(PathBuf, u64)>();
-        let (meta_res_tx, meta_res_rx) = mpsc::channel();
-        let meta_ctx = ctx.clone();
-
-        std::thread::spawn(move || {
-            // PERFORMANCE: Set background priority to minimize HDD contention with video playback
-            crate::infrastructure::io_priority::set_thread_priority(
-                crate::infrastructure::io_priority::IOPriority::Background,
-            );
-
-            while let Ok((path, mtime)) = meta_req_rx.recv() {
-                let meta = windows_infra::extract_media_metadata(&path);
-                let _ = meta_res_tx.send((path, mtime, meta));
-                meta_ctx.request_repaint();
-            }
-        });
-
-        // --- FOLDER PREVIEW WORKER (Native Windows Shell sandwich effect) ---
-        let (folder_preview_tx, folder_preview_rx_thread) = mpsc::channel::<PathBuf>();
-        let (folder_preview_res_tx, folder_preview_res_rx) = mpsc::channel();
-        let folder_preview_rx = Arc::new(std::sync::Mutex::new(folder_preview_rx_thread));
-        {
-            use crate::workers::folder_preview_worker::spawn_folder_preview_worker;
-            let cpu = std::thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(4);
-            // HDD-friendly cap: too many concurrent shell preview workers cause random I/O thrash.
-            let worker_count = cpu.clamp(2, 6);
-            for _ in 0..worker_count {
-                spawn_folder_preview_worker(
-                    folder_preview_rx.clone(),
-                    folder_preview_res_tx.clone(),
-                    ctx.clone(),
-                    disk_cache.clone(),
-                );
-            }
-        }
-
-        // --- FOLDER SIZE WORKER (async for details panel) ---
-        let (folder_size_req_tx, folder_size_req_rx) = mpsc::channel::<PathBuf>();
-        let (folder_size_res_tx, folder_size_res_rx) = mpsc::channel::<FolderSizeMessage>();
-        let folder_size_ctx = ctx.clone();
-        let folder_size_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let folder_size_cancel_worker = folder_size_cancel.clone();
-
-        std::thread::spawn(move || {
-            use std::sync::atomic::Ordering;
-
-            while let Ok(folder_path) = folder_size_req_rx.recv() {
-                // Reset cancel flag for this new request
-                folder_size_cancel_worker.store(false, Ordering::Release);
-
-                // Drain any queued requests - only process the latest one
-                let mut latest_path = folder_path;
-                while let Ok(newer_path) = folder_size_req_rx.try_recv() {
-                    let _ = folder_size_res_tx.send(FolderSizeMessage::Cancelled {
-                        folder_path: latest_path,
-                    });
-                    latest_path = newer_path;
-                }
-                let folder_path = latest_path;
-                folder_size_cancel_worker.store(false, Ordering::Release);
-
-                let is_ssd = crate::infrastructure::io_priority::is_ssd(&folder_path);
-                let priority = if is_ssd {
-                    crate::infrastructure::io_priority::IOPriority::Prefetch
-                } else {
-                    crate::infrastructure::io_priority::IOPriority::Background
-                };
-                crate::infrastructure::io_priority::set_thread_priority(priority);
-
-                // Use parallel Win32 folder size calculator
-                let cancel_ref = folder_size_cancel_worker.clone();
-                let res_tx = folder_size_res_tx.clone();
-                let path_clone = folder_path.clone();
-                let ctx_clone = folder_size_ctx.clone();
-
-                let result =
-                    crate::infrastructure::windows::folder_size::calculate_folder_size_parallel(
-                        &folder_path,
-                        &cancel_ref,
-                        move |partial_size| {
-                            let _ = res_tx.send(FolderSizeMessage::Progress {
-                                folder_path: path_clone.clone(),
-                                total_size: partial_size,
-                            });
-                            ctx_clone.request_repaint();
-                        },
-                    );
-
-                match result {
-                    Some(total_size) => {
-                        let _ = folder_size_res_tx.send(FolderSizeMessage::Complete {
-                            folder_path,
-                            total_size,
-                        });
-                    }
-                    None => {
-                        let _ =
-                            folder_size_res_tx.send(FolderSizeMessage::Cancelled { folder_path });
-                    }
-                }
-                folder_size_ctx.request_repaint();
-                crate::infrastructure::io_priority::reset_thread_priority();
-            }
-        });
-
-        let (prefetch_tx, prefetch_rx) = mpsc::channel();
-        crate::workers::prefetch_worker::spawn_prefetch_worker(
-            prefetch_rx,
+        let PrefetchWorkerHandles {
+            prefetch_sender: prefetch_tx,
+            predictive_sender: predictive_tx,
+            idle_warmup_sender: idle_warmup_tx,
+        } = spawn_prefetching_workers(
             directory_cache.clone(),
-        );
-
-        let (predictive_tx, predictive_rx) = mpsc::channel();
-        crate::workers::predictive_prefetch::spawn_predictive_prefetcher(
-            predictive_rx,
-            directory_cache.clone(),
-        );
-
-        let (idle_warmup_tx, idle_warmup_rx) = mpsc::channel();
-        crate::workers::idle_warmup::spawn_idle_warmup_worker(
-            idle_warmup_rx,
             thumbnail_queue.clone(),
-            directory_cache.clone(),
             shared_gen.clone(),
-            prefetch_tx.clone(),
         );
 
         // --- FILE OPERATION WORKER (Background Shell ops) ---
-        let (file_op_tx, file_op_rx) = mpsc::channel();
-        let (file_op_res_tx, file_op_res_rx) = mpsc::channel();
-        crate::workers::file_operation_worker::start_file_operation_worker(
-            file_op_rx,
-            file_op_res_tx,
-        );
+        let (file_op_tx, file_op_res_rx) = spawn_file_operation_worker();
 
         // --- GLOBAL SEARCH WORKER (IPC client to search service) ---
-        let (global_search_tx, global_search_rx_thread) = mpsc::channel();
-        let (global_search_res_tx, global_search_res_rx) = mpsc::channel();
-        crate::workers::global_search_worker::start_global_search_worker(
-            global_search_rx_thread,
-            global_search_res_tx,
-            ctx.clone(),
-        );
+        let (global_search_tx, global_search_res_rx) = spawn_global_search_worker(&ctx);
 
         // --- DISK CACHE INVALIDATION WORKER (async SQLite cleanup) ---
-        let (disk_cache_invalidation_tx, disk_cache_invalidation_rx) =
-            mpsc::channel::<Vec<PathBuf>>();
-        let disk_cache_for_invalidation = disk_cache.clone();
-        std::thread::spawn(move || {
-            while let Ok(paths) = disk_cache_invalidation_rx.recv() {
-                let mut unique_paths = std::collections::HashSet::with_capacity(paths.len());
-                for path in paths {
-                    if unique_paths.insert(path.clone()) {
-                        disk_cache_for_invalidation.remove_cache_for_path(&path);
-                    }
-                }
-            }
-        });
+        let disk_cache_invalidation_tx = spawn_disk_cache_invalidation_worker(disk_cache.clone());
 
         let disks = windows_infra::get_all_drives();
         let (drive_scan_tx, drive_scan_rx) = mpsc::channel();
@@ -783,84 +523,21 @@ impl ImageViewerApp {
 
         // Pre-populate drive_info_cache at startup so the details panel can show
         // drive info even if the user never visits "This PC".
-        {
-            let disks_snapshot: Vec<String> = app
-                .drive_state
-                .disks
-                .iter()
-                .map(|(p, _)| p.clone())
-                .collect();
-            let tx = app.drive_state.drive_info_tx.clone();
-            let startup_ctx = ctx.clone();
-            std::thread::spawn(move || {
-                use crate::domain::file_entry::DriveInfo;
-                use crate::infrastructure::windows::get_volume_info;
-                let mut results = Vec::new();
-                for path in &disks_snapshot {
-                    let vol = get_volume_info(path);
-                    let drive_type = crate::infrastructure::windows::detect_drive_type(path);
-                    results.push((
-                        path.clone(),
-                        DriveInfo {
-                            file_system: vol.file_system,
-                            total_space: vol.total_space,
-                            free_space: vol.free_space,
-                            drive_type,
-                        },
-                    ));
-                }
-                let _ = tx.send(results);
-                startup_ctx.request_repaint();
-            });
-        }
+        let disks_snapshot: Vec<String> = app
+            .drive_state
+            .disks
+            .iter()
+            .map(|(p, _)| p.clone())
+            .collect();
+        spawn_startup_drive_info_preload(
+            disks_snapshot,
+            app.drive_state.drive_info_tx.clone(),
+            ctx.clone(),
+        );
 
         // Background Garbage Collector (incremental + idle window)
         // Avoids aggressive startup I/O and keeps cleanup bounded on HDD.
-        let gc_cache = app.disk_cache.clone();
-        std::thread::spawn(move || {
-            const GC_INITIAL_DELAY_SECS: u64 = 20;
-            const GC_ACTIVE_INTERVAL_SECS: u64 = 180;
-            const GC_IDLE_INTERVAL_SECS: u64 = 20;
-            const GC_ACTIVE_BATCH: usize = 120;
-            const GC_IDLE_BATCH: usize = 600;
-            const GC_VACUUM_THRESHOLD: usize = 8_000;
-
-            std::thread::sleep(std::time::Duration::from_secs(GC_INITIAL_DELAY_SECS));
-
-            let mut removed_since_vacuum = 0usize;
-            loop {
-                let is_idle_window = crate::infrastructure::onedrive::is_app_minimized();
-                let batch = if is_idle_window {
-                    GC_IDLE_BATCH
-                } else {
-                    GC_ACTIVE_BATCH
-                };
-
-                let removed = gc_cache.garbage_collect_incremental(batch);
-                if removed > 0 {
-                    removed_since_vacuum = removed_since_vacuum.saturating_add(removed);
-                }
-
-                // VACUUM only during idle windows and only after substantial cleanup.
-                if is_idle_window
-                    && removed_since_vacuum >= GC_VACUUM_THRESHOLD
-                    && gc_cache.run_vacuum()
-                {
-                    log::info!(
-                        "[GC] VACUUM completed after removing {} entries",
-                        removed_since_vacuum
-                    );
-                    removed_since_vacuum = 0;
-                }
-
-                let sleep_secs = if is_idle_window {
-                    GC_IDLE_INTERVAL_SECS
-                } else {
-                    GC_ACTIVE_INTERVAL_SECS
-                };
-                std::thread::sleep(std::time::Duration::from_secs(sleep_secs));
-            }
-        });
+        spawn_incremental_gc_worker(app.disk_cache.clone());
 
         // NOTE: Shell warmup is now done in window.rs after HWND is obtained
         // Removed duplicate warmup here to avoid protection issues
