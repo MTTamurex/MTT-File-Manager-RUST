@@ -193,3 +193,13 @@ Targets
   - `io_priority/grouped_queue.rs` extracted
   - `io_priority.rs` now acts as API facade + tests
   - targeted tests passed (`io_priority::tests::`, 3/3)
+- `folder_loading/load_pipeline.rs` decomposition continued:
+  - `load_pipeline/tier3_fallback.rs` extracted
+  - OneDrive timeout fallback + Win32 FindFirstFileW path moved out of facade
+  - `load_pipeline.rs` reduced to 121 lines
+  - validation: `cargo check` passed
+- `ui/global_search_overlay.rs` decomposition started:
+  - `global_search_overlay/filters.rs` extracted
+  - `global_search_overlay/results_panel.rs` extracted
+  - `global_search_overlay.rs` reduced to 254 lines
+  - targeted tests passed (`global_search_overlay::filters::tests::`, 3/3)
