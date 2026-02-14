@@ -9,39 +9,27 @@ use std::num::NonZeroUsize;
 // PERFORMANCE: FxHashSet uses faster hashing for PathBuf keys
 use crate::ui::cache::FxHashSet;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicUsize;
-use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Instant;
 
 use crate::application::ClipboardManager;
-use crate::domain::file_entry::FileEntry;
-use crate::infrastructure::directory_cache::DirectoryCache;
-use crate::infrastructure::directory_index::DirectoryIndex;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::onedrive;
-use crate::infrastructure::windows as windows_infra;
 // use crate::ui::cache::CacheManager;
 use crate::ui::context_menu::ContextMenuState;
 use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::theme;
 
-use super::drive_state::DriveState;
-use super::file_operation_state::FileOperationState;
-use super::folder_size_state::FolderSizeState;
 use super::global_search_state::GlobalSearchState;
+use super::init_bootstrap::{bootstrap_app, AppBootstrap};
+use super::init_post_startup::run_post_startup_jobs;
 use super::init_preferences::StartupPreferences;
-use super::init_workers::{
-    spawn_async_font_loader, spawn_cover_worker, spawn_disk_cache_invalidation_worker,
-    spawn_file_operation_worker, spawn_folder_preview_workers, spawn_folder_size_worker,
-    spawn_global_search_worker, spawn_icon_worker, spawn_incremental_gc_worker,
-    spawn_metadata_worker, spawn_prefetching_workers, spawn_startup_drive_info_preload,
-    PrefetchWorkerHandles,
+use super::init_state_builders::{
+    build_drive_state, build_file_operation_state, build_folder_size_state, build_layout_state,
 };
-use super::layout_state::LayoutState;
 use super::navigation_state::NavigationState;
-use super::state::{ImageViewerApp, ItemsRebuildResult, LastInput};
+use super::state::{ImageViewerApp, LastInput};
 
 /// Determines the initial path based on the last saved folder
 /// Returns (path, is_computer_view) - if the folder is unavailable, returns "This PC"
@@ -81,52 +69,50 @@ impl ImageViewerApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let ctx = cc.egui_ctx.clone();
 
-        // 1. Channels for Workers -> UI communication
-        let (file_entry_sender, file_entry_receiver) = mpsc::channel::<(usize, Vec<FileEntry>)>();
-        let (items_rebuild_sender, items_rebuild_receiver) = mpsc::channel::<ItemsRebuildResult>();
-
-        // Initialize disk cache (MOVED UP for Cover Worker access)
-        let cache_dir = dirs::data_local_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("MTT-File-Manager")
-            .join("thumbnails");
-        let disk_cache = Arc::new(match ThumbnailDiskCache::new(cache_dir.clone()) {
-            Ok(cache) => cache,
-            Err(e) => {
-                log::error!(
-                    "[Cache] Fatal: failed to initialize thumbnail cache at {:?}: {:?}",
-                    cache_dir,
-                    e
-                );
-                std::process::exit(1);
-            }
-        });
-        let directory_index = match DirectoryIndex::open(&cache_dir.join("thumbnails.db")) {
-            Ok(index) => Some(Arc::new(index)),
-            Err(e) => {
-                log::warn!("[Cache] Failed to open directory index: {:?}", e);
-                None
-            }
-        };
-
-        // COVER WORKER: Single worker to process folder covers
-        let (cover_req_tx, cover_res_rx) = spawn_cover_worker(disk_cache.clone());
-        #[cfg(feature = "notify-watcher")]
-        let (fs_tx, fs_rx) = mpsc::channel();
-        let (device_event_sender, device_event_receiver) = mpsc::channel();
-
-        windows_infra::start_device_change_listener(device_event_sender, ctx.clone());
-
-        // --- THUMBNAIL SYSTEM (OPTIMIZED WORKER POOL) ---
-        let (img_tx, img_rx) = mpsc::channel();
-        use crate::workers::thumbnail::PriorityThumbnailQueue;
-        let thumbnail_queue = Arc::new(PriorityThumbnailQueue::new());
-        let shared_gen = Arc::new(AtomicUsize::new(0));
-
-        // Initialize OneDrive path detection
-        onedrive::init_onedrive_paths();
-
-        let directory_cache = Arc::new(DirectoryCache::new());
+        let AppBootstrap {
+            file_entry_sender,
+            file_entry_receiver,
+            items_rebuild_sender,
+            items_rebuild_receiver,
+            disk_cache,
+            directory_index,
+            directory_cache,
+            startup_preferences,
+            cover_req_tx,
+            cover_res_rx,
+            #[cfg(feature = "notify-watcher")]
+            fs_tx,
+            #[cfg(feature = "notify-watcher")]
+            fs_rx,
+            device_event_receiver,
+            thumbnail_queue,
+            shared_gen,
+            img_rx,
+            pending_deletions,
+            font_rx,
+            icon_req_tx,
+            icon_res_rx,
+            meta_req_tx,
+            meta_res_rx,
+            folder_preview_tx,
+            folder_preview_res_rx,
+            folder_size_req_tx,
+            folder_size_res_rx,
+            folder_size_cancel,
+            prefetch_tx,
+            predictive_tx,
+            idle_warmup_tx,
+            file_op_tx,
+            file_op_res_rx,
+            global_search_tx,
+            global_search_res_rx,
+            disk_cache_invalidation_tx,
+            disks,
+            drive_scan_tx,
+            drive_scan_rx,
+            drive_info_tx,
+            drive_info_rx,
+        } = bootstrap_app(&ctx);
 
         let StartupPreferences {
             sort_mode,
@@ -144,61 +130,7 @@ impl ImageViewerApp {
             sidebar_left_width,
             sidebar_right_width,
             saved_media_volume,
-        } = StartupPreferences::load(&disk_cache);
-
-        // STARTUP OPTIMIZATION: Async Font Loader
-        // Spawns a thread to load fonts while the app frame initializes
-        let font_rx = spawn_async_font_loader();
-
-        // Shared pending_deletions for worker cancellation
-        let pending_deletions: Arc<dashmap::DashMap<PathBuf, ()>> =
-            Arc::new(dashmap::DashMap::new());
-
-        // 8 threads: optimal balance between SSD and USB HDD
-        use crate::workers::thumbnail::spawn_thumbnail_workers;
-        spawn_thumbnail_workers(
-            thumbnail_queue.clone(),
-            img_tx,
-            ctx.clone(),
-            shared_gen.clone(),
-            disk_cache.clone(),
-            pending_deletions.clone(),
-        );
-
-        // --- ASYNC ICON + METADATA WORKERS ---
-        let (icon_req_tx, icon_res_rx) = spawn_icon_worker(&ctx);
-        let (meta_req_tx, meta_res_rx) = spawn_metadata_worker(&ctx);
-
-        // --- FOLDER PREVIEW WORKERS ---
-        let (folder_preview_tx, folder_preview_res_rx) =
-            spawn_folder_preview_workers(&ctx, disk_cache.clone());
-
-        // --- FOLDER SIZE WORKER ---
-        let (folder_size_req_tx, folder_size_res_rx, folder_size_cancel) =
-            spawn_folder_size_worker(&ctx);
-
-        let PrefetchWorkerHandles {
-            prefetch_sender: prefetch_tx,
-            predictive_sender: predictive_tx,
-            idle_warmup_sender: idle_warmup_tx,
-        } = spawn_prefetching_workers(
-            directory_cache.clone(),
-            thumbnail_queue.clone(),
-            shared_gen.clone(),
-        );
-
-        // --- FILE OPERATION WORKER (Background Shell ops) ---
-        let (file_op_tx, file_op_res_rx) = spawn_file_operation_worker();
-
-        // --- GLOBAL SEARCH WORKER (IPC client to search service) ---
-        let (global_search_tx, global_search_res_rx) = spawn_global_search_worker(&ctx);
-
-        // --- DISK CACHE INVALIDATION WORKER (async SQLite cleanup) ---
-        let disk_cache_invalidation_tx = spawn_disk_cache_invalidation_worker(disk_cache.clone());
-
-        let disks = windows_infra::get_all_drives();
-        let (drive_scan_tx, drive_scan_rx) = mpsc::channel();
-        let (drive_info_tx, drive_info_rx) = mpsc::channel();
+        } = startup_preferences;
 
         // Initialize Audio Device (removed)
 
@@ -262,17 +194,13 @@ impl ImageViewerApp {
             media_preview_owner_tab_id: None,
             selected_metadata: None,
             show_preview_panel, // Loaded from SQLite
-            drive_state: DriveState {
+            drive_state: build_drive_state(
                 disks,
-                last_drive_refresh: Instant::now(),
-                last_drive_bitmask: crate::infrastructure::windows::get_logical_drives_bitmask(),
-                drive_scan_pending: false,
-                drive_scan_rx,
                 drive_scan_tx,
-                drive_info_rx,
+                drive_scan_rx,
                 drive_info_tx,
-                drive_info_cache: std::collections::HashMap::new(),
-            },
+                drive_info_rx,
+            ),
             thumbnail_size, // Loaded from SQLite
             selected_item: None,
             multi_selection: FxHashSet::default(),
@@ -364,62 +292,14 @@ impl ImageViewerApp {
             font_loader_rx: Some(font_rx),
 
             // Window/layout persistence
-            layout: LayoutState {
+            layout: build_layout_state(
+                &disk_cache,
                 saved_window_width,
                 saved_window_height,
                 saved_is_maximized,
-                saved_is_minimized: false,
                 sidebar_left_width,
                 sidebar_right_width,
-                list_col_name_width: disk_cache
-                    .get_preference("list_col_name_width")
-                    .and_then(|s| s.parse::<f32>().ok())
-                    .unwrap_or(300.0),
-                list_col_date_width: disk_cache
-                    .get_preference("list_col_date_width")
-                    .and_then(|s| s.parse::<f32>().ok())
-                    .unwrap_or(170.0),
-                list_col_type_width: disk_cache
-                    .get_preference("list_col_type_width")
-                    .and_then(|s| s.parse::<f32>().ok())
-                    .unwrap_or(120.0),
-                list_col_size_width: disk_cache
-                    .get_preference("list_col_size_width")
-                    .and_then(|s| s.parse::<f32>().ok())
-                    .unwrap_or(100.0),
-                list_col_onedrive_name_width: disk_cache
-                    .get_preference("list_col_onedrive_name_width")
-                    .and_then(|s| s.parse::<f32>().ok())
-                    .unwrap_or(300.0),
-                list_col_onedrive_date_width: disk_cache
-                    .get_preference("list_col_onedrive_date_width")
-                    .and_then(|s| s.parse::<f32>().ok())
-                    .unwrap_or(170.0),
-                list_col_onedrive_type_width: disk_cache
-                    .get_preference("list_col_onedrive_type_width")
-                    .and_then(|s| s.parse::<f32>().ok())
-                    .unwrap_or(120.0),
-                list_col_onedrive_size_width: disk_cache
-                    .get_preference("list_col_onedrive_size_width")
-                    .and_then(|s| s.parse::<f32>().ok())
-                    .unwrap_or(100.0),
-                list_col_onedrive_status_width: disk_cache
-                    .get_preference("list_col_onedrive_status_width")
-                    .and_then(|s| s.parse::<f32>().ok())
-                    .unwrap_or(120.0),
-                list_col_computer_name_width: disk_cache
-                    .get_preference("list_col_computer_name_width")
-                    .and_then(|s| s.parse::<f32>().ok())
-                    .unwrap_or(300.0),
-                list_col_computer_total_width: disk_cache
-                    .get_preference("list_col_computer_total_width")
-                    .and_then(|s| s.parse::<f32>().ok())
-                    .unwrap_or(120.0),
-                list_col_computer_free_width: disk_cache
-                    .get_preference("list_col_computer_free_width")
-                    .and_then(|s| s.parse::<f32>().ok())
-                    .unwrap_or(120.0),
-            },
+            ),
 
             // METADATA ASYNC
             metadata_req_sender: meta_req_tx,
@@ -442,15 +322,11 @@ impl ImageViewerApp {
             tab_manager,
 
             // FOLDER SIZE CALCULATOR
-            folder_size_state: FolderSizeState {
-                req_sender: folder_size_req_tx,
-                res_receiver: folder_size_res_rx,
-                cancel: folder_size_cancel,
-                cache: LruCache::new(
-                    NonZeroUsize::new(500).expect("folder_size cache size must be non-zero"),
-                ),
-                loading: FxHashSet::default(),
-            },
+            folder_size_state: build_folder_size_state(
+                folder_size_req_tx,
+                folder_size_res_rx,
+                folder_size_cancel,
+            ),
 
             // RECYCLE BIN CACHE
             deletion_date_cache: LruCache::new(
@@ -497,17 +373,15 @@ impl ImageViewerApp {
             global_search: GlobalSearchState::new(global_search_tx, global_search_res_rx),
 
             // FILE OPERATION WORKER/TRACKING
-            file_operation_state: FileOperationState {
-                file_op_sender: file_op_tx,
-                file_op_res_receiver: file_op_res_rx,
-                disk_cache_invalidation_sender: disk_cache_invalidation_tx,
-                prefetch_sender: prefetch_tx,
-                predictive_sender: predictive_tx,
-                idle_warmup_sender: idle_warmup_tx,
-                file_ops_in_progress: 0,
+            file_operation_state: build_file_operation_state(
+                file_op_tx,
+                file_op_res_rx,
+                disk_cache_invalidation_tx,
+                prefetch_tx,
+                predictive_tx,
+                idle_warmup_tx,
                 pending_deletions,
-                pending_iso_mount: None,
-            },
+            ),
 
             // BULK THUMBNAIL SCAN
             bulk_thumbnail_scanning: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -518,34 +392,7 @@ impl ImageViewerApp {
             last_media_key_press: std::time::Instant::now(),
         };
 
-        // Start initial folder monitoring
-        app.watch_current_folder();
-
-        // Pre-populate drive_info_cache at startup so the details panel can show
-        // drive info even if the user never visits "This PC".
-        let disks_snapshot: Vec<String> = app
-            .drive_state
-            .disks
-            .iter()
-            .map(|(p, _)| p.clone())
-            .collect();
-        spawn_startup_drive_info_preload(
-            disks_snapshot,
-            app.drive_state.drive_info_tx.clone(),
-            ctx.clone(),
-        );
-
-        // Background Garbage Collector (incremental + idle window)
-        // Avoids aggressive startup I/O and keeps cleanup bounded on HDD.
-        spawn_incremental_gc_worker(app.disk_cache.clone());
-
-        // NOTE: Shell warmup is now done in window.rs after HWND is obtained
-        // Removed duplicate warmup here to avoid protection issues
-
-        // --- PDF WEBVIEW2 WARMUP ---
-        // Initializes the runtime in a background thread to reduce latency on first PDF open.
-        // Completely invisible and non-blocking.
-        crate::pdf_viewer::warmup();
+        run_post_startup_jobs(&mut app, &ctx);
 
         app
     }

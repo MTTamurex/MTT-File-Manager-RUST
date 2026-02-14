@@ -124,3 +124,28 @@ Targets
   - `src/app/init_workers/filesystem_workers.rs`
   - `src/app/init_workers/pipeline_workers.rs`
   - `src/app/init_workers/background_jobs.rs`
+- `init.rs` decomposition continued with `init_state_builders.rs`:
+  - `DriveState` assembly extracted
+  - `LayoutState` assembly extracted
+  - `FolderSizeState` assembly extracted
+  - `FileOperationState` assembly extracted
+- `init.rs` decomposition continued with `init_bootstrap.rs`:
+  - cache + channel bootstrap extracted
+  - worker/bootstrap wiring extracted
+  - drive channel bootstrap extracted
+- `init.rs` decomposition continued with `init_post_startup.rs`:
+  - initial folder watch start extracted
+  - startup drive-info preload trigger extracted
+  - incremental GC trigger extracted
+  - PDF warmup trigger extracted
+- `disk_cache.rs` decomposition started with `disk_cache/gc.rs`:
+  - incremental GC methods extracted
+  - full GC + VACUUM methods extracted
+  - GC path/drive helper methods extracted
+- `disk_cache.rs` decomposition continued:
+  - `disk_cache/preferences.rs` extracted
+  - `disk_cache/folder_covers.rs` extracted
+  - `disk_cache/folder_previews.rs` extracted
+  - `disk_cache/cleanup.rs` extracted
+  - `disk_cache/thumbnails_repo.rs` extracted
+  - `disk_cache.rs` reduced to 310 lines
