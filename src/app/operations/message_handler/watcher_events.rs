@@ -105,6 +105,16 @@ impl ImageViewerApp {
         const MAX_EVENTS_INDIVIDUAL: usize = 50;
         let mut pending_disk_cache_invalidations: Vec<PathBuf> = Vec::new();
         let mut folders_with_changed_contents: HashSet<PathBuf> = HashSet::new();
+        let register_changed_folder = |changed_path: &Path,
+                                       out: &mut HashSet<PathBuf>| {
+            // Some events arrive as "folder modified" (path is the folder),
+            // others as "file changed" (path is the file). Handle both.
+            if crate::infrastructure::onedrive::fast_is_dir(changed_path) {
+                out.insert(changed_path.to_path_buf());
+            } else if let Some(parent) = changed_path.parent() {
+                out.insert(parent.to_path_buf());
+            }
+        };
 
         if drive_events.len() > MAX_EVENTS_INDIVIDUAL {
             log::warn!(
@@ -131,9 +141,7 @@ impl ImageViewerApp {
                             continue;
                         }
                         let cleaned = Self::clean_path(path);
-                        if let Some(parent) = cleaned.parent() {
-                            folders_with_changed_contents.insert(parent.to_path_buf());
-                        }
+                        register_changed_folder(&cleaned, &mut folders_with_changed_contents);
                         if let Some(parent) = cleaned.parent() {
                             let parent_norm = Self::normalize_for_match(parent);
                             if parent_norm == current_path_norm {
@@ -155,9 +163,7 @@ impl ImageViewerApp {
                         let cleaned = Self::clean_path(path);
                         pending_disk_cache_invalidations.push(cleaned.clone());
                         self.invalidate_folder_cover_for_removed_path(&cleaned);
-                        if let Some(parent) = cleaned.parent() {
-                            folders_with_changed_contents.insert(parent.to_path_buf());
-                        }
+                        register_changed_folder(&cleaned, &mut folders_with_changed_contents);
 
                         if let Some(parent) = cleaned.parent() {
                             let parent_norm = Self::normalize_for_match(parent);
@@ -219,9 +225,7 @@ impl ImageViewerApp {
                             continue;
                         }
                         let cleaned = Self::clean_path(path);
-                        if let Some(parent) = cleaned.parent() {
-                            folders_with_changed_contents.insert(parent.to_path_buf());
-                        }
+                        register_changed_folder(&cleaned, &mut folders_with_changed_contents);
                         self.cache_manager.texture_cache.pop(&cleaned);
                         self.cache_manager.failed_thumbnails.pop(&cleaned);
                         crate::workers::thumbnail::clear_failure_cache(&cleaned);
@@ -257,12 +261,8 @@ impl ImageViewerApp {
 
                             pending_disk_cache_invalidations.push(cleaned_old.clone());
                             self.invalidate_folder_cover_for_removed_path(&cleaned_old);
-                            if let Some(parent) = cleaned_old.parent() {
-                                folders_with_changed_contents.insert(parent.to_path_buf());
-                            }
-                            if let Some(parent) = cleaned_new.parent() {
-                                folders_with_changed_contents.insert(parent.to_path_buf());
-                            }
+                            register_changed_folder(&cleaned_old, &mut folders_with_changed_contents);
+                            register_changed_folder(&cleaned_new, &mut folders_with_changed_contents);
 
                             // Invalidate caches for both paths
                             self.cache_manager.texture_cache.pop(&cleaned_old);
@@ -296,15 +296,21 @@ impl ImageViewerApp {
         for folder_path in folders_with_changed_contents {
             self.cache_manager.invalidate_folder_preview(&folder_path);
             self.disk_cache.remove_folder_preview_cache(&folder_path);
+            self.disk_cache.remove_folder_cover(&folder_path);
+            self.scanned_folders.pop(&folder_path);
 
-            // If this folder is visible in the current item list, enqueue immediate refresh.
-            if self
+            // Clear stale in-memory cover immediately for visible folders.
+            if let Some(item) = self
                 .all_items
-                .iter()
-                .any(|item| item.is_dir && item.path == folder_path)
+                .iter_mut()
+                .find(|item| item.is_dir && item.path == folder_path)
             {
-                self.request_folder_preview_load(folder_path.clone());
+                item.folder_cover = None;
             }
+
+            // Force a fresh cover discovery for this folder so changes from external apps
+            // (Explorer, scripts, etc.) are reflected without manual refresh.
+            let _ = self.cover_worker_sender.send(folder_path.clone());
         }
 
         let drive_events_done = Instant::now();
