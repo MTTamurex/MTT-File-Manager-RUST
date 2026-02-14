@@ -214,3 +214,21 @@ Targets
   - `icon_loader/special_icons.rs` extracted
   - `icon_loader.rs` reduced to facade + cache lifecycle methods
   - validation: `cargo check` passed
+- `ui/components/mpv_preview/mod.rs` decomposition started:
+  - `mpv_preview/osc_input.rs` extracted (OSC runtime sync + input forwarding)
+  - `mpv_preview/update_loop.rs` extracted (main update/render loop)
+  - `mod.rs` reduced to 394 lines (facade + mode/surface API)
+  - validation: `cargo check` passed
+  - validation: `cargo test --lib` passed (92/92)
+- `crates/mtt-search-service/src/main.rs` decomposition started:
+  - `mtt-search-service/src/volume_indexers.rs` extracted
+  - USN indexer loop + non-USN fallback indexer + shared wait helper moved out of `main.rs`
+  - `main.rs` reduced to 235 lines (entrypoint + orchestration only)
+  - validation: `cargo check -p mtt-search-service` passed
+  - validation: `cargo test -p mtt-search-service` passed
+- `ui/preview_panel/video_preview/controls.rs` decomposition started:
+  - `video_preview/controls/pickers.rs` extracted
+  - `video_preview/controls/detached.rs` extracted
+  - `controls.rs` reduced to 301 lines (facade + shared base controls)
+  - validation: `cargo check` passed
+  - validation: `cargo test --lib` passed (92/92)
