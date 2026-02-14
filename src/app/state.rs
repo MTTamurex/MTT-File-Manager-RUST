@@ -26,6 +26,8 @@ use std::time::Instant;
 
 use crate::application::ClipboardManager;
 use crate::app::drive_state::DriveState;
+use crate::app::file_operation_state::FileOperationState;
+use crate::app::folder_size_state::FolderSizeState;
 use crate::app::global_search_state::GlobalSearchState;
 use crate::app::layout_state::LayoutState;
 use crate::app::navigation_state::NavigationState;
@@ -49,21 +51,6 @@ pub struct ItemsRebuildResult {
     pub request_id: usize,
     pub items: Vec<FileEntry>,
     pub total_items: usize,
-}
-
-#[derive(Debug, Clone)]
-pub enum FolderSizeMessage {
-    Progress {
-        folder_path: PathBuf,
-        total_size: u64,
-    },
-    Complete {
-        folder_path: PathBuf,
-        total_size: u64,
-    },
-    Cancelled {
-        folder_path: PathBuf,
-    },
 }
 
 pub struct ImageViewerApp {
@@ -245,11 +232,7 @@ pub struct ImageViewerApp {
     pub tab_manager: crate::tabs::TabManager,
 
     // FOLDER SIZE CALCULATOR (async for details panel)
-    pub folder_size_req_sender: Sender<PathBuf>, // UI → Worker
-    pub folder_size_res_receiver: Receiver<FolderSizeMessage>, // Worker → UI (progress + complete)
-    pub folder_size_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>, // Cancel current calculation
-    pub folder_size_cache: LruCache<PathBuf, u64>, // Calculated sizes (LRU bounded)
-    pub folder_size_loading: FxHashSet<PathBuf>,   // Currently calculating
+    pub folder_size_state: FolderSizeState,
 
     // RECYCLE BIN CACHE
     pub deletion_date_cache: LruCache<String, String>,
@@ -301,26 +284,13 @@ pub struct ImageViewerApp {
     // GLOBAL SEARCH (via MTT Search Service)
     pub global_search: GlobalSearchState,
 
-    // FILE OPERATION WORKER
-    pub(crate) file_op_sender: Sender<crate::workers::file_operation_worker::FileOperationRequest>,
-    pub file_op_res_receiver: Receiver<crate::workers::file_operation_worker::FileOperationResult>,
-    pub disk_cache_invalidation_sender: Sender<Vec<PathBuf>>,
-    pub prefetch_sender: Sender<crate::workers::prefetch_worker::PrefetchMessage>,
-    pub predictive_sender: Sender<crate::workers::predictive_prefetch::PredictiveMessage>,
-    pub idle_warmup_sender: Sender<crate::workers::idle_warmup::IdleWarmupMessage>,
-
-    // FILE OPERATION TRACKING (suppresses watcher auto-reload during copy/move/delete)
-    pub file_ops_in_progress: usize,
-    /// Paths currently being deleted — shared with worker threads to cancel in-flight extractions
-    pub pending_deletions: Arc<dashmap::DashMap<PathBuf, ()>>,
+    // FILE OPERATION WORKER/TRACKING
+    pub file_operation_state: FileOperationState,
 
     // BULK THUMBNAIL SCAN
     pub bulk_thumbnail_scanning: Arc<AtomicBool>,
     pub bulk_thumbnail_was_scanning: bool,
     pub bulk_thumbnail_total: Arc<AtomicUsize>,
-
-    // ISO MOUNTING
-    pub pending_iso_mount: Option<PathBuf>,
 
     // Media keyboard debounce
     pub last_media_key_press: Instant,

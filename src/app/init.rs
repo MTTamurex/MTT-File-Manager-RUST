@@ -28,6 +28,8 @@ use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::theme;
 
 use super::drive_state::DriveState;
+use super::file_operation_state::FileOperationState;
+use super::folder_size_state::{FolderSizeMessage, FolderSizeState};
 use super::global_search_state::GlobalSearchState;
 use super::layout_state::LayoutState;
 use super::navigation_state::NavigationState;
@@ -430,8 +432,7 @@ impl ImageViewerApp {
 
         // --- FOLDER SIZE WORKER (async for details panel) ---
         let (folder_size_req_tx, folder_size_req_rx) = mpsc::channel::<PathBuf>();
-        let (folder_size_res_tx, folder_size_res_rx) =
-            mpsc::channel::<crate::app::state::FolderSizeMessage>();
+        let (folder_size_res_tx, folder_size_res_rx) = mpsc::channel::<FolderSizeMessage>();
         let folder_size_ctx = ctx.clone();
         let folder_size_cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let folder_size_cancel_worker = folder_size_cancel.clone();
@@ -447,7 +448,7 @@ impl ImageViewerApp {
                 let mut latest_path = folder_path;
                 while let Ok(newer_path) = folder_size_req_rx.try_recv() {
                     let _ =
-                        folder_size_res_tx.send(crate::app::state::FolderSizeMessage::Cancelled {
+                        folder_size_res_tx.send(FolderSizeMessage::Cancelled {
                             folder_path: latest_path,
                         });
                     latest_path = newer_path;
@@ -474,7 +475,7 @@ impl ImageViewerApp {
                         &folder_path,
                         &cancel_ref,
                         move |partial_size| {
-                            let _ = res_tx.send(crate::app::state::FolderSizeMessage::Progress {
+                            let _ = res_tx.send(FolderSizeMessage::Progress {
                                 folder_path: path_clone.clone(),
                                 total_size: partial_size,
                             });
@@ -485,7 +486,7 @@ impl ImageViewerApp {
                 match result {
                     Some(total_size) => {
                         let _ = folder_size_res_tx.send(
-                            crate::app::state::FolderSizeMessage::Complete {
+                            FolderSizeMessage::Complete {
                                 folder_path,
                                 total_size,
                             },
@@ -493,7 +494,7 @@ impl ImageViewerApp {
                     }
                     None => {
                         let _ = folder_size_res_tx
-                            .send(crate::app::state::FolderSizeMessage::Cancelled { folder_path });
+                            .send(FolderSizeMessage::Cancelled { folder_path });
                     }
                 }
                 folder_size_ctx.request_repaint();
@@ -800,13 +801,15 @@ impl ImageViewerApp {
             tab_manager,
 
             // FOLDER SIZE CALCULATOR
-            folder_size_req_sender: folder_size_req_tx,
-            folder_size_res_receiver: folder_size_res_rx,
-            folder_size_cancel,
-            folder_size_cache: LruCache::new(
-                NonZeroUsize::new(500).expect("folder_size cache size must be non-zero"),
-            ),
-            folder_size_loading: FxHashSet::default(),
+            folder_size_state: FolderSizeState {
+                req_sender: folder_size_req_tx,
+                res_receiver: folder_size_res_rx,
+                cancel: folder_size_cancel,
+                cache: LruCache::new(
+                    NonZeroUsize::new(500).expect("folder_size cache size must be non-zero"),
+                ),
+                loading: FxHashSet::default(),
+            },
 
             // RECYCLE BIN CACHE
             deletion_date_cache: LruCache::new(
@@ -852,25 +855,23 @@ impl ImageViewerApp {
             // GLOBAL SEARCH
             global_search: GlobalSearchState::new(global_search_tx, global_search_res_rx),
 
-            // FILE OPERATION WORKER
-            file_op_sender: file_op_tx,
-            file_op_res_receiver: file_op_res_rx,
-            disk_cache_invalidation_sender: disk_cache_invalidation_tx,
-            prefetch_sender: prefetch_tx,
-            predictive_sender: predictive_tx,
-            idle_warmup_sender: idle_warmup_tx,
-
-            // FILE OPERATION TRACKING
-            file_ops_in_progress: 0,
-            pending_deletions,
+            // FILE OPERATION WORKER/TRACKING
+            file_operation_state: FileOperationState {
+                file_op_sender: file_op_tx,
+                file_op_res_receiver: file_op_res_rx,
+                disk_cache_invalidation_sender: disk_cache_invalidation_tx,
+                prefetch_sender: prefetch_tx,
+                predictive_sender: predictive_tx,
+                idle_warmup_sender: idle_warmup_tx,
+                file_ops_in_progress: 0,
+                pending_deletions,
+                pending_iso_mount: None,
+            },
 
             // BULK THUMBNAIL SCAN
             bulk_thumbnail_scanning: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             bulk_thumbnail_was_scanning: false,
             bulk_thumbnail_total: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-
-            // ISO MOUNTING
-            pending_iso_mount: None,
 
             // Media keyboard debounce
             last_media_key_press: std::time::Instant::now(),

@@ -6,7 +6,7 @@ use std::sync::mpsc::TryRecvError;
 impl ImageViewerApp {
     pub(super) fn process_file_operation_results(&mut self, current_path_norm: &str) {
         loop {
-            match self.file_op_res_receiver.try_recv() {
+            match self.file_operation_state.file_op_res_receiver.try_recv() {
                 Ok(res) => match res {
                     FileOperationResult::RenameCompleted {
                         path,
@@ -245,14 +245,15 @@ impl ImageViewerApp {
     }
 
     fn handle_file_operation_finished(&mut self) {
-        self.file_ops_in_progress = self.file_ops_in_progress.saturating_sub(1);
-        if self.file_ops_in_progress == 0 {
+        self.file_operation_state.file_ops_in_progress = self.file_operation_state.file_ops_in_progress.saturating_sub(1);
+        if self.file_operation_state.file_ops_in_progress == 0 {
             // Completion handlers already triggered reloads. Skip watcher queued reload.
             self.pending_auto_reload = false;
             // Keep pending_deletions until folder load completion to avoid stale thumbnail retries.
             if !self.is_loading_folder {
-                self.pending_deletions.clear();
+                self.file_operation_state.pending_deletions.clear();
             }
         }
     }
 }
+

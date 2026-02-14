@@ -8,6 +8,8 @@
 
 pub mod cache_state;
 pub mod drive_state;
+pub mod file_operation_state;
+pub mod folder_size_state;
 pub mod global_search_state;
 pub mod init;
 pub mod layout_state;

@@ -144,12 +144,12 @@ fn render_preview_panel_layout(
                                 });
 
                             let folder_size = if file.is_dir {
-                                app.folder_size_cache.peek(&file.path).copied()
+                                app.folder_size_state.cache.peek(&file.path).copied()
                             } else {
                                 None
                             };
                             let is_folder_size_loading =
-                                app.folder_size_loading.contains(&file.path);
+                                app.folder_size_state.loading.contains(&file.path);
 
                             let is_owner = app.media_preview_owner_tab_id == Some(tab_id);
 
@@ -286,10 +286,10 @@ fn render_preview_panel_layout(
                                     }
                                     PreviewPanelAction::CalculateFolderSize(path) => {
                                         // Cancel any in-progress calculation before starting new one
-                                        app.folder_size_cancel
+                                        app.folder_size_state.cancel
                                             .store(true, std::sync::atomic::Ordering::Release);
-                                        app.folder_size_loading.insert(path.clone());
-                                        let _ = app.folder_size_req_sender.send(path);
+                                        app.folder_size_state.loading.insert(path.clone());
+                                        let _ = app.folder_size_state.req_sender.send(path);
                                     }
                                 }
                             }
@@ -604,3 +604,4 @@ fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
             }
         });
 }
+

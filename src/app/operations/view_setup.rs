@@ -281,7 +281,7 @@ impl ImageViewerApp {
                 }
 
                 // AUTO-FOCUS FOR RECENTLY MOUNTED ISO
-                if let Some(_iso_path) = self.pending_iso_mount.take() {
+                if let Some(_iso_path) = self.file_operation_state.pending_iso_mount.take() {
                     let mut target_drive = None;
                     for (new_path, _label) in &self.drive_state.disks {
                         if !old_disks.iter().any(|(old_path, _)| old_path == new_path)
@@ -297,7 +297,7 @@ impl ImageViewerApp {
                     if let Some(drive) = target_drive {
                         self.navigate_to(&drive);
                     } else {
-                        self.pending_iso_mount = Some(_iso_path);
+                        self.file_operation_state.pending_iso_mount = Some(_iso_path);
                     }
                 }
 
@@ -359,3 +359,4 @@ impl ImageViewerApp {
         }
     }
 }
+

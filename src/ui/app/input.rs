@@ -30,7 +30,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             }
 
             if user_active {
-                let _ = app.idle_warmup_sender.send(IdleWarmupMessage::UserActive);
+                let _ = app.file_operation_state.idle_warmup_sender.send(IdleWarmupMessage::UserActive);
             }
             return;
         }
@@ -211,7 +211,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         }
     }
     if user_active {
-        let _ = app.idle_warmup_sender.send(IdleWarmupMessage::UserActive);
+        let _ = app.file_operation_state.idle_warmup_sender.send(IdleWarmupMessage::UserActive);
     }
 }
 
@@ -450,3 +450,4 @@ fn perform_quick_search(app: &mut ImageViewerApp) {
         );
     }
 }
+

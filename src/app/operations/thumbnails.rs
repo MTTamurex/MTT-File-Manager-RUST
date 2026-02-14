@@ -108,7 +108,7 @@ impl ImageViewerApp {
         modified: u64,
     ) {
         // Skip files pending deletion to avoid wasteful extraction
-        if self.pending_deletions.contains_key(&path) {
+        if self.file_operation_state.pending_deletions.contains_key(&path) {
             return;
         }
 
@@ -176,3 +176,4 @@ impl ImageViewerApp {
 
 #[cfg(test)]
 mod tests {}
+

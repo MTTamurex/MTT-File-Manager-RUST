@@ -329,9 +329,9 @@ impl ImageViewerApp {
             }
         };
 
-        self.file_ops_in_progress += 1;
-        if self.file_op_sender.send(request).is_err() {
-            self.file_ops_in_progress = self.file_ops_in_progress.saturating_sub(1);
+        self.file_operation_state.file_ops_in_progress += 1;
+        if self.file_operation_state.file_op_sender.send(request).is_err() {
+            self.file_operation_state.file_ops_in_progress = self.file_operation_state.file_ops_in_progress.saturating_sub(1);
         }
 
         // Clear drag state
@@ -475,3 +475,4 @@ fn volume_key(path: &Path) -> Option<String> {
         _ => None,
     })
 }
+

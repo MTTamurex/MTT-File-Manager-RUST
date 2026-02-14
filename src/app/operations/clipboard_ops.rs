@@ -98,8 +98,8 @@ impl ImageViewerApp {
                     hwnd,
                 )
             };
-            self.file_ops_in_progress += 1;
-            let _ = self.file_op_sender.send(req);
+            self.file_operation_state.file_ops_in_progress += 1;
+            let _ = self.file_operation_state.file_op_sender.send(req);
 
             // Clear internal state if it was a move (Shell does this for us for system clipboard)
             if is_move {
@@ -116,3 +116,4 @@ impl ImageViewerApp {
         }
     }
 }
+

@@ -452,7 +452,7 @@ impl ImageViewerApp {
         // The DriveWatcher thread now coalesces and deduplicates events internally
         // (200ms batches, max 500 unique events per batch), so event floods from
         // OneDrive dehydration are absorbed before reaching the UI thread.
-        if self.pending_auto_reload && self.file_ops_in_progress == 0 && !self.is_loading_folder {
+        if self.pending_auto_reload && self.file_operation_state.file_ops_in_progress == 0 && !self.is_loading_folder {
             let elapsed = self.last_auto_reload.elapsed();
             if elapsed > Duration::from_millis(theme::AUTO_RELOAD_MS) {
                 #[cfg(debug_assertions)]
@@ -490,3 +490,4 @@ impl ImageViewerApp {
         }
     }
 }
+
