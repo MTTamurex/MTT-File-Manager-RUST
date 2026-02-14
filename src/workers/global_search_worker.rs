@@ -10,7 +10,11 @@ use mtt_search_protocol::{IndexStatusInfo, SearchResultItem};
 /// Requests sent from the UI to the global search worker.
 pub enum GlobalSearchRequest {
     /// Search for files matching the query.
-    Search { query: String, max_results: u32 },
+    Search {
+        query: String,
+        offset: u32,
+        limit: u32,
+    },
     /// Check if the search service is available.
     CheckStatus,
 }
@@ -21,6 +25,9 @@ pub enum GlobalSearchResponse {
     Results {
         query: String,
         items: Vec<SearchResultItem>,
+        offset: u32,
+        limit: u32,
+        has_more: bool,
     },
     /// Service availability status.
     Status { available: bool, total_indexed: u64 },
@@ -53,37 +60,42 @@ fn normalize_result_path(path: &str) -> String {
     }
 }
 
-fn merge_results(
-    service_items: Vec<SearchResultItem>,
-    local_items: Vec<SearchResultItem>,
-    max_results: usize,
-) -> Vec<SearchResultItem> {
-    let mut merged = Vec::with_capacity(max_results.min(256));
-    let mut seen_paths =
-        HashSet::with_capacity((service_items.len() + local_items.len()).min(2048));
-
-    for item in service_items.into_iter().chain(local_items) {
-        let key = normalize_result_path(&item.full_path);
-        if seen_paths.insert(key) {
-            merged.push(item);
-            if merged.len() >= max_results {
-                break;
-            }
-        }
+fn append_unique_items(
+    target: &mut Vec<SearchResultItem>,
+    extra: Vec<SearchResultItem>,
+    max_limit: usize,
+) {
+    if target.len() >= max_limit {
+        return;
     }
 
-    merged
+    let mut seen_paths = HashSet::with_capacity((target.len() + extra.len()).min(2048));
+    for item in target.iter() {
+        seen_paths.insert(normalize_result_path(&item.full_path));
+    }
+
+    for item in extra {
+        if target.len() >= max_limit {
+            break;
+        }
+
+        let key = normalize_result_path(&item.full_path);
+        if seen_paths.insert(key) {
+            target.push(item);
+        }
+    }
 }
 
 fn query_service_with_retry(
     query: &str,
-    max_results: u32,
-) -> Result<Vec<SearchResultItem>, String> {
-    match crate::infrastructure::global_search::search(query, max_results) {
-        Ok(items) => Ok(items),
+    offset: u32,
+    limit: u32,
+) -> Result<crate::infrastructure::global_search::SearchPage, String> {
+    match crate::infrastructure::global_search::search(query, offset, limit) {
+        Ok(page) => Ok(page),
         Err(e) if e.contains("All pipe instances are busy") => {
             std::thread::sleep(std::time::Duration::from_millis(200));
-            crate::infrastructure::global_search::search(query, max_results)
+            crate::infrastructure::global_search::search(query, offset, limit)
         }
         Err(e) => Err(e),
     }
@@ -91,17 +103,17 @@ fn query_service_with_retry(
 
 fn filter_existing_results(
     items: Vec<SearchResultItem>,
-    max_results: usize,
+    max_limit: usize,
 ) -> Vec<SearchResultItem> {
-    if items.is_empty() || max_results == 0 {
+    if items.is_empty() || max_limit == 0 {
         return Vec::new();
     }
 
-    let mut filtered = Vec::with_capacity(items.len().min(max_results));
+    let mut filtered = Vec::with_capacity(items.len().min(max_limit));
     for item in items {
         if crate::infrastructure::onedrive::fast_path_exists(Path::new(&item.full_path)) {
             filtered.push(item);
-            if filtered.len() >= max_results {
+            if filtered.len() >= max_limit {
                 break;
             }
         }
@@ -207,7 +219,8 @@ pub fn start_global_search_worker(
             match request {
                 GlobalSearchRequest::Search {
                     mut query,
-                    mut max_results,
+                    mut offset,
+                    mut limit,
                 } => {
                     // Coalesce rapid typing bursts:
                     // process only the latest queued Search before touching IPC.
@@ -216,10 +229,12 @@ pub fn start_global_search_worker(
                         match next {
                             GlobalSearchRequest::Search {
                                 query: next_query,
-                                max_results: next_max_results,
+                                offset: next_offset,
+                                limit: next_limit,
                             } => {
                                 query = next_query;
-                                max_results = next_max_results;
+                                offset = next_offset;
+                                limit = next_limit;
                             }
                             GlobalSearchRequest::CheckStatus => {
                                 pending_status_check = true;
@@ -227,19 +242,85 @@ pub fn start_global_search_worker(
                         }
                     }
 
+                    let max_limit = limit as usize;
+                    if query.is_empty() || max_limit == 0 {
+                        let _ = sender.send(GlobalSearchResponse::Results {
+                            query,
+                            items: Vec::new(),
+                            offset,
+                            limit,
+                            has_more: false,
+                        });
+                        if pending_status_check {
+                            refresh_and_send_status(
+                                &sender,
+                                &mut session_index,
+                                &mut last_known_available,
+                                &mut last_known_total_indexed,
+                                &mut last_known_service_volumes,
+                                &mut consecutive_failures,
+                            );
+                        }
+                        continue;
+                    }
+
                     // Never scan drives in the query path; use cached session index only.
                     // Refresh happens in status cycles to keep typing/search latency stable.
                     session_index.poll_fast_updates();
-                    let local_items = session_index.search(&query, max_results as usize);
 
-                    match query_service_with_retry(&query, max_results) {
-                        Ok(service_items) => {
-                            let merged =
-                                merge_results(service_items, local_items, max_results as usize);
-                            let items = filter_existing_results(merged, max_results as usize);
-                            let _ = sender.send(GlobalSearchResponse::Results { query, items });
+                    match query_service_with_retry(&query, offset, limit) {
+                        Ok(service_page) => {
+                            let mut merged = service_page.items;
+                            let mut has_more = service_page.has_more;
+
+                            // If service page exhausted before filling this page, continue from the
+                            // session-only index using the remaining portion.
+                            if !service_page.has_more && merged.len() < max_limit {
+                                let service_total = service_page
+                                    .total_matches
+                                    .unwrap_or(offset.saturating_add(merged.len() as u32));
+                                let local_offset = offset.saturating_sub(service_total);
+                                let local_limit = max_limit.saturating_sub(merged.len());
+
+                                if local_limit > 0 {
+                                    let (local_items, local_has_more) = session_index.search_page(
+                                        &query,
+                                        local_offset as usize,
+                                        local_limit,
+                                    );
+                                    append_unique_items(&mut merged, local_items, max_limit);
+                                    has_more = local_has_more;
+                                } else {
+                                    has_more = false;
+                                }
+                            } else if !service_page.has_more && merged.len() == max_limit {
+                                // Boundary case: service page ended exactly at service tail.
+                                // Check if session-only index has at least one item for the next page.
+                                if let Some(service_total) = service_page.total_matches {
+                                    let next_offset = offset.saturating_add(merged.len() as u32);
+                                    if next_offset >= service_total {
+                                        let local_offset =
+                                            next_offset.saturating_sub(service_total);
+                                        let (probe_items, probe_has_more) = session_index
+                                            .search_page(&query, local_offset as usize, 1);
+                                        has_more = !probe_items.is_empty() || probe_has_more;
+                                    }
+                                }
+                            }
+
+                            let items = filter_existing_results(merged, max_limit);
+                            let _ = sender.send(GlobalSearchResponse::Results {
+                                query,
+                                items,
+                                offset,
+                                limit,
+                                has_more,
+                            });
                         }
                         Err(e) => {
+                            let (local_items, local_has_more) =
+                                session_index.search_page(&query, offset as usize, max_limit);
+
                             if local_items.is_empty() {
                                 let _ =
                                     sender.send(GlobalSearchResponse::Error { query, message: e });
@@ -248,10 +329,14 @@ pub fn start_global_search_worker(
                                     "[GLOBAL-SEARCH] Service query failed, returning session index results: {}",
                                     e
                                 );
-                                let merged =
-                                    merge_results(Vec::new(), local_items, max_results as usize);
-                                let items = filter_existing_results(merged, max_results as usize);
-                                let _ = sender.send(GlobalSearchResponse::Results { query, items });
+                                let items = filter_existing_results(local_items, max_limit);
+                                let _ = sender.send(GlobalSearchResponse::Results {
+                                    query,
+                                    items,
+                                    offset,
+                                    limit,
+                                    has_more: local_has_more,
+                                });
                             }
                         }
                     }

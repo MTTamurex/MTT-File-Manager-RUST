@@ -7,12 +7,29 @@ impl ImageViewerApp {
     pub(super) fn process_global_search_events(&mut self) {
         while let Ok(response) = self.global_search.receiver.try_recv() {
             match response {
-                GlobalSearchResponse::Results { query, items } => {
+                GlobalSearchResponse::Results {
+                    query,
+                    items,
+                    offset,
+                    limit,
+                    has_more,
+                } => {
                     // Only apply if the query still matches (user may have typed more)
                     if query == self.global_search.query {
-                        self.global_search.results = items;
-                        self.global_search.selected_index = None;
+                        if offset == 0 {
+                            self.global_search.results = items;
+                            self.global_search.selected_index = None;
+                        } else if offset == self.global_search.results.len() as u32 {
+                            append_unique_results(&mut self.global_search.results, items);
+                        } else {
+                            // Stale page response (offset mismatch), ignore.
+                            continue;
+                        }
+
                         self.global_search.loading = false;
+                        self.global_search.requested_offset = offset;
+                        self.global_search.requested_limit = limit;
+                        self.global_search.has_more_results = has_more;
                     }
                 }
                 GlobalSearchResponse::Status {
@@ -25,6 +42,7 @@ impl ImageViewerApp {
                 GlobalSearchResponse::Error { query, message } => {
                     if query == self.global_search.query {
                         self.global_search.loading = false;
+                        self.global_search.has_more_results = false;
                     }
                     log::error!("[GLOBAL-SEARCH] Error for '{}': {}", query, message);
 
@@ -72,4 +90,36 @@ fn is_connectivity_error(message: &str) -> bool {
         || m.contains("writefile failed")
         || m.contains("readfile failed")
         || m.contains("timeout")
+}
+
+fn normalize_result_path(path: &str) -> String {
+    let lower = path.to_ascii_lowercase();
+    let stripped = lower.strip_prefix(r"\\?\").unwrap_or(&lower);
+
+    if stripped.len() > 3 {
+        stripped.trim_end_matches('\\').to_string()
+    } else {
+        stripped.to_string()
+    }
+}
+
+fn append_unique_results(
+    target: &mut Vec<mtt_search_protocol::SearchResultItem>,
+    extra: Vec<mtt_search_protocol::SearchResultItem>,
+) {
+    if extra.is_empty() {
+        return;
+    }
+
+    let mut seen = std::collections::HashSet::with_capacity((target.len() + extra.len()).min(2048));
+    for item in target.iter() {
+        seen.insert(normalize_result_path(&item.full_path));
+    }
+
+    for item in extra {
+        let key = normalize_result_path(&item.full_path);
+        if seen.insert(key) {
+            target.push(item);
+        }
+    }
 }

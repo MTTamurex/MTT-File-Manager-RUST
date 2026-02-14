@@ -161,13 +161,23 @@ impl UserSessionSearchIndex {
             .retain(|letter, _| active_letters.contains(letter));
     }
 
-    pub fn search(&self, query: &str, max_results: usize) -> Vec<SearchResultItem> {
-        if query.is_empty() || max_results == 0 {
-            return Vec::new();
+    pub fn search(&self, query: &str, limit: usize) -> Vec<SearchResultItem> {
+        self.search_page(query, 0, limit).0
+    }
+
+    pub fn search_page(
+        &self,
+        query: &str,
+        offset: usize,
+        limit: usize,
+    ) -> (Vec<SearchResultItem>, bool) {
+        if query.is_empty() || limit == 0 {
+            return (Vec::new(), false);
         }
 
         let query_lower = query.to_lowercase();
-        let mut results = Vec::with_capacity(max_results.min(128));
+        let mut results = Vec::with_capacity(limit.min(128));
+        let mut matched = 0usize;
 
         for volume in self.volumes.values() {
             for item in &volume.items {
@@ -175,22 +185,30 @@ impl UserSessionSearchIndex {
                     continue;
                 }
 
-                if item.name_lower.contains(&query_lower) {
-                    results.push(SearchResultItem {
-                        name: item.name.clone(),
-                        full_path: item.full_path.clone(),
-                        is_dir: item.is_dir,
-                        size: 0,
-                    });
-
-                    if results.len() >= max_results {
-                        return results;
-                    }
+                if !item.name_lower.contains(&query_lower) {
+                    continue;
                 }
+
+                if matched < offset {
+                    matched += 1;
+                    continue;
+                }
+
+                if results.len() >= limit {
+                    return (results, true);
+                }
+
+                results.push(SearchResultItem {
+                    name: item.name.clone(),
+                    full_path: item.full_path.clone(),
+                    is_dir: item.is_dir,
+                    size: 0,
+                });
+                matched += 1;
             }
         }
 
-        results
+        (results, false)
     }
 
     pub fn total_indexed(&self) -> u64 {

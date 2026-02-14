@@ -30,7 +30,10 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             }
 
             if user_active {
-                let _ = app.file_operation_state.idle_warmup_sender.send(IdleWarmupMessage::UserActive);
+                let _ = app
+                    .file_operation_state
+                    .idle_warmup_sender
+                    .send(IdleWarmupMessage::UserActive);
             }
             return;
         }
@@ -186,6 +189,9 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 app.global_search.query.clear();
                 app.global_search.results.clear();
                 app.global_search.loading = false;
+                app.global_search.has_more_results = false;
+                app.global_search.requested_offset = 0;
+                app.global_search.requested_limit = 200;
                 // Check service availability
                 if let Err(e) = app
                     .global_search
@@ -196,6 +202,9 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 }
             } else {
                 app.global_search.focus_request = false;
+                app.global_search.has_more_results = false;
+                app.global_search.requested_offset = 0;
+                app.global_search.requested_limit = 200;
             }
             user_active = true;
         }
@@ -211,7 +220,10 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         }
     }
     if user_active {
-        let _ = app.file_operation_state.idle_warmup_sender.send(IdleWarmupMessage::UserActive);
+        let _ = app
+            .file_operation_state
+            .idle_warmup_sender
+            .send(IdleWarmupMessage::UserActive);
     }
 }
 
@@ -385,7 +397,8 @@ fn handle_quick_search(app: &mut ImageViewerApp, ctx: &egui::Context) {
             active_tab.quick_search_last_input = std::time::Instant::now();
             log::debug!(
                 "[QUICK_SEARCH] Backspace - Buffer: '{}' (Tab {})",
-                active_tab.quick_search_buffer, active_tab.id
+                active_tab.quick_search_buffer,
+                active_tab.id
             );
 
             if !active_tab.quick_search_buffer.is_empty() {
@@ -398,7 +411,9 @@ fn handle_quick_search(app: &mut ImageViewerApp, ctx: &egui::Context) {
         active_tab.quick_search_last_input = std::time::Instant::now();
         log::debug!(
             "[QUICK_SEARCH] Input: '{}' - Buffer: '{}' (Tab {})",
-            text, active_tab.quick_search_buffer, active_tab.id
+            text,
+            active_tab.quick_search_buffer,
+            active_tab.id
         );
 
         perform_quick_search(app);
@@ -423,7 +438,9 @@ fn perform_quick_search(app: &mut ImageViewerApp) {
         let tab_id = app.tab_manager.active().id;
         log::debug!(
             "[QUICK_SEARCH] Found match at index {} - '{}' (Tab {})",
-            index, app.items[index].name, tab_id
+            index,
+            app.items[index].name,
+            tab_id
         );
 
         // Update selection
@@ -446,8 +463,8 @@ fn perform_quick_search(app: &mut ImageViewerApp) {
         let tab_id = app.tab_manager.active().id;
         log::debug!(
             "[QUICK_SEARCH] No match found for '{}' (Tab {})",
-            search_lower, tab_id
+            search_lower,
+            tab_id
         );
     }
 }
-

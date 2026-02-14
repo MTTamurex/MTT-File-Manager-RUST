@@ -11,20 +11,35 @@ use windows::Win32::System::Pipes::PeekNamedPipe;
 const PIPE_IO_TIMEOUT_MS: u64 = 8000;
 const PIPE_POLL_INTERVAL_MS: u64 = 15;
 
+pub struct SearchPage {
+    pub items: Vec<SearchResultItem>,
+    pub has_more: bool,
+    pub total_matches: Option<u32>,
+}
+
 /// Send a search query to the service and return results.
-pub fn search(query: &str, max_results: u32) -> Result<Vec<SearchResultItem>, String> {
+pub fn search(query: &str, offset: u32, limit: u32) -> Result<SearchPage, String> {
     let pipe = open_pipe()?;
 
     let result = (|| {
         let request = SearchRequest::Query {
             text: query.to_string(),
-            max_results,
+            offset,
+            limit,
         };
         write_message(pipe, &request)?;
         let response: SearchResponse = read_response(pipe)?;
 
         match response {
-            SearchResponse::Results { items, .. } => Ok(items),
+            SearchResponse::Results {
+                items,
+                has_more,
+                total_matches,
+            } => Ok(SearchPage {
+                items,
+                has_more,
+                total_matches,
+            }),
             SearchResponse::Error(e) => Err(e),
             _ => Err("Unexpected response type".into()),
         }
