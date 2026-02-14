@@ -1,5 +1,4 @@
 use crate::app::state::ImageViewerApp;
-use crate::ui::theme;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -76,7 +75,10 @@ impl ImageViewerApp {
                 let drive_prefix = drive_root.to_string_lossy().to_string();
                 if !self.navigation_state.is_computer_view
                     && !self.navigation_state.is_recycle_bin_view
-                    && self.navigation_state.current_path.starts_with(&drive_prefix)
+                    && self
+                        .navigation_state
+                        .current_path
+                        .starts_with(&drive_prefix)
                 {
                     log::warn!(
                         "[FS-WATCH] Current path '{}' is on lost drive, redirecting to Este Computador",
@@ -106,8 +108,7 @@ impl ImageViewerApp {
         const FLOOD_RELOAD_COOLDOWN_MS: u64 = 5000;
         let mut pending_disk_cache_invalidations: Vec<PathBuf> = Vec::new();
         let mut folders_with_changed_contents: HashSet<PathBuf> = HashSet::new();
-        let register_changed_folder = |changed_path: &Path,
-                                       out: &mut HashSet<PathBuf>| {
+        let register_changed_folder = |changed_path: &Path, out: &mut HashSet<PathBuf>| {
             // Some events arrive as "folder modified" (path is the folder),
             // others as "file changed" (path is the file). Handle both.
             if crate::infrastructure::onedrive::fast_is_dir(changed_path) {
@@ -155,9 +156,8 @@ impl ImageViewerApp {
             };
 
         if drive_events.len() > MAX_EVENTS_INDIVIDUAL {
-            let affects_current_listing = drive_events
-                .iter()
-                .any(flood_event_affects_current_listing);
+            let affects_current_listing =
+                drive_events.iter().any(flood_event_affects_current_listing);
 
             if affects_current_listing {
                 log::warn!(
@@ -320,8 +320,14 @@ impl ImageViewerApp {
 
                             pending_disk_cache_invalidations.push(cleaned_old.clone());
                             self.invalidate_folder_cover_for_removed_path(&cleaned_old);
-                            register_changed_folder(&cleaned_old, &mut folders_with_changed_contents);
-                            register_changed_folder(&cleaned_new, &mut folders_with_changed_contents);
+                            register_changed_folder(
+                                &cleaned_old,
+                                &mut folders_with_changed_contents,
+                            );
+                            register_changed_folder(
+                                &cleaned_new,
+                                &mut folders_with_changed_contents,
+                            );
 
                             // Invalidate caches for both paths
                             self.cache_manager.texture_cache.pop(&cleaned_old);
@@ -390,7 +396,9 @@ impl ImageViewerApp {
                     legacy_events.len()
                 );
                 self.directory_cache.clear();
-                if !self.navigation_state.is_computer_view && !self.navigation_state.is_recycle_bin_view {
+                if !self.navigation_state.is_computer_view
+                    && !self.navigation_state.is_recycle_bin_view
+                {
                     self.pending_auto_reload = true;
                 }
             } else {
@@ -484,51 +492,7 @@ impl ImageViewerApp {
         }
 
         self.enqueue_disk_cache_invalidations(pending_disk_cache_invalidations);
-
-        // Execute reload only when debounce allows
-        // SUPPRESS auto-reload while file operations are in progress to prevent
-        // screen flashing (watcher fires repeatedly as files grow during copy)
-        // Skip auto-reload if smart delete already updated the UI
-        if self.skip_next_auto_reload {
-            self.skip_next_auto_reload = false;
-            self.pending_auto_reload = false;
-            #[cfg(debug_assertions)]
-            log::debug!("[DEBUG] Skipping auto-reload - UI already updated by smart delete");
-        }
-
-        // NOTE: Inactivity recovery cooldown removed - no longer needed.
-        // The DriveWatcher thread now coalesces and deduplicates events internally
-        // (200ms batches, max 500 unique events per batch), so event floods from
-        // OneDrive dehydration are absorbed before reaching the UI thread.
-        if self.pending_auto_reload && self.file_operation_state.file_ops_in_progress == 0 && !self.is_loading_folder {
-            let elapsed = self.last_auto_reload.elapsed();
-            if elapsed > Duration::from_millis(theme::AUTO_RELOAD_MS) {
-                #[cfg(debug_assertions)]
-                log::debug!(
-                    "[DEBUG] Checking auto-reload for path: '{}'",
-                    self.navigation_state.current_path
-                );
-                // SKIP for special views (Recycle Bin/Computer) which are managed manually via events
-                if self.navigation_state.is_recycle_bin_view || self.navigation_state.is_computer_view {
-                    self.pending_auto_reload = false;
-                } else {
-                    #[cfg(debug_assertions)]
-                    log::debug!(
-                        "[DEBUG] Auto-reloading with force_refresh=false (watcher-triggered)."
-                    );
-                    // PERFORMANCE: Use force_refresh=false for watcher-triggered reloads.
-                    // force_refresh=true clears ALL caches (textures, thumbnails, folder covers),
-                    // empties the items list, and causes a white screen on HDD while rescanning.
-                    // With false: directory_cache was already invalidated by watcher events above,
-                    // so fresh data is loaded from disk, but texture/thumbnail caches are preserved.
-                    // force_refresh=true is reserved for manual refresh (F5) only.
-                    self.loaded_path.clear();
-                    self.load_folder(false);
-                }
-                self.last_auto_reload = Instant::now();
-                self.pending_auto_reload = false;
-            }
-        }
+        self.apply_watcher_reload_policy();
 
         let auto_reload_done = Instant::now();
         WatcherPerfMarks {
@@ -538,4 +502,3 @@ impl ImageViewerApp {
         }
     }
 }
-
