@@ -1,3 +1,6 @@
+use crate::infrastructure::windows::window_subclass::{
+    clear_caption_drag_region, is_native_caption_drag_enabled, set_caption_drag_region_px,
+};
 use eframe::egui::{self, Color32, CornerRadius, Stroke, Vec2};
 
 pub(super) fn render_new_tab_and_drag_area(
@@ -19,16 +22,34 @@ pub(super) fn render_new_tab_and_drag_area(
 
     let remaining_width = ui.available_width() - window_controls_width;
     if remaining_width > 0.0 {
+        let native_caption_drag = is_native_caption_drag_enabled();
+        let sense = if native_caption_drag {
+            egui::Sense::hover()
+        } else {
+            egui::Sense::click_and_drag()
+        };
         let (drag_rect, drag_response) = ui.allocate_exact_size(
             Vec2::new(remaining_width, tab_height),
-            egui::Sense::click_and_drag(),
+            sense,
         );
 
         ui.painter().rect_filled(drag_rect, 0.0, inactive_bg);
 
-        if drag_response.drag_started() || drag_response.dragged() {
+        // Sync native caption drag area with this explicit empty strip.
+        let ppp = ctx.pixels_per_point();
+        set_caption_drag_region_px(
+            (drag_rect.min.x * ppp).round() as i32,
+            (drag_rect.min.y * ppp).round() as i32,
+            (drag_rect.width() * ppp).round() as i32,
+            (drag_rect.height() * ppp).round() as i32,
+        );
+
+        // Fallback path for environments where native caption drag is disabled.
+        if !native_caption_drag && (drag_response.drag_started() || drag_response.dragged()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
         }
+    } else {
+        clear_caption_drag_region();
     }
 
     let new_tab_bg = if new_tab_response.hovered() {
