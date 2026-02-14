@@ -221,18 +221,30 @@ impl ImageViewerApp {
         // 2. Cover Worker: Receive folder cover results
         let mut folder_updates = false;
         while let Ok((folder_path, cover_opt)) = self.cover_worker_receiver.try_recv() {
-            if let Some(cover) = cover_opt {
-                // Update in all_items (mutable source)
-                if let Some(item) = self.all_items.iter_mut().find(|i| i.path == folder_path) {
-                    item.folder_cover = Some(cover.clone());
-                    // PERFORMANCE: DB write moved to worker thread to avoid main thread stutter
-                    folder_updates = true;
+            // Update in all_items (mutable source)
+            if let Some(item) = self.all_items.iter_mut().find(|i| i.path == folder_path) {
+                match cover_opt {
+                    Some(cover) => {
+                        // PERFORMANCE: DB write moved to worker thread to avoid main thread stutter
+                        if item.folder_cover.as_ref() != Some(&cover) {
+                            item.folder_cover = Some(cover.clone());
+                            folder_updates = true;
+                        }
 
-                    // Request thumbnail if needed (marking as loading to avoid loop)
-                    if !self.cache_manager.has_thumbnail(&cover)
-                        && self.cache_manager.start_loading(cover.clone())
-                    {
-                        self.request_thumbnail_load(cover, 256);
+                        // Request thumbnail if needed (marking as loading to avoid loop)
+                        if !self.cache_manager.has_thumbnail(&cover)
+                            && self.cache_manager.start_loading(cover.clone())
+                        {
+                            self.request_thumbnail_load(cover, 256);
+                        }
+                    }
+                    None => {
+                        // Folder has no media preview item anymore (e.g., became empty).
+                        // Clear stale cover state so UI stops showing old preview.
+                        if item.folder_cover.take().is_some() {
+                            self.disk_cache.remove_folder_cover(&folder_path);
+                            folder_updates = true;
+                        }
                     }
                 }
             }
