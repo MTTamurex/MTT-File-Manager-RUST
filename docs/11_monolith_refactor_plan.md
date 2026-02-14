@@ -203,3 +203,14 @@ Targets
   - `global_search_overlay/results_panel.rs` extracted
   - `global_search_overlay.rs` reduced to 254 lines
   - targeted tests passed (`global_search_overlay::filters::tests::`, 3/3)
+- `application/sorting.rs` decomposition started:
+  - `sorting/sort_impl.rs` extracted
+  - `sorting/filtering.rs` extracted
+  - `sorting.rs` now acts as API facade + tests
+  - targeted tests passed (`sorting::tests::`, 10/10)
+- `ui/icon_loader.rs` decomposition started:
+  - `icon_loader/async_ops.rs` extracted
+  - `icon_loader/file_icons.rs` extracted
+  - `icon_loader/special_icons.rs` extracted
+  - `icon_loader.rs` reduced to facade + cache lifecycle methods
+  - validation: `cargo check` passed
