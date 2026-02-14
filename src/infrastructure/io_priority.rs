@@ -1,566 +1,61 @@
-//! I/O Priority management for optimized disk access
+//! I/O Priority management for optimized disk access.
 //!
 //! This module provides:
 //! - SSD vs HDD detection
 //! - Thread priority adjustment for background work
 //! - Directory-grouped request scheduling to minimize seeks on HDDs
 
-use std::cell::Cell;
-use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::path::Path;
 
-use rustc_hash::FxHashMap;
+mod detection;
+mod grouped_queue;
+mod threading;
 
-/// Cache of disk type detection results (drive letter -> is_ssd)
-static DISK_TYPE_CACHE: OnceLock<std::sync::Mutex<FxHashMap<char, bool>>> = OnceLock::new();
+pub use grouped_queue::DirectoryGroupedQueue;
 
-fn get_disk_cache() -> &'static std::sync::Mutex<FxHashMap<char, bool>> {
-    DISK_TYPE_CACHE.get_or_init(|| std::sync::Mutex::new(FxHashMap::default()))
-}
-
-thread_local! {
-    static THREAD_BG_MODE_ACTIVE: Cell<bool> = const { Cell::new(false) };
-}
-
-/// Detects if a drive is a virtual Cryptomator drive
-///
-/// Cryptomator mounts encrypted vaults as virtual drives using CryptoFS.
-/// These should be treated as HDDs if the underlying storage is an HDD.
-fn is_virtual_drive(drive_letter: char) -> bool {
-    use windows::core::{PCWSTR, PWSTR};
-    use windows::Win32::Foundation::{ERROR_MORE_DATA, NO_ERROR};
-    use windows::Win32::NetworkManagement::WNet::WNetGetConnectionW;
-    use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
-
-    fn has_virtual_markers(value: &str) -> bool {
-        let lower = value.to_lowercase();
-        lower.contains("cryptomator")
-            || lower.contains("cryptofs")
-            || lower.contains("dokan")
-            || lower.contains("winfsp")
-            || lower == "fuse"
-            || lower.contains("cryptomator-vault")
-    }
-
-    fn mapped_provider_name(drive_letter: char) -> Option<String> {
-        let local = format!("{}:", drive_letter);
-        let local_wide: Vec<u16> = local.encode_utf16().chain(std::iter::once(0)).collect();
-        let mut required_len: u32 = 0;
-
-        unsafe {
-            let probe = WNetGetConnectionW(
-                PCWSTR(local_wide.as_ptr()),
-                None,
-                &mut required_len as *mut u32,
-            );
-
-            if probe != NO_ERROR && probe != ERROR_MORE_DATA {
-                return None;
-            }
-
-            if required_len == 0 {
-                return None;
-            }
-
-            let mut buffer: Vec<u16> = vec![0; required_len as usize + 1];
-            let status = WNetGetConnectionW(
-                PCWSTR(local_wide.as_ptr()),
-                Some(PWSTR(buffer.as_mut_ptr())),
-                &mut required_len as *mut u32,
-            );
-
-            if status != NO_ERROR {
-                return None;
-            }
-
-            let end = buffer
-                .iter()
-                .position(|&c| c == 0)
-                .unwrap_or(required_len as usize)
-                .min(buffer.len());
-
-            if end == 0 {
-                return None;
-            }
-
-            Some(String::from_utf16_lossy(&buffer[..end]))
-        }
-    }
-
-    let root_path = format!("{}:\\", drive_letter);
-    let wide_path: Vec<u16> = root_path.encode_utf16().chain(std::iter::once(0)).collect();
-
-    let mut volume_name = [0u16; 261];
-    let mut file_system_name = [0u16; 261];
-    let mut serial_number: u32 = 0;
-    let mut max_component_len: u32 = 0;
-    let mut fs_flags: u32 = 0;
-
-    let ok = unsafe {
-        GetVolumeInformationW(
-            PCWSTR(wide_path.as_ptr()),
-            Some(&mut volume_name),
-            Some(&mut serial_number),
-            Some(&mut max_component_len),
-            Some(&mut fs_flags),
-            Some(&mut file_system_name),
-        )
-    };
-
-    if ok.is_err() {
-        // Cryptomator vaults can be mapped as remote drives where volume info is not available.
-        return mapped_provider_name(drive_letter)
-            .as_deref()
-            .is_some_and(has_virtual_markers);
-    }
-
-    let volume_len = volume_name
-        .iter()
-        .position(|&c| c == 0)
-        .unwrap_or(volume_name.len());
-    let fs_len = file_system_name
-        .iter()
-        .position(|&c| c == 0)
-        .unwrap_or(file_system_name.len());
-
-    let volume = String::from_utf16_lossy(&volume_name[..volume_len]).to_lowercase();
-    let file_system = String::from_utf16_lossy(&file_system_name[..fs_len]).to_lowercase();
-
-    // Detect virtual drive indicators from volume/fs metadata.
-    if has_virtual_markers(&volume) || has_virtual_markers(&file_system) {
-        return true;
-    }
-
-    // Fallback: mapped network provider name (ex: \\cryptomator-vault\...).
-    mapped_provider_name(drive_letter)
-        .as_deref()
-        .is_some_and(has_virtual_markers)
-}
-
-fn extract_drive_letter(path: &Path) -> Option<char> {
-    path.to_str()
-        .and_then(|s| {
-            if s.len() >= 2 && s.chars().nth(1) == Some(':') {
-                s.chars().next()
-            } else {
-                None
-            }
-        })
-        .map(|c| c.to_ascii_uppercase())
-}
-
-/// Checks whether a path belongs to a virtual drive (Cryptomator, Dokan, WinFSP, etc.).
-/// Manual drive overrides are also considered virtual for cache fallback purposes.
-pub fn is_virtual_drive_path(path: &Path) -> bool {
-    if path
-        .to_str()
-        .map(|s| s.to_lowercase().starts_with(r"\\cryptomator-vault\"))
-        .unwrap_or(false)
-    {
-        return true;
-    }
-
-    let Some(drive_letter) = extract_drive_letter(path) else {
-        return false;
-    };
-
-    if crate::infrastructure::virtual_drive_config::get_drive_override(drive_letter).is_some() {
-        return true;
-    }
-
-    is_virtual_drive(drive_letter)
-}
-
-/// Priority levels for I/O operations
+/// Priority levels for I/O operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum IOPriority {
-    /// Thumbnail visible on screen NOW - user is waiting
-    /// Processed with normal thread priority
+    /// Thumbnail visible on screen now; user is waiting.
     Interactive = 0,
 
-    /// Thumbnail that will be visible soon (prefetch nearby items)
-    /// Processed with slightly lower priority
+    /// Thumbnail that will be visible soon (prefetch nearby items).
     #[default]
     Prefetch = 1,
 
-    /// Background operations (folder covers, metadata discovery)
-    /// Processed with lowest priority, yields to other I/O
+    /// Background operations (folder covers, metadata discovery).
     Background = 2,
 }
 
-/// Detect if a path is on an SSD (no seek penalty) or HDD (has seek penalty)
-///
-/// Uses Windows DeviceIoControl with IOCTL_STORAGE_QUERY_PROPERTY to check
-/// the StorageDeviceSeekPenaltyProperty. SSDs return IncursSeekPenalty = false.
-///
-/// Special handling for virtual drives (like Cryptomator):
-/// - Checks user configuration first for manual overrides
-/// - Virtual drives can be configured as SSD or HDD via settings UI
-///
-/// Results are cached per drive letter for performance (including user overrides).
+/// Checks whether a path belongs to a virtual drive (Cryptomator, Dokan, WinFSP, etc.).
+pub fn is_virtual_drive_path(path: &Path) -> bool {
+    detection::is_virtual_drive_path(path)
+}
+
+/// Detect if a path is on an SSD (no seek penalty) or HDD (has seek penalty).
 pub fn is_ssd(path: &Path) -> bool {
-    // Extract drive letter (e.g., "C:" from "C:\Users\...")
-    let Some(drive_letter) = extract_drive_letter(path) else {
-        return true; // Assume SSD for network paths, etc.
-    };
-
-    // Check cache first (fast path - no locks if cache hit)
-    if let Ok(cache) = get_disk_cache().lock() {
-        if let Some(&is_ssd) = cache.get(&drive_letter) {
-            return is_ssd;
-        }
-    }
-
-    // Cache miss - determine type and cache it
-    let result = determine_disk_type(drive_letter);
-
-    // Cache the result
-    if let Ok(mut cache) = get_disk_cache().lock() {
-        cache.insert(drive_letter, result);
-    }
-
-    result
+    detection::is_ssd(path)
 }
 
-/// Determine disk type for a drive letter (not cached)
-fn determine_disk_type(drive_letter: char) -> bool {
-    // Check user configuration first (manual overrides)
-    if let Some(override_type) =
-        crate::infrastructure::virtual_drive_config::get_drive_override(drive_letter)
-    {
-        return matches!(
-            override_type,
-            crate::infrastructure::virtual_drive_config::DiskTypeOverride::SSD
-        );
-    }
-
-    // Check if it's a virtual drive
-    if is_virtual_drive(drive_letter) {
-        // Default to SSD for unconfigured virtual drives (safe default)
-        return true;
-    }
-
-    // Query Windows for disk type
-    query_disk_seek_penalty(drive_letter)
-}
-
-/// Invalidate cache for a specific drive (useful after configuration changes)
+/// Invalidate cache for a specific drive (useful after configuration changes).
 pub fn invalidate_drive_cache(drive_letter: char) {
-    if let Ok(mut cache) = get_disk_cache().lock() {
-        cache.remove(&drive_letter.to_ascii_uppercase());
-    }
+    detection::invalidate_drive_cache(drive_letter)
 }
 
-/// Query Windows for whether a disk has seek penalty (HDD) or not (SSD)
-fn query_disk_seek_penalty(drive_letter: char) -> bool {
-    use windows::core::PCWSTR;
-    use windows::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
-    use windows::Win32::Storage::FileSystem::{
-        CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
-    };
-    use windows::Win32::System::Ioctl::IOCTL_STORAGE_QUERY_PROPERTY;
-    use windows::Win32::System::IO::DeviceIoControl;
-
-    // Construct path like "\\.\C:"
-    let device_path = format!("\\\\.\\{}:", drive_letter);
-    let wide_path: Vec<u16> = device_path
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
-
-    unsafe {
-        // Open handle to the physical drive
-        let handle = CreateFileW(
-            PCWSTR(wide_path.as_ptr()),
-            0, // No access needed, just query
-            FILE_SHARE_READ | FILE_SHARE_WRITE,
-            None,
-            OPEN_EXISTING,
-            windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES(0),
-            None,
-        );
-
-        let handle = match handle {
-            Ok(h) if h != INVALID_HANDLE_VALUE => h,
-            _ => return true, // Assume SSD on error (safer for performance)
-        };
-
-        // StorageDeviceSeekPenaltyProperty = 7
-        const STORAGE_DEVICE_SEEK_PENALTY_PROPERTY: u32 = 7;
-        // PropertyStandardQuery = 0
-        const PROPERTY_STANDARD_QUERY: u32 = 0;
-
-        #[repr(C)]
-        struct StoragePropertyQuery {
-            property_id: u32,
-            query_type: u32,
-            additional_parameters: [u8; 1],
-        }
-
-        #[repr(C)]
-        struct DeviceSeekPenaltyDescriptor {
-            version: u32,
-            size: u32,
-            incurs_seek_penalty: u8, // BOOLEAN
-        }
-
-        let query = StoragePropertyQuery {
-            property_id: STORAGE_DEVICE_SEEK_PENALTY_PROPERTY,
-            query_type: PROPERTY_STANDARD_QUERY,
-            additional_parameters: [0],
-        };
-
-        let mut result = DeviceSeekPenaltyDescriptor {
-            version: 0,
-            size: 0,
-            incurs_seek_penalty: 1, // Default to HDD (seek penalty)
-        };
-
-        let mut bytes_returned: u32 = 0;
-
-        let success = DeviceIoControl(
-            handle,
-            IOCTL_STORAGE_QUERY_PROPERTY,
-            Some(&query as *const _ as *const std::ffi::c_void),
-            std::mem::size_of::<StoragePropertyQuery>() as u32,
-            Some(&mut result as *mut _ as *mut std::ffi::c_void),
-            std::mem::size_of::<DeviceSeekPenaltyDescriptor>() as u32,
-            Some(&mut bytes_returned),
-            None,
-        );
-
-        let _ = CloseHandle(handle);
-
-        if success.is_ok() && bytes_returned > 0 {
-            // incurs_seek_penalty == 0 means SSD (no seek penalty)
-            // incurs_seek_penalty == 1 means HDD (has seek penalty)
-            let is_ssd = result.incurs_seek_penalty == 0;
-            log::debug!(
-                "[DISK-DETECT] Drive {}: DeviceIoControl succeeded, is_ssd={}",
-                drive_letter, is_ssd
-            );
-            is_ssd
-        } else {
-            // Query failed - this typically happens with:
-            // 1. USB drives (controller doesn't support the query)
-            // 2. External drives
-            // 3. Some RAID configurations
-            //
-            // IMPORTANT: Modern SSDs almost always respond to this query correctly.
-            // If the query fails, it's much more likely to be an HDD (especially USB HDDs)
-            // than an SSD. Therefore, we default to HDD (false) on failure.
-            false // Assume HDD when query fails (safer default for performance)
-        }
-    }
-}
-
-/// Set the current thread's priority based on I/O priority level
-///
-/// - Interactive: Above normal (faster response)
-/// - Prefetch: Normal
-/// - Background: Lowest + Background mode (minimal I/O impact)
+/// Set the current thread's priority based on I/O priority level.
 pub fn set_thread_priority(priority: IOPriority) {
-    use windows::Win32::System::Threading::*;
-
-    unsafe {
-        let thread = GetCurrentThread();
-
-        THREAD_BG_MODE_ACTIVE.with(|bg_active| match priority {
-            IOPriority::Interactive => {
-                // Leaving background mode is required so Interactive requests can truly preempt.
-                if bg_active.replace(false) {
-                    let _ = SetThreadPriority(thread, THREAD_MODE_BACKGROUND_END);
-                }
-                let _ = SetThreadPriority(thread, THREAD_PRIORITY_ABOVE_NORMAL);
-            }
-            IOPriority::Prefetch => {
-                if bg_active.replace(false) {
-                    let _ = SetThreadPriority(thread, THREAD_MODE_BACKGROUND_END);
-                }
-                let _ = SetThreadPriority(thread, THREAD_PRIORITY_NORMAL);
-            }
-            IOPriority::Background => {
-                if !bg_active.get() {
-                    // Enable background processing mode (Windows Vista+).
-                    // This tells the OS to give this thread minimal I/O priority.
-                    let _ = SetThreadPriority(thread, THREAD_MODE_BACKGROUND_BEGIN);
-                    bg_active.set(true);
-                }
-                let _ = SetThreadPriority(thread, THREAD_PRIORITY_LOWEST);
-            }
-        });
-    }
+    threading::set_thread_priority(priority)
 }
 
-/// Reset thread priority to normal (call after background work completes)
+/// Reset thread priority to normal (call after background work completes).
 pub fn reset_thread_priority() {
-    use windows::Win32::System::Threading::*;
-
-    unsafe {
-        let thread = GetCurrentThread();
-
-        THREAD_BG_MODE_ACTIVE.with(|bg_active| {
-            if bg_active.replace(false) {
-                // Exit background mode if active
-                let _ = SetThreadPriority(thread, THREAD_MODE_BACKGROUND_END);
-            }
-        });
-
-        // Reset to normal
-        let _ = SetThreadPriority(thread, THREAD_PRIORITY_NORMAL);
-    }
-}
-
-/// Groups requests by directory to minimize disk seeks on HDDs
-///
-/// For SSDs, this just returns items sorted by priority.
-/// For HDDs, items are grouped by parent directory so that sequential reads
-/// from the same folder happen together, minimizing expensive seek operations.
-pub struct DirectoryGroupedQueue<T> {
-    /// Items grouped by parent directory
-    by_directory: FxHashMap<PathBuf, Vec<(IOPriority, T)>>,
-
-    /// Whether we're on an SSD (skip grouping optimization)
-    is_ssd: bool,
-
-    /// Current directory being processed (for HDD locality optimization)
-    current_directory: Option<PathBuf>,
-}
-
-impl<T> DirectoryGroupedQueue<T> {
-    /// Create a new queue, detecting disk type from the given path
-    pub fn new(sample_path: &Path) -> Self {
-        Self {
-            by_directory: FxHashMap::default(),
-            is_ssd: is_ssd(sample_path),
-            current_directory: None,
-        }
-    }
-
-    /// Create a queue with explicit SSD/HDD mode
-    pub fn with_disk_type(is_ssd: bool) -> Self {
-        Self {
-            by_directory: FxHashMap::default(),
-            is_ssd,
-            current_directory: None,
-        }
-    }
-
-    /// Add an item to the queue
-    pub fn push(&mut self, path: PathBuf, priority: IOPriority, item: T) {
-        let parent = path.parent().unwrap_or(&path).to_path_buf();
-        self.by_directory
-            .entry(parent)
-            .or_default()
-            .push((priority, item));
-    }
-
-    /// Get the next item, optimizing for disk locality on HDDs
-    pub fn pop(&mut self) -> Option<T> {
-        if self.by_directory.is_empty() {
-            return None;
-        }
-
-        if self.is_ssd {
-            // SSD: Just get highest priority item from any directory
-            self.pop_highest_priority()
-        } else {
-            // HDD: Prefer items from current directory to minimize seeks
-            self.pop_with_locality()
-        }
-    }
-
-    /// Pop highest priority item regardless of directory (SSD mode)
-    fn pop_highest_priority(&mut self) -> Option<T> {
-        // Find directory with highest priority item
-        let best_dir = self
-            .by_directory
-            .iter()
-            .filter(|(_, items)| !items.is_empty())
-            .min_by_key(|(_, items)| {
-                items
-                    .iter()
-                    .map(|(p, _)| *p)
-                    .min()
-                    .unwrap_or(IOPriority::Background)
-            })
-            .map(|(dir, _)| dir.clone())?;
-
-        self.pop_from_directory(&best_dir)
-    }
-
-    /// Pop item with locality preference (HDD mode)
-    fn pop_with_locality(&mut self) -> Option<T> {
-        // If we have a current directory with items, continue there
-        if let Some(ref dir) = self.current_directory.clone() {
-            if let Some(items) = self.by_directory.get(dir) {
-                if !items.is_empty() {
-                    return self.pop_from_directory(dir);
-                }
-            }
-        }
-
-        // Find directory with highest priority item
-        let best_dir = self
-            .by_directory
-            .iter()
-            .filter(|(_, items)| !items.is_empty())
-            .min_by_key(|(_, items)| {
-                items
-                    .iter()
-                    .map(|(p, _)| *p)
-                    .min()
-                    .unwrap_or(IOPriority::Background)
-            })
-            .map(|(dir, _)| dir.clone())?;
-
-        self.current_directory = Some(best_dir.clone());
-        self.pop_from_directory(&best_dir)
-    }
-
-    /// Pop highest priority item from a specific directory
-    fn pop_from_directory(&mut self, dir: &PathBuf) -> Option<T> {
-        let items = self.by_directory.get_mut(dir)?;
-
-        if items.is_empty() {
-            self.by_directory.remove(dir);
-            return None;
-        }
-
-        // Find index of highest priority item
-        let best_idx = items
-            .iter()
-            .enumerate()
-            .min_by_key(|(_, (p, _))| *p)
-            .map(|(idx, _)| idx)?;
-
-        let (_, item) = items.swap_remove(best_idx);
-
-        // Clean up empty directories
-        if items.is_empty() {
-            self.by_directory.remove(dir);
-            if self.current_directory.as_ref() == Some(dir) {
-                self.current_directory = None;
-            }
-        }
-
-        Some(item)
-    }
-
-    /// Check if queue is empty
-    pub fn is_empty(&self) -> bool {
-        self.by_directory.values().all(|v| v.is_empty())
-    }
-
-    /// Get total item count
-    pub fn len(&self) -> usize {
-        self.by_directory.values().map(|v| v.len()).sum()
-    }
+    threading::reset_thread_priority()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn test_directory_grouped_queue_ssd() {
@@ -622,3 +117,4 @@ mod tests {
         assert!(IOPriority::Prefetch < IOPriority::Background);
     }
 }
+

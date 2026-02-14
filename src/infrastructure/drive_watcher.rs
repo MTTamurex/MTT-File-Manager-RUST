@@ -10,36 +10,19 @@
 //! Based on File Pilot's approach: "Stabilized directory change tracking by using
 //! ReadDirectoryChanges on the entire drive instead of per folder."
 
-use std::collections::HashSet;
-use std::ffi::OsString;
-use std::os::windows::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use windows::core::PCWSTR;
-use windows::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+use windows::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, ReadDirectoryChangesW, FILE_ACTION_ADDED, FILE_ACTION_MODIFIED,
-    FILE_ACTION_REMOVED, FILE_ACTION_RENAMED_NEW_NAME, FILE_ACTION_RENAMED_OLD_NAME,
-    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OVERLAPPED, FILE_LIST_DIRECTORY,
-    FILE_NOTIFY_CHANGE_ATTRIBUTES, FILE_NOTIFY_CHANGE_CREATION, FILE_NOTIFY_CHANGE_DIR_NAME,
-    FILE_NOTIFY_CHANGE_FILE_NAME, FILE_NOTIFY_CHANGE_LAST_WRITE, FILE_NOTIFY_CHANGE_SIZE,
-    FILE_NOTIFY_INFORMATION, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OVERLAPPED, FILE_LIST_DIRECTORY,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
-use windows::Win32::System::Threading::{CreateEventW, ResetEvent, WaitForSingleObject};
-use windows::Win32::System::IO::{CancelIoEx, GetOverlappedResult};
 
-/// Buffer size for directory change notifications (64KB is the typical max)
-const BUFFER_SIZE: usize = 65536;
-
-/// Maximum events to keep in the dedup buffer before flushing.
-/// When exceeded, events are coalesced into a bulk invalidation.
-const MAX_COALESCED_EVENTS: usize = 500;
-
-/// Minimum interval (ms) between sending event batches to the UI thread.
-/// This prevents flooding the channel during OneDrive dehydration storms.
-const COALESCE_INTERVAL_MS: u64 = 200;
+mod buffer_parser;
+mod thread_loop;
 
 /// Events that can be reported by the drive watcher
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -60,7 +43,7 @@ pub enum DriveWatcherEvent {
 
 /// Internal command for the watcher thread
 #[derive(Debug, Clone)]
-enum WatcherCommand {
+pub(super) enum WatcherCommand {
     /// Update the filter prefix (when user navigates to a different folder)
     UpdatePrefix(PathBuf),
     /// Shutdown the watcher
@@ -117,7 +100,7 @@ impl DriveWatcher {
                 return;
             };
 
-            watcher_thread_main(
+            thread_loop::watcher_thread_main(
                 handle,
                 drive_root_clone,
                 cmd_rx,
@@ -214,8 +197,8 @@ impl DriveWatcher {
     ///
     /// Example: "C:\Users\Name" -> "C:\"
     ///
-    /// NOTE: On Windows, `Path::components().next()` returns `"C:"` (without backslash),
-    /// which means "current directory on drive C" — NOT the root. We must append `\`
+    /// NOTE: On Windows, `Path::components().next()` returns "C:" (without backslash),
+    /// which means "current directory on drive C" - NOT the root. We must append `\`
     /// so that `CreateFileW` opens the actual drive root for `ReadDirectoryChangesW`.
     pub fn extract_drive_root(path: &Path) -> Option<PathBuf> {
         let s = path.to_string_lossy();
@@ -238,287 +221,9 @@ impl Drop for DriveWatcher {
     }
 }
 
-/// Main watcher thread function
-///
-/// ARCHITECTURE (inspired by Files app):
-/// - Events are coalesced in a HashSet to deduplicate (same path → one event)
-/// - Batches are flushed at most every COALESCE_INTERVAL_MS (200ms)
-/// - When the buffer exceeds MAX_COALESCED_EVENTS, it's flushed immediately
-///   to prevent unbounded memory growth during OneDrive dehydration storms
-/// - This ensures the UI thread NEVER receives unbounded event lists
-fn watcher_thread_main(
-    handle: HANDLE,
-    drive_root: PathBuf,
-    command_rx: std::sync::mpsc::Receiver<WatcherCommand>,
-    event_tx: std::sync::mpsc::Sender<Vec<DriveWatcherEvent>>,
-    shutdown: Arc<AtomicBool>,
-    mut current_prefix: PathBuf,
-) {
-    log::info!("[DRIVE-WATCHER] Thread started for drive: {:?}", drive_root);
-
-    unsafe {
-        // Create events for overlapped I/O
-        let h_event = match CreateEventW(None, true, false, None) {
-            Ok(event) => event,
-            Err(e) => {
-                log::error!("[DRIVE-WATCHER] Failed to create event: {}", e);
-                let _ = CloseHandle(handle);
-                return;
-            }
-        };
-
-        // Buffer for directory change notifications
-        let mut buffer: Vec<u8> = vec![0; BUFFER_SIZE];
-        let mut overlapped = std::mem::zeroed::<windows::Win32::System::IO::OVERLAPPED>();
-        overlapped.hEvent = h_event;
-
-        // Coalescing state: events are deduplicated here before sending
-        let mut coalesced: HashSet<DriveWatcherEvent> = HashSet::new();
-        let mut last_flush = std::time::Instant::now();
-        let mut bytes_returned: u32 = 0;
-        let mut waiting_for_io = false;
-
-        loop {
-            if shutdown.load(Ordering::Relaxed) {
-                break;
-            }
-
-            // Drain commands (non-blocking), keeping the latest prefix.
-            let mut should_exit = false;
-            loop {
-                match command_rx.try_recv() {
-                    Ok(WatcherCommand::UpdatePrefix(new_prefix)) => {
-                        current_prefix = new_prefix;
-                    }
-                    Ok(WatcherCommand::Shutdown) => {
-                        should_exit = true;
-                        break;
-                    }
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        should_exit = true;
-                        break;
-                    }
-                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                }
-            }
-            if should_exit {
-                break;
-            }
-
-            // Start async read if not already pending
-            if !waiting_for_io {
-                buffer.fill(0);
-                let result = ReadDirectoryChangesW(
-                    handle,
-                    buffer.as_mut_ptr() as *mut _,
-                    buffer.len() as u32,
-                    true, // Watch subtree (entire drive)
-                    FILE_NOTIFY_CHANGE_FILE_NAME
-                        | FILE_NOTIFY_CHANGE_DIR_NAME
-                        | FILE_NOTIFY_CHANGE_ATTRIBUTES
-                        | FILE_NOTIFY_CHANGE_SIZE
-                        | FILE_NOTIFY_CHANGE_LAST_WRITE
-                        | FILE_NOTIFY_CHANGE_CREATION,
-                    None, // Async operation - bytes returned comes from GetOverlappedResult
-                    Some(&mut overlapped),
-                    None,
-                );
-
-                if result.is_err() {
-                    log::error!(
-                        "[DRIVE-WATCHER] ReadDirectoryChangesW failed (drive likely unmounted): {:?}",
-                        result.err()
-                    );
-                    let _ = event_tx.send(vec![DriveWatcherEvent::DriveLost(drive_root.clone())]);
-                    break;
-                }
-
-                waiting_for_io = true;
-            }
-
-            // Wait for I/O completion with timeout (100ms)
-            let wait_result = WaitForSingleObject(h_event, 100);
-
-            if wait_result.0 == 0 {
-                // Event signaled - I/O completed
-                let result = GetOverlappedResult(handle, &overlapped, &mut bytes_returned, false);
-
-                if let Err(e) = &result {
-                    // Handle became invalid — drive was likely unmounted
-                    log::error!(
-                        "[DRIVE-WATCHER] GetOverlappedResult failed (drive likely unmounted): {}",
-                        e
-                    );
-                    let _ = event_tx.send(vec![DriveWatcherEvent::DriveLost(drive_root.clone())]);
-                    break;
-                }
-
-                if bytes_returned > 0 {
-                    // Parse the notification buffer
-                    let events =
-                        parse_notify_buffer(&buffer[..bytes_returned as usize], &drive_root);
-
-                    // Insert into coalescing set (deduplicates automatically)
-                    // and filter by the currently watched prefix.
-                    for event in events {
-                        if event_matches_prefix(&event, &current_prefix) {
-                            coalesced.insert(event);
-                        }
-                    }
-                }
-
-                // Reset event and mark I/O as complete
-                let _ = ResetEvent(h_event);
-                waiting_for_io = false;
-            }
-
-            // Flush coalesced events based on time or buffer pressure
-            let elapsed = last_flush.elapsed().as_millis() as u64;
-            let should_flush = !coalesced.is_empty()
-                && (elapsed >= COALESCE_INTERVAL_MS || coalesced.len() >= MAX_COALESCED_EVENTS);
-
-            if should_flush {
-                let batch: Vec<DriveWatcherEvent> = coalesced.drain().collect();
-                let _ = event_tx.send(batch);
-                last_flush = std::time::Instant::now();
-            }
-        }
-
-        // Flush remaining events before shutdown
-        if !coalesced.is_empty() {
-            let batch: Vec<DriveWatcherEvent> = coalesced.drain().collect();
-            let _ = event_tx.send(batch);
-        }
-
-        // Cleanup
-        let _ = CancelIoEx(handle, None);
-        let _ = CloseHandle(handle);
-        let _ = CloseHandle(h_event);
-        log::info!("[DRIVE-WATCHER] Thread shutdown complete");
-    }
-}
-
-/// Parse FILE_NOTIFY_INFORMATION buffer into events
-fn parse_notify_buffer(buffer: &[u8], drive_root: &Path) -> Vec<DriveWatcherEvent> {
-    let mut events = Vec::new();
-    let mut offset = 0usize;
-    let mut pending_rename_old: Option<PathBuf> = None;
-
-    // Ensure drive_root ends with backslash for proper path construction
-    let drive_root_str = drive_root.to_string_lossy();
-    let drive_root_normalized = if drive_root_str.ends_with('\\') {
-        drive_root_str.to_string()
-    } else {
-        format!("{}\\", drive_root_str)
-    };
-
-    unsafe {
-        loop {
-            if offset + std::mem::size_of::<FILE_NOTIFY_INFORMATION>() > buffer.len() {
-                break;
-            }
-
-            let info = &*(buffer.as_ptr().add(offset) as *const FILE_NOTIFY_INFORMATION);
-
-            // Extract filename (comes as relative path from watched directory)
-            let name_len = info.FileNameLength as usize / 2;
-            let name_ptr = info.FileName.as_ptr();
-            let name_slice = std::slice::from_raw_parts(name_ptr, name_len);
-            let filename = OsString::from_wide(name_slice);
-            let filename_str = filename.to_string_lossy();
-
-            // Build full path - manually concatenate to avoid Path::join issues
-            // FILE_NOTIFY_INFORMATION returns paths like "file.txt" or "folder\file.txt"
-            // We need to prepend the drive root
-            let full_path_str = format!("{}{}", drive_root_normalized, filename_str);
-            let full_path = PathBuf::from(full_path_str);
-
-            // Determine event type using FILE_ACTION constants
-            match info.Action {
-                FILE_ACTION_ADDED => events.push(DriveWatcherEvent::Created(full_path)),
-                FILE_ACTION_REMOVED => events.push(DriveWatcherEvent::Deleted(full_path)),
-                FILE_ACTION_MODIFIED => events.push(DriveWatcherEvent::Modified(full_path)),
-                FILE_ACTION_RENAMED_OLD_NAME => {
-                    // Rename notifications arrive as old-name + new-name pairs.
-                    // Keep old-name pending and emit only when new-name arrives.
-                    if let Some(unpaired_old) = pending_rename_old.replace(full_path) {
-                        // Two OLD events in a row (rare): flush previous one conservatively.
-                        events.push(DriveWatcherEvent::Renamed(
-                            unpaired_old.clone(),
-                            unpaired_old,
-                        ));
-                    }
-                }
-                FILE_ACTION_RENAMED_NEW_NAME => {
-                    if let Some(old_path) = pending_rename_old.take() {
-                        events.push(DriveWatcherEvent::Renamed(old_path, full_path));
-                    } else {
-                        // Defensive fallback for unmatched NEW event.
-                        events.push(DriveWatcherEvent::Renamed(full_path.clone(), full_path));
-                    }
-                }
-                _ => events.push(DriveWatcherEvent::Unknown(full_path)),
-            }
-
-            // Move to next entry
-            if info.NextEntryOffset == 0 {
-                break;
-            }
-            offset += info.NextEntryOffset as usize;
-        }
-    }
-
-    // Defensive fallback: unmatched OLD rename at buffer end.
-    if let Some(old_path) = pending_rename_old.take() {
-        events.push(DriveWatcherEvent::Renamed(old_path.clone(), old_path));
-    }
-
-    events
-}
-
-fn path_matches_prefix(path: &Path, prefix: &Path) -> bool {
-    // Normalize both paths for comparison
-    let path_str_raw = path.to_string_lossy().to_lowercase();
-    let prefix_str_raw = prefix.to_string_lossy().to_lowercase();
-
-    if prefix_str_raw.is_empty() {
-        return true;
-    }
-
-    let path_str = path_str_raw.strip_prefix(r"\\?\").unwrap_or(&path_str_raw);
-    let prefix_str = prefix_str_raw
-        .strip_prefix(r"\\?\")
-        .unwrap_or(&prefix_str_raw);
-
-    // Ensure both end with backslash for proper prefix matching
-    let prefix_normalized = if prefix_str.ends_with('\\') {
-        prefix_str.to_string()
-    } else {
-        format!("{}\\", prefix_str)
-    };
-
-    path_str.starts_with(&prefix_normalized)
-        // Special case: if prefix is drive root (e.g., "d:\\"),
-        // any path on that drive matches.
-        || (prefix_normalized.len() == 3 && path_str.starts_with(&prefix_normalized[..2]))
-}
-
-/// Check if an event matches the current prefix.
-fn event_matches_prefix(event: &DriveWatcherEvent, prefix: &Path) -> bool {
-    match event {
-        DriveWatcherEvent::DriveLost(_) => true, // Always propagate
-        DriveWatcherEvent::Created(p)
-        | DriveWatcherEvent::Deleted(p)
-        | DriveWatcherEvent::Modified(p)
-        | DriveWatcherEvent::Unknown(p) => path_matches_prefix(p, prefix),
-        DriveWatcherEvent::Renamed(old, new) => {
-            path_matches_prefix(old, prefix) || path_matches_prefix(new, prefix)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::buffer_parser::event_matches_prefix;
     use super::*;
 
     #[test]
