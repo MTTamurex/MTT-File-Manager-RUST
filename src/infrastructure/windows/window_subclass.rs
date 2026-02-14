@@ -17,13 +17,14 @@
 //! - Windows needs edge codes (HTLEFT, HTRIGHT, etc.) for resize cursors/behavior
 //! - During minimize, client area is 0x0 which corrupts egui layout calculations
 
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, Ordering};
 use std::sync::Mutex;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetClientRect, IsZoomed, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCLIENT, HTLEFT, HTRIGHT,
-    HTTOP, HTTOPLEFT, HTTOPRIGHT, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_NCHITTEST, WM_SIZE,
+    GetClientRect, IsZoomed, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT,
+    HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_NCHITTEST,
+    WM_SIZE,
 };
 
 /// SIZE_MINIMIZED constant (wParam for WM_SIZE when window is minimized)
@@ -86,6 +87,16 @@ static SUBCLASS_INSTALLED: AtomicBool = AtomicBool::new(false);
 /// Set true on WM_ENTERSIZEMOVE, false on WM_EXITSIZEMOVE
 static IS_IN_SIZE_MOVE: AtomicBool = AtomicBool::new(false);
 
+/// Enables native caption drag hit-testing on a UI-defined drag region.
+static NATIVE_CAPTION_DRAG_ENABLED: AtomicBool = AtomicBool::new(true);
+/// Caption drag region (window-relative, physical pixels).
+/// Used by WM_NCHITTEST to return HTCAPTION for the empty tab-bar drag area.
+static CAPTION_DRAG_REGION_VALID: AtomicBool = AtomicBool::new(false);
+static CAPTION_DRAG_REGION_X: AtomicI32 = AtomicI32::new(0);
+static CAPTION_DRAG_REGION_Y: AtomicI32 = AtomicI32::new(0);
+static CAPTION_DRAG_REGION_W: AtomicI32 = AtomicI32::new(0);
+static CAPTION_DRAG_REGION_H: AtomicI32 = AtomicI32::new(0);
+
 /// Current layout phase (atomic for lock-free read)
 static LAYOUT_PHASE: AtomicU8 = AtomicU8::new(0); // 0 = Normal
 
@@ -105,6 +116,40 @@ static SIDEBAR_SNAPSHOT: Mutex<SidebarSnapshot> = Mutex::new(SidebarSnapshot {
 #[inline]
 pub fn is_in_size_move() -> bool {
     IS_IN_SIZE_MOVE.load(Ordering::Relaxed)
+}
+
+/// Returns whether native caption drag hit-testing is enabled.
+#[inline]
+pub fn is_native_caption_drag_enabled() -> bool {
+    NATIVE_CAPTION_DRAG_ENABLED.load(Ordering::Relaxed)
+}
+
+/// Enables or disables native caption drag hit-testing.
+pub fn set_native_caption_drag_enabled(enabled: bool) {
+    NATIVE_CAPTION_DRAG_ENABLED.store(enabled, Ordering::SeqCst);
+    if !enabled {
+        clear_caption_drag_region();
+    }
+}
+
+/// Sets the native caption drag region in physical pixels, window-relative.
+/// Passing non-positive width/height clears the region.
+pub fn set_caption_drag_region_px(x: i32, y: i32, width: i32, height: i32) {
+    if width <= 0 || height <= 0 {
+        clear_caption_drag_region();
+        return;
+    }
+
+    CAPTION_DRAG_REGION_X.store(x, Ordering::Relaxed);
+    CAPTION_DRAG_REGION_Y.store(y, Ordering::Relaxed);
+    CAPTION_DRAG_REGION_W.store(width, Ordering::Relaxed);
+    CAPTION_DRAG_REGION_H.store(height, Ordering::Relaxed);
+    CAPTION_DRAG_REGION_VALID.store(true, Ordering::Release);
+}
+
+/// Clears the native caption drag region.
+pub fn clear_caption_drag_region() {
+    CAPTION_DRAG_REGION_VALID.store(false, Ordering::Release);
 }
 
 /// Get the current layout phase.
@@ -278,11 +323,8 @@ extern "system" fn borderless_subclass_proc(
 /// - Corner zones (8x8px): HTTOPLEFT, HTTOPRIGHT, HTBOTTOMLEFT, HTBOTTOMRIGHT
 /// - Rest of window: HTCLIENT (let egui handle)
 fn handle_nchittest(hwnd: HWND, lparam: LPARAM) -> LRESULT {
-    // Don't provide resize borders when maximized
-    // SAFETY: HWND is valid, IsZoomed just queries window state
-    if unsafe { IsZoomed(hwnd).as_bool() } {
-        return LRESULT(HTCLIENT as isize);
-    }
+    // SAFETY: HWND is valid, IsZoomed just queries window state.
+    let is_zoomed = unsafe { IsZoomed(hwnd).as_bool() };
 
     // Extract cursor position from lparam (screen coordinates)
     let cursor_x = (lparam.0 as i32) & 0xFFFF;
@@ -328,34 +370,65 @@ fn handle_nchittest(hwnd: HWND, lparam: LPARAM) -> LRESULT {
         return LRESULT(HTCLIENT as isize);
     }
 
-    // Determine hit-test zone
-    let on_left = x < RESIZE_BORDER_WIDTH;
-    let on_right = x >= width - RESIZE_BORDER_WIDTH;
-    let on_top = y < RESIZE_BORDER_WIDTH;
-    let on_bottom = y >= height - RESIZE_BORDER_WIDTH;
+    // Determine hit-test zone for resize borders/corners.
+    // Disable resize zones while maximized, but still allow caption dragging.
+    if !is_zoomed {
+        let on_left = x < RESIZE_BORDER_WIDTH;
+        let on_right = x >= width - RESIZE_BORDER_WIDTH;
+        let on_top = y < RESIZE_BORDER_WIDTH;
+        let on_bottom = y >= height - RESIZE_BORDER_WIDTH;
 
-    // Corner detection (corners take priority)
-    let hit_test = if on_top && on_left {
-        HTTOPLEFT
-    } else if on_top && on_right {
-        HTTOPRIGHT
-    } else if on_bottom && on_left {
-        HTBOTTOMLEFT
-    } else if on_bottom && on_right {
-        HTBOTTOMRIGHT
-    } else if on_left {
-        HTLEFT
-    } else if on_right {
-        HTRIGHT
-    } else if on_top {
-        HTTOP
-    } else if on_bottom {
-        HTBOTTOM
-    } else {
-        HTCLIENT
-    };
+        // Corner detection (corners take priority).
+        let resize_hit = if on_top && on_left {
+            Some(HTTOPLEFT)
+        } else if on_top && on_right {
+            Some(HTTOPRIGHT)
+        } else if on_bottom && on_left {
+            Some(HTBOTTOMLEFT)
+        } else if on_bottom && on_right {
+            Some(HTBOTTOMRIGHT)
+        } else if on_left {
+            Some(HTLEFT)
+        } else if on_right {
+            Some(HTRIGHT)
+        } else if on_top {
+            Some(HTTOP)
+        } else if on_bottom {
+            Some(HTBOTTOM)
+        } else {
+            None
+        };
 
-    LRESULT(hit_test as isize)
+        if let Some(hit) = resize_hit {
+            return LRESULT(hit as isize);
+        }
+    }
+
+    if is_native_caption_drag_enabled() && point_in_caption_drag_region(x, y) {
+        return LRESULT(HTCAPTION as isize);
+    }
+
+    LRESULT(HTCLIENT as isize)
+}
+
+#[inline]
+fn point_in_caption_drag_region(x: i32, y: i32) -> bool {
+    if !CAPTION_DRAG_REGION_VALID.load(Ordering::Acquire) {
+        return false;
+    }
+
+    let rx = CAPTION_DRAG_REGION_X.load(Ordering::Relaxed);
+    let ry = CAPTION_DRAG_REGION_Y.load(Ordering::Relaxed);
+    let rw = CAPTION_DRAG_REGION_W.load(Ordering::Relaxed);
+    let rh = CAPTION_DRAG_REGION_H.load(Ordering::Relaxed);
+
+    if rw <= 0 || rh <= 0 {
+        return false;
+    }
+
+    let right = rx.saturating_add(rw);
+    let bottom = ry.saturating_add(rh);
+    x >= rx && y >= ry && x < right && y < bottom
 }
 
 /// RAII guard for borderless subclass.
