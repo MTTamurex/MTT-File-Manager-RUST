@@ -521,7 +521,7 @@ User digita query
     ↓
 src/workers/global_search_worker.rs - GlobalSearchRequest::Search
     ↓ (coalescing de queries rápidas)
-src/infrastructure/global_search.rs - search(query, max_results)
+src/infrastructure/global_search.rs - search(query, offset, limit)
     ↓
 open_pipe() → Named Pipe \\.\pipe\MTTFileManagerSearch
     ↓
@@ -530,7 +530,7 @@ write_message(SearchRequest::Query) → [4-byte LE length + bincode payload]
 mtt-search-service (processo separado):
     crates/mtt-search-service/src/ipc_server.rs - handle_client()
         ↓
-    crates/mtt-search-service/src/file_index.rs - search()
+    crates/mtt-search-service/src/file_index.rs - search_page()
         ↓ (busca substring case-insensitive no nome, com deadline de 5s)
     crates/mtt-search-service/src/path_resolver.rs - resolve_path()
         ↓ (chain de parent FRNs até root)

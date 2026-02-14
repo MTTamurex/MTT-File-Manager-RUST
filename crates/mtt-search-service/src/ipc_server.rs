@@ -32,8 +32,10 @@ const MAX_ACTIVE_CLIENTS: u32 = 8;
 const MAX_REQUEST_PAYLOAD: usize = 64 * 1024;
 /// Maximum search query text length in bytes.
 const MAX_QUERY_TEXT_LEN: usize = 1024;
-/// Maximum results per search query.
+/// Maximum results per query page.
 const MAX_QUERY_RESULTS: usize = 10_000;
+/// Maximum query offset to avoid pathological skip scans.
+const MAX_QUERY_OFFSET: usize = 5_000_000;
 /// Per-connection I/O timeout in seconds (prevents slowloris DoS).
 const IO_TIMEOUT_SECS: u64 = 30;
 
@@ -119,7 +121,10 @@ pub fn run_ipc_server(indices: Arc<RwLock<Vec<VolumeIndex>>>, shutdown: Arc<Atom
                     }
                 }
                 if !watchdog_done.load(Ordering::Relaxed) {
-                    eprintln!("[IPC] Client timeout after {}s, disconnecting", IO_TIMEOUT_SECS);
+                    eprintln!(
+                        "[IPC] Client timeout after {}s, disconnecting",
+                        IO_TIMEOUT_SECS
+                    );
                     unsafe {
                         let handle = HANDLE(watchdog_pipe as *mut core::ffi::c_void);
                         let _ = DisconnectNamedPipe(handle);
@@ -435,9 +440,14 @@ fn handle_client(
                 }),
             );
         }
-        SearchRequest::Query { text, max_results } => {
-            // Input validation: cap max_results and text length
-            let max_results = (max_results as usize).min(MAX_QUERY_RESULTS);
+        SearchRequest::Query {
+            text,
+            offset,
+            limit,
+        } => {
+            // Input validation: cap offset/limit and text length.
+            let offset = (offset as usize).min(MAX_QUERY_OFFSET);
+            let limit = (limit as usize).min(MAX_QUERY_RESULTS);
 
             let text = if text.len() > MAX_QUERY_TEXT_LEN {
                 text[..text.floor_char_boundary(MAX_QUERY_TEXT_LEN)].to_string()
@@ -450,8 +460,8 @@ fn handle_client(
                     pipe,
                     &SearchResponse::Results {
                         items: Vec::new(),
-                        is_final: true,
-                        total_found: 0,
+                        has_more: false,
+                        total_matches: Some(0),
                     },
                 );
                 return;
@@ -464,9 +474,10 @@ fn handle_client(
                     poisoned.into_inner()
                 }
             };
-            let results = file_index::search(&indices_lock, &text, max_results);
+            let page = file_index::search_page(&indices_lock, &text, offset, limit);
 
-            let items: Vec<SearchResultItem> = results
+            let items: Vec<SearchResultItem> = page
+                .items
                 .into_iter()
                 .map(|r| SearchResultItem {
                     name: r.name,
@@ -476,13 +487,12 @@ fn handle_client(
                 })
                 .collect();
 
-            let total = items.len() as u32;
             let _ = send_response(
                 pipe,
                 &SearchResponse::Results {
                     items,
-                    is_final: true,
-                    total_found: total,
+                    has_more: page.has_more,
+                    total_matches: page.total_matches.map(|v| v as u32),
                 },
             );
         }

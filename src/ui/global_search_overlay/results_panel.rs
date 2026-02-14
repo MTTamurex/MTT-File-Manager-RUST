@@ -5,6 +5,8 @@ use eframe::egui;
 
 const RESULT_ROW_HEIGHT: f32 = 46.0;
 const ICON_SIZE: f32 = 18.0;
+const LOAD_MORE_STEP: u32 = 500;
+const MAX_RESULTS_CAP: u32 = 10_000;
 
 pub(super) fn render_results_panel(
     ui: &mut egui::Ui,
@@ -91,11 +93,11 @@ pub(super) fn render_results_panel(
     {
         app.global_search.selected_index = None;
     }
-    if app
-        .global_search
-        .selected_index
-        .is_some_and(|idx| !filtered_indices.iter().any(|filtered_idx| *filtered_idx == idx))
-    {
+    if app.global_search.selected_index.is_some_and(|idx| {
+        !filtered_indices
+            .iter()
+            .any(|filtered_idx| *filtered_idx == idx)
+    }) {
         app.global_search.selected_index = None;
     }
 
@@ -127,7 +129,8 @@ pub(super) fn render_results_panel(
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     for &source_idx in &filtered_indices {
-                        let Some(result) = app.global_search.results.get(source_idx).cloned() else {
+                        let Some(result) = app.global_search.results.get(source_idx).cloned()
+                        else {
                             continue;
                         };
                         let path_buf = std::path::PathBuf::from(&result.full_path);
@@ -187,7 +190,9 @@ pub(super) fn render_results_panel(
                         row_ui.style_mut().interaction.selectable_labels = false;
 
                         if let Some(icon) = icon_tex {
-                            row_ui.add(egui::Image::new(&icon).max_size(egui::vec2(ICON_SIZE, ICON_SIZE)));
+                            row_ui.add(
+                                egui::Image::new(&icon).max_size(egui::vec2(ICON_SIZE, ICON_SIZE)),
+                            );
                         } else {
                             let icon_str = if is_dir { "\u{1F4C1}" } else { "\u{1F4C4}" };
                             row_ui.label(egui::RichText::new(icon_str).size(14.0));
@@ -229,6 +234,60 @@ pub(super) fn render_results_panel(
                 });
         },
     );
+
+    // Real pagination: request next page using offset/limit.
+    if !app.global_search.query.is_empty() {
+        if app.global_search.has_more_results
+            && !app.global_search.loading
+            && (app.global_search.results.len() as u32) < MAX_RESULTS_CAP
+        {
+            let current_loaded = app.global_search.results.len() as u32;
+            let next_offset = current_loaded;
+            let next_limit = LOAD_MORE_STEP.min(MAX_RESULTS_CAP.saturating_sub(current_loaded));
+
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(format!("{} resultados carregados", current_loaded))
+                        .size(10.0)
+                        .color(egui::Color32::from_gray(120)),
+                );
+                if ui
+                    .button(format!("Carregar mais (+{})", next_limit))
+                    .on_hover_text("Busca a próxima página de resultados")
+                    .clicked()
+                {
+                    app.global_search.loading = true;
+                    app.global_search.has_more_results = false;
+                    app.global_search.requested_offset = next_offset;
+                    app.global_search.requested_limit = next_limit;
+
+                    if let Err(e) = app.global_search.sender.send(
+                        crate::workers::global_search_worker::GlobalSearchRequest::Search {
+                            query: app.global_search.query.clone(),
+                            offset: next_offset,
+                            limit: next_limit,
+                        },
+                    ) {
+                        app.global_search.loading = false;
+                        log::error!("[GLOBAL-SEARCH] Failed to queue load-more request: {}", e);
+                    }
+                }
+            });
+        } else if app.global_search.has_more_results
+            && (app.global_search.results.len() as u32) >= MAX_RESULTS_CAP
+        {
+            ui.add_space(6.0);
+            ui.label(
+                egui::RichText::new(format!(
+                    "Limite máximo atingido ({} resultados). Refine a busca para mais precisão.",
+                    MAX_RESULTS_CAP
+                ))
+                .size(10.0)
+                .color(egui::Color32::from_gray(120)),
+            );
+        }
+    }
 
     // Enter opens selected result (or the first visible one when none is selected).
     if activate_result.is_none()

@@ -7,7 +7,11 @@ pub const PIPE_NAME: &str = r"\\.\pipe\MTTFileManagerSearch";
 #[derive(Serialize, Deserialize, Debug)]
 pub enum SearchRequest {
     /// Search for files matching the query.
-    Query { text: String, max_results: u32 },
+    Query {
+        text: String,
+        offset: u32,
+        limit: u32,
+    },
     /// Get the current indexing status.
     GetStatus,
     /// Check if the service is alive.
@@ -22,8 +26,8 @@ pub enum SearchResponse {
     /// Search results.
     Results {
         items: Vec<SearchResultItem>,
-        is_final: bool,
-        total_found: u32,
+        has_more: bool,
+        total_matches: Option<u32>,
     },
     /// Index status information.
     Status(IndexStatusInfo),
@@ -91,15 +95,21 @@ mod tests {
     fn test_roundtrip_request() {
         let req = SearchRequest::Query {
             text: "test.txt".to_string(),
-            max_results: 100,
+            offset: 50,
+            limit: 100,
         };
         let encoded = encode_message(&req).unwrap();
         // Skip 4-byte length prefix
         let decoded: SearchRequest = decode_message(&encoded[4..]).unwrap();
         match decoded {
-            SearchRequest::Query { text, max_results } => {
+            SearchRequest::Query {
+                text,
+                offset,
+                limit,
+            } => {
                 assert_eq!(text, "test.txt");
-                assert_eq!(max_results, 100);
+                assert_eq!(offset, 50);
+                assert_eq!(limit, 100);
             }
             _ => panic!("unexpected variant"),
         }
@@ -114,21 +124,23 @@ mod tests {
                 is_dir: false,
                 size: 1024,
             }],
-            is_final: true,
-            total_found: 1,
+            has_more: true,
+            total_matches: None,
         };
         let encoded = encode_message(&resp).unwrap();
         let decoded: SearchResponse = decode_message(&encoded[4..]).unwrap();
-        match decoded {
-            SearchResponse::Results {
-                items, total_found, ..
-            } => {
-                assert_eq!(items.len(), 1);
-                assert_eq!(items[0].name, "hello.rs");
-                assert_eq!(total_found, 1);
-            }
-            _ => panic!("unexpected variant"),
-        }
+        let SearchResponse::Results {
+            items,
+            has_more,
+            total_matches,
+        } = decoded
+        else {
+            panic!("unexpected variant");
+        };
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].name, "hello.rs");
+        assert!(has_more);
+        assert!(total_matches.is_none());
     }
 
     #[test]

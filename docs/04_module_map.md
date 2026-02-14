@@ -464,8 +464,8 @@ pub fn is_active(&self) -> bool
 ```rust
 pub const PIPE_NAME: &str = r"\\.\pipe\MTTFileManagerSearch";
 
-pub enum SearchRequest { Query { text, max_results }, GetStatus, Ping, WarmIndex }
-pub enum SearchResponse { Results { items, is_final, total_found }, Status(IndexStatusInfo), Pong, WarmStarted, Error(String) }
+pub enum SearchRequest { Query { text, offset, limit }, GetStatus, Ping, WarmIndex }
+pub enum SearchResponse { Results { items, has_more, total_matches }, Status(IndexStatusInfo), Pong, WarmStarted, Error(String) }
 pub struct SearchResultItem { name, full_path, is_dir, size }
 pub struct IndexStatusInfo { volumes: Vec<VolumeStatus>, total_files_indexed }
 pub struct VolumeStatus { drive_letter, state, files_indexed }

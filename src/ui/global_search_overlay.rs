@@ -10,7 +10,7 @@ use filters::{available_drives, category_label, format_number};
 mod filters;
 mod results_panel;
 
-const MAX_RESULTS: u32 = 200;
+const INITIAL_PAGE_LIMIT: u32 = 200;
 const BACKDROP_ALPHA: u8 = 72;
 
 /// Render the global search overlay. Returns true if the overlay should remain open.
@@ -156,10 +156,14 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                     if search_resp.changed() && !app.global_search.query.is_empty() {
                         app.global_search.selected_index = None;
                         app.global_search.loading = true;
+                        app.global_search.has_more_results = false;
+                        app.global_search.requested_offset = 0;
+                        app.global_search.requested_limit = INITIAL_PAGE_LIMIT;
                         if let Err(e) = app.global_search.sender.send(
                             crate::workers::global_search_worker::GlobalSearchRequest::Search {
                                 query: app.global_search.query.clone(),
-                                max_results: MAX_RESULTS,
+                                offset: app.global_search.requested_offset,
+                                limit: app.global_search.requested_limit,
                             },
                         ) {
                             app.global_search.loading = false;
@@ -169,6 +173,9 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         app.global_search.selected_index = None;
                         app.global_search.results.clear();
                         app.global_search.loading = false;
+                        app.global_search.has_more_results = false;
+                        app.global_search.requested_offset = 0;
+                        app.global_search.requested_limit = INITIAL_PAGE_LIMIT;
                     }
 
                     ui.add_space(8.0);
@@ -282,5 +289,3 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
         }
     });
 }
-
-

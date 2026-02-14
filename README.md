@@ -49,6 +49,7 @@ O MTT File Manager é um gerenciador de arquivos desktop que combina a performan
 - **Indexação híbrida por volume** - NTFS/ReFS via USN Journal; volumes sem USN (exFAT/FAT32/FUSE/CryptoFS) via varredura completa
 - **Serviço em background** - Windows Service dedicado para indexação contínua
 - **Overlay tipo Spotlight** - Interface modal ativada por Ctrl+Shift+F
+- **Paginação real de resultados** - Busca por páginas (`offset/limit`) com carregamento incremental
 - **Atualização adaptativa** - NTFS/ReFS com loop incremental de 2s; sem USN com re-scan periódico (30s/120s)
 - **Cache persistente** - Índice salvo em SQLite para restart rápido do serviço
 

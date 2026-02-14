@@ -141,6 +141,12 @@ pub struct SearchResult {
     pub is_dir: bool,
 }
 
+pub struct SearchPage {
+    pub items: Vec<SearchResult>,
+    pub has_more: bool,
+    pub total_matches: Option<usize>,
+}
+
 /// Case-insensitive substring search without allocation.
 ///
 /// Checks if `needle_lower` (already lowercased) appears as a contiguous
@@ -173,21 +179,33 @@ fn contains_case_insensitive(haystack: &str, needle_lower: &str) -> bool {
     }
 
     // Slow path: full Unicode lowercase via char iteration
-    let haystack_lower: String = haystack
-        .chars()
-        .flat_map(|c| c.to_lowercase())
-        .collect();
+    let haystack_lower: String = haystack.chars().flat_map(|c| c.to_lowercase()).collect();
     haystack_lower.contains(needle_lower)
 }
 
 /// Search the indices for files matching a query string.
-/// Returns up to `max_results` matching records with their resolved paths.
+/// Returns one page (`offset`, `limit`) of matching records with resolved paths.
 /// Enforces a time limit to avoid holding locks indefinitely on cold memory.
-pub fn search(indices: &[VolumeIndex], query: &str, max_results: usize) -> Vec<SearchResult> {
+pub fn search_page(
+    indices: &[VolumeIndex],
+    query: &str,
+    offset: usize,
+    limit: usize,
+) -> SearchPage {
+    if query.is_empty() || limit == 0 {
+        return SearchPage {
+            items: Vec::new(),
+            has_more: false,
+            total_matches: Some(0),
+        };
+    }
+
     let query_lower = query.to_lowercase();
-    let mut results = Vec::with_capacity(max_results.min(1000));
+    let mut items = Vec::with_capacity(limit.min(1000));
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     let mut scanned: u64 = 0;
+    let mut matched_after_filters: usize = 0;
+    let mut timed_out = false;
 
     for index in indices {
         if !matches!(index.state, IndexState::Ready) {
@@ -201,28 +219,51 @@ pub fn search(indices: &[VolumeIndex], query: &str, max_results: usize) -> Vec<S
                 eprintln!(
                     "[SEARCH] Time limit reached after scanning {} records, returning {} partial results",
                     scanned,
-                    results.len()
+                    items.len()
                 );
-                return results;
+                timed_out = true;
+                break;
             }
 
             let name = index.names.get(record.name_ref());
 
             if contains_case_insensitive(name, &query_lower) {
                 if let Some(full_path) = path_resolver::resolve_path(frn, index) {
-                    results.push(SearchResult {
+                    if matched_after_filters < offset {
+                        matched_after_filters += 1;
+                        continue;
+                    }
+
+                    if items.len() >= limit {
+                        return SearchPage {
+                            items,
+                            has_more: true,
+                            total_matches: None,
+                        };
+                    }
+
+                    items.push(SearchResult {
                         name: name.to_owned(),
                         full_path,
                         is_dir: record.is_dir,
                     });
-
-                    if results.len() >= max_results {
-                        return results;
-                    }
+                    matched_after_filters += 1;
                 }
             }
         }
+
+        if timed_out {
+            break;
+        }
     }
 
-    results
+    SearchPage {
+        items,
+        has_more: timed_out,
+        total_matches: if timed_out {
+            None
+        } else {
+            Some(matched_after_filters)
+        },
+    }
 }
