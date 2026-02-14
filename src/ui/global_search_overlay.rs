@@ -3,6 +3,7 @@
 
 use crate::app::global_search_state::GlobalSearchCategory;
 use crate::app::state::ImageViewerApp;
+use crate::ui::theme;
 use eframe::egui;
 
 const MAX_RESULTS: u32 = 200;
@@ -81,6 +82,21 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
         .fixed_pos(egui::pos2(modal_x, modal_y))
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
+            let hover_color = if ui.visuals().dark_mode {
+                theme::color_dark_hover()
+            } else {
+                theme::color_hover()
+            };
+            ui.visuals_mut().selection.bg_fill = theme::COLOR_SELECTION;
+            ui.visuals_mut().selection.stroke = egui::Stroke::new(0.0, theme::COLOR_SELECTION_TEXT);
+            ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
+            ui.visuals_mut().widgets.hovered.bg_fill = hover_color;
+            ui.visuals_mut().widgets.hovered.weak_bg_fill = hover_color;
+            ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
+            ui.visuals_mut().widgets.active.bg_fill = hover_color;
+            ui.visuals_mut().widgets.active.weak_bg_fill = hover_color;
+            ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
+
             egui::Frame::window(ui.style())
                 .inner_margin(egui::Margin::same(16))
                 .corner_radius(8.0)
@@ -310,13 +326,13 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                                                 ui.painter().rect_filled(
                                                     row_rect,
                                                     4.0,
-                                                    ui.style().visuals.selection.bg_fill,
+                                                    theme::COLOR_SELECTION,
                                                 );
                                             } else if row_resp.hovered() {
                                                 ui.painter().rect_filled(
                                                     row_rect,
                                                     4.0,
-                                                    egui::Color32::from_white_alpha(12),
+                                                    hover_color,
                                                 );
                                             }
 
@@ -416,7 +432,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                             |ui| {
                                 ui.add_space(20.0);
                                 ui.label(
-                                    egui::RichText::new("Ctrl+Shift+F para abrir/fechar")
+                                    egui::RichText::new("ESC para fechar")
                                         .size(11.0)
                                         .color(egui::Color32::from_gray(100)),
                                 );

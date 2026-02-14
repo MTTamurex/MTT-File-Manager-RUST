@@ -111,6 +111,10 @@ pub fn render_status_bar(
         } else {
             theme::color_hover()
         };
+        let selection_stroke = egui::Stroke::new(0.0, theme::COLOR_SELECTION_TEXT);
+
+        ui.visuals_mut().selection.bg_fill = theme::COLOR_SELECTION;
+        ui.visuals_mut().selection.stroke = selection_stroke;
         ui.visuals_mut().override_text_color = Some(egui::Color32::BLACK);
         ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
         ui.visuals_mut().widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
