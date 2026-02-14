@@ -4,8 +4,10 @@
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-#[cfg(windows)]
-use std::os::windows::fs::MetadataExt;
+mod components;
+mod drive;
+mod symlink;
+mod unc;
 
 /// Path-related security errors.
 #[derive(Error, Debug)]
@@ -75,22 +77,22 @@ pub fn sanitize_path(path: &Path, config: &SecurityConfig) -> Result<PathBuf, Se
 
     // Validate user-provided components before canonicalization so patterns like
     // `..\` are blocked even when canonicalization would normalize them away.
-    validate_path_components(path, config)?;
+    components::validate_path_components(path, config)?;
 
     let canonical = match path.canonicalize() {
         Ok(p) => p,
         Err(e) => {
             // Fallback for paths that do not exist yet (e.g. file creation):
-            // validate against the canonical parent and rebuild an absolute path.
+            // validate against canonical parent and rebuild an absolute path.
             if let Some(parent) = path.parent() {
                 if parent.exists() {
                     let canonical_parent = parent.canonicalize().map_err(|_| {
                         SecurityError::InvalidPath(format!("Parent directory invalid: {}", e))
                     })?;
 
-                    validate_drive(&canonical_parent, config)?;
+                    drive::validate_drive(&canonical_parent, config)?;
                     if !config.allow_symlinks {
-                        check_symlink(&canonical_parent)?;
+                        symlink::check_symlink(&canonical_parent)?;
                     }
 
                     let fallback = match path.file_name() {
@@ -101,59 +103,17 @@ pub fn sanitize_path(path: &Path, config: &SecurityConfig) -> Result<PathBuf, Se
                 }
             }
 
-            return Err(SecurityError::InvalidPath(format!(
-                "Cannot canonicalize: {}",
-                e
-            )));
+            return Err(SecurityError::InvalidPath(format!("Cannot canonicalize: {}", e)));
         }
     };
 
-    validate_path_components(&canonical, config)?;
-    validate_drive(&canonical, config)?;
+    components::validate_path_components(&canonical, config)?;
+    drive::validate_drive(&canonical, config)?;
     if !config.allow_symlinks {
-        check_symlink(&canonical)?;
+        symlink::check_symlink(&canonical)?;
     }
 
     Ok(normalize_for_shell_apis(&canonical))
-}
-
-fn extract_local_drive(path: &Path) -> Option<String> {
-    let raw = path.to_string_lossy();
-    let normalized = if let Some(stripped) = raw.strip_prefix(r"\\?\") {
-        stripped
-    } else if let Some(stripped) = raw.strip_prefix(r"\\.\") {
-        stripped
-    } else {
-        &raw
-    };
-
-    let bytes = normalized.as_bytes();
-    if bytes.len() < 3 {
-        return None;
-    }
-
-    if bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/')
-    {
-        Some(format!("{}:", (bytes[0] as char).to_ascii_uppercase()))
-    } else {
-        None
-    }
-}
-
-fn drive_is_allowed(drive: &str, config: &SecurityConfig) -> bool {
-    config
-        .allowed_drives
-        .iter()
-        .any(|allowed| allowed.to_uppercase() == drive)
-}
-
-fn has_relative_components(path: &Path) -> bool {
-    path.components().any(|component| {
-        matches!(
-            component,
-            std::path::Component::ParentDir | std::path::Component::CurDir
-        )
-    })
 }
 
 /// Sanitizes a path and falls back to lexical validation for absolute local-drive paths.
@@ -172,20 +132,20 @@ pub fn sanitize_path_with_local_drive_fallback(
                 return Err(SecurityError::NullBytes(path_str.to_string()));
             }
 
-            let Some(drive) = extract_local_drive(path) else {
+            let Some(drive) = drive::extract_local_drive(path) else {
                 return Err(original_error);
             };
 
-            if !drive_is_allowed(&drive, config) {
+            if !drive::drive_is_allowed(&drive, config) {
                 return Err(SecurityError::OutsideAllowedDrive(path_str.to_string()));
             }
 
-            if config.block_special_components && has_relative_components(path) {
+            if config.block_special_components && drive::has_relative_components(path) {
                 return Err(SecurityError::PathTraversal(path_str.to_string()));
             }
 
             if !config.allow_symlinks {
-                check_symlink(path)?;
+                symlink::check_symlink(path)?;
             }
 
             Ok(normalize_for_shell_apis(path))
@@ -193,234 +153,26 @@ pub fn sanitize_path_with_local_drive_fallback(
     }
 }
 
-/// Normalize a string to Unicode NFC (Normalization Form Composed) using the
-/// Windows `NormalizeString` API.  This prevents bypasses where decomposed
-/// characters (NFD) could trick security checks — e.g. a decomposed "ñ"
-/// (U+006E U+0303) looks identical to precomposed "ñ" (U+00F1) but has
-/// different bytes.  Returns the original string unchanged if normalization
-/// fails or the input is already pure ASCII.
-#[cfg(windows)]
-fn normalize_nfc(s: &str) -> String {
-    // Fast path: pure ASCII needs no normalization.
-    if s.is_ascii() {
-        return s.to_string();
-    }
-
-    use std::os::windows::ffi::OsStrExt;
-    use windows::Win32::Globalization::{NormalizeString, NORM_FORM};
-    const NFC: NORM_FORM = NORM_FORM(1);
-
-    let wide: Vec<u16> = std::ffi::OsStr::new(s).encode_wide().collect();
-
-    unsafe {
-        // First call: query required buffer length.
-        let needed = NormalizeString(NFC, &wide, None);
-        if needed <= 0 {
-            return s.to_string();
-        }
-        let mut buf = vec![0u16; needed as usize];
-        let actual = NormalizeString(NFC, &wide, Some(&mut buf));
-        if actual <= 0 {
-            return s.to_string();
-        }
-        String::from_utf16_lossy(&buf[..actual as usize])
-    }
-}
-
-#[cfg(not(windows))]
-fn normalize_nfc(s: &str) -> String {
-    s.to_string()
-}
-
-/// Validate each path component.
-fn validate_path_components(path: &Path, config: &SecurityConfig) -> Result<(), SecurityError> {
-    if config.block_special_components {
-        for component in path.components() {
-            let comp_str = component.as_os_str().to_string_lossy();
-
-            if comp_str == ".." || comp_str == "." {
-                return Err(SecurityError::PathTraversal(
-                    path.to_string_lossy().to_string(),
-                ));
-            }
-
-            if comp_str == "~" {
-                return Err(SecurityError::InvalidPath(
-                    "Home directory shortcut not allowed".to_string(),
-                ));
-            }
-
-            // Only check Normal components (not Prefix like "C:" or RootDir)
-            if let std::path::Component::Normal(name) = component {
-                let name_str = normalize_nfc(&name.to_string_lossy());
-
-                // Block NTFS Alternate Data Streams: a colon in a normal
-                // filename component indicates a hidden data stream
-                // (e.g. "file.txt:hidden:$DATA").
-                if name_str.contains(':') {
-                    return Err(SecurityError::InvalidPath(format!(
-                        "NTFS Alternate Data Stream not allowed: {}",
-                        name_str
-                    )));
-                }
-
-                // Block Windows reserved device names (CON, NUL, PRN, AUX,
-                // COM1-9, LPT1-9).  Windows silently redirects these to
-                // kernel device objects regardless of extension.
-                let base_name = name_str.split('.').next().unwrap_or("");
-                if is_windows_reserved_name(base_name) {
-                    return Err(SecurityError::InvalidPath(format!(
-                        "Windows reserved device name not allowed: {}",
-                        name_str
-                    )));
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
 /// Returns true if `name` is a Windows reserved device name.
 pub fn is_windows_reserved_name(name: &str) -> bool {
-    let upper = name.to_uppercase();
-    matches!(
-        upper.as_str(),
-        "CON"
-            | "PRN"
-            | "AUX"
-            | "NUL"
-            | "COM1"
-            | "COM2"
-            | "COM3"
-            | "COM4"
-            | "COM5"
-            | "COM6"
-            | "COM7"
-            | "COM8"
-            | "COM9"
-            | "LPT1"
-            | "LPT2"
-            | "LPT3"
-            | "LPT4"
-            | "LPT5"
-            | "LPT6"
-            | "LPT7"
-            | "LPT8"
-            | "LPT9"
-    )
-}
-
-fn normalize_windows_prefix(path_upper: &str) -> String {
-    if let Some(stripped) = path_upper.strip_prefix("\\\\?\\") {
-        stripped.to_string()
-    } else if let Some(stripped) = path_upper.strip_prefix("\\\\.\\") {
-        stripped.to_string()
-    } else {
-        path_upper.to_string()
-    }
+    components::is_windows_reserved_name(name)
 }
 
 /// Converts Windows verbatim prefixes to regular paths for Shell APIs.
-///
-/// `std::fs::canonicalize` commonly returns paths like `\\?\C:\...`.
-/// Many shell operations (SHFileOperation / parsing-name based APIs) are
-/// more reliable with the regular `C:\...` representation.
 fn normalize_for_shell_apis(path: &Path) -> PathBuf {
-    let s = path.to_string_lossy();
-
-    if let Some(stripped) = s.strip_prefix(r"\\?\UNC\") {
-        return PathBuf::from(format!(r"\\{}", stripped));
-    }
-    if let Some(stripped) = s.strip_prefix(r"\\?\") {
-        return PathBuf::from(stripped);
-    }
-    if let Some(stripped) = s.strip_prefix(r"\\.\") {
-        return PathBuf::from(stripped);
-    }
-
-    path.to_path_buf()
-}
-
-/// Validate that a path is inside an allowed drive.
-fn validate_drive(path: &Path, config: &SecurityConfig) -> Result<(), SecurityError> {
-    let path_upper = path.to_string_lossy().to_uppercase();
-    let normalized = normalize_windows_prefix(&path_upper);
-
-    // Extended UNC format: \\?\UNC\server\share\...
-    if normalized.starts_with("UNC\\") || normalized.starts_with("\\\\") {
-        return Err(SecurityError::OutsideAllowedDrive(
-            "UNC paths not allowed".to_string(),
-        ));
-    }
-
-    let bytes = normalized.as_bytes();
-    if bytes.len() < 2 || bytes[1] != b':' || !(bytes[0] as char).is_ascii_alphabetic() {
-        return Err(SecurityError::InvalidPath(format!(
-            "Invalid drive prefix: {}",
-            normalized
-        )));
-    }
-
-    let drive = format!("{}:", (bytes[0] as char).to_ascii_uppercase());
-    if !config
-        .allowed_drives
-        .iter()
-        .any(|d| d.to_uppercase() == drive)
-    {
-        return Err(SecurityError::OutsideAllowedDrive(normalized));
-    }
-
-    Ok(())
-}
-
-/// Check if path or any parent component is a symlink.
-fn check_symlink(path: &Path) -> Result<(), SecurityError> {
-    let mut current = path.to_path_buf();
-
-    while current.exists() {
-        if let Ok(metadata) = std::fs::symlink_metadata(&current) {
-            if is_link_like_path(&metadata) {
-                return Err(SecurityError::SymlinkDetected(
-                    current.to_string_lossy().to_string(),
-                ));
-            }
-        }
-
-        if let Some(parent) = current.parent() {
-            current = parent.to_path_buf();
-        } else {
-            break;
-        }
-    }
-
-    Ok(())
-}
-
-#[cfg(windows)]
-#[inline]
-fn is_link_like_path(metadata: &std::fs::Metadata) -> bool {
-    // Windows reparse points include symlinks, junctions and mount points.
-    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
-    (metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT) != 0
-}
-
-#[cfg(not(windows))]
-#[inline]
-fn is_link_like_path(metadata: &std::fs::Metadata) -> bool {
-    metadata.file_type().is_symlink()
+    drive::normalize_for_shell_apis(path)
 }
 
 /// Validate file extension against blocked list.
 ///
-/// Normalizes trailing dots/spaces that Windows silently strips from filenames
-/// before checking the extension. Without this, a name like `malware.exe.` would
-/// yield `None` from `Path::extension()` while Windows still treats it as `.exe`.
+/// Normalizes trailing dots/spaces that Windows strips from filenames
+/// before checking the extension.
 pub fn validate_file_extension(path: &Path, config: &SecurityConfig) -> Result<(), SecurityError> {
     let file_name = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
+
     // Strip trailing dots/spaces that Windows ignores but bypass extension checks.
     let normalized = file_name.trim_end_matches(['.', ' ']);
     let check_path = Path::new(normalized);
@@ -448,37 +200,8 @@ pub fn sanitize_path_quick(path: &Path) -> Result<PathBuf, SecurityError> {
 }
 
 /// Validates a UNC network path for basic safety (null bytes, path traversal).
-///
-/// Unlike full `sanitize_path`, this does **not** check drive letters or attempt
-/// canonicalization since UNC paths (`\\server\share\...`) have no local drive prefix.
-/// It still blocks the most dangerous patterns that would allow an attacker to
-/// escape path boundaries.
 pub fn sanitize_unc_path(path: &Path) -> Result<PathBuf, SecurityError> {
-    let path_str = path.to_string_lossy();
-
-    if path_str.contains('\0') {
-        return Err(SecurityError::NullBytes(path_str.to_string()));
-    }
-
-    // Raw string check: Windows path parsing may normalize `.` and `..` away before
-    // the component iterator sees them. Check the raw string for traversal patterns.
-    for segment in path_str.split(&['\\', '/']) {
-        if segment == ".." || segment == "." {
-            return Err(SecurityError::PathTraversal(path_str.to_string()));
-        }
-    }
-
-    // Also check via the typed component API as a belt-and-suspenders defense.
-    for component in path.components() {
-        if matches!(
-            component,
-            std::path::Component::ParentDir | std::path::Component::CurDir
-        ) {
-            return Err(SecurityError::PathTraversal(path_str.to_string()));
-        }
-    }
-
-    Ok(path.to_path_buf())
+    unc::sanitize_unc_path(path)
 }
 
 #[cfg(test)]
@@ -695,3 +418,4 @@ mod tests {
         assert!(result2.is_ok(), "UNC with IP should pass: {:?}", result2);
     }
 }
+

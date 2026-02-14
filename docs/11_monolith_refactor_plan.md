@@ -172,3 +172,24 @@ Targets
   - `shell_operations/shfile_ops.rs` extracted
   - `shell_operations/file_op.rs` extracted
   - `shell_operations.rs` reduced to 12 lines
+- `drive_watcher.rs` decomposition started:
+  - `drive_watcher/buffer_parser.rs` extracted
+  - `drive_watcher/thread_loop.rs` extracted
+  - `drive_watcher.rs` reduced to 224 lines
+- `workers/thumbnail/worker.rs` decomposition started:
+  - `workers/thumbnail/worker/request_processing.rs` extracted
+  - `worker.rs` reduced to 193 lines
+  - targeted tests passed (`test_semaphore_concurrency`, `cache_entry_satisfies_request`)
+- `security.rs` decomposition started:
+  - `security/components.rs` extracted
+  - `security/drive.rs` extracted
+  - `security/symlink.rs` extracted
+  - `security/unc.rs` extracted
+  - `security.rs` now acts as API facade + tests
+  - targeted tests passed (`security::tests::`, 14/14)
+- `io_priority.rs` decomposition started:
+  - `io_priority/detection.rs` extracted
+  - `io_priority/threading.rs` extracted
+  - `io_priority/grouped_queue.rs` extracted
+  - `io_priority.rs` now acts as API facade + tests
+  - targeted tests passed (`io_priority::tests::`, 3/3)
