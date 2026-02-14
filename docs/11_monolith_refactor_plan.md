@@ -149,3 +149,26 @@ Targets
   - `disk_cache/cleanup.rs` extracted
   - `disk_cache/thumbnails_repo.rs` extracted
   - `disk_cache.rs` reduced to 310 lines
+- `codec_registry.rs` decomposition started:
+  - `codec_registry/known_codecs.rs` extracted
+  - `codec_registry/mf_queries.rs` extracted
+  - `codec_registry/registry_queries.rs` extracted
+  - `codec_registry.rs` reduced to 443 lines
+- `icons.rs` decomposition started:
+  - `icons/file_icons.rs` extracted
+  - `icons/thumbnails.rs` extracted
+  - `icons/special.rs` extracted
+  - `icons.rs` reduced to 15 lines
+- `file_operation_worker.rs` decomposition started:
+  - `file_operation_worker/handlers.rs` extracted
+  - worker dispatch loop simplified (delegates by request type)
+  - `file_operation_worker.rs` reduced to 277 lines
+- `recycle_bin.rs` decomposition started:
+  - `recycle_bin/enumeration.rs` extracted
+  - `recycle_bin/operations.rs` extracted
+  - `recycle_bin.rs` reduced to 117 lines
+- `shell_operations.rs` decomposition started:
+  - `shell_operations/context_menu.rs` extracted
+  - `shell_operations/shfile_ops.rs` extracted
+  - `shell_operations/file_op.rs` extracted
+  - `shell_operations.rs` reduced to 12 lines
