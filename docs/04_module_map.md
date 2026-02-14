@@ -65,6 +65,9 @@ MTT-File-Manager-RUST/
 - **`folder_loading/`** - Pipeline de carregamento de pastas
   - **`mod.rs`** - Coordenador do fluxo
   - **`load_pipeline.rs`** - Pipeline principal de carregamento
+  - **`load_pipeline/fast_paths.rs`** - Fast-paths e heuristicas de carregamento
+  - **`load_pipeline/optimized_tiers.rs`** - Tiers otimizados de carregamento
+  - **`load_pipeline/tier3_fallback.rs`** - Fallback robusto (OneDrive timeout/FindFirstFileW)
   - **`folder_scan.rs`** - Scan e leitura de diretórios
   - **`refresh.rs`** - Regras de refresh e reload
   - **`guards.rs`** - Guards/validações de fluxo
@@ -72,8 +75,15 @@ MTT-File-Manager-RUST/
 - **`message_handler/`** - Processamento de eventos dos workers/watchers
   - **`mod.rs`** - Dispatcher/orquestração
   - **`file_op_events.rs`** - Eventos de operações de arquivo
+  - **`global_search_events.rs`** - Eventos da busca global
   - **`watcher_events.rs`** - Eventos de file watcher
+  - **`watcher_drive_processing.rs`** - Processamento de eventos de drive watcher
+  - **`watcher_reload.rs`** - Politica de reload/refresh final
+  - **`watcher_legacy.rs`** - Fallback legado (`notify`) para cenarios especificos
   - **`thumbnail_events.rs`** - Eventos de thumbnail
+  - **`thumbnail_workers.rs`** - Drains e integracao com workers de thumbnail
+  - **`thumbnail_uploads.rs`** - Pipeline de upload de thumbnails/previews para UI
+  - **`thumbnail_rebuild.rs`** - Rebuild incremental de itens/miniaturas
   - **`rebuild_events.rs`** - Eventos de rebuild/reordenação
   - **`helpers.rs`** - Helpers e utilitários de apoio
 
@@ -110,8 +120,9 @@ pub struct ItemsRebuildResult { generation, request_id, items, total_items }
 - **`navigation.rs`** - Histórico de navegação (NavigationHistory)
 - **`notification.rs`** - Sistema de notificações/toasts (NotificationManager)
 - **`renaming.rs`** - Lógica de renomeação
-- **`sorting.rs`** - Ordenação básica
-- **`sorting_optimized.rs`** - Ordenação otimizada com paralelismo
+- **`sorting.rs`** - Fachada de ordenação/filtro (API pública)
+- **`sorting/sort_impl.rs`** - Implementação de ordenação
+- **`sorting/filtering.rs`** - Implementação de filtros
 - **`state.rs`** - Estado da aplicação (ApplicationState)
 - **`watcher.rs`** - Watcher de filesystem
 
@@ -218,6 +229,13 @@ pub enum AppError {
   - **`attributes.rs`** - Atributos/sync flags
   - **`timeout_ops.rs`** - Operações com timeout
   - **`directory_enum.rs`** - Enumeração de diretórios
+- **`disk_cache/`** - Repositórios de persistência e GC segmentados
+  - **`thumbnails_repo.rs`** - CRUD de thumbnails
+  - **`folder_previews.rs`** - CRUD de previews de pasta
+  - **`folder_covers.rs`** - CRUD de capas de pasta
+  - **`preferences.rs`** - Preferências persistidas
+  - **`cleanup.rs`** - Limpeza/manutenção de cache
+  - **`gc.rs`** - Coleta incremental/full + vacuum
 
 **Integrações Windows** (`src/infrastructure/windows/`):
 - **`mod.rs`** - Re-exports e funções principais
@@ -308,6 +326,8 @@ pub fn is_active(&self) -> bool
   - **`lifecycle.rs`** - Inicialização/shutdown
   - **`playback_state.rs`** - Estado e comandos de playback
   - **`docked_filters.rs`** - Filtros/perfil docked
+  - **`osc_input.rs`** - Sync de OSC e forwarding de input
+  - **`update_loop.rs`** - Loop principal de update/render do preview
   - **`window_embed.rs`** - Embedding e sync da janela nativa
 
 **MPV Sub-módulo** (`src/ui/components/mpv/`):
@@ -347,7 +367,9 @@ pub fn is_active(&self) -> bool
 - **`utils.rs`** - Utilitários
 - **`video_preview/`** - Preview de vídeo
   - **`mod.rs`** - Coordenação
-  - **`controls.rs`** - Controles
+  - **`controls.rs`** - Fachada de controles
+  - **`controls/pickers.rs`** - Pickers de audio/legenda
+  - **`controls/detached.rs`** - Controles exclusivos do modo destacado
   - **`detached.rs`** - Janela destacada
   - **`docked.rs`** - Painel docked
   - **`fullscreen.rs`** - Tela cheia
@@ -356,7 +378,10 @@ pub fn is_active(&self) -> bool
 - **`app_impl.rs`** - Implementação eframe::App
 - **`cache.rs`** - CacheManager para texturas
 - **`context_menu.rs`** - Menu de contexto UI
-- **`icon_loader.rs`** - Loader de ícones
+- **`icon_loader.rs`** - Fachada do loader de ícones
+- **`icon_loader/async_ops.rs`** - Carga assíncrona e integração com workers
+- **`icon_loader/file_icons.rs`** - Carregamento de ícones de arquivo
+- **`icon_loader/special_icons.rs`** - Ícones especiais e shortcuts
 - **`navigation.rs`** - Navegação UI
 - **`sidebar.rs`** - Sidebar com atalhos
 - **`status_bar.rs`** - Barra de status
@@ -365,7 +390,9 @@ pub fn is_active(&self) -> bool
 - **`theme.rs`** - Tema e cores
 - **`toolbar.rs`** - Barra de ferramentas
 - **`widgets.rs`** - Widgets customizados
-- **`global_search_overlay.rs`** - Overlay modal de busca global (Ctrl+Shift+F)
+- **`global_search_overlay.rs`** - Fachada do overlay modal de busca global (Ctrl+Shift+F)
+- **`global_search_overlay/filters.rs`** - Filtros de drive/tipo e parsing de query
+- **`global_search_overlay/results_panel.rs`** - Renderização e ativação de resultados
 
 **Submódulo de tab bar refatorado** (`src/ui/tab_bar/`):
 - **`mod.rs`** - Coordenador principal
@@ -455,7 +482,8 @@ pub fn decode_message<T: Deserialize>(data: &[u8]) -> Result<T, String>
 **Propósito**: Windows Service que indexa todos os arquivos com estratégia híbrida por volume (USN + fallback full-scan) e serve buscas via Named Pipes
 
 **Arquivos**:
-- **`main.rs`** - Entry point, command-line dispatch (`install`, `uninstall`, `run-console`), orquestração (`run_indexer`)
+- **`main.rs`** - Entry point, command-line dispatch (`install`, `uninstall`, `run-console`) e orquestração de workers
+- **`volume_indexers.rs`** - Indexadores por volume (USN incremental + fallback sem USN)
 - **`usn_journal.rs`** - Descoberta de volumes (`discover_volumes`) + API USN (`open_volume`, `query_usn_journal`, `enumerate_all_files`, `read_usn_buffer`, `parse_usn_records`)
 - **`fs_walker.rs`** - Varredura full-tree para volumes sem USN (BFS iterativo, ignora reparse points)
 - **`file_index.rs`** - Índice in-memory: `VolumeIndex` (HashMap<u64, FileRecord>), `search()` com deadline de 5s
@@ -557,4 +585,3 @@ mtt-search-service (processo separado)
 ---
 
 *Última atualização: 2026-02-14 (documentado fallback de busca para volumes sem USN)*
-

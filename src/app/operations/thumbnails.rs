@@ -6,7 +6,6 @@ use crate::app::state::ImageViewerApp;
 use crate::domain::thumbnail::ThumbnailData;
 use crate::workers::thumbnail::ThumbnailPriority;
 use std::path::PathBuf;
-use std::time::Duration;
 
 impl ImageViewerApp {
     pub fn request_thumbnail_load(&mut self, path: PathBuf, size_px: u32) {
@@ -163,8 +162,6 @@ impl ImageViewerApp {
     }
 
     pub fn request_folder_preview_load(&mut self, path: PathBuf) {
-        let is_ssd = crate::infrastructure::io_priority::is_ssd(&path);
-
         if self
             .cache_manager
             .start_folder_preview_loading(path.clone())

@@ -287,11 +287,3 @@ MTT-File-Manager-RUST/
 ---
 
 *Última atualização: 2026-02-14 (documentado fallback de busca para volumes sem USN)*
-
-
-### [11_monolith_refactor_plan.md](11_monolith_refactor_plan.md)
-**Plano de Refatoracao de Monolitos**
-- Arquivos prioritarios (P0/P1/P2)
-- Fases incrementais de implementacao
-- Criterios de aceite e validacao
-- Log de execucao da refatoracao

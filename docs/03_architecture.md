@@ -119,7 +119,7 @@ Responsável pela interface com o usuário usando eframe/egui (immediate mode GU
 - `src/ui/app/` - Ciclo de vida, input e notificações da aplicação
 - `src/ui/components/` - Componentes reutilizáveis (media_preview, gif_manager, etc.)
 - `src/ui/components/item_slot/` - Renderização de slots separada por tipo (drive/folder/file)
-- `src/ui/components/mpv_preview/` - Bridge MPV separado por ciclo de vida/estado/embed
+- `src/ui/components/mpv_preview/` - Bridge MPV modular (lifecycle, playback_state, docked_filters, osc_input, update_loop, window_embed)
 - `src/ui/tab_bar/` - Sistema de abas separado por renderer/controles/drag dwell
 - `src/ui/views/` - Views principais (grid, list, computer)
 - `src/ui/preview_panel/` - Sub-sistema de preview com suporte a vídeo
@@ -142,7 +142,7 @@ Contém a lógica de negócios e serviços da aplicação.
 - **Navigation**: Gerenciamento de histórico de navegação (`src/application/navigation.rs`)
 - **File Operations**: Operações de arquivo (copiar, mover, deletar) (`src/application/file_operations.rs`)
 - **Clipboard Manager**: Gerenciamento da área de transferência (`src/application/clipboard.rs`)
-- **Sorting Engine**: Motor de ordenação de arquivos (`src/application/sorting.rs`, `sorting_optimized.rs`)
+- **Sorting Engine**: Motor de ordenação de arquivos (`src/application/sorting.rs` + `src/application/sorting/`)
 - **Watcher Service**: Monitoramento de mudanças no filesystem (`src/application/watcher.rs`)
 - **Notification System**: Sistema de notificações/toasts (`src/application/notification.rs`)
 - **Renaming Service**: Lógica de renomeação (`src/application/renaming.rs`)
@@ -152,7 +152,9 @@ Contém a lógica de negócios e serviços da aplicação.
 - `src/application/navigation.rs` - Histórico de navegação
 - `src/application/file_operations.rs` - Operações de arquivo
 - `src/application/clipboard.rs` - Gerenciamento de clipboard
-- `src/application/sorting_optimized.rs` - Ordenação otimizada (funções `sort_items`, `filter_items`)
+- `src/application/sorting.rs` - Fachada da API de ordenação/filtro (`sort_items`, `filter_items`)
+- `src/application/sorting/sort_impl.rs` - Implementação de ordenação
+- `src/application/sorting/filtering.rs` - Implementação de filtros
 - `src/application/notification.rs` - Sistema de notificações
 
 ### 3. Domain Layer
