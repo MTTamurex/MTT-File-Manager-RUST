@@ -106,3 +106,21 @@ Targets
   - `watcher_legacy.rs` (notify-watcher fallback path)
 - `init.rs` decomposition started with `init_preferences.rs`:
   - startup preferences loading/parsing moved out of `ImageViewerApp::new`.
+- `init.rs` decomposition continued with `init_workers.rs`:
+  - icon worker bootstrap extracted
+  - metadata worker bootstrap extracted
+  - disk cache invalidation worker bootstrap extracted
+  - folder preview workers bootstrap extracted
+  - folder size worker bootstrap extracted
+  - prefetch/predictive/idle-warmup bootstraps extracted
+  - file operation worker bootstrap extracted
+  - global search worker bootstrap extracted
+  - cover worker bootstrap extracted
+  - async font loader bootstrap extracted
+  - startup drive info preload job extracted
+  - incremental GC background job extracted
+- `init_workers` split to avoid a new monolith:
+  - `src/app/init_workers/visual_workers.rs`
+  - `src/app/init_workers/filesystem_workers.rs`
+  - `src/app/init_workers/pipeline_workers.rs`
+  - `src/app/init_workers/background_jobs.rs`

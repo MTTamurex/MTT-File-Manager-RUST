@@ -1,0 +1,128 @@
+use crate::app::folder_size_state::FolderSizeMessage;
+use crate::infrastructure::disk_cache::ThumbnailDiskCache;
+use eframe::egui;
+use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::{mpsc, Arc, Mutex};
+
+pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
+    disk_cache: Arc<ThumbnailDiskCache>,
+) -> mpsc::Sender<Vec<PathBuf>> {
+    let (disk_cache_invalidation_tx, disk_cache_invalidation_rx) = mpsc::channel::<Vec<PathBuf>>();
+    let disk_cache_for_invalidation = disk_cache.clone();
+    std::thread::spawn(move || {
+        while let Ok(paths) = disk_cache_invalidation_rx.recv() {
+            let mut unique_paths = std::collections::HashSet::with_capacity(paths.len());
+            for path in paths {
+                if unique_paths.insert(path.clone()) {
+                    disk_cache_for_invalidation.remove_cache_for_path(&path);
+                }
+            }
+        }
+    });
+    disk_cache_invalidation_tx
+}
+
+pub(in crate::app) fn spawn_folder_preview_workers(
+    ctx: &egui::Context,
+    disk_cache: Arc<ThumbnailDiskCache>,
+) -> (
+    mpsc::Sender<PathBuf>,
+    mpsc::Receiver<crate::workers::folder_preview_worker::FolderPreviewData>,
+) {
+    let (folder_preview_tx, folder_preview_rx_thread) = mpsc::channel::<PathBuf>();
+    let (folder_preview_res_tx, folder_preview_res_rx) = mpsc::channel();
+    let folder_preview_rx = Arc::new(Mutex::new(folder_preview_rx_thread));
+
+    {
+        use crate::workers::folder_preview_worker::spawn_folder_preview_worker;
+        let cpu = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
+        let worker_count = cpu.clamp(2, 6);
+        for _ in 0..worker_count {
+            spawn_folder_preview_worker(
+                folder_preview_rx.clone(),
+                folder_preview_res_tx.clone(),
+                ctx.clone(),
+                disk_cache.clone(),
+            );
+        }
+    }
+
+    (folder_preview_tx, folder_preview_res_rx)
+}
+
+pub(in crate::app) fn spawn_folder_size_worker(
+    ctx: &egui::Context,
+) -> (
+    mpsc::Sender<PathBuf>,
+    mpsc::Receiver<FolderSizeMessage>,
+    Arc<AtomicBool>,
+) {
+    let (folder_size_req_tx, folder_size_req_rx) = mpsc::channel::<PathBuf>();
+    let (folder_size_res_tx, folder_size_res_rx) = mpsc::channel::<FolderSizeMessage>();
+    let folder_size_ctx = ctx.clone();
+    let folder_size_cancel = Arc::new(AtomicBool::new(false));
+    let folder_size_cancel_worker = folder_size_cancel.clone();
+
+    std::thread::spawn(move || {
+        use std::sync::atomic::Ordering;
+
+        while let Ok(folder_path) = folder_size_req_rx.recv() {
+            folder_size_cancel_worker.store(false, Ordering::Release);
+
+            let mut latest_path = folder_path;
+            while let Ok(newer_path) = folder_size_req_rx.try_recv() {
+                let _ = folder_size_res_tx.send(FolderSizeMessage::Cancelled {
+                    folder_path: latest_path,
+                });
+                latest_path = newer_path;
+            }
+            let folder_path = latest_path;
+            folder_size_cancel_worker.store(false, Ordering::Release);
+
+            let is_ssd = crate::infrastructure::io_priority::is_ssd(&folder_path);
+            let priority = if is_ssd {
+                crate::infrastructure::io_priority::IOPriority::Prefetch
+            } else {
+                crate::infrastructure::io_priority::IOPriority::Background
+            };
+            crate::infrastructure::io_priority::set_thread_priority(priority);
+
+            let cancel_ref = folder_size_cancel_worker.clone();
+            let res_tx = folder_size_res_tx.clone();
+            let path_clone = folder_path.clone();
+            let ctx_clone = folder_size_ctx.clone();
+
+            let result =
+                crate::infrastructure::windows::folder_size::calculate_folder_size_parallel(
+                    &folder_path,
+                    &cancel_ref,
+                    move |partial_size| {
+                        let _ = res_tx.send(FolderSizeMessage::Progress {
+                            folder_path: path_clone.clone(),
+                            total_size: partial_size,
+                        });
+                        ctx_clone.request_repaint();
+                    },
+                );
+
+            match result {
+                Some(total_size) => {
+                    let _ = folder_size_res_tx.send(FolderSizeMessage::Complete {
+                        folder_path,
+                        total_size,
+                    });
+                }
+                None => {
+                    let _ = folder_size_res_tx.send(FolderSizeMessage::Cancelled { folder_path });
+                }
+            }
+            folder_size_ctx.request_repaint();
+            crate::infrastructure::io_priority::reset_thread_priority();
+        }
+    });
+
+    (folder_size_req_tx, folder_size_res_rx, folder_size_cancel)
+}
