@@ -72,7 +72,7 @@ impl ImageViewerApp {
 
         if saw_end_of_load {
             self.is_loading_folder = false;
-            self.pending_deletions.clear();
+            self.file_operation_state.pending_deletions.clear();
             self.pending_items_rebuild = false;
             self.pending_items_count = 0;
             const INLINE_REBUILD_THRESHOLD: usize = 256;
@@ -603,26 +603,26 @@ impl ImageViewerApp {
         }
 
         // 9. FOLDER SIZE RESULTS
-        while let Ok(msg) = self.folder_size_res_receiver.try_recv() {
+        while let Ok(msg) = self.folder_size_state.res_receiver.try_recv() {
             match msg {
-                crate::app::state::FolderSizeMessage::Progress {
+                crate::app::folder_size_state::FolderSizeMessage::Progress {
                     folder_path,
                     total_size,
                 } => {
-                    self.folder_size_cache.put(folder_path, total_size);
+                    self.folder_size_state.cache.put(folder_path, total_size);
                     received_any = true;
                 }
-                crate::app::state::FolderSizeMessage::Complete {
+                crate::app::folder_size_state::FolderSizeMessage::Complete {
                     folder_path,
                     total_size,
                 } => {
-                    self.folder_size_loading.remove(&folder_path);
-                    self.folder_size_cache.put(folder_path, total_size);
+                    self.folder_size_state.loading.remove(&folder_path);
+                    self.folder_size_state.cache.put(folder_path, total_size);
                     received_any = true;
                 }
-                crate::app::state::FolderSizeMessage::Cancelled { folder_path } => {
-                    self.folder_size_loading.remove(&folder_path);
-                    self.folder_size_cache.pop(&folder_path);
+                crate::app::folder_size_state::FolderSizeMessage::Cancelled { folder_path } => {
+                    self.folder_size_state.loading.remove(&folder_path);
+                    self.folder_size_state.cache.pop(&folder_path);
                     received_any = true;
                 }
             }
@@ -635,3 +635,4 @@ impl ImageViewerApp {
         _t_streaming_done
     }
 }
+

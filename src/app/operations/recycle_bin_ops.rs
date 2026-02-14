@@ -62,8 +62,8 @@ impl ImageViewerApp {
                     "Restaurando {} itens...",
                     restore_items.len()
                 )));
-            self.file_ops_in_progress += 1;
-            let _ = self.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::RestoreFromRecycleBin {
+            self.file_operation_state.file_ops_in_progress += 1;
+            let _ = self.file_operation_state.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::RestoreFromRecycleBin {
                 items: restore_items,
             });
 
@@ -89,8 +89,8 @@ impl ImageViewerApp {
         // Send request to background worker (BATCH)
         // Windows will show a native confirmation dialog before deleting.
         let hwnd = self.native_hwnd.unwrap_or_default();
-        self.file_ops_in_progress += 1;
-        let _ = self.file_op_sender.send(
+        self.file_operation_state.file_ops_in_progress += 1;
+        let _ = self.file_operation_state.file_op_sender.send(
             crate::workers::file_operation_worker::FileOperationRequest::DeletePermanently {
                 physical_paths: paths.to_vec(),
                 hwnd: crate::workers::file_operation_worker::SendHwnd(hwnd),
@@ -108,11 +108,12 @@ impl ImageViewerApp {
         // Send request to background worker.
         // Windows will show a native confirmation dialog before emptying.
         let hwnd = self.native_hwnd.unwrap_or_default();
-        self.file_ops_in_progress += 1;
-        let _ = self.file_op_sender.send(
+        self.file_operation_state.file_ops_in_progress += 1;
+        let _ = self.file_operation_state.file_op_sender.send(
             crate::workers::file_operation_worker::FileOperationRequest::EmptyRecycleBin {
                 hwnd: crate::workers::file_operation_worker::SendHwnd(hwnd),
             },
         );
     }
 }
+

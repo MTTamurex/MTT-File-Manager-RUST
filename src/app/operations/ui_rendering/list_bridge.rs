@@ -488,6 +488,7 @@ impl ImageViewerApp {
                     ),
                 ListAction::NotifyIdleVisibleItems(items) => {
                     let _ = self
+                        .file_operation_state
                         .idle_warmup_sender
                         .send(crate::workers::idle_warmup::IdleWarmupMessage::VisibleItems(items));
                 }

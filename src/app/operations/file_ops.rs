@@ -19,8 +19,8 @@ impl ImageViewerApp {
         }
 
         // Send request to background worker (BATCH)
-        self.file_ops_in_progress += 1;
-        let _ = self.file_op_sender.send(
+        self.file_operation_state.file_ops_in_progress += 1;
+        let _ = self.file_operation_state.file_op_sender.send(
             crate::workers::file_operation_worker::FileOperationRequest::delete(
                 paths.to_vec(),
                 self.native_hwnd.unwrap_or_default(),
@@ -29,7 +29,7 @@ impl ImageViewerApp {
 
         // Track pending deletions to suppress thumbnail extraction for these files
         for path in paths {
-            self.pending_deletions.insert(path.clone(), ());
+            self.file_operation_state.pending_deletions.insert(path.clone(), ());
         }
         self.thumbnail_queue.remove_paths(paths);
 
@@ -144,8 +144,8 @@ impl ImageViewerApp {
         if let Some((_, new_name)) = self.renaming_state.take() {
             if let Some(item) = self.items.get(idx) {
                 // Send request to background worker
-                self.file_ops_in_progress += 1;
-                let _ = self.file_op_sender.send(
+                self.file_operation_state.file_ops_in_progress += 1;
+                let _ = self.file_operation_state.file_op_sender.send(
                     crate::workers::file_operation_worker::FileOperationRequest::rename(
                         item.path.clone(),
                         new_name,
@@ -165,7 +165,7 @@ impl ImageViewerApp {
     pub fn mount_and_navigate_iso(&mut self, path: PathBuf) {
         use crate::infrastructure::windows::mount_iso;
 
-        self.pending_iso_mount = Some(path.clone());
+        self.file_operation_state.pending_iso_mount = Some(path.clone());
 
         match mount_iso(&path) {
             Ok(_) => {
@@ -179,7 +179,7 @@ impl ImageViewerApp {
                     )));
             }
             Err(e) => {
-                self.pending_iso_mount = None;
+                self.file_operation_state.pending_iso_mount = None;
                 self.notifications
                     .push(crate::application::AppNotification::error(format!(
                         "Falha ao montar ISO: {}",
@@ -189,3 +189,4 @@ impl ImageViewerApp {
         }
     }
 }
+

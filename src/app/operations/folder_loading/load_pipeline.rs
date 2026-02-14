@@ -24,7 +24,7 @@ impl ImageViewerApp {
         let directory_cache = self.directory_cache.clone();
         // Use existing directory_cache for cache-first strategy
         let directory_index_opt = self.directory_index.clone();
-        let _prefetch_sender = self.prefetch_sender.clone();
+        let _prefetch_sender = self.file_operation_state.prefetch_sender.clone();
 
         // STREAMING BATCH LOADING: Adaptive batch size based on disk type
         std::thread::spawn(move || {
@@ -479,3 +479,4 @@ impl ImageViewerApp {
         });
     }
 }
+
