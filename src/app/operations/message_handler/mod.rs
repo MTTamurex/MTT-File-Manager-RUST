@@ -25,7 +25,11 @@ mod global_search_events;
 mod helpers;
 mod rebuild_events;
 mod thumbnail_events;
+mod thumbnail_rebuild;
+mod thumbnail_uploads;
+mod thumbnail_workers;
 mod watcher_events;
+mod watcher_reload;
 
 impl ImageViewerApp {
     pub fn process_incoming_messages(&mut self, ctx: &egui::Context) {
@@ -57,7 +61,8 @@ impl ImageViewerApp {
         self.process_items_rebuild_results(ctx);
 
         // PERFORMANCE: Precompute normalized current path once for all comparisons
-        let current_path_norm = Self::normalize_for_match(Path::new(&self.navigation_state.current_path));
+        let current_path_norm =
+            Self::normalize_for_match(Path::new(&self.navigation_state.current_path));
 
         // BLOCKING: Process all available file operation results in batch
         self.process_file_operation_results(&current_path_norm);
@@ -92,7 +97,11 @@ impl ImageViewerApp {
             return;
         }
 
-        if let Err(_err) = self.file_operation_state.disk_cache_invalidation_sender.send(paths) {
+        if let Err(_err) = self
+            .file_operation_state
+            .disk_cache_invalidation_sender
+            .send(paths)
+        {
             debug_log!(
                 "[CACHE] Failed to enqueue disk cache invalidations: {:?}",
                 _err
@@ -123,4 +132,3 @@ impl ImageViewerApp {
         }
     }
 }
-
