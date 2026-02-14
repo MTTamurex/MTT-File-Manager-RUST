@@ -103,6 +103,7 @@ impl ImageViewerApp {
         // just trigger a simple folder reload. The reload will fetch fresh data from
         // disk, which is faster than processing hundreds of SQLite deletes.
         const MAX_EVENTS_INDIVIDUAL: usize = 50;
+        const FLOOD_RELOAD_COOLDOWN_MS: u64 = 5000;
         let mut pending_disk_cache_invalidations: Vec<PathBuf> = Vec::new();
         let mut folders_with_changed_contents: HashSet<PathBuf> = HashSet::new();
         let register_changed_folder = |changed_path: &Path,
@@ -115,20 +116,79 @@ impl ImageViewerApp {
                 out.insert(parent.to_path_buf());
             }
         };
+        let flood_event_affects_current_listing =
+            |event: &crate::infrastructure::drive_watcher::DriveWatcherEvent| -> bool {
+                let path_affects = |p: &Path| -> bool {
+                    let cleaned = Self::clean_path(p);
+                    let cleaned_norm = Self::normalize_for_match(&cleaned);
+                    if cleaned_norm == current_path_norm {
+                        return true;
+                    }
+
+                    cleaned
+                        .parent()
+                        .map(|parent| Self::normalize_for_match(parent) == current_path_norm)
+                        .unwrap_or(false)
+                };
+
+                match event {
+                    crate::infrastructure::drive_watcher::DriveWatcherEvent::Created(path)
+                    | crate::infrastructure::drive_watcher::DriveWatcherEvent::Deleted(path)
+                    | crate::infrastructure::drive_watcher::DriveWatcherEvent::Modified(path)
+                    | crate::infrastructure::drive_watcher::DriveWatcherEvent::Unknown(path) => {
+                        if should_ignore(path) {
+                            return false;
+                        }
+                        path_affects(path)
+                    }
+                    crate::infrastructure::drive_watcher::DriveWatcherEvent::Renamed(
+                        old_path,
+                        new_path,
+                    ) => {
+                        if should_ignore(old_path) && should_ignore(new_path) {
+                            return false;
+                        }
+                        path_affects(old_path) || path_affects(new_path)
+                    }
+                    crate::infrastructure::drive_watcher::DriveWatcherEvent::DriveLost(_) => true,
+                }
+            };
 
         if drive_events.len() > MAX_EVENTS_INDIVIDUAL {
-            log::warn!(
-                "[FS-WATCH] Event flood detected: {} events (threshold {}). Skipping individual processing, triggering full reload.",
-                drive_events.len(),
-                MAX_EVENTS_INDIVIDUAL
-            );
+            let affects_current_listing = drive_events
+                .iter()
+                .any(flood_event_affects_current_listing);
 
-            // Invalidate directory caches broadly (cheap in-memory operation)
-            self.directory_cache.clear();
+            if affects_current_listing {
+                log::warn!(
+                    "[FS-WATCH] Event flood detected: {} events (threshold {}). Direct impact on current folder, scheduling throttled reload.",
+                    drive_events.len(),
+                    MAX_EVENTS_INDIVIDUAL
+                );
 
-            // Just trigger a reload instead of processing each event
-            if !self.navigation_state.is_computer_view && !self.navigation_state.is_recycle_bin_view {
-                self.pending_auto_reload = true;
+                // Keep flood handling bounded: don't reload repeatedly while the storm persists.
+                if self.last_auto_reload.elapsed() > Duration::from_millis(FLOOD_RELOAD_COOLDOWN_MS)
+                {
+                    self.directory_cache
+                        .invalidate(&PathBuf::from(&self.navigation_state.current_path));
+                    if !self.navigation_state.is_computer_view
+                        && !self.navigation_state.is_recycle_bin_view
+                    {
+                        self.pending_auto_reload = true;
+                    }
+                } else {
+                    #[cfg(debug_assertions)]
+                    log::debug!(
+                        "[FS-WATCH] Flood cooldown active ({}ms): skipping reload to avoid flicker",
+                        self.last_auto_reload.elapsed().as_millis()
+                    );
+                }
+            } else {
+                #[cfg(debug_assertions)]
+                log::debug!(
+                    "[FS-WATCH] Event flood detected ({} events) with no direct impact on current folder listing. Skipping reload.",
+                    drive_events.len()
+                );
             }
         } else {
             // Events are pre-deduplicated and coalesced by the watcher thread (200ms batches,
