@@ -10,8 +10,8 @@ impl eframe::App for ImageViewerApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let t_frame_start = std::time::Instant::now();
 
-        // Check if window is being resized/dragged (for UI optimization)
-        let is_resizing = is_in_size_move();
+        // True while Windows is in interactive move/resize loop (WM_ENTERSIZEMOVE..EXITSIZEMOVE).
+        let is_in_size_move = is_in_size_move();
 
         // 1. Initial validation
         if self.startup_tick == 0 {
@@ -56,9 +56,9 @@ impl eframe::App for ImageViewerApp {
             };
         }
 
-        // 3. Infrastructure updates (skip heavy processing during resize)
+        // 3. Infrastructure updates (throttle heavy processing during interactive move/resize)
         self.ensure_window_handle(frame);
-        if !is_resizing {
+        if !is_in_size_move {
             // PERF TIMING: Detect slow frames after inactivity
             let t0 = std::time::Instant::now();
             self.process_incoming_messages(ctx);
@@ -105,7 +105,7 @@ impl eframe::App for ImageViewerApp {
         self.item_icon_loader.poll_async_icons(ctx);
 
         // 4. Input: Keyboard shortcuts (resize borders handled by native subclass)
-        if !is_resizing {
+        if !is_in_size_move {
             app::input::handle_input(self, ctx);
         }
 
@@ -121,48 +121,35 @@ impl eframe::App for ImageViewerApp {
         // 7b. Layout: Secondary Toolbar (Top 3) - lightweight, always render
         app::layers::render_secondary_toolbar_layer(self, ctx);
 
-        // 8-11. Heavy operations: Skip during resize for smooth animation
-        if is_resizing {
-            // Simplified placeholder during resize
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE.fill(if ctx.style().visuals.dark_mode {
-                    egui::Color32::from_rgb(45, 45, 45)
-                } else {
-                    egui::Color32::WHITE
-                }))
-                .show(ctx, |_ui| {
-                    // Empty panel - just fill with background color
-                });
-        } else {
-            // 8. Layout: Main Panels (Sidebar, Preview, Central)
-            let t_panels = std::time::Instant::now();
-            app::panels::render_panels(self, ctx, frame);
-            let panels_ms = t_panels.elapsed().as_millis();
-            if panels_ms > 50 {
-                log::warn!("[PERF] Slow render_panels: {}ms", panels_ms);
-            }
-
-            // 9. Operations: Context Menu (Rendering & Actions)
-            app::menu_handler::handle_context_menu(self, ctx);
-
-            // 10. Operations: Resize borders (on top) - REMOVED, handled by native subclass
-            // app::input::handle_resize_borders(self, ctx);
-
-            // 11. Virtual drive settings modal
-            if self.navigation_state.show_virtual_drive_settings {
-                self.navigation_state.show_virtual_drive_settings =
-                    crate::ui::components::virtual_drive_settings::render_virtual_drive_settings(
-                        ctx,
-                        self.navigation_state.show_virtual_drive_settings,
-                    );
-            }
-
-            // 12. Notifications
-            app::notifications::render_notifications(self, ctx);
-
-            // 13. Global Search Overlay (on top of everything)
-            crate::ui::global_search_overlay::render_global_search_overlay(self, ctx);
+        // 8. Layout: Main Panels (Sidebar, Preview, Central)
+        // Keep full rendering even during move/resize so content/video stays visible and synchronized.
+        let t_panels = std::time::Instant::now();
+        app::panels::render_panels(self, ctx, frame);
+        let panels_ms = t_panels.elapsed().as_millis();
+        if panels_ms > 50 {
+            log::warn!("[PERF] Slow render_panels: {}ms", panels_ms);
         }
+
+        // 9. Operations: Context Menu (Rendering & Actions)
+        app::menu_handler::handle_context_menu(self, ctx);
+
+        // 10. Operations: Resize borders (on top) - REMOVED, handled by native subclass
+        // app::input::handle_resize_borders(self, ctx);
+
+        // 11. Virtual drive settings modal
+        if self.navigation_state.show_virtual_drive_settings {
+            self.navigation_state.show_virtual_drive_settings =
+                crate::ui::components::virtual_drive_settings::render_virtual_drive_settings(
+                    ctx,
+                    self.navigation_state.show_virtual_drive_settings,
+                );
+        }
+
+        // 12. Notifications
+        app::notifications::render_notifications(self, ctx);
+
+        // 13. Global Search Overlay (on top of everything)
+        crate::ui::global_search_overlay::render_global_search_overlay(self, ctx);
 
         // Keep drag feedback on top and avoid cursor override by later widgets.
         if self.is_item_dragging {
@@ -178,6 +165,11 @@ impl eframe::App for ImageViewerApp {
             if primary_released {
                 self.complete_item_drag(ctrl, shift);
             }
+        }
+
+        if is_in_size_move {
+            // Ensure continuous redraw while the OS is in the modal move/resize loop.
+            ctx.request_repaint();
         }
 
         // PERF: Log total frame time when slow (helps diagnose post-inactivity freezes)
