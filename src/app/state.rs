@@ -14,17 +14,6 @@ pub enum LastInput {
     Keyboard,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GlobalSearchCategory {
-    All,
-    Files,
-    Folders,
-    Images,
-    Videos,
-    Audio,
-    Documents,
-}
-
 use std::collections::VecDeque;
 // use std::num::NonZeroUsize;
 use std::path::PathBuf;
@@ -35,8 +24,11 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::application::navigation::NavigationHistory;
 use crate::application::ClipboardManager;
+use crate::app::drive_state::DriveState;
+use crate::app::global_search_state::GlobalSearchState;
+use crate::app::layout_state::LayoutState;
+use crate::app::navigation_state::NavigationState;
 use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
 use crate::domain::thumbnail::ThumbnailData;
 use crate::infrastructure::directory_cache::DirectoryCache;
@@ -75,7 +67,7 @@ pub enum FolderSizeMessage {
 }
 
 pub struct ImageViewerApp {
-    pub current_path: String,
+    pub navigation_state: NavigationState,
     /// Last known modified timestamp for the currently browsed folder.
     /// Filled at navigation time from the already selected/listed folder entry
     /// to avoid blocking filesystem calls in the render loop.
@@ -131,20 +123,8 @@ pub struct ImageViewerApp {
     // View Mode
     pub view_mode: ViewMode,
 
-    // Navigation state (linear history)
-    pub navigation: NavigationHistory,
-    pub path_input: String, // Editable address bar
-
     // UI state
-    pub disks: Vec<(String, String)>, // (path, label)
-    pub last_drive_refresh: Instant,
-    pub last_drive_bitmask: u32, // Fast bitmask from GetLogicalDrives() for quick change detection
-    pub drive_scan_pending: bool, // Whether a background drive scan is in progress
-    pub drive_scan_rx: Receiver<Vec<(String, String)>>, // Background drive scan results
-    pub drive_scan_tx: Sender<Vec<(String, String)>>, // Sender cloned into background thread
-    pub drive_info_rx: Receiver<Vec<(String, crate::domain::file_entry::DriveInfo)>>, // Background volume info
-    pub drive_info_tx: Sender<Vec<(String, crate::domain::file_entry::DriveInfo)>>, // Sender for bg thread
-    pub drive_info_cache: std::collections::HashMap<String, crate::domain::file_entry::DriveInfo>, // Persistent cache surviving navigation
+    pub drive_state: DriveState,
     pub thumbnail_size: f32, // Zoom: 64-512
     pub selected_item: Option<usize>,
     pub selected_file: Option<FileEntry>,
@@ -167,11 +147,6 @@ pub struct ImageViewerApp {
     pub last_metadata_refresh: Instant,
     pub last_metadata_path: Option<PathBuf>,
     pub show_preview_panel: bool,
-    pub is_computer_view: bool, // Whether we're in the "This PC" view
-    pub computer_view_local_indices: Vec<usize>, // Pre-computed indices for local drives (virtualization)
-    pub computer_view_network_indices: Vec<usize>, // Pre-computed indices for network drives (virtualization)
-    pub is_recycle_bin_view: bool,                 // Whether we're in the Recycle Bin view
-    pub show_virtual_drive_settings: bool,         // Virtual drive settings modal
 
     pub total_items: usize,
 
@@ -263,15 +238,8 @@ pub struct ImageViewerApp {
     // 3-stage startup: hidden -> maximize/resize -> reveal
     pub startup_tick: usize,
 
-    // Window state persistence
-    pub saved_window_width: f32,
-    pub saved_window_height: f32,
-    pub saved_is_maximized: bool,
-    pub saved_is_minimized: bool,
-
-    // Sidebar widths persistence
-    pub sidebar_left_width: f32,
-    pub sidebar_right_width: f32,
+    // Window/layout persistence and list column widths
+    pub layout: LayoutState,
 
     // TAB SYSTEM
     pub tab_manager: crate::tabs::TabManager,
@@ -331,21 +299,7 @@ pub struct ImageViewerApp {
     pub scroll_request: ScrollRequest,
 
     // GLOBAL SEARCH (via MTT Search Service)
-    pub global_search_sender: Sender<crate::workers::global_search_worker::GlobalSearchRequest>,
-    pub global_search_receiver:
-        Receiver<crate::workers::global_search_worker::GlobalSearchResponse>,
-    pub global_search_query: String,
-    pub global_search_results: Vec<mtt_search_protocol::SearchResultItem>,
-    pub global_search_selected_index: Option<usize>,
-    pub global_search_focus_request: bool,
-    pub global_search_size_cache: LruCache<String, Option<u64>>,
-    pub global_search_category: GlobalSearchCategory,
-    pub global_search_drive_filter: Option<char>,
-    pub global_search_active: bool,
-    pub global_search_loading: bool,
-    pub global_search_available: bool,
-    pub global_search_last_check: Instant,
-    pub global_search_total_indexed: u64,
+    pub global_search: GlobalSearchState,
 
     // FILE OPERATION WORKER
     pub(crate) file_op_sender: Sender<crate::workers::file_operation_worker::FileOperationRequest>,
@@ -371,21 +325,6 @@ pub struct ImageViewerApp {
     // Media keyboard debounce
     pub last_media_key_press: Instant,
 
-    // List view column widths (resizable) - Regular view
-    pub list_col_name_width: f32,
-    pub list_col_date_width: f32,
-    pub list_col_type_width: f32,
-    pub list_col_size_width: f32,
-    // List view column widths - OneDrive view
-    pub list_col_onedrive_name_width: f32,
-    pub list_col_onedrive_date_width: f32,
-    pub list_col_onedrive_type_width: f32,
-    pub list_col_onedrive_size_width: f32,
-    pub list_col_onedrive_status_width: f32,
-    // List view column widths - Computer view
-    pub list_col_computer_name_width: f32,
-    pub list_col_computer_total_width: f32,
-    pub list_col_computer_free_width: f32,
 }
 
 impl ImageViewerApp {
@@ -528,17 +467,17 @@ impl ImageViewerApp {
 
     fn estimated_visible_folder_previews(&self) -> usize {
         if !matches!(self.view_mode, ViewMode::Grid)
-            || self.is_computer_view
-            || self.is_recycle_bin_view
+            || self.navigation_state.is_computer_view
+            || self.navigation_state.is_recycle_bin_view
         {
             return 0;
         }
 
         let screen = self.ui_ctx.screen_rect();
         let mut central_width = screen.width()
-            - self.sidebar_left_width.clamp(150.0, 500.0)
+            - self.layout.sidebar_left_width.clamp(150.0, 500.0)
             - if self.show_preview_panel {
-                self.sidebar_right_width.clamp(250.0, 500.0)
+                self.layout.sidebar_right_width.clamp(250.0, 500.0)
             } else {
                 0.0
             };

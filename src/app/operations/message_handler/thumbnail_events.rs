@@ -136,9 +136,9 @@ impl ImageViewerApp {
 
             // OneDrive folders: enqueue folder previews eagerly to reduce visual delay.
             if matches!(self.view_mode, crate::domain::file_entry::ViewMode::Grid)
-                && !self.is_recycle_bin_view
+                && !self.navigation_state.is_recycle_bin_view
                 && crate::infrastructure::onedrive::is_onedrive_path(&PathBuf::from(
-                    &self.current_path,
+                    &self.navigation_state.current_path,
                 ))
             {
                 const MAX_EAGER_FOLDER_PREVIEWS: usize = 80;

@@ -8,13 +8,13 @@ impl ImageViewerApp {
         // GUARD CLAUSE: Prevent spam by checking if we're already on this path
         log::debug!(
             "[GUARD] Checking load_folder: current_path={:?}, loaded_path={:?}, force_refresh={}",
-            self.current_path, self.loaded_path, force_refresh
+            self.navigation_state.current_path, self.loaded_path, force_refresh
         );
 
-        if !force_refresh && self.current_path == self.loaded_path {
+        if !force_refresh && self.navigation_state.current_path == self.loaded_path {
             log::debug!(
                 "[GUARD] Skipping load_folder for {:?} - already loaded",
-                self.current_path
+                self.navigation_state.current_path
             );
             return true;
         }
@@ -25,15 +25,15 @@ impl ImageViewerApp {
     pub(super) fn mark_folder_load_started(&mut self, force_refresh: bool) {
         log::debug!(
             "[GUARD] load_folder called for {:?} (force_refresh={}, loaded_path={:?})",
-            self.current_path, force_refresh, self.loaded_path
+            self.navigation_state.current_path, force_refresh, self.loaded_path
         );
 
         // Mark as loaded immediately to prevent spam.
-        self.loaded_path = self.current_path.clone();
+        self.loaded_path = self.navigation_state.current_path.clone();
 
         log::debug!(
             "[GUARD] Starting folder loading process for {:?}",
-            self.current_path
+            self.navigation_state.current_path
         );
     }
 

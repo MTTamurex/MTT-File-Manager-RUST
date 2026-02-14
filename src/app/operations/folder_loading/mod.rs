@@ -24,7 +24,7 @@ impl ImageViewerApp {
         self.mark_folder_load_started(force_refresh);
         self.bump_folder_load_generation();
 
-        let _current_path_buf = PathBuf::from(&self.current_path);
+        let _current_path_buf = PathBuf::from(&self.navigation_state.current_path);
         // DISABLED: Predictive prefetch and idle warmup (testing HDD I/O impact)
         // let _ = self
         //     .predictive_sender

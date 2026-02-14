@@ -17,7 +17,7 @@ impl ImageViewerApp {
     pub(super) fn start_folder_load_pipeline(&mut self, force_refresh: bool) {
         let my_gen = self.generation;
         let gen_clone = self.current_generation.clone();
-        let current_path = self.current_path.clone();
+        let current_path = self.navigation_state.current_path.clone();
         let file_entry_sender = self.file_entry_sender.clone();
         let ctx = self.ui_ctx.clone();
         let disk_cache = self.disk_cache.clone();

@@ -18,7 +18,7 @@ impl ImageViewerApp {
     /// The drive watcher is more efficient for fast navigation since it doesn't need
     /// to recreate the watcher on every folder change within the same drive.
     pub fn watch_current_folder(&mut self) {
-        let current_path = self.current_path.clone();
+        let current_path = self.navigation_state.current_path.clone();
         log::debug!("[WATCHER] Setting up for: {}", current_path);
 
         // Try using drive-wide watcher first (File Pilot optimization)
@@ -58,7 +58,7 @@ impl ImageViewerApp {
     /// Setup legacy notify-based watcher (fallback)
     #[cfg(feature = "notify-watcher")]
     fn setup_notify_watcher(&mut self) {
-        let current_path = self.current_path.clone();
+        let current_path = self.navigation_state.current_path.clone();
 
         // Canonicalize the path for Windows compatibility
         let path_to_watch = if let Ok(p) = Path::new(&current_path).canonicalize() {

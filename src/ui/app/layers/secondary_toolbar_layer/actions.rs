@@ -24,7 +24,7 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
     let can_rename = app.multi_selection.len() <= 1
         && (app.multi_selection.len() == 1 || app.selected_file.is_some());
     let can_paste = app.clipboard.has_content() && !is_drive_selected;
-    let can_create_folder = !app.is_computer_view && !app.is_recycle_bin_view;
+    let can_create_folder = !app.navigation_state.is_computer_view && !app.navigation_state.is_recycle_bin_view;
 
     let icon_color = if ui.visuals().dark_mode {
         [220, 220, 220, 255]

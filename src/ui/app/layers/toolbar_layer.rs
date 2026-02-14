@@ -35,11 +35,11 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
 
             let action = render_toolbar(
                 ui,
-                &app.current_path,
-                &mut app.path_input,
+                &app.navigation_state.current_path,
+                &mut app.navigation_state.path_input,
                 &mut app.is_address_editing,
                 &mut app.search_query,
-                &app.navigation,
+                &app.navigation_state.navigation,
                 app.view_mode,
                 app.sort_mode,
                 app.sort_descending,
@@ -77,7 +77,7 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                     }
                     ToolbarAction::ChangeSortMode(mode) => {
                         app.sort_mode = mode;
-                        if app.is_computer_view {
+                        if app.navigation_state.is_computer_view {
                             app.sort_mode_computer = mode;
                         } else {
                             app.sort_mode_normal = mode;
@@ -93,7 +93,7 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                     ToolbarAction::Search(_query) => app.filter_items(),
                     ToolbarAction::Navigate(path) => app.navigate_to(&path),
                     ToolbarAction::StartAddressEdit => {
-                        app.path_input = app.current_path.clone();
+                        app.navigation_state.path_input = app.navigation_state.current_path.clone();
                         app.is_address_editing = true;
                     }
                     ToolbarAction::CommitPathInput(path) => {
@@ -103,13 +103,13 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                             app.navigate_to(&path);
                             app.is_address_editing = false;
                         } else {
-                            app.path_input = app.current_path.clone();
+                            app.navigation_state.path_input = app.navigation_state.current_path.clone();
                             app.is_address_editing = false;
                         }
                     }
                     ToolbarAction::CancelPathInput => {
                         app.is_address_editing = false;
-                        app.path_input = app.current_path.clone();
+                        app.navigation_state.path_input = app.navigation_state.current_path.clone();
                     }
                     _ => {}
                 }

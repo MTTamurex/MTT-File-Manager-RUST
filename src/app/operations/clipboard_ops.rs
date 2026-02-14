@@ -70,13 +70,13 @@ impl ImageViewerApp {
                 if item.is_dir {
                     item.path.clone()
                 } else {
-                    PathBuf::from(&self.current_path)
+                    PathBuf::from(&self.navigation_state.current_path)
                 }
             } else {
-                PathBuf::from(&self.current_path)
+                PathBuf::from(&self.navigation_state.current_path)
             }
         } else {
-            PathBuf::from(&self.current_path)
+            PathBuf::from(&self.navigation_state.current_path)
         };
 
         // 1. Get files and operation from clipboard via Manager

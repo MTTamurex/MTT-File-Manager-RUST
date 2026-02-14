@@ -23,7 +23,7 @@ impl ImageViewerApp {
             return;
         }
 
-        if self.renaming_state.is_some() || self.is_computer_view || self.is_recycle_bin_view {
+        if self.renaming_state.is_some() || self.navigation_state.is_computer_view || self.navigation_state.is_recycle_bin_view {
             return;
         }
 
@@ -52,7 +52,7 @@ impl ImageViewerApp {
 
         self.is_item_dragging = true;
         self.drag_payload_paths = payload;
-        self.drag_source_folder = Some(PathBuf::from(&self.current_path));
+        self.drag_source_folder = Some(PathBuf::from(&self.navigation_state.current_path));
         self.drag_target_folder = None;
         self.drag_hovered_folder = None;
         self.ui_ctx.request_repaint();
@@ -78,10 +78,10 @@ impl ImageViewerApp {
         // but only when we're NOT in the drag's source folder (to allow
         // dropping onto the open folder of a different tab).
         let candidate = hovered_folder.or_else(|| {
-            if self.current_path.is_empty() {
+            if self.navigation_state.current_path.is_empty() {
                 return None;
             }
-            let cur = PathBuf::from(&self.current_path);
+            let cur = PathBuf::from(&self.navigation_state.current_path);
             // Don't fall back to the source folder (items are already there)
             if let Some(ref src) = self.drag_source_folder {
                 if normalize_path_for_compare(src) == normalize_path_for_compare(&cur) {

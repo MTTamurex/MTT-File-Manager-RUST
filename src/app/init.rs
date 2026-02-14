@@ -14,7 +14,6 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::application::navigation::NavigationHistory;
 use crate::application::ClipboardManager;
 use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
 use crate::infrastructure::directory_cache::DirectoryCache;
@@ -28,6 +27,10 @@ use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::theme;
 
+use super::drive_state::DriveState;
+use super::global_search_state::GlobalSearchState;
+use super::layout_state::LayoutState;
+use super::navigation_state::NavigationState;
 use super::state::{ImageViewerApp, ItemsRebuildResult, LastInput};
 
 /// Determines the initial path based on the last saved folder
@@ -570,7 +573,7 @@ impl ImageViewerApp {
         tab_manager.active_mut().view_mode = view_mode;
 
         let mut app = Self {
-            current_path: initial_path.clone(),
+            navigation_state: NavigationState::new(initial_path.clone(), is_computer_view_initial),
             current_folder_modified_hint: None,
             folder_modified_hints: std::collections::HashMap::new(),
             loaded_path: String::new(), // Start empty - will be set when first folder loads
@@ -617,22 +620,17 @@ impl ImageViewerApp {
             media_preview_owner_tab_id: None,
             selected_metadata: None,
             show_preview_panel, // Loaded from SQLite
-            is_computer_view: is_computer_view_initial,
-            computer_view_local_indices: Vec::new(),
-            computer_view_network_indices: Vec::new(),
-            is_recycle_bin_view: false,
-            show_virtual_drive_settings: false,
-            navigation: NavigationHistory::new(initial_path.clone()),
-            path_input: initial_path.clone(),
-            disks,
-            last_drive_refresh: Instant::now(),
-            last_drive_bitmask: crate::infrastructure::windows::get_logical_drives_bitmask(),
-            drive_scan_pending: false,
-            drive_scan_rx,
-            drive_scan_tx,
-            drive_info_rx,
-            drive_info_tx,
-            drive_info_cache: std::collections::HashMap::new(),
+            drive_state: DriveState {
+                disks,
+                last_drive_refresh: Instant::now(),
+                last_drive_bitmask: crate::infrastructure::windows::get_logical_drives_bitmask(),
+                drive_scan_pending: false,
+                drive_scan_rx,
+                drive_scan_tx,
+                drive_info_rx,
+                drive_info_tx,
+                drive_info_cache: std::collections::HashMap::new(),
+            },
             thumbnail_size, // Loaded from SQLite
             selected_item: None,
             multi_selection: FxHashSet::default(),
@@ -723,15 +721,63 @@ impl ImageViewerApp {
             // STARTUP OPTIMIZATION: Async Font Loader
             font_loader_rx: Some(font_rx),
 
-            // Window state persistence
-            saved_window_width,
-            saved_window_height,
-            saved_is_maximized,
-            saved_is_minimized: false,
-
-            // Sidebar widths persistence
-            sidebar_left_width,
-            sidebar_right_width,
+            // Window/layout persistence
+            layout: LayoutState {
+                saved_window_width,
+                saved_window_height,
+                saved_is_maximized,
+                saved_is_minimized: false,
+                sidebar_left_width,
+                sidebar_right_width,
+                list_col_name_width: disk_cache
+                    .get_preference("list_col_name_width")
+                    .and_then(|s| s.parse::<f32>().ok())
+                    .unwrap_or(300.0),
+                list_col_date_width: disk_cache
+                    .get_preference("list_col_date_width")
+                    .and_then(|s| s.parse::<f32>().ok())
+                    .unwrap_or(170.0),
+                list_col_type_width: disk_cache
+                    .get_preference("list_col_type_width")
+                    .and_then(|s| s.parse::<f32>().ok())
+                    .unwrap_or(120.0),
+                list_col_size_width: disk_cache
+                    .get_preference("list_col_size_width")
+                    .and_then(|s| s.parse::<f32>().ok())
+                    .unwrap_or(100.0),
+                list_col_onedrive_name_width: disk_cache
+                    .get_preference("list_col_onedrive_name_width")
+                    .and_then(|s| s.parse::<f32>().ok())
+                    .unwrap_or(300.0),
+                list_col_onedrive_date_width: disk_cache
+                    .get_preference("list_col_onedrive_date_width")
+                    .and_then(|s| s.parse::<f32>().ok())
+                    .unwrap_or(170.0),
+                list_col_onedrive_type_width: disk_cache
+                    .get_preference("list_col_onedrive_type_width")
+                    .and_then(|s| s.parse::<f32>().ok())
+                    .unwrap_or(120.0),
+                list_col_onedrive_size_width: disk_cache
+                    .get_preference("list_col_onedrive_size_width")
+                    .and_then(|s| s.parse::<f32>().ok())
+                    .unwrap_or(100.0),
+                list_col_onedrive_status_width: disk_cache
+                    .get_preference("list_col_onedrive_status_width")
+                    .and_then(|s| s.parse::<f32>().ok())
+                    .unwrap_or(120.0),
+                list_col_computer_name_width: disk_cache
+                    .get_preference("list_col_computer_name_width")
+                    .and_then(|s| s.parse::<f32>().ok())
+                    .unwrap_or(300.0),
+                list_col_computer_total_width: disk_cache
+                    .get_preference("list_col_computer_total_width")
+                    .and_then(|s| s.parse::<f32>().ok())
+                    .unwrap_or(120.0),
+                list_col_computer_free_width: disk_cache
+                    .get_preference("list_col_computer_free_width")
+                    .and_then(|s| s.parse::<f32>().ok())
+                    .unwrap_or(120.0),
+            },
 
             // METADATA ASYNC
             metadata_req_sender: meta_req_tx,
@@ -804,22 +850,7 @@ impl ImageViewerApp {
             scroll_request: crate::app::state::ScrollRequest::None,
 
             // GLOBAL SEARCH
-            global_search_sender: global_search_tx,
-            global_search_receiver: global_search_res_rx,
-            global_search_query: String::new(),
-            global_search_results: Vec::new(),
-            global_search_selected_index: None,
-            global_search_focus_request: false,
-            global_search_size_cache: LruCache::new(
-                NonZeroUsize::new(2000).expect("global_search_size_cache size must be non-zero"),
-            ),
-            global_search_category: crate::app::state::GlobalSearchCategory::All,
-            global_search_drive_filter: None,
-            global_search_active: false,
-            global_search_loading: false,
-            global_search_available: false,
-            global_search_last_check: Instant::now(),
-            global_search_total_indexed: 0,
+            global_search: GlobalSearchState::new(global_search_tx, global_search_res_rx),
 
             // FILE OPERATION WORKER
             file_op_sender: file_op_tx,
@@ -844,57 +875,6 @@ impl ImageViewerApp {
             // Media keyboard debounce
             last_media_key_press: std::time::Instant::now(),
 
-            // List view column widths (resizable) - Regular view
-            list_col_name_width: disk_cache
-                .get_preference("list_col_name_width")
-                .and_then(|s| s.parse::<f32>().ok())
-                .unwrap_or(300.0),
-            list_col_date_width: disk_cache
-                .get_preference("list_col_date_width")
-                .and_then(|s| s.parse::<f32>().ok())
-                .unwrap_or(170.0),
-            list_col_type_width: disk_cache
-                .get_preference("list_col_type_width")
-                .and_then(|s| s.parse::<f32>().ok())
-                .unwrap_or(120.0),
-            list_col_size_width: disk_cache
-                .get_preference("list_col_size_width")
-                .and_then(|s| s.parse::<f32>().ok())
-                .unwrap_or(100.0),
-            // List view column widths - OneDrive view
-            list_col_onedrive_name_width: disk_cache
-                .get_preference("list_col_onedrive_name_width")
-                .and_then(|s| s.parse::<f32>().ok())
-                .unwrap_or(300.0),
-            list_col_onedrive_date_width: disk_cache
-                .get_preference("list_col_onedrive_date_width")
-                .and_then(|s| s.parse::<f32>().ok())
-                .unwrap_or(170.0),
-            list_col_onedrive_type_width: disk_cache
-                .get_preference("list_col_onedrive_type_width")
-                .and_then(|s| s.parse::<f32>().ok())
-                .unwrap_or(120.0),
-            list_col_onedrive_size_width: disk_cache
-                .get_preference("list_col_onedrive_size_width")
-                .and_then(|s| s.parse::<f32>().ok())
-                .unwrap_or(100.0),
-            list_col_onedrive_status_width: disk_cache
-                .get_preference("list_col_onedrive_status_width")
-                .and_then(|s| s.parse::<f32>().ok())
-                .unwrap_or(120.0),
-            // List view column widths - Computer view
-            list_col_computer_name_width: disk_cache
-                .get_preference("list_col_computer_name_width")
-                .and_then(|s| s.parse::<f32>().ok())
-                .unwrap_or(300.0),
-            list_col_computer_total_width: disk_cache
-                .get_preference("list_col_computer_total_width")
-                .and_then(|s| s.parse::<f32>().ok())
-                .unwrap_or(120.0),
-            list_col_computer_free_width: disk_cache
-                .get_preference("list_col_computer_free_width")
-                .and_then(|s| s.parse::<f32>().ok())
-                .unwrap_or(120.0),
         };
 
         // Start initial folder monitoring
@@ -903,8 +883,13 @@ impl ImageViewerApp {
         // Pre-populate drive_info_cache at startup so the details panel can show
         // drive info even if the user never visits "This PC".
         {
-            let disks_snapshot: Vec<String> = app.disks.iter().map(|(p, _)| p.clone()).collect();
-            let tx = app.drive_info_tx.clone();
+            let disks_snapshot: Vec<String> = app
+                .drive_state
+                .disks
+                .iter()
+                .map(|(p, _)| p.clone())
+                .collect();
+            let tx = app.drive_state.drive_info_tx.clone();
             let startup_ctx = ctx.clone();
             std::thread::spawn(move || {
                 use crate::domain::file_entry::DriveInfo;

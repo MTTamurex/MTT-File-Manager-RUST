@@ -46,7 +46,7 @@ impl ImageViewerApp {
             self.item_icon_loader.clear_drive_icons();
 
             // Launch async drive scan (non-blocking)
-            self.last_drive_refresh = Instant::now();
+            self.drive_state.last_drive_refresh = Instant::now();
             self.reload_drive_list_async();
 
             // Force immediate repaint without waiting for input events
@@ -57,7 +57,7 @@ impl ImageViewerApp {
         self.process_items_rebuild_results(ctx);
 
         // PERFORMANCE: Precompute normalized current path once for all comparisons
-        let current_path_norm = Self::normalize_for_match(Path::new(&self.current_path));
+        let current_path_norm = Self::normalize_for_match(Path::new(&self.navigation_state.current_path));
 
         // BLOCKING: Process all available file operation results in batch
         self.process_file_operation_results(&current_path_norm);

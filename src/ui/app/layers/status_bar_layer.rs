@@ -48,12 +48,12 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                 app.frame_time_peak_ms,
                 app.fps_avg,
                 app.upload_budget_ms,
-                app.is_computer_view,
+                app.navigation_state.is_computer_view,
                 bulk_progress,
             );
             match action {
                 StatusBarAction::SortChanged => {
-                    if app.is_computer_view {
+                    if app.navigation_state.is_computer_view {
                         app.sort_mode_computer = app.sort_mode;
                     } else {
                         app.sort_mode_normal = app.sort_mode;
@@ -62,10 +62,10 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                     app.save_preferences();
                 }
                 StatusBarAction::OpenVirtualDriveSettings => {
-                    app.show_virtual_drive_settings = true;
+                    app.navigation_state.show_virtual_drive_settings = true;
                 }
                 StatusBarAction::BulkThumbnailScan => {
-                    let root = std::path::PathBuf::from(&app.current_path);
+                    let root = std::path::PathBuf::from(&app.navigation_state.current_path);
                     let queue = app.thumbnail_queue.clone();
                     let generation = app.generation;
                     let scanning_flag = app.bulk_thumbnail_scanning.clone();

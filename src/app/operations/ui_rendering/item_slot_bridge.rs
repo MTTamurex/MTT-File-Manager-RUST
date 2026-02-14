@@ -47,7 +47,7 @@ impl ImageViewerApp {
                 is_renaming,
                 renaming_text,
                 focus_rename: self.focus_rename,
-                is_recycle_bin_view: self.is_recycle_bin_view,
+                is_recycle_bin_view: self.navigation_state.is_recycle_bin_view,
                 texture_cache: &mut self.cache_manager.texture_cache,
                 icon_loader: &mut self.item_icon_loader,
                 scanned_folders: &mut self.scanned_folders,

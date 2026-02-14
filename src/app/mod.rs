@@ -7,7 +7,10 @@
 //! - State sub-modules for better organization
 
 pub mod cache_state;
+pub mod drive_state;
+pub mod global_search_state;
 pub mod init;
+pub mod layout_state;
 pub mod navigation_state;
 pub mod operations;
 pub mod state;

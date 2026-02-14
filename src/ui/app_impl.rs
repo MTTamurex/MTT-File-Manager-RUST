@@ -149,11 +149,11 @@ impl eframe::App for ImageViewerApp {
             // app::input::handle_resize_borders(self, ctx);
 
             // 11. Virtual drive settings modal
-            if self.show_virtual_drive_settings {
-                self.show_virtual_drive_settings =
+            if self.navigation_state.show_virtual_drive_settings {
+                self.navigation_state.show_virtual_drive_settings =
                     crate::ui::components::virtual_drive_settings::render_virtual_drive_settings(
                         ctx,
-                        self.show_virtual_drive_settings,
+                        self.navigation_state.show_virtual_drive_settings,
                     );
             }
 
