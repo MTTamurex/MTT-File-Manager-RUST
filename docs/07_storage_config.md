@@ -283,13 +283,11 @@ CREATE TABLE volume_state (
 
 -- Registros de arquivos (índice persistido)
 CREATE TABLE file_records (
-    frn INTEGER NOT NULL,            -- File Reference Number (MFT)
+    frn INTEGER NOT NULL,            -- FRN NTFS ou referência sintética (volumes sem USN)
     drive_letter TEXT NOT NULL,
     name TEXT NOT NULL,              -- Nome do arquivo/pasta
-    name_lower TEXT NOT NULL,        -- Nome em lowercase (pré-computado para busca)
     parent_frn INTEGER NOT NULL,     -- FRN do diretório pai
     is_dir INTEGER NOT NULL,
-    size INTEGER NOT NULL,
     PRIMARY KEY (drive_letter, frn)
 );
 ```
@@ -300,11 +298,19 @@ CREATE TABLE file_records (
 
 ### Fluxo de Startup
 1. Serviço abre/cria `search_index.db`
-2. Para cada volume NTFS detectado:
-   - Carrega `volume_state` → verifica se `journal_id` ainda bate com o journal atual
-   - Se sim: carrega `file_records` para HashMap in-memory + catch-up incremental via USN Journal
-   - Se não (journal resetado): descarta cache, faz full re-scan do MFT
-3. Persiste índice atualizado no SQLite a cada 5 minutos
+2. Para cada volume detectado (`discover_volumes`):
+   - Se `usn_supported` (`NTFS`/`ReFS`):
+     - Carrega `volume_state` e valida `journal_id`
+     - Se válido: `load_into_index()` + catch-up incremental via USN Journal
+     - Se inválido/ausente: full re-scan do MFT (`FSCTL_ENUM_USN_DATA`)
+     - Persistência periódica a cada 5 minutos
+   - Se **sem USN** (exFAT/FAT32/FUSE/CryptoFS etc.):
+     - Tenta `load_into_index()` para disponibilizar cache imediatamente
+     - Executa full scan com `fs_walker::scan_volume()`
+     - Persiste após cada scan completo
+     - Re-scan periódico (30s para fuse/cryptofs/dokan/winfsp, 120s para demais)
+
+**Nota**: em volumes sem USN, `journal_id` e `last_usn` são persistidos como `0`.
 
 ### Acesso ao Banco
 ```rust
@@ -316,7 +322,7 @@ pub struct IndexDb {
 pub fn load_volume_state(&self, drive_letter: char) -> Option<PersistedVolumeState>
 
 // Carregar registros de arquivos
-pub fn load_file_records(&self, drive_letter: char) -> Option<HashMap<u64, FileRecord>>
+pub fn load_into_index(&self, index: &mut VolumeIndex) -> Option<usize>
 
 // Salvar índice completo
 pub fn save_volume(&self, index: &VolumeIndex) -> Result<(), String>
@@ -439,4 +445,4 @@ Copy-Item $source $dest -Recurse -Force
 
 ---
 
-*Última atualização: 2026-02-11 (adicionado banco de dados do serviço de busca)*
+*Última atualização: 2026-02-14 (documentado armazenamento para fallback sem USN)*

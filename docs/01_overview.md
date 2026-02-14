@@ -34,6 +34,12 @@ O MTT File Manager é um gerenciador de arquivos nativo para Windows desenvolvid
 - **Montagem de ISO** - Suporte para montar arquivos ISO como drives virtuais
 - **Renomeação inline** - Renomeação de arquivos diretamente na lista
 
+### Busca Global
+- **Overlay dedicado** - Busca global via Ctrl+Shift+F
+- **Serviço externo** - `mtt-search-service` com IPC por Named Pipe
+- **Indexação híbrida por volume** - NTFS/ReFS com USN Journal; volumes sem USN com varredura full-tree
+- **Atualização por tipo de filesystem** - USN incremental (2s), sem USN por re-scan periódico (30s/120s)
+
 ### Sistema de Cache e Performance
 - **Cache em disco** - SQLite para thumbnails e metadados
 - **Cache em memória** - LRU cache para acesso rápido
@@ -139,4 +145,4 @@ O MTT File Manager é um gerenciador de arquivos nativo para Windows desenvolvid
 
 ---
 
-*Última atualização: 2026-02-08 (watcher primário atualizado para Drive Watcher)*
+*Última atualização: 2026-02-14 (adicionado resumo da busca híbrida com fallback sem USN)*

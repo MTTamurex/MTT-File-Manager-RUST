@@ -13,14 +13,14 @@ MTT-File-Manager-RUST/
 ├── src/                          # App principal (GUI)
 ├── crates/
 │   ├── mtt-search-protocol/     # Tipos IPC compartilhados (SearchRequest, SearchResponse)
-│   └── mtt-search-service/      # Windows Service de indexação (USN Journal + Named Pipes)
+│   └── mtt-search-service/      # Windows Service de indexação (USN + fallback full scan + Named Pipes)
 ```
 
 | Crate | Tipo | Descrição |
 |-------|------|-----------|
 | `mtt-file-manager` | bin (GUI) | App principal com eframe/egui |
 | `mtt-search-protocol` | lib | Tipos e serialização bincode para IPC |
-| `mtt-search-service` | bin (service) | Windows Service que indexa via USN Journal e serve buscas via Named Pipes |
+| `mtt-search-service` | bin (service) | Windows Service com indexação híbrida por volume (USN + full scan fallback) e IPC via Named Pipes |
 
 ## Visão Geral da Arquitetura
 
@@ -93,8 +93,8 @@ O MTT File Manager segue uma arquitetura em camadas com separação clara de res
 │  ┌─────────────────────────────────────────────────────────────────────┐  │
 │  │                    mtt-search-service.exe                            │  │
 │  │  ┌────────────┬────────────┬────────────┬────────────┬──────────┐  │  │
-│  │  │USN Journal │File Index  │Path        │SQLite      │Named     │  │  │
-│  │  │Reader      │(HashMap)   │Resolver    │Persistence │Pipe IPC  │  │  │
+│  │  │USN/FS Scan │File Index  │Path        │SQLite      │Named     │  │  │
+│  │  │Indexer     │(HashMap)   │Resolver    │Persistence │Pipe IPC  │  │  │
 │  │  └────────────┴────────────┴────────────┴────────────┴──────────┘  │  │
 │  └─────────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -261,12 +261,13 @@ Threads de background para processamento assíncrono.
 ### 6. Search Service (Processo Externo)
 **Localização**: `crates/mtt-search-service/`
 
-Serviço Windows separado que indexa todos os arquivos do sistema via USN Journal e serve buscas via Named Pipes. Roda como `LocalSystem` com privilégios de administrador (necessário para acesso à USN Journal).
+Serviço Windows separado que indexa todos os arquivos do sistema com estratégia híbrida por volume e serve buscas via Named Pipes. Roda como `LocalSystem`; privilégios de administrador são necessários para o caminho USN (`FSCTL_*`).
 
 **Componentes**:
-- **`usn_journal.rs`** - Leitura da USN Journal do NTFS (FSCTL_ENUM_USN_DATA, FSCTL_READ_USN_JOURNAL)
+- **`usn_journal.rs`** - Descoberta de volumes (`discover_volumes`) e API USN (NTFS/ReFS)
+- **`fs_walker.rs`** - Scanner full-tree para volumes sem USN (exFAT/FAT32/FUSE/CryptoFS)
 - **`file_index.rs`** - Índice in-memory: `HashMap<u64, FileRecord>` (FRN → registro)
-- **`path_resolver.rs`** - Reconstrução de path completo via cadeia de parent references
+- **`path_resolver.rs`** - Reconstrução de path completo via cadeia de parent references (FRN real ou sintético)
 - **`index_db.rs`** - Persistência SQLite em `%PROGRAMDATA%\MTT-File-Manager\search_index.db`
 - **`ipc_server.rs`** - Named Pipe server com NULL DACL (permite conexões de não-admin)
 - **`service_control.rs`** - Install/uninstall do serviço via `windows-service`
@@ -278,11 +279,17 @@ Serviço Windows separado que indexa todos os arquivos do sistema via USN Journa
 - Responses: `Results`, `Status`, `Pong`, `WarmStarted`, `Error`
 
 **Fluxo de indexação**:
-1. Detecta volumes NTFS via `GetVolumeInformationW`
-2. Tenta carregar índice do SQLite; se journal_id bate, faz catch-up incremental
-3. Se não há cache ou journal resetou, faz full MFT scan via `FSCTL_ENUM_USN_DATA`
-4. Loop incremental a cada 2s via `FSCTL_READ_USN_JOURNAL`
-5. Persiste índice no SQLite a cada 5 minutos
+1. Detecta volumes montados via `GetVolumeInformationW` e marca `usn_supported` para `NTFS`/`ReFS`
+2. Spawna 1 thread de indexação por volume descoberto
+3. Volumes com USN (`NTFS`/`ReFS`):
+   - Carrega cache SQLite, valida `journal_id` e faz catch-up incremental
+   - Se cache inválido/ausente, executa full MFT scan (`FSCTL_ENUM_USN_DATA`)
+   - Entra em loop incremental de 2s (`FSCTL_READ_USN_JOURNAL`) e persiste a cada 5 min
+4. Volumes sem USN:
+   - Reusa snapshot SQLite no startup para resposta rápida
+   - Executa full scan com `fs_walker::scan_volume()` e persiste o resultado
+   - Reexecuta scan periodicamente: 30s (`fuse`/`cryptofs`/`dokan`/`winfsp`) ou 120s (demais)
+5. Um discovery loop roda a cada 20s para capturar novos volumes montados
 
 **Integração no app** (`src/infrastructure/global_search.rs`):
 - Cliente Named Pipe que conecta ao serviço
@@ -519,5 +526,5 @@ pub struct SharedState {
 
 ---
 
-*Última atualização: 2026-02-11 (adicionado serviço de busca global e estrutura de workspace)*
+*Última atualização: 2026-02-14 (documentado fluxo híbrido de busca para volumes sem USN)*
 

@@ -24,7 +24,7 @@ MTT-File-Manager-RUST/
 │   └── main.rs                       # Entry point do binário
 ├── crates/
 │   ├── mtt-search-protocol/          # Tipos IPC compartilhados
-│   └── mtt-search-service/           # Windows Service de indexação
+│   └── mtt-search-service/           # Windows Service de indexação híbrida
 ```
 
 ## Módulos Detalhados
@@ -452,20 +452,21 @@ pub fn decode_message<T: Deserialize>(data: &[u8]) -> Result<T, String>
 ---
 
 ### 10. `crates/mtt-search-service/` - Serviço de Busca
-**Propósito**: Windows Service que indexa todos os arquivos via USN Journal do NTFS e serve buscas via Named Pipes
+**Propósito**: Windows Service que indexa todos os arquivos com estratégia híbrida por volume (USN + fallback full-scan) e serve buscas via Named Pipes
 
 **Arquivos**:
 - **`main.rs`** - Entry point, command-line dispatch (`install`, `uninstall`, `run-console`), orquestração (`run_indexer`)
-- **`usn_journal.rs`** - API USN Journal: `discover_ntfs_volumes`, `open_volume`, `query_usn_journal`, `enumerate_all_files`, `read_usn_buffer`, `parse_usn_records`
+- **`usn_journal.rs`** - Descoberta de volumes (`discover_volumes`) + API USN (`open_volume`, `query_usn_journal`, `enumerate_all_files`, `read_usn_buffer`, `parse_usn_records`)
+- **`fs_walker.rs`** - Varredura full-tree para volumes sem USN (BFS iterativo, ignora reparse points)
 - **`file_index.rs`** - Índice in-memory: `VolumeIndex` (HashMap<u64, FileRecord>), `search()` com deadline de 5s
-- **`path_resolver.rs`** - `resolve_path(frn, index)` via cadeia de parent references até FRN 5 (root NTFS)
+- **`path_resolver.rs`** - `resolve_path(frn, index)` via cadeia de parent references até FRN 5 (funciona para FRN NTFS e sintético)
 - **`index_db.rs`** - SQLite em `%PROGRAMDATA%\MTT-File-Manager\search_index.db`: tables `volume_state`, `file_records`
 - **`ipc_server.rs`** - Named Pipe server com NULL DACL, overlapped I/O, handlers para Query/GetStatus/Ping/WarmIndex
 - **`service_control.rs`** - Install/uninstall via `windows-service` (nome: `MTTFileManagerSearch`, AutoStart, LocalSystem)
 
 **Principais structs**:
 ```rust
-pub struct FileRecord { name, name_lower, parent_ref, is_dir, size }
+pub struct FileRecord { parent_ref, name_offset, name_len, is_dir, _pad }
 pub struct VolumeIndex { drive_letter, records: HashMap<u64, FileRecord>, last_usn, journal_id, state }
 pub enum IndexState { NotStarted, Scanning, Ready, Error(String) }
 ```
@@ -525,7 +526,7 @@ lib.rs
 
 mtt-search-service (processo separado)
     ├──► mtt-search-protocol (IPC types)
-    ├──► windows (USN Journal, Named Pipes)
+    ├──► windows (USN Journal, descoberta de volumes, Named Pipes)
     ├──► rusqlite (persistência)
     └──► windows-service (SCM integration)
 ```
@@ -555,5 +556,5 @@ mtt-search-service (processo separado)
 
 ---
 
-*Última atualização: 2026-02-11 (adicionados crates mtt-search-protocol e mtt-search-service)*
+*Última atualização: 2026-02-14 (documentado fallback de busca para volumes sem USN)*
 

@@ -82,7 +82,9 @@ cargo build --no-default-features
 ```
 
 ### Serviço de Busca Global
-O serviço (`mtt-search-service`) roda como Windows Service e indexa todos os arquivos via USN Journal.
+O serviço (`mtt-search-service`) roda como Windows Service e usa indexação híbrida por volume:
+- **NTFS/ReFS**: USN Journal (full scan inicial + loop incremental)
+- **Sem USN (exFAT/FAT32/FUSE/CryptoFS etc.)**: full scan com cache SQLite + re-scan periódico
 
 ```powershell
 # Instalar como serviço (requer PowerShell como Administrador)
@@ -100,6 +102,10 @@ sc.exe stop MTTFileManagerSearch
 # Remover o serviço
 .\target\release\mtt-search-service.exe uninstall
 ```
+
+**Cadência de atualização sem USN**:
+- 30s para volumes virtuais (`fuse`, `cryptofs`, `dokan`, `winfsp`)
+- 120s para volumes físicos sem USN (ex.: exFAT/FAT32)
 
 ## Flags e Features do Cargo
 
@@ -378,4 +384,4 @@ cargo check -p mtt-file-manager
 
 ---
 
-*Última atualização: 2026-02-11 (adicionado build do workspace e serviço de busca)*
+*Última atualização: 2026-02-14 (documentado fallback de indexação sem USN)*

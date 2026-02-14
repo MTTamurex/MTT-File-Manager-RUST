@@ -24,7 +24,7 @@ Este índice fornece navegação para todos os documentos técnicos do MTT File 
 **Arquitetura do Sistema**
 - Estrutura do Cargo Workspace (3 crates)
 - Camadas e responsabilidades (UI, Application, Domain, Infrastructure)
-- Serviço de Busca Global (processo externo com USN Journal + Named Pipes)
+- Serviço de Busca Global (processo externo com indexação híbrida: USN + full-scan fallback)
 - Principais boundaries
 - Ciclo de vida da aplicação
 - Estado global e gerenciamento
@@ -57,7 +57,7 @@ Este índice fornece navegação para todos os documentos técnicos do MTT File 
 - Menu de contexto
 - Lixeira
 - Navegação por teclado
-- Busca global (Ctrl+Shift+F → Named Pipe → USN Journal)
+- Busca global (Ctrl+Shift+F → Named Pipe → índice híbrido USN/fallback)
 - Debugging por fluxo
 
 ### [07_storage_config.md](07_storage_config.md)
@@ -233,10 +233,11 @@ MTT-File-Manager-RUST/
 │   └── main.rs                       # Entry point bin
 ├── crates/
 │   ├── mtt-search-protocol/          # Tipos IPC compartilhados
-│   └── mtt-search-service/           # Windows Service de indexação
+│   └── mtt-search-service/           # Windows Service de indexação híbrida
 │       └── src/
 │           ├── main.rs               # Entry point + orquestração
-│           ├── usn_journal.rs        # USN Journal API
+│           ├── usn_journal.rs        # Descoberta de volumes + API USN
+│           ├── fs_walker.rs          # Full scan para volumes sem USN
 │           ├── file_index.rs         # Índice in-memory
 │           ├── path_resolver.rs      # Reconstrução de paths
 │           ├── index_db.rs           # Persistência SQLite
@@ -285,5 +286,5 @@ MTT-File-Manager-RUST/
 
 ---
 
-*Última atualização: 2026-02-11 (adicionado serviço de busca global ao índice)*
+*Última atualização: 2026-02-14 (documentado fallback de busca para volumes sem USN)*
 

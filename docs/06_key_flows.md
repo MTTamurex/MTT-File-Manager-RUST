@@ -531,7 +531,7 @@ mtt-search-service (processo separado):
     crates/mtt-search-service/src/ipc_server.rs - handle_client()
         ↓
     crates/mtt-search-service/src/file_index.rs - search()
-        ↓ (busca substring em name_lower, max 5s deadline)
+        ↓ (busca substring case-insensitive no nome, com deadline de 5s)
     crates/mtt-search-service/src/path_resolver.rs - resolve_path()
         ↓ (chain de parent FRNs até root)
     SearchResponse::Results → Named Pipe
@@ -556,6 +556,8 @@ src/app/operations/navigation/mod.rs - navigate_to_path()
 - **`crates/mtt-search-service/src/ipc_server.rs`** - Servidor Named Pipe
 - **`crates/mtt-search-service/src/file_index.rs`** - Busca no índice in-memory
 - **`crates/mtt-search-service/src/path_resolver.rs`** - Reconstrução de paths
+- **`crates/mtt-search-service/src/usn_journal.rs`** - Descoberta/classificação de volumes + USN
+- **`crates/mtt-search-service/src/fs_walker.rs`** - Full scan para volumes sem USN
 
 ### Fluxo de Startup do Serviço
 ```
@@ -563,24 +565,32 @@ mtt-search-service.exe (Windows Service / console)
     ↓
 main.rs - run_indexer()
     ↓
-usn_journal::discover_ntfs_volumes() - GetVolumeInformationW (A-Z)
+usn_journal::discover_volumes() - GetVolumeInformationW (A-Z)
     ↓
-Para cada volume NTFS (thread separada):
+Para cada volume detectado (thread separada):
     ↓
-index_db.rs - load_volume_state() / load_file_records()
-    ↓
-Se cache válido (journal_id bate):
-    usn_journal::read_usn_changes() - catch-up incremental
-Se cache inválido ou ausente:
-    usn_journal::enumerate_all_files() - FSCTL_ENUM_USN_DATA (full MFT scan)
-    ↓
-file_index::VolumeIndex.state = Ready
-    ↓
-Loop incremental (a cada 2s):
-    usn_journal::read_usn_buffer() - sem lock (I/O pura)
-    indices.try_write() - aplica mudanças (lock breve, skip se busy)
-    ↓
-Persist SQLite a cada 5 minutos
+Se usn_supported (NTFS/ReFS):
+    index_db.rs - load_volume_state() / load_into_index()
+    Se cache válido (journal_id bate):
+        usn_journal::read_usn_changes() - catch-up incremental
+    Se cache inválido/ausente:
+        usn_journal::enumerate_all_files() - FSCTL_ENUM_USN_DATA (full MFT scan)
+    file_index::VolumeIndex.state = Ready
+    Loop incremental (a cada 2s):
+        usn_journal::read_usn_buffer() - sem lock (I/O pura)
+        indices.try_write() - aplica mudanças (lock breve, skip se busy)
+    Persist SQLite a cada 5 minutos
+
+Se !usn_supported (exFAT/FAT32/FUSE/CryptoFS etc.):
+    index_db.rs - load_into_index() (snapshot para startup rápido)
+    fs_walker::scan_volume() - full-tree scan iterativo (BFS)
+    file_index::VolumeIndex.state = Ready
+    save_volume() após cada full scan
+    Aguarda novo ciclo:
+        30s para fuse/cryptofs/dokan/winfsp
+        120s para demais filesystems sem USN
+
+Discovery loop em paralelo: revarre volumes a cada 20s
 ```
 
 ### Pontos de Bug Comuns
@@ -590,9 +600,9 @@ Persist SQLite a cada 5 minutos
    - **Solução**: Instalar e iniciar o serviço
 
 2. **Busca retorna 0 resultados**
-   - **Causa**: Índice ainda em estado `Scanning`, ou query não corresponde a nenhum `name_lower`
+   - **Causa**: Índice ainda em estado `Scanning`, ou query não corresponde ao nome dos arquivos indexados
    - **Debug**: `GetStatus` retorna `state: "scanning"` nos volumes
-   - **Solução**: Aguardar indexação completar (primeira vez ~10-30s por volume)
+   - **Solução**: Aguardar indexação completar (primeira vez pode ser maior em volumes sem USN)
 
 3. **Delay na primeira busca após idle longo**
    - **Causa**: Páginas de memória do índice foram paged out pelo SO
@@ -603,6 +613,11 @@ Persist SQLite a cada 5 minutos
    - **Causa**: LRU cache de ícones muito pequeno para a quantidade de resultados
    - **Debug**: Verificar tamanho do `icon_cache` no `icon_loader.rs`
    - **Solução**: Cache LRU de 512 entradas (default atual)
+
+5. **Resultados desatualizados em exFAT/FAT32/CryptoFS**
+   - **Causa**: Volumes sem USN atualizam por re-scan periódico (não há loop incremental de 2s)
+   - **Debug**: Verificar logs `[SCAN]` no serviço e o filesystem detectado
+   - **Solução**: Aguardar próximo ciclo (30s/120s) ou reiniciar o serviço para forçar novo scan
 
 ### Como Debugar
 ```powershell
@@ -621,5 +636,5 @@ sc.exe query MTTFileManagerSearch
 
 ---
 
-*Última atualização: 2026-02-11 (adicionado fluxo de busca global)*
+*Última atualização: 2026-02-14 (documentado fluxo fallback para volumes sem USN)*
 
