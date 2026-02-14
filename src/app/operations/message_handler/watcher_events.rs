@@ -1,5 +1,6 @@
 use crate::app::state::ImageViewerApp;
 use crate::ui::theme;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -103,6 +104,7 @@ impl ImageViewerApp {
         // disk, which is faster than processing hundreds of SQLite deletes.
         const MAX_EVENTS_INDIVIDUAL: usize = 50;
         let mut pending_disk_cache_invalidations: Vec<PathBuf> = Vec::new();
+        let mut folders_with_changed_contents: HashSet<PathBuf> = HashSet::new();
 
         if drive_events.len() > MAX_EVENTS_INDIVIDUAL {
             log::warn!(
@@ -130,6 +132,9 @@ impl ImageViewerApp {
                         }
                         let cleaned = Self::clean_path(path);
                         if let Some(parent) = cleaned.parent() {
+                            folders_with_changed_contents.insert(parent.to_path_buf());
+                        }
+                        if let Some(parent) = cleaned.parent() {
                             let parent_norm = Self::normalize_for_match(parent);
                             if parent_norm == current_path_norm {
                                 // Only invalidate active folder cache to keep watcher handling O(1).
@@ -149,13 +154,14 @@ impl ImageViewerApp {
                         }
                         let cleaned = Self::clean_path(path);
                         pending_disk_cache_invalidations.push(cleaned.clone());
+                        self.invalidate_folder_cover_for_removed_path(&cleaned);
+                        if let Some(parent) = cleaned.parent() {
+                            folders_with_changed_contents.insert(parent.to_path_buf());
+                        }
 
                         if let Some(parent) = cleaned.parent() {
                             let parent_norm = Self::normalize_for_match(parent);
                             if parent_norm == current_path_norm {
-                                // If the removed file was the folder cover of its parent folder,
-                                // invalidate immediately before DB cleanup so lookup still resolves.
-                                self.invalidate_folder_cover_for_removed_path(&cleaned);
                                 self.directory_cache.invalidate(&parent.to_path_buf());
                                 self.directory_cache.invalidate_children(&cleaned);
 
@@ -213,6 +219,9 @@ impl ImageViewerApp {
                             continue;
                         }
                         let cleaned = Self::clean_path(path);
+                        if let Some(parent) = cleaned.parent() {
+                            folders_with_changed_contents.insert(parent.to_path_buf());
+                        }
                         self.cache_manager.texture_cache.pop(&cleaned);
                         self.cache_manager.failed_thumbnails.pop(&cleaned);
                         crate::workers::thumbnail::clear_failure_cache(&cleaned);
@@ -247,6 +256,13 @@ impl ImageViewerApp {
                             let cleaned_new = Self::clean_path(new_path);
 
                             pending_disk_cache_invalidations.push(cleaned_old.clone());
+                            self.invalidate_folder_cover_for_removed_path(&cleaned_old);
+                            if let Some(parent) = cleaned_old.parent() {
+                                folders_with_changed_contents.insert(parent.to_path_buf());
+                            }
+                            if let Some(parent) = cleaned_new.parent() {
+                                folders_with_changed_contents.insert(parent.to_path_buf());
+                            }
 
                             // Invalidate caches for both paths
                             self.cache_manager.texture_cache.pop(&cleaned_old);
@@ -257,9 +273,6 @@ impl ImageViewerApp {
                             if let Some(parent) = cleaned_old.parent() {
                                 let parent_norm = Self::normalize_for_match(parent);
                                 if parent_norm == current_path_norm {
-                                    // Old path was removed from its original folder (cut/move/rename).
-                                    // If it was used as folder cover, force recalculation.
-                                    self.invalidate_folder_cover_for_removed_path(&cleaned_old);
                                     self.directory_cache.invalidate(&parent.to_path_buf());
                                     self.pending_auto_reload = true;
                                 }
@@ -275,6 +288,22 @@ impl ImageViewerApp {
                     }
                     _ => {}
                 }
+            }
+        }
+
+        // Folder preview cache invalidation for content changes inside folders.
+        // Needed so subfolder thumbnails/previews update when files are added/removed/renamed.
+        for folder_path in folders_with_changed_contents {
+            self.cache_manager.invalidate_folder_preview(&folder_path);
+            self.disk_cache.remove_folder_preview_cache(&folder_path);
+
+            // If this folder is visible in the current item list, enqueue immediate refresh.
+            if self
+                .all_items
+                .iter()
+                .any(|item| item.is_dir && item.path == folder_path)
+            {
+                self.request_folder_preview_load(folder_path.clone());
             }
         }
 
