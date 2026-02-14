@@ -419,7 +419,8 @@ impl ImageViewerApp {
             let cpu = std::thread::available_parallelism()
                 .map(|n| n.get())
                 .unwrap_or(4);
-            let worker_count = cpu.clamp(2, 6);
+            // HDD-friendly cap: too many concurrent shell preview workers cause random I/O thrash.
+            let worker_count = cpu.clamp(1, 3);
             for _ in 0..worker_count {
                 spawn_folder_preview_worker(
                     folder_preview_rx.clone(),

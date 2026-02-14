@@ -277,12 +277,7 @@ fn render_preview_panel_layout(
                                         }
                                     }
                                     PreviewPanelAction::LoadFolderPreview(path) => {
-                                        if app.cache_manager.folder_preview_loading.len() < 30 {
-                                            app.cache_manager
-                                                .folder_preview_loading
-                                                .insert(path.clone());
-                                            let _ = app.folder_preview_sender.send(path);
-                                        }
+                                        app.request_folder_preview_load(path);
                                     }
                                     PreviewPanelAction::CalculateFolderSize(path) => {
                                         // Cancel any in-progress calculation before starting new one
