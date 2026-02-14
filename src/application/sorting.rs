@@ -1,78 +1,7 @@
-use crate::domain::file_entry::{is_archive_extension, FileEntry, FoldersPosition, SortMode};
-use rayon::prelude::*;
-use std::cmp::Ordering;
+use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode};
 
-/// Parse recycle bin dates like `dd/mm/yyyy hh:mm` (or with seconds) into
-/// sortable tuple `(year, month, day, hour, minute, second)`.
-#[inline]
-fn parse_recycle_date_sort_key(date: &str) -> Option<(u32, u32, u32, u32, u32, u32)> {
-    let trimmed = date.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let mut parts = trimmed.split_whitespace();
-    let date_part = parts.next()?;
-    let time_part = parts.next().unwrap_or("00:00:00");
-
-    let mut date_it = date_part.split(['/', '-', '.']);
-    let day = date_it.next()?.parse::<u32>().ok()?;
-    let month = date_it.next()?.parse::<u32>().ok()?;
-    let year = date_it.next()?.parse::<u32>().ok()?;
-    if !(1..=31).contains(&day) || !(1..=12).contains(&month) || year < 1601 {
-        return None;
-    }
-
-    let mut time_it = time_part.split(':');
-    let hour = time_it
-        .next()
-        .and_then(|v| v.parse::<u32>().ok())
-        .unwrap_or(0);
-    let minute = time_it
-        .next()
-        .and_then(|v| v.parse::<u32>().ok())
-        .unwrap_or(0);
-    let second = time_it
-        .next()
-        .and_then(|v| v.parse::<u32>().ok())
-        .unwrap_or(0);
-    if hour > 23 || minute > 59 || second > 59 {
-        return None;
-    }
-
-    Some((year, month, day, hour, minute, second))
-}
-
-/// Helper function to get the appropriate date for sorting.
-/// For recycle bin items with deletion_date, uses the deletion date string for comparison.
-/// For all other items, uses the modified timestamp.
-///
-/// For recycle bin items, attempts semantic parsing of date string first, and
-/// falls back to lexicographic comparison only when parsing fails.
-fn get_sort_date_for_comparison(a: &FileEntry, b: &FileEntry) -> Ordering {
-    match (&a.deletion_date, &b.deletion_date) {
-        // Both have deletion date (recycle bin): compare strings directly
-        (Some(a_date), Some(b_date)) => {
-            let has_recycle_metadata =
-                a.recycle_original_path.is_some() && b.recycle_original_path.is_some();
-            if has_recycle_metadata && a.modified > 0 && b.modified > 0 {
-                return a.modified.cmp(&b.modified);
-            }
-            match (
-                parse_recycle_date_sort_key(a_date),
-                parse_recycle_date_sort_key(b_date),
-            ) {
-                (Some(a_key), Some(b_key)) => a_key.cmp(&b_key),
-                _ => a_date.cmp(b_date),
-            }
-        }
-        // Only one has a deletion date: recycle bin items come first
-        (Some(_), None) => Ordering::Less,
-        (None, Some(_)) => Ordering::Greater,
-        // Neither has a deletion date: use modified as before
-        (None, None) => a.modified.cmp(&b.modified),
-    }
-}
+mod filtering;
+mod sort_impl;
 
 /// Sorts a slice of FileEntry in place based on the given criteria.
 /// Uses Rayon for parallel sorting if the list is large (>5000 items).
@@ -84,106 +13,7 @@ pub fn sort_items(
     descending: bool,
     folders_position: FoldersPosition,
 ) {
-    // Helper to check if an item is a "true" directory (not an archive file)
-    let is_true_dir =
-        |item: &FileEntry| -> bool { item.is_dir && !is_archive_extension(&item.name) };
-
-    let compare = |a: &FileEntry, b: &FileEntry| -> Ordering {
-        // 1. Folders Position logic (ZIP files should be treated as files, not folders)
-        let a_is_dir = is_true_dir(a);
-        let b_is_dir = is_true_dir(b);
-        if folders_position != FoldersPosition::Mixed && a_is_dir != b_is_dir {
-            let folders_come_first = folders_position == FoldersPosition::First;
-            return if a_is_dir {
-                if folders_come_first {
-                    Ordering::Less
-                } else {
-                    Ordering::Greater
-                }
-            } else if folders_come_first {
-                Ordering::Greater
-            } else {
-                Ordering::Less
-            };
-        }
-
-        // 2. Primary sort criteria
-        // PERFORMANCE: Uses cmp_ignore_case for zero-allocation comparison
-        let ordering = match mode {
-            SortMode::Name => natord::compare_ignore_case(&a.name, &b.name),
-            SortMode::Date => get_sort_date_for_comparison(a, b),
-            SortMode::Size => a.size.cmp(&b.size),
-            SortMode::Type => {
-                // PERFORMANCE: Compare extensions without allocation using OsStr
-                let ext_a = a.path.extension().map(|e| e.to_ascii_lowercase());
-                let ext_b = b.path.extension().map(|e| e.to_ascii_lowercase());
-                match ext_a.cmp(&ext_b) {
-                    Ordering::Equal => natord::compare_ignore_case(&a.name, &b.name),
-                    other => other,
-                }
-            }
-            SortMode::DriveTotalSpace => {
-                // Sort by total drive space (largest to smallest by default)
-                let total_a = a.drive_info.as_ref().map(|d| d.total_space).unwrap_or(0);
-                let total_b = b.drive_info.as_ref().map(|d| d.total_space).unwrap_or(0);
-                total_a.cmp(&total_b)
-            }
-            SortMode::DriveFreeSpace => {
-                // Sort by free drive space (largest to smallest by default)
-                let free_a = a.drive_info.as_ref().map(|d| d.free_space).unwrap_or(0);
-                let free_b = b.drive_info.as_ref().map(|d| d.free_space).unwrap_or(0);
-                free_a.cmp(&free_b)
-            }
-        };
-
-        // 3. Apply Descending direction
-        if descending {
-            ordering.reverse()
-        } else {
-            ordering
-        }
-    };
-
-    // Adaptive threshold
-    const PARALLEL_THRESHOLD: usize = 5000;
-
-    if items.len() > PARALLEL_THRESHOLD {
-        items.par_sort_by(compare);
-    } else {
-        items.sort_by(compare);
-    }
-}
-
-/// PERFORMANCE: Check if haystack contains needle (case-insensitive) using precomputed needle.
-/// For ASCII strings, uses fast byte-by-byte comparison without allocation.
-/// Falls back to Unicode-aware comparison for non-ASCII strings.
-#[inline]
-fn contains_ignore_case_precomputed(
-    haystack: &str,
-    needle_lower: &[char],
-    needle_ascii_lower: Option<&[u8]>,
-) -> bool {
-    if needle_lower.is_empty() {
-        return true;
-    }
-
-    // PERFORMANCE: Fast path for ASCII strings (majority of filenames)
-    // Uses byte-by-byte comparison without any allocation
-    if haystack.is_ascii() {
-        if let Some(needle_bytes) = needle_ascii_lower {
-            return haystack.as_bytes().windows(needle_bytes.len()).any(|w| {
-                w.iter()
-                    .zip(needle_bytes.iter())
-                    .all(|(h, n)| h.to_ascii_lowercase() == *n)
-            });
-        }
-    }
-
-    // Fallback: Unicode-aware comparison using Vec<char>
-    let haystack_chars: Vec<char> = haystack.chars().flat_map(|c| c.to_lowercase()).collect();
-    haystack_chars
-        .windows(needle_lower.len())
-        .any(|window| window == needle_lower)
+    sort_impl::sort_items(items, mode, descending, folders_position)
 }
 
 /// Filters items based on a query string.
@@ -191,35 +21,8 @@ fn contains_ignore_case_precomputed(
 /// PERFORMANCE: When query is empty, returns None to signal "use all items"
 /// without cloning. The caller should handle this case by using the original slice.
 /// When query is present, returns Some(filtered_vec).
-///
-/// PERFORMANCE: Precomputes needle_lower once before the filter loop to avoid
-/// repeated allocations in contains_ignore_case.
 pub fn filter_items_opt(items: &[FileEntry], query: &str) -> Option<Vec<FileEntry>> {
-    if query.is_empty() {
-        return None; // Signal: use original items without clone
-    }
-
-    // PERFORMANCE: Precompute needle_lower once for the entire filter operation
-    let needle_lower: Vec<char> = query.chars().flat_map(|c| c.to_lowercase()).collect();
-    let needle_ascii_lower: Option<Vec<u8>> = if needle_lower.iter().all(|c| c.is_ascii()) {
-        Some(needle_lower.iter().map(|c| *c as u8).collect())
-    } else {
-        None
-    };
-
-    Some(
-        items
-            .iter()
-            .filter(|item| {
-                contains_ignore_case_precomputed(
-                    &item.name,
-                    &needle_lower,
-                    needle_ascii_lower.as_deref(),
-                )
-            })
-            .cloned()
-            .collect(),
-    )
+    filtering::filter_items_opt(items, query)
 }
 
 /// Filters items based on a query string. Returns a new Vec of matching items.
@@ -227,9 +30,8 @@ pub fn filter_items_opt(items: &[FileEntry], query: &str) -> Option<Vec<FileEntr
 /// DEPRECATED: Use filter_items_opt() for better performance when query is empty.
 /// This function is kept for backwards compatibility.
 pub fn filter_items(items: &[FileEntry], query: &str) -> Vec<FileEntry> {
-    filter_items_opt(items, query).unwrap_or_else(|| items.to_vec())
+    filtering::filter_items(items, query)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -489,3 +291,4 @@ mod tests {
         assert_eq!(items[1].name, "newer.txt");
     }
 }
+
