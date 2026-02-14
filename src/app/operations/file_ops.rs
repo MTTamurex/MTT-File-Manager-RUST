@@ -29,7 +29,9 @@ impl ImageViewerApp {
 
         // Track pending deletions to suppress thumbnail extraction for these files
         for path in paths {
-            self.file_operation_state.pending_deletions.insert(path.clone(), ());
+            self.file_operation_state
+                .pending_deletions
+                .insert(path.clone(), ());
         }
         self.thumbnail_queue.remove_paths(paths);
 
@@ -189,4 +191,3 @@ impl ImageViewerApp {
         }
     }
 }
-

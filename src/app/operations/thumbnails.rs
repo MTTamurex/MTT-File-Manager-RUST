@@ -109,7 +109,11 @@ impl ImageViewerApp {
         modified: u64,
     ) {
         // Skip files pending deletion to avoid wasteful extraction
-        if self.file_operation_state.pending_deletions.contains_key(&path) {
+        if self
+            .file_operation_state
+            .pending_deletions
+            .contains_key(&path)
+        {
             return;
         }
 
@@ -160,7 +164,7 @@ impl ImageViewerApp {
 
     pub fn request_folder_preview_load(&mut self, path: PathBuf) {
         let is_ssd = crate::infrastructure::io_priority::is_ssd(&path);
-        
+
         if self
             .cache_manager
             .start_folder_preview_loading(path.clone())
@@ -179,4 +183,3 @@ impl ImageViewerApp {
 
 #[cfg(test)]
 mod tests {}
-

@@ -24,13 +24,13 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::application::ClipboardManager;
 use crate::app::drive_state::DriveState;
 use crate::app::file_operation_state::FileOperationState;
 use crate::app::folder_size_state::FolderSizeState;
 use crate::app::global_search_state::GlobalSearchState;
 use crate::app::layout_state::LayoutState;
 use crate::app::navigation_state::NavigationState;
+use crate::application::ClipboardManager;
 use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
 use crate::domain::thumbnail::ThumbnailData;
 use crate::infrastructure::directory_cache::DirectoryCache;
@@ -294,7 +294,6 @@ pub struct ImageViewerApp {
 
     // Media keyboard debounce
     pub last_media_key_press: Instant,
-
 }
 
 impl ImageViewerApp {

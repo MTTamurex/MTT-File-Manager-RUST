@@ -147,7 +147,9 @@ pub(super) fn try_handle_fast_paths(
 
     log::debug!(
         "[FOLDER-LOADING] Phase 3: Starting disk scan for {:?} (batch_size={}, is_ssd={})",
-        current_path, *batch_size, is_ssd
+        current_path,
+        *batch_size,
+        is_ssd
     );
 
     // Check if we are navigating a virtual Shell folder (like an archive)
@@ -173,7 +175,8 @@ pub(super) fn try_handle_fast_paths(
             Err(e) => {
                 log::error!(
                     "[FOLDER-LOADING] Shell folder FAILED for {:?}: {:?}",
-                    base_path, e
+                    base_path,
+                    e
                 );
             }
         }

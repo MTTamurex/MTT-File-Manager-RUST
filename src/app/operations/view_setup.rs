@@ -171,7 +171,9 @@ impl ImageViewerApp {
         for item in &computer_items {
             if let Some(info) = &item.drive_info {
                 let path_str = item.path.to_string_lossy().to_string();
-                self.drive_state.drive_info_cache.insert(path_str, info.clone());
+                self.drive_state
+                    .drive_info_cache
+                    .insert(path_str, info.clone());
             }
         }
 
@@ -198,7 +200,12 @@ impl ImageViewerApp {
         self.is_loading_folder = false;
 
         // Launch background thread for volume info (total/free space, file_system)
-        let disks_snapshot: Vec<String> = self.drive_state.disks.iter().map(|(p, _)| p.clone()).collect();
+        let disks_snapshot: Vec<String> = self
+            .drive_state
+            .disks
+            .iter()
+            .map(|(p, _)| p.clone())
+            .collect();
         let tx = self.drive_state.drive_info_tx.clone();
         let ctx = self.ui_ctx.clone();
         std::thread::spawn(move || {
@@ -254,7 +261,11 @@ impl ImageViewerApp {
                 let removed_drives: Vec<String> = old_disks
                     .iter()
                     .filter(|(old_path, _)| {
-                        !self.drive_state.disks.iter().any(|(new_path, _)| new_path == old_path)
+                        !self
+                            .drive_state
+                            .disks
+                            .iter()
+                            .any(|(new_path, _)| new_path == old_path)
                     })
                     .map(|(path, _)| path.clone())
                     .collect();
@@ -319,7 +330,8 @@ impl ImageViewerApp {
             if current_bitmask != self.drive_state.last_drive_bitmask {
                 log::debug!(
                     "[DRIVE-REFRESH] Bitmask changed: 0x{:08X} -> 0x{:08X}",
-                    self.drive_state.last_drive_bitmask, current_bitmask
+                    self.drive_state.last_drive_bitmask,
+                    current_bitmask
                 );
                 self.drive_state.last_drive_bitmask = current_bitmask;
                 self.drive_state.last_drive_refresh = Instant::now();
@@ -339,7 +351,9 @@ impl ImageViewerApp {
             // Always persist drive info in the dedicated cache so it survives
             // navigation away from computer view (used by details panel).
             for (path, info) in &results {
-                self.drive_state.drive_info_cache.insert(path.clone(), info.clone());
+                self.drive_state
+                    .drive_info_cache
+                    .insert(path.clone(), info.clone());
             }
 
             if !self.navigation_state.is_computer_view {
@@ -359,4 +373,3 @@ impl ImageViewerApp {
         }
     }
 }
-

@@ -85,7 +85,8 @@ impl ImageViewerApp {
                     Ok(event) => {
                         log::trace!(
                             "[NOTIFY-WATCHER] Event received: kind={:?}, paths={:?}",
-                            event.kind, event.paths
+                            event.kind,
+                            event.paths
                         );
                     }
                     Err(e) => {
@@ -108,7 +109,8 @@ impl ImageViewerApp {
                 Err(e) => {
                     log::error!(
                         "[NOTIFY-WATCHER] Failed to watch path: {:?} - Error: {}",
-                        path_to_watch, e
+                        path_to_watch,
+                        e
                     );
                 }
             },

@@ -23,7 +23,10 @@ impl ImageViewerApp {
             return;
         }
 
-        if self.renaming_state.is_some() || self.navigation_state.is_computer_view || self.navigation_state.is_recycle_bin_view {
+        if self.renaming_state.is_some()
+            || self.navigation_state.is_computer_view
+            || self.navigation_state.is_recycle_bin_view
+        {
             return;
         }
 
@@ -330,8 +333,16 @@ impl ImageViewerApp {
         };
 
         self.file_operation_state.file_ops_in_progress += 1;
-        if self.file_operation_state.file_op_sender.send(request).is_err() {
-            self.file_operation_state.file_ops_in_progress = self.file_operation_state.file_ops_in_progress.saturating_sub(1);
+        if self
+            .file_operation_state
+            .file_op_sender
+            .send(request)
+            .is_err()
+        {
+            self.file_operation_state.file_ops_in_progress = self
+                .file_operation_state
+                .file_ops_in_progress
+                .saturating_sub(1);
         }
 
         // Clear drag state
@@ -475,4 +486,3 @@ fn volume_key(path: &Path) -> Option<String> {
         _ => None,
     })
 }
-

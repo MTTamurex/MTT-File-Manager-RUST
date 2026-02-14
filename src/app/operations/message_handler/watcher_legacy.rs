@@ -1,0 +1,129 @@
+use crate::app::state::ImageViewerApp;
+use std::path::PathBuf;
+
+impl ImageViewerApp {
+    #[cfg(feature = "notify-watcher")]
+    pub(super) fn process_legacy_notify_events(
+        &mut self,
+        drive_watcher_active: bool,
+        current_path_norm: &str,
+        internal_cache_root_norm: Option<&str>,
+        internal_cache_root_prefix: Option<&str>,
+        max_events_individual: usize,
+        pending_disk_cache_invalidations: &mut Vec<PathBuf>,
+    ) {
+        if drive_watcher_active {
+            return;
+        }
+
+        let mut legacy_events = Vec::new();
+        while let Ok(event) = self.fs_event_receiver.try_recv() {
+            legacy_events.push(event);
+        }
+
+        if legacy_events.len() > max_events_individual {
+            log::warn!(
+                "[FS-WATCH-LEGACY] Event flood detected: {} events. Triggering full reload.",
+                legacy_events.len()
+            );
+            self.directory_cache.clear();
+            if !self.navigation_state.is_computer_view && !self.navigation_state.is_recycle_bin_view
+            {
+                self.pending_auto_reload = true;
+            }
+            return;
+        }
+
+        for event in legacy_events {
+            match event {
+                Ok(evt) => {
+                    let mut meaningful_change = false;
+
+                    if matches!(evt.kind, notify::EventKind::Remove(_)) {
+                        for path in &evt.paths {
+                            if self.should_ignore_watcher_path(
+                                path,
+                                internal_cache_root_norm,
+                                internal_cache_root_prefix,
+                            ) {
+                                continue;
+                            }
+                            meaningful_change = true;
+
+                            let cleaned = Self::clean_path(path);
+                            if let Some(parent) = cleaned.parent() {
+                                self.directory_cache.invalidate(&parent.to_path_buf());
+                            }
+                            self.directory_cache.invalidate_children(&cleaned);
+                            #[cfg(debug_assertions)]
+                            log::trace!(
+                                "[FS-WATCH-LEGACY] REMOVE: {:?}",
+                                path.file_name().unwrap_or_default()
+                            );
+                            pending_disk_cache_invalidations.push(cleaned.clone());
+                        }
+                    }
+
+                    for path in &evt.paths {
+                        if self.should_ignore_watcher_path(
+                            path,
+                            internal_cache_root_norm,
+                            internal_cache_root_prefix,
+                        ) {
+                            continue;
+                        }
+                        meaningful_change = true;
+
+                        if let Some(parent) = path.parent() {
+                            let parent_norm = Self::normalize_for_match(parent);
+                            if parent_norm == current_path_norm {
+                                let cleaned = Self::clean_path(path);
+                                if let Some(cache_parent) = cleaned.parent() {
+                                    self.directory_cache.invalidate(&cache_parent.to_path_buf());
+                                }
+                                #[cfg(debug_assertions)]
+                                log::trace!(
+                                    "[FS] Direct subfolder modified: {:?}",
+                                    cleaned.file_name()
+                                );
+                                self.disk_cache.remove_folder_preview_cache(&cleaned);
+                            }
+                        }
+
+                        if let Some(parent) = path.parent() {
+                            if let Some(grandparent) = parent.parent() {
+                                let grandparent_norm = Self::normalize_for_match(grandparent);
+                                if grandparent_norm == current_path_norm {
+                                    let cleaned_parent = Self::clean_path(parent);
+                                    if let Some(cache_parent) = cleaned_parent.parent() {
+                                        self.directory_cache
+                                            .invalidate(&cache_parent.to_path_buf());
+                                    }
+                                    #[cfg(debug_assertions)]
+                                    log::trace!(
+                                        "[FS] File in subfolder modified, invalidating: {:?}",
+                                        cleaned_parent.file_name()
+                                    );
+                                    self.disk_cache.remove_folder_preview_cache(&cleaned_parent);
+                                }
+                            }
+                        }
+
+                        let cleaned = Self::clean_path(path);
+                        self.cache_manager.texture_cache.pop(&cleaned);
+                        self.cache_manager.failed_thumbnails.pop(&cleaned);
+                        crate::workers::thumbnail::clear_failure_cache(&cleaned);
+                    }
+
+                    if meaningful_change {
+                        self.pending_auto_reload = true;
+                    }
+                }
+                Err(_err) => {
+                    #[cfg(debug_assertions)]
+                    log::warn!("Erro de watch: {:?}", _err);
+                }
+            }
+        }
+    }
+}
