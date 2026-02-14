@@ -45,10 +45,11 @@ O MTT File Manager é um gerenciador de arquivos desktop que combina a performan
 - **Suporte a GIFs animados** - Reprodução otimizada e fluída
 
 ### 🔍 Busca Global
-- **Busca instantânea** - Pesquisa em milhões de arquivos via USN Journal do NTFS
+- **Busca instantânea** - Consulta em índice in-memory com suporte a milhões de arquivos
+- **Indexação híbrida por volume** - NTFS/ReFS via USN Journal; volumes sem USN (exFAT/FAT32/FUSE/CryptoFS) via varredura completa
 - **Serviço em background** - Windows Service dedicado para indexação contínua
 - **Overlay tipo Spotlight** - Interface modal ativada por Ctrl+Shift+F
-- **Atualização incremental** - Índice atualizado automaticamente a cada 2 segundos
+- **Atualização adaptativa** - NTFS/ReFS com loop incremental de 2s; sem USN com re-scan periódico (30s/120s)
 - **Cache persistente** - Índice salvo em SQLite para restart rápido do serviço
 
 ### 📁 Operações de Arquivo
@@ -215,7 +216,11 @@ cargo bench
 ```
 
 ### Serviço de Busca Global
-O serviço de busca (`mtt-search-service`) roda como Windows Service e requer privilégios de administrador para acessar a USN Journal do NTFS.
+O serviço de busca (`mtt-search-service`) roda como Windows Service e usa dois modos de indexação por volume:
+- **USN (NTFS/ReFS)**: indexação por journal com catch-up incremental (2s)
+- **Fallback sem USN (exFAT/FAT32/FUSE/CryptoFS etc.)**: snapshot SQLite no startup + full scan periódico (30s para FUSE/CryptoFS/WinFsp/Dokan, 120s para físicos)
+
+**Nota**: privilégios de administrador continuam necessários para o caminho USN (`FSCTL_*`).
 
 ```powershell
 # Instalar o serviço (requer PowerShell como Administrador)
@@ -255,10 +260,11 @@ MTT-File-Manager-RUST/
 │       └── global_search_worker.rs   # Worker de busca global
 ├── crates/
 │   ├── mtt-search-protocol/          # Tipos IPC compartilhados (bincode)
-│   └── mtt-search-service/           # Windows Service de indexação
+│   └── mtt-search-service/           # Windows Service de indexação híbrida
 │       └── src/
 │           ├── main.rs               # Entry point + SCM
-│           ├── usn_journal.rs        # API USN Journal do NTFS
+│           ├── usn_journal.rs        # Descoberta de volumes + API USN (NTFS/ReFS)
+│           ├── fs_walker.rs          # Scanner full-tree para volumes sem USN
 │           ├── file_index.rs         # Índice in-memory (HashMap)
 │           ├── path_resolver.rs      # Reconstrução de paths
 │           ├── index_db.rs           # Persistência SQLite
@@ -302,6 +308,8 @@ sc.exe start MTTFileManagerSearch
 
 # Verificar logs do serviço (modo console)
 .\target\release\mtt-search-service.exe run-console
+
+# Em volumes sem USN, acompanhe logs [SCAN] e aguarde o próximo ciclo (30s/120s)
 ```
 
 #### Performance lenta
