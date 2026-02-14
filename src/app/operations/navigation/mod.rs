@@ -27,9 +27,7 @@ impl ImageViewerApp {
             .map(|item| (item.path.clone(), item.modified))
             .or_else(|| {
                 self.selected_file.as_ref().and_then(|selected| {
-                    if selected.is_dir
-                        && selected.path == destination_path
-                        && selected.modified > 0
+                    if selected.is_dir && selected.path == destination_path && selected.modified > 0
                     {
                         Some((selected.path.clone(), selected.modified))
                     } else {
@@ -82,7 +80,9 @@ impl ImageViewerApp {
         self.loaded_path.clear();
 
         // Add new path to history
-        self.navigation_state.navigation.navigate_to(normalized_path.clone());
+        self.navigation_state
+            .navigation
+            .navigate_to(normalized_path.clone());
 
         self.navigation_state.current_path = normalized_path.clone();
         self.navigation_state.path_input = normalized_path.clone();
@@ -208,7 +208,9 @@ impl ImageViewerApp {
             return;
         }
 
-        self.navigation_state.navigation.navigate_to("Este Computador".to_string());
+        self.navigation_state
+            .navigation
+            .navigate_to("Este Computador".to_string());
         // self.sync_to_tab(); // setup_computer_view calls sync_from_tab?? no, we sync afterward
 
         self.reset_selection_and_search();
@@ -222,7 +224,9 @@ impl ImageViewerApp {
             return;
         }
 
-        self.navigation_state.navigation.navigate_to("Lixeira".to_string());
+        self.navigation_state
+            .navigation
+            .navigate_to("Lixeira".to_string());
         self.reset_selection_and_search();
         self.watch_current_folder();
         self.setup_recycle_bin_view();

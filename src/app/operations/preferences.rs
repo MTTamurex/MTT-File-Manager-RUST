@@ -112,8 +112,10 @@ impl ImageViewerApp {
         // Window state persistence
         self.disk_cache
             .set_preference("window_width", &self.layout.saved_window_width.to_string());
-        self.disk_cache
-            .set_preference("window_height", &self.layout.saved_window_height.to_string());
+        self.disk_cache.set_preference(
+            "window_height",
+            &self.layout.saved_window_height.to_string(),
+        );
         self.disk_cache.set_preference(
             "window_is_maximized",
             if self.layout.saved_is_maximized {
@@ -151,14 +153,22 @@ impl ImageViewerApp {
         }
 
         // Save list view column widths - Regular view
-        self.disk_cache
-            .set_preference("list_col_name_width", &self.layout.list_col_name_width.to_string());
-        self.disk_cache
-            .set_preference("list_col_date_width", &self.layout.list_col_date_width.to_string());
-        self.disk_cache
-            .set_preference("list_col_type_width", &self.layout.list_col_type_width.to_string());
-        self.disk_cache
-            .set_preference("list_col_size_width", &self.layout.list_col_size_width.to_string());
+        self.disk_cache.set_preference(
+            "list_col_name_width",
+            &self.layout.list_col_name_width.to_string(),
+        );
+        self.disk_cache.set_preference(
+            "list_col_date_width",
+            &self.layout.list_col_date_width.to_string(),
+        );
+        self.disk_cache.set_preference(
+            "list_col_type_width",
+            &self.layout.list_col_type_width.to_string(),
+        );
+        self.disk_cache.set_preference(
+            "list_col_size_width",
+            &self.layout.list_col_size_width.to_string(),
+        );
         // Save list view column widths - OneDrive view
         self.disk_cache.set_preference(
             "list_col_onedrive_name_width",

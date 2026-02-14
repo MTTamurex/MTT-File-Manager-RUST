@@ -12,6 +12,7 @@ pub mod file_operation_state;
 pub mod folder_size_state;
 pub mod global_search_state;
 pub mod init;
+mod init_preferences;
 pub mod layout_state;
 pub mod navigation_state;
 pub mod operations;

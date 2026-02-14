@@ -245,7 +245,10 @@ impl ImageViewerApp {
     }
 
     fn handle_file_operation_finished(&mut self) {
-        self.file_operation_state.file_ops_in_progress = self.file_operation_state.file_ops_in_progress.saturating_sub(1);
+        self.file_operation_state.file_ops_in_progress = self
+            .file_operation_state
+            .file_ops_in_progress
+            .saturating_sub(1);
         if self.file_operation_state.file_ops_in_progress == 0 {
             // Completion handlers already triggered reloads. Skip watcher queued reload.
             self.pending_auto_reload = false;
@@ -256,4 +259,3 @@ impl ImageViewerApp {
         }
     }
 }
-

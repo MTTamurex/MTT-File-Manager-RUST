@@ -101,3 +101,8 @@ Targets
   - `thumbnail_workers.rs` (cover/icon/metadata/folder-size drains)
   - `thumbnail_uploads.rs` (thumbnail + folder preview upload pipeline)
 - Watcher flow decomposition started with `watcher_reload.rs` (final auto-reload policy extraction).
+- Watcher flow decomposed further into:
+  - `watcher_drive_processing.rs` (flood handling + created/deleted/modified/renamed processing)
+  - `watcher_legacy.rs` (notify-watcher fallback path)
+- `init.rs` decomposition started with `init_preferences.rs`:
+  - startup preferences loading/parsing moved out of `ImageViewerApp::new`.

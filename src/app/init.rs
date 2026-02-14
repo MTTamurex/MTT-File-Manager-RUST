@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::application::ClipboardManager;
-use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
+use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::directory_index::DirectoryIndex;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
@@ -31,6 +31,7 @@ use super::drive_state::DriveState;
 use super::file_operation_state::FileOperationState;
 use super::folder_size_state::{FolderSizeMessage, FolderSizeState};
 use super::global_search_state::GlobalSearchState;
+use super::init_preferences::StartupPreferences;
 use super::layout_state::LayoutState;
 use super::navigation_state::NavigationState;
 use super::state::{ImageViewerApp, ItemsRebuildResult, LastInput};
@@ -145,42 +146,23 @@ impl ImageViewerApp {
 
         let directory_cache = Arc::new(DirectoryCache::new());
 
-        // Load Preferences from SQLite
-        let sort_mode = disk_cache
-            .get_preference("sort_mode")
-            .map(|s| match s.as_str() {
-                "date" => SortMode::Date,
-                "size" => SortMode::Size,
-                "type" => SortMode::Type,
-                "drive_total" => SortMode::DriveTotalSpace,
-                "drive_free" => SortMode::DriveFreeSpace,
-                _ => SortMode::Name,
-            })
-            .unwrap_or(SortMode::Name);
-
-        let sort_mode_computer = disk_cache
-            .get_preference("sort_mode_computer")
-            .map(|s| match s.as_str() {
-                "drive_total" => SortMode::DriveTotalSpace,
-                "drive_free" => SortMode::DriveFreeSpace,
-                _ => SortMode::Name,
-            })
-            .unwrap_or(SortMode::Name);
-
-        let sort_mode_normal = disk_cache
-            .get_preference("sort_mode_normal")
-            .map(|s| match s.as_str() {
-                "date" => SortMode::Date,
-                "size" => SortMode::Size,
-                "type" => SortMode::Type,
-                _ => SortMode::Name,
-            })
-            .unwrap_or(SortMode::Name);
-
-        let sort_descending = disk_cache
-            .get_preference("sort_descending")
-            .map(|s| s == "true")
-            .unwrap_or(false);
+        let StartupPreferences {
+            sort_mode,
+            sort_mode_computer,
+            sort_mode_normal,
+            sort_descending,
+            folders_position,
+            thumbnail_size,
+            view_mode,
+            show_preview_panel,
+            upload_budget_ms,
+            saved_window_width,
+            saved_window_height,
+            saved_is_maximized,
+            sidebar_left_width,
+            sidebar_right_width,
+            saved_media_volume,
+        } = StartupPreferences::load(&disk_cache);
 
         // STARTUP OPTIMIZATION: Async Font Loader
         // Spawns a thread to load fonts while the app frame initializes
@@ -254,85 +236,6 @@ impl ImageViewerApp {
 
             let _ = font_tx.send(fonts);
         });
-
-        let folders_position = disk_cache
-            .get_preference("folders_position")
-            .map(|s| match s.as_str() {
-                "last" => FoldersPosition::Last,
-                "mixed" => FoldersPosition::Mixed,
-                _ => FoldersPosition::First,
-            })
-            .unwrap_or(FoldersPosition::First);
-
-        // Load UI preferences from SQLite
-        let thumbnail_size = disk_cache
-            .get_preference("thumbnail_size")
-            .and_then(|s| s.parse::<f32>().ok())
-            .unwrap_or(theme::THUMBNAIL_DEFAULT)
-            .clamp(theme::THUMBNAIL_MIN, theme::THUMBNAIL_MAX); // Ensure valid range
-
-        let view_mode = disk_cache
-            .get_preference("view_mode")
-            .map(|s| match s.as_str() {
-                "list" => ViewMode::List,
-                _ => ViewMode::Grid,
-            })
-            .unwrap_or(ViewMode::Grid);
-
-        let show_preview_panel = disk_cache
-            .get_preference("show_preview_panel")
-            .map(|s| s != "false")
-            .unwrap_or(true);
-
-        let upload_budget_ms = disk_cache
-            .get_preference("upload_budget_ms")
-            .and_then(|s| s.parse::<f32>().ok())
-            .unwrap_or(6.0)
-            .clamp(2.0, 10.0);
-
-        // Load window state from SQLite
-        let saved_window_width = disk_cache
-            .get_preference("window_width")
-            .and_then(|s| s.parse::<f32>().ok())
-            .unwrap_or(1280.0);
-        let saved_window_height = disk_cache
-            .get_preference("window_height")
-            .and_then(|s| s.parse::<f32>().ok())
-            .unwrap_or(720.0);
-        let saved_is_maximized = disk_cache
-            .get_preference("window_is_maximized")
-            .map(|s| s == "true")
-            .unwrap_or(true); // Default to maximized
-
-        // Load sidebar widths from SQLite
-        let sidebar_left_raw = disk_cache.get_preference("sidebar_left_width");
-        let sidebar_right_raw = disk_cache.get_preference("sidebar_right_width");
-
-        log::debug!(
-            "[INIT] Raw sidebar values from DB: L={:?}, R={:?}",
-            sidebar_left_raw,
-            sidebar_right_raw
-        );
-
-        let sidebar_left_width = sidebar_left_raw
-            .and_then(|s| s.parse::<f32>().ok())
-            .unwrap_or(200.0);
-        let sidebar_right_width = sidebar_right_raw
-            .and_then(|s| s.parse::<f32>().ok())
-            .unwrap_or(300.0);
-
-        log::debug!(
-            "[INIT] Parsed sidebar widths: L={}, R={}",
-            sidebar_left_width,
-            sidebar_right_width
-        );
-
-        // Load media player volume from SQLite
-        let saved_media_volume = disk_cache
-            .get_preference("media_volume")
-            .and_then(|s| s.parse::<f32>().ok())
-            .unwrap_or(1.0)
-            .clamp(0.0, 1.0);
 
         // Shared pending_deletions for worker cancellation
         let pending_deletions: Arc<dashmap::DashMap<PathBuf, ()>> =
@@ -448,10 +351,9 @@ impl ImageViewerApp {
                 // Drain any queued requests - only process the latest one
                 let mut latest_path = folder_path;
                 while let Ok(newer_path) = folder_size_req_rx.try_recv() {
-                    let _ =
-                        folder_size_res_tx.send(FolderSizeMessage::Cancelled {
-                            folder_path: latest_path,
-                        });
+                    let _ = folder_size_res_tx.send(FolderSizeMessage::Cancelled {
+                        folder_path: latest_path,
+                    });
                     latest_path = newer_path;
                 }
                 let folder_path = latest_path;
@@ -486,16 +388,14 @@ impl ImageViewerApp {
 
                 match result {
                     Some(total_size) => {
-                        let _ = folder_size_res_tx.send(
-                            FolderSizeMessage::Complete {
-                                folder_path,
-                                total_size,
-                            },
-                        );
+                        let _ = folder_size_res_tx.send(FolderSizeMessage::Complete {
+                            folder_path,
+                            total_size,
+                        });
                     }
                     None => {
-                        let _ = folder_size_res_tx
-                            .send(FolderSizeMessage::Cancelled { folder_path });
+                        let _ =
+                            folder_size_res_tx.send(FolderSizeMessage::Cancelled { folder_path });
                     }
                 }
                 folder_size_ctx.request_repaint();
@@ -876,7 +776,6 @@ impl ImageViewerApp {
 
             // Media keyboard debounce
             last_media_key_press: std::time::Instant::now(),
-
         };
 
         // Start initial folder monitoring

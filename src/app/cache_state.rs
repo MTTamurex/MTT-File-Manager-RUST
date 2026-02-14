@@ -27,7 +27,8 @@ impl CacheState {
             Err(e) => {
                 log::error!(
                     "[Cache] Fatal: failed to initialize cache state at {:?}: {:?}",
-                    cache_dir, e
+                    cache_dir,
+                    e
                 );
                 std::process::exit(1);
             }
