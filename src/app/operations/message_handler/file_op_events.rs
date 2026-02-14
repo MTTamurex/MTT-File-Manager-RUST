@@ -96,7 +96,7 @@ impl ImageViewerApp {
     }
 
     fn handle_recycle_bin_changed(&mut self) {
-        if self.is_recycle_bin_view {
+        if self.navigation_state.is_recycle_bin_view {
             #[cfg(debug_assertions)]
             log::debug!("[RECYCLE] Operation finished, refreshing view.");
             self.setup_recycle_bin_view();
@@ -137,7 +137,7 @@ impl ImageViewerApp {
             #[cfg(debug_assertions)]
             log::debug!(
                 "[COPY] Dest folder matches current view, reloading: {}",
-                self.current_path
+                self.navigation_state.current_path
             );
             self.loaded_path.clear();
             self.load_folder(false);
@@ -165,7 +165,7 @@ impl ImageViewerApp {
             #[cfg(debug_assertions)]
             log::debug!(
                 "[MOVE] Source folder matches current view, reloading: {}",
-                self.current_path
+                self.navigation_state.current_path
             );
             self.loaded_path.clear();
             self.load_folder(false);
@@ -175,7 +175,7 @@ impl ImageViewerApp {
             #[cfg(debug_assertions)]
             log::debug!(
                 "[MOVE] Dest folder matches current view, reloading: {}",
-                self.current_path
+                self.navigation_state.current_path
             );
             self.loaded_path.clear();
             self.load_folder(false);
@@ -237,7 +237,7 @@ impl ImageViewerApp {
             #[cfg(debug_assertions)]
             log::debug!(
                 "[MOVE-BATCH] Dest folder matches current view, reloading: {}",
-                self.current_path
+                self.navigation_state.current_path
             );
             self.loaded_path.clear();
             self.load_folder(false);

@@ -69,18 +69,18 @@ impl ImageViewerApp {
                 event
             {
                 log::warn!("[FS-WATCH] DriveLost signal received for: {:?}", drive_root);
-                self.last_drive_refresh = Instant::now();
+                self.drive_state.last_drive_refresh = Instant::now();
                 self.reload_drive_list_async();
 
                 // If user is browsing inside the lost drive, redirect immediately
                 let drive_prefix = drive_root.to_string_lossy().to_string();
-                if !self.is_computer_view
-                    && !self.is_recycle_bin_view
-                    && self.current_path.starts_with(&drive_prefix)
+                if !self.navigation_state.is_computer_view
+                    && !self.navigation_state.is_recycle_bin_view
+                    && self.navigation_state.current_path.starts_with(&drive_prefix)
                 {
                     log::warn!(
                         "[FS-WATCH] Current path '{}' is on lost drive, redirecting to Este Computador",
-                        self.current_path
+                        self.navigation_state.current_path
                     );
                     self.directory_cache.clear();
                     self.drive_watcher.cleanup_unused_watchers(None);
@@ -127,7 +127,7 @@ impl ImageViewerApp {
             self.directory_cache.clear();
 
             // Just trigger a reload instead of processing each event
-            if !self.is_computer_view && !self.is_recycle_bin_view {
+            if !self.navigation_state.is_computer_view && !self.navigation_state.is_recycle_bin_view {
                 self.pending_auto_reload = true;
             }
         } else {
@@ -339,7 +339,7 @@ impl ImageViewerApp {
                     legacy_events.len()
                 );
                 self.directory_cache.clear();
-                if !self.is_computer_view && !self.is_recycle_bin_view {
+                if !self.navigation_state.is_computer_view && !self.navigation_state.is_recycle_bin_view {
                     self.pending_auto_reload = true;
                 }
             } else {
@@ -458,10 +458,10 @@ impl ImageViewerApp {
                 #[cfg(debug_assertions)]
                 log::debug!(
                     "[DEBUG] Checking auto-reload for path: '{}'",
-                    self.current_path
+                    self.navigation_state.current_path
                 );
                 // SKIP for special views (Recycle Bin/Computer) which are managed manually via events
-                if self.is_recycle_bin_view || self.is_computer_view {
+                if self.navigation_state.is_recycle_bin_view || self.navigation_state.is_computer_view {
                     self.pending_auto_reload = false;
                 } else {
                     #[cfg(debug_assertions)]

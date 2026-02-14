@@ -22,10 +22,10 @@ const DRIVE_BITMASK_CHECK_INTERVAL_MS: u64 = 3000;
 
 impl ImageViewerApp {
     pub fn setup_recycle_bin_view(&mut self) {
-        self.current_path = "Lixeira".to_string();
-        self.is_computer_view = false;
-        self.is_recycle_bin_view = true;
-        self.path_input = "Lixeira".to_string();
+        self.navigation_state.current_path = "Lixeira".to_string();
+        self.navigation_state.is_computer_view = false;
+        self.navigation_state.is_recycle_bin_view = true;
+        self.navigation_state.path_input = "Lixeira".to_string();
         self.is_loading_folder = true;
         self.items = Arc::new(Vec::new());
         self.all_items.clear();
@@ -130,10 +130,10 @@ impl ImageViewerApp {
         self.pending_items_count = 0;
 
         // Set computer view
-        self.current_path = "Este Computador".to_string();
-        self.is_computer_view = true;
-        self.is_recycle_bin_view = false;
-        self.path_input = "Este Computador".to_string();
+        self.navigation_state.current_path = "Este Computador".to_string();
+        self.navigation_state.is_computer_view = true;
+        self.navigation_state.is_recycle_bin_view = false;
+        self.navigation_state.path_input = "Este Computador".to_string();
 
         // Load Computer View sort mode
         self.sort_mode = self.sort_mode_computer;
@@ -144,7 +144,7 @@ impl ImageViewerApp {
         use crate::domain::file_entry::DriveInfo;
 
         let mut computer_items = Vec::new();
-        for (path, label) in &self.disks {
+        for (path, label) in &self.drive_state.disks {
             let drive_type = windows_infra::detect_drive_type(path);
             let entry = FileEntry {
                 path: PathBuf::from(path),
@@ -171,7 +171,7 @@ impl ImageViewerApp {
         for item in &computer_items {
             if let Some(info) = &item.drive_info {
                 let path_str = item.path.to_string_lossy().to_string();
-                self.drive_info_cache.insert(path_str, info.clone());
+                self.drive_state.drive_info_cache.insert(path_str, info.clone());
             }
         }
 
@@ -179,27 +179,27 @@ impl ImageViewerApp {
         self.items = Arc::new(computer_items);
 
         // PRE-COMPUTE SECTION INDICES (O(n) once, not per frame)
-        self.computer_view_local_indices.clear();
-        self.computer_view_network_indices.clear();
+        self.navigation_state.computer_view_local_indices.clear();
+        self.navigation_state.computer_view_network_indices.clear();
 
         for (i, item) in self.items.iter().enumerate() {
             let is_remote = item.drive_info.as_ref().is_some_and(|di| {
                 di.drive_type == crate::infrastructure::windows::DriveType::Remote
             });
             if is_remote {
-                self.computer_view_network_indices.push(i);
+                self.navigation_state.computer_view_network_indices.push(i);
             } else {
-                self.computer_view_local_indices.push(i);
+                self.navigation_state.computer_view_local_indices.push(i);
             }
         }
 
         self.reset_selection_and_search();
-        self.total_items = self.disks.len();
+        self.total_items = self.drive_state.disks.len();
         self.is_loading_folder = false;
 
         // Launch background thread for volume info (total/free space, file_system)
-        let disks_snapshot: Vec<String> = self.disks.iter().map(|(p, _)| p.clone()).collect();
-        let tx = self.drive_info_tx.clone();
+        let disks_snapshot: Vec<String> = self.drive_state.disks.iter().map(|(p, _)| p.clone()).collect();
+        let tx = self.drive_state.drive_info_tx.clone();
         let ctx = self.ui_ctx.clone();
         std::thread::spawn(move || {
             use crate::infrastructure::windows::get_volume_info;
@@ -224,11 +224,11 @@ impl ImageViewerApp {
 
     /// Launches a background thread to scan drives. Non-blocking.
     pub fn reload_drive_list_async(&mut self) {
-        if self.drive_scan_pending {
+        if self.drive_state.drive_scan_pending {
             return; // Already scanning
         }
-        self.drive_scan_pending = true;
-        let tx = self.drive_scan_tx.clone();
+        self.drive_state.drive_scan_pending = true;
+        let tx = self.drive_state.drive_scan_tx.clone();
         let ctx = self.ui_ctx.clone();
         std::thread::spawn(move || {
             let new_disks = crate::infrastructure::windows::get_all_drives();
@@ -239,11 +239,11 @@ impl ImageViewerApp {
 
     /// Poll for completed background drive scans. Called once per frame.
     pub fn poll_drive_scan(&mut self) {
-        if let Ok(new_disks) = self.drive_scan_rx.try_recv() {
-            self.drive_scan_pending = false;
-            let old_disks = std::mem::take(&mut self.disks);
+        if let Ok(new_disks) = self.drive_state.drive_scan_rx.try_recv() {
+            self.drive_state.drive_scan_pending = false;
+            let old_disks = std::mem::take(&mut self.drive_state.disks);
             let changed = new_disks != old_disks;
-            self.disks = new_disks;
+            self.drive_state.disks = new_disks;
 
             if changed {
                 // Invalidate cached drive types since drive list changed
@@ -254,7 +254,7 @@ impl ImageViewerApp {
                 let removed_drives: Vec<String> = old_disks
                     .iter()
                     .filter(|(old_path, _)| {
-                        !self.disks.iter().any(|(new_path, _)| new_path == old_path)
+                        !self.drive_state.disks.iter().any(|(new_path, _)| new_path == old_path)
                     })
                     .map(|(path, _)| path.clone())
                     .collect();
@@ -263,9 +263,9 @@ impl ImageViewerApp {
                     log::info!("[DRIVE-REFRESH] Drives removed: {:?}", removed_drives);
 
                     // Check if user is currently browsing inside a removed drive
-                    let current = self.current_path.clone();
-                    let on_removed_drive = !self.is_computer_view
-                        && !self.is_recycle_bin_view
+                    let current = self.navigation_state.current_path.clone();
+                    let on_removed_drive = !self.navigation_state.is_computer_view
+                        && !self.navigation_state.is_recycle_bin_view
                         && removed_drives.iter().any(|d| current.starts_with(d));
 
                     if on_removed_drive {
@@ -283,7 +283,7 @@ impl ImageViewerApp {
                 // AUTO-FOCUS FOR RECENTLY MOUNTED ISO
                 if let Some(_iso_path) = self.pending_iso_mount.take() {
                     let mut target_drive = None;
-                    for (new_path, _label) in &self.disks {
+                    for (new_path, _label) in &self.drive_state.disks {
                         if !old_disks.iter().any(|(old_path, _)| old_path == new_path)
                             && crate::infrastructure::onedrive::fast_path_exists(
                                 std::path::Path::new(new_path),
@@ -301,7 +301,7 @@ impl ImageViewerApp {
                     }
                 }
 
-                if self.is_computer_view {
+                if self.navigation_state.is_computer_view {
                     self.setup_computer_view();
                 }
             }
@@ -309,24 +309,24 @@ impl ImageViewerApp {
     }
 
     pub fn refresh_drives_if_needed(&mut self) {
-        let elapsed = self.last_drive_refresh.elapsed();
+        let elapsed = self.drive_state.last_drive_refresh.elapsed();
 
         // Fast check: compare drive bitmask every 3s (no disk I/O, reads kernel cache).
         // This catches virtual/mapped drives (Cryptomator, VeraCrypt, subst, net use)
         // that don't fire WM_DEVICECHANGE when unmounted.
         if elapsed >= Duration::from_millis(DRIVE_BITMASK_CHECK_INTERVAL_MS) {
             let current_bitmask = crate::infrastructure::windows::get_logical_drives_bitmask();
-            if current_bitmask != self.last_drive_bitmask {
+            if current_bitmask != self.drive_state.last_drive_bitmask {
                 log::debug!(
                     "[DRIVE-REFRESH] Bitmask changed: 0x{:08X} -> 0x{:08X}",
-                    self.last_drive_bitmask, current_bitmask
+                    self.drive_state.last_drive_bitmask, current_bitmask
                 );
-                self.last_drive_bitmask = current_bitmask;
-                self.last_drive_refresh = Instant::now();
+                self.drive_state.last_drive_bitmask = current_bitmask;
+                self.drive_state.last_drive_refresh = Instant::now();
                 self.reload_drive_list_async();
             } else if elapsed >= Duration::from_millis(DRIVE_REFRESH_INTERVAL_MS) {
                 // Full fallback refresh every 30s (safety net)
-                self.last_drive_refresh = Instant::now();
+                self.drive_state.last_drive_refresh = Instant::now();
                 self.reload_drive_list_async();
             }
         }
@@ -335,14 +335,14 @@ impl ImageViewerApp {
     /// Poll for completed background volume info scans. Called once per frame.
     /// Updates drive_info (total_space, free_space, file_system) in existing items.
     pub fn poll_drive_info(&mut self) {
-        if let Ok(results) = self.drive_info_rx.try_recv() {
+        if let Ok(results) = self.drive_state.drive_info_rx.try_recv() {
             // Always persist drive info in the dedicated cache so it survives
             // navigation away from computer view (used by details panel).
             for (path, info) in &results {
-                self.drive_info_cache.insert(path.clone(), info.clone());
+                self.drive_state.drive_info_cache.insert(path.clone(), info.clone());
             }
 
-            if !self.is_computer_view {
+            if !self.navigation_state.is_computer_view {
                 return; // Only update all_items if still in computer view
             }
 

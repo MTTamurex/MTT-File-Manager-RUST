@@ -72,7 +72,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         } else {
                             path.parent()
                                 .map(Path::to_path_buf)
-                                .unwrap_or_else(|| PathBuf::from(&app.current_path))
+                                .unwrap_or_else(|| PathBuf::from(&app.navigation_state.current_path))
                         };
 
                         let prev_view_mode = app.view_mode;
@@ -88,7 +88,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         active.folders_position = prev_folders_position;
                         app.sync_from_tab();
 
-                        if app.is_computer_view {
+                        if app.navigation_state.is_computer_view {
                             app.setup_computer_view();
                         } else {
                             app.watch_current_folder();

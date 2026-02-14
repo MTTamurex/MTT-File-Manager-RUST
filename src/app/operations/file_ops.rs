@@ -94,11 +94,11 @@ impl ImageViewerApp {
     }
 
     pub fn create_new_folder(&mut self) {
-        if self.is_computer_view || self.is_recycle_bin_view {
+        if self.navigation_state.is_computer_view || self.navigation_state.is_recycle_bin_view {
             return;
         }
 
-        let base_path = PathBuf::from(&self.current_path);
+        let base_path = PathBuf::from(&self.navigation_state.current_path);
 
         match file_operations::create_new_folder(&base_path) {
             Ok(full_path) => {
@@ -158,7 +158,7 @@ impl ImageViewerApp {
 
     /// Create a Windows shell shortcut (.lnk) pointing to `target` in the same directory.
     pub fn create_shell_shortcut(&self, target: &Path) -> Result<PathBuf, String> {
-        file_operations::create_shortcut(target, &self.current_path)
+        file_operations::create_shortcut(target, &self.navigation_state.current_path)
     }
 
     /// Mounts an ISO programmatically and marks it for auto-navigation

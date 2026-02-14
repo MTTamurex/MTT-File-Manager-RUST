@@ -42,6 +42,7 @@ pub fn render_panels(app: &mut ImageViewerApp, ctx: &egui::Context, _frame: &mut
 fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) {
     // Clamp width to valid range BEFORE using it
     let target_width = app
+        .layout
         .sidebar_left_width
         .clamp(LEFT_SIDEBAR_MIN, LEFT_SIDEBAR_MAX);
 
@@ -58,16 +59,16 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) {
         .show(ctx, |ui| {
             use crate::ui::sidebar::{render_sidebar, SidebarContext};
 
-            let disks = app.disks.clone();
-            let current_path = app.current_path.clone();
-            let is_computer_view = app.is_computer_view;
+            let disks = app.drive_state.disks.clone();
+            let current_path = app.navigation_state.current_path.clone();
+            let is_computer_view = app.navigation_state.is_computer_view;
             let computer_icon = app.cache_manager.computer_icon.clone();
 
             let mut sidebar_ctx = SidebarContext {
                 disks: &disks,
                 current_path: &current_path,
                 is_computer_view,
-                is_recycle_bin_view: app.is_recycle_bin_view,
+                is_recycle_bin_view: app.navigation_state.is_recycle_bin_view,
                 computer_icon: computer_icon.as_ref(),
                 is_renaming: app.renaming_state.is_some(),
                 icon_loader: &mut app.item_icon_loader,
@@ -98,6 +99,7 @@ fn render_preview_panel_layout(
 
         // Clamp width to valid range BEFORE using it
         let target_width = app
+            .layout
             .sidebar_right_width
             .clamp(RIGHT_SIDEBAR_MIN, RIGHT_SIDEBAR_MAX);
 
@@ -170,7 +172,7 @@ fn render_preview_panel_layout(
                                 app.metadata_loading.contains(&file.path),
                                 folder_size,
                                 is_folder_size_loading,
-                                app.is_recycle_bin_view,
+                                app.navigation_state.is_recycle_bin_view,
                                 &mut app.item_icon_loader,
                                 &mut app.svg_icon_manager,
                                 Some(frame),
@@ -311,6 +313,7 @@ fn render_resize_handles(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
     // Left sidebar resize handle (right edge of left sidebar)
     let left_width = app
+        .layout
         .sidebar_left_width
         .clamp(LEFT_SIDEBAR_MIN, LEFT_SIDEBAR_MAX);
     let left_handle_rect = egui::Rect::from_min_size(
@@ -332,14 +335,15 @@ fn render_resize_handles(app: &mut ImageViewerApp, ctx: &egui::Context) {
             // Update width on drag
             if response.dragged() {
                 let delta = response.drag_delta().x;
-                app.sidebar_left_width =
-                    (app.sidebar_left_width + delta).clamp(LEFT_SIDEBAR_MIN, LEFT_SIDEBAR_MAX);
+                app.layout.sidebar_left_width = (app.layout.sidebar_left_width + delta)
+                    .clamp(LEFT_SIDEBAR_MIN, LEFT_SIDEBAR_MAX);
             }
         });
 
     // Right sidebar resize handle (left edge of right sidebar) - only if panel is visible
     if app.show_preview_panel {
         let right_width = app
+            .layout
             .sidebar_right_width
             .clamp(RIGHT_SIDEBAR_MIN, RIGHT_SIDEBAR_MAX);
         let right_handle_x = screen.width() - right_width - RESIZE_HANDLE_WIDTH / 2.0;
@@ -362,7 +366,7 @@ fn render_resize_handles(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 // Update width on drag (note: dragging LEFT increases right panel width)
                 if response.dragged() {
                     let delta = -response.drag_delta().x; // Inverted for right panel
-                    app.sidebar_right_width = (app.sidebar_right_width + delta)
+                    app.layout.sidebar_right_width = (app.layout.sidebar_right_width + delta)
                         .clamp(RIGHT_SIDEBAR_MIN, RIGHT_SIDEBAR_MAX);
                 }
             });
@@ -378,7 +382,7 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
         // 2. File system watcher events (auto-refresh)
         // Trust the cached state - it's updated by the file watcher.
         Some(file)
-    } else if app.is_recycle_bin_view {
+    } else if app.navigation_state.is_recycle_bin_view {
         Some(FileEntry {
             path: PathBuf::from("Lixeira"),
             name: "Lixeira".to_string(),
@@ -391,13 +395,13 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             deletion_date: None,
             recycle_original_path: None,
         })
-    } else if app.is_computer_view {
+    } else if app.navigation_state.is_computer_view {
         // "Este Computador" - show drive count info
         Some(FileEntry {
             path: PathBuf::from("Este Computador"),
             name: "Este Computador".to_string(),
             is_dir: true,
-            size: app.disks.len() as u64, // Store drive count in size field
+            size: app.drive_state.disks.len() as u64, // Store drive count in size field
             modified: 0,
             folder_cover: None,
             drive_info: None,
@@ -406,7 +410,7 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             recycle_original_path: None,
         })
     } else {
-        let path = std::path::PathBuf::from(&app.current_path);
+        let path = std::path::PathBuf::from(&app.navigation_state.current_path);
         let current_folder_modified = app
             .current_folder_modified_hint
             .as_ref()
@@ -445,11 +449,12 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             // PERFORMANCE FIX: Use cached drive_info from items instead of calling
             // get_volume_info() which blocks on network drives EVERY FRAME.
             let label = app
+                .drive_state
                 .disks
                 .iter()
-                .find(|(p, _)| p.starts_with(&app.current_path) || app.current_path.starts_with(p))
+                .find(|(p, _)| p.starts_with(&app.navigation_state.current_path) || app.navigation_state.current_path.starts_with(p))
                 .map(|(_, l)| l.clone())
-                .unwrap_or_else(|| app.current_path.clone());
+                .unwrap_or_else(|| app.navigation_state.current_path.clone());
             entry.name = label;
 
             // Try to find cached drive_info from computer view items
@@ -458,19 +463,19 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
                 .iter()
                 .find(|item| {
                     let item_str = item.path.to_string_lossy();
-                    item_str.starts_with(&app.current_path)
-                        || app.current_path.starts_with(item_str.as_ref())
+                    item_str.starts_with(&app.navigation_state.current_path)
+                        || app.navigation_state.current_path.starts_with(item_str.as_ref())
                 })
                 .and_then(|item| item.drive_info.clone())
                 // Fallback: persistent drive_info_cache survives navigation away from computer view
-                .or_else(|| app.drive_info_cache.get(&app.current_path).cloned());
+                .or_else(|| app.drive_state.drive_info_cache.get(&app.navigation_state.current_path).cloned());
 
             if let Some(info) = cached_info {
                 entry.drive_info = Some(info);
             } else {
                 // Fallback NON-BLOCKING: avoid volume probes in render loop.
                 // Detailed volume info is filled asynchronously by computer view pipeline.
-                let drive_type = windows_infra::detect_drive_type(&app.current_path);
+                let drive_type = windows_infra::detect_drive_type(&app.navigation_state.current_path);
                 entry.drive_info = Some(crate::domain::file_entry::DriveInfo {
                     file_system: String::new(),
                     total_space: 0,
@@ -482,7 +487,7 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             entry.name = path
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| app.current_path.clone());
+                .unwrap_or_else(|| app.navigation_state.current_path.clone());
         }
         Some(entry)
     }
@@ -554,10 +559,10 @@ fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     app.context_menu.target_paths.clear();
 
                     // Use current path for shell menu
-                    let paths = if app.is_recycle_bin_view {
+                    let paths = if app.navigation_state.is_recycle_bin_view {
                         vec![]
                     } else {
-                        vec![std::path::PathBuf::from(&app.current_path)]
+                        vec![std::path::PathBuf::from(&app.navigation_state.current_path)]
                     };
 
                     // Prepare state

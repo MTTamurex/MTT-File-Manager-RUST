@@ -13,10 +13,10 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
         // While the global search modal is open, keep focus/input inside it.
         // Prevent routing shortcuts/quick-search to the main file views.
-        if app.global_search_active {
+        if app.global_search.active {
             if ctx.input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::F)) {
-                app.global_search_active = false;
-                app.global_search_focus_request = false;
+                app.global_search.active = false;
+                app.global_search.focus_request = false;
                 user_active = true;
             }
 
@@ -170,8 +170,8 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
         // Ctrl + Shift + N: Nova Pasta
         if ctx.input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::N))
-            && !app.is_computer_view
-            && !app.is_recycle_bin_view
+            && !app.navigation_state.is_computer_view
+            && !app.navigation_state.is_recycle_bin_view
         {
             app.create_new_folder();
             user_active = true;
@@ -179,22 +179,23 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
         // Ctrl + Shift + F: Global Search
         if ctx.input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::F)) {
-            app.global_search_active = !app.global_search_active;
-            app.global_search_selected_index = None;
-            if app.global_search_active {
-                app.global_search_focus_request = true;
-                app.global_search_query.clear();
-                app.global_search_results.clear();
-                app.global_search_loading = false;
+            app.global_search.active = !app.global_search.active;
+            app.global_search.selected_index = None;
+            if app.global_search.active {
+                app.global_search.focus_request = true;
+                app.global_search.query.clear();
+                app.global_search.results.clear();
+                app.global_search.loading = false;
                 // Check service availability
                 if let Err(e) = app
-                    .global_search_sender
+                    .global_search
+                    .sender
                     .send(crate::workers::global_search_worker::GlobalSearchRequest::CheckStatus)
                 {
                     log::error!("[GLOBAL-SEARCH] Failed to queue status check: {}", e);
                 }
             } else {
-                app.global_search_focus_request = false;
+                app.global_search.focus_request = false;
             }
             user_active = true;
         }

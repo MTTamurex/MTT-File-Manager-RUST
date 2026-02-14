@@ -81,7 +81,7 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
                     .clicked()
                 {
                     app.sort_mode = SortMode::Name;
-                    if app.is_computer_view {
+                    if app.navigation_state.is_computer_view {
                         app.sort_mode_computer = SortMode::Name;
                     } else {
                         app.sort_mode_normal = SortMode::Name;
@@ -90,7 +90,7 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
                     app.save_preferences();
                 }
 
-                if app.is_computer_view {
+                if app.navigation_state.is_computer_view {
                     if ui
                         .selectable_value(
                             &mut SortMode::DriveTotalSpace,

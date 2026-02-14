@@ -111,12 +111,12 @@ impl ImageViewerApp {
 
         // Window state persistence
         self.disk_cache
-            .set_preference("window_width", &self.saved_window_width.to_string());
+            .set_preference("window_width", &self.layout.saved_window_width.to_string());
         self.disk_cache
-            .set_preference("window_height", &self.saved_window_height.to_string());
+            .set_preference("window_height", &self.layout.saved_window_height.to_string());
         self.disk_cache.set_preference(
             "window_is_maximized",
-            if self.saved_is_maximized {
+            if self.layout.saved_is_maximized {
                 "true"
             } else {
                 "false"
@@ -124,8 +124,8 @@ impl ImageViewerApp {
         );
 
         // Sidebar widths persistence - only save valid values
-        let left_to_save = self.sidebar_left_width.max(150.0);
-        let right_to_save = self.sidebar_right_width.max(250.0);
+        let left_to_save = self.layout.sidebar_left_width.max(150.0);
+        let right_to_save = self.layout.sidebar_right_width.max(250.0);
         self.disk_cache
             .set_preference("sidebar_left_width", &left_to_save.to_string());
         self.disk_cache
@@ -152,46 +152,46 @@ impl ImageViewerApp {
 
         // Save list view column widths - Regular view
         self.disk_cache
-            .set_preference("list_col_name_width", &self.list_col_name_width.to_string());
+            .set_preference("list_col_name_width", &self.layout.list_col_name_width.to_string());
         self.disk_cache
-            .set_preference("list_col_date_width", &self.list_col_date_width.to_string());
+            .set_preference("list_col_date_width", &self.layout.list_col_date_width.to_string());
         self.disk_cache
-            .set_preference("list_col_type_width", &self.list_col_type_width.to_string());
+            .set_preference("list_col_type_width", &self.layout.list_col_type_width.to_string());
         self.disk_cache
-            .set_preference("list_col_size_width", &self.list_col_size_width.to_string());
+            .set_preference("list_col_size_width", &self.layout.list_col_size_width.to_string());
         // Save list view column widths - OneDrive view
         self.disk_cache.set_preference(
             "list_col_onedrive_name_width",
-            &self.list_col_onedrive_name_width.to_string(),
+            &self.layout.list_col_onedrive_name_width.to_string(),
         );
         self.disk_cache.set_preference(
             "list_col_onedrive_date_width",
-            &self.list_col_onedrive_date_width.to_string(),
+            &self.layout.list_col_onedrive_date_width.to_string(),
         );
         self.disk_cache.set_preference(
             "list_col_onedrive_type_width",
-            &self.list_col_onedrive_type_width.to_string(),
+            &self.layout.list_col_onedrive_type_width.to_string(),
         );
         self.disk_cache.set_preference(
             "list_col_onedrive_size_width",
-            &self.list_col_onedrive_size_width.to_string(),
+            &self.layout.list_col_onedrive_size_width.to_string(),
         );
         self.disk_cache.set_preference(
             "list_col_onedrive_status_width",
-            &self.list_col_onedrive_status_width.to_string(),
+            &self.layout.list_col_onedrive_status_width.to_string(),
         );
         // Save list view column widths - Computer view
         self.disk_cache.set_preference(
             "list_col_computer_name_width",
-            &self.list_col_computer_name_width.to_string(),
+            &self.layout.list_col_computer_name_width.to_string(),
         );
         self.disk_cache.set_preference(
             "list_col_computer_total_width",
-            &self.list_col_computer_total_width.to_string(),
+            &self.layout.list_col_computer_total_width.to_string(),
         );
         self.disk_cache.set_preference(
             "list_col_computer_free_width",
-            &self.list_col_computer_free_width.to_string(),
+            &self.layout.list_col_computer_free_width.to_string(),
         );
     }
 }

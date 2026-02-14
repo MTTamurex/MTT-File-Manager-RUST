@@ -5,37 +5,37 @@ use crate::workers::global_search_worker::GlobalSearchResponse;
 
 impl ImageViewerApp {
     pub(super) fn process_global_search_events(&mut self) {
-        while let Ok(response) = self.global_search_receiver.try_recv() {
+        while let Ok(response) = self.global_search.receiver.try_recv() {
             match response {
                 GlobalSearchResponse::Results { query, items } => {
                     // Only apply if the query still matches (user may have typed more)
-                    if query == self.global_search_query {
-                        self.global_search_results = items;
-                        self.global_search_selected_index = None;
-                        self.global_search_loading = false;
+                    if query == self.global_search.query {
+                        self.global_search.results = items;
+                        self.global_search.selected_index = None;
+                        self.global_search.loading = false;
                     }
                 }
                 GlobalSearchResponse::Status {
                     available,
                     total_indexed,
                 } => {
-                    self.global_search_available = available;
-                    self.global_search_total_indexed = total_indexed;
+                    self.global_search.available = available;
+                    self.global_search.total_indexed = total_indexed;
                 }
                 GlobalSearchResponse::Error { query, message } => {
-                    if query == self.global_search_query {
-                        self.global_search_loading = false;
+                    if query == self.global_search.query {
+                        self.global_search.loading = false;
                     }
                     log::error!("[GLOBAL-SEARCH] Error for '{}': {}", query, message);
 
                     // Service IPC can be temporarily unstable after app/service restart.
                     // Trigger an expedited status check to recover UI state quickly.
                     if is_connectivity_error(&message)
-                        && self.global_search_last_check.elapsed()
+                        && self.global_search.last_check.elapsed()
                             > std::time::Duration::from_secs(1)
                     {
-                        self.global_search_last_check = std::time::Instant::now();
-                        let _ = self.global_search_sender.send(
+                        self.global_search.last_check = std::time::Instant::now();
+                        let _ = self.global_search.sender.send(
                             crate::workers::global_search_worker::GlobalSearchRequest::CheckStatus,
                         );
                     }
@@ -44,18 +44,19 @@ impl ImageViewerApp {
         }
 
         // Check availability faster while offline, slower while stable online.
-        let interval = if self.global_search_active {
+        let interval = if self.global_search.active {
             std::time::Duration::from_secs(1)
-        } else if self.global_search_available {
+        } else if self.global_search.available {
             std::time::Duration::from_secs(30)
         } else {
             std::time::Duration::from_secs(3)
         };
 
-        if self.global_search_last_check.elapsed() > interval {
-            self.global_search_last_check = std::time::Instant::now();
+        if self.global_search.last_check.elapsed() > interval {
+            self.global_search.last_check = std::time::Instant::now();
             let _ = self
-                .global_search_sender
+                .global_search
+                .sender
                 .send(crate::workers::global_search_worker::GlobalSearchRequest::CheckStatus);
         }
     }

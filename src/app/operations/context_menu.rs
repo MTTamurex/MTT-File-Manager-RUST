@@ -31,7 +31,7 @@ impl ImageViewerApp {
         }
 
         // 5. Current folder
-        vec![PathBuf::from(&self.current_path)]
+        vec![PathBuf::from(&self.navigation_state.current_path)]
     }
 
     pub fn populate_context_menu(
@@ -49,7 +49,7 @@ impl ImageViewerApp {
         let mut items = Vec::new();
 
         // Special menu for Recycle Bin items
-        if self.is_recycle_bin_view && !is_empty_area {
+        if self.navigation_state.is_recycle_bin_view && !is_empty_area {
             // Menu items for recycle bin (no primary icons)
             items.push(ContextMenuItem::new(-52, "Restaurar").with_command("restore"));
             items.push(
@@ -68,7 +68,7 @@ impl ImageViewerApp {
         }
 
         // Special menu for empty area in Recycle Bin
-        if self.is_recycle_bin_view && is_empty_area {
+        if self.navigation_state.is_recycle_bin_view && is_empty_area {
             items.push(
                 ContextMenuItem::new(-54, "Esvaziar Lixeira").with_command("empty_recycle_bin"),
             );
@@ -121,7 +121,7 @@ impl ImageViewerApp {
 
         // ========== SECONDARY ITEMS (App-specific) ==========
         let can_paste = self.clipboard.has_content();
-        let can_create_folder = !self.is_computer_view && !self.is_recycle_bin_view;
+        let can_create_folder = !self.navigation_state.is_computer_view && !self.navigation_state.is_recycle_bin_view;
         if is_empty_area {
             items.push(ContextMenuItem::separator());
             items.push(

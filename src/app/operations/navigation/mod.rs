@@ -65,7 +65,7 @@ impl ImageViewerApp {
         };
 
         // If we're already at this path, do nothing
-        if self.current_path == normalized_path {
+        if self.navigation_state.current_path == normalized_path {
             return;
         }
 
@@ -82,12 +82,12 @@ impl ImageViewerApp {
         self.loaded_path.clear();
 
         // Add new path to history
-        self.navigation.navigate_to(normalized_path.clone());
+        self.navigation_state.navigation.navigate_to(normalized_path.clone());
 
-        self.current_path = normalized_path.clone();
-        self.path_input = normalized_path.clone();
-        self.is_computer_view = false;
-        self.is_recycle_bin_view = false; // Reset when navigating to any folder
+        self.navigation_state.current_path = normalized_path.clone();
+        self.navigation_state.path_input = normalized_path.clone();
+        self.navigation_state.is_computer_view = false;
+        self.navigation_state.is_recycle_bin_view = false; // Reset when navigating to any folder
 
         // Restore normal folder sort mode
         self.sort_mode = self.sort_mode_normal;
@@ -104,11 +104,11 @@ impl ImageViewerApp {
     }
 
     pub fn go_back(&mut self) {
-        if let Some(path) = self.navigation.go_back().cloned() {
+        if let Some(path) = self.navigation_state.navigation.go_back().cloned() {
             self.remember_current_folder_modified_hint();
 
             // Save current path before going back (to invalidate the preview)
-            let previous_path = std::path::PathBuf::from(&self.current_path);
+            let previous_path = std::path::PathBuf::from(&self.navigation_state.current_path);
 
             if path == "Este Computador" {
                 // Invalidate preview of the folder we were in
@@ -135,12 +135,12 @@ impl ImageViewerApp {
                     self.cache_manager.invalidate_folder_preview(&previous_path);
                 }
 
-                self.current_path = path.clone();
+                self.navigation_state.current_path = path.clone();
                 self.loaded_path.clear(); // Clear to allow reload
                 self.sync_to_tab();
-                self.path_input = self.current_path.clone();
-                self.is_computer_view = false;
-                self.is_recycle_bin_view = false;
+                self.navigation_state.path_input = self.navigation_state.current_path.clone();
+                self.navigation_state.is_computer_view = false;
+                self.navigation_state.is_recycle_bin_view = false;
 
                 // Restore normal folder sort mode
                 self.sort_mode = self.sort_mode_normal;
@@ -154,11 +154,11 @@ impl ImageViewerApp {
 
     /// Moves forward in history
     pub fn go_forward(&mut self) {
-        if let Some(path) = self.navigation.go_forward().cloned() {
+        if let Some(path) = self.navigation_state.navigation.go_forward().cloned() {
             self.remember_current_folder_modified_hint();
 
             // Save current path before going forward (to invalidate the preview)
-            let previous_path = std::path::PathBuf::from(&self.current_path);
+            let previous_path = std::path::PathBuf::from(&self.navigation_state.current_path);
 
             if path == "Este Computador" {
                 // Invalidate preview of the folder we were in
@@ -185,12 +185,12 @@ impl ImageViewerApp {
                     self.cache_manager.invalidate_folder_preview(&previous_path);
                 }
 
-                self.current_path = path.clone();
+                self.navigation_state.current_path = path.clone();
                 self.loaded_path.clear(); // Clear to allow reload
                 self.sync_to_tab();
-                self.path_input = self.current_path.clone();
-                self.is_computer_view = false;
-                self.is_recycle_bin_view = false;
+                self.navigation_state.path_input = self.navigation_state.current_path.clone();
+                self.navigation_state.is_computer_view = false;
+                self.navigation_state.is_recycle_bin_view = false;
 
                 // Restore normal folder sort mode
                 self.sort_mode = self.sort_mode_normal;
@@ -204,11 +204,11 @@ impl ImageViewerApp {
 
     /// Navigates to the "This PC" view (adding to history)
     pub fn navigate_to_computer(&mut self) {
-        if self.is_computer_view {
+        if self.navigation_state.is_computer_view {
             return;
         }
 
-        self.navigation.navigate_to("Este Computador".to_string());
+        self.navigation_state.navigation.navigate_to("Este Computador".to_string());
         // self.sync_to_tab(); // setup_computer_view calls sync_from_tab?? no, we sync afterward
 
         self.reset_selection_and_search();
@@ -218,11 +218,11 @@ impl ImageViewerApp {
     }
 
     pub fn navigate_to_recycle_bin(&mut self) {
-        if self.is_recycle_bin_view {
+        if self.navigation_state.is_recycle_bin_view {
             return;
         }
 
-        self.navigation.navigate_to("Lixeira".to_string());
+        self.navigation_state.navigation.navigate_to("Lixeira".to_string());
         self.reset_selection_and_search();
         self.watch_current_folder();
         self.setup_recycle_bin_view();
@@ -230,13 +230,13 @@ impl ImageViewerApp {
     }
 
     pub fn go_up_one_level(&mut self) {
-        if self.is_computer_view {
+        if self.navigation_state.is_computer_view {
             // Already at the top
             return;
         }
 
         // If we're at the root of a drive (C:\, D:\), going up navigates to "This PC"
-        let parent = std::path::Path::new(&self.current_path).parent();
+        let parent = std::path::Path::new(&self.navigation_state.current_path).parent();
         if parent.is_none() {
             self.navigate_to_computer();
             return;
@@ -255,12 +255,12 @@ impl ImageViewerApp {
 
     /// Can go back in history?
     pub fn can_go_back(&self) -> bool {
-        self.navigation.can_go_back()
+        self.navigation_state.navigation.can_go_back()
     }
 
     /// Can go forward in history?
     pub fn can_go_forward(&self) -> bool {
-        self.navigation.can_go_forward()
+        self.navigation_state.navigation.can_go_forward()
     }
 }
 

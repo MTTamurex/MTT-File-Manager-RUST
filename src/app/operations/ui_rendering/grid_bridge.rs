@@ -124,7 +124,7 @@ impl ImageViewerApp {
             .max(1.0) as usize;
 
         // Keyboard navigation (ONLY when not renaming and media is NOT focused)
-        if !self.global_search_active
+        if !self.global_search.active
             && should_handle_navigation(
                 ui,
                 self.renaming_state.is_some(),
@@ -231,7 +231,7 @@ impl ImageViewerApp {
         // Check if video is playing in docked mode to reduce disk I/O
         let is_video_docked_visible = self.is_video_docked_visible();
 
-        let is_ssd = io_priority::is_ssd(&PathBuf::from(&self.current_path));
+        let is_ssd = io_priority::is_ssd(&PathBuf::from(&self.navigation_state.current_path));
         let prefetch_rows = if is_ssd { 1 } else { 3 };
         let mut drag_started_item = None;
         let mut drag_hovered_item = None;
@@ -245,9 +245,9 @@ impl ImageViewerApp {
             renaming_state: renaming_state.clone(),
             focus_rename,
             scroll_to_selected,
-            is_computer_view: self.is_computer_view,
-            is_recycle_bin_view: self.is_recycle_bin_view,
-            global_search_active: self.global_search_active,
+            is_computer_view: self.navigation_state.is_computer_view,
+            is_recycle_bin_view: self.navigation_state.is_recycle_bin_view,
+            global_search_active: self.global_search.active,
             texture_cache: &mut self.cache_manager.texture_cache,
             loading_set: &mut self.cache_manager.loading_set,
             loading_icons: &mut self.loading_icons,
@@ -275,8 +275,8 @@ impl ImageViewerApp {
             drag_target_folder: self.drag_target_folder.clone(),
             drag_started_item: &mut drag_started_item,
             drag_hovered_item: &mut drag_hovered_item,
-            computer_local_indices: &self.computer_view_local_indices,
-            computer_network_indices: &self.computer_view_network_indices,
+            computer_local_indices: &self.navigation_state.computer_view_local_indices,
+            computer_network_indices: &self.navigation_state.computer_view_network_indices,
         };
 
         // Use a different approach: collect actions in vectors
@@ -350,7 +350,7 @@ impl ImageViewerApp {
                 let mut path_to_navigate = None;
                 if let Some(item) = self.items.get(idx) {
                     if item.is_dir {
-                        if !self.is_recycle_bin_view {
+                        if !self.navigation_state.is_recycle_bin_view {
                             path_to_navigate = Some(item.path.clone());
                         }
                     } else {
@@ -405,7 +405,7 @@ impl ImageViewerApp {
                 }
             }
             Some(grid_view::GridViewAction::EmptyAreaSecondaryClick) if !is_renaming => {
-                let path = PathBuf::from(&self.current_path);
+                let path = PathBuf::from(&self.navigation_state.current_path);
                 let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
                 let right_bound = ui.available_rect_before_wrap().right();
                 self.populate_context_menu(ui.ctx(), std::slice::from_ref(&path), true, None);

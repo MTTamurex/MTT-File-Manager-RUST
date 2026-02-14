@@ -98,7 +98,7 @@ impl ImageViewerApp {
     /// Render list view with extracted navigation logic
     pub fn render_list_view(&mut self, ui: &mut egui::Ui) {
         // Keyboard navigation (ONLY when not renaming and media is NOT focused)
-        if !self.global_search_active
+        if !self.global_search.active
             && should_handle_navigation(
                 ui,
                 self.renaming_state.is_some(),
@@ -203,7 +203,7 @@ impl ImageViewerApp {
         // path_has_cloud_attributes() was removed because GetFileAttributesW can BLOCK
         // indefinitely on cloud-only OneDrive files, causing UI freeze and crash
         let is_onedrive_folder = {
-            let p = PathBuf::from(&self.current_path);
+            let p = PathBuf::from(&self.navigation_state.current_path);
             crate::infrastructure::onedrive::is_onedrive_path(&p)
         };
 
@@ -211,39 +211,39 @@ impl ImageViewerApp {
         let scroll_to_selected = self.scroll_to_selected;
         let is_video_docked_visible = self.is_video_docked_visible();
         let multi_selection = &self.multi_selection;
-        let is_ssd = io_priority::is_ssd(&PathBuf::from(&self.current_path));
+        let is_ssd = io_priority::is_ssd(&PathBuf::from(&self.navigation_state.current_path));
         let prefetch_rows = if is_ssd { 1 } else { 3 };
         let mut drag_started_item = None;
         let mut drag_hovered_item = None;
 
         // Select appropriate column width references based on context
         let (col_name_width, col_date_width, col_type_width, col_size_width, col_status_width) =
-            if self.is_computer_view {
+            if self.navigation_state.is_computer_view {
                 // Computer view uses its own set of columns
                 (
-                    &mut self.list_col_computer_name_width,
-                    &mut self.list_col_computer_total_width,
-                    &mut self.list_col_type_width, // Not used in computer view
-                    &mut self.list_col_computer_free_width,
-                    &mut self.list_col_onedrive_status_width, // Not used in computer view
+                    &mut self.layout.list_col_computer_name_width,
+                    &mut self.layout.list_col_computer_total_width,
+                    &mut self.layout.list_col_type_width, // Not used in computer view
+                    &mut self.layout.list_col_computer_free_width,
+                    &mut self.layout.list_col_onedrive_status_width, // Not used in computer view
                 )
             } else if is_onedrive_folder {
                 // OneDrive view uses its own set with status column
                 (
-                    &mut self.list_col_onedrive_name_width,
-                    &mut self.list_col_onedrive_date_width,
-                    &mut self.list_col_onedrive_type_width,
-                    &mut self.list_col_onedrive_size_width,
-                    &mut self.list_col_onedrive_status_width,
+                    &mut self.layout.list_col_onedrive_name_width,
+                    &mut self.layout.list_col_onedrive_date_width,
+                    &mut self.layout.list_col_onedrive_type_width,
+                    &mut self.layout.list_col_onedrive_size_width,
+                    &mut self.layout.list_col_onedrive_status_width,
                 )
             } else {
                 // Regular view uses standard columns
                 (
-                    &mut self.list_col_name_width,
-                    &mut self.list_col_date_width,
-                    &mut self.list_col_type_width,
-                    &mut self.list_col_size_width,
-                    &mut self.list_col_onedrive_status_width, // Not used in regular view
+                    &mut self.layout.list_col_name_width,
+                    &mut self.layout.list_col_date_width,
+                    &mut self.layout.list_col_type_width,
+                    &mut self.layout.list_col_size_width,
+                    &mut self.layout.list_col_onedrive_status_width, // Not used in regular view
                 )
             };
 
@@ -257,10 +257,10 @@ impl ImageViewerApp {
             renaming_state: renaming_state.clone(),
             focus_rename,
             scroll_to_selected,
-            is_computer_view: self.is_computer_view,
-            is_recycle_bin_view: self.is_recycle_bin_view,
+            is_computer_view: self.navigation_state.is_computer_view,
+            is_recycle_bin_view: self.navigation_state.is_recycle_bin_view,
             is_onedrive_folder,
-            global_search_active: self.global_search_active,
+            global_search_active: self.global_search.active,
             texture_cache: &mut self.cache_manager.texture_cache,
             loading_set: &mut self.cache_manager.loading_set,
             loading_icons: &mut self.loading_icons,
@@ -367,7 +367,7 @@ impl ImageViewerApp {
                 let mut path_to_navigate = None;
                 if let Some(item) = self.items.get(idx) {
                     if item.is_dir {
-                        if !self.is_recycle_bin_view {
+                        if !self.navigation_state.is_recycle_bin_view {
                             path_to_navigate = Some(item.path.clone());
                         }
                     } else {
@@ -434,7 +434,7 @@ impl ImageViewerApp {
                 self.save_preferences();
             }
             Some(list_view::ListViewAction::EmptyAreaSecondaryClick) if !is_renaming => {
-                let path = PathBuf::from(&self.current_path);
+                let path = PathBuf::from(&self.navigation_state.current_path);
                 let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
                 let right_bound = ui.available_rect_before_wrap().right();
                 self.populate_context_menu(ui.ctx(), std::slice::from_ref(&path), true, None);

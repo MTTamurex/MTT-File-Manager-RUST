@@ -8,12 +8,12 @@ pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
         if app.startup_tick == 1 {
             // Frame 1: Apply saved geometry while window is hidden
-            if app.saved_is_maximized {
+            if app.layout.saved_is_maximized {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
             } else {
                 ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::Vec2::new(
-                    app.saved_window_width,
-                    app.saved_window_height,
+                    app.layout.saved_window_width,
+                    app.layout.saved_window_height,
                 )));
             }
         }
@@ -24,7 +24,7 @@ pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
 
             // FINAL INITIALIZATION: Now that the UI is ready, ensure the initial tab is populated
-            if app.is_computer_view {
+            if app.navigation_state.is_computer_view {
                 app.setup_computer_view();
             } else {
                 app.load_folder(false);
@@ -48,27 +48,27 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
         // Detect if window is minimized
         let minimized = i.viewport().minimized.unwrap_or(false);
-        let prev_minimized = app.saved_is_minimized;
+        let prev_minimized = app.layout.saved_is_minimized;
         let minimized_changed = minimized != prev_minimized;
 
         if let Some(rect) = i.viewport().inner_rect {
             // Only save size when NOT maximized
             if !i.viewport().maximized.unwrap_or(false) {
-                if (app.saved_window_width - rect.width()).abs() > 1.0
-                    || (app.saved_window_height - rect.height()).abs() > 1.0
+                if (app.layout.saved_window_width - rect.width()).abs() > 1.0
+                    || (app.layout.saved_window_height - rect.height()).abs() > 1.0
                 {
                     size_changed = true;
                 }
-                app.saved_window_width = rect.width();
-                app.saved_window_height = rect.height();
+                app.layout.saved_window_width = rect.width();
+                app.layout.saved_window_height = rect.height();
             }
         }
 
         let new_maximized = i.viewport().maximized.unwrap_or(false);
-        if new_maximized != app.saved_is_maximized {
+        if new_maximized != app.layout.saved_is_maximized {
             maximized_changed = true;
         }
-        app.saved_is_maximized = new_maximized;
+        app.layout.saved_is_maximized = new_maximized;
 
         (
             size_changed,
@@ -80,7 +80,7 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
     // Handle minimization state changes - CRITICAL for OneDrive thread management
     if minimized_changed {
-        app.saved_is_minimized = is_minimized;
+        app.layout.saved_is_minimized = is_minimized;
         onedrive::set_app_minimized(is_minimized);
 
         if is_minimized {
@@ -103,7 +103,7 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
     // This happens when egui reports minimized but we haven't frozen yet
     if is_minimized && layout_phase() == WindowLayoutPhase::Normal {
         // Freeze layout with current sidebar widths
-        freeze_layout(app.sidebar_left_width, app.sidebar_right_width);
+        freeze_layout(app.layout.sidebar_left_width, app.layout.sidebar_right_width);
     }
 
     // Save preferences when window state changes
@@ -120,6 +120,6 @@ pub fn handle_exit(app: &mut ImageViewerApp) {
     app.force_save_preferences();
     log::info!(
         "[EXIT] Saved sidebar widths: L={}, R={}",
-        app.sidebar_left_width, app.sidebar_right_width
+        app.layout.sidebar_left_width, app.layout.sidebar_right_width
     );
 }

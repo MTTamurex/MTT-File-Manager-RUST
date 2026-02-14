@@ -3,10 +3,10 @@ use std::time::Instant;
 
 impl ImageViewerApp {
     pub fn trigger_manual_refresh(&mut self) {
-        if self.is_computer_view {
+        if self.navigation_state.is_computer_view {
             self.reload_drive_list_async();
-            self.last_drive_refresh = Instant::now();
-        } else if self.is_recycle_bin_view {
+            self.drive_state.last_drive_refresh = Instant::now();
+        } else if self.navigation_state.is_recycle_bin_view {
             self.setup_recycle_bin_view();
         } else {
             // Force regeneration of visible folder previews on manual refresh.
