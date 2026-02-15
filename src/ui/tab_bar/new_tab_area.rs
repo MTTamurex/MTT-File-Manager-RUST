@@ -52,22 +52,12 @@ pub(super) fn render_new_tab_and_drag_area(
         clear_caption_drag_region();
     }
 
-    let new_tab_bg = if new_tab_response.hovered() {
-        hover_bg
-    } else {
-        inactive_bg
-    };
-
-    ui.painter().rect_filled(
-        new_tab_rect,
-        CornerRadius {
-            nw: 6,
-            ne: 6,
-            sw: 0,
-            se: 0,
-        },
-        new_tab_bg,
-    );
+    // Keep "+" as a button, not as another tab.
+    // Draw hover only to avoid visual seam with rounded tabs.
+    if new_tab_response.hovered() {
+        ui.painter()
+            .rect_filled(new_tab_rect.shrink2(Vec2::splat(4.0)), CornerRadius::same(4), hover_bg);
+    }
 
     let plus_center = new_tab_rect.center();
     let plus_size = 10.0;

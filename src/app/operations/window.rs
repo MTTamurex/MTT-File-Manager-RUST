@@ -5,6 +5,7 @@
 
 use crate::app::state::ImageViewerApp;
 use crate::infrastructure::windows::native_menu::warmup_shell_extensions;
+use crate::infrastructure::windows::window_corners::apply_window_corner_preference;
 use crate::infrastructure::windows::window_subclass::install_borderless_subclass;
 use windows::core::PCWSTR;
 use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
@@ -39,6 +40,9 @@ impl ImageViewerApp {
                     } else {
                         log::warn!("Failed to install borderless resize subclass");
                     }
+
+                    // Keep rounded corners in windowed mode (Windows 11 DWM).
+                    apply_window_corner_preference(hwnd, self.layout.saved_is_maximized);
 
                     // Warmup shell extensions to avoid first-use delay on context menu
                     // This pre-loads extensions like WinRAR, Send to, etc.
