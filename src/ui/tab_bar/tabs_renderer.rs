@@ -5,6 +5,30 @@ use eframe::egui::{self, Color32, CornerRadius, Stroke, Vec2};
 
 use super::{drag_dwell, TabBarAction};
 
+const TAB_CORNER_RADIUS: u8 = 8;
+
+#[inline]
+fn paint_tab_background(ui: &mut egui::Ui, rect: egui::Rect, color: Color32) {
+    ui.painter().rect_filled(
+        rect,
+        CornerRadius {
+            nw: TAB_CORNER_RADIUS,
+            ne: TAB_CORNER_RADIUS,
+            sw: 0,
+            se: 0,
+        },
+        color,
+    );
+
+    // Second pass only for opaque fills. For translucent colors this would double-blend
+    // and create a visible horizontal tone seam.
+    if color.a() == u8::MAX {
+        let body_top = (rect.min.y + TAB_CORNER_RADIUS as f32 - 1.0).min(rect.max.y);
+        let body = egui::Rect::from_min_max(egui::pos2(rect.min.x, body_top), rect.max);
+        ui.painter().rect_filled(body, 0.0, color);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_tabs(
     ui: &mut egui::Ui,
@@ -68,16 +92,7 @@ pub(super) fn render_tabs(
             inactive_bg
         };
 
-        ui.painter().rect_filled(
-            rect,
-            CornerRadius {
-                nw: 6,
-                ne: 6,
-                sw: 0,
-                se: 0,
-            },
-            bg_color,
-        );
+        paint_tab_background(ui, rect, bg_color);
 
         let content_rect = rect.shrink2(Vec2::new(tab_padding, 4.0));
 

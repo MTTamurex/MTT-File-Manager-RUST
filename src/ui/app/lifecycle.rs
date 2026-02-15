@@ -110,6 +110,15 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
     if size_changed || maximized_changed {
         app.save_preferences();
     }
+
+    if maximized_changed {
+        if let Some(hwnd) = app.native_hwnd {
+            crate::infrastructure::windows::window_corners::apply_window_corner_preference(
+                hwnd,
+                app.layout.saved_is_maximized,
+            );
+        }
+    }
 }
 
 pub fn handle_exit(app: &mut ImageViewerApp) {

@@ -11,7 +11,6 @@
 use crate::tabs::TabManager;
 use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
-use crate::ui::theme;
 use eframe::egui::{self, Color32};
 
 mod drag_dwell;
@@ -66,10 +65,11 @@ pub fn render_tab_bar(
     } else {
         Color32::from_rgb(230, 230, 230) // Darker gray for inactive tabs
     };
+    // Use opaque hover colors in tab bar to avoid tone mismatch with rounded-tab dual-pass paint.
     let hover_bg = if is_dark {
-        theme::color_dark_hover()
+        Color32::from_rgb(52, 52, 52)
     } else {
-        theme::color_hover()
+        Color32::from_rgb(216, 216, 216)
     };
     let text_color = if is_dark {
         Color32::from_rgb(220, 220, 220)

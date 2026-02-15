@@ -20,6 +20,7 @@ pub mod recycle_bin;
 pub mod shell_folder;
 pub mod shell_operations;
 pub mod system_info;
+pub mod window_corners;
 pub mod window_subclass;
 
 // Re-export for convenience
@@ -44,4 +45,5 @@ pub use recycle_bin::*;
 pub use shell_folder::{is_shell_navigation_path, list_shell_folder};
 pub use shell_operations::*;
 pub use system_info::*;
+pub use window_corners::*;
 pub use window_subclass::*;

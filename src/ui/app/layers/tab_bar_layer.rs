@@ -11,9 +11,9 @@ pub(crate) fn render_tab_bar_layer(
         .exact_height(36.0)
         .frame(egui::Frame {
             fill: if ctx.style().visuals.dark_mode {
-                egui::Color32::from_rgb(32, 32, 32)
+                egui::Color32::from_rgb(30, 30, 30)
             } else {
-                egui::Color32::from_rgb(243, 243, 243)
+                egui::Color32::from_rgb(230, 230, 230)
             },
             ..Default::default()
         })
