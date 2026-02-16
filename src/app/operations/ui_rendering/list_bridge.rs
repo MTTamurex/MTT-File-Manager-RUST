@@ -211,7 +211,10 @@ impl ImageViewerApp {
         let scroll_to_selected = self.scroll_to_selected;
         let is_video_docked_visible = self.is_video_docked_visible();
         let multi_selection = &self.multi_selection;
-        let is_ssd = io_priority::is_ssd(&PathBuf::from(&self.navigation_state.current_path));
+        // Non-blocking in render loop: use cached profile only.
+        // Unknown drives fall back to HDD behavior to avoid UI stalls.
+        let is_ssd = io_priority::try_is_ssd(Path::new(&self.navigation_state.current_path))
+            .unwrap_or(false);
         let prefetch_rows = if is_ssd { 1 } else { 3 };
         let mut drag_started_item = None;
         let mut drag_hovered_item = None;

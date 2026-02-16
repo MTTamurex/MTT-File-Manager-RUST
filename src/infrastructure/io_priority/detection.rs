@@ -174,6 +174,16 @@ pub(super) fn is_ssd(path: &Path) -> bool {
     result
 }
 
+/// Non-blocking cache lookup for disk type.
+/// Returns:
+/// - Some(is_ssd) when cached
+/// - None when drive is unknown (caller may choose a safe fallback without probing)
+pub(super) fn try_is_ssd_cached(path: &Path) -> Option<bool> {
+    let drive_letter = extract_drive_letter(path)?;
+    let cache = get_disk_cache().lock().ok()?;
+    cache.get(&drive_letter).copied()
+}
+
 fn determine_disk_type(drive_letter: char) -> bool {
     // Check user configuration first (manual overrides).
     if let Some(override_type) =

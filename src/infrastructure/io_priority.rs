@@ -37,6 +37,12 @@ pub fn is_ssd(path: &Path) -> bool {
     detection::is_ssd(path)
 }
 
+/// Non-blocking SSD check based only on cached drive profile.
+/// Returns `None` when the drive was never profiled yet.
+pub fn try_is_ssd(path: &Path) -> Option<bool> {
+    detection::try_is_ssd_cached(path)
+}
+
 /// Invalidate cache for a specific drive (useful after configuration changes).
 pub fn invalidate_drive_cache(drive_letter: char) {
     detection::invalidate_drive_cache(drive_letter)
