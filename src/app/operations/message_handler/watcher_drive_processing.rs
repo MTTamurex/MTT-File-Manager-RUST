@@ -204,6 +204,7 @@ impl ImageViewerApp {
         current_path_norm: &str,
         internal_cache_root_norm: Option<&str>,
         internal_cache_root_prefix: Option<&str>,
+        folders_with_changed_contents: &mut HashSet<PathBuf>,
     ) {
         if self.should_ignore_watcher_path(
             path,
@@ -217,6 +218,10 @@ impl ImageViewerApp {
         self.cache_manager.texture_cache.pop(&cleaned);
         self.cache_manager.failed_thumbnails.pop(&cleaned);
         crate::workers::thumbnail::clear_failure_cache(&cleaned);
+
+        // Register parent folder as changed so its cover/preview caches
+        // are invalidated when the modified file was the cover source.
+        Self::register_changed_folder(&cleaned, folders_with_changed_contents);
 
         if let Some(ref selected) = self.selected_file {
             if selected.path == cleaned {
@@ -341,6 +346,62 @@ impl ImageViewerApp {
                     drive_events.len()
                 );
             }
+
+            // Even during flood, collect affected parent folders so their
+            // cover/preview caches are invalidated by apply_folder_content_change_invalidations.
+            for event in drive_events {
+                match event {
+                    DriveWatcherEvent::Created(path)
+                    | DriveWatcherEvent::Modified(path)
+                    | DriveWatcherEvent::Unknown(path) => {
+                        if !self.should_ignore_watcher_path(
+                            path,
+                            internal_cache_root_norm,
+                            internal_cache_root_prefix,
+                        ) {
+                            let cleaned = Self::clean_path(path);
+                            Self::register_changed_folder(&cleaned, folders_with_changed_contents);
+                        }
+                    }
+                    DriveWatcherEvent::Deleted(path) => {
+                        if !self.should_ignore_watcher_path(
+                            path,
+                            internal_cache_root_norm,
+                            internal_cache_root_prefix,
+                        ) {
+                            let cleaned = Self::clean_path(path);
+                            pending_disk_cache_invalidations.push(cleaned.clone());
+                            Self::register_changed_folder(&cleaned, folders_with_changed_contents);
+                        }
+                    }
+                    DriveWatcherEvent::Renamed(old_path, new_path) => {
+                        if !self.should_ignore_watcher_path(
+                            old_path,
+                            internal_cache_root_norm,
+                            internal_cache_root_prefix,
+                        ) {
+                            let cleaned_old = Self::clean_path(old_path);
+                            pending_disk_cache_invalidations.push(cleaned_old.clone());
+                            Self::register_changed_folder(
+                                &cleaned_old,
+                                folders_with_changed_contents,
+                            );
+                        }
+                        if !self.should_ignore_watcher_path(
+                            new_path,
+                            internal_cache_root_norm,
+                            internal_cache_root_prefix,
+                        ) {
+                            let cleaned_new = Self::clean_path(new_path);
+                            Self::register_changed_folder(
+                                &cleaned_new,
+                                folders_with_changed_contents,
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
             return;
         }
 
@@ -366,6 +427,7 @@ impl ImageViewerApp {
                     current_path_norm,
                     internal_cache_root_norm,
                     internal_cache_root_prefix,
+                    folders_with_changed_contents,
                 ),
                 DriveWatcherEvent::Renamed(old_path, new_path) => self.handle_drive_renamed_event(
                     old_path,
@@ -388,6 +450,9 @@ impl ImageViewerApp {
         for folder_path in folders_with_changed_contents {
             self.disk_cache.remove_folder_preview_cache(&folder_path);
             self.disk_cache.remove_folder_cover(&folder_path);
+            // Also evict the in-memory GPU texture so the stale preview
+            // stops being rendered immediately (not just on LRU eviction).
+            self.cache_manager.invalidate_folder_preview(&folder_path);
             self.scanned_folders.pop(&folder_path);
             let _ = self.cover_worker_sender.send(folder_path.clone());
         }

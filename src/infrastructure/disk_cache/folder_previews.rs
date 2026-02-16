@@ -5,21 +5,29 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 impl ThumbnailDiskCache {
     /// Retrieves a cached folder preview (Shell sandwich icon) from SQLite.
-    /// Returns decoded RGBA data ready for GPU upload.
+    /// Returns decoded RGBA data ready for GPU upload, plus the cache timestamp.
+    /// The `created_at` (Unix seconds) allows callers to detect stale entries
+    /// by comparing against the folder's last-write time.
     /// [READER]
-    pub fn get_folder_preview_cache(&self, folder_path: &Path) -> Option<(Vec<u8>, u32, u32)> {
+    pub fn get_folder_preview_cache(
+        &self,
+        folder_path: &Path,
+    ) -> Option<(Vec<u8>, u32, u32, i64)> {
         let db = self.reader.lock().ok()?;
         let mut stmt = db
-            .prepare_cached("SELECT data, width, height FROM folder_previews WHERE folder_path = ?")
+            .prepare_cached(
+                "SELECT data, width, height, created_at FROM folder_previews WHERE folder_path = ?",
+            )
             .ok()?;
 
         let folder_path_str = folder_path.to_string_lossy();
-        let (webp_data, _db_width, _db_height): (Vec<u8>, u32, u32) =
+        let (webp_data, _db_width, _db_height, created_at): (Vec<u8>, u32, u32, i64) =
             match stmt.query_row([&*folder_path_str], |row| {
                 Ok((
                     row.get::<_, Vec<u8>>(0)?,
                     row.get::<_, i64>(1)? as u32,
                     row.get::<_, i64>(2)? as u32,
+                    row.get::<_, i64>(3)?,
                 ))
             }) {
                 Ok(row) => row,
@@ -53,7 +61,7 @@ impl ThumbnailDiskCache {
         };
         let rgba = decoded.to_image().to_rgba8();
         let (w, h) = (rgba.width(), rgba.height());
-        Some((rgba.into_raw(), w, h))
+        Some((rgba.into_raw(), w, h, created_at))
     }
 
     /// Saves a folder preview (Shell sandwich icon) to SQLite, compressed as WebP.
