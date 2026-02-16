@@ -99,9 +99,27 @@ fn path_matches_prefix(path: &Path, prefix: &Path) -> bool {
         format!("{}\\", prefix_str)
     };
 
-    path_str.starts_with(&prefix_normalized)
-        // Special case: if prefix is drive root (e.g., "d:\\"), any path on that drive matches.
-        || (prefix_normalized.len() == 3 && path_str.starts_with(&prefix_normalized[..2]))
+    // Match children of the prefix (e.g. path="c:\teste\file.txt", prefix="c:\teste\\")
+    if path_str.starts_with(&prefix_normalized) {
+        return true;
+    }
+
+    // Match the prefix itself (e.g. path="c:\teste", prefix="c:\teste")
+    // This is critical for detecting when the watched folder itself is
+    // deleted or renamed by another application.
+    if path_str == prefix_str {
+        return true;
+    }
+
+    // Match ancestors of the prefix (e.g. path="c:\parent", prefix starts with "c:\parent\\")
+    // Needed when a parent folder of the watched path is deleted.
+    let path_as_prefix = format!("{}\\" , path_str);
+    if prefix_normalized.starts_with(&path_as_prefix) {
+        return true;
+    }
+
+    // Special case: if prefix is drive root (e.g., "d:\\"), any path on that drive matches.
+    prefix_normalized.len() == 3 && path_str.starts_with(&prefix_normalized[..2])
 }
 
 /// Check if an event matches the current prefix.
