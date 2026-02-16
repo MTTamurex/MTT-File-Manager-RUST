@@ -20,7 +20,7 @@ pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
                     // like Cryptomator that emit DELETE+CREATE during
                     // internal refresh). Skip the DB cleanup to avoid
                     // permanent thumbnail loss.
-                    if path.exists() {
+                    if crate::infrastructure::onedrive::fast_path_exists(path.as_path()) {
                         log::debug!(
                             "[CACHE-INVALIDATION] Skipping DB cleanup — path still exists: {:?}",
                             path.file_name().unwrap_or_default()

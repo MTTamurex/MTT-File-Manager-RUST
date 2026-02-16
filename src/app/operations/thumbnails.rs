@@ -173,7 +173,9 @@ impl ImageViewerApp {
     pub fn request_icon_load(&mut self, path: PathBuf) {
         if !self.loading_icons.contains(&path) {
             self.loading_icons.insert(path.clone());
-            let _ = self.icon_req_sender.send(path);
+            if self.icon_req_sender.send((path.clone(), self.generation)).is_err() {
+                self.loading_icons.remove(&path);
+            }
         }
     }
 }

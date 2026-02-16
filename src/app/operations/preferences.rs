@@ -30,18 +30,21 @@ impl ImageViewerApp {
         {
             return;
         }
-        self.preferences_dirty = false;
-        self.preferences_last_save = std::time::Instant::now();
-        self.do_save_preferences();
+        // Non-blocking flush: if DB writer is busy, keep dirty=true and retry next frame.
+        if self.do_save_preferences_nonblocking() {
+            self.preferences_dirty = false;
+            self.preferences_last_save = std::time::Instant::now();
+        }
     }
 
     /// Force-flushes preferences immediately (for exit).
     pub fn force_save_preferences(&self) {
-        self.do_save_preferences();
+        self.do_save_preferences_blocking();
     }
 
-    /// Actually writes all preferences to SQLite.
-    fn do_save_preferences(&self) {
+    fn collect_preferences(&self) -> Vec<(&'static str, String)> {
+        let mut prefs: Vec<(&'static str, String)> = Vec::with_capacity(32);
+
         let sort_mode_str = match self.sort_mode {
             SortMode::Name => "name",
             SortMode::Date => "date",
@@ -50,7 +53,7 @@ impl ImageViewerApp {
             SortMode::DriveTotalSpace => "drive_total",
             SortMode::DriveFreeSpace => "drive_free",
         };
-        self.disk_cache.set_preference("sort_mode", sort_mode_str);
+        prefs.push(("sort_mode", sort_mode_str.to_string()));
 
         let sort_mode_computer_str = match self.sort_mode_computer {
             SortMode::Name => "name",
@@ -58,8 +61,7 @@ impl ImageViewerApp {
             SortMode::DriveFreeSpace => "drive_free",
             _ => "name", // Computer view only supports these 3
         };
-        self.disk_cache
-            .set_preference("sort_mode_computer", sort_mode_computer_str);
+        prefs.push(("sort_mode_computer", sort_mode_computer_str.to_string()));
 
         let sort_mode_normal_str = match self.sort_mode_normal {
             SortMode::Name => "name",
@@ -68,70 +70,66 @@ impl ImageViewerApp {
             SortMode::Type => "type",
             _ => "name", // Normal folders don't use drive modes
         };
-        self.disk_cache
-            .set_preference("sort_mode_normal", sort_mode_normal_str);
+        prefs.push(("sort_mode_normal", sort_mode_normal_str.to_string()));
 
-        self.disk_cache.set_preference(
+        prefs.push((
             "sort_descending",
-            if self.sort_descending {
+            (if self.sort_descending {
                 "true"
             } else {
                 "false"
-            },
-        );
+            })
+            .to_string(),
+        ));
 
         let folders_pos_str = match self.folders_position {
             FoldersPosition::First => "first",
             FoldersPosition::Last => "last",
             FoldersPosition::Mixed => "mixed",
         };
-        self.disk_cache
-            .set_preference("folders_position", folders_pos_str);
+        prefs.push(("folders_position", folders_pos_str.to_string()));
 
         // UI preferences
-        self.disk_cache
-            .set_preference("thumbnail_size", &self.thumbnail_size.to_string());
+        prefs.push(("thumbnail_size", self.thumbnail_size.to_string()));
 
         let view_mode_str = match self.view_mode {
             ViewMode::Grid => "grid",
             ViewMode::List => "list",
         };
-        self.disk_cache.set_preference("view_mode", view_mode_str);
+        prefs.push(("view_mode", view_mode_str.to_string()));
 
-        self.disk_cache.set_preference(
+        prefs.push((
             "show_preview_panel",
-            if self.show_preview_panel {
+            (if self.show_preview_panel {
                 "true"
             } else {
                 "false"
-            },
-        );
-        self.disk_cache
-            .set_preference("upload_budget_ms", &self.upload_budget_ms.to_string());
+            })
+            .to_string(),
+        ));
+        prefs.push(("upload_budget_ms", self.upload_budget_ms.to_string()));
 
         // Window state persistence
-        self.disk_cache
-            .set_preference("window_width", &self.layout.saved_window_width.to_string());
-        self.disk_cache.set_preference(
+        prefs.push(("window_width", self.layout.saved_window_width.to_string()));
+        prefs.push((
             "window_height",
-            &self.layout.saved_window_height.to_string(),
-        );
-        self.disk_cache.set_preference(
+            self.layout.saved_window_height.to_string(),
+        ));
+        prefs.push((
             "window_is_maximized",
-            if self.layout.saved_is_maximized {
+            (if self.layout.saved_is_maximized {
                 "true"
             } else {
                 "false"
-            },
-        );
+            })
+            .to_string(),
+        ));
 
         // Sidebar widths persistence - only save valid values
         let left_to_save = self.layout.sidebar_left_width.max(150.0);
         let right_to_save = self.layout.sidebar_right_width.max(250.0);
-        self.disk_cache
-            .set_preference("sidebar_left_width", &left_to_save.to_string());
-        self.disk_cache
-            .set_preference("sidebar_right_width", &right_to_save.to_string());
+        prefs.push(("sidebar_left_width", left_to_save.to_string()));
+        prefs.push(("sidebar_right_width", right_to_save.to_string()));
 
         // Save last active folder from current tab
         let last_folder = self.tab_manager.active().path.clone();
@@ -141,67 +139,68 @@ impl ImageViewerApp {
             && last_folder != "Lixeira"
             && !last_folder.starts_with("shell:")
         {
-            self.disk_cache.set_preference("last_folder", &last_folder);
+            prefs.push(("last_folder", last_folder));
         }
 
         // Save media player volume if available
         if let Some(preview) = &self.media_preview {
             if let Some(volume) = preview.get_video_state().map(|s| s.volume) {
-                self.disk_cache
-                    .set_preference("media_volume", &volume.to_string());
+                prefs.push(("media_volume", volume.to_string()));
             }
         }
 
         // Save list view column widths - Regular view
-        self.disk_cache.set_preference(
-            "list_col_name_width",
-            &self.layout.list_col_name_width.to_string(),
-        );
-        self.disk_cache.set_preference(
-            "list_col_date_width",
-            &self.layout.list_col_date_width.to_string(),
-        );
-        self.disk_cache.set_preference(
-            "list_col_type_width",
-            &self.layout.list_col_type_width.to_string(),
-        );
-        self.disk_cache.set_preference(
-            "list_col_size_width",
-            &self.layout.list_col_size_width.to_string(),
-        );
+        prefs.push(("list_col_name_width", self.layout.list_col_name_width.to_string()));
+        prefs.push(("list_col_date_width", self.layout.list_col_date_width.to_string()));
+        prefs.push(("list_col_type_width", self.layout.list_col_type_width.to_string()));
+        prefs.push(("list_col_size_width", self.layout.list_col_size_width.to_string()));
         // Save list view column widths - OneDrive view
-        self.disk_cache.set_preference(
+        prefs.push((
             "list_col_onedrive_name_width",
-            &self.layout.list_col_onedrive_name_width.to_string(),
-        );
-        self.disk_cache.set_preference(
+            self.layout.list_col_onedrive_name_width.to_string(),
+        ));
+        prefs.push((
             "list_col_onedrive_date_width",
-            &self.layout.list_col_onedrive_date_width.to_string(),
-        );
-        self.disk_cache.set_preference(
+            self.layout.list_col_onedrive_date_width.to_string(),
+        ));
+        prefs.push((
             "list_col_onedrive_type_width",
-            &self.layout.list_col_onedrive_type_width.to_string(),
-        );
-        self.disk_cache.set_preference(
+            self.layout.list_col_onedrive_type_width.to_string(),
+        ));
+        prefs.push((
             "list_col_onedrive_size_width",
-            &self.layout.list_col_onedrive_size_width.to_string(),
-        );
-        self.disk_cache.set_preference(
+            self.layout.list_col_onedrive_size_width.to_string(),
+        ));
+        prefs.push((
             "list_col_onedrive_status_width",
-            &self.layout.list_col_onedrive_status_width.to_string(),
-        );
+            self.layout.list_col_onedrive_status_width.to_string(),
+        ));
         // Save list view column widths - Computer view
-        self.disk_cache.set_preference(
+        prefs.push((
             "list_col_computer_name_width",
-            &self.layout.list_col_computer_name_width.to_string(),
-        );
-        self.disk_cache.set_preference(
+            self.layout.list_col_computer_name_width.to_string(),
+        ));
+        prefs.push((
             "list_col_computer_total_width",
-            &self.layout.list_col_computer_total_width.to_string(),
-        );
-        self.disk_cache.set_preference(
+            self.layout.list_col_computer_total_width.to_string(),
+        ));
+        prefs.push((
             "list_col_computer_free_width",
-            &self.layout.list_col_computer_free_width.to_string(),
-        );
+            self.layout.list_col_computer_free_width.to_string(),
+        ));
+
+        prefs
+    }
+
+    /// Non-blocking write attempt used by frame loop flush.
+    fn do_save_preferences_nonblocking(&self) -> bool {
+        let prefs = self.collect_preferences();
+        self.disk_cache.try_set_preferences_batch(&prefs)
+    }
+
+    /// Blocking write used on exit to maximize persistence reliability.
+    fn do_save_preferences_blocking(&self) {
+        let prefs = self.collect_preferences();
+        self.disk_cache.set_preferences_batch(&prefs);
     }
 }

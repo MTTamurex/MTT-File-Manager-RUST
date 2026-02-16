@@ -13,6 +13,50 @@ impl ThumbnailDiskCache {
         }
     }
 
+    /// Best-effort non-blocking batch preference write.
+    /// Returns `true` when the batch was flushed, `false` when writer lock is busy.
+    /// [WRITER]
+    pub fn try_set_preferences_batch(&self, entries: &[(&str, String)]) -> bool {
+        let mut db = match self.writer.try_lock() {
+            Ok(db) => db,
+            Err(_) => return false,
+        };
+
+        Self::write_preferences_batch(&mut db, entries);
+        true
+    }
+
+    /// Blocking batch preference write.
+    /// [WRITER]
+    pub fn set_preferences_batch(&self, entries: &[(&str, String)]) {
+        if let Ok(mut db) = self.writer.lock() {
+            Self::write_preferences_batch(&mut db, entries);
+        }
+    }
+
+    fn write_preferences_batch(db: &mut rusqlite::Connection, entries: &[(&str, String)]) {
+        if entries.is_empty() {
+            return;
+        }
+
+        if db.execute("BEGIN IMMEDIATE TRANSACTION", []).is_ok() {
+            for (key, value) in entries {
+                let _ = db.execute(
+                    "INSERT OR REPLACE INTO user_preferences (key, value) VALUES (?, ?)",
+                    params![key, value],
+                );
+            }
+            let _ = db.execute("COMMIT", []);
+        } else {
+            for (key, value) in entries {
+                let _ = db.execute(
+                    "INSERT OR REPLACE INTO user_preferences (key, value) VALUES (?, ?)",
+                    params![key, value],
+                );
+            }
+        }
+    }
+
     /// Gets a user preference
     /// [READER]
     pub fn get_preference(&self, key: &str) -> Option<String> {

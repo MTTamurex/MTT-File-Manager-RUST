@@ -98,7 +98,7 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
     }
 
     if !drew_something {
-        // Fallback to Windows icon or placeholder
+        // Fallback to Windows icon only (no generic placeholder glyphs)
         ui.painter()
             .rect_filled(thumb_rect, 4.0, egui::Color32::from_gray(248));
         if let Some(icon_texture) = file_icon {
@@ -110,21 +110,6 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
                 icon_rect,
                 egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                 egui::Color32::WHITE,
-            );
-        } else {
-            // If even the icon hasn't loaded, show "..." for media or generic icon
-            let text = if is_media_file { "..." } else { "📄" };
-            let font_id = if is_media_file {
-                egui::FontId::proportional(thumb_size * 0.3)
-            } else {
-                egui::FontId::proportional(thumb_size * 0.4)
-            };
-            ui.painter().text(
-                thumb_rect.center(),
-                egui::Align2::CENTER_CENTER,
-                text,
-                font_id,
-                egui::Color32::GRAY,
             );
         }
     }
