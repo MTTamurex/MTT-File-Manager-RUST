@@ -230,16 +230,23 @@ impl ImageViewerApp {
             }
         }
 
+        // NOTE: MODIFY events mean file content/size/mtime changed, NOT that
+        // files were added or removed. The directory listing (names, count) is
+        // unchanged, so we do NOT invalidate the DirectoryCache or trigger a
+        // full auto-reload. This prevents unnecessary disk rescans on FUSE/WinFsp
+        // drivers (Cryptomator, VeraCrypt) that emit frequent MODIFY events
+        // during internal operations.  The texture/thumbnail caches were already
+        // evicted above, so the *visual* thumbnail will be refreshed lazily.
+        // Directory listing metadata (size/mtime) is refreshed on next
+        // navigation or manual reload (F5).
+        #[cfg(debug_assertions)]
         if let Some(parent) = cleaned.parent() {
             let parent_norm = Self::normalize_for_match(parent);
             if parent_norm == current_path_norm {
-                self.directory_cache.invalidate(&parent.to_path_buf());
-                #[cfg(debug_assertions)]
                 log::trace!(
-                    "[FS-WATCH] MODIFY: {:?}",
+                    "[FS-WATCH] MODIFY (texture eviction only): {:?}",
                     path.file_name().unwrap_or_default()
                 );
-                self.pending_auto_reload = true;
             }
         }
     }

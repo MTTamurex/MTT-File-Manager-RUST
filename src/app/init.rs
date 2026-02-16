@@ -241,6 +241,7 @@ impl ImageViewerApp {
             watcher_fallback_fs: None,
             watcher_fallback_last_probe: Instant::now(),
             watcher_fallback_signature: None,
+            rdcw_unreliable_drives: std::collections::HashMap::new(),
 
             // CLIPBOARD
             clipboard: ClipboardManager::new(),

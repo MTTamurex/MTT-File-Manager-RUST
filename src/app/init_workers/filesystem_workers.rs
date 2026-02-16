@@ -15,6 +15,18 @@ pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
             let mut unique_paths = std::collections::HashSet::with_capacity(paths.len());
             for path in paths {
                 if unique_paths.insert(path.clone()) {
+                    // Guard: if the path still exists on disk, the DELETE
+                    // event was transient (common on FUSE/WinFsp drivers
+                    // like Cryptomator that emit DELETE+CREATE during
+                    // internal refresh). Skip the DB cleanup to avoid
+                    // permanent thumbnail loss.
+                    if path.exists() {
+                        log::debug!(
+                            "[CACHE-INVALIDATION] Skipping DB cleanup — path still exists: {:?}",
+                            path.file_name().unwrap_or_default()
+                        );
+                        continue;
+                    }
                     disk_cache_for_invalidation.remove_cache_for_path(&path);
                 }
             }
