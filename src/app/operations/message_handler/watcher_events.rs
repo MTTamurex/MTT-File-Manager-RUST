@@ -100,6 +100,15 @@ impl ImageViewerApp {
             ) {
                 Ok(entries) => entries,
                 Err(err) => {
+                    // If the directory doesn't exist anymore, navigate up.
+                    if !current_path.is_dir() {
+                        log::warn!(
+                            "[FS-WATCH-FALLBACK] Current folder vanished: {:?} — navigating up",
+                            current_path
+                        );
+                        self.navigate_to_nearest_valid_ancestor();
+                        return;
+                    }
                     log::debug!(
                         "[FS-WATCH-FALLBACK] Poll read failed for {:?}: {}",
                         current_path,
