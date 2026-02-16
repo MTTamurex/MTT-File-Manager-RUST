@@ -365,6 +365,23 @@ impl ImageViewerApp {
                     max_events_individual
                 );
 
+                // Check if the current folder was deleted/renamed during the flood.
+                // This catches the case where a folder with many files is deleted
+                // (generating >50 events) and the individual handler never runs.
+                let current_path_pb = PathBuf::from(&self.navigation_state.current_path);
+                if !self.navigation_state.is_computer_view
+                    && !self.navigation_state.is_recycle_bin_view
+                    && !current_path_pb.is_dir()
+                {
+                    log::warn!(
+                        "[FS-WATCH] Flood: current folder vanished: {:?} — navigating up",
+                        current_path_pb
+                    );
+                    self.directory_cache.invalidate(&current_path_pb);
+                    self.navigate_to_nearest_valid_ancestor();
+                    return;
+                }
+
                 if self.last_auto_reload.elapsed() > Duration::from_millis(flood_reload_cooldown_ms)
                 {
                     self.directory_cache
