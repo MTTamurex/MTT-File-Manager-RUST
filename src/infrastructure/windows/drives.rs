@@ -1,6 +1,7 @@
 //! Windows drive and volume information functions
 //! Follows .cursorrules: single responsibility, < 300 lines
 
+use std::path::Path;
 use windows::{core::*, Win32::Storage::FileSystem::*, Win32::UI::Shell::*};
 
 /// Volume information structure.
@@ -172,4 +173,35 @@ pub fn get_volume_info(drive_path: &str) -> VolumeInfo {
             }
         }
     }
+}
+
+fn extract_drive_letter(path: &Path) -> Option<char> {
+    let s = path.to_string_lossy();
+    if s.len() >= 2 && s.as_bytes()[1] == b':' {
+        s.chars().next().map(|c| c.to_ascii_uppercase())
+    } else {
+        None
+    }
+}
+
+/// Returns the filesystem name for a local path drive (e.g. "NTFS", "exFAT").
+pub fn get_file_system_for_path(path: &Path) -> Option<String> {
+    let drive_letter = extract_drive_letter(path)?;
+    let drive_root = format!("{}:\\", drive_letter);
+    let info = get_volume_info(&drive_root);
+    if info.file_system.is_empty() {
+        None
+    } else {
+        Some(info.file_system)
+    }
+}
+
+/// USN-capable filesystems support reliable journal-backed change tracking.
+pub fn is_usn_filesystem(file_system: &str) -> bool {
+    file_system.eq_ignore_ascii_case("NTFS") || file_system.eq_ignore_ascii_case("ReFS")
+}
+
+/// Returns whether the path is on an USN-capable filesystem.
+pub fn path_is_usn_filesystem(path: &Path) -> Option<bool> {
+    get_file_system_for_path(path).map(|fs| is_usn_filesystem(&fs))
 }

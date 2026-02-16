@@ -7,8 +7,39 @@ use crate::app::state::ImageViewerApp;
 #[cfg(feature = "notify-watcher")]
 use notify::{RecursiveMode, Watcher};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 impl ImageViewerApp {
+    fn configure_watcher_fallback_mode(&mut self, path: &Path) {
+        self.watcher_fallback_last_probe = Instant::now();
+        self.watcher_fallback_signature = None;
+
+        let fs_name = crate::infrastructure::windows::get_file_system_for_path(path);
+        let fallback_polling = fs_name
+            .as_deref()
+            .map(|fs| !crate::infrastructure::windows::is_usn_filesystem(fs))
+            .unwrap_or(false);
+
+        self.watcher_fallback_polling = fallback_polling;
+        self.watcher_fallback_fs = fs_name.clone();
+
+        if fallback_polling {
+            log::info!(
+                "[WATCHER] Non-USN filesystem detected ({:?}) for {:?}: enabling notify backup + consistency polling",
+                fs_name,
+                path
+            );
+
+            // Force fresh directory data for this path. Non-USN volumes (exFAT/FAT)
+            // are more prone to missed notifications, so we should not trust stale index/cache.
+            let path_buf = path.to_path_buf();
+            self.directory_cache.invalidate(&path_buf);
+            if let Some(di) = &self.directory_index {
+                let _ = di.invalidate(path);
+            }
+        }
+    }
+
     /// Sets up monitoring for the current folder
     ///
     /// DUAL USE:
@@ -23,6 +54,7 @@ impl ImageViewerApp {
 
         // Try using drive-wide watcher first (File Pilot optimization)
         let path_buf = PathBuf::from(&current_path);
+        self.configure_watcher_fallback_mode(path_buf.as_path());
 
         // Drive watcher only works for local drives (C:\, D:\, etc.)
         // Does NOT work for UNC paths (\\server\share) or network drives
@@ -35,16 +67,22 @@ impl ImageViewerApp {
             );
             self.drive_watcher.watch_path(path_buf);
 
-            // If drive watcher is active, do NOT use notify (avoid duplicates)
+            // If drive watcher is active on USN filesystems (NTFS/ReFS), avoid duplicates.
+            // On non-USN filesystems (exFAT/FAT), keep notify as backup for resilience.
             if self.drive_watcher.is_active() {
-                log::debug!("[WATCHER] Drive watcher is active - skipping notify-watcher");
-                // Drop notify watcher if it exists to save resources
-                #[cfg(feature = "notify-watcher")]
-                if self.watcher.is_some() {
-                    log::debug!("[WATCHER] Dropping notify-watcher to save resources");
-                    self.watcher = None;
+                if !self.watcher_fallback_polling {
+                    log::debug!("[WATCHER] Drive watcher is active - skipping notify-watcher");
+                    // Drop notify watcher if it exists to save resources
+                    #[cfg(feature = "notify-watcher")]
+                    if self.watcher.is_some() {
+                        log::debug!("[WATCHER] Dropping notify-watcher to save resources");
+                        self.watcher = None;
+                    }
+                    return;
                 }
-                return;
+                log::debug!(
+                    "[WATCHER] Drive watcher active + non-USN fallback enabled - keeping notify backup"
+                );
             }
         } else {
             log::debug!("[WATCHER] UNC/Network path detected - using notify-watcher only");

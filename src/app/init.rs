@@ -237,6 +237,10 @@ impl ImageViewerApp {
             last_auto_reload: Instant::now(),
             pending_auto_reload: false,
             skip_next_auto_reload: false,
+            watcher_fallback_polling: false,
+            watcher_fallback_fs: None,
+            watcher_fallback_last_probe: Instant::now(),
+            watcher_fallback_signature: None,
 
             // CLIPBOARD
             clipboard: ClipboardManager::new(),
