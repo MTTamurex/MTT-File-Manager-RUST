@@ -36,11 +36,18 @@ impl ImageViewerApp {
     }
 
     pub(super) fn process_icon_worker_results(&mut self, ctx: &egui::Context) {
-        let max_icon_uploads = if self.is_video_playing_docked() { 2 } else { 5 };
+        let max_icon_uploads = if self.is_video_playing_docked() { 8 } else { 32 };
         let mut icon_uploads = 0;
 
         while icon_uploads < max_icon_uploads {
-            if let Ok((path, pixels, width, height)) = self.icon_res_receiver.try_recv() {
+            if let Ok((path, icon_generation, pixels, width, height)) =
+                self.icon_res_receiver.try_recv()
+            {
+                // Ignore stale icon results from previous folder generations.
+                if icon_generation != self.generation {
+                    continue;
+                }
+
                 self.loading_icons.remove(&path);
 
                 if pixels.is_empty() || width == 0 || height == 0 {
@@ -49,7 +56,7 @@ impl ImageViewerApp {
                     continue;
                 }
 
-                let cache_key = format!("{}_Jumbo", path.to_string_lossy());
+                let cache_key = format!("{}_Large", path.to_string_lossy());
                 if !self.item_icon_loader.icon_cache.contains(&cache_key) {
                     let texture = ctx.load_texture(
                         cache_key.clone(),

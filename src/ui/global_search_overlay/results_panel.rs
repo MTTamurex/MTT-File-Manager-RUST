@@ -193,9 +193,6 @@ pub(super) fn render_results_panel(
                             row_ui.add(
                                 egui::Image::new(&icon).max_size(egui::vec2(ICON_SIZE, ICON_SIZE)),
                             );
-                        } else {
-                            let icon_str = if is_dir { "\u{1F4C1}" } else { "\u{1F4C4}" };
-                            row_ui.label(egui::RichText::new(icon_str).size(14.0));
                         }
 
                         row_ui.add_space(8.0);

@@ -2,7 +2,8 @@ use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::windows as windows_infra;
 use eframe::egui;
 use std::path::PathBuf;
-use std::sync::{mpsc, Arc};
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+use std::sync::{mpsc, Arc, Mutex};
 
 pub(in crate::app) fn spawn_cover_worker(
     disk_cache: Arc<ThumbnailDiskCache>,
@@ -103,43 +104,75 @@ pub(in crate::app) fn spawn_async_font_loader() -> mpsc::Receiver<egui::FontDefi
 
 pub(in crate::app) fn spawn_icon_worker(
     ctx: &egui::Context,
+    current_generation: Arc<AtomicUsize>,
 ) -> (
-    mpsc::Sender<PathBuf>,
-    mpsc::Receiver<(PathBuf, Vec<u8>, u32, u32)>,
+    mpsc::Sender<(PathBuf, usize)>,
+    mpsc::Receiver<(PathBuf, usize, Vec<u8>, u32, u32)>,
 ) {
-    let (icon_req_tx, icon_req_rx) = mpsc::channel::<PathBuf>();
-    let (icon_res_tx, icon_res_rx) = mpsc::channel::<(PathBuf, Vec<u8>, u32, u32)>();
-    let icon_ctx = ctx.clone();
+    let (icon_req_tx, icon_req_rx_thread) = mpsc::channel::<(PathBuf, usize)>();
+    let icon_req_rx = Arc::new(Mutex::new(icon_req_rx_thread));
+    let (icon_res_tx, icon_res_rx) = mpsc::channel::<(PathBuf, usize, Vec<u8>, u32, u32)>();
 
-    std::thread::spawn(move || {
-        use crate::domain::file_entry::IconSize;
-        use crate::infrastructure::windows::extract_file_icon_by_path;
-        use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
+    let cpu = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    let worker_count = cpu.clamp(2, 6);
 
-        unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        }
+    for worker_id in 0..worker_count {
+        let icon_ctx = ctx.clone();
+        let icon_req_rx = icon_req_rx.clone();
+        let icon_res_tx = icon_res_tx.clone();
+        let generation_ref = current_generation.clone();
 
-        crate::infrastructure::io_priority::set_thread_priority(
-            crate::infrastructure::io_priority::IOPriority::Background,
-        );
+        let _ = std::thread::Builder::new()
+            .name(format!("icon-worker-{}", worker_id))
+            .spawn(move || {
+                use crate::domain::file_entry::IconSize;
+                use crate::infrastructure::windows::extract_file_icon_by_path;
+                use windows::Win32::System::Com::{
+                    CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED,
+                };
 
-        while let Ok(path) = icon_req_rx.recv() {
-            match extract_file_icon_by_path(&path, IconSize::Jumbo) {
-                Ok((pixels, width, height)) => {
-                    let _ = icon_res_tx.send((path, pixels, width, height));
+                unsafe {
+                    let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
                 }
-                Err(_) => {
-                    let _ = icon_res_tx.send((path, Vec::new(), 0, 0));
-                }
-            }
-            icon_ctx.request_repaint();
-        }
 
-        unsafe {
-            CoUninitialize();
-        }
-    });
+                crate::infrastructure::io_priority::set_thread_priority(
+                    crate::infrastructure::io_priority::IOPriority::Interactive,
+                );
+
+                loop {
+                    let recv_result = match icon_req_rx.lock() {
+                        Ok(rx) => rx.recv(),
+                        Err(_) => break,
+                    };
+
+                    let (path, req_generation) = match recv_result {
+                        Ok(data) => data,
+                        Err(_) => break,
+                    };
+
+                    // Drop stale requests quickly when user has already navigated away.
+                    if req_generation != generation_ref.load(AtomicOrdering::Relaxed) {
+                        continue;
+                    }
+
+                    match extract_file_icon_by_path(&path, IconSize::Large) {
+                        Ok((pixels, width, height)) => {
+                            let _ = icon_res_tx.send((path, req_generation, pixels, width, height));
+                        }
+                        Err(_) => {
+                            let _ = icon_res_tx.send((path, req_generation, Vec::new(), 0, 0));
+                        }
+                    }
+                    icon_ctx.request_repaint();
+                }
+
+                unsafe {
+                    CoUninitialize();
+                }
+            });
+    }
 
     (icon_req_tx, icon_res_rx)
 }

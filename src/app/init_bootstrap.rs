@@ -46,8 +46,8 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) pending_deletions: Arc<dashmap::DashMap<PathBuf, ()>>,
     pub(in crate::app) font_rx: mpsc::Receiver<egui::FontDefinitions>,
 
-    pub(in crate::app) icon_req_tx: mpsc::Sender<PathBuf>,
-    pub(in crate::app) icon_res_rx: mpsc::Receiver<(PathBuf, Vec<u8>, u32, u32)>,
+    pub(in crate::app) icon_req_tx: mpsc::Sender<(PathBuf, usize)>,
+    pub(in crate::app) icon_res_rx: mpsc::Receiver<(PathBuf, usize, Vec<u8>, u32, u32)>,
     pub(in crate::app) meta_req_tx: mpsc::Sender<(PathBuf, u64)>,
     pub(in crate::app) meta_res_rx: mpsc::Receiver<(PathBuf, u64, windows_infra::MediaMetadata)>,
     pub(in crate::app) folder_preview_tx: mpsc::Sender<PathBuf>,
@@ -131,7 +131,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         pending_deletions.clone(),
     );
 
-    let (icon_req_tx, icon_res_rx) = spawn_icon_worker(ctx);
+    let (icon_req_tx, icon_res_rx) = spawn_icon_worker(ctx, shared_gen.clone());
     let (meta_req_tx, meta_res_rx) = spawn_metadata_worker(ctx);
     let (folder_preview_tx, folder_preview_res_rx) =
         spawn_folder_preview_workers(ctx, disk_cache.clone());

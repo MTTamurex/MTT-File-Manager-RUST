@@ -364,7 +364,6 @@ fn render_item_icon(
     );
 
     if item.drive_info.is_some() {
-        // Drive: use specialized drive icon loader
         if let Some(drive_icon) = ctx
             .item_icon_loader
             .get_or_load_drive_icon(ui.ctx(), &item.path.to_string_lossy())
@@ -375,17 +374,11 @@ fn render_item_icon(
                 Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
                 Color32::WHITE,
             );
-        } else {
-            ui.painter().text(
-                icon_rect.min,
-                egui::Align2::LEFT_TOP,
-                "💽",
-                FontId::proportional(14.0),
-                Color32::GRAY,
-            );
         }
-    } else if item.is_dir && !item.is_archive() {
-        // folder: Windows native icon
+        return;
+    }
+
+    if item.is_dir && !item.is_archive() {
         let path_lower = item.path.to_string_lossy().to_lowercase();
         let is_virtual_archive =
             crate::domain::file_entry::path_contains_archive_segment(&path_lower);
@@ -401,40 +394,22 @@ fn render_item_icon(
                     Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
                     Color32::WHITE,
                 );
-            } else if let Some(folder_icon) = ctx.folder_icon_texture {
-                ui.painter().image(
-                    folder_icon.id(),
-                    icon_rect,
-                    Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
-                    Color32::WHITE,
-                );
-            } else {
-                ui.painter().text(
-                    icon_rect.min,
-                    egui::Align2::LEFT_TOP,
-                    "\u{ED9F}", // ICON_FOLDER
-                    FontId::new(14.0, egui::FontFamily::Name("icons".into())),
-                    Color32::from_rgb(255, 193, 7),
-                );
+                return;
             }
-        } else if let Some(folder_icon) = ctx.folder_icon_texture {
+        }
+
+        if let Some(folder_icon) = ctx.folder_icon_texture {
             ui.painter().image(
                 folder_icon.id(),
                 icon_rect,
                 Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
                 Color32::WHITE,
             );
-        } else {
-            ui.painter().text(
-                icon_rect.min,
-                egui::Align2::LEFT_TOP,
-                "\u{ED9F}", // ICON_FOLDER
-                FontId::new(14.0, egui::FontFamily::Name("icons".into())),
-                Color32::from_rgb(255, 193, 7),
-            );
         }
-    } else if item.is_archive() {
-        // Archive file: load native Windows icon based on extension (ZIP, 7Z, RAR, etc.)
+        return;
+    }
+
+    if item.is_archive() {
         if let Some(file_icon) =
             ctx.item_icon_loader
                 .get_or_load_icon(ui.ctx(), &item.path, false, false)
@@ -445,50 +420,27 @@ fn render_item_icon(
                 Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
                 Color32::WHITE,
             );
-        } else {
-            // If icon not in cache and not loading, request it (async)
-            if !ctx.loading_icons.contains(&item.path)
-                && ctx.failed_icons.peek(&item.path).is_none()
-            {
-                ops.request_icon_load(item.path.clone());
-            }
-
-            ui.painter().text(
-                icon_rect.min,
-                egui::Align2::LEFT_TOP,
-                "\u{ECD3}", // ICON_FILE
-                FontId::new(14.0, egui::FontFamily::Name("icons".into())),
-                Color32::GRAY,
-            );
-        }
-    } else {
-        // File: load native Windows icon using IconLoader (same as grid view)
-        if let Some(file_icon) =
-            ctx.item_icon_loader
-                .get_or_load_icon(ui.ctx(), &item.path, item.is_dir, false)
+        } else if !ctx.loading_icons.contains(&item.path)
+            && ctx.failed_icons.peek(&item.path).is_none()
         {
-            ui.painter().image(
-                file_icon.id(),
-                icon_rect,
-                Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
-                Color32::WHITE,
-            );
-        } else {
-            // If icon not in cache and not loading, request it (async)
-            if !ctx.loading_icons.contains(&item.path)
-                && ctx.failed_icons.peek(&item.path).is_none()
-            {
-                ops.request_icon_load(item.path.clone());
-            }
-
-            ui.painter().text(
-                icon_rect.min,
-                egui::Align2::LEFT_TOP,
-                "\u{ECD3}", // ICON_FILE
-                FontId::new(14.0, egui::FontFamily::Name("icons".into())),
-                Color32::GRAY,
-            );
+            ops.request_icon_load(item.path.clone());
         }
+        return;
+    }
+
+    if let Some(file_icon) = ctx
+        .item_icon_loader
+        .get_or_load_icon(ui.ctx(), &item.path, item.is_dir, false)
+    {
+        ui.painter().image(
+            file_icon.id(),
+            icon_rect,
+            Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
+            Color32::WHITE,
+        );
+    } else if !ctx.loading_icons.contains(&item.path) && ctx.failed_icons.peek(&item.path).is_none()
+    {
+        ops.request_icon_load(item.path.clone());
     }
 }
 
