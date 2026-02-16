@@ -38,6 +38,9 @@ pub(super) fn try_handle_fast_paths(
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0)
     };
+    let can_trust_persistent_index =
+        crate::infrastructure::windows::path_is_usn_filesystem(base_path_buf.as_path())
+            .unwrap_or(true);
 
     // Phase 1: Instant feedback from DirectoryCache (all local disks).
     {
@@ -187,7 +190,7 @@ pub(super) fn try_handle_fast_paths(
         );
     }
 
-    if !force_refresh && !is_onedrive_base {
+    if !force_refresh && !is_onedrive_base && can_trust_persistent_index {
         if let Some(di) = directory_index_opt {
             let base = PathBuf::from(base_path);
             // SAFETY CHECK: Verify directory mtime before trusting cached index
@@ -281,6 +284,11 @@ pub(super) fn try_handle_fast_paths(
                 } // end else (index not stale)
             } // end if let Some((meta, indexed_files))
         } // end if let Some(di)
+    } else if !can_trust_persistent_index {
+        log::debug!(
+            "[FOLDER-LOADING] Skipping DirectoryIndex for non-USN filesystem at {:?}",
+            base_path_buf
+        );
     } // end if !force_refresh && !is_onedrive_base
 
     if !force_refresh {

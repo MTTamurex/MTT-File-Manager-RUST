@@ -1,7 +1,10 @@
 use crate::app::state::ImageViewerApp;
+use crate::domain::file_entry::FileEntry;
 use std::collections::HashSet;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub(super) struct WatcherPerfMarks {
     pub(super) watcher_start: Instant,
@@ -10,6 +13,105 @@ pub(super) struct WatcherPerfMarks {
 }
 
 impl ImageViewerApp {
+    fn fallback_poll_interval(item_count: usize) -> Duration {
+        if item_count <= 300 {
+            Duration::from_secs(3)
+        } else if item_count <= 2_000 {
+            Duration::from_secs(6)
+        } else if item_count <= 8_000 {
+            Duration::from_secs(10)
+        } else {
+            Duration::from_secs(15)
+        }
+    }
+
+    fn compute_entries_signature(entries: &[FileEntry]) -> u64 {
+        let mut xor_acc = 0u64;
+        let mut sum_acc = 0u64;
+        let mut bytes_acc = 0u64;
+
+        for entry in entries {
+            let mut hasher = DefaultHasher::new();
+            entry.name.hash(&mut hasher);
+            entry.is_dir.hash(&mut hasher);
+            entry.size.hash(&mut hasher);
+            entry.modified.hash(&mut hasher);
+            let entry_hash = hasher.finish();
+
+            xor_acc ^= entry_hash;
+            sum_acc = sum_acc.wrapping_add(entry_hash);
+            bytes_acc = bytes_acc.wrapping_add(entry.size);
+        }
+
+        let mut final_hasher = DefaultHasher::new();
+        entries.len().hash(&mut final_hasher);
+        xor_acc.hash(&mut final_hasher);
+        sum_acc.hash(&mut final_hasher);
+        bytes_acc.hash(&mut final_hasher);
+        final_hasher.finish()
+    }
+
+    fn maybe_poll_non_usn_consistency(
+        &mut self,
+        pending_disk_cache_invalidations: &mut Vec<PathBuf>,
+    ) {
+        if !self.watcher_fallback_polling
+            || self.navigation_state.is_computer_view
+            || self.navigation_state.is_recycle_bin_view
+            || self.is_loading_folder
+            || self.file_operation_state.file_ops_in_progress > 0
+            || self.layout.saved_is_minimized
+        {
+            return;
+        }
+
+        let interval = Self::fallback_poll_interval(self.all_items.len());
+        if self.watcher_fallback_last_probe.elapsed() < interval {
+            return;
+        }
+        self.watcher_fallback_last_probe = Instant::now();
+
+        let current_path = PathBuf::from(&self.navigation_state.current_path);
+        let ui_signature = Self::compute_entries_signature(&self.all_items);
+        self.watcher_fallback_signature = Some(ui_signature);
+
+        let is_onedrive = crate::infrastructure::onedrive::is_onedrive_path(&current_path);
+        let disk_entries =
+            match crate::infrastructure::windows::hdd_directory_reader::read_directory_hdd_optimized(
+                current_path.as_path(),
+                is_onedrive,
+            ) {
+                Ok(entries) => entries,
+                Err(err) => {
+                    log::debug!(
+                        "[FS-WATCH-FALLBACK] Poll read failed for {:?}: {}",
+                        current_path,
+                        err
+                    );
+                    return;
+                }
+            };
+
+        let disk_signature = Self::compute_entries_signature(&disk_entries);
+        if disk_signature == ui_signature {
+            return;
+        }
+
+        log::warn!(
+            "[FS-WATCH-FALLBACK] Listing drift detected via polling on {:?} (fs={:?}); scheduling reload",
+            current_path,
+            self.watcher_fallback_fs
+        );
+
+        self.directory_cache.invalidate(&current_path);
+        if let Some(di) = &self.directory_index {
+            let _ = di.invalidate(&current_path);
+        }
+        pending_disk_cache_invalidations.push(current_path.clone());
+        self.watcher_fallback_signature = Some(disk_signature);
+        self.pending_auto_reload = true;
+    }
+
     pub(super) fn process_watcher_events_and_auto_reload(
         &mut self,
         current_path_norm: &str,
@@ -100,6 +202,8 @@ impl ImageViewerApp {
             MAX_EVENTS_INDIVIDUAL,
             &mut pending_disk_cache_invalidations,
         );
+
+        self.maybe_poll_non_usn_consistency(&mut pending_disk_cache_invalidations);
 
         self.enqueue_disk_cache_invalidations(pending_disk_cache_invalidations);
         self.apply_watcher_reload_policy();

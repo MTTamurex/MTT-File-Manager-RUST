@@ -168,6 +168,12 @@ pub struct ImageViewerApp {
     pub last_auto_reload: Instant,
     pub pending_auto_reload: bool,
     pub skip_next_auto_reload: bool, // SMART DELETE: Prevent reload after direct UI update
+    /// Fallback consistency polling for non-USN filesystems (exFAT/FAT32).
+    /// Disabled on NTFS/ReFS to keep zero overhead on normal local disks.
+    pub watcher_fallback_polling: bool,
+    pub watcher_fallback_fs: Option<String>,
+    pub watcher_fallback_last_probe: Instant,
+    pub watcher_fallback_signature: Option<u64>,
 
     // CLIPBOARD (Copy/Cut/Paste)
     pub clipboard: ClipboardManager,
