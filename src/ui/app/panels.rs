@@ -12,17 +12,27 @@ const RIGHT_SIDEBAR_MAX: f32 = 500.0;
 const RESIZE_HANDLE_WIDTH: f32 = 6.0;
 
 pub fn render_panels(app: &mut ImageViewerApp, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    let t_panels_start = std::time::Instant::now();
+
     // 1. Manual resize handles (rendered FIRST so Foreground Windows appearing later stack ON TOP)
+    let t_resize = std::time::Instant::now();
     render_resize_handles(app, ctx);
+    let resize_ms = t_resize.elapsed().as_millis();
 
     // 2. Left Sidebar (forced width from app state)
+    let t_sidebar = std::time::Instant::now();
     render_sidebar_panel(app, ctx);
+    let sidebar_ms = t_sidebar.elapsed().as_millis();
 
     // 3. Right Preview Panel (forced width from app state)
+    let t_preview = std::time::Instant::now();
     render_preview_panel_layout(app, ctx, _frame);
+    let preview_ms = t_preview.elapsed().as_millis();
 
     // 4. Central Panel
+    let t_central = std::time::Instant::now();
     render_central_panel_layout(app, ctx);
+    let central_ms = t_central.elapsed().as_millis();
 
     // 5. Focus release: When user clicks anywhere outside the video player,
     // release focus back to the main window (MPV no-op, kept for parity)
@@ -36,6 +46,18 @@ pub fn render_panels(app: &mut ImageViewerApp, ctx: &egui::Context, _frame: &mut
                 player.release_focus_auto();
             }
         }
+    }
+
+    let total_ms = t_panels_start.elapsed().as_millis();
+    if total_ms > 120 {
+        log::warn!(
+            "[PERF] Slow render_panels breakdown: resize={}ms sidebar={}ms preview={}ms central={}ms total={}ms",
+            resize_ms,
+            sidebar_ms,
+            preview_ms,
+            central_ms,
+            total_ms
+        );
     }
 }
 

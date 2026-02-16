@@ -1,17 +1,41 @@
 use crate::app::state::ImageViewerApp;
 use eframe::egui;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 const MAX_PENDING_THUMBNAILS: usize = 64;
+const MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME: usize = 96;
 const CRITICAL_FRAME_TIME_MS: f32 = 33.33;
 const SEVERE_FRAME_TIME_MS: f32 = 25.0;
+const MAX_INCOMING_THUMBNAIL_BUDGET_MS: u64 = 4;
+const MIN_INCOMING_THUMBNAIL_BUDGET_MS: u64 = 2;
 
 impl ImageViewerApp {
     pub(super) fn process_thumbnail_upload_pipeline(&mut self, ctx: &egui::Context) -> bool {
         let mut received_any = false;
+        let mut incoming_count = 0usize;
+        let mut has_more_incoming = false;
+        let incoming_budget = if self.frame_time_peak_ms > CRITICAL_FRAME_TIME_MS {
+            Duration::from_millis(MIN_INCOMING_THUMBNAIL_BUDGET_MS)
+        } else {
+            Duration::from_millis(MAX_INCOMING_THUMBNAIL_BUDGET_MS)
+        };
+        let incoming_start = Instant::now();
+        let mut not_found_failures: Vec<PathBuf> = Vec::new();
 
-        while let Ok(thumbnail_data) = self.image_receiver.try_recv() {
+        while incoming_count < MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME {
+            if incoming_start.elapsed() >= incoming_budget {
+                has_more_incoming = true;
+                break;
+            }
+            let thumbnail_data = match self.image_receiver.try_recv() {
+                Ok(data) => data,
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+            };
+
+            incoming_count += 1;
             if thumbnail_data.generation != self.generation {
                 continue;
             }
@@ -23,15 +47,7 @@ impl ImageViewerApp {
                     .mark_as_failed(thumbnail_data.path.clone());
 
                 if thumbnail_data.not_found {
-                    let failed = &thumbnail_data.path;
-                    for item in self.all_items.iter_mut() {
-                        if item.folder_cover.as_ref() == Some(failed) {
-                            let folder = item.path.clone();
-                            item.folder_cover = None;
-                            self.disk_cache.remove_folder_cover(&folder);
-                            let _ = self.cover_worker_sender.send(folder);
-                        }
-                    }
+                    not_found_failures.push(thumbnail_data.path.clone());
                 }
 
                 continue;
@@ -46,6 +62,14 @@ impl ImageViewerApp {
             self.cache_manager
                 .start_pending_upload(thumbnail_data.path.clone());
             self.pending_thumbnails.push_back(thumbnail_data);
+            received_any = true;
+        }
+
+        if incoming_count >= MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME {
+            has_more_incoming = true;
+        }
+
+        if self.handle_missing_cover_sources(not_found_failures) {
             received_any = true;
         }
 
@@ -212,12 +236,58 @@ impl ImageViewerApp {
             }
         }
 
-        if !self.pending_thumbnails.is_empty() {
+        if !self.pending_thumbnails.is_empty() || has_more_incoming {
             ctx.request_repaint();
         }
 
         self.process_folder_preview_uploads(ctx, is_performance_critical, is_video_playing);
         received_any
+    }
+
+    fn handle_missing_cover_sources(&mut self, missing_paths: Vec<PathBuf>) -> bool {
+        if missing_paths.is_empty() {
+            return false;
+        }
+
+        let failed_paths: HashSet<PathBuf> = missing_paths.into_iter().collect();
+        if failed_paths.is_empty() {
+            return false;
+        }
+
+        let mut folders_to_refresh: HashSet<PathBuf> = HashSet::new();
+        let mut updated_any = false;
+
+        for item in self.all_items.iter_mut() {
+            if item
+                .folder_cover
+                .as_ref()
+                .is_some_and(|cover| failed_paths.contains(cover))
+            {
+                let folder_path = item.path.clone();
+                item.folder_cover = None;
+                self.disk_cache.remove_folder_cover(&folder_path);
+                folders_to_refresh.insert(folder_path);
+                updated_any = true;
+            }
+        }
+
+        let items = std::sync::Arc::make_mut(&mut self.items);
+        for item in items.iter_mut() {
+            if item
+                .folder_cover
+                .as_ref()
+                .is_some_and(|cover| failed_paths.contains(cover))
+            {
+                item.folder_cover = None;
+                updated_any = true;
+            }
+        }
+
+        for folder_path in folders_to_refresh {
+            let _ = self.cover_worker_sender.send(folder_path);
+        }
+
+        updated_any
     }
 
     fn process_folder_preview_uploads(

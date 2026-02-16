@@ -1,48 +1,106 @@
 use crate::app::state::ImageViewerApp;
 use eframe::egui;
+use std::time::{Duration, Instant};
 
 impl ImageViewerApp {
     pub(super) fn process_cover_worker_results(&mut self, ctx: &egui::Context) {
-        let mut folder_updates = false;
-        while let Ok((folder_path, cover_opt)) = self.cover_worker_receiver.try_recv() {
-            if let Some(item) = self.all_items.iter_mut().find(|i| i.path == folder_path) {
-                match cover_opt {
-                    Some(cover) => {
-                        if item.folder_cover.as_ref() != Some(&cover) {
-                            item.folder_cover = Some(cover.clone());
-                            folder_updates = true;
-                        }
+        // Cap per-frame processing to keep message handling responsive under heavy cover streams.
+        const MAX_COVER_EVENTS_PER_FRAME: usize = 48;
+        let mut cover_updates: std::collections::HashMap<std::path::PathBuf, Option<std::path::PathBuf>> =
+            std::collections::HashMap::with_capacity(MAX_COVER_EVENTS_PER_FRAME);
+        let mut processed = 0usize;
+        let mut has_more = false;
 
-                        if !self.cache_manager.has_thumbnail(&cover)
-                            && self.cache_manager.start_loading(cover.clone())
-                        {
-                            self.request_thumbnail_load(cover, 256);
-                        }
-                    }
-                    None => {
-                        if item.folder_cover.take().is_some() {
-                            self.disk_cache.remove_folder_cover(&folder_path);
-                            folder_updates = true;
-                        }
-                    }
+        while processed < MAX_COVER_EVENTS_PER_FRAME {
+            match self.cover_worker_receiver.try_recv() {
+                Ok((folder_path, cover_opt)) => {
+                    cover_updates.insert(folder_path, cover_opt);
+                    processed += 1;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+            }
+        }
+
+        if processed >= MAX_COVER_EVENTS_PER_FRAME {
+            has_more = true;
+        }
+
+        if cover_updates.is_empty() {
+            if has_more {
+                ctx.request_repaint();
+            }
+            return;
+        }
+
+        let mut folder_updates = false;
+
+        // Apply updates to master list.
+        for item in self.all_items.iter_mut() {
+            if let Some(cover_opt) = cover_updates.get(&item.path) {
+                if item.folder_cover != *cover_opt {
+                    item.folder_cover = cover_opt.clone();
+                    folder_updates = true;
                 }
             }
         }
 
-        if folder_updates {
-            self.filter_items();
+        // Apply updates to currently rendered list without full filter/sort rebuild.
+        let items = std::sync::Arc::make_mut(&mut self.items);
+        for item in items.iter_mut() {
+            if let Some(cover_opt) = cover_updates.get(&item.path) {
+                if item.folder_cover != *cover_opt {
+                    item.folder_cover = cover_opt.clone();
+                    folder_updates = true;
+                }
+            }
+        }
+
+        // Trigger thumbnail loads / cleanup once per updated folder.
+        for (folder_path, cover_opt) in cover_updates {
+            match cover_opt {
+                Some(cover) => {
+                    if !self.cache_manager.has_thumbnail(&cover)
+                        && self.cache_manager.start_loading(cover.clone())
+                    {
+                        self.request_thumbnail_load(cover, 256);
+                    }
+                }
+                None => {
+                    self.disk_cache.remove_folder_cover(&folder_path);
+                }
+            }
+        }
+
+        if folder_updates || has_more {
             ctx.request_repaint();
         }
     }
 
     pub(super) fn process_icon_worker_results(&mut self, ctx: &egui::Context) {
         let max_icon_uploads = if self.is_video_playing_docked() { 8 } else { 32 };
+        let max_icon_messages = if self.is_video_playing_docked() { 48 } else { 128 };
+        let icon_budget = if self.frame_time_peak_ms > 33.33 {
+            Duration::from_millis(2)
+        } else if self.frame_time_peak_ms > 25.0 {
+            Duration::from_millis(3)
+        } else {
+            Duration::from_millis(5)
+        };
+        let start = Instant::now();
         let mut icon_uploads = 0;
+        let mut processed_messages = 0usize;
+        let mut has_more = false;
 
-        while icon_uploads < max_icon_uploads {
+        while processed_messages < max_icon_messages && icon_uploads < max_icon_uploads {
+            if start.elapsed() >= icon_budget {
+                has_more = true;
+                break;
+            }
             if let Ok((path, icon_generation, pixels, width, height)) =
                 self.icon_res_receiver.try_recv()
             {
+                processed_messages += 1;
                 // Ignore stale icon results from previous folder generations.
                 if icon_generation != self.generation {
                     continue;
@@ -75,7 +133,11 @@ impl ImageViewerApp {
             }
         }
 
-        if icon_uploads >= max_icon_uploads {
+        if processed_messages >= max_icon_messages || icon_uploads >= max_icon_uploads {
+            has_more = true;
+        }
+
+        if has_more {
             ctx.request_repaint();
         }
     }
@@ -100,26 +162,56 @@ impl ImageViewerApp {
     }
 
     pub(super) fn process_folder_size_results(&mut self) -> bool {
-        let mut received_any = false;
+        const MAX_FOLDER_SIZE_MSGS_PER_FRAME: usize = 96;
 
-        while let Ok(msg) = self.folder_size_state.res_receiver.try_recv() {
+        let folder_size_budget = if self.frame_time_peak_ms > 33.33 {
+            Duration::from_millis(2)
+        } else if self.frame_time_peak_ms > 25.0 {
+            Duration::from_millis(3)
+        } else {
+            Duration::from_millis(4)
+        };
+
+        let start = Instant::now();
+        let mut received_any = false;
+        let mut processed_messages = 0usize;
+        let mut has_more = false;
+        let mut progress_updates: std::collections::HashMap<std::path::PathBuf, u64> =
+            std::collections::HashMap::new();
+
+        while processed_messages < MAX_FOLDER_SIZE_MSGS_PER_FRAME {
+            if start.elapsed() >= folder_size_budget {
+                has_more = true;
+                break;
+            }
+
+            let msg = match self.folder_size_state.res_receiver.try_recv() {
+                Ok(msg) => msg,
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+            };
+            processed_messages += 1;
+
             match msg {
                 crate::app::folder_size_state::FolderSizeMessage::Progress {
                     folder_path,
                     total_size,
                 } => {
-                    self.folder_size_state.cache.put(folder_path, total_size);
+                    // Coalesce multiple progress updates for the same folder into one cache write.
+                    progress_updates.insert(folder_path, total_size);
                     received_any = true;
                 }
                 crate::app::folder_size_state::FolderSizeMessage::Complete {
                     folder_path,
                     total_size,
                 } => {
+                    progress_updates.remove(&folder_path);
                     self.folder_size_state.loading.remove(&folder_path);
                     self.folder_size_state.cache.put(folder_path, total_size);
                     received_any = true;
                 }
                 crate::app::folder_size_state::FolderSizeMessage::Cancelled { folder_path } => {
+                    progress_updates.remove(&folder_path);
                     self.folder_size_state.loading.remove(&folder_path);
                     self.folder_size_state.cache.pop(&folder_path);
                     received_any = true;
@@ -127,6 +219,14 @@ impl ImageViewerApp {
             }
         }
 
-        received_any
+        for (folder_path, total_size) in progress_updates {
+            self.folder_size_state.cache.put(folder_path, total_size);
+        }
+
+        if processed_messages >= MAX_FOLDER_SIZE_MSGS_PER_FRAME {
+            has_more = true;
+        }
+
+        received_any || has_more
     }
 }

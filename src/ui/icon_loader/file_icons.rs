@@ -183,10 +183,22 @@ impl IconLoader {
         }
 
         let icon_result = if is_folder {
-            windows::get_file_type_icon(true, "", size)
+            if !self.can_run_non_blocking_sync_icon_lookup(path, allow_blocking) {
+                return None;
+            }
+            let lookup_start = std::time::Instant::now();
+            let result = windows::get_file_type_icon(true, "", size);
+            self.record_non_blocking_sync_icon_lookup(lookup_start.elapsed(), allow_blocking);
+            result
         } else if let Some(ext) = path.extension() {
             let ext_str = ext.to_string_lossy().to_lowercase();
-            windows::get_file_type_icon(false, &ext_str, size)
+            if !self.can_run_non_blocking_sync_icon_lookup(path, allow_blocking) {
+                return None;
+            }
+            let lookup_start = std::time::Instant::now();
+            let result = windows::get_file_type_icon(false, &ext_str, size);
+            self.record_non_blocking_sync_icon_lookup(lookup_start.elapsed(), allow_blocking);
+            result
         } else {
             // No extension - try manual parsing or generic fallback.
             let path_str = path.to_string_lossy();
@@ -202,9 +214,21 @@ impl IconLoader {
             };
 
             if let Some(ext) = manual_ext {
-                windows::get_file_type_icon(false, &ext, size)
+                if !self.can_run_non_blocking_sync_icon_lookup(path, allow_blocking) {
+                    return None;
+                }
+                let lookup_start = std::time::Instant::now();
+                let result = windows::get_file_type_icon(false, &ext, size);
+                self.record_non_blocking_sync_icon_lookup(lookup_start.elapsed(), allow_blocking);
+                result
             } else {
-                windows::get_file_type_icon(false, "", size)
+                if !self.can_run_non_blocking_sync_icon_lookup(path, allow_blocking) {
+                    return None;
+                }
+                let lookup_start = std::time::Instant::now();
+                let result = windows::get_file_type_icon(false, "", size);
+                self.record_non_blocking_sync_icon_lookup(lookup_start.elapsed(), allow_blocking);
+                result
             }
         };
 

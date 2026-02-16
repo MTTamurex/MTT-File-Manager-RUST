@@ -5,6 +5,7 @@
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 use eframe::egui;
 use lru::LruCache;
@@ -44,6 +45,10 @@ pub struct IconLoader {
     icon_result_rx: mpsc::Receiver<AsyncIconResult>,
     /// Sender cloned into background threads
     icon_result_tx: mpsc::Sender<AsyncIconResult>,
+    /// Per-frame budget guard for non-blocking icon lookups that still hit Windows Shell.
+    sync_icon_budget_window_start: Instant,
+    sync_icon_budget_elapsed: Duration,
+    sync_icon_budget_calls: usize,
 }
 
 impl Default for IconLoader {
@@ -69,6 +74,9 @@ impl IconLoader {
             loading_drive_icons: HashSet::new(),
             icon_result_rx: rx,
             icon_result_tx: tx,
+            sync_icon_budget_window_start: Instant::now(),
+            sync_icon_budget_elapsed: Duration::ZERO,
+            sync_icon_budget_calls: 0,
         }
     }
 
@@ -79,6 +87,9 @@ impl IconLoader {
         self.failed_drive_icons.clear();
         self.folder_icon_texture = None;
         self.computer_icon_texture = None;
+        self.sync_icon_budget_window_start = Instant::now();
+        self.sync_icon_budget_elapsed = Duration::ZERO;
+        self.sync_icon_budget_calls = 0;
     }
 
     /// Clears drive icon caches (both successful and failed), allowing fresh extraction.
@@ -86,5 +97,43 @@ impl IconLoader {
     pub fn clear_drive_icons(&mut self) {
         self.drive_icon_cache.clear();
         self.failed_drive_icons.clear();
+    }
+
+    fn can_run_non_blocking_sync_icon_lookup(
+        &mut self,
+        path: &std::path::Path,
+        allow_blocking: bool,
+    ) -> bool {
+        if allow_blocking {
+            return true;
+        }
+
+        // Never run sync shell icon lookups in UI for OneDrive paths.
+        // OneDrive shell/metadata calls may stall for hundreds of ms.
+        if crate::infrastructure::onedrive::is_onedrive_path(path) {
+            return false;
+        }
+
+        const WINDOW: Duration = Duration::from_millis(16);
+        const MAX_CALLS_PER_WINDOW: usize = 2;
+        const MAX_TIME_PER_WINDOW: Duration = Duration::from_millis(4);
+
+        if self.sync_icon_budget_window_start.elapsed() >= WINDOW {
+            self.sync_icon_budget_window_start = Instant::now();
+            self.sync_icon_budget_elapsed = Duration::ZERO;
+            self.sync_icon_budget_calls = 0;
+        }
+
+        self.sync_icon_budget_calls < MAX_CALLS_PER_WINDOW
+            && self.sync_icon_budget_elapsed < MAX_TIME_PER_WINDOW
+    }
+
+    fn record_non_blocking_sync_icon_lookup(&mut self, elapsed: Duration, allow_blocking: bool) {
+        if allow_blocking {
+            return;
+        }
+        self.sync_icon_budget_calls = self.sync_icon_budget_calls.saturating_add(1);
+        self.sync_icon_budget_elapsed =
+            self.sync_icon_budget_elapsed.saturating_add(elapsed);
     }
 }
