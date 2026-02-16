@@ -148,6 +148,27 @@ impl ImageViewerApp {
         self.invalidate_folder_cover_for_removed_path(&cleaned);
         Self::register_changed_folder(&cleaned, folders_with_changed_contents);
 
+        // Check if the CURRENT FOLDER (or an ancestor) was deleted.
+        // When that happens, the user is stranded in a non-existent path.
+        let cleaned_norm = Self::normalize_for_match(&cleaned);
+        let current_path_buf = PathBuf::from(&self.navigation_state.current_path);
+        let current_is_deleted = cleaned_norm == current_path_norm;
+        let ancestor_is_deleted = !current_is_deleted
+            && current_path_buf
+                .to_string_lossy()
+                .to_lowercase()
+                .starts_with(&format!("{}\\" , cleaned_norm));
+
+        if current_is_deleted || ancestor_is_deleted {
+            log::warn!(
+                "[FS-WATCH] Current folder (or ancestor) was DELETED externally: {:?}",
+                cleaned
+            );
+            self.directory_cache.invalidate(&current_path_buf);
+            self.navigate_to_nearest_valid_ancestor();
+            return;
+        }
+
         if let Some(parent) = cleaned.parent() {
             let parent_norm = Self::normalize_for_match(parent);
             if parent_norm == current_path_norm {
@@ -275,6 +296,20 @@ impl ImageViewerApp {
 
         let cleaned_old = Self::clean_path(old_path);
         let cleaned_new = Self::clean_path(new_path);
+
+        // Check if the CURRENT FOLDER was renamed.
+        // If so, follow the rename to the new path instead of stranding the user.
+        let old_norm = Self::normalize_for_match(&cleaned_old);
+        if old_norm == current_path_norm {
+            log::warn!(
+                "[FS-WATCH] Current folder was RENAMED externally: {:?} → {:?}",
+                cleaned_old, cleaned_new
+            );
+            self.directory_cache.invalidate(&cleaned_old);
+            let new_path_str = cleaned_new.to_string_lossy().to_string();
+            self.navigate_to(&new_path_str);
+            return;
+        }
 
         pending_disk_cache_invalidations.push(cleaned_old.clone());
         self.invalidate_folder_cover_for_removed_path(&cleaned_old);

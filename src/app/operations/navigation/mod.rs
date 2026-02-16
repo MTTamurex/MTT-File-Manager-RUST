@@ -266,6 +266,37 @@ impl ImageViewerApp {
     pub fn can_go_forward(&self) -> bool {
         self.navigation_state.navigation.can_go_forward()
     }
+
+    /// Navigates upward from the given path until a valid (existing) ancestor
+    /// folder is found. If no ancestor exists (e.g. drive removed), navigates
+    /// to "Este Computador".
+    ///
+    /// Used when the current folder is deleted externally.
+    pub fn navigate_to_nearest_valid_ancestor(&mut self) {
+        let current = PathBuf::from(&self.navigation_state.current_path);
+        log::warn!(
+            "[NAV] Current folder no longer exists: {:?}  — searching for valid ancestor",
+            current
+        );
+
+        let mut candidate = current.as_path().parent();
+        while let Some(parent) = candidate {
+            if parent.as_os_str().is_empty() {
+                break;
+            }
+            if parent.is_dir() {
+                log::info!("[NAV] Navigating to nearest valid ancestor: {:?}", parent);
+                let target = parent.to_string_lossy().to_string();
+                self.navigate_to(&target);
+                return;
+            }
+            candidate = parent.parent();
+        }
+
+        // No valid ancestor on disk → go to computer view
+        log::warn!("[NAV] No valid ancestor found — redirecting to Este Computador");
+        self.navigate_to_computer();
+    }
 }
 
 // Re-export commonly used types from submodules
