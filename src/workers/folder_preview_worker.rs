@@ -12,7 +12,7 @@ use eframe::egui;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Instant, UNIX_EPOCH};
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 
 /// Data returned from folder preview worker
@@ -71,29 +71,50 @@ pub fn spawn_folder_preview_worker(
             }
 
             // FAST PATH: Check SQLite disk cache first (NVMe read, ~1ms)
+            // Then verify the cache entry is still fresh by comparing
+            // its created_at timestamp against the folder's last-write time.
+            // This handles the case where files were changed while the app was closed.
             let cache_start = Instant::now();
-            if let Some((rgba_data, width, height)) = disk_cache.get_folder_preview_cache(&path) {
+            if let Some((rgba_data, width, height, created_at)) =
+                disk_cache.get_folder_preview_cache(&path)
+            {
+                // Staleness check: if the folder was modified after we cached
+                // the preview, the cache is stale → skip to Shell API.
+                let is_stale = std::fs::metadata(&path)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|mtime| mtime.duration_since(UNIX_EPOCH).ok())
+                    .map(|dur| dur.as_secs() as i64 > created_at)
+                    .unwrap_or(false);
+
+                if !is_stale {
+                    log::debug!(
+                        "[FOLDER PREVIEW] DB HIT {:?} ({}x{}, {:.1}ms)",
+                        path.file_name().unwrap_or_default(),
+                        width,
+                        height,
+                        cache_start.elapsed().as_secs_f64() * 1000.0
+                    );
+                    let _ = tx.send(FolderPreviewData {
+                        path,
+                        rgba_data,
+                        width,
+                        height,
+                    });
+                    throttle_repaint(&ctx, &mut last_repaint);
+                    continue;
+                }
                 log::debug!(
-                    "[FOLDER PREVIEW] DB HIT {:?} ({}x{}, {:.1}ms)",
+                    "[FOLDER PREVIEW] DB STALE {:?} (folder modified after cache) → Shell API",
                     path.file_name().unwrap_or_default(),
-                    width,
-                    height,
+                );
+            } else {
+                log::debug!(
+                    "[FOLDER PREVIEW] DB MISS {:?} ({:.1}ms) → Shell API",
+                    path.file_name().unwrap_or_default(),
                     cache_start.elapsed().as_secs_f64() * 1000.0
                 );
-                let _ = tx.send(FolderPreviewData {
-                    path,
-                    rgba_data,
-                    width,
-                    height,
-                });
-                throttle_repaint(&ctx, &mut last_repaint);
-                continue;
             }
-            log::debug!(
-                "[FOLDER PREVIEW] DB MISS {:?} ({:.1}ms) → Shell API",
-                path.file_name().unwrap_or_default(),
-                cache_start.elapsed().as_secs_f64() * 1000.0
-            );
 
             // SLOW PATH: Extract from Shell API
             // Strategy differs for OneDrive vs normal folders:
