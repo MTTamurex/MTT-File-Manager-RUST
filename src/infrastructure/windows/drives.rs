@@ -175,7 +175,7 @@ pub fn get_volume_info(drive_path: &str) -> VolumeInfo {
     }
 }
 
-fn extract_drive_letter(path: &Path) -> Option<char> {
+pub fn extract_drive_letter(path: &Path) -> Option<char> {
     let s = path.to_string_lossy();
     if s.len() >= 2 && s.as_bytes()[1] == b':' {
         s.chars().next().map(|c| c.to_ascii_uppercase())
@@ -204,4 +204,23 @@ pub fn is_usn_filesystem(file_system: &str) -> bool {
 /// Returns whether the path is on an USN-capable filesystem.
 pub fn path_is_usn_filesystem(path: &Path) -> Option<bool> {
     get_file_system_for_path(path).map(|fs| is_usn_filesystem(&fs))
+}
+
+/// Checks if a filesystem is known to NOT deliver `ReadDirectoryChangesW`
+/// notifications for changes made by other processes.
+///
+/// Only native FAT-family drivers have this limitation.
+/// FUSE-based drivers (Cryptomator/WinFsp, VeraCrypt, etc.) implement
+/// `ReadDirectoryChangesW` correctly in their minifilter/driver layer.
+pub fn lacks_cross_process_notifications(file_system: &str) -> bool {
+    let fs = file_system.trim().to_uppercase();
+    matches!(fs.as_str(), "EXFAT" | "FAT32" | "FAT" | "FAT16" | "FAT12")
+}
+
+/// Returns whether the path is on a filesystem that lacks cross-process
+/// `ReadDirectoryChangesW` notifications (exFAT/FAT32/FAT).
+pub fn path_lacks_cross_process_notifications(path: &Path) -> bool {
+    get_file_system_for_path(path)
+        .map(|fs| lacks_cross_process_notifications(&fs))
+        .unwrap_or(false)
 }

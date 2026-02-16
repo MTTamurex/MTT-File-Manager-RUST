@@ -15,28 +15,41 @@ impl ImageViewerApp {
         self.watcher_fallback_signature = None;
 
         let fs_name = crate::infrastructure::windows::get_file_system_for_path(path);
-        let fallback_polling = fs_name
+        let is_usn = fs_name
             .as_deref()
-            .map(|fs| !crate::infrastructure::windows::is_usn_filesystem(fs))
-            .unwrap_or(false);
+            .map(|fs| crate::infrastructure::windows::is_usn_filesystem(fs))
+            .unwrap_or(true); // unknown FS → assume reliable
 
-        self.watcher_fallback_polling = fallback_polling;
         self.watcher_fallback_fs = fs_name.clone();
 
-        if fallback_polling {
-            log::info!(
-                "[WATCHER] Non-USN filesystem detected ({:?}) for {:?}: enabling notify backup + consistency polling",
-                fs_name,
-                path
-            );
+        if is_usn {
+            // NTFS / ReFS — USN journal + reliable RDCW. Zero polling overhead.
+            self.watcher_fallback_polling = false;
+            return;
+        }
 
-            // Force fresh directory data for this path. Non-USN volumes (exFAT/FAT)
-            // are more prone to missed notifications, so we should not trust stale index/cache.
-            let path_buf = path.to_path_buf();
-            self.directory_cache.invalidate(&path_buf);
-            if let Some(di) = &self.directory_index {
-                let _ = di.invalidate(path);
-            }
+        // Non-USN filesystem: check if we already learned this drive is unreliable.
+        let drive_letter = crate::infrastructure::windows::extract_drive_letter(path);
+        let already_known_bad = drive_letter
+            .map(|dl| self.rdcw_unreliable_drives.get(&dl).copied().unwrap_or(false))
+            .unwrap_or(false);
+
+        if already_known_bad {
+            // We previously detected RDCW drift on this drive → active polling.
+            self.watcher_fallback_polling = true;
+            log::info!(
+                "[WATCHER] Drive {:?} (fs={:?}): RDCW previously verified as unreliable → active polling",
+                drive_letter, fs_name
+            );
+        } else {
+            // RDCW not yet proven bad. Enable verification mode: slow probing
+            // that checks for drift without invalidating caches.
+            // If drift is found, maybe_poll_non_usn_consistency will escalate.
+            self.watcher_fallback_polling = true;
+            log::info!(
+                "[WATCHER] Drive {:?} (fs={:?}): RDCW unverified → verification probing active",
+                drive_letter, fs_name
+            );
         }
     }
 

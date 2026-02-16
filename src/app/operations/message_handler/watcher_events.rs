@@ -13,15 +13,32 @@ pub(super) struct WatcherPerfMarks {
 }
 
 impl ImageViewerApp {
-    fn fallback_poll_interval(item_count: usize) -> Duration {
-        if item_count <= 300 {
-            Duration::from_secs(3)
-        } else if item_count <= 2_000 {
-            Duration::from_secs(6)
-        } else if item_count <= 8_000 {
-            Duration::from_secs(10)
+    /// Returns the poll interval based on RDCW reliability verdict.
+    /// - Confirmed unreliable → fast polling (3-15s based on item count)
+    /// - Still verifying      → slow probing (30s)
+    fn fallback_poll_interval(&self, item_count: usize) -> Duration {
+        let drive_letter =
+            crate::infrastructure::windows::extract_drive_letter(std::path::Path::new(
+                &self.navigation_state.current_path,
+            ));
+        let known_bad = drive_letter
+            .map(|dl| self.rdcw_unreliable_drives.get(&dl).copied().unwrap_or(false))
+            .unwrap_or(false);
+
+        if known_bad {
+            // RDCW confirmed broken → fast polling
+            if item_count <= 300 {
+                Duration::from_secs(3)
+            } else if item_count <= 2_000 {
+                Duration::from_secs(6)
+            } else if item_count <= 8_000 {
+                Duration::from_secs(10)
+            } else {
+                Duration::from_secs(15)
+            }
         } else {
-            Duration::from_secs(15)
+            // Verification mode → slow probing
+            Duration::from_secs(30)
         }
     }
 
@@ -65,7 +82,7 @@ impl ImageViewerApp {
             return;
         }
 
-        let interval = Self::fallback_poll_interval(self.all_items.len());
+        let interval = self.fallback_poll_interval(self.all_items.len());
         if self.watcher_fallback_last_probe.elapsed() < interval {
             return;
         }
@@ -97,8 +114,23 @@ impl ImageViewerApp {
             return;
         }
 
+        // Drift detected! RDCW missed cross-process events on this drive.
+        // Record the verdict so future visits skip verification mode.
+        let drive_letter =
+            crate::infrastructure::windows::extract_drive_letter(current_path.as_path());
+        if let Some(dl) = drive_letter {
+            if !self.rdcw_unreliable_drives.get(&dl).copied().unwrap_or(false) {
+                log::warn!(
+                    "[FS-WATCH-FALLBACK] RDCW verified UNRELIABLE for drive {}:\\ (fs={:?}). Escalating to active polling.",
+                    dl,
+                    self.watcher_fallback_fs
+                );
+                self.rdcw_unreliable_drives.insert(dl, true);
+            }
+        }
+
         log::warn!(
-            "[FS-WATCH-FALLBACK] Listing drift detected via polling on {:?} (fs={:?}); scheduling reload",
+            "[FS-WATCH-FALLBACK] Listing drift detected on {:?} (fs={:?}); scheduling reload",
             current_path,
             self.watcher_fallback_fs
         );

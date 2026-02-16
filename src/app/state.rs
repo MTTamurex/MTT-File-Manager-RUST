@@ -168,12 +168,17 @@ pub struct ImageViewerApp {
     pub last_auto_reload: Instant,
     pub pending_auto_reload: bool,
     pub skip_next_auto_reload: bool, // SMART DELETE: Prevent reload after direct UI update
-    /// Fallback consistency polling for non-USN filesystems (exFAT/FAT32).
-    /// Disabled on NTFS/ReFS to keep zero overhead on normal local disks.
+    /// Adaptive RDCW verification for non-USN filesystems.
+    /// Starts in verification mode (slow probing) and escalates to active
+    /// polling only when the probe detects drift (RDCW missed events).
     pub watcher_fallback_polling: bool,
     pub watcher_fallback_fs: Option<String>,
     pub watcher_fallback_last_probe: Instant,
     pub watcher_fallback_signature: Option<u64>,
+    /// Per-drive RDCW reliability verdict, learned during the session.
+    /// `true` = RDCW confirmed unreliable (drift was detected at least once).
+    /// Drives not in this map are still being verified.
+    pub rdcw_unreliable_drives: std::collections::HashMap<char, bool>,
 
     // CLIPBOARD (Copy/Cut/Paste)
     pub clipboard: ClipboardManager,
