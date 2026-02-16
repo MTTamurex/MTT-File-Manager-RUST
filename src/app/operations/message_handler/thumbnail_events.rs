@@ -7,6 +7,9 @@ impl ImageViewerApp {
         &mut self,
         ctx: &egui::Context,
     ) -> Instant {
+        const MAX_FILE_BATCHES_PER_FRAME: usize = 48;
+        const FILE_BATCH_BUDGET_MS: u64 = 5;
+
         // 1. STREAMING: Receive incremental batches of FileEntry (filtered by generation)
         // BLOCKING: Process all available file entries in batch
 
@@ -20,9 +23,17 @@ impl ImageViewerApp {
         }
 
         let mut saw_end_of_load = false;
-        loop {
+        let mut processed_batches = 0usize;
+        let mut has_more_stream_batches = false;
+        let stream_start = Instant::now();
+        while processed_batches < MAX_FILE_BATCHES_PER_FRAME {
+            if stream_start.elapsed() >= std::time::Duration::from_millis(FILE_BATCH_BUDGET_MS) {
+                has_more_stream_batches = true;
+                break;
+            }
             match self.file_entry_receiver.try_recv() {
                 Ok((gen_id, new_batch)) => {
+                    processed_batches += 1;
                     if gen_id != self.generation {
                         continue; // Discard data from a previous navigation/refresh
                     }
@@ -43,10 +54,16 @@ impl ImageViewerApp {
             }
         }
 
+        if processed_batches >= MAX_FILE_BATCHES_PER_FRAME {
+            has_more_stream_batches = true;
+        }
+
         if saw_end_of_load {
             self.handle_items_after_end_of_load(ctx);
         } else if self.pending_items_rebuild {
             self.maybe_schedule_stream_items_rebuild(ctx);
+        } else if has_more_stream_batches {
+            ctx.request_repaint();
         }
 
         // 2. Cover worker results
@@ -66,7 +83,7 @@ impl ImageViewerApp {
         // 6. Folder size updates
         received_any |= self.process_folder_size_results();
 
-        if received_any {
+        if received_any || has_more_stream_batches {
             ctx.request_repaint();
         }
 
