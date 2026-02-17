@@ -1,6 +1,5 @@
 use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::workers::idle_warmup::IdleWarmupMessage;
-use crate::workers::predictive_prefetch::PredictiveMessage;
 use crate::workers::prefetch_worker::PrefetchMessage;
 use crate::workers::thumbnail::PriorityThumbnailQueue;
 use eframe::egui;
@@ -8,7 +7,6 @@ use std::sync::{mpsc, Arc};
 
 pub(in crate::app) struct PrefetchWorkerHandles {
     pub(in crate::app) prefetch_sender: mpsc::Sender<PrefetchMessage>,
-    pub(in crate::app) predictive_sender: mpsc::Sender<PredictiveMessage>,
     pub(in crate::app) idle_warmup_sender: mpsc::Sender<IdleWarmupMessage>,
 }
 
@@ -19,12 +17,6 @@ pub(in crate::app) fn spawn_prefetching_workers(
 ) -> PrefetchWorkerHandles {
     let (prefetch_tx, prefetch_rx) = mpsc::channel();
     crate::workers::prefetch_worker::spawn_prefetch_worker(prefetch_rx, directory_cache.clone());
-
-    let (predictive_tx, predictive_rx) = mpsc::channel();
-    crate::workers::predictive_prefetch::spawn_predictive_prefetcher(
-        predictive_rx,
-        directory_cache.clone(),
-    );
 
     let (idle_warmup_tx, idle_warmup_rx) = mpsc::channel();
     crate::workers::idle_warmup::spawn_idle_warmup_worker(
@@ -37,7 +29,6 @@ pub(in crate::app) fn spawn_prefetching_workers(
 
     PrefetchWorkerHandles {
         prefetch_sender: prefetch_tx,
-        predictive_sender: predictive_tx,
         idle_warmup_sender: idle_warmup_tx,
     }
 }
