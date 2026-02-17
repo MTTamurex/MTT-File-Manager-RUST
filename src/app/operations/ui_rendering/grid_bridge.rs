@@ -280,6 +280,7 @@ impl ImageViewerApp {
             drag_hovered_item: &mut drag_hovered_item,
             computer_local_indices: &self.navigation_state.computer_view_local_indices,
             computer_network_indices: &self.navigation_state.computer_view_network_indices,
+            frame_time_peak_ms: self.frame_time_peak_ms,
         };
 
         // Use a different approach: collect actions in vectors
