@@ -14,10 +14,10 @@ use std::sync::{mpsc, Arc};
 use super::folder_size_state::FolderSizeMessage;
 use super::init_preferences::StartupPreferences;
 use super::init_workers::{
-    spawn_async_font_loader, spawn_cover_worker, spawn_disk_cache_invalidation_worker,
-    spawn_file_operation_worker, spawn_folder_preview_workers, spawn_folder_size_worker,
-    spawn_global_search_worker, spawn_icon_worker, spawn_metadata_worker,
-    spawn_prefetching_workers, PrefetchWorkerHandles,
+    spawn_async_font_loader, spawn_consistency_probe_worker, spawn_cover_worker,
+    spawn_disk_cache_invalidation_worker, spawn_file_operation_worker,
+    spawn_folder_preview_workers, spawn_folder_size_worker, spawn_global_search_worker,
+    spawn_icon_worker, spawn_metadata_worker, spawn_prefetching_workers, PrefetchWorkerHandles,
 };
 use super::state::ItemsRebuildResult;
 
@@ -69,6 +69,11 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) global_search_res_rx:
         mpsc::Receiver<crate::workers::global_search_worker::GlobalSearchResponse>,
     pub(in crate::app) disk_cache_invalidation_tx: mpsc::Sender<Vec<PathBuf>>,
+
+    pub(in crate::app) consistency_probe_tx:
+        mpsc::Sender<super::init_workers::consistency_probe_worker::ConsistencyProbeRequest>,
+    pub(in crate::app) consistency_probe_rx:
+        mpsc::Receiver<super::init_workers::consistency_probe_worker::ConsistencyProbeResult>,
 
     pub(in crate::app) disks: Vec<(String, String)>,
     pub(in crate::app) drive_scan_tx: mpsc::Sender<Vec<(String, String)>>,
@@ -148,6 +153,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     let (file_op_tx, file_op_res_rx) = spawn_file_operation_worker();
     let (global_search_tx, global_search_res_rx) = spawn_global_search_worker(ctx);
     let disk_cache_invalidation_tx = spawn_disk_cache_invalidation_worker(disk_cache.clone());
+    let (consistency_probe_tx, consistency_probe_rx) = spawn_consistency_probe_worker(ctx.clone());
 
     let disks = windows_infra::get_all_drives();
     let (drive_scan_tx, drive_scan_rx) = mpsc::channel();
@@ -190,6 +196,8 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         global_search_tx,
         global_search_res_rx,
         disk_cache_invalidation_tx,
+        consistency_probe_tx,
+        consistency_probe_rx,
         disks,
         drive_scan_tx,
         drive_scan_rx,

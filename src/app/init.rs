@@ -106,6 +106,8 @@ impl ImageViewerApp {
             global_search_tx,
             global_search_res_rx,
             disk_cache_invalidation_tx,
+            consistency_probe_tx,
+            consistency_probe_rx,
             disks,
             drive_scan_tx,
             drive_scan_rx,
@@ -241,6 +243,8 @@ impl ImageViewerApp {
             watcher_fallback_last_probe: Instant::now(),
             watcher_fallback_signature: None,
             rdcw_unreliable_drives: std::collections::HashMap::new(),
+            consistency_probe_tx,
+            consistency_probe_rx,
 
             // CLIPBOARD
             clipboard: ClipboardManager::new(),

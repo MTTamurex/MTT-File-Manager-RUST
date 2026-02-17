@@ -33,10 +33,13 @@ impl ImageViewerApp {
 
         if known_bad {
             if is_non_usn_fs {
-                if item_count <= 2_000 {
-                    Duration::from_secs(30)
+                // Probe runs in background thread — safe to use shorter intervals.
+                if item_count <= 500 {
+                    Duration::from_secs(10)
+                } else if item_count <= 2_000 {
+                    Duration::from_secs(15)
                 } else {
-                    Duration::from_secs(45)
+                    Duration::from_secs(25)
                 }
             } else if item_count <= 300 {
                 Duration::from_secs(3)
@@ -48,7 +51,8 @@ impl ImageViewerApp {
                 Duration::from_secs(15)
             }
         } else if is_non_usn_fs {
-            Duration::from_secs(45)
+            // Unverified non-USN: probe in background, moderate interval.
+            Duration::from_secs(20)
         } else {
             Duration::from_secs(30)
         }
@@ -80,22 +84,25 @@ impl ImageViewerApp {
         final_hasher.finish()
     }
 
-    fn maybe_poll_non_usn_consistency(
-        &mut self,
-        pending_disk_cache_invalidations: &mut Vec<PathBuf>,
-    ) {
-        if !self.watcher_fallback_polling
-            || self.navigation_state.is_computer_view
+    /// Sends a consistency probe request to the background worker if the interval has elapsed.
+    /// The actual disk read happens off the UI thread.
+    fn maybe_send_consistency_probe(&mut self) {
+        if !self.watcher_fallback_polling {
+            return;
+        }
+        if self.navigation_state.is_computer_view
             || self.navigation_state.is_recycle_bin_view
-            || self.is_loading_folder
+        {
+            return;
+        }
+        if self.is_loading_folder
             || self.file_operation_state.file_ops_in_progress > 0
             || self.layout.saved_is_minimized
         {
             return;
         }
 
-        // After long inactivity, skip synchronous fallback probe briefly
-        // so UI can recover first.
+        // After long inactivity, skip probe briefly so UI can recover first.
         if self.minimized_duration_secs >= 10.0
             && self.last_restore_time.elapsed() < Duration::from_secs(8)
         {
@@ -124,65 +131,113 @@ impl ImageViewerApp {
         let ui_signature = Self::compute_entries_signature(&self.all_items);
         self.watcher_fallback_signature = Some(ui_signature);
 
-        let is_onedrive = crate::infrastructure::onedrive::is_onedrive_path(&current_path);
-        let disk_entries =
-            match crate::infrastructure::windows::hdd_directory_reader::read_directory_hdd_optimized(
-                current_path.as_path(),
-                is_onedrive,
-            ) {
-                Ok(entries) => entries,
-                Err(err) => {
-                    // If the directory doesn't exist anymore, navigate up.
-                    if !current_path.is_dir() {
-                        log::warn!(
-                            "[FS-WATCH-FALLBACK] Current folder vanished: {:?} - navigating up",
-                            current_path
-                        );
-                        self.navigate_to_nearest_valid_ancestor();
-                        return;
-                    }
-                    log::debug!(
-                        "[FS-WATCH-FALLBACK] Poll read failed for {:?}: {}",
-                        current_path,
-                        err
-                    );
-                    return;
+        // Collect cover paths from subfolder entries for staleness verification.
+        let cover_paths: Vec<(PathBuf, PathBuf)> = self
+            .all_items
+            .iter()
+            .filter_map(|entry| {
+                if entry.is_dir {
+                    entry.folder_cover.as_ref().map(|cover| {
+                        (current_path.join(&entry.name), cover.clone())
+                    })
+                } else {
+                    None
                 }
-            };
+            })
+            .collect();
 
-        let disk_signature = Self::compute_entries_signature(&disk_entries);
-        if disk_signature == ui_signature {
-            return;
-        }
-
-        // Drift detected! RDCW missed cross-process events on this drive.
-        // Record the verdict so future visits skip verification mode.
-        let drive_letter =
-            crate::infrastructure::windows::extract_drive_letter(current_path.as_path());
-        if let Some(dl) = drive_letter {
-            if !self.rdcw_unreliable_drives.get(&dl).copied().unwrap_or(false) {
-                log::warn!(
-                    "[FS-WATCH-FALLBACK] RDCW verified UNRELIABLE for drive {}:\\ (fs={:?}). Escalating to active polling.",
-                    dl,
-                    self.watcher_fallback_fs
-                );
-                self.rdcw_unreliable_drives.insert(dl, true);
-            }
-        }
-
-        log::warn!(
-            "[FS-WATCH-FALLBACK] Listing drift detected on {:?} (fs={:?}); scheduling reload",
-            current_path,
-            self.watcher_fallback_fs
+        let is_onedrive = crate::infrastructure::onedrive::is_onedrive_path(&current_path);
+        let _ = self.consistency_probe_tx.send(
+            crate::app::init_workers::consistency_probe_worker::ConsistencyProbeRequest {
+                path: current_path,
+                is_onedrive,
+                ui_signature,
+                cover_paths,
+            },
         );
+    }
 
-        self.directory_cache.invalidate(&current_path);
-        if let Some(di) = &self.directory_index {
-            let _ = di.invalidate(&current_path);
+    /// Processes results from the async consistency probe worker.
+    /// Handles drift detection, cache invalidation, stale covers, and folder-vanished scenarios.
+    fn process_consistency_probe_results(
+        &mut self,
+        pending_disk_cache_invalidations: &mut Vec<PathBuf>,
+    ) {
+        while let Ok(result) = self.consistency_probe_rx.try_recv() {
+            let current_path = PathBuf::from(&self.navigation_state.current_path);
+
+            // Discard stale results from a different folder.
+            if result.path != current_path {
+                continue;
+            }
+
+            if result.path_vanished {
+                log::warn!(
+                    "[FS-WATCH-FALLBACK] Current folder vanished: {:?} - navigating up",
+                    result.path
+                );
+                self.navigate_to_nearest_valid_ancestor();
+                return;
+            }
+
+            // Handle stale subfolder covers: clear in-memory cover and re-request discovery.
+            if !result.stale_covers.is_empty() {
+                log::debug!(
+                    "[FS-WATCH-FALLBACK] {} stale cover(s) detected in {:?}",
+                    result.stale_covers.len(),
+                    result.path.file_name().unwrap_or_default()
+                );
+                let stale_set: HashSet<PathBuf> = result.stale_covers.into_iter().collect();
+                for item in &mut self.all_items {
+                    if !item.is_dir || item.folder_cover.is_none() {
+                        continue;
+                    }
+                    let folder_path = current_path.join(&item.name);
+                    if stale_set.contains(&folder_path) {
+                        item.folder_cover = None;
+                        // Invalidate disk cache cover in background (avoids Mutex on UI thread).
+                        pending_disk_cache_invalidations.push(folder_path.clone());
+                        // Re-request cover discovery for this subfolder.
+                        let _ = self.cover_worker_sender.send(folder_path);
+                    }
+                }
+                self.pending_items_rebuild = true;
+            }
+
+            // Re-check UI signature in case items changed while probe was in flight.
+            let current_ui_signature = Self::compute_entries_signature(&self.all_items);
+            if result.disk_signature == current_ui_signature {
+                continue;
+            }
+
+            // Drift detected! RDCW missed cross-process events on this drive.
+            let drive_letter =
+                crate::infrastructure::windows::extract_drive_letter(result.path.as_path());
+            if let Some(dl) = drive_letter {
+                if !self.rdcw_unreliable_drives.get(&dl).copied().unwrap_or(false) {
+                    log::warn!(
+                        "[FS-WATCH-FALLBACK] RDCW verified UNRELIABLE for drive {}:\\ (fs={:?}). Escalating to active polling.",
+                        dl,
+                        self.watcher_fallback_fs
+                    );
+                    self.rdcw_unreliable_drives.insert(dl, true);
+                }
+            }
+
+            log::warn!(
+                "[FS-WATCH-FALLBACK] Listing drift detected on {:?} (fs={:?}); scheduling reload",
+                result.path,
+                self.watcher_fallback_fs
+            );
+
+            self.directory_cache.invalidate(&result.path);
+            if let Some(di) = &self.directory_index {
+                let _ = di.invalidate(&result.path);
+            }
+            pending_disk_cache_invalidations.push(result.path);
+            self.watcher_fallback_signature = Some(result.disk_signature);
+            self.pending_auto_reload = true;
         }
-        pending_disk_cache_invalidations.push(current_path.clone());
-        self.watcher_fallback_signature = Some(disk_signature);
-        self.pending_auto_reload = true;
     }
 
     pub(super) fn process_watcher_events_and_auto_reload(
@@ -321,7 +376,10 @@ impl ImageViewerApp {
             &mut pending_disk_cache_invalidations,
         );
 
-        self.maybe_poll_non_usn_consistency(&mut pending_disk_cache_invalidations);
+        // Async consistency probe: receive results from background worker
+        self.process_consistency_probe_results(&mut pending_disk_cache_invalidations);
+        // Send new probe request if interval elapsed (disk read happens in background)
+        self.maybe_send_consistency_probe();
 
         self.enqueue_disk_cache_invalidations(pending_disk_cache_invalidations);
         self.apply_watcher_reload_policy();

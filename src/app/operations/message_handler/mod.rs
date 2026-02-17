@@ -82,8 +82,8 @@ impl ImageViewerApp {
 
         // PERF: Log detailed breakdown when process_incoming_messages is slow
         let _t_msg_total = _t_msg_start.elapsed().as_millis();
-        if _t_msg_total > 100 {
-            log::debug!("[PERF-MSG] TOTAL={}ms | pre_watcher={}ms | watcher_events={}ms | legacy+autoreload={}ms | streaming={}ms | icons+thumbs={}ms",
+        if _t_msg_total > 50 {
+            log::warn!("[PERF-MSG] TOTAL={}ms | pre_watcher={}ms | watcher_events={}ms | legacy+autoreload={}ms | streaming={}ms | icons+thumbs={}ms",
                 _t_msg_total,
                 _t_watcher_start.duration_since(_t_msg_start).as_millis(),
                 _t_drive_events_done.duration_since(_t_watcher_start).as_millis(),
