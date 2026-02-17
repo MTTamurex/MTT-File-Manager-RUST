@@ -250,11 +250,20 @@ impl ImageViewerApp {
             .file_ops_in_progress
             .saturating_sub(1);
         if self.file_operation_state.file_ops_in_progress == 0 {
-            // Completion handlers already triggered reloads. Skip watcher queued reload.
             self.pending_auto_reload = false;
             // Keep pending_deletions until folder load completion to avoid stale thumbnail retries.
             if !self.is_loading_folder {
                 self.file_operation_state.pending_deletions.clear();
+            }
+            // Watcher events were drained but not processed while ops were active.
+            // Force a full reload so the view reflects the final state of the folder.
+            if !self.navigation_state.is_computer_view
+                && !self.navigation_state.is_recycle_bin_view
+            {
+                self.directory_cache
+                    .invalidate(&PathBuf::from(&self.navigation_state.current_path));
+                self.loaded_path.clear();
+                self.load_folder(false);
             }
         }
     }
