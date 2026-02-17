@@ -143,6 +143,24 @@ impl DriveWatcherManager {
         watcher.poll_events()
     }
 
+    /// Poll events with limits suitable for UI-thread processing.
+    /// Returns `(events_kept, dropped_event_count)`.
+    pub fn poll_events_limited(
+        &self,
+        max_batches: usize,
+        max_events: usize,
+    ) -> (Vec<DriveWatcherEvent>, usize) {
+        let Some(ref drive) = self.current_drive else {
+            return (Vec::new(), 0);
+        };
+
+        let Some(watcher) = self.watchers.get(drive) else {
+            return (Vec::new(), 0);
+        };
+
+        watcher.poll_events_limited(max_batches, max_events)
+    }
+
     /// Check if the watcher system is active
     pub fn is_active(&self) -> bool {
         self.current_drive

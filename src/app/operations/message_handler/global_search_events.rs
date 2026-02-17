@@ -2,10 +2,36 @@
 
 use crate::app::state::ImageViewerApp;
 use crate::workers::global_search_worker::GlobalSearchResponse;
+use std::time::{Duration, Instant};
 
 impl ImageViewerApp {
     pub(super) fn process_global_search_events(&mut self) {
-        while let Ok(response) = self.global_search.receiver.try_recv() {
+        const MAX_GLOBAL_SEARCH_MSGS_PER_FRAME: usize = 48;
+        let budget = if self.frame_time_peak_ms > 33.33 {
+            Duration::from_millis(1)
+        } else if self.frame_time_peak_ms > 25.0 {
+            Duration::from_millis(2)
+        } else {
+            Duration::from_millis(4)
+        };
+
+        let start = Instant::now();
+        let mut processed = 0usize;
+        let mut has_more = false;
+
+        while processed < MAX_GLOBAL_SEARCH_MSGS_PER_FRAME {
+            if start.elapsed() >= budget {
+                has_more = true;
+                break;
+            }
+
+            let response = match self.global_search.receiver.try_recv() {
+                Ok(response) => response,
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+            };
+            processed += 1;
+
             match response {
                 GlobalSearchResponse::Results {
                     query,
@@ -61,17 +87,25 @@ impl ImageViewerApp {
             }
         }
 
+        if processed >= MAX_GLOBAL_SEARCH_MSGS_PER_FRAME {
+            has_more = true;
+        }
+
+        if has_more {
+            self.ui_ctx.request_repaint();
+        }
+
         // Check availability faster while offline, slower while stable online.
         let interval = if self.global_search.active {
-            std::time::Duration::from_secs(1)
+            Duration::from_secs(1)
         } else if self.global_search.available {
-            std::time::Duration::from_secs(30)
+            Duration::from_secs(30)
         } else {
-            std::time::Duration::from_secs(3)
+            Duration::from_secs(3)
         };
 
         if self.global_search.last_check.elapsed() > interval {
-            self.global_search.last_check = std::time::Instant::now();
+            self.global_search.last_check = Instant::now();
             let _ = self
                 .global_search
                 .sender
