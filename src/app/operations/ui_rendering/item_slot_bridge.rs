@@ -132,8 +132,8 @@ impl ImageViewerApp {
             }
         }
 
-        for path in pending_folder_scans {
-            self.request_folder_scan(path);
+        if !pending_folder_scans.is_empty() {
+            self.request_folder_scans_batch(pending_folder_scans);
         }
 
         for path in pending_folder_preview_loads {

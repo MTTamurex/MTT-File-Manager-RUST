@@ -10,7 +10,6 @@ impl ThumbnailDiskCache {
         folder_paths: &[PathBuf],
     ) -> std::collections::HashMap<PathBuf, PathBuf> {
         let mut results = std::collections::HashMap::new();
-        let mut stale_folder_rows = Vec::new();
         if folder_paths.is_empty() {
             return results;
         }
@@ -18,48 +17,40 @@ impl ThumbnailDiskCache {
         // SQLite parameter limit is 999, use 500 for safety margin
         const BATCH_SIZE: usize = 500;
 
-        {
-            let db = match self.reader.lock() {
-                Ok(db) => db,
-                Err(_) => return results,
-            };
+        let db = match self.reader.lock() {
+            Ok(db) => db,
+            Err(_) => return results,
+        };
 
-            for chunk in folder_paths.chunks(BATCH_SIZE) {
-                let placeholders: Vec<&str> = chunk.iter().map(|_| "?").collect();
-                let query = format!(
-                    "SELECT folder_path, cover_path FROM folder_covers WHERE folder_path IN ({})",
-                    placeholders.join(",")
-                );
+        for chunk in folder_paths.chunks(BATCH_SIZE) {
+            let placeholders: Vec<&str> = chunk.iter().map(|_| "?").collect();
+            let query = format!(
+                "SELECT folder_path, cover_path FROM folder_covers WHERE folder_path IN ({})",
+                placeholders.join(",")
+            );
 
-                if let Ok(mut stmt) = db.prepare(&query) {
-                    let path_strs: Vec<String> = chunk
-                        .iter()
-                        .map(|p| p.to_string_lossy().to_string())
-                        .collect();
+            if let Ok(mut stmt) = db.prepare(&query) {
+                let path_strs: Vec<String> = chunk
+                    .iter()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect();
 
-                    if let Ok(rows) =
-                        stmt.query_map(rusqlite::params_from_iter(path_strs.iter()), |row| {
-                            let f_path: String = row.get(0)?;
-                            let c_path: String = row.get(1)?;
-                            Ok((f_path, c_path))
-                        })
-                    {
-                        for row in rows.flatten() {
-                            if Self::path_exists_fast(&row.1) {
-                                results.insert(PathBuf::from(row.0), PathBuf::from(row.1));
-                            } else {
-                                stale_folder_rows.push(PathBuf::from(row.0));
-                            }
-                        }
+                if let Ok(rows) =
+                    stmt.query_map(rusqlite::params_from_iter(path_strs.iter()), |row| {
+                        let f_path: String = row.get(0)?;
+                        let c_path: String = row.get(1)?;
+                        Ok((f_path, c_path))
+                    })
+                {
+                    for row in rows.flatten() {
+                        // PERFORMANCE: Skip path_exists_fast() validation here.
+                        // On virtual/encrypted drives (Cryptomator), GetFileAttributesW per cover
+                        // can take 3-5ms each, causing 90-150ms stalls with dozens of folders.
+                        // Stale covers are cleaned up lazily when thumbnail workers fail.
+                        results.insert(PathBuf::from(row.0), PathBuf::from(row.1));
                     }
                 }
             }
-        }
-
-        // Best-effort stale cleanup after releasing reader lock.
-        // This prevents old/non-existent cover paths from reappearing.
-        for folder in stale_folder_rows {
-            self.remove_folder_cover(&folder);
         }
 
         results
