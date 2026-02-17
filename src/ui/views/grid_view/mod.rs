@@ -179,6 +179,8 @@ pub struct GridViewContext<'a> {
     pub computer_local_indices: &'a [usize],
     /// PERFORMANCE: Pre-computed network drive indices for computer view
     pub computer_network_indices: &'a [usize],
+    /// PERFORMANCE: Peak frame time for adaptive overscan after inactivity wake
+    pub frame_time_peak_ms: f32,
 }
 
 /// Operations that can be performed from grid view

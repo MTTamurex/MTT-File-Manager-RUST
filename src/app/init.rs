@@ -357,6 +357,7 @@ impl ImageViewerApp {
             last_scroll_offset: 0.0,
             frame_time_avg_ms: 0.0,
             frame_time_peak_ms: 0.0,
+            last_actual_frame_ms: 0.0,
             fps_avg: 0.0,
             upload_budget_ms,
             last_upload_budget_update: Instant::now(),

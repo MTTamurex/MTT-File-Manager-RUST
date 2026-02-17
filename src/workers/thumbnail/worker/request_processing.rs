@@ -55,7 +55,7 @@ pub(super) fn process_thumbnail_request(
             if let Some(decoded) = decode_cache_entry(entry, req_size) {
                 final_result = Some(decoded);
             } else {
-                log::warn!(
+                log::debug!(
                     "[Thumbnail-CACHE] EXACT match found but decode_cache_entry rejected! path={:?}, cached={}x{}, requested_size_in_db={}, req_size={}",
                     path.file_name(), w, h, rs, req_size
                 );

@@ -33,7 +33,10 @@ pub(super) fn render_virtualized_grid(
 
     cleanup_loading_set(ctx, vis_min_row, vis_max_row, total_rows, cols, count);
 
-    let overscan = if is_scrolling {
+    let overscan = if ctx.frame_time_peak_ms > 80.0 {
+        // Recovering from inactivity wake — minimize off-screen work
+        1
+    } else if is_scrolling {
         if ctx.scroll_predictor.velocity > 5.0 {
             3
         } else {

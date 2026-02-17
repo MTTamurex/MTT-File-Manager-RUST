@@ -35,6 +35,12 @@ impl eframe::App for ImageViewerApp {
         app::lifecycle::track_window_state(self, ctx);
         let frame_ms = ctx.input(|i| i.stable_dt) * 1000.0;
 
+        // Use the larger of egui's stable_dt and the previous frame's actual render
+        // time so that throttle guards react to real rendering cost, not just the
+        // inter-frame interval reported by egui (which stays ~17ms even when a frame
+        // actually took 200ms+ due to OS paging / GPU wake after inactivity).
+        let effective_frame_ms = frame_ms.max(self.last_actual_frame_ms);
+
         if frame_ms > 0.0 {
             if self.frame_time_avg_ms <= 0.0 {
                 self.frame_time_avg_ms = frame_ms;
@@ -42,11 +48,11 @@ impl eframe::App for ImageViewerApp {
                 self.frame_time_avg_ms = self.frame_time_avg_ms * 0.9 + frame_ms * 0.1;
             }
             if self.frame_time_peak_ms <= 0.0 {
-                self.frame_time_peak_ms = frame_ms;
+                self.frame_time_peak_ms = effective_frame_ms;
             } else {
                 self.frame_time_peak_ms *= 0.95;
-                if frame_ms > self.frame_time_peak_ms {
-                    self.frame_time_peak_ms = frame_ms;
+                if effective_frame_ms > self.frame_time_peak_ms {
+                    self.frame_time_peak_ms = effective_frame_ms;
                 }
             }
             self.fps_avg = if self.frame_time_avg_ms > 0.0 {
@@ -174,6 +180,7 @@ impl eframe::App for ImageViewerApp {
 
         // PERF: Log total frame time when slow (helps diagnose post-inactivity freezes)
         let frame_total_ms = t_frame_start.elapsed().as_millis();
+        self.last_actual_frame_ms = frame_total_ms as f32;
         if frame_total_ms > 100 {
             log::warn!(
                 "[PERF] SLOW FRAME: {}ms total (stable_dt={:.0}ms)",
