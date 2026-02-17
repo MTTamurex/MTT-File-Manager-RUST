@@ -34,10 +34,20 @@ impl ImageViewerApp {
     }
 
     fn register_changed_folder(changed_path: &Path, out: &mut HashSet<PathBuf>) {
-        if crate::infrastructure::onedrive::fast_is_dir(changed_path) {
+        // Avoid per-event GetFileAttributesW syscalls during watcher bursts.
+        // Use a fast heuristic: paths with a file extension are almost certainly
+        // files, so register their parent.  Paths without an extension could be
+        // directories OR extensionless files, so register both the path itself
+        // and its parent to cover both cases.
+        if changed_path.extension().is_some() {
+            if let Some(parent) = changed_path.parent() {
+                out.insert(parent.to_path_buf());
+            }
+        } else {
             out.insert(changed_path.to_path_buf());
-        } else if let Some(parent) = changed_path.parent() {
-            out.insert(parent.to_path_buf());
+            if let Some(parent) = changed_path.parent() {
+                out.insert(parent.to_path_buf());
+            }
         }
     }
 
@@ -371,6 +381,8 @@ impl ImageViewerApp {
                 // Check if the current folder was deleted/renamed during the flood.
                 // This catches the case where a folder with many files is deleted
                 // (generating >50 events) and the individual handler never runs.
+                // Note: During our own file operations, this code is unreachable
+                // because process_watcher_events_and_auto_reload() early-returns.
                 let current_path_pb = PathBuf::from(&self.navigation_state.current_path);
                 if !self.navigation_state.is_computer_view
                     && !self.navigation_state.is_recycle_bin_view

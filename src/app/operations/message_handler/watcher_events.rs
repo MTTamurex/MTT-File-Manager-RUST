@@ -267,6 +267,28 @@ impl ImageViewerApp {
             (4usize, 320usize)
         };
 
+        // While a shell file operation is in progress (copy/move/delete), drain
+        // watcher events without processing them individually.  This avoids
+        // synchronous filesystem syscalls (is_dir, GetFileAttributesW) on the UI
+        // thread while the disk is under heavy I/O.  A full folder reload is
+        // triggered in handle_file_operation_finished() once all ops complete.
+        if self.file_operation_state.file_ops_in_progress > 0 {
+            let (_drained, _dropped) = self
+                .drive_watcher
+                .poll_events_limited(max_batches, max_events);
+            if !self.navigation_state.is_computer_view
+                && !self.navigation_state.is_recycle_bin_view
+            {
+                self.pending_auto_reload = true;
+            }
+            let now = Instant::now();
+            return WatcherPerfMarks {
+                watcher_start,
+                drive_events_done: now,
+                auto_reload_done: now,
+            };
+        }
+
         let (drive_events, dropped_drive_events) = self
             .drive_watcher
             .poll_events_limited(max_batches, max_events);
