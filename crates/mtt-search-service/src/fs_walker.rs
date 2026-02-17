@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::os::windows::fs::MetadataExt;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::file_index::VolumeIndex;
@@ -23,7 +24,11 @@ pub struct ScanStats {
 /// Full-tree scan for filesystems without USN support (FAT/exFAT/FUSE/CryptoFS).
 ///
 /// The scan is iterative (no recursion) and skips reparse points to avoid cycles.
-pub fn scan_volume(drive_letter: char, index: &mut VolumeIndex) -> Result<ScanStats, String> {
+pub fn scan_volume(
+    drive_letter: char,
+    index: &mut VolumeIndex,
+    shutdown: &AtomicBool,
+) -> Result<ScanStats, String> {
     let root = PathBuf::from(format!("{}:\\", drive_letter));
     if !root.exists() {
         return Err(format!("volume root {}:\\ is not accessible", drive_letter));
@@ -37,6 +42,10 @@ pub fn scan_volume(drive_letter: char, index: &mut VolumeIndex) -> Result<ScanSt
     queue.push_back((root, ROOT_REF));
 
     while let Some((dir_path, parent_ref)) = queue.pop_front() {
+        // Check shutdown every 100 directories to allow graceful stop.
+        if directories_scanned % 100 == 0 && shutdown.load(Ordering::Relaxed) {
+            return Err("scan interrupted by shutdown".to_string());
+        }
         directories_scanned += 1;
 
         let entries = match std::fs::read_dir(&dir_path) {

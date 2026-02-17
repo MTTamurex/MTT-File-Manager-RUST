@@ -63,7 +63,7 @@ pub(crate) fn index_non_ntfs_volume(
         let mut scanned_index = file_index::VolumeIndex::new(drive_letter);
         scanned_index.state = file_index::IndexState::Scanning;
 
-        match fs_walker::scan_volume(drive_letter, &mut scanned_index) {
+        match fs_walker::scan_volume(drive_letter, &mut scanned_index, &shutdown) {
             Ok(stats) => {
                 scanned_index.names.shrink_to_fit();
                 scanned_index.journal_id = 0;

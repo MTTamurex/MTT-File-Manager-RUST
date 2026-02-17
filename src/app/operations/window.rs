@@ -44,9 +44,14 @@ impl ImageViewerApp {
                     // Keep rounded corners in windowed mode (Windows 11 DWM).
                     apply_window_corner_preference(hwnd, self.layout.saved_is_maximized);
 
-                    // Warmup shell extensions to avoid first-use delay on context menu
-                    // This pre-loads extensions like WinRAR, Send to, etc.
-                    warmup_shell_extensions(hwnd);
+                    // Warmup shell extensions on a background thread to avoid
+                    // blocking the UI for ~2-3s while DLLs load.
+                    let hwnd_raw = hwnd.0 as usize;
+                    std::thread::spawn(move || {
+                        use windows::Win32::Foundation::HWND;
+                        let hwnd = HWND(hwnd_raw as *mut _);
+                        warmup_shell_extensions(hwnd);
+                    });
                 }
             }
         }

@@ -175,6 +175,12 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
 /// Call this on app startup (e.g., with C:\ as path) to ensure
 /// shell extensions like WinRAR, Send to, Include in library are loaded
 pub fn warmup_shell_extensions(hwnd: HWND) {
+    // Initialize COM on this thread (required for IShellFolder/IContextMenu).
+    // Uses STA because shell extensions are apartment-threaded COM objects.
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+    }
+
     // Use the system drive root to trigger shell extension loading
     let system_drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_string());
     let warmup_path = std::path::PathBuf::from(format!("{}\\", system_drive));
