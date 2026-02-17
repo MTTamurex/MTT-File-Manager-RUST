@@ -58,6 +58,8 @@ impl ImageViewerApp {
             has_more_stream_batches = true;
         }
 
+        let t_stream_recv = Instant::now();
+
         if saw_end_of_load {
             self.handle_items_after_end_of_load(ctx);
         } else if self.pending_items_rebuild {
@@ -66,6 +68,8 @@ impl ImageViewerApp {
             ctx.request_repaint();
         }
 
+        let t_rebuild = Instant::now();
+
         // 2. Cover worker results
         self.process_cover_worker_results(ctx);
 
@@ -73,15 +77,36 @@ impl ImageViewerApp {
 
         // 3. Icon worker results
         self.process_icon_worker_results(ctx);
+        let t_icons = Instant::now();
 
         // 4. Metadata worker results
         self.process_metadata_worker_results(ctx);
+        let t_meta = Instant::now();
 
         // 5. Thumbnails + folder previews upload pipeline
         let mut received_any = self.process_thumbnail_upload_pipeline(ctx);
+        let t_thumbs = Instant::now();
 
         // 6. Folder size updates
         received_any |= self.process_folder_size_results();
+        let t_sizes = Instant::now();
+
+        let total_ms = stream_start.elapsed().as_millis();
+        if total_ms > 50 {
+            log::warn!(
+                "[PERF-STREAM] recv={}ms rebuild={}ms covers={}ms | icons={}ms meta={}ms thumbs={}ms sizes={}ms (batches={} items={} eol={})",
+                t_stream_recv.duration_since(stream_start).as_millis(),
+                t_rebuild.duration_since(t_stream_recv).as_millis(),
+                streaming_done.duration_since(t_rebuild).as_millis(),
+                t_icons.duration_since(streaming_done).as_millis(),
+                t_meta.duration_since(t_icons).as_millis(),
+                t_thumbs.duration_since(t_meta).as_millis(),
+                t_sizes.duration_since(t_thumbs).as_millis(),
+                processed_batches,
+                self.pending_items_count,
+                saw_end_of_load,
+            );
+        }
 
         if received_any || has_more_stream_batches {
             ctx.request_repaint();

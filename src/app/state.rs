@@ -179,6 +179,9 @@ pub struct ImageViewerApp {
     /// `true` = RDCW confirmed unreliable (drift was detected at least once).
     /// Drives not in this map are still being verified.
     pub rdcw_unreliable_drives: std::collections::HashMap<char, bool>,
+    /// Async consistency probe for non-USN drives (avoids blocking UI thread)
+    pub consistency_probe_tx: Sender<super::init_workers::consistency_probe_worker::ConsistencyProbeRequest>,
+    pub consistency_probe_rx: Receiver<super::init_workers::consistency_probe_worker::ConsistencyProbeResult>,
 
     // CLIPBOARD (Copy/Cut/Paste)
     pub clipboard: ClipboardManager,

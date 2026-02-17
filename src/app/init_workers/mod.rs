@@ -1,9 +1,11 @@
 mod background_jobs;
+pub(super) mod consistency_probe_worker;
 mod filesystem_workers;
 mod pipeline_workers;
 mod visual_workers;
 
 pub(super) use background_jobs::{spawn_incremental_gc_worker, spawn_startup_drive_info_preload};
+pub(super) use consistency_probe_worker::spawn_consistency_probe_worker;
 pub(super) use filesystem_workers::{
     spawn_disk_cache_invalidation_worker, spawn_folder_preview_workers, spawn_folder_size_worker,
 };
