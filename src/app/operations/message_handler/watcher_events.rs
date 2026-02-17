@@ -14,9 +14,15 @@ pub(super) struct WatcherPerfMarks {
 
 impl ImageViewerApp {
     /// Returns the poll interval based on RDCW reliability verdict.
-    /// - Confirmed unreliable → fast polling (3-15s based on item count)
-    /// - Still verifying      → slow probing (30s)
+    /// - Confirmed unreliable -> fast polling on local USN filesystems
+    /// - Non-USN/virtual filesystems -> conservative polling to avoid UI stalls
     fn fallback_poll_interval(&self, item_count: usize) -> Duration {
+        let is_non_usn_fs = self
+            .watcher_fallback_fs
+            .as_deref()
+            .map(|fs| !(fs.eq_ignore_ascii_case("NTFS") || fs.eq_ignore_ascii_case("ReFS")))
+            .unwrap_or(false);
+
         let drive_letter =
             crate::infrastructure::windows::extract_drive_letter(std::path::Path::new(
                 &self.navigation_state.current_path,
@@ -26,8 +32,13 @@ impl ImageViewerApp {
             .unwrap_or(false);
 
         if known_bad {
-            // RDCW confirmed broken → fast polling
-            if item_count <= 300 {
+            if is_non_usn_fs {
+                if item_count <= 2_000 {
+                    Duration::from_secs(30)
+                } else {
+                    Duration::from_secs(45)
+                }
+            } else if item_count <= 300 {
                 Duration::from_secs(3)
             } else if item_count <= 2_000 {
                 Duration::from_secs(6)
@@ -36,8 +47,9 @@ impl ImageViewerApp {
             } else {
                 Duration::from_secs(15)
             }
+        } else if is_non_usn_fs {
+            Duration::from_secs(45)
         } else {
-            // Verification mode → slow probing
             Duration::from_secs(30)
         }
     }
@@ -82,6 +94,19 @@ impl ImageViewerApp {
             return;
         }
 
+        // After long inactivity, skip synchronous fallback probe briefly
+        // so UI can recover first.
+        if self.minimized_duration_secs >= 10.0
+            && self.last_restore_time.elapsed() < Duration::from_secs(8)
+        {
+            return;
+        }
+
+        // If frame pacing is already degraded, defer expensive fallback probe.
+        if self.frame_time_peak_ms > 25.0 {
+            return;
+        }
+
         let interval = self.fallback_poll_interval(self.all_items.len());
         if self.watcher_fallback_last_probe.elapsed() < interval {
             return;
@@ -103,7 +128,7 @@ impl ImageViewerApp {
                     // If the directory doesn't exist anymore, navigate up.
                     if !current_path.is_dir() {
                         log::warn!(
-                            "[FS-WATCH-FALLBACK] Current folder vanished: {:?} — navigating up",
+                            "[FS-WATCH-FALLBACK] Current folder vanished: {:?} - navigating up",
                             current_path
                         );
                         self.navigate_to_nearest_valid_ancestor();
@@ -166,9 +191,51 @@ impl ImageViewerApp {
         let watcher_start = Instant::now();
         self.drive_watcher.check_pending_activation();
 
-        let drive_events = self.drive_watcher.poll_events();
+        let recently_restored = self.minimized_duration_secs >= 10.0
+            && self.last_restore_time.elapsed() < Duration::from_secs(10);
+        let (max_batches, max_events) = if self.layout.saved_is_minimized {
+            (1usize, 32usize)
+        } else if recently_restored {
+            (2usize, 96usize)
+        } else if self.frame_time_peak_ms > 33.33 {
+            (2usize, 128usize)
+        } else if self.frame_time_peak_ms > 25.0 {
+            (3usize, 192usize)
+        } else {
+            (4usize, 320usize)
+        };
+
+        let (drive_events, dropped_drive_events) = self
+            .drive_watcher
+            .poll_events_limited(max_batches, max_events);
         let t_poll_done = Instant::now();
         let drive_event_count = drive_events.len();
+
+        if dropped_drive_events > 0 && !self.layout.saved_is_minimized {
+            if dropped_drive_events >= max_events.saturating_mul(4) {
+                log::warn!(
+                    "[FS-WATCH] Dropped {} queued drive events after inactivity burst (kept={} batches<= {}, events<= {}). Scheduling safety reload.",
+                    dropped_drive_events,
+                    drive_event_count,
+                    max_batches,
+                    max_events
+                );
+            } else {
+                log::debug!(
+                    "[FS-WATCH] Dropped {} queued drive events (kept={} batches<= {}, events<= {})",
+                    dropped_drive_events,
+                    drive_event_count,
+                    max_batches,
+                    max_events
+                );
+            }
+            if !self.navigation_state.is_computer_view && !self.navigation_state.is_recycle_bin_view
+            {
+                self.directory_cache
+                    .invalidate(&PathBuf::from(&self.navigation_state.current_path));
+                self.pending_auto_reload = true;
+            }
+        }
 
         #[cfg(feature = "notify-watcher")]
         let drive_watcher_active = !drive_events.is_empty();
@@ -184,10 +251,7 @@ impl ImageViewerApp {
                 let drive_prefix = drive_root.to_string_lossy().to_string();
                 if !self.navigation_state.is_computer_view
                     && !self.navigation_state.is_recycle_bin_view
-                    && self
-                        .navigation_state
-                        .current_path
-                        .starts_with(&drive_prefix)
+                    && self.navigation_state.current_path.starts_with(&drive_prefix)
                 {
                     log::warn!(
                         "[FS-WATCH] Current path '{}' is on lost drive, redirecting to Este Computador",
@@ -225,12 +289,15 @@ impl ImageViewerApp {
         self.apply_folder_content_change_invalidations(folders_with_changed_contents);
 
         let drive_events_done = Instant::now();
+        let drive_poll_ms = t_poll_done.duration_since(watcher_start).as_millis();
+        let drive_process_ms = drive_events_done.duration_since(t_poll_done).as_millis();
         if drive_events_done.duration_since(watcher_start).as_millis() > 50 {
-            log::debug!(
-                "[PERF-MSG] DriveWatcher: poll={}ms process={}ms events={}",
-                t_poll_done.duration_since(watcher_start).as_millis(),
-                drive_events_done.duration_since(t_poll_done).as_millis(),
-                drive_event_count
+            log::warn!(
+                "[PERF-MSG] DriveWatcher: poll={}ms process={}ms events={} dropped={}",
+                drive_poll_ms,
+                drive_process_ms,
+                drive_event_count,
+                dropped_drive_events
             );
         }
 

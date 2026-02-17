@@ -156,6 +156,48 @@ impl DriveWatcher {
         all_events
     }
 
+    /// Poll events with per-frame limits and overflow draining.
+    ///
+    /// This method is intended for UI-thread consumers:
+    /// - keeps at most `max_batches` channel batches
+    /// - keeps at most `max_events` events
+    /// - drains and drops any additional buffered events to prevent backlog bursts
+    ///
+    /// Returns `(events_kept, dropped_event_count)`.
+    pub fn poll_events_limited(
+        &self,
+        max_batches: usize,
+        max_events: usize,
+    ) -> (Vec<DriveWatcherEvent>, usize) {
+        let max_batches = max_batches.max(1);
+        let max_events = max_events.max(1);
+
+        let mut kept = Vec::with_capacity(max_events.min(1024));
+        let mut dropped = 0usize;
+        let mut batches_kept = 0usize;
+
+        while let Ok(events) = self.event_receiver.try_recv() {
+            let batch_len = events.len();
+
+            if batches_kept >= max_batches || kept.len() >= max_events {
+                dropped = dropped.saturating_add(batch_len);
+                continue;
+            }
+
+            batches_kept = batches_kept.saturating_add(1);
+
+            let remaining = max_events.saturating_sub(kept.len());
+            if batch_len <= remaining {
+                kept.extend(events);
+            } else {
+                kept.extend(events.into_iter().take(remaining));
+                dropped = dropped.saturating_add(batch_len.saturating_sub(remaining));
+            }
+        }
+
+        (kept, dropped)
+    }
+
     /// Check if the watcher is still running
     pub fn is_running(&self) -> bool {
         !self.shutdown.load(Ordering::Relaxed)
