@@ -202,7 +202,7 @@ pub fn search_page(
 
     let query_lower = query.to_lowercase();
     let mut items = Vec::with_capacity(limit.min(1000));
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
     let mut scanned: u64 = 0;
     let mut matched_after_filters: usize = 0;
     let mut timed_out = false;
@@ -211,6 +211,8 @@ pub fn search_page(
         if !matches!(index.state, IndexState::Ready) {
             continue;
         }
+
+        let mut dir_path_cache = HashMap::new();
 
         for (&frn, record) in &index.records {
             // Check deadline every 50K records to avoid Instant::now() overhead
@@ -228,7 +230,7 @@ pub fn search_page(
             let name = index.names.get(record.name_ref());
 
             if contains_case_insensitive(name, &query_lower) {
-                if let Some(full_path) = path_resolver::resolve_path(frn, index) {
+                if let Some(full_path) = path_resolver::resolve_path_cached(frn, index, &mut dir_path_cache) {
                     if matched_after_filters < offset {
                         matched_after_filters += 1;
                         continue;
