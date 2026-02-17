@@ -304,8 +304,17 @@ impl ImageViewerApp {
             20
         };
 
+        // Time-budget folder preview uploads to avoid frame spikes.
+        // Each ctx.load_texture() can take 5-15ms, so uncapped uploads
+        // of 20 previews/frame could stall the UI for up to 300ms.
+        let budget = Duration::from_millis(if is_performance_critical { 3 } else { 8 });
+        let start = Instant::now();
+
         let mut folder_uploads = 0;
         while folder_uploads < max_folder_uploads {
+            if folder_uploads > 0 && start.elapsed() >= budget {
+                break;
+            }
             if let Ok(data) = self.folder_preview_receiver.try_recv() {
                 self.cache_manager.finish_folder_preview_loading(&data.path);
 
@@ -328,7 +337,8 @@ impl ImageViewerApp {
             }
         }
 
-        if folder_uploads >= max_folder_uploads {
+        if folder_uploads >= max_folder_uploads || (folder_uploads > 0 && start.elapsed() >= budget)
+        {
             ctx.request_repaint();
         }
     }
