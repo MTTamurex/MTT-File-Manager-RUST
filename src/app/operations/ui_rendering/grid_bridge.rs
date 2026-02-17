@@ -444,6 +444,9 @@ impl ImageViewerApp {
             self.cancel_item_drag();
         }
 
+        // PERFORMANCE: Collect folder scans for batching (single SQLite query + single filter_items)
+        let mut folder_scan_paths: Vec<PathBuf> = Vec::new();
+
         // Execute collected actions
         for action in actions {
             match action {
@@ -455,7 +458,7 @@ impl ImageViewerApp {
                 GridAction::RequestThumbnailLoadWithIndex(path, size, index, modified) => {
                     self.request_thumbnail_load_with_index_and_modified(path, size, index, modified)
                 }
-                GridAction::RequestFolderScan(path) => self.request_folder_scan(path),
+                GridAction::RequestFolderScan(path) => folder_scan_paths.push(path),
                 GridAction::RequestFolderPreviewLoad(path) => {
                     self.request_folder_preview_load(path)
                 }
@@ -475,6 +478,11 @@ impl ImageViewerApp {
                         .send(crate::workers::idle_warmup::IdleWarmupMessage::VisibleItems(items));
                 }
             }
+        }
+
+        // Flush batched folder scans (single SQLite query + single filter_items)
+        if !folder_scan_paths.is_empty() {
+            self.request_folder_scans_batch(folder_scan_paths);
         }
 
         // Reset scroll trigger after view has consumed it
