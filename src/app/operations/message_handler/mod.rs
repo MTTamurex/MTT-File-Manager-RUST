@@ -110,27 +110,4 @@ impl ImageViewerApp {
             );
         }
     }
-
-    fn invalidate_folder_cover_for_removed_path(&mut self, removed_path: &Path) {
-        let Some(parent_path) = removed_path.parent() else {
-            return;
-        };
-
-        let parent_buf = parent_path.to_path_buf();
-        let covers = self
-            .disk_cache
-            .get_folder_covers(std::slice::from_ref(&parent_buf));
-
-        if let Some(current_cover) = covers.get(&parent_buf) {
-            if current_cover.as_path() == removed_path {
-                self.disk_cache.remove_folder_cover(&parent_buf);
-                self.cache_manager.folder_preview_cache.pop(&parent_buf);
-                let _ = self.cover_worker_sender.send(parent_buf.clone());
-                debug_log!(
-                    "[FOLDER-COVER] Removed stale cover and requested recalculation for {:?}",
-                    parent_buf
-                );
-            }
-        }
-    }
 }

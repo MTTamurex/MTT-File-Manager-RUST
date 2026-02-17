@@ -145,7 +145,6 @@ impl ImageViewerApp {
 
         let cleaned = Self::clean_path(path);
         pending_disk_cache_invalidations.push(cleaned.clone());
-        self.invalidate_folder_cover_for_removed_path(&cleaned);
         Self::register_changed_folder(&cleaned, folders_with_changed_contents);
 
         // Check if the CURRENT FOLDER (or an ancestor) was deleted.
@@ -193,13 +192,13 @@ impl ImageViewerApp {
                     .unwrap_or(false);
 
                 if removed_from_all {
-                    let filtered: Vec<_> = self
-                        .items
-                        .iter()
-                        .filter(|item| item.path != path_to_remove)
-                        .cloned()
-                        .collect();
-                    self.items = Arc::new(filtered);
+                    // Avoid cloning the entire visible list on each delete event.
+                    // Arc::make_mut mutates in place when uniquely owned, and only
+                    // falls back to cloning when another Arc reference exists.
+                    let items = Arc::make_mut(&mut self.items);
+                    if let Some(idx) = items.iter().position(|item| item.path == path_to_remove) {
+                        items.remove(idx);
+                    }
                     self.total_items = self.items.len();
                     #[cfg(debug_assertions)]
                     log::debug!("[FS-WATCH] SMART DELETE: Removed from UI without reload");
@@ -214,6 +213,11 @@ impl ImageViewerApp {
                     }
 
                     self.skip_next_auto_reload = true;
+                } else {
+                    // Path mismatch can happen on some filesystems/watchers
+                    // (case/prefix differences). Fall back to a debounced reload
+                    // to guarantee correctness.
+                    self.pending_auto_reload = true;
                 }
             }
         }
@@ -312,7 +316,6 @@ impl ImageViewerApp {
         }
 
         pending_disk_cache_invalidations.push(cleaned_old.clone());
-        self.invalidate_folder_cover_for_removed_path(&cleaned_old);
         Self::register_changed_folder(&cleaned_old, folders_with_changed_contents);
         Self::register_changed_folder(&cleaned_new, folders_with_changed_contents);
 
@@ -505,14 +508,26 @@ impl ImageViewerApp {
     pub(super) fn apply_folder_content_change_invalidations(
         &mut self,
         folders_with_changed_contents: HashSet<PathBuf>,
+        pending_disk_cache_invalidations: &mut Vec<PathBuf>,
     ) {
+        let current_path_norm =
+            Self::normalize_for_match(std::path::Path::new(&self.navigation_state.current_path));
         for folder_path in folders_with_changed_contents {
-            self.disk_cache.remove_folder_preview_cache(&folder_path);
-            self.disk_cache.remove_folder_cover(&folder_path);
             // Also evict the in-memory GPU texture so the stale preview
             // stops being rendered immediately (not just on LRU eviction).
             self.cache_manager.invalidate_folder_preview(&folder_path);
             self.scanned_folders.pop(&folder_path);
+            // Keep folder listing cache coherent for future navigation.
+            // This avoids opening a changed folder with stale cached entries
+            // until the non-USN fallback probe runs (~30s).
+            let folder_norm = Self::normalize_for_match(&folder_path);
+            if folder_norm != current_path_norm {
+                self.directory_cache.invalidate(&folder_path);
+                self.clear_tab_cache_for_normalized_path(&folder_norm);
+            }
+            // Defer SQLite writes to the background invalidation worker to
+            // avoid blocking the UI thread during watcher bursts.
+            pending_disk_cache_invalidations.push(folder_path.clone());
             let _ = self.cover_worker_sender.send(folder_path.clone());
         }
     }

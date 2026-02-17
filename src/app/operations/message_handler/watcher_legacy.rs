@@ -12,7 +12,9 @@ impl ImageViewerApp {
         max_events_individual: usize,
         pending_disk_cache_invalidations: &mut Vec<PathBuf>,
     ) {
-        if drive_watcher_active {
+        // On USN filesystems, DriveWatcher is authoritative and we can skip notify.
+        // On non-USN filesystems, keep notify processing as resilience backup.
+        if drive_watcher_active && !self.watcher_fallback_polling {
             return;
         }
 

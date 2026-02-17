@@ -102,8 +102,15 @@ impl ImageViewerApp {
             return;
         }
 
-        // If frame pacing is already degraded, defer expensive fallback probe.
-        if self.frame_time_peak_ms > 25.0 {
+        // For non-USN filesystems, do not block consistency probes based on a sticky
+        // peak metric: reliability is more important and probe interval is already long.
+        // Keep the guard for USN paths, where known-bad drives can probe as fast as 3s.
+        let is_non_usn_fs = self
+            .watcher_fallback_fs
+            .as_deref()
+            .map(|fs| !(fs.eq_ignore_ascii_case("NTFS") || fs.eq_ignore_ascii_case("ReFS")))
+            .unwrap_or(false);
+        if !is_non_usn_fs && self.frame_time_peak_ms > 25.0 {
             return;
         }
 
@@ -286,7 +293,10 @@ impl ImageViewerApp {
             &mut folders_with_changed_contents,
         );
 
-        self.apply_folder_content_change_invalidations(folders_with_changed_contents);
+        self.apply_folder_content_change_invalidations(
+            folders_with_changed_contents,
+            &mut pending_disk_cache_invalidations,
+        );
 
         let drive_events_done = Instant::now();
         let drive_poll_ms = t_poll_done.duration_since(watcher_start).as_millis();
