@@ -7,7 +7,6 @@ pub struct FileOperationState {
     pub file_op_res_receiver: Receiver<crate::workers::file_operation_worker::FileOperationResult>,
     pub disk_cache_invalidation_sender: Sender<Vec<PathBuf>>,
     pub prefetch_sender: Sender<crate::workers::prefetch_worker::PrefetchMessage>,
-    pub predictive_sender: Sender<crate::workers::predictive_prefetch::PredictiveMessage>,
     pub idle_warmup_sender: Sender<crate::workers::idle_warmup::IdleWarmupMessage>,
     pub file_ops_in_progress: usize,
     pub pending_deletions: Arc<dashmap::DashMap<PathBuf, ()>>,

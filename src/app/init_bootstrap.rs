@@ -58,8 +58,6 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) folder_size_cancel: Arc<AtomicBool>,
 
     pub(in crate::app) prefetch_tx: mpsc::Sender<crate::workers::prefetch_worker::PrefetchMessage>,
-    pub(in crate::app) predictive_tx:
-        mpsc::Sender<crate::workers::predictive_prefetch::PredictiveMessage>,
     pub(in crate::app) idle_warmup_tx: mpsc::Sender<crate::workers::idle_warmup::IdleWarmupMessage>,
 
     pub(in crate::app) file_op_tx:
@@ -140,7 +138,6 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
 
     let PrefetchWorkerHandles {
         prefetch_sender: prefetch_tx,
-        predictive_sender: predictive_tx,
         idle_warmup_sender: idle_warmup_tx,
     } = spawn_prefetching_workers(
         directory_cache.clone(),
@@ -187,7 +184,6 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         folder_size_res_rx,
         folder_size_cancel,
         prefetch_tx,
-        predictive_tx,
         idle_warmup_tx,
         file_op_tx,
         file_op_res_rx,

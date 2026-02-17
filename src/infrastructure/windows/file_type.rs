@@ -314,8 +314,12 @@ pub fn find_folder_preview_item(folder_path: &Path) -> Option<PathBuf> {
     // Standard path (non-OneDrive) - use regular fs::read_dir
     if let Ok(entries) = fs::read_dir(folder_path) {
         for entry in entries.flatten().take(15) {
-            let path = entry.path();
-            if path.is_file() {
+            let file_type = match entry.file_type() {
+                Ok(ft) => ft,
+                Err(_) => continue,
+            };
+            if file_type.is_file() {
+                let path = entry.path();
                 if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                     // For folder preview, we only want images or videos
                     let ptype = get_perceived_type(ext);

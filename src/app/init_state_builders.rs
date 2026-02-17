@@ -124,7 +124,6 @@ pub(in crate::app) fn build_file_operation_state(
     >,
     disk_cache_invalidation_sender: mpsc::Sender<Vec<PathBuf>>,
     prefetch_sender: mpsc::Sender<crate::workers::prefetch_worker::PrefetchMessage>,
-    predictive_sender: mpsc::Sender<crate::workers::predictive_prefetch::PredictiveMessage>,
     idle_warmup_sender: mpsc::Sender<crate::workers::idle_warmup::IdleWarmupMessage>,
     pending_deletions: Arc<dashmap::DashMap<PathBuf, ()>>,
 ) -> FileOperationState {
@@ -133,7 +132,6 @@ pub(in crate::app) fn build_file_operation_state(
         file_op_res_receiver,
         disk_cache_invalidation_sender,
         prefetch_sender,
-        predictive_sender,
         idle_warmup_sender,
         file_ops_in_progress: 0,
         pending_deletions,
