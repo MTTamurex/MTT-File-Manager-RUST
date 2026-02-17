@@ -44,11 +44,11 @@ impl NameArena {
     /// for NTFS file names (max 255 UTF-16 code units ≈ 1 020 bytes UTF-8).
     pub fn insert(&mut self, name: &str) -> NameRef {
         let offset = self.buf.len();
-        debug_assert!(
+        assert!(
             offset <= u32::MAX as usize,
             "NameArena exceeded 4 GB limit"
         );
-        debug_assert!(
+        assert!(
             name.len() <= u16::MAX as usize,
             "File name exceeds 65 535 bytes"
         );
@@ -64,8 +64,10 @@ impl NameArena {
     pub fn get(&self, r: NameRef) -> &str {
         let start = r.offset as usize;
         let end = start + r.len as usize;
-        // SAFETY: we only insert valid UTF-8 via `insert`.
-        unsafe { std::str::from_utf8_unchecked(&self.buf[start..end]) }
+        let bytes = &self.buf[start..end];
+        // All data is inserted via `insert` which only accepts &str (valid UTF-8).
+        // Use safe validation as defense-in-depth for a SYSTEM-level service.
+        std::str::from_utf8(bytes).unwrap_or("")
     }
 
     /// Clear all names (for re-scan).

@@ -9,7 +9,7 @@ mod usn_journal;
 mod volume_indexers;
 
 use std::collections::HashSet;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 /// Redact filesystem paths from error messages to prevent information leakage.
@@ -63,14 +63,33 @@ fn main() {
     }
 }
 
-fn ctrlc_handler(_shutdown: Arc<AtomicBool>) -> Result<(), String> {
-    // Simple Ctrl+C handler for console mode
-    std::thread::spawn(move || {
-        loop {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            // In production, hook SetConsoleCtrlHandler. For now, the process
-            // will just terminate on Ctrl+C which is acceptable for debugging.
+/// Global flag set by the console ctrl handler callback.
+static CONSOLE_SHUTDOWN: AtomicBool = AtomicBool::new(false);
+
+unsafe extern "system" fn console_ctrl_callback(
+    _ctrl_type: u32,
+) -> windows::core::BOOL {
+    CONSOLE_SHUTDOWN.store(true, Ordering::SeqCst);
+    true.into()
+}
+
+fn ctrlc_handler(shutdown: Arc<AtomicBool>) -> Result<(), String> {
+    unsafe {
+        windows::Win32::System::Console::SetConsoleCtrlHandler(
+            Some(console_ctrl_callback),
+            true,
+        )
+        .map_err(|e| format!("SetConsoleCtrlHandler failed: {}", e))?;
+    }
+
+    // Propagate the static flag to the shared shutdown Arc.
+    std::thread::spawn(move || loop {
+        if CONSOLE_SHUTDOWN.load(Ordering::Relaxed) {
+            eprintln!("[SERVICE] Ctrl+C received, shutting down...");
+            shutdown.store(true, Ordering::SeqCst);
+            break;
         }
+        std::thread::sleep(std::time::Duration::from_millis(200));
     });
     Ok(())
 }
