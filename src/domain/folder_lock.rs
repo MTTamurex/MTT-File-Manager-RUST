@@ -9,5 +9,4 @@ pub struct FolderLock {
     pub sort_mode: SortMode,
     pub sort_descending: bool,
     pub folders_position: FoldersPosition,
-    pub search_query: String,
 }
