@@ -110,7 +110,11 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 dragging_path: dragging_path_str.as_deref(),
             };
 
-            render_sidebar(ui, &mut sidebar_ctx)
+            egui::ScrollArea::vertical()
+                .id_salt("sidebar_scroll")
+                .auto_shrink([false, false])
+                .show(ui, |ui| render_sidebar(ui, &mut sidebar_ctx))
+                .inner
         });
 
     if let Some(action) = sidebar_response.inner {
