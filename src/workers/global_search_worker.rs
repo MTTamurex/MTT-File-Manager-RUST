@@ -37,6 +37,7 @@ pub enum GlobalSearchResponse {
 
 const OFFLINE_FAILURE_THRESHOLD: u8 = 3;
 const STATUS_RETRY_COUNT: usize = 3;
+const MIN_QUERY_LEN_FOR_SERVICE_SEARCH: usize = 2;
 
 fn is_transient_ipc_error(message: &str) -> bool {
     let m = message.to_ascii_lowercase();
@@ -99,6 +100,10 @@ fn query_service_with_retry(
         }
         Err(e) => Err(e),
     }
+}
+
+fn should_skip_service_query(query: &str, offset: u32) -> bool {
+    offset == 0 && query.chars().count() < MIN_QUERY_LEN_FOR_SERVICE_SEARCH
 }
 
 fn filter_existing_results(
@@ -251,6 +256,31 @@ pub fn start_global_search_worker(
                             limit,
                             has_more: false,
                         });
+                        if pending_status_check {
+                            refresh_and_send_status(
+                                &sender,
+                                &mut session_index,
+                                &mut last_known_available,
+                                &mut last_known_total_indexed,
+                                &mut last_known_service_volumes,
+                                &mut consecutive_failures,
+                            );
+                        }
+                        continue;
+                    }
+
+                    if should_skip_service_query(&query, offset) {
+                        let (local_items, local_has_more) =
+                            session_index.search_page(&query, offset as usize, max_limit);
+                        let items = filter_existing_results(local_items, max_limit);
+                        let _ = sender.send(GlobalSearchResponse::Results {
+                            query,
+                            items,
+                            offset,
+                            limit,
+                            has_more: local_has_more,
+                        });
+
                         if pending_status_check {
                             refresh_and_send_status(
                                 &sender,

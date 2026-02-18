@@ -6,6 +6,11 @@ use crate::fs_walker;
 use crate::index_db;
 use crate::usn_journal;
 
+const INCREMENTAL_APPLY_RETRY_ATTEMPTS: usize = 3;
+const INCREMENTAL_APPLY_RETRY_SLEEP: std::time::Duration = std::time::Duration::from_millis(35);
+const INCREMENTAL_CONTENTION_LOG_INTERVAL: std::time::Duration =
+    std::time::Duration::from_secs(30);
+
 pub(crate) fn wait_for_shutdown_or_timeout(
     shutdown: &Arc<AtomicBool>,
     timeout: std::time::Duration,
@@ -321,6 +326,11 @@ pub(crate) fn index_volume(
 
     // Incremental update loop.
     let mut last_persist = std::time::Instant::now();
+    let mut contention_retries = 0u64;
+    let mut contention_applied_after_retry = 0u64;
+    let mut contention_skipped_cycles = 0u64;
+    let mut last_contention_log = std::time::Instant::now();
+
     loop {
         if shutdown.load(Ordering::Relaxed) {
             break;
@@ -335,24 +345,46 @@ pub(crate) fn index_volume(
         // 1) Read raw USN buffer with no lock held.
         match usn_journal::read_usn_buffer(volume_handle, &journal_info, current_usn) {
             Ok(Some((buffer, bytes_returned, new_usn))) => {
-                // 2) Apply deltas under a short try_write lock to avoid read-starvation.
-                if let Ok(mut indices_lock) = indices.try_write() {
-                    if let Some(vol_index) = indices_lock
-                        .iter_mut()
-                        .find(|v| v.drive_letter == drive_letter)
-                    {
-                        let mut dummy_count = 0;
-                        usn_journal::parse_usn_records(
-                            &buffer[8..bytes_returned as usize],
-                            vol_index,
-                            &mut dummy_count,
-                            true,
-                        );
-                        vol_index.last_usn = new_usn;
+                // 2) Apply deltas under a short bounded try_write retry window
+                // to avoid read-starvation while reducing staleness under contention.
+                let mut applied = false;
+                let mut attempt = 0usize;
+                while attempt < INCREMENTAL_APPLY_RETRY_ATTEMPTS {
+                    match indices.try_write() {
+                        Ok(mut indices_lock) => {
+                            if let Some(vol_index) = indices_lock
+                                .iter_mut()
+                                .find(|v| v.drive_letter == drive_letter)
+                            {
+                                let mut dummy_count = 0;
+                                usn_journal::parse_usn_records(
+                                    &buffer[8..bytes_returned as usize],
+                                    vol_index,
+                                    &mut dummy_count,
+                                    true,
+                                );
+                                vol_index.last_usn = new_usn;
+                                current_usn = new_usn;
+                                applied = true;
+                                if attempt > 0 {
+                                    contention_applied_after_retry += 1;
+                                }
+                            }
+                            break;
+                        }
+                        Err(_) => {
+                            attempt += 1;
+                            if attempt < INCREMENTAL_APPLY_RETRY_ATTEMPTS {
+                                contention_retries += 1;
+                                std::thread::sleep(INCREMENTAL_APPLY_RETRY_SLEEP);
+                            }
+                        }
                     }
-                    current_usn = new_usn;
                 }
-                // else: lock busy, retry on next cycle
+
+                if !applied {
+                    contention_skipped_cycles += 1;
+                }
             }
             Ok(None) => {}
             Err(e) => {
@@ -362,6 +394,25 @@ pub(crate) fn index_volume(
                     crate::redact_paths(&e)
                 );
             }
+        }
+
+        if last_contention_log.elapsed() >= INCREMENTAL_CONTENTION_LOG_INTERVAL {
+            if contention_retries > 0
+                || contention_applied_after_retry > 0
+                || contention_skipped_cycles > 0
+            {
+                eprintln!(
+                    "[USN] {}:\\ Incremental lock contention: retries={}, applied_after_retry={}, skipped_cycles={}",
+                    drive_letter,
+                    contention_retries,
+                    contention_applied_after_retry,
+                    contention_skipped_cycles
+                );
+                contention_retries = 0;
+                contention_applied_after_retry = 0;
+                contention_skipped_cycles = 0;
+            }
+            last_contention_log = std::time::Instant::now();
         }
 
         // 3) Persist every 5 minutes under read lock.
@@ -378,6 +429,16 @@ pub(crate) fn index_volume(
             }
             last_persist = std::time::Instant::now();
         }
+    }
+
+    if contention_retries > 0 || contention_applied_after_retry > 0 || contention_skipped_cycles > 0 {
+        eprintln!(
+            "[USN] {}:\\ Final incremental contention stats: retries={}, applied_after_retry={}, skipped_cycles={}",
+            drive_letter,
+            contention_retries,
+            contention_applied_after_retry,
+            contention_skipped_cycles
+        );
     }
 
     usn_journal::close_volume(volume_handle);

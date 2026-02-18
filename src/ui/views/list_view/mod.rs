@@ -312,7 +312,7 @@ pub fn render_list_view(
     let row_height = 24.0;
     let available_w = ui.available_width();
 
-    // Snapshot column widths BEFORE scaling (used for item rendering)
+    // Snapshot column widths BEFORE scaling (used as scaling input)
     let w_status = if ctx.is_onedrive_folder && !ctx.is_computer_view {
         *ctx.col_status_width
     } else {
@@ -326,12 +326,12 @@ pub fn render_list_view(
     // Scale column widths if they exceed available space
     scale_column_widths(ctx, available_w, w_status, w_name, w_date, w_type, w_size);
 
-    // Snapshot for item rendering (uses pre-scaling values, same as original)
+    // Snapshot for item rendering (uses post-scaling values to match header)
     let col_widths = ColumnWidths {
-        name: w_name,
-        date: w_date,
-        type_col: w_type,
-        size: w_size,
+        name: *ctx.col_name_width,
+        date: *ctx.col_date_width,
+        type_col: *ctx.col_type_width,
+        size: *ctx.col_size_width,
     };
 
     // Render header (uses ctx.col_*_width directly for resize interaction)
