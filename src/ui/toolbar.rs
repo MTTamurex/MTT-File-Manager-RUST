@@ -44,6 +44,7 @@ pub fn render_toolbar(
     _is_renaming: bool,
     computer_icon: Option<&egui::TextureHandle>,
     svg_manager: &mut SvgIconManager,
+    folder_locked: bool,
 ) -> Option<ToolbarAction> {
     let mut action = None;
 
@@ -159,15 +160,19 @@ pub fn render_toolbar(
             let text_available_w =
                 search_ui.available_width() - if has_text { 22.0 + 4.0 } else { 4.0 };
 
+            let hint = if folder_locked {
+                egui::RichText::new("Busca bloqueada").color(egui::Color32::from_gray(150))
+            } else {
+                egui::RichText::new("Buscar...").color(egui::Color32::from_gray(120))
+            };
             let text_resp = search_ui.add_sized(
                 egui::vec2(text_available_w, input_height - 2.0),
                 egui::TextEdit::singleline(search_query)
                     .frame(false)
-                    .hint_text(
-                        egui::RichText::new("Buscar...").color(egui::Color32::from_gray(120)),
-                    )
+                    .hint_text(hint)
                     .text_color(egui::Color32::BLACK)
-                    .vertical_align(egui::Align::Center),
+                    .vertical_align(egui::Align::Center)
+                    .interactive(!folder_locked),
             );
 
             if text_resp.changed() {

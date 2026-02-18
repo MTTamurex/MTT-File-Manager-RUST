@@ -19,6 +19,8 @@ pub const ICON_HEADPHONES: &[u8] = include_bytes!("../assets/icons/headphones.sv
 pub const ICON_HOME: &[u8] = include_bytes!("../assets/icons/home.svg");
 pub const ICON_INFO: &[u8] = include_bytes!("../assets/icons/info.svg");
 pub const ICON_LANGUAGES: &[u8] = include_bytes!("../assets/icons/languages.svg");
+pub const ICON_LOCK: &[u8] = include_bytes!("../assets/icons/lock.svg");
+pub const ICON_LOCK_OPEN: &[u8] = include_bytes!("../assets/icons/lock_open.svg");
 pub const ICON_MAXIMIZE: &[u8] = include_bytes!("../assets/icons/maximize.svg");
 pub const ICON_MINIMIZE: &[u8] = include_bytes!("../assets/icons/minimize.svg");
 pub const ICON_MINIMIZE_2: &[u8] = include_bytes!("../assets/icons/minimize_2.svg");
@@ -53,6 +55,8 @@ pub fn get_icon(name: &str) -> Option<&'static [u8]> {
         "home" => Some(ICON_HOME),
         "info" => Some(ICON_INFO),
         "languages" => Some(ICON_LANGUAGES),
+        "lock" => Some(ICON_LOCK),
+        "lock_open" => Some(ICON_LOCK_OPEN),
         "maximize" => Some(ICON_MAXIMIZE),
         "minimize" => Some(ICON_MINIMIZE),
         "minimize_2" => Some(ICON_MINIMIZE_2),

@@ -222,7 +222,7 @@ fn render_preview_panel_layout(
                                         player.show_player = true; // Ensure player is visible immediately
 
                                         // Set initial volume (will be applied when MPV is ready)
-                                        player.initial_volume = app.saved_media_volume;
+                                        player.initial_volume = app.session_volume;
 
                                         app.media_preview =
                                             Some(MediaPreview::Video(Box::new(player)));
@@ -307,6 +307,9 @@ fn render_preview_panel_layout(
                                             .store(true, std::sync::atomic::Ordering::Release);
                                         app.folder_size_state.loading.insert(path.clone());
                                         let _ = app.folder_size_state.req_sender.send(path);
+                                    }
+                                    PreviewPanelAction::VolumeChanged(vol) => {
+                                        app.session_volume = vol;
                                     }
                                 }
                             }

@@ -25,6 +25,7 @@ pub mod context_menu;
 pub mod drag_drop;
 pub mod file_ops;
 pub mod folder_loading;
+pub mod folder_lock_ops;
 pub mod icons;
 pub mod message_handler;
 pub mod metadata;

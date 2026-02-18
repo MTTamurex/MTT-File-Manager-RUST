@@ -97,6 +97,9 @@ impl ImageViewerApp {
 
         self.reset_selection_and_search();
 
+        // Apply folder lock if this folder has locked preferences
+        self.apply_folder_lock_if_present();
+
         // UPDATE THE WATCHER
         self.watch_current_folder();
 
@@ -146,6 +149,7 @@ impl ImageViewerApp {
                 self.sort_mode = self.sort_mode_normal;
 
                 self.reset_selection_and_search();
+                self.apply_folder_lock_if_present();
                 self.watch_current_folder(); // Update the watcher
                 self.load_folder(false);
             }
@@ -196,6 +200,7 @@ impl ImageViewerApp {
                 self.sort_mode = self.sort_mode_normal;
 
                 self.reset_selection_and_search();
+                self.apply_folder_lock_if_present();
                 self.watch_current_folder();
                 self.load_folder(false);
             }

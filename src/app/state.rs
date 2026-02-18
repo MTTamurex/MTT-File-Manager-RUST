@@ -290,8 +290,12 @@ pub struct ImageViewerApp {
     pub preferences_dirty: bool,
     pub preferences_last_save: Instant,
 
-    // Media player volume persistence
-    pub saved_media_volume: f32,
+    // Media player volume — session-level (updated on slider/keyboard changes, saved to disk on exit)
+    pub session_volume: f32,
+
+    // Per-folder locked view preferences
+    pub folder_locks: std::collections::HashMap<String, crate::domain::folder_lock::FolderLock>,
+    pub current_folder_locked: bool,
 
     // Explicit scroll request for keyboard navigation
     pub scroll_request: ScrollRequest,

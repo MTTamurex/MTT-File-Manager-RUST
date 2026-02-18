@@ -142,12 +142,8 @@ impl ImageViewerApp {
             prefs.push(("last_folder", last_folder));
         }
 
-        // Save media player volume if available
-        if let Some(preview) = &self.media_preview {
-            if let Some(volume) = preview.get_video_state().map(|s| s.volume) {
-                prefs.push(("media_volume", volume.to_string()));
-            }
-        }
+        // Save session volume (always available, independent of active player)
+        prefs.push(("media_volume", self.session_volume.to_string()));
 
         // Save list view column widths - Regular view
         prefs.push(("list_col_name_width", self.layout.list_col_name_width.to_string()));
