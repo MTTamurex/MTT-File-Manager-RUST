@@ -72,6 +72,22 @@ CREATE TABLE directory_cache (
     total_size INTEGER,
     cached_at INTEGER DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Folder locks (preferências de view por pasta — persiste view_mode, sort, etc.)
+CREATE TABLE folder_locks (
+    path TEXT PRIMARY KEY,
+    view_mode TEXT NOT NULL,
+    sort_mode TEXT NOT NULL,
+    sort_descending TEXT NOT NULL,
+    folders_position TEXT NOT NULL
+);
+
+-- Quick Access — pastas fixadas na sidebar pelo usuário
+CREATE TABLE pinned_folders (
+    path TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0
+);
 ```
 
 ### Acesso ao Banco
@@ -445,4 +461,4 @@ Copy-Item $source $dest -Recurse -Force
 
 ---
 
-*Última atualização: 2026-02-14 (documentado armazenamento para fallback sem USN)*
+*Última atualização: 2026-02-18 (adicionadas tabelas folder_locks e pinned_folders ao schema)*

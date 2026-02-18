@@ -14,7 +14,8 @@ O MTT File Manager é um gerenciador de arquivos nativo para Windows desenvolvid
 - **Navegação em abas** - Sistema de abas com histórico independente por aba
 - **Visualizações múltiplas** - Modo grade e lista com thumbnails ajustáveis
 - **Barra de endereços editável** - Navegação direta por caminhos com breadcrumbs
-- **Sidebar com atalhos** - Acesso rápido a drives, bibliotecas, OneDrive e Lixeira
+- **Sidebar com atalhos** - Acesso rápido a drives, bibliotecas, OneDrive e Lixeira; sidebar com scroll automático quando há overflow
+- **Acesso Rápido (pastas fixadas)** - Fixar qualquer pasta via clique direito ("Fixar no Acesso Rápido") ou arrастando para a seção na sidebar; ícone 📌 persistente para desafixar; reordenação por drag-and-drop; persistência em SQLite
 - **Suporte a navegação por teclado** - Atalhos completos para navegação sem mouse
 - **Busca em tempo real** - Filtro de arquivos por nome
 
@@ -145,4 +146,4 @@ O MTT File Manager é um gerenciador de arquivos nativo para Windows desenvolvid
 
 ---
 
-*Última atualização: 2026-02-14 (adicionado resumo da busca híbrida com fallback sem USN)*
+*Última atualização: 2026-02-18 (adicionado Acesso Rápido com pastas fixadas e scroll na sidebar)*

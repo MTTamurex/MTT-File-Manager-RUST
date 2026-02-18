@@ -48,6 +48,8 @@ MTT-File-Manager-RUST/
 - **`context_menu.rs`** - Menu de contexto
 - **`file_ops.rs`** - Operações de arquivo (deletar, renomear)
 - **`folder_loading/mod.rs`** - Carregamento de pastas
+- **`folder_lock_ops.rs`** - Operações de bloqueio de view por pasta
+- **`pinned_folder_ops.rs`** - Fixar/desafixar/reordenar pastas no Acesso Rápido
 - **`icons.rs`** - Gerenciamento de ícones
 - **`message_handler/mod.rs`** - Handler de mensagens entre threads
 - **`metadata.rs`** - Solicitação de metadados
@@ -152,6 +154,8 @@ pub fn filter_items_cow<'a>(items: &'a [FileEntry], query: &str) -> Cow<'a, [Fil
 - **`mod.rs`** - Re-exports do módulo
 - **`errors.rs`** - Tipos de erro da aplicação (AppError)
 - **`file_entry.rs`** - Modelo FileEntry e enums relacionados
+- **`folder_lock.rs`** - Preferências de view por pasta (FolderLock)
+- **`pinned_folder.rs`** - Pasta fixada no Acesso Rápido (PinnedFolder)
 - **`thumbnail.rs`** - Modelo de thumbnail (ThumbnailData)
 
 **Principais structs/enums**:
@@ -233,6 +237,8 @@ pub enum AppError {
   - **`thumbnails_repo.rs`** - CRUD de thumbnails
   - **`folder_previews.rs`** - CRUD de previews de pasta
   - **`folder_covers.rs`** - CRUD de capas de pasta
+  - **`folder_locks.rs`** - CRUD de preferências de view por pasta
+  - **`pinned_folders.rs`** - CRUD de pastas fixadas no Acesso Rápido
   - **`preferences.rs`** - Preferências persistidas
   - **`cleanup.rs`** - Limpeza/manutenção de cache
   - **`gc.rs`** - Coleta incremental/full + vacuum
@@ -383,7 +389,7 @@ pub fn is_active(&self) -> bool
 - **`icon_loader/file_icons.rs`** - Carregamento de ícones de arquivo
 - **`icon_loader/special_icons.rs`** - Ícones especiais e shortcuts
 - **`navigation.rs`** - Navegação UI
-- **`sidebar.rs`** - Sidebar com atalhos
+- **`sidebar.rs`** - Sidebar com atalhos, Acesso Rápido (pastas fixadas, drag-and-drop, scroll)
 - **`status_bar.rs`** - Barra de status
 - **`svg_icons.rs`** - Gerenciador de ícones SVG
 - **`tab_bar/mod.rs`** - Sistema de abas
@@ -584,4 +590,4 @@ mtt-search-service (processo separado)
 
 ---
 
-*Última atualização: 2026-02-14 (documentado fallback de busca para volumes sem USN)*
+*Última atualização: 2026-02-18 (adicionado pinned_folder, pinned_folder_ops, disk_cache/pinned_folders, folder_lock_ops, folder_locks)*

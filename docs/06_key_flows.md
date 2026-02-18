@@ -426,7 +426,115 @@ eprintln!("[WORKERS] thumbnails_pending={}, icons_loading={}",
 
 ---
 
-## 8. Drive Watcher (File System Events)
+## 8. Acesso Rápido (Pastas Fixadas na Sidebar)
+
+### Fixar uma Pasta
+
+```
+Clique Direito em uma pasta na área principal
+    ↓
+src/ui/app/input.rs - abre context menu
+    ↓
+src/app/operations/context_menu.rs - populate_context_menu()
+    ↓ (pasta não fixada → ID -60 "Fixar no Acesso Rápido")
+    ↓ (pasta já fixada → ID -61 "Remover do Acesso Rápido")
+User seleciona opção
+    ↓
+src/ui/app/menu_handler.rs - handle_context_menu()
+    ↓
+ID -60 → app.pin_folder(path)
+ID -61 → app.unpin_folder(path)
+    ↓
+src/app/operations/pinned_folder_ops.rs - pin_folder() / unpin_folder()
+    ↓
+src/infrastructure/disk_cache/pinned_folders.rs - save_pinned_folder() / remove_pinned_folder()
+    ↓
+app.pinned_folders atualizado → sidebar re-renderiza
+```
+
+### Fixar via Drag-and-Drop para a Sidebar
+
+```
+User arrasta uma pasta da área principal
+    ↓
+is_item_dragging = true, drag_payload_paths = [pasta]
+    ↓
+src/ui/app/panels.rs - render_sidebar_panel()
+    ↓ is_folder_dragging = true → SidebarContext.is_folder_dragging = true
+src/ui/sidebar.rs - render_sidebar()
+    ↓ Seção "Acesso Rápido" renderiza com destaque (borda azul)
+User solta o mouse sobre a seção "Acesso Rápido"
+    ↓
+SidebarAction::PinFolder(path) emitido
+    ↓
+panels.rs → app.pin_folder(&path)
+    ↓
+pinned_folder_ops.rs + disk_cache/pinned_folders.rs
+```
+
+### Desafixar via Ícone 📌
+
+```
+User vê ícone 📌 ao lado do item fixado na sidebar
+    ↓ (ícone sempre visível, fica vermelho ao hover)
+User clica no ícone 📌
+    ↓
+src/ui/sidebar.rs - render_pinned_folders()
+    ↓ hit-test manual: inp.pointer.interact_pos() dentro de pin_rect
+    ↓ action = SidebarAction::UnpinFolder(path)
+panels.rs → app.unpin_folder(&path)
+    ↓
+pinned_folder_ops.rs + disk_cache/pinned_folders.rs - remove_pinned_folder()
+    ↓
+app.pinned_folders atualizado → item some da sidebar
+```
+
+### Reordenar via Drag-and-Drop Interno
+
+```
+User arrasta item fixado dentro da seção "Acesso Rápido"
+    ↓
+src/ui/sidebar.rs - render_pinned_folders()
+    ↓ Sense::click_and_drag() em cada item
+    ↓ ui.ctx().data_mut() armazena drag_idx por frame
+    ↓ Linha indicadora de posição renderizada entre itens
+User solta sobre posição destino
+    ↓
+SidebarAction::ReorderPinnedFolder { from, to } emitido
+    ↓
+panels.rs → app.reorder_pinned_folder(from, to)
+    ↓
+pinned_folder_ops.rs - reorder_pinned_folder()
+    ↓
+disk_cache/pinned_folders.rs - update_pinned_positions()
+    ↓
+app.pinned_folders reordenado → sidebar atualiza
+```
+
+### Arquivos Envolvidos
+- **`src/ui/sidebar.rs`** - Renderização, ícone 📌, drag-and-drop
+- **`src/ui/app/panels.rs`** - Contexto da sidebar, tratamento de ações
+- **`src/app/operations/pinned_folder_ops.rs`** - Lógica de pin/unpin/reorder
+- **`src/app/operations/context_menu.rs`** - Itens de menu -60 / -61
+- **`src/ui/app/menu_handler.rs`** - Handler dos IDs -60 / -61
+- **`src/infrastructure/disk_cache/pinned_folders.rs`** - Persistência SQLite
+- **`src/domain/pinned_folder.rs`** - Struct `PinnedFolder`
+
+### Pontos de Bug Comuns
+1. **Clique no 📌 navega para a pasta em vez de desafixar**
+   - **Causa**: `ui.interact()` em sub-rect conflita com o rect pai
+   - **Solução**: Usar `inp.pointer.interact_pos()` + hit-test manual em `pin_rect` (já implementado)
+
+2. **Pastas fixadas não persistem após reiniciar**
+   - **Causa**: `save_pinned_folder` não foi chamado ou houve erro no SQLite
+   - **Debug**: Verificar logs `[PINNED]` em `pinned_folder_ops.rs`
+
+3. **Sidebar não exibe todos os itens após muitos pins**
+   - **Solução**: Sidebar usa `ScrollArea::vertical()` — scroll automático (já implementado)
+
+---
+
+## 9. Drive Watcher (File System Events)
 
 ### Sequência de Chamadas
 ```
@@ -507,7 +615,7 @@ eprintln!("[FS-WATCH] SMART DELETE: Removed from UI without reload");
 
 ---
 
-## 9. Busca Global (Global Search)
+## 10. Busca Global (Global Search)
 
 ### Sequência de Chamadas
 ```
@@ -636,5 +744,5 @@ sc.exe query MTTFileManagerSearch
 
 ---
 
-*Última atualização: 2026-02-14 (documentado fluxo fallback para volumes sem USN)*
+*Última atualização: 2026-02-18 (adicionado fluxo Acesso Rápido — pastas fixadas na sidebar)*
 

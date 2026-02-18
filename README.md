@@ -35,7 +35,7 @@ O MTT File Manager é um gerenciador de arquivos desktop que combina a performan
 - **Navegação em abas** - Múltiplas abas com histórico independente
 - **Visualizações flexíveis** - Modo grade e lista com thumbnails ajustáveis
 - **Barra de endereços inteligente** - Navegação direta com autocomplete
-- **Sidebar com atalhos** - Acesso rápido a drives, bibliotecas e OneDrive
+- **Sidebar com atalhos** - Acesso rápido a drives, bibliotecas, OneDrive e Lixeira; **Acesso Rápido** com pastas fixadas pelo usuário (fixar via clique direito ou drag-and-drop, reordenar via drag, ícone 📌 para desafixar)
 
 ### 🎬 Preview e Mídia
 - **Preview integrado** - Visualização sem sair do aplicativo
