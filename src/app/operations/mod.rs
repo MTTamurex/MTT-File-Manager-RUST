@@ -27,6 +27,7 @@ pub mod file_ops;
 pub mod folder_loading;
 pub mod folder_lock_ops;
 pub mod icons;
+pub mod pinned_folder_ops;
 pub mod message_handler;
 pub mod metadata;
 pub mod navigation;

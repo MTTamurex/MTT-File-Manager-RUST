@@ -136,6 +136,9 @@ impl ImageViewerApp {
         // Load folder locks from database
         let folder_locks = disk_cache.get_all_folder_locks();
 
+        // Load Quick Access pinned folders from database
+        let pinned_folders = disk_cache.get_all_pinned_folders();
+
         // Determine initial path based on last saved folder
         let (initial_path, is_computer_view_initial) = determine_initial_path(&disk_cache);
 
@@ -382,6 +385,8 @@ impl ImageViewerApp {
 
             folder_locks,
             current_folder_locked: false,
+
+            pinned_folders,
 
             scroll_request: crate::app::state::ScrollRequest::None,
 

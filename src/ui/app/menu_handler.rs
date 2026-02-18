@@ -136,6 +136,20 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     }
                 }
                 -54 => app.empty_recycle_bin(),
+                -60 => {
+                    if let Some(path) = app.context_target_paths(item_idx).first()
+                        .and_then(|p| p.to_str())
+                    {
+                        app.pin_folder(path);
+                    }
+                }
+                -61 => {
+                    if let Some(path) = app.context_target_paths(item_idx).first()
+                        .and_then(|p| p.to_str())
+                    {
+                        app.unpin_folder(path);
+                    }
+                }
                 _ => {}
             }
         }

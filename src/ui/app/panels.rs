@@ -86,6 +86,15 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) {
             let is_computer_view = app.navigation_state.is_computer_view;
             let computer_icon = app.cache_manager.computer_icon.clone();
 
+            let is_folder_dragging = app.is_item_dragging
+                && app.drag_payload_paths.iter().all(|p| p.is_dir())
+                && app.drag_payload_paths.len() == 1;
+            let dragging_path_str: Option<String> = if is_folder_dragging {
+                app.drag_payload_paths.first().and_then(|p| p.to_str()).map(|s| s.to_string())
+            } else {
+                None
+            };
+
             let mut sidebar_ctx = SidebarContext {
                 disks: &disks,
                 current_path: &current_path,
@@ -96,6 +105,9 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 icon_loader: &mut app.item_icon_loader,
                 onedrive_path: app.onedrive_path.as_deref(),
                 onedrive_icon: app.onedrive_icon.as_ref(),
+                pinned_folders: &app.pinned_folders,
+                is_folder_dragging,
+                dragging_path: dragging_path_str.as_deref(),
             };
 
             render_sidebar(ui, &mut sidebar_ctx)
@@ -107,6 +119,9 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) {
             SidebarAction::NavigateTo(path) => app.navigate_to(&path),
             SidebarAction::NavigateToComputer => app.navigate_to_computer(),
             SidebarAction::NavigateToRecycleBin => app.navigate_to_recycle_bin(),
+            SidebarAction::PinFolder(path) => app.pin_folder(&path),
+            SidebarAction::UnpinFolder(path) => app.unpin_folder(&path),
+            SidebarAction::ReorderPinnedFolder { from, to } => app.reorder_pinned_folder(from, to),
         }
     }
 }
