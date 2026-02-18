@@ -5,7 +5,12 @@ use crate::ui::widgets;
 use eframe::egui;
 
 pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
-    {
+    let locked = app.current_folder_locked;
+
+    ui.scope(|ui| {
+        if locked {
+            ui.disable();
+        }
         let svg_manager = &mut app.svg_icon_manager;
         if widgets::toggle_icon_button(
             ui,
@@ -32,7 +37,7 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
         {
             app.view_mode = ViewMode::Grid;
         }
-    }
+    });
 
     ui.separator();
 

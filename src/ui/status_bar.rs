@@ -102,6 +102,7 @@ pub fn render_status_bar(
     _upload_budget_ms: f32,
     is_computer_view: bool,
     bulk_progress: Option<(usize, usize)>,
+    folder_locked: bool,
 ) -> StatusBarAction {
     let mut action = StatusBarAction::None;
 
@@ -174,86 +175,95 @@ pub fn render_status_bar(
 
             ui.separator();
 
-            // === CENTER: View mode ===
-            ui.label("Modo:");
-            if ui
-                .selectable_label(*view_mode == ViewMode::Grid, "Grade")
-                .clicked()
-            {
-                *view_mode = ViewMode::Grid;
-                action = StatusBarAction::ViewModeChanged;
-            }
-            if ui
-                .selectable_label(*view_mode == ViewMode::List, "Lista")
-                .clicked()
-            {
-                *view_mode = ViewMode::List;
-                action = StatusBarAction::ViewModeChanged;
-            }
+            // === CENTER: View mode (disabled when folder is locked) ===
+            ui.scope(|ui| {
+                if folder_locked { ui.disable(); }
+                ui.label("Modo:");
+                if ui
+                    .selectable_label(*view_mode == ViewMode::Grid, "Grade")
+                    .clicked()
+                {
+                    *view_mode = ViewMode::Grid;
+                    action = StatusBarAction::ViewModeChanged;
+                }
+                if ui
+                    .selectable_label(*view_mode == ViewMode::List, "Lista")
+                    .clicked()
+                {
+                    *view_mode = ViewMode::List;
+                    action = StatusBarAction::ViewModeChanged;
+                }
+            });
 
             ui.separator();
 
-            // === CENTER-RIGHT: Sort controls ===
-            ui.label("Ordenar:");
+            // === CENTER-RIGHT: Sort controls (disabled when folder is locked) ===
+            ui.scope(|ui| {
+                if folder_locked { ui.disable(); }
+                ui.label("Ordenar:");
 
-            // PERFORMANCE: Static arrays instead of Vec allocation per frame
-            let sort_modes: &[(SortMode, &str)] = if is_computer_view {
-                &[
-                    (SortMode::Name, "Nome"),
-                    (SortMode::DriveTotalSpace, "Espaço Total"),
-                    (SortMode::DriveFreeSpace, "Espaço Livre"),
-                ]
-            } else {
-                &[
-                    (SortMode::Name, "Nome"),
-                    (SortMode::Date, "Data"),
-                    (SortMode::Size, "Tamanho"),
-                ]
-            };
+                // PERFORMANCE: Static arrays instead of Vec allocation per frame
+                let sort_modes: &[(SortMode, &str)] = if is_computer_view {
+                    &[
+                        (SortMode::Name, "Nome"),
+                        (SortMode::DriveTotalSpace, "Espaço Total"),
+                        (SortMode::DriveFreeSpace, "Espaço Livre"),
+                    ]
+                } else {
+                    &[
+                        (SortMode::Name, "Nome"),
+                        (SortMode::Date, "Data"),
+                        (SortMode::Size, "Tamanho"),
+                    ]
+                };
 
-            for &(mode, label) in sort_modes {
-                if ui.selectable_label(*sort_mode == mode, label).clicked() {
-                    if *sort_mode == mode {
-                        *sort_descending = !*sort_descending;
-                    } else {
-                        *sort_mode = mode;
-                        *sort_descending = false;
+                for &(mode, label) in sort_modes {
+                    if ui.selectable_label(*sort_mode == mode, label).clicked() {
+                        if *sort_mode == mode {
+                            *sort_descending = !*sort_descending;
+                        } else {
+                            *sort_mode = mode;
+                            *sort_descending = false;
+                        }
+                        action = StatusBarAction::SortChanged;
                     }
+                }
+
+                // Sort direction indicator
+                let arrow = if *sort_descending { "↓" } else { "↑" };
+                ui.label(arrow);
+            });
+
+            ui.separator();
+
+            ui.scope(|ui| {
+                if folder_locked { ui.disable(); }
+                ui.label("Pastas:");
+                if ui
+                    .selectable_label(*folders_position == FoldersPosition::First, "Início")
+                    .on_hover_text("Pastas sempre no topo")
+                    .clicked()
+                {
+                    *folders_position = FoldersPosition::First;
                     action = StatusBarAction::SortChanged;
                 }
-            }
-
-            // Sort direction indicator
-            let arrow = if *sort_descending { "↓" } else { "↑" };
-            ui.label(arrow);
-
-            ui.separator();
-
-            ui.label("Pastas:");
-            if ui
-                .selectable_label(*folders_position == FoldersPosition::First, "Início")
-                .on_hover_text("Pastas sempre no topo")
-                .clicked()
-            {
-                *folders_position = FoldersPosition::First;
-                action = StatusBarAction::SortChanged;
-            }
-            if ui
-                .selectable_label(*folders_position == FoldersPosition::Last, "Fim")
-                .on_hover_text("Pastas no final da lista")
-                .clicked()
-            {
-                *folders_position = FoldersPosition::Last;
-                action = StatusBarAction::SortChanged;
-            }
-            if ui
-                .selectable_label(*folders_position == FoldersPosition::Mixed, "Misto")
-                .on_hover_text("Pastas misturadas com arquivos")
-                .clicked()
-            {
-                *folders_position = FoldersPosition::Mixed;
-                action = StatusBarAction::SortChanged;
-            }
+                if ui
+                    .selectable_label(*folders_position == FoldersPosition::Last, "Fim")
+                    .on_hover_text("Pastas no final da lista")
+                    .clicked()
+                {
+                    *folders_position = FoldersPosition::Last;
+                    action = StatusBarAction::SortChanged;
+                }
+                if ui
+                    .selectable_label(*folders_position == FoldersPosition::Mixed, "Misto")
+                    .on_hover_text("Pastas misturadas com arquivos")
+                    .clicked()
+                {
+                    *folders_position = FoldersPosition::Mixed;
+                    action = StatusBarAction::SortChanged;
+                }
+            });
 
             // === RIGHT SIDE: System info (push to right with available space) ===
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

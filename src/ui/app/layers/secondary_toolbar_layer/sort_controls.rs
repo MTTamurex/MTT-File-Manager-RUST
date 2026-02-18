@@ -4,6 +4,7 @@ use crate::ui::theme;
 use eframe::egui;
 
 pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
+    let locked = app.current_folder_locked;
     let sort_symbol = if app.sort_descending {
         "\u{2193}"
     } else {
@@ -11,6 +12,9 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
     };
 
     ui.scope(|ui| {
+        if locked {
+            ui.disable();
+        }
         let hover_color = if ui.visuals().dark_mode {
             theme::color_dark_hover()
         } else {
@@ -40,6 +44,9 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
     });
 
     ui.scope(|ui| {
+        if locked {
+            ui.disable();
+        }
         let hover_color = if ui.visuals().dark_mode {
             theme::color_dark_hover()
         } else {

@@ -38,7 +38,7 @@ pub fn render_video_preview(
 
     if paths_match && is_owner {
         // === ACTIVE PLAYER (OWNER) ===
-        if preview.is_maximized() {
+        let vol_action = if preview.is_maximized() {
             render_fullscreen_video(
                 ui,
                 preview,
@@ -49,7 +49,7 @@ pub fn render_video_preview(
                 volume,
                 is_muted,
                 is_playing,
-            );
+            )
         } else if preview.is_detached() {
             render_detached_video(
                 ui,
@@ -62,7 +62,7 @@ pub fn render_video_preview(
                 volume,
                 is_muted,
                 is_playing,
-            );
+            )
         } else {
             render_docked_video(
                 ui,
@@ -75,8 +75,9 @@ pub fn render_video_preview(
                 volume,
                 is_muted,
                 is_playing,
-            );
-        }
+            )
+        };
+        action = action.or(vol_action);
     } else {
         // === THUMBNAIL WITH PLAY OVERLAY (NON-OWNER) ===
         if let Some(tex) = texture {

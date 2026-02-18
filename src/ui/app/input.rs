@@ -247,6 +247,7 @@ fn handle_media_hardware_input(app: &mut ImageViewerApp, ctx: &egui::Context) ->
     // Detect keys via hardware-level check (AsyncKeyState)
     // We check bits to ensure the key WAS pressed since last check
     let mut consumed = false;
+    let mut new_session_vol: Option<f32> = None;
     unsafe {
         // VK_SPACE = 0x20, VK_UP = 0x26, VK_DOWN = 0x28, VK_RIGHT = 0x27, VK_LEFT = 0x25
         // VK_CTRL = 0x11, VK_SHIFT = 0x10, VK_U = 0x55, VK_A = 0x41
@@ -288,6 +289,7 @@ fn handle_media_hardware_input(app: &mut ImageViewerApp, ctx: &egui::Context) ->
             let vol = preview.get_video_state().map(|s| s.volume).unwrap_or(1.0);
             let new_vol = (vol + 0.05).min(1.0);
             preview.set_volume(new_vol);
+            new_session_vol = Some(new_vol);
             let msg = format!("Volume: {}%", (new_vol * 100.0).round() as i32);
             preview.show_osd(&msg, 2000);
             consumed = true;
@@ -295,6 +297,7 @@ fn handle_media_hardware_input(app: &mut ImageViewerApp, ctx: &egui::Context) ->
             let vol = preview.get_video_state().map(|s| s.volume).unwrap_or(1.0);
             let new_vol = (vol - 0.05).max(0.0);
             preview.set_volume(new_vol);
+            new_session_vol = Some(new_vol);
             let msg = format!("Volume: {}%", (new_vol * 100.0).round() as i32);
             preview.show_osd(&msg, 2000);
             consumed = true;
@@ -339,6 +342,9 @@ fn handle_media_hardware_input(app: &mut ImageViewerApp, ctx: &egui::Context) ->
         }
     }
 
+    if let Some(vol) = new_session_vol {
+        app.session_volume = vol;
+    }
     if consumed {
         app.last_media_key_press = std::time::Instant::now();
         ctx.request_repaint();

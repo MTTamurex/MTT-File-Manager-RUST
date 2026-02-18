@@ -1,4 +1,5 @@
 use crate::ui::components::MediaPreview;
+use crate::ui::preview_panel::actions::PreviewPanelAction;
 use crate::ui::preview_panel::video_preview::controls::draw_video_controls;
 use crate::ui::svg_icons::SvgIconManager;
 use eframe::egui;
@@ -15,7 +16,7 @@ pub fn render_detached_video(
     volume: f32,
     is_muted: bool,
     is_playing: bool,
-) {
+) -> Option<PreviewPanelAction> {
     // 2. Floating Window logic
     let mut open = true;
     let is_fullscreen = preview.is_maximized(); // Renamed for clarity: this is now fullscreen
@@ -142,6 +143,7 @@ pub fn render_detached_video(
 
     let use_native_osc = preview.native_osc_active();
 
+    let mut vol_action: Option<PreviewPanelAction> = None;
     let window_response = window_builder.show(ui.ctx(), |ui| {
         // === TRUE AUTOHIDE IMPLEMENTATION ===
         // Video takes 100% when idle, shrinks when controls are shown
@@ -263,7 +265,7 @@ pub fn render_detached_video(
 
             let mut control_ui = ui.new_child(egui::UiBuilder::new().max_rect(control_rect));
             control_ui.add_space(6.0);
-            draw_video_controls(
+            if let Some(vol) = draw_video_controls(
                 &mut control_ui,
                 preview,
                 control_rect.width() - 20.0,
@@ -274,7 +276,9 @@ pub fn render_detached_video(
                 volume,
                 is_muted,
                 true,
-            );
+            ) {
+                vol_action = Some(PreviewPanelAction::VolumeChanged(vol));
+            }
         }
 
         // Request repaint to check timeout and hide controls
@@ -337,4 +341,6 @@ pub fn render_detached_video(
             preview.set_detached(false);
         }
     }
+
+    vol_action
 }

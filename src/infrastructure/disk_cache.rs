@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 
 mod cleanup;
 mod folder_covers;
+mod folder_locks;
 mod folder_previews;
 mod gc;
 mod preferences;
@@ -286,6 +287,20 @@ impl ThumbnailDiskCache {
 
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_file_index_dir ON file_index(dir_path)",
+            [],
+        )
+        .unwrap_or(0);
+
+        // Folder locks table (per-folder view preferences)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS folder_locks (
+                path TEXT PRIMARY KEY,
+                view_mode TEXT NOT NULL,
+                sort_mode TEXT NOT NULL,
+                sort_descending TEXT NOT NULL,
+                folders_position TEXT NOT NULL,
+                search_query TEXT NOT NULL
+            )",
             [],
         )
         .unwrap_or(0);

@@ -74,6 +74,7 @@ fn draw_seek_bar(
 }
 
 /// Draw basic controls: Play/Pause, Detach, Volume
+/// Returns `Some(new_volume)` if the user changed the volume via the slider.
 fn draw_basic_controls(
     ui: &mut egui::Ui,
     preview: &mut MediaPreview,
@@ -82,7 +83,7 @@ fn draw_basic_controls(
     volume: f32,
     is_muted: bool,
     is_detached: bool,
-) {
+) -> Option<f32> {
     let icon_color_val = icon_color(ui.visuals().dark_mode);
     let btn_size = 18.0;
 
@@ -153,7 +154,9 @@ fn draw_basic_controls(
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             preview.set_volume(vol);
         }));
+        return Some(vol);
     }
+    None
 }
 
 /// Draw time display
@@ -173,6 +176,7 @@ fn draw_time_display(ui: &mut egui::Ui, current_time: f64, duration: f64) {
 
 /// Draw simple controls for docked mode (preview panel)
 /// Shows only: seek bar, play/pause, detach, volume, time
+/// Returns `Some(new_volume)` if the user changed the volume via the slider.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_docked_controls(
     ui: &mut egui::Ui,
@@ -184,7 +188,7 @@ pub fn draw_docked_controls(
     duration: f64,
     volume: f32,
     is_muted: bool,
-) {
+) -> Option<f32> {
     ui.set_width(full_width);
 
     // Seek Bar
@@ -193,9 +197,10 @@ pub fn draw_docked_controls(
     ui.add_space(6.0);
 
     // Buttons row - only basic controls for docked mode
+    let mut new_vol = None;
     ui.horizontal(|ui| {
         // Basic controls (play, detach, volume)
-        draw_basic_controls(
+        new_vol = draw_basic_controls(
             ui,
             preview,
             svg_manager,
@@ -210,10 +215,12 @@ pub fn draw_docked_controls(
         // Time display
         draw_time_display(ui, current_time, duration);
     });
+    new_vol
 }
 
 /// Draw full controls for detached mode (floating window)
 /// Shows all controls including audio/subtitle pickers, normalizer, fullscreen, VSR
+/// Returns `Some(new_volume)` if the user changed the volume via the slider.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_detached_controls(
     ui: &mut egui::Ui,
@@ -225,7 +232,7 @@ pub fn draw_detached_controls(
     duration: f64,
     volume: f32,
     is_muted: bool,
-) {
+) -> Option<f32> {
     ui.set_width(full_width);
 
     // Seek Bar
@@ -234,9 +241,10 @@ pub fn draw_detached_controls(
     ui.add_space(6.0);
 
     // Buttons row - full controls for detached mode
+    let mut new_vol = None;
     ui.horizontal(|ui| {
         // Basic controls (play, detach, volume)
-        draw_basic_controls(ui, preview, svg_manager, is_playing, volume, is_muted, true);
+        new_vol = draw_basic_controls(ui, preview, svg_manager, is_playing, volume, is_muted, true);
 
         ui.add_space(10.0);
 
@@ -257,9 +265,11 @@ pub fn draw_detached_controls(
         // Right-aligned buttons (fullscreen, VSR)
         detached::draw_detached_buttons(ui, preview, svg_manager);
     });
+    new_vol
 }
 
 /// Legacy function for backward compatibility - delegates to appropriate version
+/// Returns `Some(new_volume)` if the user changed the volume via the slider.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_video_controls(
     ui: &mut egui::Ui,
@@ -272,7 +282,7 @@ pub fn draw_video_controls(
     volume: f32,
     is_muted: bool,
     is_detached: bool,
-) {
+) -> Option<f32> {
     if is_detached {
         draw_detached_controls(
             ui,
@@ -284,7 +294,7 @@ pub fn draw_video_controls(
             duration,
             volume,
             is_muted,
-        );
+        )
     } else {
         draw_docked_controls(
             ui,
@@ -296,6 +306,6 @@ pub fn draw_video_controls(
             duration,
             volume,
             is_muted,
-        );
+        )
     }
 }

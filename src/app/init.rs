@@ -130,10 +130,11 @@ impl ImageViewerApp {
             saved_is_maximized,
             sidebar_left_width,
             sidebar_right_width,
-            saved_media_volume,
+            session_volume,
         } = startup_preferences;
 
-        // Initialize Audio Device (removed)
+        // Load folder locks from database
+        let folder_locks = disk_cache.get_all_folder_locks();
 
         // Determine initial path based on last saved folder
         let (initial_path, is_computer_view_initial) = determine_initial_path(&disk_cache);
@@ -374,7 +375,10 @@ impl ImageViewerApp {
             preferences_dirty: false,
             preferences_last_save: Instant::now(),
 
-            saved_media_volume,
+            session_volume,
+
+            folder_locks,
+            current_folder_locked: false,
 
             scroll_request: crate::app::state::ScrollRequest::None,
 

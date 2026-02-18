@@ -17,7 +17,7 @@ pub(super) struct StartupPreferences {
     pub(super) saved_is_maximized: bool,
     pub(super) sidebar_left_width: f32,
     pub(super) sidebar_right_width: f32,
-    pub(super) saved_media_volume: f32,
+    pub(super) session_volume: f32,
 }
 
 impl StartupPreferences {
@@ -127,7 +127,7 @@ impl StartupPreferences {
             sidebar_right_width
         );
 
-        let saved_media_volume = disk_cache
+        let session_volume = disk_cache
             .get_preference("media_volume")
             .and_then(|s| s.parse::<f32>().ok())
             .unwrap_or(1.0)
@@ -148,7 +148,7 @@ impl StartupPreferences {
             saved_is_maximized,
             sidebar_left_width,
             sidebar_right_width,
-            saved_media_volume,
+            session_volume,
         }
     }
 }
