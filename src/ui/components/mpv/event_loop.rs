@@ -102,10 +102,16 @@ pub fn stop_event_loop(running: Arc<AtomicBool>, handle: Option<thread::JoinHand
                 std::thread::sleep(Duration::from_millis(50));
             }
 
-            // Join or warn if still running
-            match handle.join() {
-                Ok(_) => log::info!("[MpvPreview] Event loop thread joined successfully"),
-                Err(_) => log::warn!("[MpvPreview] Event loop thread panicked"),
+            if handle.is_finished() {
+                match handle.join() {
+                    Ok(_) => log::info!("[MpvPreview] Event loop thread joined successfully"),
+                    Err(_) => log::warn!("[MpvPreview] Event loop thread panicked"),
+                }
+            } else {
+                // Intentionally avoid unconditional join here to preserve timeout semantics.
+                log::warn!(
+                    "[MpvPreview] Event loop thread did not finish within timeout; skipping blocking join"
+                );
             }
         }
     }
