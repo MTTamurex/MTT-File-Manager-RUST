@@ -23,6 +23,9 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
             && !matches!(app.view_mode, ViewMode::List)
         {
             app.view_mode = ViewMode::List;
+            if !locked {
+                app.view_mode_normal = ViewMode::List;
+            }
         }
 
         if widgets::toggle_icon_button(
@@ -36,6 +39,9 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
             && !matches!(app.view_mode, ViewMode::Grid)
         {
             app.view_mode = ViewMode::Grid;
+            if !locked {
+                app.view_mode_normal = ViewMode::Grid;
+            }
         }
     });
 

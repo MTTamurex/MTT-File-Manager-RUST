@@ -30,7 +30,7 @@ impl ThumbnailDiskCache {
             FoldersPosition::Mixed => "mixed",
         };
         if let Ok(db) = self.writer.lock() {
-            let _ = db.execute(
+            match db.execute(
                 "INSERT OR REPLACE INTO folder_locks
                  (path, view_mode, sort_mode, sort_descending, folders_position)
                  VALUES (?, ?, ?, ?, ?)",
@@ -41,7 +41,12 @@ impl ThumbnailDiskCache {
                     sort_desc_str,
                     folders_pos_str
                 ],
-            );
+            ) {
+                Ok(_) => log::info!("[FOLDER-LOCK] Saved lock for {:?}: view={}, sort={}, desc={}, pos={}", path, view_mode_str, sort_mode_str, sort_desc_str, folders_pos_str),
+                Err(e) => log::error!("[FOLDER-LOCK] Failed to save lock for {:?}: {:?}", path, e),
+            }
+        } else {
+            log::error!("[FOLDER-LOCK] Failed to acquire writer lock for save_folder_lock");
         }
     }
 
@@ -57,14 +62,20 @@ impl ThumbnailDiskCache {
         let mut results = HashMap::new();
         let db = match self.reader.lock() {
             Ok(db) => db,
-            Err(_) => return results,
+            Err(e) => {
+                log::error!("[FOLDER-LOCK] Failed to acquire reader lock: {:?}", e);
+                return results;
+            }
         };
         let mut stmt = match db.prepare(
             "SELECT path, view_mode, sort_mode, sort_descending, folders_position
              FROM folder_locks",
         ) {
             Ok(s) => s,
-            Err(_) => return results,
+            Err(e) => {
+                log::error!("[FOLDER-LOCK] Failed to prepare SELECT statement: {:?}", e);
+                return results;
+            }
         };
         let rows = stmt.query_map([], |row| {
             Ok((
@@ -107,6 +118,7 @@ impl ThumbnailDiskCache {
                 );
             }
         }
+        log::info!("[FOLDER-LOCK] Loaded {} folder locks from DB: {:?}", results.len(), results.keys().collect::<Vec<_>>());
         results
     }
 }

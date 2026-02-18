@@ -292,6 +292,15 @@ impl ThumbnailDiskCache {
         .unwrap_or(0);
 
         // Folder locks table (per-folder view preferences)
+        // Migration: drop legacy table that had a search_query NOT NULL column,
+        // which caused INSERT failures (constraint violation error 1299).
+        // Since the old INSERT always failed, the table is guaranteed to be empty.
+        let has_search_query_col = conn
+            .prepare("SELECT search_query FROM folder_locks LIMIT 0")
+            .is_ok();
+        if has_search_query_col {
+            conn.execute("DROP TABLE folder_locks", []).unwrap_or(0);
+        }
         conn.execute(
             "CREATE TABLE IF NOT EXISTS folder_locks (
                 path TEXT PRIMARY KEY,

@@ -45,7 +45,9 @@ impl ImageViewerApp {
     fn collect_preferences(&self) -> Vec<(&'static str, String)> {
         let mut prefs: Vec<(&'static str, String)> = Vec::with_capacity(32);
 
-        let sort_mode_str = match self.sort_mode {
+        // Always save the "normal" (unlocked) values so that locked-folder
+        // overrides don't corrupt the persisted global preferences.
+        let sort_mode_str = match self.sort_mode_normal {
             SortMode::Name => "name",
             SortMode::Date => "date",
             SortMode::Size => "size",
@@ -74,7 +76,7 @@ impl ImageViewerApp {
 
         prefs.push((
             "sort_descending",
-            (if self.sort_descending {
+            (if self.sort_descending_normal {
                 "true"
             } else {
                 "false"
@@ -82,7 +84,7 @@ impl ImageViewerApp {
             .to_string(),
         ));
 
-        let folders_pos_str = match self.folders_position {
+        let folders_pos_str = match self.folders_position_normal {
             FoldersPosition::First => "first",
             FoldersPosition::Last => "last",
             FoldersPosition::Mixed => "mixed",
@@ -92,7 +94,7 @@ impl ImageViewerApp {
         // UI preferences
         prefs.push(("thumbnail_size", self.thumbnail_size.to_string()));
 
-        let view_mode_str = match self.view_mode {
+        let view_mode_str = match self.view_mode_normal {
             ViewMode::Grid => "grid",
             ViewMode::List => "list",
         };

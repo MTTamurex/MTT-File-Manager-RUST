@@ -115,6 +115,9 @@ impl ImageViewerApp {
             self.folders_position = active.folders_position;
         }
 
+        // Apply folder lock if the destination tab's folder has locked preferences
+        self.apply_folder_lock_if_present();
+
         self.watch_current_folder();
 
         // If items were cleared (by MoveCompleted event) and this is a regular folder view,

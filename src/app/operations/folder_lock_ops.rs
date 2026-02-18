@@ -34,16 +34,26 @@ impl ImageViewerApp {
     }
 
     /// Called after navigating to a new folder.
-    /// Checks whether the destination has a lock and applies settings if so.
+    /// If the destination has a lock, applies the locked settings.
+    /// If not, restores the "normal" (unlocked) settings so that locked-folder
+    /// overrides don't bleed into unlocked folders.
     pub fn apply_folder_lock_if_present(&mut self) {
         let path = &self.navigation_state.current_path;
         if let Some(lock) = self.folder_locks.get(path).cloned() {
+            log::info!("[FOLDER-LOCK] Applying lock for {:?}: view={:?}, sort={:?}, desc={}, pos={:?}",
+                path, lock.view_mode, lock.sort_mode, lock.sort_descending, lock.folders_position);
             self.view_mode = lock.view_mode;
             self.sort_mode = lock.sort_mode;
             self.sort_descending = lock.sort_descending;
             self.folders_position = lock.folders_position;
             self.current_folder_locked = true;
         } else {
+            log::debug!("[FOLDER-LOCK] No lock for {:?} (known locks: {})", path, self.folder_locks.len());
+            // Restore normal (unlocked) settings
+            self.view_mode = self.view_mode_normal;
+            self.sort_mode = self.sort_mode_normal;
+            self.sort_descending = self.sort_descending_normal;
+            self.folders_position = self.folders_position_normal;
             self.current_folder_locked = false;
         }
     }

@@ -433,6 +433,10 @@ impl ImageViewerApp {
                     self.sort_mode = mode;
                     self.sort_descending = false;
                 }
+                if !self.current_folder_locked {
+                    self.sort_mode_normal = self.sort_mode;
+                    self.sort_descending_normal = self.sort_descending;
+                }
                 self.sort_items();
                 self.save_preferences();
             }
