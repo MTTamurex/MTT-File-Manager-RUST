@@ -206,11 +206,29 @@ fn open_pipe() -> Result<HANDLE, String> {
 
 fn write_message<T: serde::Serialize>(pipe: HANDLE, msg: &T) -> Result<(), String> {
     let encoded = encode_message(msg)?;
+    write_all(pipe, &encoded)
+}
 
-    let mut bytes_written: u32 = 0;
-    unsafe {
-        WriteFile(pipe, Some(&encoded), Some(&mut bytes_written), None)
-            .map_err(|e| format!("WriteFile failed: {}", e))?;
+fn write_all(pipe: HANDLE, data: &[u8]) -> Result<(), String> {
+    let mut offset = 0usize;
+
+    while offset < data.len() {
+        let mut bytes_written: u32 = 0;
+        unsafe {
+            WriteFile(pipe, Some(&data[offset..]), Some(&mut bytes_written), None)
+                .map_err(|e| format!("WriteFile failed: {}", e))?;
+        }
+
+        if bytes_written == 0 {
+            return Err("Pipe closed during write".into());
+        }
+
+        let written = bytes_written as usize;
+        if written > data.len().saturating_sub(offset) {
+            return Err("WriteFile wrote beyond buffer bounds".into());
+        }
+
+        offset += written;
     }
 
     Ok(())

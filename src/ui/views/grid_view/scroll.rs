@@ -70,6 +70,10 @@ pub(super) fn render_custom_scrollbar(
         return;
     }
 
+    if viewport_h <= 0.0 {
+        return;
+    }
+
     let scrollbar_w = 12.0;
     let scrollbar_rect = Rect::from_min_max(
         viewport_rect.right_top() - egui::vec2(scrollbar_w, 0.0),
@@ -79,8 +83,11 @@ pub(super) fn render_custom_scrollbar(
     ui.painter()
         .rect_filled(scrollbar_rect, 0.0, Color32::from_gray(245));
 
-    let handle_h = (viewport_h / total_content_height * viewport_h).max(30.0);
-    let handle_y = (current_scroll / max_scroll) * (viewport_h - handle_h);
+    let handle_h = (viewport_h / total_content_height * viewport_h)
+        .max(30.0)
+        .min(viewport_h.max(30.0));
+    let travel = (viewport_h - handle_h).max(1.0);
+    let handle_y = (current_scroll / max_scroll) * travel;
     let handle_rect = Rect::from_min_size(
         scrollbar_rect.min + egui::vec2(2.0, handle_y),
         egui::vec2(scrollbar_w - 4.0, handle_h),
@@ -96,12 +103,12 @@ pub(super) fn render_custom_scrollbar(
         if let Some(click_pos) = ui.input(|i| i.pointer.interact_pos()) {
             let relative_y = click_pos.y - scrollbar_rect.top();
             let target_handle_top = relative_y - (handle_h / 2.0);
-            let scroll_ratio = target_handle_top / (viewport_h - handle_h);
+            let scroll_ratio = target_handle_top / travel;
             *target_scroll = (scroll_ratio * max_scroll).clamp(0.0, max_scroll);
         }
     } else if interact.dragged() {
         let delta_y = interact.drag_delta().y;
-        let scroll_pct_delta = delta_y / (viewport_h - handle_h);
+        let scroll_pct_delta = delta_y / travel;
         *target_scroll += scroll_pct_delta * max_scroll;
         *target_scroll = target_scroll.clamp(0.0, max_scroll);
     }

@@ -17,6 +17,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             if ctx.input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::F)) {
                 app.global_search.active = false;
                 app.global_search.focus_request = false;
+                app.global_search.pending_query_dispatch_at = None;
                 user_active = true;
             }
 
@@ -189,6 +190,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 app.global_search.query.clear();
                 app.global_search.results.clear();
                 app.global_search.loading = false;
+                app.global_search.pending_query_dispatch_at = None;
                 app.global_search.has_more_results = false;
                 app.global_search.requested_offset = 0;
                 app.global_search.requested_limit = 200;
@@ -202,6 +204,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 }
             } else {
                 app.global_search.focus_request = false;
+                app.global_search.pending_query_dispatch_at = None;
                 app.global_search.has_more_results = false;
                 app.global_search.requested_offset = 0;
                 app.global_search.requested_limit = 200;
