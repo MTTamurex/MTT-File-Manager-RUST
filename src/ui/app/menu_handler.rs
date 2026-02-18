@@ -61,7 +61,10 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         if path.is_dir() {
                             app.navigate_to(&path.to_string_lossy());
                         } else {
-                            open_with_shell(&path);
+                            let _ = crate::application::file_operations::open_with_shell(
+                                &path,
+                                app.native_hwnd,
+                            );
                         }
                     }
                 }
@@ -156,8 +159,4 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
         context_menu.close();
     }
     app.context_menu = context_menu;
-}
-
-fn open_with_shell(path: &Path) {
-    let _ = std::process::Command::new("explorer").arg(path).spawn();
 }

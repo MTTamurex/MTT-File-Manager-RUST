@@ -2,7 +2,6 @@
 //! Follows .cursorrules: single responsibility, < 300 lines
 
 use crate::domain::file_entry::{archive_type_label, FileEntry};
-use crate::infrastructure::windows;
 
 /// Gets file type string for display
 pub fn get_file_type_string(item: &FileEntry) -> String {
@@ -25,17 +24,12 @@ pub fn get_file_type_string(item: &FileEntry) -> String {
 
 /// Formats date for display
 pub fn format_date(timestamp: u64) -> String {
-    windows::format_date(timestamp)
+    crate::infrastructure::windows::format_date(timestamp)
 }
 
 /// Formats size for display
 pub fn format_size(size: u64) -> String {
-    windows::format_size(size)
-}
-
-/// Opens file with shell
-pub fn open_with_shell(path: &std::path::Path) {
-    windows::open_with_shell(path);
+    crate::infrastructure::windows::format_size(size)
 }
 
 #[derive(Clone, Copy)]

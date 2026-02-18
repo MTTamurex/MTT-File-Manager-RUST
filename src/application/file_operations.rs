@@ -9,7 +9,8 @@ use windows::Win32::System::Com::{
 use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
 
 use crate::infrastructure::security::{
-    sanitize_path_with_local_drive_fallback, sanitize_unc_path, SecurityConfig,
+    sanitize_path_with_local_drive_fallback, sanitize_unc_path, validate_file_extension,
+    SecurityConfig,
 };
 use crate::infrastructure::windows as windows_infra;
 use crate::infrastructure::windows::recycle_bin;
@@ -95,6 +96,12 @@ fn sanitize_operation_path(path: &Path) -> OpResult<PathBuf> {
         .map_err(|e| e.to_string())
 }
 
+fn sanitize_open_path(path: &Path) -> OpResult<PathBuf> {
+    let valid = sanitize_operation_path(path)?;
+    validate_file_extension(&valid, &operation_security_config()).map_err(|e| e.to_string())?;
+    Ok(valid)
+}
+
 /// Deletes a file or directory using Windows Shell (Recycle Bin).
 ///
 /// # Warning
@@ -114,7 +121,7 @@ pub fn delete_with_shell(path: &Path, hwnd: Option<HWND>) -> OpResult<bool> {
 
 /// Opens a file with its default application.
 pub fn open_with_shell(path: &Path, _hwnd: Option<HWND>) -> OpResult<()> {
-    let valid_path = sanitize_operation_path(path)?;
+    let valid_path = sanitize_open_path(path)?;
     shell_operations::open_with_shell(&valid_path);
     Ok(())
 }
