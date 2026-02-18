@@ -1239,7 +1239,7 @@ function layouts()
     local btnY = refY - 28
     local btnW = 40
     local btnH = 56
-    local tcW = osc_geo.w - 520
+    local tcW = osc_geo.w - 600
 
     osc_param.areas = {} -- delete areas
 
@@ -1346,6 +1346,14 @@ function layouts()
 
     lo = add_layout("tog_info")
     lo.geometry = {x = osc_geo.w - 68, y = btnY, an = 5, w = btnW, h = btnH}
+    lo.style = osc_styles.button
+
+    lo = add_layout("tog_vsr")
+    lo.geometry = {x = osc_geo.w - 228, y = btnY, an = 5, w = btnW, h = btnH}
+    lo.style = osc_styles.button
+
+    lo = add_layout("tog_norm")
+    lo.geometry = {x = osc_geo.w - 188, y = btnY, an = 5, w = btnW, h = btnH}
     lo.style = osc_styles.button
 end
 
@@ -1644,6 +1652,46 @@ function osc_init()
     ne.tooltipF = "Information"
     ne.eventresponder["mbtn_left_up"] =
         function () mp.commandv("script-binding", "stats/display-stats-toggle") end
+
+    --tog_vsr
+    ne = new_element("tog_vsr", "button")
+    ne.visible = (osc_param.playresx >= 576)
+    ne.tooltip_style = osc_styles.tooltip
+    ne.tooltipF = function ()
+        local on = mp.get_property_bool("user-data/vsr/vsr-enabled", true)
+        return "RTX VSR: " .. (on and "ON" or "OFF")
+    end
+    ne.content = function ()
+        local on = mp.get_property_bool("user-data/vsr/vsr-enabled", true)
+        if on then
+            return "{\\fs14\\1c&H00FF00}VSR{\\1c&HFFFFFF}"
+        else
+            return "{\\fs14\\1c&H808080}VSR{\\1c&HFFFFFF}"
+        end
+    end
+    ne.eventresponder["mbtn_left_up"] =
+        function () mp.commandv("script-message-to", "vsr", "toggle-vsr") end
+
+    --tog_norm
+    ne = new_element("tog_norm", "button")
+    ne.visible = (osc_param.playresx >= 536)
+    ne.tooltip_style = osc_styles.tooltip
+    ne.tooltipF = function ()
+        local af = mp.get_property("af", "")
+        local on = af:find("dynaudnorm") ~= nil
+        return "Normalizador: " .. (on and "Ativo" or "Inativo")
+    end
+    ne.content = function ()
+        local af = mp.get_property("af", "")
+        local on = af:find("dynaudnorm") ~= nil
+        if on then
+            return "{\\fs12\\1c&H00FF00}Norm{\\1c&HFFFFFF}"
+        else
+            return "{\\fs12\\1c&H808080}Norm{\\1c&HFFFFFF}"
+        end
+    end
+    ne.eventresponder["mbtn_left_up"] =
+        function () mp.commandv("af", "toggle", "dynaudnorm=f=75") end
 
     --seekbar
     ne = new_element("seekbar", "slider")
