@@ -169,6 +169,57 @@ pub fn is_file_ready(mpv: &Arc<mpv::Mpv>) -> bool {
         .unwrap_or(false)
 }
 
+/// Detect interlaced status from MPV video params.
+/// Returns None if detection is inconclusive.
+pub fn detect_interlaced(mpv: &mpv::Mpv) -> Option<bool> {
+    if let Ok(value) = mpv.get_property::<bool>("video-params/interlaced") {
+        return Some(value);
+    }
+    if let Ok(value) = mpv.get_property::<i64>("video-params/interlaced") {
+        return Some(value != 0);
+    }
+    if let Ok(value) = mpv.get_property::<String>("video-params/interlaced") {
+        let value = value.to_lowercase();
+        if value == "yes" || value == "true" || value == "1" {
+            return Some(true);
+        }
+        if value == "no" || value == "false" || value == "0" {
+            return Some(false);
+        }
+    }
+    if let Ok(field) = mpv.get_property::<String>("video-params/field") {
+        let field = field.to_lowercase();
+        if field == "top" || field == "bottom" || field == "tff" || field == "bff" {
+            return Some(true);
+        }
+        if field == "progressive" {
+            return Some(false);
+        }
+    }
+    None
+}
+
+/// Get current video aspect ratio from MPV.
+/// Prefers post-VO params and falls back to source params.
+pub fn get_video_aspect(mpv: &mpv::Mpv) -> Option<f64> {
+    if let Ok(aspect) = mpv.get_property::<f64>("video-out-params/aspect") {
+        if aspect.is_finite() && aspect > 0.1 {
+            return Some(aspect);
+        }
+    }
+    let dw = mpv.get_property::<i64>("video-out-params/dw").ok().unwrap_or(0);
+    let dh = mpv.get_property::<i64>("video-out-params/dh").ok().unwrap_or(0);
+    if dw > 0 && dh > 0 {
+        return Some(dw as f64 / dh as f64);
+    }
+    let w = mpv.get_property::<i64>("video-params/w").ok().unwrap_or(0);
+    let h = mpv.get_property::<i64>("video-params/h").ok().unwrap_or(0);
+    if w > 0 && h > 0 {
+        return Some(w as f64 / h as f64);
+    }
+    None
+}
+
 /// Query tracks from MPV and return audio and subtitle tracks
 pub fn query_tracks(mpv: &Arc<mpv::Mpv>) -> (Vec<TrackInfo>, Vec<TrackInfo>) {
     let mut audio_tracks = Vec::new();

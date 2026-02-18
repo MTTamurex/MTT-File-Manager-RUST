@@ -118,8 +118,15 @@ impl MpvPreview {
                 let path_str = self.path.to_string_lossy().to_string();
                 let _ = m.command("loadfile", &[&path_str]);
 
-                // Prefer sidecar subtitle when available (movie.srt, movie.en.srt, etc.)
-                self.pending_external_subtitle = mpv_playback::find_sidecar_subtitle(&self.path);
+                // PERF: Async sidecar subtitle search (moved off render thread)
+                let video_path = self.path.clone();
+                let (tx, rx) = std::sync::mpsc::channel();
+                std::thread::spawn(move || {
+                    let result = mpv_playback::find_sidecar_subtitle(&video_path);
+                    let _ = tx.send(result);
+                });
+                self.sidecar_rx = Some(rx);
+                self.pending_external_subtitle = None;
 
                 if self.play_on_init {
                     let _ = m.set_property("pause", false);
@@ -131,6 +138,19 @@ impl MpvPreview {
             // Clear cached values for new file
             self.cached_duration = None;
             self.cached_tracks = None;
+            self.last_interlaced = None;
+
+            // Signal event loop to query tracks when file is ready
+            self.tracks_need_query.store(true, Ordering::Release);
+
+            // Clear stale state for new file
+            if let Ok(mut state) = self.state.write() {
+                state.tracks_ready = false;
+                state.audio_tracks.clear();
+                state.subtitle_tracks.clear();
+                state.interlaced = None;
+                state.video_aspect = None;
+            }
 
             // Defensive cleanup: ensure docked-only filters are not carried across files.
             self.update_docked_downscale(false);
@@ -144,39 +164,54 @@ impl MpvPreview {
             self.update_docked_downscale(false);
         }
 
-        // PERF FASE 2: State updates now handled by async event loop (zero polling overhead)
-        // Only tracks still need manual fetching (heavy JSON parse, done once per file)
-        if let Some(m) = self.mpv.clone() {
-            let file_ready = mpv_playback::is_file_ready(&m);
-            if file_ready {
-                if let Some(sidecar) = self.pending_external_subtitle.take() {
-                    if let Err(e) = self.load_external_subtitle(&sidecar) {
-                        log::error!("[MPV] Failed to auto-load sidecar subtitle: {}", e);
-                    }
-                }
+        // PERF: Check async sidecar subtitle result (non-blocking)
+        if let Some(rx) = &self.sidecar_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.pending_external_subtitle = result;
+                self.sidecar_rx = None;
             }
+        }
 
-            if self.cached_tracks.is_none() && file_ready {
-                let (audio_tracks, sub_tracks): (Vec<TrackInfo>, Vec<TrackInfo>) =
-                    mpv_playback::query_tracks(&m);
+        // PERF: Use cached duration from event loop instead of synchronous FFI
+        let file_ready = self
+            .state
+            .try_read()
+            .map(|s| s.duration > 0.0)
+            .unwrap_or(false);
 
-                self.cached_tracks = Some((audio_tracks.clone(), sub_tracks.clone()));
-
-                if let Ok(mut state) = self.state.write() {
-                    state.audio_tracks = audio_tracks;
-                    state.subtitle_tracks = sub_tracks;
+        // Load pending sidecar subtitle when file is ready
+        if file_ready {
+            if let Some(sidecar) = self.pending_external_subtitle.take() {
+                if let Err(e) = self.load_external_subtitle(&sidecar) {
+                    log::error!("[MPV] Failed to auto-load sidecar subtitle: {}", e);
                 }
-            } else if let Some((ref audio, ref subs)) = self.cached_tracks {
-                if let Ok(mut state) = self.state.write() {
-                    state.audio_tracks = audio.clone();
-                    state.subtitle_tracks = subs.clone();
+                // Re-query tracks after subtitle add
+                self.tracks_need_query.store(true, Ordering::Release);
+            }
+        }
+
+        // PERF: Tracks are now queried by the background event loop
+        if self.cached_tracks.is_none() {
+            if let Ok(state) = self.state.try_read() {
+                if state.tracks_ready {
+                    self.cached_tracks =
+                        Some((state.audio_tracks.clone(), state.subtitle_tracks.clone()));
                 }
             }
         }
 
-        if self.last_deinterlace_check.elapsed() >= Duration::from_millis(500) {
-            self.update_deinterlace_filter();
-            self.last_deinterlace_check = Instant::now();
+        // PERF: Deinterlace detection moved to event loop; apply filter only on state change
+        {
+            let interlaced = match self.state.try_read() {
+                Ok(s) => Some(s.interlaced),
+                Err(_) => None,
+            };
+            if let Some(interlaced) = interlaced {
+                if interlaced != self.last_interlaced {
+                    self.last_interlaced = interlaced;
+                    self.apply_deinterlace_state(interlaced);
+                }
+            }
         }
 
         if self.osc_active {

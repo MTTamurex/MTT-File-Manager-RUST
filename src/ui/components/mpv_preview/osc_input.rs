@@ -41,9 +41,19 @@ impl MpvPreview {
         }
 
         // Custom OSC script switches to "always" when paused.
-        // While docked, keep forcing "never" to prevent ghost overlay when pause toggles it.
+        // While docked, re-force "never" only when playback state toggles.
         if !desired_custom_osc_visible {
-            let _ = mpv.command("script-message", &["osc-visibility", "never", "1"]);
+            if let Ok(state) = self.state.try_read() {
+                let playing = state.is_playing;
+                drop(state);
+                if self.osc_last_playing_for_suppress != Some(playing) {
+                    let _ = mpv.command("script-message", &["osc-visibility", "never", "1"]);
+                    self.osc_last_playing_for_suppress = Some(playing);
+                }
+            }
+        } else {
+            // Reset suppress tracker when entering detached mode
+            self.osc_last_playing_for_suppress = None;
         }
 
         let desired_fullscreen = self.is_fullscreen();
@@ -67,9 +77,11 @@ impl MpvPreview {
         self.osc_active = desired_custom_osc_visible;
     }
 
-    pub(super) fn sync_fullscreen_from_mpv(&mut self, ui: &egui::Ui, mpv: &mpv::Mpv) {
-        let Ok(mpv_fullscreen) = mpv.get_property::<bool>("fullscreen") else {
-            return;
+    pub(super) fn sync_fullscreen_from_mpv(&mut self, ui: &egui::Ui, _mpv: &mpv::Mpv) {
+        // PERF: Read fullscreen from shared state (polled by background event loop)
+        let mpv_fullscreen = match self.state.try_read() {
+            Ok(s) => s.fullscreen,
+            Err(_) => return,
         };
 
         if self.last_observed_mpv_fullscreen == Some(mpv_fullscreen) {
