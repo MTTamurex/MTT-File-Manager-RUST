@@ -542,19 +542,19 @@ fn render_pinned_folders(
                 text_color,
             );
 
-            // Unpin icon ("✕") — visible on hover only
-            if response.hovered() && !is_being_dragged {
+            // Pin icon — always visible; click removes the shortcut
+            if !is_being_dragged {
                 let pointer_pos = ui.input(|inp| inp.pointer.hover_pos());
                 let pin_hovered = pointer_pos.map(|p| pin_rect.contains(p)).unwrap_or(false);
                 let pin_color = if pin_hovered {
                     Color32::from_rgb(220, 60, 60)
                 } else {
-                    Color32::from_gray(160)
+                    Color32::from_gray(140)
                 };
                 ui.painter().text(
                     pin_rect.center(),
                     egui::Align2::CENTER_CENTER,
-                    "✕",
+                    "📌",
                     egui::FontId::proportional(10.0),
                     pin_color,
                 );
