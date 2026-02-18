@@ -102,6 +102,12 @@ pub struct ImageViewerApp {
     pub sort_descending: bool,        // true = Z-A, Newest, Largest
     pub folders_position: FoldersPosition, // First, Last, Mixed
 
+    // "Normal" (unlocked) state — these track what unlocked folders should use.
+    // When a locked folder overrides active settings, these remain unchanged.
+    pub sort_descending_normal: bool,
+    pub folders_position_normal: FoldersPosition,
+    pub view_mode_normal: ViewMode,
+
     // Persistence Layer
     pub disk_cache: Arc<ThumbnailDiskCache>,
     pub directory_cache: Arc<DirectoryCache>,

@@ -59,6 +59,10 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                     } else {
                         app.sort_mode_normal = app.sort_mode;
                     }
+                    if !app.current_folder_locked {
+                        app.sort_descending_normal = app.sort_descending;
+                        app.folders_position_normal = app.folders_position;
+                    }
                     app.sort_items();
                     app.save_preferences();
                 }

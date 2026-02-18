@@ -38,6 +38,9 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
             .clicked()
         {
             app.sort_descending = !app.sort_descending;
+            if !app.current_folder_locked {
+                app.sort_descending_normal = app.sort_descending;
+            }
             app.sort_items();
             app.save_preferences();
         }

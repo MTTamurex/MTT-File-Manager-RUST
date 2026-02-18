@@ -65,6 +65,9 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                         } else {
                             app.view_mode = ViewMode::List;
                         }
+                        if !app.current_folder_locked {
+                            app.view_mode_normal = app.view_mode;
+                        }
                         debug_log!(
                             "[VIEW-MODE] Toolbar toggle -> {:?} (tab={})",
                             app.view_mode,
@@ -87,6 +90,9 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                     }
                     ToolbarAction::ToggleSortDescending => {
                         app.sort_descending = !app.sort_descending;
+                        if !app.current_folder_locked {
+                            app.sort_descending_normal = app.sort_descending;
+                        }
                         app.sort_items();
                         app.save_preferences();
                     }

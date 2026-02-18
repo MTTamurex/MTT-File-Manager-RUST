@@ -182,7 +182,10 @@ impl ImageViewerApp {
             sort_mode_computer,
             sort_mode_normal,
             sort_descending,
+            sort_descending_normal: sort_descending,
             folders_position,
+            folders_position_normal: folders_position,
+            view_mode_normal: view_mode,
             disk_cache: disk_cache.clone(),
             directory_cache: directory_cache.clone(),
             directory_index: directory_index.clone(),
@@ -403,6 +406,9 @@ impl ImageViewerApp {
             // Media keyboard debounce
             last_media_key_press: std::time::Instant::now(),
         };
+
+        // Apply folder lock for the initial folder (if it has one saved)
+        app.apply_folder_lock_if_present();
 
         run_post_startup_jobs(&mut app, &ctx);
 
