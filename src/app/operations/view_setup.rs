@@ -138,6 +138,13 @@ impl ImageViewerApp {
         // Load Computer View sort mode
         self.sort_mode = self.sort_mode_computer;
 
+        // Restore unlocked defaults for settings that folder_lock may have overridden.
+        // "Este Computador" cannot be locked, so always clear the locked state.
+        self.sort_descending = self.sort_descending_normal;
+        self.folders_position = self.folders_position_normal;
+        self.view_mode = self.view_mode_normal;
+        self.current_folder_locked = false;
+
         // Populate items with drives using FAST-ONLY calls (no I/O blocking)
         // detect_drive_type uses GetDriveTypeW which is cached and < 1ms
         // get_volume_info is deferred to background thread
