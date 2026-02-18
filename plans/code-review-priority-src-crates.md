@@ -34,6 +34,12 @@ Top risks:
   - Added looped write-all handling for named pipe writes in client and service.
 - **F-05**: ✅ Implemented
   - Added real UI-side debounce before dispatching global search requests.
+- **F-07**: ✅ Implemented
+  - MPV event-loop shutdown now preserves timeout semantics and avoids unconditional blocking join.
+- **F-09**: ✅ Implemented (targeted)
+  - Added path redaction on remaining high-signal raw error logs in search-service indexer loops.
+- **F-10**: ✅ Implemented (bounded mitigation)
+  - Added per-frame cap for uncached filesystem metadata probes in global-search results rendering.
 
 ---
 

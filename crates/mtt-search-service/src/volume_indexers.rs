@@ -94,7 +94,11 @@ pub(crate) fn index_non_ntfs_volume(
                 );
             }
             Err(e) => {
-                eprintln!("[SCAN] {}:\\ Full scan failed: {}", drive_letter, e);
+                eprintln!(
+                    "[SCAN] {}:\\ Full scan failed: {}",
+                    drive_letter,
+                    crate::redact_paths(&e)
+                );
 
                 let mut indices_lock = indices.write().unwrap_or_else(|poison| poison.into_inner());
                 if let Some(existing) = indices_lock
@@ -223,7 +227,8 @@ pub(crate) fn index_volume(
                     Err(e) => {
                         eprintln!(
                             "[USN] {}:\\ Catch-up failed ({}), doing full scan",
-                            drive_letter, e
+                            drive_letter,
+                            crate::redact_paths(&e)
                         );
                         index.clear();
                         need_full_scan = true;
@@ -279,7 +284,11 @@ pub(crate) fn index_volume(
                 );
             }
             Err(e) => {
-                eprintln!("[USN] {}:\\ Enumeration failed: {}", drive_letter, e);
+                eprintln!(
+                    "[USN] {}:\\ Enumeration failed: {}",
+                    drive_letter,
+                    crate::redact_paths(&e)
+                );
                 index.state = file_index::IndexState::Error(e);
                 usn_journal::close_volume(volume_handle);
                 return;
@@ -347,7 +356,11 @@ pub(crate) fn index_volume(
             }
             Ok(None) => {}
             Err(e) => {
-                eprintln!("[USN] {}:\\ Incremental read error: {}", drive_letter, e);
+                eprintln!(
+                    "[USN] {}:\\ Incremental read error: {}",
+                    drive_letter,
+                    crate::redact_paths(&e)
+                );
             }
         }
 
