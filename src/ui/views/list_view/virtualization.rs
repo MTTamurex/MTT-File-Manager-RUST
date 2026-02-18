@@ -336,6 +336,10 @@ fn render_scrollbar(
     current_scroll: f32,
     ctx: &mut ListViewContext,
 ) {
+    if viewport_h <= 0.0 || total_content_height <= 0.0 || max_scroll <= 0.0 {
+        return;
+    }
+
     let scroll_bar_w = 4.0;
     let scroll_bar_rect = Rect::from_min_max(
         egui::pos2(
@@ -345,8 +349,11 @@ fn render_scrollbar(
         egui::pos2(viewport_rect.right() - 2.0, viewport_rect.bottom()),
     );
 
-    let handle_h = (viewport_h / total_content_height * viewport_h).max(30.0);
-    let handle_top = current_scroll / max_scroll * (viewport_h - handle_h);
+    let handle_h = (viewport_h / total_content_height * viewport_h)
+        .max(30.0)
+        .min(viewport_h.max(30.0));
+    let travel = (viewport_h - handle_h).max(1.0);
+    let handle_top = (current_scroll / max_scroll) * travel;
     let handle_rect = Rect::from_min_size(
         egui::pos2(scroll_bar_rect.left(), viewport_rect.top() + handle_top),
         egui::vec2(scroll_bar_w, handle_h),
@@ -361,12 +368,12 @@ fn render_scrollbar(
         if let Some(click_pos) = ui.input(|i| i.pointer.interact_pos()) {
             let relative_y = click_pos.y - scroll_bar_rect.top();
             let target_handle_top = relative_y - (handle_h / 2.0);
-            let scroll_ratio = target_handle_top / (viewport_h - handle_h);
+            let scroll_ratio = target_handle_top / travel;
             *ctx.mut_scroll_offset_y = (scroll_ratio * max_scroll).clamp(0.0, max_scroll);
         }
     } else if response.dragged() {
         let delta = response.drag_delta().y;
-        let scroll_per_pixel = max_scroll / (viewport_h - handle_h);
+        let scroll_per_pixel = max_scroll / travel;
         *ctx.mut_scroll_offset_y += delta * scroll_per_pixel;
         *ctx.mut_scroll_offset_y = ctx.mut_scroll_offset_y.clamp(0.0, max_scroll);
     }

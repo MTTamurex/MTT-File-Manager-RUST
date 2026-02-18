@@ -21,6 +21,20 @@ Top risks:
 3. **UI scrollbar numeric edge cases** that can produce invalid math.
 4. **Search request pressure and full-scan query complexity** affecting responsiveness.
 
+### Implementation Status (Code Phase - 2026-02-18)
+
+- **F-01**: ✅ Implemented
+  - Context-menu open path now uses centralized sanitized open flow.
+- **F-02**: ⚠️ Partially implemented (intentionally scoped)
+  - Blocked-extension validation enforced for open flow boundary.
+  - Generic enforcement on all file operations was intentionally deferred to avoid behavioral regressions.
+- **F-03**: ✅ Implemented
+  - Added denominator/travel guards and handle clamp in list/grid custom scrollbars.
+- **F-04**: ✅ Implemented
+  - Added looped write-all handling for named pipe writes in client and service.
+- **F-05**: ✅ Implemented
+  - Added real UI-side debounce before dispatching global search requests.
+
 ---
 
 ## 2. Methodology
