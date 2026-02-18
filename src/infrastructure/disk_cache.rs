@@ -11,6 +11,7 @@ mod folder_covers;
 mod folder_locks;
 mod folder_previews;
 mod gc;
+mod pinned_folders;
 mod preferences;
 mod thumbnails_repo;
 
@@ -308,6 +309,17 @@ impl ThumbnailDiskCache {
                 sort_mode TEXT NOT NULL,
                 sort_descending TEXT NOT NULL,
                 folders_position TEXT NOT NULL
+            )",
+            [],
+        )
+        .unwrap_or(0);
+
+        // Quick Access pinned folders table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS pinned_folders (
+                path TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0
             )",
             [],
         )

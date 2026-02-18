@@ -174,6 +174,24 @@ impl ImageViewerApp {
             items.push(ContextMenuItem::separator());
             items.push(ContextMenuItem::new(-24, "Copiar caminho").with_shortcut("Ctrl+Shift+C"));
             items.push(ContextMenuItem::new(-26, "Criar atalho"));
+            // Quick Access pin/unpin — only for folders (not drives)
+            if !is_drive {
+                if let Some(target_path) = paths.first().and_then(|p| p.to_str()) {
+                    if std::path::Path::new(target_path).is_dir() {
+                        let is_pinned = self
+                            .pinned_folders
+                            .iter()
+                            .any(|pf| pf.path == target_path);
+                        items.push(ContextMenuItem::separator());
+                        if is_pinned {
+                            items.push(ContextMenuItem::new(-61, "Remover do Acesso Rápido"));
+                        } else {
+                            items.push(ContextMenuItem::new(-60, "Fixar no Acesso Rápido"));
+                        }
+                    }
+                }
+            }
+
             items.push(ContextMenuItem::separator());
             items.push(
                 ContextMenuItem::new(-28, "Propriedades")
