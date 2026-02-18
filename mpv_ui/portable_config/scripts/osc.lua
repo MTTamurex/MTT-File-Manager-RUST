@@ -1432,41 +1432,29 @@ function osc_init()
 
     -- prev
     ne = new_element("pl_prev", "button")
-
-    ne.content = icons.pl_prev
-    ne.enabled = (pl_pos > 1) or (loop ~= "no")
-    ne.tooltip_style = osc_styles.tooltip
-    ne.tooltipF = "Previous"
-    ne.eventresponder["mbtn_left_up"] =
-        function ()
-            mp.commandv("playlist-prev", "weak")
-            if user_opts.playlist_osd then
-                show_message(get_playlist(), 3)
-            end
-        end
-    ne.eventresponder["shift+mbtn_left_up"] =
-        function () show_message(get_playlist(), 3) end
-    ne.eventresponder["mbtn_right_up"] =
-        function () show_message(get_playlist(), 3) end
+    do
+        local ch_list = mp.get_property_native("chapter-list", {})
+        local ch_cur  = mp.get_property_number("chapter", -1)
+        ne.content = icons.pl_prev
+        ne.enabled = #ch_list > 0 and ch_cur > 0
+        ne.tooltip_style = osc_styles.tooltip
+        ne.tooltipF = "Capítulo anterior"
+        ne.eventresponder["mbtn_left_up"] =
+            function () mp.commandv("add", "chapter", -1) end
+    end
 
     --next
     ne = new_element("pl_next", "button")
-
-    ne.content = icons.pl_next
-    ne.enabled = (have_pl and (pl_pos < pl_count)) or (loop ~= "no")
-    ne.tooltip_style = osc_styles.tooltip
-    ne.tooltipF = "Next"
-    ne.eventresponder["mbtn_left_up"] =
-        function ()
-            mp.commandv("playlist-next", "weak")
-            if user_opts.playlist_osd then
-                show_message(get_playlist(), 3)
-            end
-        end
-    ne.eventresponder["shift+mbtn_left_up"] =
-        function () show_message(get_playlist(), 3) end
-    ne.eventresponder["mbtn_right_up"] =
-        function () show_message(get_playlist(), 3) end
+    do
+        local ch_list = mp.get_property_native("chapter-list", {})
+        local ch_cur  = mp.get_property_number("chapter", -1)
+        ne.content = icons.pl_next
+        ne.enabled = #ch_list > 0 and ch_cur < #ch_list - 1
+        ne.tooltip_style = osc_styles.tooltip
+        ne.tooltipF = "Próximo capítulo"
+        ne.eventresponder["mbtn_left_up"] =
+            function () mp.commandv("add", "chapter", 1) end
+    end
 
 
     -- play control buttons
