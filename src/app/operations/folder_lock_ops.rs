@@ -26,7 +26,6 @@ impl ImageViewerApp {
                 sort_mode: self.sort_mode,
                 sort_descending: self.sort_descending,
                 folders_position: self.folders_position,
-                search_query: self.search_query.clone(),
             };
             self.disk_cache.save_folder_lock(&path, &lock);
             self.folder_locks.insert(path, lock);
@@ -43,7 +42,6 @@ impl ImageViewerApp {
             self.sort_mode = lock.sort_mode;
             self.sort_descending = lock.sort_descending;
             self.folders_position = lock.folders_position;
-            self.search_query = lock.search_query;
             self.current_folder_locked = true;
         } else {
             self.current_folder_locked = false;

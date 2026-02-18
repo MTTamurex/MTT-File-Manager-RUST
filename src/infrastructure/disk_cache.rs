@@ -298,8 +298,7 @@ impl ThumbnailDiskCache {
                 view_mode TEXT NOT NULL,
                 sort_mode TEXT NOT NULL,
                 sort_descending TEXT NOT NULL,
-                folders_position TEXT NOT NULL,
-                search_query TEXT NOT NULL
+                folders_position TEXT NOT NULL
             )",
             [],
         )

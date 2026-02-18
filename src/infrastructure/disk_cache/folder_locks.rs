@@ -32,15 +32,14 @@ impl ThumbnailDiskCache {
         if let Ok(db) = self.writer.lock() {
             let _ = db.execute(
                 "INSERT OR REPLACE INTO folder_locks
-                 (path, view_mode, sort_mode, sort_descending, folders_position, search_query)
-                 VALUES (?, ?, ?, ?, ?, ?)",
+                 (path, view_mode, sort_mode, sort_descending, folders_position)
+                 VALUES (?, ?, ?, ?, ?)",
                 params![
                     path,
                     view_mode_str,
                     sort_mode_str,
                     sort_desc_str,
-                    folders_pos_str,
-                    &lock.search_query
+                    folders_pos_str
                 ],
             );
         }
@@ -61,7 +60,7 @@ impl ThumbnailDiskCache {
             Err(_) => return results,
         };
         let mut stmt = match db.prepare(
-            "SELECT path, view_mode, sort_mode, sort_descending, folders_position, search_query
+            "SELECT path, view_mode, sort_mode, sort_descending, folders_position
              FROM folder_locks",
         ) {
             Ok(s) => s,
@@ -74,12 +73,11 @@ impl ThumbnailDiskCache {
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
                 row.get::<_, String>(4)?,
-                row.get::<_, String>(5)?,
             ))
         });
         if let Ok(rows) = rows {
             for row in rows.flatten() {
-                let (path, view_mode_s, sort_mode_s, sort_desc_s, folders_pos_s, search_q) = row;
+                let (path, view_mode_s, sort_mode_s, sort_desc_s, folders_pos_s) = row;
                 let view_mode = match view_mode_s.as_str() {
                     "list" => ViewMode::List,
                     _ => ViewMode::Grid,
@@ -105,7 +103,6 @@ impl ThumbnailDiskCache {
                         sort_mode,
                         sort_descending,
                         folders_position,
-                        search_query: search_q,
                     },
                 );
             }
