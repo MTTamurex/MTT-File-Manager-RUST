@@ -3,7 +3,7 @@ use eframe::egui;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// PERF FASE 2: Starts async polling thread for offloading FFI calls from main thread
 ///
@@ -13,6 +13,7 @@ pub fn start_event_loop(
     mpv: Arc<mpv::Mpv>,
     state: Arc<RwLock<MpvState>>,
     running: Arc<AtomicBool>,
+    tracks_need_query: Arc<AtomicBool>,
     ctx: egui::Context,
 ) -> thread::JoinHandle<()> {
     running.store(true, Ordering::Release);
@@ -20,6 +21,8 @@ pub fn start_event_loop(
     // Spawn background polling thread
     thread::spawn(move || {
         log::info!("[MpvPreview] Async polling thread started");
+
+        let mut last_interlace_check = Instant::now();
 
         loop {
             // Check shutdown flag
@@ -30,6 +33,7 @@ pub fn start_event_loop(
 
             // Poll properties (moved to background thread - zero impact on main thread!)
             let mut state_updated = false;
+            let mut current_duration: f64 = 0.0;
 
             // Poll time position
             if let Ok(pos) = mpv.get_property::<f64>("time-pos") {
@@ -65,12 +69,60 @@ pub fn start_event_loop(
 
             // Poll duration (only once until it's available)
             if let Ok(dur) = mpv.get_property::<f64>("duration") {
+                current_duration = dur;
                 if let Ok(mut s) = state.write() {
                     if s.duration == 0.0 || s.duration != dur {
                         s.duration = dur;
                         state_updated = true;
                     }
                 }
+            }
+
+            // Poll fullscreen (PERF: moved from per-frame FFI in sync_fullscreen_from_mpv)
+            if let Ok(fs) = mpv.get_property::<bool>("fullscreen") {
+                if let Ok(mut s) = state.write() {
+                    if s.fullscreen != fs {
+                        s.fullscreen = fs;
+                        state_updated = true;
+                    }
+                }
+            }
+
+            // Poll video aspect ratio (PERF: moved from per-frame FFI in video_aspect())
+            if current_duration > 0.0 {
+                let aspect = super::playback::get_video_aspect(&mpv);
+                if let Ok(mut s) = state.write() {
+                    if s.video_aspect != aspect {
+                        s.video_aspect = aspect;
+                        state_updated = true;
+                    }
+                }
+            }
+
+            // Query tracks when signaled and file is ready (PERF: moved from render thread)
+            if tracks_need_query.load(Ordering::Acquire) && current_duration > 0.0 {
+                let (audio, subs) = super::playback::query_tracks(&mpv);
+                if let Ok(mut s) = state.write() {
+                    s.audio_tracks = audio;
+                    s.subtitle_tracks = subs;
+                    s.tracks_ready = true;
+                    state_updated = true;
+                }
+                tracks_need_query.store(false, Ordering::Release);
+            }
+
+            // Detect interlaced status every ~500ms (PERF: moved from render thread)
+            if current_duration > 0.0
+                && last_interlace_check.elapsed() >= Duration::from_millis(500)
+            {
+                let interlaced = super::playback::detect_interlaced(&mpv);
+                if let Ok(mut s) = state.write() {
+                    if s.interlaced != interlaced {
+                        s.interlaced = interlaced;
+                        state_updated = true;
+                    }
+                }
+                last_interlace_check = Instant::now();
             }
 
             // Request UI repaint only if state changed

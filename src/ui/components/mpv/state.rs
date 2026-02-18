@@ -18,4 +18,9 @@ pub struct MpvState {
     pub is_muted: bool,
     pub audio_tracks: Vec<TrackInfo>,
     pub subtitle_tracks: Vec<TrackInfo>,
+    // PERF: fields polled by background event loop to avoid FFI on render thread
+    pub fullscreen: bool,
+    pub video_aspect: Option<f64>,
+    pub interlaced: Option<bool>,
+    pub tracks_ready: bool,
 }

@@ -103,29 +103,9 @@ impl MpvPreview {
     }
 
     /// Returns the current display aspect ratio reported by MPV.
-    /// Prefers post-VO params and falls back to source params.
+    /// PERF: Reads from cached state (polled by background event loop).
     pub fn video_aspect(&self) -> Option<f64> {
-        let m = self.mpv.as_ref()?;
-
-        if let Ok(aspect) = m.get_property::<f64>("video-out-params/aspect") {
-            if aspect.is_finite() && aspect > 0.1 {
-                return Some(aspect);
-            }
-        }
-
-        let dw = m.get_property::<i64>("video-out-params/dw").ok().unwrap_or(0);
-        let dh = m.get_property::<i64>("video-out-params/dh").ok().unwrap_or(0);
-        if dw > 0 && dh > 0 {
-            return Some(dw as f64 / dh as f64);
-        }
-
-        let w = m.get_property::<i64>("video-params/w").ok().unwrap_or(0);
-        let h = m.get_property::<i64>("video-params/h").ok().unwrap_or(0);
-        if w > 0 && h > 0 {
-            return Some(w as f64 / h as f64);
-        }
-
-        None
+        self.state.try_read().ok().and_then(|s| s.video_aspect)
     }
 
     pub fn toggle_audio_normalizer(&mut self) {

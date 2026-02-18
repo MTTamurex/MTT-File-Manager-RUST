@@ -99,7 +99,6 @@ pub struct MpvPreview {
     /// Stores previous demuxer back cache bytes to restore on undock
     docked_prev_demuxer_max_back_bytes: Option<i64>,
     audio_normalizer_enabled: bool,
-    last_deinterlace_check: Instant,
 
     // Performance: Async event handling (Fase 2 optimization)
     event_thread_running: Arc<AtomicBool>,
@@ -109,6 +108,15 @@ pub struct MpvPreview {
     cached_duration: Option<f64>,
     cached_tracks: Option<(Vec<TrackInfo>, Vec<TrackInfo>)>,
     pending_external_subtitle: Option<PathBuf>,
+
+    // PERF: Shared signal for background track querying
+    tracks_need_query: Arc<AtomicBool>,
+    // PERF: Async sidecar subtitle search receiver
+    sidecar_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
+    // PERF: Track previous interlaced state for change detection
+    last_interlaced: Option<bool>,
+    // PERF: Track last play state to minimize osc-visibility IPC commands
+    osc_last_playing_for_suppress: Option<bool>,
 
     /// Native window surface for video rendering (encapsulates all HWND logic)
     pub surface: VideoSurface,
@@ -221,13 +229,8 @@ impl MpvPreview {
             show_player: false,
             play_on_init: false,
             state: Arc::new(RwLock::new(MpvState {
-                is_playing: false,
-                current_time: 0.0,
-                duration: 0.0,
                 volume: 1.0,
-                is_muted: false,
-                audio_tracks: Vec::new(),
-                subtitle_tracks: Vec::new(),
+                ..Default::default()
             })),
             is_visible: true,
             mode: VideoMode::Docked,
@@ -258,12 +261,15 @@ impl MpvPreview {
             docked_prev_demuxer_max_bytes: None,
             docked_prev_demuxer_max_back_bytes: None,
             audio_normalizer_enabled: false,
-            last_deinterlace_check: Instant::now(),
             event_thread_running: Arc::new(AtomicBool::new(false)),
             event_thread_handle: None,
             cached_duration: None,
             cached_tracks: None,
             pending_external_subtitle: None,
+            tracks_need_query: Arc::new(AtomicBool::new(false)),
+            sidecar_rx: None,
+            last_interlaced: None,
+            osc_last_playing_for_suppress: None,
             surface: VideoSurface::new(),
             mpv: None,
             loaded_path: None,
