@@ -42,7 +42,7 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
         freeze_layout, layout_phase, WindowLayoutPhase,
     };
 
-    let (size_changed, maximized_changed, is_minimized, minimized_changed) = ctx.input(|i| {
+    let (size_changed, maximized_changed, fullscreen_changed, is_minimized, minimized_changed) = ctx.input(|i| {
         let mut size_changed = false;
         let mut maximized_changed = false;
 
@@ -70,9 +70,14 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
         }
         app.layout.saved_is_maximized = new_maximized;
 
+        let new_fullscreen = i.viewport().fullscreen.unwrap_or(false);
+        let fullscreen_changed = new_fullscreen != app.layout.saved_is_fullscreen;
+        app.layout.saved_is_fullscreen = new_fullscreen;
+
         (
             size_changed,
             maximized_changed,
+            fullscreen_changed,
             minimized,
             minimized_changed,
         )
@@ -111,11 +116,12 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
         app.save_preferences();
     }
 
-    if maximized_changed {
+    if maximized_changed || fullscreen_changed {
         if let Some(hwnd) = app.native_hwnd {
+            let no_round = app.layout.saved_is_maximized || app.layout.saved_is_fullscreen;
             crate::infrastructure::windows::window_corners::apply_window_corner_preference(
                 hwnd,
-                app.layout.saved_is_maximized,
+                no_round,
             );
         }
     }

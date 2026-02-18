@@ -1679,15 +1679,15 @@ function osc_init()
     ne.tooltipF = function ()
         local af = mp.get_property("af", "")
         local on = af:find("dynaudnorm") ~= nil
-        return "Normalizador: " .. (on and "Ativo" or "Inativo")
+        return "NORMalizador: " .. (on and "Ativo" or "Inativo")
     end
     ne.content = function ()
         local af = mp.get_property("af", "")
         local on = af:find("dynaudnorm") ~= nil
         if on then
-            return "{\\fs12\\1c&H00FF00}Norm{\\1c&HFFFFFF}"
+            return "{\\fs12\\1c&H00FF00}NORM{\\1c&HFFFFFF}"
         else
-            return "{\\fs12\\1c&H808080}Norm{\\1c&HFFFFFF}"
+            return "{\\fs12\\1c&H808080}NORM{\\1c&HFFFFFF}"
         end
     end
     ne.eventresponder["mbtn_left_up"] =

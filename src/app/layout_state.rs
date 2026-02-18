@@ -6,6 +6,7 @@ pub struct LayoutState {
     pub saved_window_height: f32,
     pub saved_is_maximized: bool,
     pub saved_is_minimized: bool,
+    pub saved_is_fullscreen: bool,
 
     // Sidebar widths persistence
     pub sidebar_left_width: f32,
@@ -37,6 +38,7 @@ impl Default for LayoutState {
             saved_window_height: 720.0,
             saved_is_maximized: true,
             saved_is_minimized: false,
+            saved_is_fullscreen: false,
             sidebar_left_width: 200.0,
             sidebar_right_width: 300.0,
             list_col_name_width: 300.0,

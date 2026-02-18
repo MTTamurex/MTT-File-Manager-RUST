@@ -32,6 +32,7 @@ pub(in crate::app) fn build_layout_state(
         saved_window_height,
         saved_is_maximized,
         saved_is_minimized: false,
+        saved_is_fullscreen: false,
         sidebar_left_width,
         sidebar_right_width,
         list_col_name_width: load_width_pref(disk_cache, "list_col_name_width", 300.0),
