@@ -30,18 +30,33 @@ impl MpvPreview {
     }
 
     pub fn toggle_play(&mut self) {
-        match self.state.read() {
-            Ok(state) => {
-                if state.is_playing {
-                    self.pause();
-                } else {
-                    self.play();
-                }
-            }
+        let was_playing = match self.state.read() {
+            Ok(state) => state.is_playing,
             Err(_) => {
                 log::error!("[MpvPreview] Erro ao toggle play - RwLock poisonado");
                 self.pause();
+                return;
             }
+        };
+
+        if was_playing {
+            self.pause();
+        } else {
+            self.play();
+        }
+
+        // Immediately update state so UI reflects the change without waiting for event loop
+        if let Ok(mut s) = self.state.try_write() {
+            s.is_playing = !was_playing;
+        }
+
+        // In docked mode, immediately suppress OSC and reset tracking so
+        // sync_osc_runtime_state re-sends on next frame (double-tap suppression).
+        if self.is_docked() {
+            if let Some(m) = &self.mpv {
+                let _ = m.command("script-message", &["osc-visibility", "never", "1"]);
+            }
+            self.osc_last_playing_for_suppress = None;
         }
     }
 

@@ -15,6 +15,7 @@ impl MpvPreview {
             self.state.clone(),
             self.event_thread_running.clone(),
             self.tracks_need_query.clone(),
+            self.file_loading.clone(),
             ctx,
         );
 

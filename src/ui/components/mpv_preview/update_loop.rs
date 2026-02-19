@@ -120,6 +120,9 @@ impl MpvPreview {
                 let path_str = self.path.to_string_lossy().to_string();
                 let _ = m.command("loadfile", &[&path_str]);
 
+                // Gate event loop time-pos writes until new file's duration is available
+                self.file_loading.store(true, Ordering::Release);
+
                 // PERF: Async sidecar subtitle search (moved off render thread)
                 let video_path = self.path.clone();
                 let (tx, rx) = std::sync::mpsc::channel();
@@ -141,12 +144,17 @@ impl MpvPreview {
             self.cached_duration = None;
             self.cached_tracks = None;
             self.last_interlaced = None;
+            // Force OSC state re-sync on new file (MPV reloads scripts on loadfile)
+            self.last_osc_enabled = None;
+            self.osc_last_playing_for_suppress = None;
 
             // Signal event loop to query tracks when file is ready
             self.tracks_need_query.store(true, Ordering::Release);
 
             // Clear stale state for new file
             if let Ok(mut state) = self.state.write() {
+                state.current_time = 0.0;
+                state.duration = 0.0;
                 state.tracks_ready = false;
                 state.audio_tracks.clear();
                 state.subtitle_tracks.clear();
