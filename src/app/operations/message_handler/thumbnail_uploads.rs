@@ -10,13 +10,90 @@ const CRITICAL_FRAME_TIME_MS: f32 = 33.33;
 const SEVERE_FRAME_TIME_MS: f32 = 25.0;
 const MAX_INCOMING_THUMBNAIL_BUDGET_MS: u64 = 4;
 const MIN_INCOMING_THUMBNAIL_BUDGET_MS: u64 = 2;
+const TEXTURE_CACHE_RETUNE_INTERVAL_MS: u64 = 900;
+const TEXTURE_CACHE_RETUNE_MIN_DELTA_ITEMS: usize = 16;
+
+fn live_frame_pressure_ms(app: &ImageViewerApp) -> f32 {
+    app.last_actual_frame_ms.max(app.frame_time_avg_ms)
+}
+
+fn compute_texture_cache_target_items(
+    app: &ImageViewerApp,
+    frame_pressure_ms: f32,
+    open_tabs: usize,
+    is_scrolling: bool,
+    is_video_playing: bool,
+) -> usize {
+    let tab_factor: f32 = if open_tabs <= 1 {
+        1.25
+    } else if open_tabs <= 3 {
+        1.12
+    } else if open_tabs <= 5 {
+        1.0
+    } else {
+        0.90
+    };
+
+    let queue_pending = app.thumbnail_queue.pending_count();
+    let upload_pending = app.pending_thumbnails.len();
+    let pipeline_backlog = queue_pending.saturating_add(upload_pending);
+
+    let backlog_boost = if pipeline_backlog >= 900 {
+        96
+    } else if pipeline_backlog >= 600 {
+        72
+    } else if pipeline_backlog >= 320 {
+        48
+    } else if pipeline_backlog >= 140 {
+        24
+    } else {
+        0
+    };
+
+    let frame_headroom_boost = if frame_pressure_ms < 12.0 {
+        24
+    } else if frame_pressure_ms < 16.0 {
+        12
+    } else {
+        0
+    };
+
+    let frame_penalty = if frame_pressure_ms > CRITICAL_FRAME_TIME_MS {
+        80
+    } else if frame_pressure_ms > SEVERE_FRAME_TIME_MS {
+        52
+    } else if frame_pressure_ms > 20.0 {
+        24
+    } else {
+        0
+    };
+
+    let activity_penalty = if is_video_playing && is_scrolling {
+        48
+    } else if is_video_playing {
+        30
+    } else if is_scrolling {
+        12
+    } else {
+        0
+    };
+
+    let raw_target = ((220.0_f32 * tab_factor).round() as i32)
+        + backlog_boost
+        + frame_headroom_boost
+        - frame_penalty
+        - activity_penalty;
+
+    raw_target.clamp(140, 420) as usize
+}
 
 impl ImageViewerApp {
     pub(super) fn process_thumbnail_upload_pipeline(&mut self, ctx: &egui::Context) -> bool {
         let mut received_any = false;
         let mut incoming_count = 0usize;
         let mut has_more_incoming = false;
-        let incoming_budget = if self.frame_time_peak_ms > CRITICAL_FRAME_TIME_MS {
+        let frame_pressure_ms = live_frame_pressure_ms(self);
+        let incoming_budget = if frame_pressure_ms > CRITICAL_FRAME_TIME_MS {
             Duration::from_millis(MIN_INCOMING_THUMBNAIL_BUDGET_MS)
         } else {
             Duration::from_millis(MAX_INCOMING_THUMBNAIL_BUDGET_MS)
@@ -75,8 +152,59 @@ impl ImageViewerApp {
 
         let is_scrolling = self.last_scroll_time.elapsed() < Duration::from_millis(100);
         let is_video_playing = self.is_video_playing_docked();
-        let is_performance_critical = self.frame_time_peak_ms > CRITICAL_FRAME_TIME_MS;
-        let is_performance_severe = self.frame_time_peak_ms > SEVERE_FRAME_TIME_MS;
+        let is_performance_critical = frame_pressure_ms > CRITICAL_FRAME_TIME_MS;
+        let is_performance_severe = frame_pressure_ms > SEVERE_FRAME_TIME_MS;
+
+        let open_tabs = self.tab_manager.count().max(1);
+
+        if self.last_texture_cache_retune.elapsed()
+            >= Duration::from_millis(TEXTURE_CACHE_RETUNE_INTERVAL_MS)
+        {
+            let queue_pending = self.thumbnail_queue.pending_count();
+            let upload_pending = self.pending_thumbnails.len();
+            let target_texture_items = compute_texture_cache_target_items(
+                self,
+                frame_pressure_ms,
+                open_tabs,
+                is_scrolling,
+                is_video_playing,
+            );
+
+            let current_texture_items = self.cache_manager.texture_cache.cap().get();
+            if current_texture_items.abs_diff(target_texture_items)
+                >= TEXTURE_CACHE_RETUNE_MIN_DELTA_ITEMS
+            {
+                let applied_texture_items = self
+                    .cache_manager
+                    .retune_texture_cache_capacity(target_texture_items);
+
+                if applied_texture_items != current_texture_items {
+                    log::info!(
+                        "[PERF-TEXTURE-CACHE] old={} new={} target={} frame_pressure_ms={:.1} tabs={} queue_pending={} upload_pending={} scrolling={} video={}",
+                        current_texture_items,
+                        applied_texture_items,
+                        target_texture_items,
+                        frame_pressure_ms,
+                        open_tabs,
+                        queue_pending,
+                        upload_pending,
+                        is_scrolling,
+                        is_video_playing,
+                    );
+                }
+            }
+            self.last_texture_cache_retune = Instant::now();
+        }
+
+        let tab_upload_boost = if open_tabs <= 1 {
+            1.25
+        } else if open_tabs <= 3 {
+            1.10
+        } else if open_tabs >= 6 {
+            0.90
+        } else {
+            1.0
+        };
 
         let base_max_uploads = if is_performance_critical {
             1
@@ -91,6 +219,11 @@ impl ImageViewerApp {
         } else {
             12
         };
+
+        let base_max_uploads = ((base_max_uploads as f32) * tab_upload_boost)
+            .round()
+            .clamp(1.0, 20.0) as usize;
+
         let perf_scale = if self.frame_time_avg_ms <= 0.0 {
             1.0
         } else if self.frame_time_avg_ms < 12.0 {
@@ -104,7 +237,7 @@ impl ImageViewerApp {
         };
         let max_uploads_per_frame = ((base_max_uploads as f32) * perf_scale)
             .round()
-            .clamp(1.0, 16.0) as usize;
+            .clamp(1.0, 20.0) as usize;
 
         let mut uploads_this_frame = 0;
         let upload_start = Instant::now();
@@ -140,6 +273,24 @@ impl ImageViewerApp {
         };
         let upload_budget_ms = (base_budget_ms * perf_scale).clamp(2.0, 10.0);
         let upload_budget = Duration::from_millis(upload_budget_ms.round() as u64);
+
+        let mut prioritized_path: Option<PathBuf> = None;
+        if let Some(selected_file) = &self.selected_file {
+            prioritized_path = Some(selected_file.path.clone());
+        }
+        if let Some(path) = prioritized_path {
+            if let Some(pos) = self
+                .pending_thumbnails
+                .iter()
+                .position(|thumb| thumb.path == path)
+            {
+                if pos > 0 {
+                    if let Some(selected_thumb) = self.pending_thumbnails.remove(pos) {
+                        self.pending_thumbnails.push_front(selected_thumb);
+                    }
+                }
+            }
+        }
 
         let visible_paths: Option<&crate::ui::cache::FxHashSet<PathBuf>> = if is_scrolling {
             if self.visible_range_cached != self.visible_index_range {
@@ -238,6 +389,23 @@ impl ImageViewerApp {
 
         if !self.pending_thumbnails.is_empty() || has_more_incoming {
             ctx.request_repaint();
+        }
+
+        if received_any && (incoming_count >= 32 || uploads_this_frame >= 8) {
+            log::debug!(
+                "[PERF-THUMB-UPLOAD] incoming={} uploads={} pending={} max_uploads={} upload_budget_ms={:.1} frame_pressure_ms={:.1} tabs={} critical={} severe={} scrolling={} video={}",
+                incoming_count,
+                uploads_this_frame,
+                self.pending_thumbnails.len(),
+                max_uploads_per_frame,
+                upload_budget_ms,
+                frame_pressure_ms,
+                open_tabs,
+                is_performance_critical,
+                is_performance_severe,
+                is_scrolling,
+                is_video_playing,
+            );
         }
 
         self.process_folder_preview_uploads(ctx, is_performance_critical, is_video_playing);

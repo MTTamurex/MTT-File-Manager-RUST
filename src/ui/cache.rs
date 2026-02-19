@@ -17,6 +17,8 @@ const DEFAULT_FOLDER_PREVIEW_CACHE_ITEMS: usize = 240;
 const DEFAULT_RGBA_CACHE_ITEMS: usize = 240;
 const DEFAULT_MAX_CONCURRENT_LOADS: usize = 80;
 const DEFAULT_RGBA_BUDGET_BYTES: usize = 128 * 1024 * 1024;
+const MIN_DYNAMIC_TEXTURE_CACHE_ITEMS: usize = 140;
+const MAX_TEXTURE_CACHE_ITEMS_HARD_CAP: usize = 420;
 
 #[inline]
 fn nz_cache_size(size: usize, cache_name: &str) -> NonZeroUsize {
@@ -146,6 +148,33 @@ impl CacheManager {
     /// Puts a thumbnail in the cache
     pub fn put_thumbnail(&mut self, path: PathBuf, texture: egui::TextureHandle) {
         self.texture_cache.put(path, texture);
+    }
+
+    /// Dynamically adjusts thumbnail cache capacity by rebuilding the LRU with a new cap.
+    /// Keeps the hottest entries and drops oldest items if the new cap is smaller.
+    pub fn retune_texture_cache_capacity(&mut self, requested_items: usize) -> usize {
+        let target_items = requested_items
+            .clamp(
+                MIN_DYNAMIC_TEXTURE_CACHE_ITEMS,
+                MAX_TEXTURE_CACHE_ITEMS_HARD_CAP,
+            )
+            .max(1);
+
+        let current_items = self.texture_cache.cap().get();
+        if current_items == target_items {
+            return current_items;
+        }
+
+        let mut new_cache = LruCache::new(nz_cache_size(target_items, "texture_cache(retune)"));
+
+        while let Some((path, tex)) = self.texture_cache.pop_lru() {
+            // put() keeps most recently inserted items if we exceed cap.
+            new_cache.put(path, tex);
+        }
+
+        self.texture_cache = new_cache;
+
+        target_items
     }
 
     /// Checks if a thumbnail is being loaded
