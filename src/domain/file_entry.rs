@@ -21,6 +21,7 @@ pub struct FileEntry {
     pub folder_cover: Option<PathBuf>, // First image found in the folder (for preview)
     pub drive_info: Option<DriveInfo>, // Drive metadata (optional)
     pub sync_status: SyncStatus,       // OneDrive sync status
+    pub is_hidden: bool,               // Windows FILE_ATTRIBUTE_HIDDEN
     pub deletion_date: Option<String>, // Deletion date (Recycle Bin only)
     pub recycle_original_path: Option<PathBuf>, // Original path for restoration (Recycle Bin only)
 }
@@ -62,6 +63,7 @@ impl FileEntry {
             folder_cover,
             drive_info,
             sync_status: SyncStatus::None,
+            is_hidden: false,
             deletion_date: None,
             recycle_original_path: None,
         }

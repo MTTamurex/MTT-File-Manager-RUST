@@ -18,6 +18,7 @@ pub(super) struct StartupPreferences {
     pub(super) sidebar_left_width: f32,
     pub(super) sidebar_right_width: f32,
     pub(super) session_volume: f32,
+    pub(super) show_hidden_files: bool,
 }
 
 impl StartupPreferences {
@@ -133,6 +134,11 @@ impl StartupPreferences {
             .unwrap_or(1.0)
             .clamp(0.0, 1.0);
 
+        let show_hidden_files = disk_cache
+            .get_preference("show_hidden_files")
+            .map(|s| s == "true")
+            .unwrap_or(false);
+
         Self {
             sort_mode,
             sort_mode_computer,
@@ -149,6 +155,7 @@ impl StartupPreferences {
             sidebar_left_width,
             sidebar_right_width,
             session_volume,
+            show_hidden_files,
         }
     }
 }

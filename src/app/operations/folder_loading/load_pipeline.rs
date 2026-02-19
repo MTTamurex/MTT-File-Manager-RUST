@@ -21,6 +21,7 @@ impl ImageViewerApp {
         // Use existing directory_cache for cache-first strategy
         let directory_index_opt = self.directory_index.clone();
         let _prefetch_sender = self.file_operation_state.prefetch_sender.clone();
+        let show_hidden = self.show_hidden_files;
 
         // STREAMING BATCH LOADING: Adaptive batch size based on disk type
         std::thread::spawn(move || {
@@ -69,6 +70,7 @@ impl ImageViewerApp {
                 &disk_cache,
                 &directory_cache,
                 &directory_index_opt,
+                show_hidden,
             ) {
                 return;
             }
@@ -90,6 +92,7 @@ impl ImageViewerApp {
                 &disk_cache,
                 &directory_cache,
                 &directory_index_opt,
+                show_hidden,
             ) {
                 return;
             }
@@ -111,6 +114,7 @@ impl ImageViewerApp {
                 &disk_cache,
                 &directory_cache,
                 &directory_index_opt,
+                show_hidden,
             );
             // DISABLED: Direct subdirectory prefetch (testing HDD I/O impact)
             // if !is_ssd && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {

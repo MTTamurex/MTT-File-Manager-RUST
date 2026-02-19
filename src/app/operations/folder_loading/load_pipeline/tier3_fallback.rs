@@ -32,6 +32,7 @@ pub(super) fn run_tier3_fallback(
     disk_cache: &Arc<ThumbnailDiskCache>,
     directory_cache: &Arc<DirectoryCache>,
     directory_index_opt: &Option<Arc<DirectoryIndex>>,
+    show_hidden: bool,
 ) {
     // TIER 3: Standard FindFirstFileW fallback (last resort)
     // CRITICAL FIX: For OneDrive folders, use timeout-protected enumeration
@@ -68,7 +69,7 @@ pub(super) fn run_tier3_fallback(
                         "desktop.ini" | "thumbs.db" | "$recycle.bin" | "system volume information"
                     );
 
-                    if !is_hidden && !is_system && !is_special && !filename.starts_with('.') {
+                    if (show_hidden || !is_hidden) && !is_system && !is_special && !filename.starts_with('.') {
                         let mut is_dir = (attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
                         let full_path = PathBuf::from(base_path).join(&filename);
 
@@ -89,6 +90,7 @@ pub(super) fn run_tier3_fallback(
                             folder_cover: None,
                             drive_info: None,
                             sync_status,
+                            is_hidden,
                             deletion_date: None,
                             recycle_original_path: None,
                         };
@@ -215,7 +217,7 @@ pub(super) fn run_tier3_fallback(
                             | "system volume information"
                     );
 
-                    if !is_hidden && !is_system && !is_special && !filename.starts_with('.') {
+                    if (show_hidden || !is_hidden) && !is_system && !is_special && !filename.starts_with('.') {
                         let mut is_dir = (extended_attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
 
                         // Treat archive files as navigable folders.
@@ -249,6 +251,7 @@ pub(super) fn run_tier3_fallback(
                             folder_cover: None,
                             drive_info: None,
                             sync_status,
+                            is_hidden,
                             deletion_date: None,
                             recycle_original_path: None,
                         };

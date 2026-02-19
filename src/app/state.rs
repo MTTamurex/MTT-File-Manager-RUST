@@ -108,6 +108,7 @@ pub struct ImageViewerApp {
     pub sort_mode_normal: SortMode,   // Sort mode for normal folder views
     pub sort_descending: bool,        // true = Z-A, Newest, Largest
     pub folders_position: FoldersPosition, // First, Last, Mixed
+    pub show_hidden_files: bool,           // Show files with FILE_ATTRIBUTE_HIDDEN
 
     // "Normal" (unlocked) state — these track what unlocked folders should use.
     // When a locked folder overrides active settings, these remain unchanged.

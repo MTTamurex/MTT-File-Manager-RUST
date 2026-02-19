@@ -255,7 +255,14 @@ fn render_item_slot_for_grid(
             pending_ops: ctx.pending_ops,
         };
 
-        render_item_slot(ui, rect, &mut item_slot_ctx, &mut simple_ops);
+        if item.is_hidden {
+            ui.scope(|ui| {
+                ui.multiply_opacity(0.5);
+                render_item_slot(ui, rect, &mut item_slot_ctx, &mut simple_ops);
+            });
+        } else {
+            render_item_slot(ui, rect, &mut item_slot_ctx, &mut simple_ops);
+        }
     }
 
     if let Some(new_text) = renaming_text_clone {

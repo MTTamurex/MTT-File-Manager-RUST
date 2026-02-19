@@ -51,6 +51,7 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                 app.navigation_state.is_computer_view,
                 bulk_progress,
                 app.current_folder_locked,
+                &mut app.show_hidden_files,
             );
             match action {
                 StatusBarAction::SortChanged => {
@@ -137,6 +138,10 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                             ctx_clone.request_repaint();
                         })
                         .ok();
+                }
+                StatusBarAction::ShowHiddenChanged => {
+                    app.save_preferences();
+                    app.load_folder(true);
                 }
                 _ => {}
             }
