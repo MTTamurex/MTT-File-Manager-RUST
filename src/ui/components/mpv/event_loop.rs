@@ -14,6 +14,7 @@ pub fn start_event_loop(
     state: Arc<RwLock<MpvState>>,
     running: Arc<AtomicBool>,
     tracks_need_query: Arc<AtomicBool>,
+    file_loading: Arc<AtomicBool>,
     ctx: egui::Context,
 ) -> thread::JoinHandle<()> {
     running.store(true, Ordering::Release);
@@ -25,8 +26,8 @@ pub fn start_event_loop(
         let mut last_interlace_check = Instant::now();
         // OPT-5: Tiered polling counters (each tick = 250ms)
         let mut tick_count: u32 = 0;
-        const MEDIUM_TIER_TICKS: u32 = 4; // ~1s for pause/volume/mute
-        const SLOW_TIER_TICKS: u32 = 8; // ~2s for duration/fullscreen/aspect
+        const MEDIUM_TIER_TICKS: u32 = 4; // ~1s for volume/mute/duration
+        const SLOW_TIER_TICKS: u32 = 8; // ~2s for fullscreen/aspect
 
         loop {
             // Check shutdown flag
@@ -40,27 +41,32 @@ pub fn start_event_loop(
             let mut significant_change = false;
             let current_duration: f64;
 
-            // --- Fast tier (every 250ms): time-pos only ---
-            if let Ok(pos) = mpv.get_property::<f64>("time-pos") {
-                if let Ok(mut s) = state.write() {
-                    s.current_time = pos;
-                    state_updated = true;
+            // --- Fast tier (every 250ms): time-pos + pause ---
+            // Skip time-pos writes while a new file is loading to prevent
+            // stale values from the old file overwriting the reset.
+            if !file_loading.load(Ordering::Acquire) {
+                if let Ok(pos) = mpv.get_property::<f64>("time-pos") {
+                    if let Ok(mut s) = state.write() {
+                        s.current_time = pos;
+                        state_updated = true;
+                    }
                 }
             }
 
-            // --- Medium tier (~1s): pause, volume, mute ---
-            if tick_count % MEDIUM_TIER_TICKS == 0 {
-                if let Ok(paused) = mpv.get_property::<bool>("pause") {
-                    if let Ok(mut s) = state.write() {
-                        let new_playing = !paused;
-                        if s.is_playing != new_playing {
-                            s.is_playing = new_playing;
-                            state_updated = true;
-                            significant_change = true;
-                        }
+            // Pause is fast tier: critical for OSC suppression and play button
+            if let Ok(paused) = mpv.get_property::<bool>("pause") {
+                if let Ok(mut s) = state.write() {
+                    let new_playing = !paused;
+                    if s.is_playing != new_playing {
+                        s.is_playing = new_playing;
+                        state_updated = true;
+                        significant_change = true;
                     }
                 }
+            }
 
+            // --- Medium tier (~1s): volume, mute, duration ---
+            if tick_count % MEDIUM_TIER_TICKS == 0 {
                 if let Ok(vol) = mpv.get_property::<f64>("volume") {
                     if let Ok(mut s) = state.write() {
                         let new_vol = (vol / 100.0).clamp(0.0, 1.0) as f32;
@@ -80,10 +86,7 @@ pub fn start_event_loop(
                         }
                     }
                 }
-            }
 
-            // --- Slow tier (~2s): duration, fullscreen, aspect ---
-            if tick_count % SLOW_TIER_TICKS == 0 {
                 if let Ok(dur) = mpv.get_property::<f64>("duration") {
                     current_duration = dur;
                     if let Ok(mut s) = state.write() {
@@ -93,10 +96,20 @@ pub fn start_event_loop(
                             significant_change = true;
                         }
                     }
+                    // New file is ready — unblock time-pos writes
+                    if dur > 0.0 && file_loading.load(Ordering::Acquire) {
+                        file_loading.store(false, Ordering::Release);
+                    }
                 } else {
                     current_duration = state.read().map(|s| s.duration).unwrap_or(0.0);
                 }
+            } else {
+                // Need current_duration for track/interlace checks below
+                current_duration = state.read().map(|s| s.duration).unwrap_or(0.0);
+            }
 
+            // --- Slow tier (~2s): fullscreen, aspect ---
+            if tick_count % SLOW_TIER_TICKS == 0 {
                 if let Ok(fs) = mpv.get_property::<bool>("fullscreen") {
                     if let Ok(mut s) = state.write() {
                         if s.fullscreen != fs {
@@ -117,9 +130,6 @@ pub fn start_event_loop(
                         }
                     }
                 }
-            } else {
-                // Need current_duration for track/interlace checks below
-                current_duration = state.read().map(|s| s.duration).unwrap_or(0.0);
             }
 
             // Query tracks when signaled and file is ready (PERF: moved from render thread)

@@ -111,6 +111,8 @@ pub struct MpvPreview {
 
     // PERF: Shared signal for background track querying
     tracks_need_query: Arc<AtomicBool>,
+    // PERF: Gate event loop writes during file transitions
+    file_loading: Arc<AtomicBool>,
     // PERF: Async sidecar subtitle search receiver
     sidecar_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     // PERF: Track previous interlaced state for change detection
@@ -154,7 +156,9 @@ impl MpvPreview {
             }
         }
 
-        candidates.into_iter().find(|dir| dir.join("scripts").join("osc.lua").is_file())
+        candidates
+            .into_iter()
+            .find(|dir| dir.join("scripts").join("osc.lua").is_file())
     }
 
     fn create_mpv_instance() -> Result<mpv::Mpv, mpv::Error> {
@@ -192,7 +196,8 @@ impl MpvPreview {
                 if let Err(e) = init.set_option("script-opts", MPV_OSC_POC_SCRIPT_OPTS) {
                     log::warn!(
                         "[MpvPreview] Failed to set script-opts={} : {:?}",
-                        MPV_OSC_POC_SCRIPT_OPTS, e
+                        MPV_OSC_POC_SCRIPT_OPTS,
+                        e
                     );
                 }
 
@@ -204,7 +209,8 @@ impl MpvPreview {
                     if let Err(e) = init.set_option("config-dir", dir_str.as_str()) {
                         log::warn!(
                             "[MpvPreview] Failed to set config-dir={} : {:?}",
-                            dir_str, e
+                            dir_str,
+                            e
                         );
                     }
 
@@ -267,6 +273,7 @@ impl MpvPreview {
             cached_tracks: None,
             pending_external_subtitle: None,
             tracks_need_query: Arc::new(AtomicBool::new(false)),
+            file_loading: Arc::new(AtomicBool::new(false)),
             sidecar_rx: None,
             last_interlaced: None,
             osc_last_playing_for_suppress: None,
@@ -397,4 +404,3 @@ impl Drop for MpvPreview {
         self.shutdown();
     }
 }
-
