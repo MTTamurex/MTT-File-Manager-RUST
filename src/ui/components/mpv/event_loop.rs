@@ -96,8 +96,11 @@ pub fn start_event_loop(
                             significant_change = true;
                         }
                     }
-                    // New file is ready — unblock time-pos writes
-                    if dur > 0.0 && file_loading.load(Ordering::Acquire) {
+                    // New file is ready — unblock time-pos writes.
+                    // Release even when dur == 0.0 (streams/corrupt media may never
+                    // report a positive duration, which would keep file_loading true
+                    // forever and permanently suppress time-pos polling).
+                    if file_loading.load(Ordering::Acquire) {
                         file_loading.store(false, Ordering::Release);
                     }
                 } else {
