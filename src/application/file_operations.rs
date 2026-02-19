@@ -9,8 +9,7 @@ use windows::Win32::System::Com::{
 use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
 
 use crate::infrastructure::security::{
-    sanitize_path_with_local_drive_fallback, sanitize_unc_path, validate_file_extension,
-    SecurityConfig,
+    sanitize_path_with_local_drive_fallback, sanitize_unc_path, SecurityConfig,
 };
 use crate::infrastructure::windows as windows_infra;
 use crate::infrastructure::windows::recycle_bin;
@@ -98,7 +97,9 @@ fn sanitize_operation_path(path: &Path) -> OpResult<PathBuf> {
 
 fn sanitize_open_path(path: &Path) -> OpResult<PathBuf> {
     let valid = sanitize_operation_path(path)?;
-    validate_file_extension(&valid, &operation_security_config()).map_err(|e| e.to_string())?;
+    // Opening/executing a file with the shell must allow executable extensions
+    // (e.g. .exe/.com). Extension blocking remains enforced for other sensitive
+    // operations via their own validation paths.
     Ok(valid)
 }
 

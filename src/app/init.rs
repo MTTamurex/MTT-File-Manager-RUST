@@ -250,6 +250,7 @@ impl ImageViewerApp {
             watcher_fallback_last_probe: Instant::now(),
             watcher_fallback_signature: None,
             rdcw_unreliable_drives: std::collections::HashMap::new(),
+            watcher_fs_probe_cache: std::collections::HashMap::new(),
             consistency_probe_tx,
             consistency_probe_rx,
 

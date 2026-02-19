@@ -3,33 +3,79 @@
 //! This module handles the setup and management of the filesystem watcher
 //! to detect external changes in the current directory.
 
-use crate::app::state::ImageViewerApp;
+use crate::app::state::{ImageViewerApp, WatcherFsProbeCacheEntry};
 #[cfg(feature = "notify-watcher")]
 use notify::{RecursiveMode, Watcher};
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+const WATCHER_FS_PROBE_CACHE_TTL: Duration = Duration::from_secs(20);
 
 impl ImageViewerApp {
-    fn configure_watcher_fallback_mode(&mut self, path: &Path) {
+    fn configure_watcher_fallback_mode(&mut self, path: &Path) -> (u128, bool, Option<char>) {
         self.watcher_fallback_last_probe = Instant::now();
         self.watcher_fallback_signature = None;
 
-        let fs_name = crate::infrastructure::windows::get_file_system_for_path(path);
-        let is_usn = fs_name
-            .as_deref()
-            .map(|fs| crate::infrastructure::windows::is_usn_filesystem(fs))
-            .unwrap_or(true); // unknown FS → assume reliable
+        let fs_probe_start = Instant::now();
+        let drive_letter = crate::infrastructure::windows::extract_drive_letter(path);
+
+        let (fs_name, is_usn, fs_probe_cache_hit) = if let Some(dl) = drive_letter {
+            let cached_entry = self.watcher_fs_probe_cache.get(&dl).cloned();
+            if let Some(entry) = cached_entry {
+                if entry.probed_at.elapsed() <= WATCHER_FS_PROBE_CACHE_TTL {
+                    (entry.file_system, entry.is_usn, true)
+                } else {
+                    let fs_name = crate::infrastructure::windows::get_file_system_for_path(path);
+                    let is_usn = fs_name
+                        .as_deref()
+                        .map(crate::infrastructure::windows::is_usn_filesystem)
+                        .unwrap_or(true); // unknown FS → assume reliable
+                    self.watcher_fs_probe_cache.insert(
+                        dl,
+                        WatcherFsProbeCacheEntry {
+                            file_system: fs_name.clone(),
+                            is_usn,
+                            probed_at: Instant::now(),
+                        },
+                    );
+                    (fs_name, is_usn, false)
+                }
+            } else {
+                let fs_name = crate::infrastructure::windows::get_file_system_for_path(path);
+                let is_usn = fs_name
+                    .as_deref()
+                    .map(crate::infrastructure::windows::is_usn_filesystem)
+                    .unwrap_or(true); // unknown FS → assume reliable
+                self.watcher_fs_probe_cache.insert(
+                    dl,
+                    WatcherFsProbeCacheEntry {
+                        file_system: fs_name.clone(),
+                        is_usn,
+                        probed_at: Instant::now(),
+                    },
+                );
+                (fs_name, is_usn, false)
+            }
+        } else {
+            let fs_name = crate::infrastructure::windows::get_file_system_for_path(path);
+            let is_usn = fs_name
+                .as_deref()
+                .map(crate::infrastructure::windows::is_usn_filesystem)
+                .unwrap_or(true); // unknown FS → assume reliable
+            (fs_name, is_usn, false)
+        };
+
+        let fs_probe_ms = fs_probe_start.elapsed().as_millis();
 
         self.watcher_fallback_fs = fs_name.clone();
 
         if is_usn {
             // NTFS / ReFS — USN journal + reliable RDCW. Zero polling overhead.
             self.watcher_fallback_polling = false;
-            return;
+            return (fs_probe_ms, fs_probe_cache_hit, drive_letter);
         }
 
         // Non-USN filesystem: check if we already learned this drive is unreliable.
-        let drive_letter = crate::infrastructure::windows::extract_drive_letter(path);
         let already_known_bad = drive_letter
             .map(|dl| self.rdcw_unreliable_drives.get(&dl).copied().unwrap_or(false))
             .unwrap_or(false);
@@ -51,6 +97,8 @@ impl ImageViewerApp {
                 drive_letter, fs_name
             );
         }
+
+        (fs_probe_ms, fs_probe_cache_hit, drive_letter)
     }
 
     /// Sets up monitoring for the current folder
@@ -62,12 +110,14 @@ impl ImageViewerApp {
     /// The drive watcher is more efficient for fast navigation since it doesn't need
     /// to recreate the watcher on every folder change within the same drive.
     pub fn watch_current_folder(&mut self) {
+        let watch_start = Instant::now();
         let current_path = self.navigation_state.current_path.clone();
         log::debug!("[WATCHER] Setting up for: {}", current_path);
 
         // Try using drive-wide watcher first (File Pilot optimization)
         let path_buf = PathBuf::from(&current_path);
-        self.configure_watcher_fallback_mode(path_buf.as_path());
+        let (fs_probe_ms, fs_probe_cache_hit, fs_probe_drive) =
+            self.configure_watcher_fallback_mode(path_buf.as_path());
 
         // Drive watcher only works for local drives (C:\, D:\, etc.)
         // Does NOT work for UNC paths (\\server\share) or network drives
@@ -91,6 +141,21 @@ impl ImageViewerApp {
                         log::debug!("[WATCHER] Dropping notify-watcher to save resources");
                         self.watcher = None;
                     }
+
+                    let total_ms = watch_start.elapsed().as_millis();
+                    if total_ms > 20 {
+                        log::warn!(
+                            "[PERF-WATCHER] watch_current_folder total={}ms fs_probe={}ms fs_cache_hit={} fs_cache_drive={:?} path={} local_drive={} drive_active={} fallback_polling={}",
+                            total_ms,
+                            fs_probe_ms,
+                            fs_probe_cache_hit,
+                            fs_probe_drive,
+                            current_path,
+                            is_local_drive,
+                            self.drive_watcher.is_active(),
+                            self.watcher_fallback_polling,
+                        );
+                    }
                     return;
                 }
                 log::debug!(
@@ -104,6 +169,21 @@ impl ImageViewerApp {
         // FALLBACK: Use notify-watcher for UNC paths or if drive watcher failed
         #[cfg(feature = "notify-watcher")]
         self.setup_notify_watcher();
+
+        let total_ms = watch_start.elapsed().as_millis();
+        if total_ms > 20 {
+            log::warn!(
+                "[PERF-WATCHER] watch_current_folder total={}ms fs_probe={}ms fs_cache_hit={} fs_cache_drive={:?} path={} local_drive={} drive_active={} fallback_polling={}",
+                total_ms,
+                fs_probe_ms,
+                fs_probe_cache_hit,
+                fs_probe_drive,
+                current_path,
+                is_local_drive,
+                self.drive_watcher.is_active(),
+                self.watcher_fallback_polling,
+            );
+        }
     }
 
     /// Setup legacy notify-based watcher (fallback)
