@@ -109,6 +109,29 @@ pub fn toggle_icon_button(
     active: bool,
     tooltip: &str,
 ) -> egui::Response {
+    toggle_icon_button_sized(
+        ui,
+        svg_manager,
+        icon,
+        active,
+        tooltip,
+        theme::ICON_SIZE_LG,
+        theme::PADDING_SM,
+        0.0,
+    )
+}
+
+/// Renders a toggle button with configurable icon size/padding.
+pub fn toggle_icon_button_sized(
+    ui: &mut egui::Ui,
+    svg_manager: &mut SvgIconManager,
+    icon: &str,
+    active: bool,
+    tooltip: &str,
+    size: f32,
+    padding: f32,
+    icon_offset_y: f32,
+) -> egui::Response {
     let icon_name = match icon {
         ICON_GRID => "view_grid",
         ICON_LIST => "view_list",
@@ -116,8 +139,6 @@ pub fn toggle_icon_button(
         _ => icon,
     };
 
-    let size = theme::ICON_SIZE_LG;
-    let padding = theme::PADDING_SM;
     let button_size = egui::vec2(size + padding * 2.0, size + padding * 2.0);
 
     let (rect, response) = ui.allocate_exact_size(button_size, egui::Sense::click());
@@ -145,7 +166,8 @@ pub fn toggle_icon_button(
     };
 
     if let Some(texture) = svg_manager.get_icon(ui.ctx(), icon_name, size as u32, color) {
-        let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(size, size));
+        let icon_center = egui::pos2(rect.center().x, rect.center().y + icon_offset_y);
+        let icon_rect = egui::Rect::from_center_size(icon_center, egui::vec2(size, size));
         ui.painter().image(
             texture.id(),
             icon_rect,
@@ -164,7 +186,7 @@ pub fn toggle_icon_button(
 
     // Direct text painting for fallback
     ui.painter().text(
-        rect.center(),
+        egui::pos2(rect.center().x, rect.center().y + icon_offset_y),
         egui::Align2::CENTER_CENTER,
         icon,
         egui::FontId::proportional(theme::ICON_SIZE_MD),

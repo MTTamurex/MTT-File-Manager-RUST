@@ -37,6 +37,7 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
             use crate::ui::status_bar::{render_status_bar, StatusBarAction};
             let action = render_status_bar(
                 ui,
+                &mut app.svg_icon_manager,
                 &mut app.is_loading_folder,
                 app.total_items,
                 &mut app.view_mode,
