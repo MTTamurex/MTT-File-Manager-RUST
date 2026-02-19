@@ -39,9 +39,6 @@ pub struct SecurityConfig {
 
     /// Block special components (`..`, `.`, `~`).
     pub block_special_components: bool,
-
-    /// Blocked file extensions (example: [".exe", ".bat"]).
-    pub blocked_extensions: Vec<String>,
 }
 
 impl Default for SecurityConfig {
@@ -56,14 +53,6 @@ impl Default for SecurityConfig {
             ],
             allow_symlinks: false,
             block_special_components: true,
-            blocked_extensions: vec![
-                ".exe".to_string(),
-                ".bat".to_string(),
-                ".cmd".to_string(),
-                ".ps1".to_string(),
-                ".vbs".to_string(),
-                ".js".to_string(),
-            ],
         }
     }
 }
@@ -163,37 +152,6 @@ fn normalize_for_shell_apis(path: &Path) -> PathBuf {
     drive::normalize_for_shell_apis(path)
 }
 
-/// Validate file extension against blocked list.
-///
-/// Normalizes trailing dots/spaces that Windows strips from filenames
-/// before checking the extension.
-pub fn validate_file_extension(path: &Path, config: &SecurityConfig) -> Result<(), SecurityError> {
-    let file_name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_default();
-
-    // Strip trailing dots/spaces that Windows ignores but bypass extension checks.
-    let normalized = file_name.trim_end_matches(['.', ' ']);
-    let check_path = Path::new(normalized);
-
-    if let Some(ext) = check_path.extension() {
-        let ext_str = ext.to_string_lossy().to_lowercase();
-        let ext_with_dot = format!(".{}", ext_str);
-
-        if config.blocked_extensions.iter().any(|blocked| {
-            blocked.to_lowercase() == ext_str || blocked.to_lowercase() == ext_with_dot
-        }) {
-            return Err(SecurityError::InvalidPath(format!(
-                "Blocked file extension: .{}",
-                ext_str
-            )));
-        }
-    }
-
-    Ok(())
-}
-
 /// Quick helper using default security config.
 pub fn sanitize_path_quick(path: &Path) -> Result<PathBuf, SecurityError> {
     sanitize_path(path, &SecurityConfig::default())
@@ -255,29 +213,6 @@ mod tests {
         let result = sanitize_path(&test_file, &config);
         assert!(result.is_ok(), "Expected OK, got: {:?}", result);
         assert!(sanitize_path(temp_dir.path(), &config).is_ok());
-    }
-
-    #[test]
-    fn test_blocked_extensions() {
-        let config = SecurityConfig::default();
-
-        assert!(validate_file_extension(Path::new("virus.exe"), &config).is_err());
-        assert!(validate_file_extension(Path::new("script.bat"), &config).is_err());
-        assert!(validate_file_extension(Path::new("document.txt"), &config).is_ok());
-        assert!(validate_file_extension(Path::new("image.jpg"), &config).is_ok());
-    }
-
-    #[test]
-    fn test_blocked_extensions_trailing_dots_bypass() {
-        let config = SecurityConfig::default();
-
-        // Windows strips trailing dots/spaces, so "virus.exe." is actually "virus.exe"
-        assert!(validate_file_extension(Path::new("virus.exe."), &config).is_err());
-        assert!(validate_file_extension(Path::new("virus.exe.."), &config).is_err());
-        assert!(validate_file_extension(Path::new("virus.exe. "), &config).is_err());
-        assert!(validate_file_extension(Path::new("script.bat."), &config).is_err());
-        // Normal safe files should still pass
-        assert!(validate_file_extension(Path::new("document.txt."), &config).is_ok());
     }
 
     #[test]
