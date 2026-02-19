@@ -417,6 +417,27 @@ impl ImageViewerApp {
         // Apply folder lock for the initial folder (if it has one saved)
         app.apply_folder_lock_if_present();
 
+        // Populate the modified hint for the initial folder so the preview panel
+        // shows the correct "Data modificada" immediately on startup, even if the
+        // folder was never visited in the previous session (e.g. pinned shortcuts).
+        // This runs once at startup (not in the render loop), so it is safe.
+        if !is_computer_view_initial
+            && initial_path != "Este Computador"
+            && initial_path != "Lixeira"
+        {
+            let dest = std::path::PathBuf::from(&initial_path);
+            if let Ok(meta) = std::fs::metadata(&dest) {
+                if let Ok(modified_time) = meta.modified() {
+                    if let Ok(duration) = modified_time.duration_since(std::time::UNIX_EPOCH) {
+                        let secs = duration.as_secs();
+                        if secs > 0 {
+                            app.current_folder_modified_hint = Some((dest, secs));
+                        }
+                    }
+                }
+            }
+        }
+
         run_post_startup_jobs(&mut app, &ctx);
 
         app
