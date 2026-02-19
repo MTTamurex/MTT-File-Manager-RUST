@@ -137,8 +137,11 @@ pub fn render_status_bar(
         ui.visuals_mut().widgets.active.fg_stroke = egui::Stroke::NONE;
 
         ui.horizontal(|ui| {
-            // === LEFTMOST: Virtual drive settings button ===
-            if ui
+            ui.vertical(|ui| {
+                ui.add_space(1.5);
+                ui.horizontal(|ui| {
+                    // === LEFTMOST: Virtual drive settings button ===
+                    if ui
                 .button(egui::RichText::new("⚙").color(egui::Color32::BLACK))
                 .on_hover_text("Configurar otimização de drives virtuais")
                 .clicked()
@@ -269,6 +272,8 @@ pub fn render_status_bar(
                     *folders_position = FoldersPosition::Mixed;
                     action = StatusBarAction::SortChanged;
                 }
+            });
+                });
             });
 
             ui.separator();
