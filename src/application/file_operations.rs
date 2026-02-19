@@ -95,14 +95,6 @@ fn sanitize_operation_path(path: &Path) -> OpResult<PathBuf> {
         .map_err(|e| e.to_string())
 }
 
-fn sanitize_open_path(path: &Path) -> OpResult<PathBuf> {
-    let valid = sanitize_operation_path(path)?;
-    // Opening/executing a file with the shell must allow executable extensions
-    // (e.g. .exe/.com). Extension blocking remains enforced for other sensitive
-    // operations via their own validation paths.
-    Ok(valid)
-}
-
 /// Deletes a file or directory using Windows Shell (Recycle Bin).
 ///
 /// # Warning
@@ -122,7 +114,7 @@ pub fn delete_with_shell(path: &Path, hwnd: Option<HWND>) -> OpResult<bool> {
 
 /// Opens a file with its default application.
 pub fn open_with_shell(path: &Path, _hwnd: Option<HWND>) -> OpResult<()> {
-    let valid_path = sanitize_open_path(path)?;
+    let valid_path = sanitize_operation_path(path)?;
     shell_operations::open_with_shell(&valid_path);
     Ok(())
 }
