@@ -373,6 +373,7 @@ impl ImageViewerApp {
             upload_budget_ms,
             last_upload_budget_update: Instant::now(),
             last_memory_maintenance: Instant::now(),
+            last_texture_cache_retune: Instant::now(),
 
             // INACTIVITY RECOVERY
             last_restore_time: Instant::now(),

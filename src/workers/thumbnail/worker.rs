@@ -19,10 +19,9 @@ use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITH
 
 mod request_processing;
 
-/// Maximum concurrent decode operations (RAM limiter)
-/// Reduced from 5 to 3 to prevent RAM spikes on HDD folders
-/// Each decode can use ~50-100MB for large images
-const MAX_CONCURRENT_DECODES: usize = 3;
+/// Hard RAM safety cap for concurrent decode operations.
+/// Each decode can temporarily use tens of MB, so keep bounded even on high-core CPUs.
+const MAX_CONCURRENT_DECODES_HARD_CAP: usize = 4;
 
 /// Semaphore to limit concurrent resource usage
 pub struct Semaphore {
@@ -57,6 +56,29 @@ impl Semaphore {
     }
 }
 
+fn available_cpu_count() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+}
+
+fn compute_thumbnail_worker_count(cpu_count: usize) -> usize {
+    // Keep a balanced default: enough workers to saturate I/O/decode without overscheduling.
+    cpu_count.clamp(4, 8)
+}
+
+fn compute_decode_limit(worker_count: usize) -> usize {
+    // Decode parallelism must stay tighter than worker count to cap peak RAM use.
+    let limit = if worker_count >= 7 {
+        4
+    } else if worker_count >= 5 {
+        3
+    } else {
+        2
+    };
+    limit.clamp(2, MAX_CONCURRENT_DECODES_HARD_CAP)
+}
+
 /// Spawns thumbnail worker threads with concurrency limiting
 pub fn spawn_thumbnail_workers(
     queue: Arc<PriorityThumbnailQueue>,
@@ -66,11 +88,22 @@ pub fn spawn_thumbnail_workers(
     disk_cache: Arc<ThumbnailDiskCache>,
     pending_deletions: Arc<dashmap::DashMap<std::path::PathBuf, ()>>,
 ) {
-    // Semaphore for RAM limiter
-    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_DECODES));
+    let cpu_count = available_cpu_count();
+    let worker_count = compute_thumbnail_worker_count(cpu_count);
+    let decode_limit = compute_decode_limit(worker_count);
 
-    // 4 worker threads
-    for _ in 0..4 {
+    // Semaphore for RAM limiter
+    let semaphore = Arc::new(Semaphore::new(decode_limit));
+
+    log::info!(
+        "[THUMB-PIPELINE] workers={} decode_limit={} cpu_count={}",
+        worker_count,
+        decode_limit,
+        cpu_count
+    );
+
+    // Adaptive worker count based on available CPU resources.
+    for worker_id in 0..worker_count {
         let queue = queue.clone();
         let tx = tx.clone();
         let gen_tracker = gen_tracker.clone();
@@ -79,17 +112,27 @@ pub fn spawn_thumbnail_workers(
         let semaphore = semaphore.clone();
         let pending_deletions = pending_deletions.clone();
 
-        std::thread::spawn(move || {
-            thumbnail_worker_loop(
-                queue,
-                tx,
-                ctx,
-                gen_tracker,
-                disk_cache,
-                semaphore,
-                pending_deletions,
+        let spawn_result = std::thread::Builder::new()
+            .name(format!("thumb-worker-{}", worker_id))
+            .spawn(move || {
+                thumbnail_worker_loop(
+                    queue,
+                    tx,
+                    ctx,
+                    gen_tracker,
+                    disk_cache,
+                    semaphore,
+                    pending_deletions,
+                );
+            });
+
+        if let Err(e) = spawn_result {
+            log::warn!(
+                "[THUMB-PIPELINE] Failed to spawn worker {}: {}",
+                worker_id,
+                e
             );
-        });
+        }
     }
 }
 
