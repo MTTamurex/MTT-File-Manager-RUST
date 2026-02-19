@@ -188,6 +188,9 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                             std::time::Instant::now()
                                 + std::time::Duration::from_millis(SEARCH_INPUT_DEBOUNCE_MS),
                         );
+                        ctx.request_repaint_after(std::time::Duration::from_millis(
+                            SEARCH_INPUT_DEBOUNCE_MS,
+                        ));
                     } else if app.global_search.query.is_empty() {
                         app.global_search.selected_index = None;
                         app.global_search.results.clear();
