@@ -76,6 +76,26 @@ impl ImageViewerApp {
         self.current_folder_modified_hint =
             self.resolve_destination_folder_modified_hint(&destination_path);
 
+        // Fallback for pinned sidebar shortcuts pointing to never-visited folders:
+        // resolve_destination_folder_modified_hint only knows about folders already seen
+        // in the current session. When clicking a pinned shortcut for the first time,
+        // no hint exists → modified = 0 → "Desconhecido" in the preview panel.
+        // This call happens ONCE per navigation (user click), not in the render loop,
+        // so a single metadata() call here is safe.
+        if self.current_folder_modified_hint.is_none() {
+            if let Ok(meta) = std::fs::metadata(&destination_path) {
+                if let Ok(modified_time) = meta.modified() {
+                    if let Ok(duration) = modified_time.duration_since(std::time::UNIX_EPOCH) {
+                        let secs = duration.as_secs();
+                        if secs > 0 {
+                            self.current_folder_modified_hint =
+                                Some((destination_path.clone(), secs));
+                        }
+                    }
+                }
+            }
+        }
+
         // Clear loaded_path to allow reload if navigating to same path (for consistency)
         self.loaded_path.clear();
 
