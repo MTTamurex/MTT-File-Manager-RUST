@@ -191,7 +191,7 @@ pub(super) fn try_handle_fast_paths(
         );
     }
 
-    if !force_refresh && !is_onedrive_base && can_trust_persistent_index {
+    if !force_refresh && !is_onedrive_base && can_trust_persistent_index && !_show_hidden {
         if let Some(di) = directory_index_opt {
             let base = PathBuf::from(base_path);
             // SAFETY CHECK: Verify directory mtime before trusting cached index
