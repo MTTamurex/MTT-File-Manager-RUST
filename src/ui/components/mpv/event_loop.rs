@@ -23,6 +23,10 @@ pub fn start_event_loop(
         log::info!("[MpvPreview] Async polling thread started");
 
         let mut last_interlace_check = Instant::now();
+        // OPT-5: Tiered polling counters (each tick = 250ms)
+        let mut tick_count: u32 = 0;
+        const MEDIUM_TIER_TICKS: u32 = 4; // ~1s for pause/volume/mute
+        const SLOW_TIER_TICKS: u32 = 8; // ~2s for duration/fullscreen/aspect
 
         loop {
             // Check shutdown flag
@@ -31,11 +35,12 @@ pub fn start_event_loop(
                 break;
             }
 
-            // Poll properties (moved to background thread - zero impact on main thread!)
             let mut state_updated = false;
-            let mut current_duration: f64 = 0.0;
+            // OPT-1: Track whether a significant state change occurred
+            let mut significant_change = false;
+            let current_duration: f64;
 
-            // Poll time position
+            // --- Fast tier (every 250ms): time-pos only ---
             if let Ok(pos) = mpv.get_property::<f64>("time-pos") {
                 if let Ok(mut s) = state.write() {
                     s.current_time = pos;
@@ -43,60 +48,78 @@ pub fn start_event_loop(
                 }
             }
 
-            // Poll pause state
-            if let Ok(paused) = mpv.get_property::<bool>("pause") {
-                if let Ok(mut s) = state.write() {
-                    s.is_playing = !paused;
-                    state_updated = true;
+            // --- Medium tier (~1s): pause, volume, mute ---
+            if tick_count % MEDIUM_TIER_TICKS == 0 {
+                if let Ok(paused) = mpv.get_property::<bool>("pause") {
+                    if let Ok(mut s) = state.write() {
+                        let new_playing = !paused;
+                        if s.is_playing != new_playing {
+                            s.is_playing = new_playing;
+                            state_updated = true;
+                            significant_change = true;
+                        }
+                    }
                 }
-            }
 
-            // Poll volume
-            if let Ok(vol) = mpv.get_property::<f64>("volume") {
-                if let Ok(mut s) = state.write() {
-                    s.volume = (vol / 100.0).clamp(0.0, 1.0) as f32;
-                    state_updated = true;
+                if let Ok(vol) = mpv.get_property::<f64>("volume") {
+                    if let Ok(mut s) = state.write() {
+                        let new_vol = (vol / 100.0).clamp(0.0, 1.0) as f32;
+                        if (s.volume - new_vol).abs() > 0.001 {
+                            s.volume = new_vol;
+                            state_updated = true;
+                        }
+                    }
                 }
-            }
 
-            // Poll mute state
-            if let Ok(muted) = mpv.get_property::<bool>("mute") {
-                if let Ok(mut s) = state.write() {
-                    s.is_muted = muted;
-                    state_updated = true;
-                }
-            }
-
-            // Poll duration (only once until it's available)
-            if let Ok(dur) = mpv.get_property::<f64>("duration") {
-                current_duration = dur;
-                if let Ok(mut s) = state.write() {
-                    if s.duration == 0.0 || s.duration != dur {
-                        s.duration = dur;
-                        state_updated = true;
+                if let Ok(muted) = mpv.get_property::<bool>("mute") {
+                    if let Ok(mut s) = state.write() {
+                        if s.is_muted != muted {
+                            s.is_muted = muted;
+                            state_updated = true;
+                            significant_change = true;
+                        }
                     }
                 }
             }
 
-            // Poll fullscreen (PERF: moved from per-frame FFI in sync_fullscreen_from_mpv)
-            if let Ok(fs) = mpv.get_property::<bool>("fullscreen") {
-                if let Ok(mut s) = state.write() {
-                    if s.fullscreen != fs {
-                        s.fullscreen = fs;
-                        state_updated = true;
+            // --- Slow tier (~2s): duration, fullscreen, aspect ---
+            if tick_count % SLOW_TIER_TICKS == 0 {
+                if let Ok(dur) = mpv.get_property::<f64>("duration") {
+                    current_duration = dur;
+                    if let Ok(mut s) = state.write() {
+                        if s.duration == 0.0 || (s.duration - dur).abs() > 0.01 {
+                            s.duration = dur;
+                            state_updated = true;
+                            significant_change = true;
+                        }
                     }
+                } else {
+                    current_duration = state.read().map(|s| s.duration).unwrap_or(0.0);
                 }
-            }
 
-            // Poll video aspect ratio (PERF: moved from per-frame FFI in video_aspect())
-            if current_duration > 0.0 {
-                let aspect = super::playback::get_video_aspect(&mpv);
-                if let Ok(mut s) = state.write() {
-                    if s.video_aspect != aspect {
-                        s.video_aspect = aspect;
-                        state_updated = true;
+                if let Ok(fs) = mpv.get_property::<bool>("fullscreen") {
+                    if let Ok(mut s) = state.write() {
+                        if s.fullscreen != fs {
+                            s.fullscreen = fs;
+                            state_updated = true;
+                            significant_change = true;
+                        }
                     }
                 }
+
+                if current_duration > 0.0 {
+                    let aspect = super::playback::get_video_aspect(&mpv);
+                    if let Ok(mut s) = state.write() {
+                        if s.video_aspect != aspect {
+                            s.video_aspect = aspect;
+                            state_updated = true;
+                            significant_change = true;
+                        }
+                    }
+                }
+            } else {
+                // Need current_duration for track/interlace checks below
+                current_duration = state.read().map(|s| s.duration).unwrap_or(0.0);
             }
 
             // Query tracks when signaled and file is ready (PERF: moved from render thread)
@@ -107,28 +130,33 @@ pub fn start_event_loop(
                     s.subtitle_tracks = subs;
                     s.tracks_ready = true;
                     state_updated = true;
+                    significant_change = true;
                 }
                 tracks_need_query.store(false, Ordering::Release);
             }
 
-            // Detect interlaced status every ~500ms (PERF: moved from render thread)
-            if current_duration > 0.0
-                && last_interlace_check.elapsed() >= Duration::from_millis(500)
-            {
+            // Detect interlaced status every ~2s (moved from 500ms)
+            if current_duration > 0.0 && last_interlace_check.elapsed() >= Duration::from_secs(2) {
                 let interlaced = super::playback::detect_interlaced(&mpv);
                 if let Ok(mut s) = state.write() {
                     if s.interlaced != interlaced {
                         s.interlaced = interlaced;
                         state_updated = true;
+                        significant_change = true;
                     }
                 }
                 last_interlace_check = Instant::now();
             }
 
-            // Request UI repaint only if state changed
-            if state_updated {
+            // OPT-1: Selective repaint — immediate for significant changes,
+            // delayed for incremental time-pos updates.
+            if significant_change {
                 ctx.request_repaint();
+            } else if state_updated {
+                ctx.request_repaint_after(Duration::from_millis(500));
             }
+
+            tick_count = tick_count.wrapping_add(1);
 
             // Sleep 250ms between polls (4 FPS)
             thread::sleep(Duration::from_millis(250));

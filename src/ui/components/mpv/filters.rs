@@ -1,10 +1,12 @@
 // Downscale filter applied only in docked mode (preview in sidebar)
+// OPT-6: Reduced from 854×480 to 640×360 — sidebar preview is small enough.
 pub const DOCKED_DOWNSCALE_FILTER: &str =
-    "scale=w='min(iw,854)':h='min(ih,480)':force_original_aspect_ratio=decrease";
-pub const DOCKED_DOWNSCALE_MARKER: &str = "min(ih,480)";
+    "scale=w='min(iw,640)':h='min(ih,360)':force_original_aspect_ratio=decrease";
+pub const DOCKED_DOWNSCALE_MARKER: &str = "min(ih,360)";
 // FPS limit filter applied only in docked mode (preview in sidebar)
-pub const DOCKED_FPS_FILTER: &str = "fps=fps=30";
-pub const DOCKED_FPS_MARKER: &str = "fps=fps=30";
+// OPT-7: Reduced from 30fps to 24fps — cinema standard, visually indistinguishable at sidebar size.
+pub const DOCKED_FPS_FILTER: &str = "fps=fps=24";
+pub const DOCKED_FPS_MARKER: &str = "fps=fps=24";
 pub const DEINTERLACE_FILTER: &str = "bwdif=mode=auto:parity=auto:deint=all";
 pub const DEINTERLACE_MARKER: &str = "bwdif=";
 pub const AUDIO_NORMALIZER_FILTER: &str = "dynaudnorm=f=75";

@@ -87,10 +87,12 @@ impl MpvPreview {
                     if MPV_OSC_POC_ENABLED {
                         if let Some(mpv_ref) = &self.mpv {
                             let input_cursor = mpv_ref.get_property::<bool>("input-cursor").ok();
-                            let script_count = mpv_ref.get_property::<i64>("script-list/count").ok();
+                            let script_count =
+                                mpv_ref.get_property::<i64>("script-list/count").ok();
                             log::debug!(
                                 "[MpvPreview][OSC-POC] input-cursor={:?}, script-list/count={:?}",
-                                input_cursor, script_count
+                                input_cursor,
+                                script_count
                             );
                         }
                     }
@@ -156,11 +158,13 @@ impl MpvPreview {
             self.update_docked_downscale(false);
         }
 
-        // Apply docked-mode downscale + FPS limit (dynamic, reversible, no player restart)
+        // OPT-3: Only call update_docked_downscale when mode actually changed
         let is_detached = self.is_detached();
-        if is_detached == self.docked_downscale_applied
-            || is_detached == self.docked_fps_limit_applied
-        {
+        let needs_apply =
+            is_detached && (self.docked_downscale_applied || self.docked_fps_limit_applied);
+        let needs_remove =
+            !is_detached && (!self.docked_downscale_applied || !self.docked_fps_limit_applied);
+        if needs_apply || needs_remove {
             self.update_docked_downscale(false);
         }
 
