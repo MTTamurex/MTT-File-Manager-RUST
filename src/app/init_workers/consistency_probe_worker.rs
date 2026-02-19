@@ -57,6 +57,7 @@ pub fn spawn_consistency_probe_worker(
                 let disk_entries = match crate::infrastructure::windows::hdd_directory_reader::read_directory_hdd_optimized(
                     path.as_path(),
                     is_onedrive,
+                    false, // consistency probe never shows hidden files
                 ) {
                     Ok(entries) => entries,
                     Err(_) => {

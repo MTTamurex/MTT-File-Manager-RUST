@@ -147,6 +147,12 @@ impl ImageViewerApp {
         // Save session volume (always available, independent of active player)
         prefs.push(("media_volume", self.session_volume.to_string()));
 
+        // Show hidden files toggle
+        prefs.push((
+            "show_hidden_files",
+            (if self.show_hidden_files { "true" } else { "false" }).to_string(),
+        ));
+
         // Save list view column widths - Regular view
         prefs.push(("list_col_name_width", self.layout.list_col_name_width.to_string()));
         prefs.push(("list_col_date_width", self.layout.list_col_date_width.to_string()));

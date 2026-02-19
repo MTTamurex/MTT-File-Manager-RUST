@@ -441,6 +441,7 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             folder_cover: None,
             drive_info: None,
             sync_status: SyncStatus::None,
+            is_hidden: false,
             deletion_date: None,
             recycle_original_path: None,
         })
@@ -455,6 +456,7 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             folder_cover: None,
             drive_info: None,
             sync_status: SyncStatus::None,
+            is_hidden: false,
             deletion_date: None,
             recycle_original_path: None,
         })
@@ -491,6 +493,7 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             folder_cover: None,
             drive_info: None,
             sync_status: SyncStatus::None,
+            is_hidden: false,
             deletion_date: None,
             recycle_original_path: None,
         };

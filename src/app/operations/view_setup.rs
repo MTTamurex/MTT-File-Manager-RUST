@@ -89,6 +89,7 @@ impl ImageViewerApp {
                             folder_cover: None,
                             drive_info: None,
                             sync_status: crate::domain::file_entry::SyncStatus::None,
+                            is_hidden: false,
                             deletion_date: Some(item.date_deleted),
                             recycle_original_path: Some(item.original_path),
                         };
@@ -175,6 +176,7 @@ impl ImageViewerApp {
                     drive_type,
                 }),
                 sync_status: crate::domain::file_entry::SyncStatus::None,
+                is_hidden: false,
                 deletion_date: None,
                 recycle_original_path: None,
             };

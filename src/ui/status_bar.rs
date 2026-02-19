@@ -80,6 +80,8 @@ pub enum StatusBarAction {
     OpenVirtualDriveSettings,
     /// Start bulk thumbnail extraction for current folder and subfolders
     BulkThumbnailScan,
+    /// Show/hide hidden files toggled
+    ShowHiddenChanged,
     /// No action
     None,
 }
@@ -103,6 +105,7 @@ pub fn render_status_bar(
     is_computer_view: bool,
     bulk_progress: Option<(usize, usize)>,
     folder_locked: bool,
+    show_hidden_files: &mut bool,
 ) -> StatusBarAction {
     let mut action = StatusBarAction::None;
 
@@ -264,6 +267,30 @@ pub fn render_status_bar(
                     action = StatusBarAction::SortChanged;
                 }
             });
+
+            ui.separator();
+
+            // === SHOW HIDDEN FILES TOGGLE ===
+            {
+                let tooltip = if *show_hidden_files {
+                    "Esconder itens ocultos"
+                } else {
+                    "Exibir itens ocultos"
+                };
+                let text_color = if *show_hidden_files {
+                    theme::COLOR_SELECTION
+                } else {
+                    egui::Color32::BLACK
+                };
+                if ui
+                    .button(egui::RichText::new("👁").color(text_color))
+                    .on_hover_text(tooltip)
+                    .clicked()
+                {
+                    *show_hidden_files = !*show_hidden_files;
+                    action = StatusBarAction::ShowHiddenChanged;
+                }
+            }
 
             // === RIGHT SIDE: System info (push to right with available space) ===
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

@@ -58,6 +58,7 @@ pub(super) fn render_list_item(
     let w_size = col_widths.size;
 
     ui.push_id(i, |ui| {
+        let hidden_opacity = if item.is_hidden { 0.5 } else { 1.0 };
         let response = ui.interact(rect, ui.id().with(i), Sense::click_and_drag());
 
         // Selection and Action
@@ -152,15 +153,16 @@ pub(super) fn render_list_item(
             crate::ui::theme::COLOR_SELECTION_TEXT
         } else {
             Color32::BLACK
-        };
+        }.gamma_multiply(hidden_opacity);
         let secondary_color = if is_selected {
             crate::ui::theme::COLOR_SELECTION_TEXT
         } else {
             Color32::from_gray(100)
-        };
+        }.gamma_multiply(hidden_opacity);
 
         // 1. Icon + Name
-        render_item_icon(ui, item, ctx, ops, rect);
+        let icon_tint = Color32::WHITE.gamma_multiply(hidden_opacity);
+        render_item_icon(ui, item, ctx, ops, rect, icon_tint);
 
         // RENAMING LOGIC (LIST VIEW)
         let is_renaming_this = ctx
@@ -356,6 +358,7 @@ fn render_item_icon(
     ctx: &mut ListViewContext,
     ops: &mut dyn ListViewOperations,
     rect: Rect,
+    tint: Color32,
 ) {
     let icon_size_px = 16.0;
     let icon_rect = Rect::from_min_size(
@@ -372,7 +375,7 @@ fn render_item_icon(
                 drive_icon.id(),
                 icon_rect,
                 Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
-                Color32::WHITE,
+                tint,
             );
         }
         return;
@@ -392,7 +395,7 @@ fn render_item_icon(
                     folder_icon.id(),
                     icon_rect,
                     Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
-                    Color32::WHITE,
+                    tint,
                 );
                 return;
             }
@@ -403,7 +406,7 @@ fn render_item_icon(
                 folder_icon.id(),
                 icon_rect,
                 Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
-                Color32::WHITE,
+                tint,
             );
         }
         return;
@@ -418,7 +421,7 @@ fn render_item_icon(
                 file_icon.id(),
                 icon_rect,
                 Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
-                Color32::WHITE,
+                tint,
             );
         } else if !ctx.loading_icons.contains(&item.path)
             && ctx.failed_icons.peek(&item.path).is_none()
@@ -436,7 +439,7 @@ fn render_item_icon(
             file_icon.id(),
             icon_rect,
             Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
-            Color32::WHITE,
+            tint,
         );
     } else if !ctx.loading_icons.contains(&item.path) && ctx.failed_icons.peek(&item.path).is_none()
     {

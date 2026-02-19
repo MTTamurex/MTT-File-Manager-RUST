@@ -41,6 +41,7 @@ pub struct HddDirectoryEntry {
 pub fn read_directory_hdd_optimized(
     path: &Path,
     is_onedrive: bool,
+    show_hidden: bool,
 ) -> Result<Vec<FileEntry>, String> {
     // Set thread priority to normal/above normal for HDD operations
     // Background priority causes HDD head to seek away for other tasks
@@ -49,7 +50,7 @@ pub fn read_directory_hdd_optimized(
         let _ = SetThreadPriority(thread, THREAD_PRIORITY_NORMAL);
     }
 
-    let result = read_directory_impl(path, is_onedrive);
+    let result = read_directory_impl(path, is_onedrive, show_hidden);
 
     // Reset thread priority after operation
     unsafe {
@@ -67,8 +68,9 @@ pub fn read_directory_hdd_optimized(
 pub fn read_directory_hdd_batched(
     path: &Path,
     is_onedrive: bool,
+    show_hidden: bool,
 ) -> Result<Vec<Vec<FileEntry>>, String> {
-    let entries = read_directory_hdd_optimized(path, is_onedrive)?;
+    let entries = read_directory_hdd_optimized(path, is_onedrive, show_hidden)?;
 
     // Split into batches
     let mut batches = Vec::new();
@@ -91,7 +93,7 @@ pub fn read_directory_hdd_batched(
 }
 
 /// Internal implementation using Win32 APIs
-fn read_directory_impl(path: &Path, is_onedrive: bool) -> Result<Vec<FileEntry>, String> {
+fn read_directory_impl(path: &Path, is_onedrive: bool, show_hidden: bool) -> Result<Vec<FileEntry>, String> {
     let search_path = if path.to_string_lossy().ends_with('\\') {
         format!("{}*", path.display())
     } else {
@@ -130,6 +132,17 @@ fn read_directory_impl(path: &Path, is_onedrive: bool) -> Result<Vec<FileEntry>,
 
             // Skip special entries
             if filename == "." || filename == ".." {
+                if FindNextFileW(handle, &mut find_data).is_err() {
+                    break;
+                }
+                continue;
+            }
+
+            // Check hidden attribute before creating entry
+            let attrs = find_data.dwFileAttributes;
+            let is_hidden = (attrs & FILE_ATTRIBUTE_HIDDEN.0) != 0;
+            let is_system = (attrs & FILE_ATTRIBUTE_SYSTEM.0) != 0;
+            if is_system || (!show_hidden && is_hidden) {
                 if FindNextFileW(handle, &mut find_data).is_err() {
                     break;
                 }
@@ -182,7 +195,7 @@ fn create_file_entry(
 
     // Extract attributes
     let attributes = find_data.dwFileAttributes;
-    let _is_hidden = (attributes & FILE_ATTRIBUTE_HIDDEN.0) != 0;
+    let is_hidden = (attributes & FILE_ATTRIBUTE_HIDDEN.0) != 0;
     let _is_system = (attributes & FILE_ATTRIBUTE_SYSTEM.0) != 0;
     let is_directory = (attributes & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
 
@@ -221,6 +234,7 @@ fn create_file_entry(
         folder_cover: None, // Will be populated later if needed
         drive_info: None,
         sync_status,
+        is_hidden,
         deletion_date: None,
         recycle_original_path: None,
     })
@@ -258,6 +272,7 @@ mod tests {
                 folder_cover: None,
                 drive_info: None,
                 sync_status: SyncStatus::None,
+                is_hidden: false,
                 deletion_date: None,
                 recycle_original_path: None,
             }

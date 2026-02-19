@@ -29,6 +29,7 @@ pub(super) fn try_handle_fast_paths(
     disk_cache: &Arc<ThumbnailDiskCache>,
     directory_cache: &Arc<DirectoryCache>,
     directory_index_opt: &Option<Arc<DirectoryIndex>>,
+    _show_hidden: bool,
 ) -> bool {
     let directory_mtime_ms = |path: &PathBuf| -> u64 {
         std::fs::metadata(path)
@@ -240,6 +241,7 @@ pub(super) fn try_handle_fast_paths(
                                 folder_cover: None,
                                 drive_info: None,
                                 sync_status: SyncStatus::None,
+                                is_hidden: false,
                                 deletion_date: None,
                                 recycle_original_path: None,
                             }

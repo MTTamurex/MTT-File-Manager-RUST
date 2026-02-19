@@ -30,6 +30,7 @@ pub(super) fn try_handle_optimized_tiers(
     disk_cache: &Arc<ThumbnailDiskCache>,
     directory_cache: &Arc<DirectoryCache>,
     directory_index_opt: &Option<Arc<DirectoryIndex>>,
+    show_hidden: bool,
 ) -> bool {
     // OPTIMIZATION: Tiered disk reading strategy
     // Priority: 1) NTFS native API, 2) HDD-optimized FindFirstFileExW, 3) Standard FindFirstFileW
@@ -56,7 +57,7 @@ pub(super) fn try_handle_optimized_tiers(
                     dir_entry.name.to_lowercase().as_str(),
                     "desktop.ini" | "thumbs.db" | "$recycle.bin" | "system volume information"
                 );
-                if !is_hidden && !is_system && !is_special && !dir_entry.name.starts_with('.') {
+                if (show_hidden || !is_hidden) && !is_system && !is_special && !dir_entry.name.starts_with('.') {
                     let full_path = PathBuf::from(base_path).join(&dir_entry.name);
                     let mut is_dir = dir_entry.is_dir;
                     let is_archive = !is_dir && is_archive_extension(&dir_entry.name);
@@ -78,6 +79,7 @@ pub(super) fn try_handle_optimized_tiers(
                         folder_cover: None,
                         drive_info: None,
                         sync_status,
+                        is_hidden,
                         deletion_date: None,
                         recycle_original_path: None,
                     };
@@ -179,6 +181,7 @@ pub(super) fn try_handle_optimized_tiers(
         match crate::infrastructure::windows::hdd_directory_reader::read_directory_hdd_batched(
             &PathBuf::from(base_path),
             is_onedrive_base,
+            show_hidden,
         ) {
             Ok(batches) => {
                 log::debug!(

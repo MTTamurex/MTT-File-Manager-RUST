@@ -131,6 +131,7 @@ impl ImageViewerApp {
             sidebar_left_width,
             sidebar_right_width,
             session_volume,
+            show_hidden_files,
         } = startup_preferences;
 
         // Load folder locks from database
@@ -188,6 +189,7 @@ impl ImageViewerApp {
             sort_descending_normal: sort_descending,
             folders_position,
             folders_position_normal: folders_position,
+            show_hidden_files,
             view_mode_normal: view_mode,
             disk_cache: disk_cache.clone(),
             directory_cache: directory_cache.clone(),
