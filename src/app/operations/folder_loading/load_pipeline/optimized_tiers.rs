@@ -138,21 +138,23 @@ pub(super) fn try_handle_optimized_tiers(
             }
             if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                 directory_cache.put(PathBuf::from(base_path), all_entries_disk.clone());
-                if let Some(di) = directory_index_opt {
-                    let indexed: Vec<IndexedFile> = all_entries_disk
-                        .iter()
-                        .map(|e| IndexedFile {
-                            name: e.name.clone(),
-                            size: e.size,
-                            modified: e.modified,
-                            is_dir: e.is_dir,
-                        })
-                        .collect();
-                    let _ = di.put_directory(
-                        &PathBuf::from(base_path),
-                        &indexed,
-                        scan_start.elapsed().as_millis() as u64,
-                    );
+                if !show_hidden {
+                    if let Some(di) = directory_index_opt {
+                        let indexed: Vec<IndexedFile> = all_entries_disk
+                            .iter()
+                            .map(|e| IndexedFile {
+                                name: e.name.clone(),
+                                size: e.size,
+                                modified: e.modified,
+                                is_dir: e.is_dir,
+                            })
+                            .collect();
+                        let _ = di.put_directory(
+                            &PathBuf::from(base_path),
+                            &indexed,
+                            scan_start.elapsed().as_millis() as u64,
+                        );
+                    }
                 }
             }
             // DISABLED: Direct subdirectory prefetch (testing HDD I/O impact)
@@ -230,21 +232,23 @@ pub(super) fn try_handle_optimized_tiers(
                 if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                     directory_cache.put(PathBuf::from(base_path), all_entries_disk.clone());
 
-                    if let Some(di) = directory_index_opt {
-                        let indexed: Vec<IndexedFile> = all_entries_disk
-                            .iter()
-                            .map(|e| IndexedFile {
-                                name: e.name.clone(),
-                                size: e.size,
-                                modified: e.modified,
-                                is_dir: e.is_dir,
-                            })
-                            .collect();
-                        let _ = di.put_directory(
-                            &PathBuf::from(base_path),
-                            &indexed,
-                            scan_start.elapsed().as_millis() as u64,
-                        );
+                    if !show_hidden {
+                        if let Some(di) = directory_index_opt {
+                            let indexed: Vec<IndexedFile> = all_entries_disk
+                                .iter()
+                                .map(|e| IndexedFile {
+                                    name: e.name.clone(),
+                                    size: e.size,
+                                    modified: e.modified,
+                                    is_dir: e.is_dir,
+                                })
+                                .collect();
+                            let _ = di.put_directory(
+                                &PathBuf::from(base_path),
+                                &indexed,
+                                scan_start.elapsed().as_millis() as u64,
+                            );
+                        }
                     }
                 }
 

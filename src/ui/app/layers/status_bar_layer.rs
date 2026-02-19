@@ -141,6 +141,7 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                 }
                 StatusBarAction::ShowHiddenChanged => {
                     app.save_preferences();
+                    app.directory_cache.clear();
                     app.load_folder(true);
                 }
                 _ => {}
