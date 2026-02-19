@@ -26,6 +26,14 @@ impl ImageViewerApp {
         self.navigation_state.is_computer_view = false;
         self.navigation_state.is_recycle_bin_view = true;
         self.navigation_state.path_input = "Lixeira".to_string();
+
+        // Restore unlocked defaults for settings that folder_lock may have overridden.
+        // "Lixeira" cannot be locked, so always clear the locked state.
+        self.sort_descending = self.sort_descending_normal;
+        self.folders_position = self.folders_position_normal;
+        self.view_mode = self.view_mode_normal;
+        self.current_folder_locked = false;
+
         self.is_loading_folder = true;
         self.items = Arc::new(Vec::new());
         self.all_items.clear();
