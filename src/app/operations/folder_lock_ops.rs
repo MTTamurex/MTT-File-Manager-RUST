@@ -38,6 +38,7 @@ impl ImageViewerApp {
     /// If not, restores the "normal" (unlocked) settings so that locked-folder
     /// overrides don't bleed into unlocked folders.
     pub fn apply_folder_lock_if_present(&mut self) {
+        let lock_start = std::time::Instant::now();
         let path = &self.navigation_state.current_path;
         if let Some(lock) = self.folder_locks.get(path).cloned() {
             log::info!("[FOLDER-LOCK] Applying lock for {:?}: view={:?}, sort={:?}, desc={}, pos={:?}",
@@ -55,6 +56,17 @@ impl ImageViewerApp {
             self.sort_descending = self.sort_descending_normal;
             self.folders_position = self.folders_position_normal;
             self.current_folder_locked = false;
+        }
+
+        let lock_ms = lock_start.elapsed().as_millis();
+        if lock_ms > 20 {
+            log::warn!(
+                "[PERF-FOLDER-LOCK] apply_folder_lock_if_present took {}ms path={:?} locked={} known_locks={}",
+                lock_ms,
+                path,
+                self.current_folder_locked,
+                self.folder_locks.len(),
+            );
         }
     }
 }

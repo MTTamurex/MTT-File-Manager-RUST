@@ -50,13 +50,23 @@ pub fn render_panels(app: &mut ImageViewerApp, ctx: &egui::Context, _frame: &mut
 
     let total_ms = t_panels_start.elapsed().as_millis();
     if total_ms > 120 {
+        let items_len = app.items.len();
+        let all_items_len = app.all_items.len();
+        let pending_thumbs = app.pending_thumbnails.len();
+        let loading_icons = app.loading_icons.len();
         log::warn!(
-            "[PERF] Slow render_panels breakdown: resize={}ms sidebar={}ms preview={}ms central={}ms total={}ms",
+            "[PERF] Slow render_panels breakdown: resize={}ms sidebar={}ms preview={}ms central={}ms total={}ms | view={:?} items={} all_items={} loading_folder={} pending_thumbs={} loading_icons={}",
             resize_ms,
             sidebar_ms,
             preview_ms,
             central_ms,
-            total_ms
+            total_ms,
+            app.view_mode,
+            items_len,
+            all_items_len,
+            app.is_loading_folder,
+            pending_thumbs,
+            loading_icons,
         );
     }
 }
@@ -616,9 +626,25 @@ fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     app.populate_context_menu(ui.ctx(), &paths, true, None);
                 }
             } else {
+                let t_view_render = std::time::Instant::now();
                 match app.view_mode {
                     ViewMode::Grid => app.render_grid_view(ui),
                     ViewMode::List => app.render_list_view(ui),
+                }
+                let view_ms = t_view_render.elapsed().as_millis();
+                if view_ms > 120 {
+                    log::warn!(
+                        "[PERF-CENTRAL] Slow list/grid render: {}ms view={:?} items={} all_items={} search_len={} loading={} pending_thumbs={} pending_uploads={} visible_range={:?}",
+                        view_ms,
+                        app.view_mode,
+                        app.items.len(),
+                        app.all_items.len(),
+                        app.search_query.len(),
+                        app.is_loading_folder,
+                        app.pending_thumbnails.len(),
+                        app.cache_manager.pending_upload_set.len(),
+                        app.visible_index_range,
+                    );
                 }
 
                 if ui.input(|i| i.key_pressed(egui::Key::F2)) {

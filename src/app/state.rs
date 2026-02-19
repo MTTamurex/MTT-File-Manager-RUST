@@ -53,6 +53,13 @@ pub struct ItemsRebuildResult {
     pub total_items: usize,
 }
 
+#[derive(Debug, Clone)]
+pub struct WatcherFsProbeCacheEntry {
+    pub file_system: Option<String>,
+    pub is_usn: bool,
+    pub probed_at: Instant,
+}
+
 pub struct ImageViewerApp {
     pub navigation_state: NavigationState,
     /// Last known modified timestamp for the currently browsed folder.
@@ -185,6 +192,9 @@ pub struct ImageViewerApp {
     /// `true` = RDCW confirmed unreliable (drift was detected at least once).
     /// Drives not in this map are still being verified.
     pub rdcw_unreliable_drives: std::collections::HashMap<char, bool>,
+    /// Cached filesystem probe metadata per local drive letter.
+    /// Avoids repeated `GetVolumeInformationW` cost during frequent watcher reconfiguration.
+    pub watcher_fs_probe_cache: std::collections::HashMap<char, WatcherFsProbeCacheEntry>,
     /// Async consistency probe for non-USN drives (avoids blocking UI thread)
     pub consistency_probe_tx: Sender<super::init_workers::consistency_probe_worker::ConsistencyProbeRequest>,
     pub consistency_probe_rx: Receiver<super::init_workers::consistency_probe_worker::ConsistencyProbeResult>,

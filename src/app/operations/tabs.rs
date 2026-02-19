@@ -52,6 +52,13 @@ impl ImageViewerApp {
 
     /// Syncs the active tab state to the app
     pub fn sync_from_tab(&mut self) {
+        let sync_start = std::time::Instant::now();
+        let source_tab_id = self.tab_manager.active().id;
+        let source_tab_path = self.tab_manager.active().path.clone();
+        let source_tab_items_len = self.tab_manager.active().items.len();
+        let source_tab_all_items_len = self.tab_manager.active().all_items.len();
+        let source_tab_selection_len = self.tab_manager.active().multi_selection.len();
+
         {
             let active = self.tab_manager.active_mut();
             self.navigation_state.current_path = active.path.clone();
@@ -135,6 +142,23 @@ impl ImageViewerApp {
             // Reset loaded_path to bypass the guard in load_folder
             self.loaded_path.clear();
             self.load_folder(false);
+        }
+
+        let sync_ms = sync_start.elapsed().as_millis();
+        if sync_ms > 80 {
+            log::warn!(
+                "[PERF-TAB] sync_from_tab total={}ms tab_id={} path={} src_items={} src_all_items={} src_selection={} app_items={} app_all_items={} app_selection={} needs_reload={}",
+                sync_ms,
+                source_tab_id,
+                source_tab_path,
+                source_tab_items_len,
+                source_tab_all_items_len,
+                source_tab_selection_len,
+                self.items.len(),
+                self.all_items.len(),
+                self.multi_selection.len(),
+                needs_reload,
+            );
         }
     }
 }
