@@ -6,7 +6,9 @@
 //! are cached with 1-second TTL to avoid per-frame overhead.
 
 use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
+use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::theme;
+use crate::ui::widgets;
 use eframe::egui;
 use lru::LruCache;
 use std::path::PathBuf;
@@ -91,6 +93,7 @@ pub enum StatusBarAction {
 #[allow(clippy::too_many_arguments)]
 pub fn render_status_bar(
     ui: &mut egui::Ui,
+    svg_manager: &mut SvgIconManager,
     is_loading_folder: &mut bool,
     total_items: usize,
     view_mode: &mut ViewMode,
@@ -277,15 +280,17 @@ pub fn render_status_bar(
                 } else {
                     "Exibir itens ocultos"
                 };
-                let text_color = if *show_hidden_files {
-                    theme::COLOR_SELECTION
-                } else {
-                    egui::Color32::BLACK
-                };
-                if ui
-                    .button(egui::RichText::new("👁").color(text_color))
-                    .on_hover_text(tooltip)
-                    .clicked()
+                if widgets::toggle_icon_button_sized(
+                    ui,
+                    svg_manager,
+                    "eye",
+                    *show_hidden_files,
+                    tooltip,
+                    theme::ICON_SIZE_MD - 2.0,
+                    2.0,
+                    -1.0,
+                )
+                .clicked()
                 {
                     *show_hidden_files = !*show_hidden_files;
                     action = StatusBarAction::ShowHiddenChanged;
