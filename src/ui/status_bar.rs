@@ -138,7 +138,7 @@ pub fn render_status_bar(
 
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.add_space(1.5);
+                ui.add_space(-0.5);
                 ui.horizontal(|ui| {
                     // === LEFTMOST: Virtual drive settings button ===
                     if ui
@@ -164,6 +164,32 @@ pub fn render_status_bar(
                     .clicked()
                 {
                     action = StatusBarAction::BulkThumbnailScan;
+                }
+            }
+
+            ui.separator();
+
+            // === SHOW HIDDEN FILES TOGGLE ===
+            {
+                let tooltip = if *show_hidden_files {
+                    "Esconder itens ocultos"
+                } else {
+                    "Exibir itens ocultos"
+                };
+                if widgets::toggle_icon_button_sized(
+                    ui,
+                    svg_manager,
+                    "eye",
+                    *show_hidden_files,
+                    tooltip,
+                    theme::ICON_SIZE_MD - 2.0,
+                    2.0,
+                    -1.0,
+                )
+                .clicked()
+                {
+                    *show_hidden_files = !*show_hidden_files;
+                    action = StatusBarAction::ShowHiddenChanged;
                 }
             }
 
@@ -277,30 +303,6 @@ pub fn render_status_bar(
             });
 
             ui.separator();
-
-            // === SHOW HIDDEN FILES TOGGLE ===
-            {
-                let tooltip = if *show_hidden_files {
-                    "Esconder itens ocultos"
-                } else {
-                    "Exibir itens ocultos"
-                };
-                if widgets::toggle_icon_button_sized(
-                    ui,
-                    svg_manager,
-                    "eye",
-                    *show_hidden_files,
-                    tooltip,
-                    theme::ICON_SIZE_MD - 2.0,
-                    2.0,
-                    -1.0,
-                )
-                .clicked()
-                {
-                    *show_hidden_files = !*show_hidden_files;
-                    action = StatusBarAction::ShowHiddenChanged;
-                }
-            }
 
             // === RIGHT SIDE: System info (push to right with available space) ===
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
