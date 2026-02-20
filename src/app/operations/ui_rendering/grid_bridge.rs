@@ -13,8 +13,17 @@ use crate::infrastructure::io_priority;
 use crate::ui::views::{grid_view, GridViewContext, GridViewOperations};
 
 // Helper function equivalent to open_with_shell from ops
-fn open_with_shell(path: &Path) {
-    let _ = crate::application::file_operations::open_with_shell(path, None);
+fn open_with_shell(app: &mut ImageViewerApp, path: &Path) {
+    if let Err(e) = crate::application::file_operations::open_with_shell(path, None) {
+        log::warn!(
+            "[SECURITY] Shell open failed for '{}': {}",
+            path.display(),
+            e
+        );
+        app.notifications.push(crate::application::AppNotification::warning(
+            "Falha ao abrir item com o aplicativo padrão.".to_string(),
+        ));
+    }
 }
 
 /// Action types for grid view operations
@@ -204,7 +213,7 @@ impl ImageViewerApp {
                         self.navigate_to(&selected.path.to_string_lossy());
                         return; // Exit early after navigation
                     } else {
-                        open_with_shell(&selected.path);
+                        open_with_shell(self, &selected.path);
                     }
                 }
             }
@@ -367,7 +376,7 @@ impl ImageViewerApp {
                         if extension == "iso" {
                             self.mount_and_navigate_iso(path);
                         } else {
-                            open_with_shell(&path);
+                            open_with_shell(self, &path);
                         }
                     }
                 }
@@ -451,7 +460,7 @@ impl ImageViewerApp {
         for action in actions {
             match action {
                 GridAction::NavigateTo(path) => self.navigate_to(&path),
-                GridAction::OpenWithShell(path) => open_with_shell(&path),
+                GridAction::OpenWithShell(path) => open_with_shell(self, &path),
                 GridAction::RequestThumbnailLoad(path, size, modified) => {
                     self.request_thumbnail_load_with_modified(path, size, modified)
                 }

@@ -237,11 +237,11 @@ If ACL hardening does not apply successfully, cache/index files may become more 
 
 ## 7) Hardening Checklist
 
-- [ ] Enforce caller-aware authorization on IPC search results before returning full paths.
-- [ ] Harden DLL resolution path for WebView2 loader (trusted absolute path + fail-safe policy).
+- [x] Enforce caller-aware authorization on IPC search results before returning full paths.
+- [x] Harden DLL resolution path for WebView2 loader (trusted absolute path + fail-safe policy).
 - [ ] Replace heuristic shell-path sanitization bypass with validated typed shell namespace flow.
 - [ ] Add high-risk-source confirmation UX for shell open while preserving Explorer-compatible execution.
-- [ ] Make ACL hardening fail-closed for privileged DB/cache paths and harden fallback storage.
+- [x] Make ACL hardening fail-closed for privileged DB/cache paths and harden fallback storage.
 - [ ] Add regression tests for bypass boundaries and IPC authorization rules.
 
 ---
