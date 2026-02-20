@@ -95,6 +95,49 @@ impl ThumbnailDiskCache {
         true
     }
 
+    fn open_temp_fallback_connection(
+        temp_fallback_path: &Path,
+    ) -> rusqlite::Result<(Connection, Option<PathBuf>)> {
+        if let Some(parent) = temp_fallback_path.parent() {
+            if let Err(e) = fs::create_dir_all(parent) {
+                log::warn!(
+                    "[Cache] Failed to ensure temporary fallback directory {:?}: {}",
+                    parent,
+                    e
+                );
+            }
+        }
+
+        let temp_parent_hardened = temp_fallback_path
+            .parent()
+            .map(Self::harden_directory_permissions)
+            .unwrap_or(false);
+
+        if !temp_parent_hardened {
+            log::warn!(
+                "[Cache] Temporary fallback directory ACL hardening failed. Using in-memory cache instead."
+            );
+            return Ok((Connection::open_in_memory()?, None));
+        }
+
+        match Connection::open(temp_fallback_path) {
+            Ok(c) => {
+                log::warn!(
+                    "[Cache] Using temporary fallback database at {:?}",
+                    temp_fallback_path
+                );
+                Ok((c, Some(temp_fallback_path.to_path_buf())))
+            }
+            Err(temp_err) => {
+                log::warn!(
+                    "[Cache] Failed to open temporary fallback database: {:?}. Using in-memory cache.",
+                    temp_err
+                );
+                Ok((Connection::open_in_memory()?, None))
+            }
+        }
+    }
+
     /// Creates a new disk cache at the specified directory
     pub fn new(cache_dir: PathBuf) -> rusqlite::Result<Self> {
         // Ensure directory exists
@@ -108,7 +151,8 @@ impl ThumbnailDiskCache {
 
         // Harden directory permissions on first creation: restrict to owner
         // to prevent cache poisoning by other local users.
-        if !Self::harden_directory_permissions(&cache_dir) {
+        let primary_hardened = Self::harden_directory_permissions(&cache_dir);
+        if !primary_hardened {
             log::warn!(
                 "[DISK-CACHE] Primary cache directory ACL hardening failed for {:?}",
                 cache_dir
@@ -123,61 +167,30 @@ impl ThumbnailDiskCache {
             .join("MTT-File-Manager")
             .join("thumbnails_fallback.db");
 
-        let mut active_db_path: Option<PathBuf> = None;
-
         // 1. Open WRITER connection (Primary -> Temp fallback -> Memory fallback)
-        let writer_conn = match Connection::open(&db_path) {
-            Ok(c) => {
-                active_db_path = Some(db_path.clone());
-                c
-            }
-            Err(primary_err) => {
-                log::warn!(
-                    "[Cache] Failed to open database at {:?}: {:?}",
-                    db_path,
-                    primary_err
-                );
-
-                if let Some(parent) = temp_fallback_path.parent() {
-                    if let Err(e) = fs::create_dir_all(parent) {
-                        log::warn!(
-                            "[Cache] Failed to ensure temporary fallback directory {:?}: {}",
-                            parent,
-                            e
-                        );
-                    }
+        let (writer_conn, active_db_path) = if primary_hardened {
+            match Connection::open(&db_path) {
+                Ok(c) => {
+                    (c, Some(db_path.clone()))
                 }
-
-                let temp_parent_hardened = temp_fallback_path
-                    .parent()
-                    .map(Self::harden_directory_permissions)
-                    .unwrap_or(false);
-
-                if !temp_parent_hardened {
+                Err(primary_err) => {
                     log::warn!(
-                        "[Cache] Temporary fallback directory ACL hardening failed. Using in-memory cache instead."
+                        "[Cache] Failed to open database at {:?}: {:?}",
+                        db_path,
+                        primary_err
                     );
-                    Connection::open_in_memory()?
-                } else {
-                    match Connection::open(&temp_fallback_path) {
-                    Ok(c) => {
-                        log::warn!(
-                            "[Cache] Using temporary fallback database at {:?}",
-                            temp_fallback_path
-                        );
-                        active_db_path = Some(temp_fallback_path.clone());
-                        c
-                    }
-                    Err(temp_err) => {
-                        log::warn!(
-                            "[Cache] Failed to open temporary fallback database: {:?}. Using in-memory cache.",
-                            temp_err
-                        );
-                        Connection::open_in_memory()?
-                    }
-                    }
+                    let (conn, fallback_path) =
+                        Self::open_temp_fallback_connection(&temp_fallback_path)?;
+                    (conn, fallback_path)
                 }
             }
+        } else {
+            log::warn!(
+                "[Cache] Skipping primary database path due to ACL hardening failure at {:?}",
+                cache_dir
+            );
+            let (conn, fallback_path) = Self::open_temp_fallback_connection(&temp_fallback_path)?;
+            (conn, fallback_path)
         };
 
         // Performance Tuning: Use WAL mode for better concurrency (readers don't block writers)
