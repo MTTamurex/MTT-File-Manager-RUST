@@ -65,6 +65,19 @@ pub fn start_event_loop(
                 }
             }
 
+            // Fullscreen is fast tier: critical for OSC button responsiveness.
+            // Without this, the OSC fullscreen button has a ~2s delay because
+            // the slow tier only polls every 2 seconds. Boolean read = negligible cost.
+            if let Ok(fs) = mpv.get_property::<bool>("fullscreen") {
+                if let Ok(mut s) = state.write() {
+                    if s.fullscreen != fs {
+                        s.fullscreen = fs;
+                        state_updated = true;
+                        significant_change = true;
+                    }
+                }
+            }
+
             // --- Medium tier (~1s): volume, mute, duration ---
             if tick_count.is_multiple_of(MEDIUM_TIER_TICKS) {
                 if let Ok(vol) = mpv.get_property::<f64>("volume") {
@@ -111,18 +124,8 @@ pub fn start_event_loop(
                 current_duration = state.read().map(|s| s.duration).unwrap_or(0.0);
             }
 
-            // --- Slow tier (~2s): fullscreen, aspect ---
+            // --- Slow tier (~2s): aspect ---
             if tick_count.is_multiple_of(SLOW_TIER_TICKS) {
-                if let Ok(fs) = mpv.get_property::<bool>("fullscreen") {
-                    if let Ok(mut s) = state.write() {
-                        if s.fullscreen != fs {
-                            s.fullscreen = fs;
-                            state_updated = true;
-                            significant_change = true;
-                        }
-                    }
-                }
-
                 if current_duration > 0.0 {
                     let aspect = super::playback::get_video_aspect(&mpv);
                     if let Ok(mut s) = state.write() {
