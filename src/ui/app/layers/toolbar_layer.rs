@@ -103,12 +103,20 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                         app.is_address_editing = true;
                     }
                     ToolbarAction::CommitPathInput(path) => {
+                        // Enter used to commit path input must not trigger "open selected"
+                        // in list/grid handlers during the same frame.
+                        app.suppress_next_enter_open = true;
+
                         if crate::infrastructure::onedrive::fast_path_exists(std::path::Path::new(
                             &path,
                         )) {
                             app.navigate_to(&path);
                             app.is_address_editing = false;
                         } else {
+                            app.notifications.error(format!(
+                                "O caminho não existe: {}",
+                                path
+                            ));
                             app.navigation_state.path_input = app.navigation_state.current_path.clone();
                             app.is_address_editing = false;
                         }

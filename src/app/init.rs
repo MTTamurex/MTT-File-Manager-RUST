@@ -301,6 +301,9 @@ impl ImageViewerApp {
             // Debounce for paste key (keys_down can fire multiple times)
             paste_key_debounce: false,
 
+            // Address-bar Enter must not bubble into list/grid "open selected".
+            suppress_next_enter_open: false,
+
             // Native HWND (captured on first update)
             native_hwnd: None,
 
