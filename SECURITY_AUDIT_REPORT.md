@@ -242,7 +242,7 @@ If ACL hardening does not apply successfully, cache/index files may become more 
 - [x] Replace heuristic shell-path sanitization bypass with validated typed shell namespace flow.
 - [x] Add high-risk-source confirmation UX for shell open while preserving Explorer-compatible execution.
 - [x] Make ACL hardening fail-closed for privileged DB/cache paths and harden fallback storage.
-- [ ] Add regression tests for bypass boundaries and IPC authorization rules.
+- [x] Add regression tests for bypass boundaries and IPC authorization rules.
 
 ---
 
