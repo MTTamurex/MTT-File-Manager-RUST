@@ -9,7 +9,8 @@ use windows::Win32::System::Com::{
 use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
 
 use crate::infrastructure::security::{
-    sanitize_path_with_local_drive_fallback, sanitize_unc_path, SecurityConfig,
+    classify_shell_namespace_path, sanitize_path_with_local_drive_fallback, sanitize_unc_path,
+    SecurityConfig,
 };
 use crate::infrastructure::windows as windows_infra;
 use crate::infrastructure::windows::recycle_bin;
@@ -62,21 +63,7 @@ fn operation_security_config() -> SecurityConfig {
 }
 
 fn is_explicit_shell_namespace_path(path: &Path) -> bool {
-    let raw = path.to_string_lossy();
-    let trimmed = raw.trim();
-
-    if trimmed.starts_with("shell:") {
-        return true;
-    }
-
-    // Support GUID-style shell namespace paths (e.g., ::{GUID}), including
-    // verbatim-prefixed forms that can appear in some shell round-trips.
-    let normalized = trimmed
-        .strip_prefix(r"\\?\")
-        .or_else(|| trimmed.strip_prefix(r"\\.\"))
-        .unwrap_or(trimmed);
-
-    normalized.starts_with("::")
+    classify_shell_namespace_path(path).is_some()
 }
 
 fn should_bypass_sanitization(path: &Path) -> bool {
@@ -305,4 +292,28 @@ pub fn create_shortcut(target: &Path, current_path: &str) -> OpResult<PathBuf> {
     }
 
     Ok(candidate)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_explicit_shell_namespace_path;
+    use std::path::Path;
+
+    #[test]
+    fn shell_namespace_bypass_accepts_only_explicit_namespace_forms() {
+        assert!(is_explicit_shell_namespace_path(Path::new(
+            "shell:RecycleBinFolder"
+        )));
+        assert!(is_explicit_shell_namespace_path(Path::new(
+            "::{645FF040-5081-101B-9F08-00AA002F954E}"
+        )));
+        assert!(is_explicit_shell_namespace_path(Path::new(
+            r"\\?\::{645FF040-5081-101B-9F08-00AA002F954E}"
+        )));
+
+        assert!(!is_explicit_shell_namespace_path(Path::new(r"C:\Temp\file.txt")));
+        assert!(!is_explicit_shell_namespace_path(Path::new(
+            r"C:\Temp\archive.zip\inside"
+        )));
+    }
 }

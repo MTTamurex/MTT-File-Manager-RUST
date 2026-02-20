@@ -6,8 +6,13 @@ use thiserror::Error;
 
 mod components;
 mod drive;
+mod shell_namespace;
 mod symlink;
 mod unc;
+
+pub use shell_namespace::{
+    classify_shell_namespace_path, classify_shell_namespace_str, ShellNamespacePathKind,
+};
 
 /// Path-related security errors.
 #[derive(Error, Debug)]
