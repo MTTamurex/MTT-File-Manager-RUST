@@ -1,6 +1,7 @@
 mod file_index;
 mod fs_walker;
 mod index_db;
+mod ipc_authorization;
 mod ipc_server;
 mod name_arena;
 mod path_resolver;
