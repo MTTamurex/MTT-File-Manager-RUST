@@ -275,6 +275,7 @@ impl ImageViewerApp {
 
             // NOTIFICATION SYSTEM
             notifications: crate::application::NotificationManager::new(),
+            pending_shell_open_confirmation: None,
 
             // OPTIMIZED GIF MANAGER
             gif_manager: crate::ui::components::gif_manager::GifManager::new(ctx.clone()),
