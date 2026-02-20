@@ -61,11 +61,28 @@ fn operation_security_config() -> SecurityConfig {
     }
 }
 
+fn is_explicit_shell_namespace_path(path: &Path) -> bool {
+    let raw = path.to_string_lossy();
+    let trimmed = raw.trim();
+
+    if trimmed.starts_with("shell:") {
+        return true;
+    }
+
+    // Support GUID-style shell namespace paths (e.g., ::{GUID}), including
+    // verbatim-prefixed forms that can appear in some shell round-trips.
+    let normalized = trimmed
+        .strip_prefix(r"\\?\")
+        .or_else(|| trimmed.strip_prefix(r"\\.\"))
+        .unwrap_or(trimmed);
+
+    normalized.starts_with("::")
+}
+
 fn should_bypass_sanitization(path: &Path) -> bool {
-    let s = path.to_string_lossy();
-    // Only true shell namespace paths (shell:, ::{GUID}) bypass sanitization.
-    // UNC network paths now go through basic validation instead of bypassing entirely.
-    s.starts_with("shell:") || windows_infra::is_shell_navigation_path(path, false)
+    // Only explicit shell namespace identifiers bypass sanitization.
+    // Archive-like paths now go through normal validation/fallback flow.
+    is_explicit_shell_namespace_path(path)
 }
 
 /// Returns true for UNC network paths that need lightweight validation
@@ -115,7 +132,7 @@ pub fn delete_with_shell(path: &Path, hwnd: Option<HWND>) -> OpResult<bool> {
 /// Opens a file with its default application.
 pub fn open_with_shell(path: &Path, _hwnd: Option<HWND>) -> OpResult<()> {
     let valid_path = sanitize_operation_path(path)?;
-    shell_operations::open_with_shell(&valid_path);
+    shell_operations::open_with_shell(&valid_path).map_err(|e| e.to_string())?;
     Ok(())
 }
 

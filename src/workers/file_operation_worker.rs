@@ -145,11 +145,28 @@ fn operation_security_config() -> SecurityConfig {
     }
 }
 
+fn is_explicit_shell_namespace_path(path: &Path) -> bool {
+    let raw = path.to_string_lossy();
+    let trimmed = raw.trim();
+
+    if trimmed.starts_with("shell:") {
+        return true;
+    }
+
+    // Support GUID-style shell namespace paths (e.g., ::{GUID}), including
+    // verbatim-prefixed forms used by some shell components.
+    let normalized = trimmed
+        .strip_prefix(r"\\?\")
+        .or_else(|| trimmed.strip_prefix(r"\\.\"))
+        .unwrap_or(trimmed);
+
+    normalized.starts_with("::")
+}
+
 fn should_bypass_sanitization(path: &Path) -> bool {
-    let s = path.to_string_lossy();
-    // Only true shell namespace paths (shell:, ::{GUID}) bypass sanitization.
-    // UNC network paths now go through basic validation instead of bypassing entirely.
-    s.starts_with("shell:") || crate::infrastructure::windows::is_shell_navigation_path(path, false)
+    // Only explicit shell namespace identifiers bypass sanitization.
+    // Archive-like filesystem paths no longer bypass validation.
+    is_explicit_shell_namespace_path(path)
 }
 
 /// Returns true for UNC network paths that need lightweight validation

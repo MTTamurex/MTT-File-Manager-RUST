@@ -8,12 +8,12 @@ use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 /// Opens a file with its default application using ShellExecuteW.
-pub fn open_with_shell(path: &Path) {
+pub fn open_with_shell(path: &Path) -> Result<()> {
     unsafe {
         let path_str = path.to_string_lossy().to_string();
         let path_wide: Vec<u16> = path_str.encode_utf16().chain(std::iter::once(0)).collect();
 
-        let _ = ShellExecuteW(
+        let hinst = ShellExecuteW(
             None,
             PCWSTR::default(),
             PCWSTR(path_wide.as_ptr()),
@@ -21,6 +21,16 @@ pub fn open_with_shell(path: &Path) {
             PCWSTR::default(),
             SW_SHOW,
         );
+
+        let code = hinst.0 as isize;
+        if code <= 32 {
+            return Err(Error::new(
+                E_FAIL,
+                format!("ShellExecuteW failed with code {} for path {:?}", code, path),
+            ));
+        }
+
+        Ok(())
     }
 }
 
