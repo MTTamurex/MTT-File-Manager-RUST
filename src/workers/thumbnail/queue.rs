@@ -105,8 +105,13 @@ impl PriorityThumbnailQueue {
         if state.pending.contains(&path) {
             if Self::merge_pending_request(&mut state, &parent, &request, is_ssd) {
                 self.condvar.notify_one();
+                return;
             }
-            return;
+
+            log::warn!(
+                "[THUMB-QUEUE] pending/bucket mismatch for {:?}; requeueing request",
+                path
+            );
         }
 
         state.pending.insert(path.clone());
@@ -465,5 +470,28 @@ mod tests {
         assert_eq!(size, 256);
         assert_eq!(priority, IOPriority::Interactive);
         assert_eq!(modified, 123);
+    }
+
+    #[test]
+    fn test_requeue_when_pending_bucket_mismatch() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("mismatch.jpg");
+
+        let queue = PriorityThumbnailQueue::new();
+        {
+            let mut state = queue.state.lock().unwrap();
+            state.pending.insert(path.clone());
+        }
+
+        queue.push_with_index(path.clone(), 3, 128, IOPriority::Interactive, Some(5), 321);
+
+        let result = queue.pop();
+        assert!(result.is_some());
+        let (p, g, size, priority, modified) = result.unwrap();
+        assert_eq!(p, path);
+        assert_eq!(g, 3);
+        assert_eq!(size, 128);
+        assert_eq!(priority, IOPriority::Interactive);
+        assert_eq!(modified, 321);
     }
 }
