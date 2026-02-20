@@ -191,6 +191,8 @@ pub fn render_status_bar(
                     action = StatusBarAction::ShowHiddenChanged;
                 }
             }
+                }); // end icon buttons inner horizontal
+            }); // end icon buttons vertical
 
             ui.separator();
 
@@ -297,8 +299,6 @@ pub fn render_status_bar(
                     *folders_position = FoldersPosition::Mixed;
                     action = StatusBarAction::SortChanged;
                 }
-            });
-                });
             });
 
             ui.separator();

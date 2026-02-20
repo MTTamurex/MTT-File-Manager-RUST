@@ -47,9 +47,14 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
 
     ui.separator();
 
-    ui.add_sized(
-        egui::vec2(80.0, 20.0),
-        egui::Slider::new(&mut app.thumbnail_size, 64.0..=256.0).show_value(false),
-    );
-    ui.label("Zoom");
+    ui.scope(|ui| {
+        if matches!(app.view_mode, ViewMode::List) {
+            ui.disable();
+        }
+        ui.add_sized(
+            egui::vec2(80.0, 20.0),
+            egui::Slider::new(&mut app.thumbnail_size, 64.0..=256.0).show_value(false),
+        );
+        ui.label("Zoom");
+    });
 }

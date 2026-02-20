@@ -1,4 +1,5 @@
 use crate::app::ImageViewerApp;
+use crate::domain::file_entry::ViewMode;
 use crate::workers::idle_warmup::IdleWarmupMessage;
 use eframe::egui;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
@@ -200,11 +201,11 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             user_active = true;
         }
 
-        // Ctrl+Scroll: Ajustar tamanho dos thumbnails
+        // Ctrl+Scroll: Ajustar tamanho dos thumbnails (somente no modo Grade)
         // eframe/winit converte Ctrl+Scroll em zoom_delta antes do smooth_scroll_delta
         // Lemos zoom_delta e resetamos o fator de zoom da UI de volta a 1.0
         let zoom_delta = ctx.input(|i| i.zoom_delta());
-        if (zoom_delta - 1.0).abs() > 0.001 {
+        if (zoom_delta - 1.0).abs() > 0.001 && app.view_mode == ViewMode::Grid {
             // zoom_delta > 1.0 = scroll para cima (aumentar), < 1.0 = diminuir
             // Escala: cada entalhe da roda gera delta ~0.1 → 0.1 × 24 = ~2.4px por entalhe
             let change = (zoom_delta - 1.0) * 24.0;
