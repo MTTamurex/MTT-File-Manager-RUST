@@ -102,7 +102,8 @@ pub fn process_list_keyboard_input(
         );
     }
 
-    let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+    // Alt+Enter é reservado para Propriedades — não dispara "abrir"
+    let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.alt);
 
     KeyboardNavResult {
         new_index,
@@ -173,7 +174,8 @@ pub fn process_grid_keyboard_input(
         );
     }
 
-    let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+    // Alt+Enter é reservado para Propriedades — não dispara "abrir"
+    let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.alt);
 
     KeyboardNavResult {
         new_index,

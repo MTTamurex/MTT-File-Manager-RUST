@@ -147,6 +147,8 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         // Fallback: use Windows GetAsyncKeyState for hardware-level detection
         let ctrl_down = unsafe { GetAsyncKeyState(0x11) < 0 };
         let v_down = unsafe { GetAsyncKeyState(0x56) < 0 };
+        let shift_down = unsafe { GetAsyncKeyState(0x10) < 0 };
+        let del_down = unsafe { GetAsyncKeyState(0x2E) < 0 };
 
         // Debounced paste detection
         if ctrl_down && v_down && !app.paste_key_debounce && !text_input_active {
@@ -154,6 +156,15 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             app.paste_key_debounce = true;
         } else if !v_down {
             app.paste_key_debounce = false;
+        }
+
+        // Debounced Shift+Delete detection (permanente)
+        if shift_down && del_down && !app.delete_key_debounce && !text_input_active {
+            app.delete_permanently_for_idx(None);
+            app.delete_key_debounce = true;
+            user_active = true;
+        } else if !del_down {
+            app.delete_key_debounce = false;
         }
 
         // Execute clipboard actions
@@ -167,9 +178,40 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             app.command_paste(None);
         }
 
-        // Delete: Excluir
-        if ctx.input(|i| i.key_pressed(egui::Key::Delete)) {
+        // Delete: Excluir para lixeira (somente sem Shift)
+        if ctx.input(|i| !i.modifiers.shift && i.key_pressed(egui::Key::Delete)) {
             app.delete_with_shell_for_idx(None);
+            user_active = true;
+        }
+
+        // Shift+Delete: tratado via GetAsyncKeyState abaixo (egui não entrega confiavelmente)
+
+        // Alt+Enter: Propriedades
+        if ctx.input(|i| i.modifiers.alt && i.key_pressed(egui::Key::Enter)) {
+            app.show_properties_for_idx(None);
+            user_active = true;
+        }
+
+        // Ctrl+L: Focar barra de endereços
+        if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::L)) {
+            app.navigation_state.path_input = app.navigation_state.current_path.clone();
+            app.is_address_editing = true;
+            app.address_bar_focus_request = true;
+            user_active = true;
+        }
+
+        // Ctrl+Scroll: Ajustar tamanho dos thumbnails
+        // eframe/winit converte Ctrl+Scroll em zoom_delta antes do smooth_scroll_delta
+        // Lemos zoom_delta e resetamos o fator de zoom da UI de volta a 1.0
+        let zoom_delta = ctx.input(|i| i.zoom_delta());
+        if (zoom_delta - 1.0).abs() > 0.001 {
+            // zoom_delta > 1.0 = scroll para cima (aumentar), < 1.0 = diminuir
+            // Escala: cada entalhe da roda gera delta ~0.1 → 0.1 × 24 = ~2.4px por entalhe
+            let change = (zoom_delta - 1.0) * 24.0;
+            app.thumbnail_size = (app.thumbnail_size + change).clamp(64.0, 256.0);
+            // Impede que o egui aplique o zoom à própria UI
+            ctx.set_zoom_factor(1.0);
+            app.save_preferences();
             user_active = true;
         }
 

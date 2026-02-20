@@ -34,6 +34,7 @@ pub fn render_toolbar(
     current_path: &str,
     path_input: &mut String,
     is_editing_path: &mut bool,
+    address_bar_focus_request: &mut bool,
     search_query: &mut String,
     navigation: &NavigationHistory,
     _view_mode: ViewMode,
@@ -235,6 +236,12 @@ pub fn render_toolbar(
                         && !addr_ui.input(|i| i.key_pressed(egui::Key::Enter)))
                 {
                     action = Some(ToolbarAction::CancelPathInput);
+                }
+
+                // Ctrl+L: focar o campo diretamente na response (cursor posicionado no fim)
+                if *address_bar_focus_request {
+                    edit_response.request_focus();
+                    *address_bar_focus_request = false;
                 }
 
                 if addr_ui.input(|i| i.key_pressed(egui::Key::Enter)) {

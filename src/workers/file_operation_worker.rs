@@ -104,6 +104,12 @@ impl FileOperationRequest {
             hwnd: SendHwnd(hwnd),
         }
     }
+    pub fn delete_permanently(paths: Vec<PathBuf>, hwnd: HWND) -> Self {
+        Self::DeletePermanently {
+            physical_paths: paths,
+            hwnd: SendHwnd(hwnd),
+        }
+    }
     pub fn rename(path: PathBuf, new_name: String, hwnd: HWND) -> Self {
         Self::Rename {
             path,

@@ -38,6 +38,7 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                 &app.navigation_state.current_path,
                 &mut app.navigation_state.path_input,
                 &mut app.is_address_editing,
+                &mut app.address_bar_focus_request,
                 &mut app.search_query,
                 &app.navigation_state.navigation,
                 app.view_mode,

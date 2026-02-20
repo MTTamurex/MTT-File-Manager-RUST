@@ -75,6 +75,40 @@ impl ImageViewerApp {
         self.delete_with_shell_for_paths(&paths);
     }
 
+    pub fn delete_permanently_for_idx(&mut self, idx: Option<usize>) {
+        let paths = self.context_target_paths(idx);
+        if paths.is_empty() {
+            return;
+        }
+
+        self.file_operation_state.file_ops_in_progress += 1;
+        let _ = self.file_operation_state.file_op_sender.send(
+            crate::workers::file_operation_worker::FileOperationRequest::delete_permanently(
+                paths.clone(),
+                self.native_hwnd.unwrap_or_default(),
+            ),
+        );
+
+        for path in &paths {
+            self.file_operation_state
+                .pending_deletions
+                .insert(path.clone(), ());
+        }
+        self.thumbnail_queue.remove_paths(&paths);
+
+        for path in &paths {
+            self.disk_cache.remove_cache_for_path(path);
+            self.multi_selection.remove(path);
+        }
+
+        if let Some(selected) = &self.selected_file {
+            if paths.contains(&selected.path) {
+                self.selected_item = None;
+                self.selected_file = None;
+            }
+        }
+    }
+
     pub fn delete_with_shell_for_paths(&mut self, paths: &[PathBuf]) {
         if paths.is_empty() {
             return;
