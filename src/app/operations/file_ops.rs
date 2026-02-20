@@ -6,8 +6,81 @@ use crate::app::state::ImageViewerApp;
 use crate::application::file_operations;
 use crate::domain::file_entry::FileEntry;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+const SHELL_OPEN_CONFIRMATION_WINDOW: Duration = Duration::from_secs(10);
+
+fn is_explicit_shell_namespace_path(path: &Path) -> bool {
+    let raw = path.to_string_lossy();
+    let trimmed = raw.trim();
+
+    if trimmed.starts_with("shell:") {
+        return true;
+    }
+
+    let normalized = trimmed
+        .strip_prefix(r"\\?\")
+        .or_else(|| trimmed.strip_prefix(r"\\.\"))
+        .unwrap_or(trimmed);
+
+    normalized.starts_with("::")
+}
+
+fn is_unc_path(path: &Path) -> bool {
+    let s = path.to_string_lossy();
+    if !s.starts_with(r"\\") {
+        return false;
+    }
+
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) => rest.starts_with("UNC\\"),
+        None => true,
+    }
+}
+
+fn is_high_risk_shell_open_source(path: &Path) -> bool {
+    is_unc_path(path) || is_explicit_shell_namespace_path(path)
+}
 
 impl ImageViewerApp {
+    pub fn open_with_shell_guarded(&mut self, path: &Path) {
+        if is_high_risk_shell_open_source(path) {
+            let now = Instant::now();
+            let confirmed = self
+                .pending_shell_open_confirmation
+                .as_ref()
+                .map(|(pending_path, pending_at)| {
+                    pending_path == path
+                        && now.duration_since(*pending_at) <= SHELL_OPEN_CONFIRMATION_WINDOW
+                })
+                .unwrap_or(false);
+
+            if !confirmed {
+                self.pending_shell_open_confirmation = Some((path.to_path_buf(), now));
+                self.notifications.push(crate::application::AppNotification::warning(
+                    "Fonte de alto risco (UNC/Shell). Clique novamente para confirmar a abertura."
+                        .to_string(),
+                ));
+                return;
+            }
+
+            self.pending_shell_open_confirmation = None;
+        } else {
+            self.pending_shell_open_confirmation = None;
+        }
+
+        if let Err(e) = file_operations::open_with_shell(path, self.native_hwnd) {
+            log::warn!(
+                "[SECURITY] Shell open failed for '{}': {}",
+                path.display(),
+                e
+            );
+            self.notifications.push(crate::application::AppNotification::warning(
+                "Falha ao abrir item com o aplicativo padrão.".to_string(),
+            ));
+        }
+    }
+
     pub fn delete_with_shell_for_idx(&mut self, idx: Option<usize>) {
         let paths = self.context_target_paths(idx);
         self.delete_with_shell_for_paths(&paths);

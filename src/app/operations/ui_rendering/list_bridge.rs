@@ -14,16 +14,7 @@ use crate::ui::views::{list_view, ListViewContext, ListViewOperations};
 
 // Helper function equivalent to open_with_shell from ops
 fn open_with_shell(app: &mut ImageViewerApp, path: &Path) {
-    if let Err(e) = crate::application::file_operations::open_with_shell(path, None) {
-        log::warn!(
-            "[SECURITY] Shell open failed for '{}': {}",
-            path.display(),
-            e
-        );
-        app.notifications.push(crate::application::AppNotification::warning(
-            "Falha ao abrir item com o aplicativo padrão.".to_string(),
-        ));
-    }
+    app.open_with_shell_guarded(path);
 }
 
 /// Action types for list view operations

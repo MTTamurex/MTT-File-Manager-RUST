@@ -61,10 +61,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         if path.is_dir() {
                             app.navigate_to(&path.to_string_lossy());
                         } else {
-                            let _ = crate::application::file_operations::open_with_shell(
-                                &path,
-                                app.native_hwnd,
-                            );
+                            app.open_with_shell_guarded(&path);
                         }
                     }
                 }
