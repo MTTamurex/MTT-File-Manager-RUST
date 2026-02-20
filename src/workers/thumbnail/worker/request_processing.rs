@@ -26,7 +26,10 @@ pub(super) fn process_thumbnail_request(
     pending_deletions: &dashmap::DashMap<std::path::PathBuf, ()>,
     last_repaint: &mut Instant,
 ) {
-    use crate::workers::thumbnail::{is_known_failure, mark_as_failed};
+    use crate::workers::thumbnail::{
+        clear_failure_cache, clear_transient_failure, is_known_failure, mark_as_failed,
+        mark_as_transient_failure,
+    };
 
     // EARLY EXIT 1: Skip files that already failed in this session.
     // Prevents repeated slow retries on broken files (e.g., 0x8004B205).
@@ -87,6 +90,7 @@ pub(super) fn process_thumbnail_request(
 
     // If DB cache hit, send result and return - no source drive I/O needed.
     if let Some((data, w, h)) = final_result {
+        clear_failure_cache(path);
         let _ = tx.send(ThumbnailData {
             path: path.clone(),
             image_data: data,
@@ -118,11 +122,20 @@ pub(super) fn process_thumbnail_request(
                 return;
             }
             IoTimeoutResult::Timeout => {
+                mark_as_transient_failure(path.clone());
                 log::warn!("[THUMB WORKER] exists() timeout for {:?}", path);
             }
             IoTimeoutResult::Ok(true) => {}
             IoTimeoutResult::Err(_) => {
-                mark_as_failed(path.clone());
+                mark_as_transient_failure(path.clone());
+                let _ = tx.send(ThumbnailData {
+                    path: path.clone(),
+                    image_data: Vec::new(),
+                    width: 0,
+                    height: 0,
+                    generation: req_gen,
+                    not_found: false,
+                });
                 throttle_repaint_with_priority(ctx, last_repaint, req_priority);
                 return;
             }
@@ -130,7 +143,7 @@ pub(super) fn process_thumbnail_request(
 
         // EARLY EXIT 3: skip cloud-only OneDrive files (not downloaded).
         if !onedrive::is_locally_available_safe(path) {
-            mark_as_failed(path.clone());
+            mark_as_transient_failure(path.clone());
             let _ = tx.send(ThumbnailData {
                 path: path.clone(),
                 image_data: Vec::new(),
@@ -167,10 +180,14 @@ pub(super) fn process_thumbnail_request(
         match onedrive::onedrive_metadata(path) {
             IoTimeoutResult::Ok(metadata) => metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
             IoTimeoutResult::Timeout => {
+                mark_as_transient_failure(path.clone());
                 log::warn!("[THUMB WORKER] metadata() timeout for {:?}", path);
                 SystemTime::UNIX_EPOCH
             }
-            IoTimeoutResult::Err(_) => SystemTime::UNIX_EPOCH,
+            IoTimeoutResult::Err(_) => {
+                mark_as_transient_failure(path.clone());
+                SystemTime::UNIX_EPOCH
+            }
         }
     };
 
@@ -187,6 +204,15 @@ pub(super) fn process_thumbnail_request(
     if final_result.is_none() {
         // Cancellation: skip extraction if file is pending deletion.
         if pending_deletions.contains_key(path) {
+            let _ = tx.send(ThumbnailData {
+                path: path.clone(),
+                image_data: Vec::new(),
+                width: 0,
+                height: 0,
+                generation: req_gen,
+                not_found: false,
+            });
+            throttle_repaint_with_priority(ctx, last_repaint, req_priority);
             return;
         }
 
@@ -211,9 +237,10 @@ pub(super) fn process_thumbnail_request(
             }
 
             final_result = Some(resized);
+            clear_transient_failure(path);
         } else {
             // Extraction failed: mark as failed to skip future attempts.
-            mark_as_failed(path.clone());
+            mark_as_transient_failure(path.clone());
         }
 
         // Release slot.

@@ -114,17 +114,24 @@ impl ImageViewerApp {
 
             incoming_count += 1;
             if thumbnail_data.generation != self.generation {
+                self.cache_manager.finish_loading(&thumbnail_data.path);
+                self.cache_manager
+                    .finish_pending_upload(&thumbnail_data.path);
                 continue;
             }
 
             self.cache_manager.finish_loading(&thumbnail_data.path);
 
             if thumbnail_data.image_data.is_empty() {
-                self.cache_manager
-                    .mark_as_failed(thumbnail_data.path.clone());
-
                 if thumbnail_data.not_found {
+                    self.cache_manager
+                        .mark_as_failed(thumbnail_data.path.clone());
                     not_found_failures.push(thumbnail_data.path.clone());
+                } else {
+                    log::debug!(
+                        "[THUMB-UPLOAD] transient thumbnail miss for {:?}; allowing automatic retry",
+                        thumbnail_data.path
+                    );
                 }
 
                 continue;
@@ -316,6 +323,18 @@ impl ImageViewerApp {
             None
         };
         let mut deferred_count = 0;
+        let offscreen_upload_budget = if is_scrolling {
+            if is_performance_critical {
+                0
+            } else if is_performance_severe {
+                1
+            } else {
+                2
+            }
+        } else {
+            usize::MAX
+        };
+        let mut offscreen_uploads = 0usize;
 
         while uploads_this_frame < max_uploads_per_frame {
             if let Some(thumbnail_data) = self.pending_thumbnails.pop_front() {
@@ -345,12 +364,16 @@ impl ImageViewerApp {
 
                 if let Some(vis) = visible_paths {
                     if !vis.contains(&thumbnail_data.path) {
-                        self.pending_thumbnails.push_back(thumbnail_data);
-                        deferred_count += 1;
-                        if deferred_count > max_uploads_per_frame * 3 {
-                            break;
+                        if offscreen_uploads >= offscreen_upload_budget {
+                            self.pending_thumbnails.push_back(thumbnail_data);
+                            deferred_count += 1;
+                            if deferred_count > max_uploads_per_frame * 3 {
+                                break;
+                            }
+                            continue;
                         }
-                        continue;
+
+                        offscreen_uploads += 1;
                     }
                 }
 
