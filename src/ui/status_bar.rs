@@ -137,11 +137,8 @@ pub fn render_status_bar(
         ui.visuals_mut().widgets.active.fg_stroke = egui::Stroke::NONE;
 
         ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.add_space(0.5);
-                ui.horizontal(|ui| {
-                    // === LEFTMOST: Virtual drive settings button ===
-                    if ui
+            // === LEFTMOST: Virtual drive settings button ===
+            if ui
                 .button(egui::RichText::new("⚙").color(egui::Color32::BLACK))
                 .on_hover_text("Configurar otimização de drives virtuais")
                 .clicked()
@@ -191,10 +188,17 @@ pub fn render_status_bar(
                     action = StatusBarAction::ShowHiddenChanged;
                 }
             }
-                }); // end icon buttons inner horizontal
-            }); // end icon buttons vertical
 
             ui.separator();
+
+            // Wrap text items in a Frame with asymmetric bottom margin.
+            // This shifts content UP by ~0.5px without changing the row height
+            // (because buttons/eye are taller, so the Frame never becomes the
+            // tallest element → no coupling / vicious circle).
+            egui::Frame::none()
+                .inner_margin(egui::Margin { left: 0, right: 0, top: 0, bottom: 2 })
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
 
             // === LEFT SIDE: Item count and loading status ===
             if *is_loading_folder {
@@ -300,6 +304,9 @@ pub fn render_status_bar(
                     action = StatusBarAction::SortChanged;
                 }
             });
+
+                    }); // end text items horizontal
+                }); // end Frame
 
             ui.separator();
 
