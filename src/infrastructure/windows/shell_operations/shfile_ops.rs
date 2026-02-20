@@ -70,6 +70,33 @@ pub fn delete_items_with_shell(paths: &[PathBuf], hwnd: HWND) -> bool {
     result == 0 && op.fAnyOperationsAborted.0 == 0
 }
 
+/// Permanently deletes multiple files using Windows Shell (sem lixeira, com diálogo de confirmação).
+/// Equivalente ao Shift+Delete do Explorer.
+/// Returns true if operation was successful (not cancelled).
+pub fn delete_items_permanently_with_shell(paths: &[PathBuf], hwnd: HWND) -> bool {
+    if paths.is_empty() {
+        return false;
+    }
+
+    let from_vec = paths_to_double_null_terminated(paths);
+
+    let mut op = SHFILEOPSTRUCTW {
+        hwnd,
+        wFunc: FO_DELETE,
+        pFrom: PCWSTR(from_vec.as_ptr()),
+        pTo: PCWSTR::default(),
+        // Sem FOF_ALLOWUNDO = exclusão permanente
+        // FOF_WANTNUKEWARNING = diálogo nativo "tem certeza?" do Windows
+        fFlags: FOF_WANTNUKEWARNING.0 as u16,
+        ..Default::default()
+    };
+
+    // SAFETY: op is initialized with valid double-null terminated string buffer.
+    let result = unsafe { SHFileOperationW(&mut op) };
+
+    result == 0 && op.fAnyOperationsAborted.0 == 0
+}
+
 /// Renames a file or directory using Windows Shell.
 /// Returns true if operation was successful.
 pub fn rename_item_with_shell(path: &Path, new_name: &str, hwnd: HWND) -> bool {

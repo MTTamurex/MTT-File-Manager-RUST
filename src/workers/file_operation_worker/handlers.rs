@@ -256,10 +256,20 @@ pub(super) fn handle_delete_permanently(
 ) {
     match sanitize_operation_paths(&physical_paths) {
         Ok(valid_paths) => {
+            if valid_paths.is_empty() {
+                return;
+            }
+            shell_operations::delete_items_permanently_with_shell(&valid_paths, hwnd.0);
+            let mut parents = std::collections::HashSet::new();
             for path in &valid_paths {
-                if recycle_bin::delete_permanently(path, hwnd.0).is_err() {
-                    break;
+                if let Some(parent) = path.parent() {
+                    parents.insert(parent.to_path_buf());
                 }
+            }
+            if !parents.is_empty() {
+                let _ = result_sender.send(FileOperationResult::DeleteCompleted {
+                    parent_folders: parents.into_iter().collect(),
+                });
             }
             let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
         }

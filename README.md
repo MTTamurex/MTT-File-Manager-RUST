@@ -141,18 +141,15 @@ winget install Microsoft.EdgeWebView2Runtime
 - **Delete** - Mover para lixeira
 - **Shift+Delete** - Deletar permanentemente
 - **F2** - Renomear
-- **Ctrl+R** - Recarregar pasta
+- **F5** - Recarregar pasta
 - **Alt+Enter** - Propriedades
 - **Ctrl+Shift+F** - Busca global (todos os volumes)
 - **Ctrl+L** - Focar barra de endereços
-- **Ctrl+D** - Duplicar aba
 
 ### Dicas de Uso
 1. **Thumbnail Size**: Use Ctrl+Roda do mouse para ajustar tamanho dos thumbnails
 2. **Multi-seleção**: Segure Ctrl para selecionar múltiplos arquivos
-3. **Preview Rápido**: Selecione um arquivo e use espaço para preview
-4. **Navegação Rápida**: Use Backspace para voltar, Alt+Setas para histórico
-5. **Busca**: Comece a digitar para buscar arquivos na pasta atual
+3. **Busca**: Comece a digitar para buscar arquivos na pasta atual
 
 ### Visualização de Mídia
 - **Imagens**: JPG, PNG, GIF, WebP, BMP, TIFF, SVG
@@ -388,23 +385,5 @@ Use o [playbook de suporte](docs/09_support_playbook.md) para reportar issues:
 ⚠️ **Licença não especificada no código atual**
 
 Este projeto atualmente não tem uma licença definida. Por favor, entre em contato com os mantenedores para informações sobre licenciamento.
-
-## 🙏 Agradecimentos
-
-- **Rust Community** - Por uma linguagem incrível
-- **egui/eframe** - Framework de GUI excelente
-- **windows-rs** - Bindings seguros para Windows
-- **libmpv** - Player de vídeo de alta performance
-- **Contribuidores** - Todos que contribuem para o projeto
-
-## 📞 Suporte
-
-Para suporte:
-1. Consulte a [documentação](docs/) primeiro
-2. Use o [playbook de suporte](docs/09_support_playbook.md)
-3. Reporte issues com informações completas
-4. Inclua logs e detalhes de reprodução
-
----
 
 **MTT File Manager** - Um gerenciador de arquivos moderno, rápido e nativo para Windows.
