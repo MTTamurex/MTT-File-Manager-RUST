@@ -58,40 +58,61 @@ pub struct ThumbnailDiskCache {
 }
 
 impl ThumbnailDiskCache {
+    fn harden_directory_permissions(cache_dir: &Path) -> bool {
+        let Ok(username) = std::env::var("USERNAME") else {
+            log::warn!(
+                "[DISK-CACHE] USERNAME env not available; skipping ACL hardening for {:?}",
+                cache_dir
+            );
+            return false;
+        };
+
+        use std::os::windows::process::CommandExt;
+        let dir_str = cache_dir.to_string_lossy().to_string();
+        let grant_arg = format!("{}:(OI)(CI)F", username);
+
+        for args in [
+            vec![dir_str.as_str(), "/inheritance:r"],
+            vec![dir_str.as_str(), "/grant:r", grant_arg.as_str()],
+        ] {
+            match std::process::Command::new("icacls")
+                .args(&args)
+                .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                .status()
+            {
+                Err(e) => {
+                    log::warn!("[DISK-CACHE] icacls failed for {:?}: {}", cache_dir, e);
+                    return false;
+                }
+                Ok(status) if !status.success() => {
+                    log::warn!("[DISK-CACHE] icacls exited with {} for {:?}", status, cache_dir);
+                    return false;
+                }
+                Ok(_) => {}
+            }
+        }
+
+        true
+    }
+
     /// Creates a new disk cache at the specified directory
     pub fn new(cache_dir: PathBuf) -> rusqlite::Result<Self> {
         // Ensure directory exists
-        let created = !cache_dir.exists();
-        if created {
-            let _ = fs::create_dir_all(&cache_dir);
+        if let Err(e) = fs::create_dir_all(&cache_dir) {
+            log::warn!(
+                "[DISK-CACHE] Failed to ensure cache directory {:?}: {}",
+                cache_dir,
+                e
+            );
         }
 
         // Harden directory permissions on first creation: restrict to owner
         // to prevent cache poisoning by other local users.
-        if created {
-            if let Ok(username) = std::env::var("USERNAME") {
-                use std::os::windows::process::CommandExt;
-                let dir_str = cache_dir.to_string_lossy().to_string();
-                let grant_arg = format!("{}:(OI)(CI)F", username);
-                for args in [
-                    vec![dir_str.as_str(), "/inheritance:r"],
-                    vec![dir_str.as_str(), "/grant:r", grant_arg.as_str()],
-                ] {
-                    match std::process::Command::new("icacls")
-                        .args(&args)
-                        .creation_flags(0x08000000) // CREATE_NO_WINDOW
-                        .status()
-                    {
-                        Err(e) => {
-                            log::warn!("[DISK-CACHE] icacls failed for {:?}: {}", cache_dir, e)
-                        }
-                        Ok(status) if !status.success() => {
-                            log::warn!("[DISK-CACHE] icacls exited with {}", status);
-                        }
-                        Ok(_) => {}
-                    }
-                }
-            }
+        if !Self::harden_directory_permissions(&cache_dir) {
+            log::warn!(
+                "[DISK-CACHE] Primary cache directory ACL hardening failed for {:?}",
+                cache_dir
+            );
         }
 
         // Clean up legacy files if they exist (Migration)
@@ -118,10 +139,27 @@ impl ThumbnailDiskCache {
                 );
 
                 if let Some(parent) = temp_fallback_path.parent() {
-                    let _ = fs::create_dir_all(parent);
+                    if let Err(e) = fs::create_dir_all(parent) {
+                        log::warn!(
+                            "[Cache] Failed to ensure temporary fallback directory {:?}: {}",
+                            parent,
+                            e
+                        );
+                    }
                 }
 
-                match Connection::open(&temp_fallback_path) {
+                let temp_parent_hardened = temp_fallback_path
+                    .parent()
+                    .map(Self::harden_directory_permissions)
+                    .unwrap_or(false);
+
+                if !temp_parent_hardened {
+                    log::warn!(
+                        "[Cache] Temporary fallback directory ACL hardening failed. Using in-memory cache instead."
+                    );
+                    Connection::open_in_memory()?
+                } else {
+                    match Connection::open(&temp_fallback_path) {
                     Ok(c) => {
                         log::warn!(
                             "[Cache] Using temporary fallback database at {:?}",
@@ -136,6 +174,7 @@ impl ThumbnailDiskCache {
                             temp_err
                         );
                         Connection::open_in_memory()?
+                    }
                     }
                 }
             }
