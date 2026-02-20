@@ -139,8 +139,12 @@ pub fn collect_authorized_search_page(
         }
     }
 
-    // Safety cap reached with pending raw pages: keep pagination open.
-    if batches >= AUTHZ_MAX_BATCHES && raw_has_more {
+    // Safety cap reached with pending raw pages: keep pagination open only
+    // when items were emitted so the caller can advance the offset. If zero
+    // authorized items were collected the caller's offset cannot advance and
+    // returning has_more=true would cause an infinite retry with the same
+    // offset (raw_offset always restarts from 0 on each call).
+    if batches >= AUTHZ_MAX_BATCHES && raw_has_more && !authorized_items.is_empty() {
         has_more_authorized = true;
     }
 
