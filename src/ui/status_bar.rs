@@ -138,7 +138,7 @@ pub fn render_status_bar(
 
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.add_space(-0.5);
+                ui.add_space(0.5);
                 ui.horizontal(|ui| {
                     // === LEFTMOST: Virtual drive settings button ===
                     if ui
@@ -166,7 +166,7 @@ pub fn render_status_bar(
                 action = StatusBarAction::BulkThumbnailScan;
             }
 
-            ui.separator();
+            ui.add(egui::Separator::default().grow(6.0));
 
             // === SHOW HIDDEN FILES TOGGLE ===
             {
