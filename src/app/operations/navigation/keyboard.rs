@@ -57,6 +57,11 @@ pub fn process_list_keyboard_input(
     row_height: f32,
     viewport_h: f32,
 ) -> KeyboardNavResult {
+    // Não capturar teclas quando um campo de texto (endereço, busca) está com foco
+    if ui.ctx().wants_keyboard_input() {
+        return KeyboardNavResult::no_action();
+    }
+
     let mut pending_delta: i32 = 0;
     let mut page_action: Option<bool> = None;
 
@@ -123,6 +128,11 @@ pub fn process_grid_keyboard_input(
     cell_h: f32,
     viewport_h: f32,
 ) -> KeyboardNavResult {
+    // Não capturar teclas quando um campo de texto (endereço, busca) está com foco
+    if ui.ctx().wants_keyboard_input() {
+        return KeyboardNavResult::no_action();
+    }
+
     let mut pending_delta: i32 = 0;
     let mut page_action: Option<bool> = None;
 
