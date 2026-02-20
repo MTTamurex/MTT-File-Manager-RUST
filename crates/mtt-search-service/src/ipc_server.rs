@@ -18,7 +18,8 @@ use windows::Win32::System::IO::OVERLAPPED;
 
 use windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES;
 
-use crate::file_index::{self, IndexState, VolumeIndex};
+use crate::file_index::{IndexState, VolumeIndex};
+use crate::ipc_authorization::collect_authorized_search_page;
 use mtt_search_protocol::*;
 
 const PIPE_BUFFER_SIZE: u32 = 64 * 1024;
@@ -474,27 +475,22 @@ fn handle_client(
                     poisoned.into_inner()
                 }
             };
-            let page = file_index::search_page(&indices_lock, &text, offset, limit);
-
-            let items: Vec<SearchResultItem> = page
-                .items
-                .into_iter()
-                .map(|r| SearchResultItem {
-                    name: r.name,
-                    full_path: r.full_path,
-                    is_dir: r.is_dir,
-                    size: 0,
-                })
-                .collect();
-
-            let _ = send_response(
-                pipe,
-                &SearchResponse::Results {
-                    items,
-                    has_more: page.has_more,
-                    total_matches: page.total_matches.map(|v| v as u32),
-                },
-            );
+            match collect_authorized_search_page(pipe, &indices_lock, &text, offset, limit) {
+                Ok(page) => {
+                    let _ = send_response(
+                        pipe,
+                        &SearchResponse::Results {
+                            items: page.items,
+                            has_more: page.has_more,
+                            total_matches: page.total_matches,
+                        },
+                    );
+                }
+                Err(e) => {
+                    eprintln!("[IPC] Authorization check failed: {}", e);
+                    let _ = send_response(pipe, &SearchResponse::Error("Authorization failed".to_string()));
+                }
+            }
         }
     }
 }
