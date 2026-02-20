@@ -120,6 +120,17 @@ pub fn has_files_in_clipboard() -> bool {
     get_files_from_clipboard().is_some_and(|files| !files.is_empty())
 }
 
+/// Gets the current Windows clipboard sequence number.
+///
+/// This increments whenever clipboard content changes and is used to detect
+/// when internal file clipboard fallback becomes stale (e.g. user copied text).
+pub fn clipboard_sequence_number() -> Option<u32> {
+    use windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
+
+    let seq = unsafe { GetClipboardSequenceNumber() };
+    if seq == 0 { None } else { Some(seq) }
+}
+
 // --- Internal helper functions ---
 
 /// Sets the preferred drop effect in the clipboard

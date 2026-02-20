@@ -15,6 +15,8 @@ pub struct ClipboardManager {
     /// Internal clipboard state (fallback/cache)
     internal_files: Vec<PathBuf>,
     internal_op: Option<ClipboardOp>,
+    /// Clipboard sequence when internal file state was last synced to system clipboard.
+    internal_sync_sequence: Option<u32>,
 }
 
 impl ClipboardManager {
@@ -29,13 +31,18 @@ impl ClipboardManager {
 
     /// Checks if there is content to paste (System or Internal)
     pub fn has_content(&self) -> bool {
-        windows_clipboard::has_files_in_clipboard() || !self.internal_files.is_empty()
+        if windows_clipboard::has_files_in_clipboard() {
+            return true;
+        }
+
+        self.has_internal_content_for_sequence(windows_clipboard::clipboard_sequence_number())
     }
 
     /// Clears the internal clipboard state
     pub fn clear(&mut self) {
         self.internal_files.clear();
         self.internal_op = None;
+        self.internal_sync_sequence = None;
     }
 
     /// Copy files to clipboard (System + Internal)
@@ -44,10 +51,14 @@ impl ClipboardManager {
             return;
         }
 
-        // 1. System Clipboard (Just copy first path as text for now, should improve later)
-        if let Some(first) = paths.first() {
-            let _ = file_operations::copy_path_to_clipboard(first);
+        // 1. System Clipboard (prefer native file payload; fallback to text path)
+        if windows_clipboard::copy_files_to_clipboard(paths).is_err() {
+            if let Some(first) = paths.first() {
+                let _ = file_operations::copy_path_to_clipboard(first);
+            }
         }
+
+        self.internal_sync_sequence = windows_clipboard::clipboard_sequence_number();
 
         // 2. Internal State
         self.internal_files = paths.to_vec();
@@ -60,10 +71,14 @@ impl ClipboardManager {
             return;
         }
 
-        // 1. System Clipboard
-        if let Some(first) = paths.first() {
-            let _ = file_operations::copy_path_to_clipboard(first);
+        // 1. System Clipboard (prefer native file payload; fallback to text path)
+        if windows_clipboard::cut_files_to_clipboard(paths).is_err() {
+            if let Some(first) = paths.first() {
+                let _ = file_operations::copy_path_to_clipboard(first);
+            }
         }
+
+        self.internal_sync_sequence = windows_clipboard::clipboard_sequence_number();
 
         // 2. Internal State
         self.internal_files = paths.to_vec();
@@ -81,11 +96,84 @@ impl ClipboardManager {
         }
 
         // 2. Fallback to Internal
-        if !self.internal_files.is_empty() {
-            let is_move = matches!(self.internal_op, Some(ClipboardOp::Move));
-            return Some((self.internal_files.clone(), is_move));
+        self.internal_files_to_paste_for_sequence(windows_clipboard::clipboard_sequence_number())
+    }
+
+    fn has_internal_content_for_sequence(&self, current_sequence: Option<u32>) -> bool {
+        self.internal_files_to_paste_for_sequence(current_sequence)
+            .is_some_and(|(files, _)| !files.is_empty())
+    }
+
+    fn internal_files_to_paste_for_sequence(
+        &self,
+        current_sequence: Option<u32>,
+    ) -> Option<(Vec<PathBuf>, bool)> {
+        if self.internal_files.is_empty() {
+            return None;
         }
 
-        None
+        if let (Some(internal_seq), Some(current_seq)) =
+            (self.internal_sync_sequence, current_sequence)
+        {
+            // Clipboard changed since our last file copy/cut (e.g. user copied text).
+            // Ignore stale internal fallback to avoid unintended file paste.
+            if internal_seq != current_seq {
+                return None;
+            }
+        }
+
+        let is_move = matches!(self.internal_op, Some(ClipboardOp::Move));
+        Some((self.internal_files.clone(), is_move))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ClipboardManager, ClipboardOp};
+    use std::path::PathBuf;
+
+    #[test]
+    fn internal_fallback_is_ignored_when_clipboard_sequence_changes() {
+        let manager = ClipboardManager {
+            internal_files: vec![PathBuf::from(r"C:\\temp\\a.txt")],
+            internal_op: Some(ClipboardOp::Copy),
+            internal_sync_sequence: Some(10),
+        };
+
+        assert!(manager.internal_files_to_paste_for_sequence(Some(11)).is_none());
+        assert!(!manager.has_internal_content_for_sequence(Some(11)));
+    }
+
+    #[test]
+    fn internal_fallback_is_kept_when_clipboard_sequence_matches() {
+        let manager = ClipboardManager {
+            internal_files: vec![PathBuf::from(r"C:\\temp\\a.txt")],
+            internal_op: Some(ClipboardOp::Move),
+            internal_sync_sequence: Some(22),
+        };
+
+        let (files, is_move) = manager
+            .internal_files_to_paste_for_sequence(Some(22))
+            .expect("expected internal clipboard fallback when sequence matches");
+
+        assert_eq!(files, vec![PathBuf::from(r"C:\\temp\\a.txt")]);
+        assert!(is_move);
+        assert!(manager.has_internal_content_for_sequence(Some(22)));
+    }
+
+    #[test]
+    fn internal_fallback_works_without_sequence_information() {
+        let manager = ClipboardManager {
+            internal_files: vec![PathBuf::from(r"C:\\temp\\a.txt")],
+            internal_op: Some(ClipboardOp::Copy),
+            internal_sync_sequence: None,
+        };
+
+        let (files, is_move) = manager
+            .internal_files_to_paste_for_sequence(None)
+            .expect("expected fallback when no sequence info is available");
+
+        assert_eq!(files.len(), 1);
+        assert!(!is_move);
     }
 }

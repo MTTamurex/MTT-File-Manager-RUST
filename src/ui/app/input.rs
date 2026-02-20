@@ -42,6 +42,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         let mut do_copy = false;
         let mut do_cut = false;
         let mut do_paste = false;
+        let text_input_active = ctx.wants_keyboard_input();
 
         ctx.input(|i| {
             // INTERACTION MODE DETECTION
@@ -83,9 +84,9 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
                         if *pressed && modifiers.ctrl {
                             match key {
-                                egui::Key::C => do_copy = true,
-                                egui::Key::X => do_cut = true,
-                                egui::Key::V => do_paste = true,
+                                egui::Key::C if !text_input_active => do_copy = true,
+                                egui::Key::X if !text_input_active => do_cut = true,
+                                egui::Key::V if !text_input_active => do_paste = true,
                                 // TAB MANAGEMENT SHORTCUTS
                                 egui::Key::T => {
                                     let prev_view_mode = app.view_mode;
@@ -126,15 +127,15 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
                             }
                         }
                     }
-                    egui::Event::Copy => {
+                    egui::Event::Copy if !text_input_active => {
                         do_copy = true;
                         user_active = true;
                     }
-                    egui::Event::Cut => {
+                    egui::Event::Cut if !text_input_active => {
                         do_cut = true;
                         user_active = true;
                     }
-                    egui::Event::Paste(_) => {
+                    egui::Event::Paste(_) if !text_input_active => {
                         do_paste = true;
                         user_active = true;
                     }
@@ -148,7 +149,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         let v_down = unsafe { GetAsyncKeyState(0x56) < 0 };
 
         // Debounced paste detection
-        if ctrl_down && v_down && !app.paste_key_debounce {
+        if ctrl_down && v_down && !app.paste_key_debounce && !text_input_active {
             do_paste = true;
             app.paste_key_debounce = true;
         } else if !v_down {
