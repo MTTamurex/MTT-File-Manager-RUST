@@ -96,9 +96,7 @@ pub(super) fn render_results_panel(
         app.global_search.selected_index = None;
     }
     if app.global_search.selected_index.is_some_and(|idx| {
-        !filtered_indices
-            .iter()
-            .any(|filtered_idx| *filtered_idx == idx)
+        !filtered_indices.contains(&idx)
     }) {
         app.global_search.selected_index = None;
     }

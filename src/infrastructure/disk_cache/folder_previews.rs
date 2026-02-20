@@ -76,7 +76,7 @@ impl ThumbnailDiskCache {
         let expected_len = (width as usize)
             .checked_mul(height as usize)
             .and_then(|n| n.checked_mul(4));
-        if expected_len.map_or(true, |n| rgba_data.len() != n) {
+        if expected_len != Some(rgba_data.len()) {
             return;
         }
 

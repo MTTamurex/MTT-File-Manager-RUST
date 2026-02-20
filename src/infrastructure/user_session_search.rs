@@ -248,6 +248,12 @@ impl UserSessionSearchIndex {
     }
 }
 
+impl Default for UserSessionSearchIndex {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn apply_event_to_volume(volume: &mut IndexedVolume, event: &DriveWatcherEvent) {
     match event {
         DriveWatcherEvent::Created(path) | DriveWatcherEvent::Modified(path) => {

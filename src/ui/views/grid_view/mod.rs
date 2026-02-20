@@ -260,10 +260,10 @@ pub fn render_grid_view(
     let max_scroll = (total_content_height - viewport_h).max(0.0);
     let pointer_over_viewport = ui.ctx().pointer_hover_pos().is_some_and(|pos| {
         viewport_rect.contains(pos)
-            && !ui
+            && ui
                 .ctx()
                 .layer_id_at(pos)
-                .is_some_and(|layer| layer.order == egui::Order::Foreground)
+                .is_none_or(|layer| layer.order != egui::Order::Foreground)
     });
     let consume_scroll = pointer_over_viewport && !ctx.global_search_active;
 

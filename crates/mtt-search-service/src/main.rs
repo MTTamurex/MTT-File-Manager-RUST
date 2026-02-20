@@ -5,6 +5,7 @@ mod ipc_authorization;
 mod ipc_server;
 mod name_arena;
 mod path_resolver;
+mod security_policy;
 mod service_control;
 mod usn_journal;
 mod volume_indexers;
@@ -56,9 +57,9 @@ fn main() {
             if let Err(e) = service_control::run_as_service() {
                 eprintln!("[SERVICE] Failed to start service dispatcher: {}", e);
                 eprintln!("[SERVICE] If running from command line, use one of:");
-                eprintln!("  mtt-search-service.exe install       - Install as Windows service");
-                eprintln!("  mtt-search-service.exe uninstall     - Remove Windows service");
-                eprintln!("  mtt-search-service.exe run-console   - Run in console mode");
+                eprintln!("  mtt-search-service.exe install                 - Install as LocalSystem");
+                eprintln!("  mtt-search-service.exe uninstall               - Remove Windows service");
+                eprintln!("  mtt-search-service.exe run-console             - Run in console mode");
             }
         }
     }

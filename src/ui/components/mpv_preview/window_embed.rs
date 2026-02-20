@@ -185,6 +185,13 @@ impl VideoSurface {
     }
 }
 
+#[cfg(target_os = "windows")]
+impl Default for VideoSurface {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(not(target_os = "windows"))]
 impl VideoSurface {
     pub fn new() -> Self {

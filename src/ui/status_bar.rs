@@ -157,14 +157,13 @@ pub fn render_status_bar(
                         .color(egui::Color32::BLACK)
                         .small()
                 );
-            } else if !is_computer_view {
-                if ui
+            } else if !is_computer_view
+                && ui
                     .button(egui::RichText::new("🖼").color(egui::Color32::BLACK))
                     .on_hover_text("Gerar thumbnails para todas as subpastas")
                     .clicked()
-                {
-                    action = StatusBarAction::BulkThumbnailScan;
-                }
+            {
+                action = StatusBarAction::BulkThumbnailScan;
             }
 
             ui.separator();

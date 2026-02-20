@@ -236,7 +236,7 @@ impl ImageViewerApp {
     fn handle_drive_modified_event(
         &mut self,
         path: &Path,
-        current_path_norm: &str,
+        _current_path_norm: &str,
         internal_cache_root_norm: Option<&str>,
         internal_cache_root_prefix: Option<&str>,
         folders_with_changed_contents: &mut HashSet<PathBuf>,
@@ -276,6 +276,7 @@ impl ImageViewerApp {
         // navigation or manual reload (F5).
         #[cfg(debug_assertions)]
         if let Some(parent) = cleaned.parent() {
+            let current_path_norm = _current_path_norm;
             let parent_norm = Self::normalize_for_match(parent);
             if parent_norm == current_path_norm {
                 log::trace!(
@@ -286,6 +287,7 @@ impl ImageViewerApp {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn handle_drive_renamed_event(
         &mut self,
         old_path: &Path,
@@ -350,6 +352,7 @@ impl ImageViewerApp {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn process_drive_events_batch(
         &mut self,
         drive_events: &[DriveWatcherEvent],
