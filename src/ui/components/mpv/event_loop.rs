@@ -66,7 +66,7 @@ pub fn start_event_loop(
             }
 
             // --- Medium tier (~1s): volume, mute, duration ---
-            if tick_count % MEDIUM_TIER_TICKS == 0 {
+            if tick_count.is_multiple_of(MEDIUM_TIER_TICKS) {
                 if let Ok(vol) = mpv.get_property::<f64>("volume") {
                     if let Ok(mut s) = state.write() {
                         let new_vol = (vol / 100.0).clamp(0.0, 1.0) as f32;
@@ -112,7 +112,7 @@ pub fn start_event_loop(
             }
 
             // --- Slow tier (~2s): fullscreen, aspect ---
-            if tick_count % SLOW_TIER_TICKS == 0 {
+            if tick_count.is_multiple_of(SLOW_TIER_TICKS) {
                 if let Ok(fs) = mpv.get_property::<bool>("fullscreen") {
                     if let Ok(mut s) = state.write() {
                         if s.fullscreen != fs {

@@ -7,7 +7,7 @@ pub enum ShellNamespacePathKind {
     GuidIdentifier,
 }
 
-fn normalize_shell_input<'a>(raw: &'a str) -> &'a str {
+fn normalize_shell_input(raw: &str) -> &str {
     let trimmed = raw.trim();
 
     trimmed

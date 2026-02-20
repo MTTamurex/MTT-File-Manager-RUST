@@ -5,6 +5,11 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::{mpsc, Arc, Mutex};
 
+type IconRequest = (PathBuf, usize);
+type IconResponse = (PathBuf, usize, Vec<u8>, u32, u32);
+type MetadataRequest = (PathBuf, u64);
+type MetadataResponse = (PathBuf, u64, windows_infra::MediaMetadata);
+
 pub(in crate::app) fn spawn_cover_worker(
     disk_cache: Arc<ThumbnailDiskCache>,
 ) -> (
@@ -105,13 +110,10 @@ pub(in crate::app) fn spawn_async_font_loader() -> mpsc::Receiver<egui::FontDefi
 pub(in crate::app) fn spawn_icon_worker(
     ctx: &egui::Context,
     current_generation: Arc<AtomicUsize>,
-) -> (
-    mpsc::Sender<(PathBuf, usize)>,
-    mpsc::Receiver<(PathBuf, usize, Vec<u8>, u32, u32)>,
-) {
-    let (icon_req_tx, icon_req_rx_thread) = mpsc::channel::<(PathBuf, usize)>();
+) -> (mpsc::Sender<IconRequest>, mpsc::Receiver<IconResponse>) {
+    let (icon_req_tx, icon_req_rx_thread) = mpsc::channel::<IconRequest>();
     let icon_req_rx = Arc::new(Mutex::new(icon_req_rx_thread));
-    let (icon_res_tx, icon_res_rx) = mpsc::channel::<(PathBuf, usize, Vec<u8>, u32, u32)>();
+    let (icon_res_tx, icon_res_rx) = mpsc::channel::<IconResponse>();
 
     let cpu = std::thread::available_parallelism()
         .map(|n| n.get())
@@ -179,11 +181,8 @@ pub(in crate::app) fn spawn_icon_worker(
 
 pub(in crate::app) fn spawn_metadata_worker(
     ctx: &egui::Context,
-) -> (
-    mpsc::Sender<(PathBuf, u64)>,
-    mpsc::Receiver<(PathBuf, u64, windows_infra::MediaMetadata)>,
-) {
-    let (meta_req_tx, meta_req_rx) = mpsc::channel::<(PathBuf, u64)>();
+) -> (mpsc::Sender<MetadataRequest>, mpsc::Receiver<MetadataResponse>) {
+    let (meta_req_tx, meta_req_rx) = mpsc::channel::<MetadataRequest>();
     let (meta_res_tx, meta_res_rx) = mpsc::channel();
     let meta_ctx = ctx.clone();
 

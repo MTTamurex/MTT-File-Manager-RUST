@@ -176,12 +176,10 @@ impl IndexDb {
             })
             .ok()?;
 
-        for row in rows {
-            if let Ok((frn, name, parent_ref, is_dir)) = row {
-                index.insert_record(frn, &name, parent_ref, is_dir);
-                count += 1;
-                // `name` (String) is dropped here — no memory buildup
-            }
+        for (frn, name, parent_ref, is_dir) in rows.flatten() {
+            index.insert_record(frn, &name, parent_ref, is_dir);
+            count += 1;
+            // `name` (String) is dropped here — no memory buildup
         }
 
         if count == 0 { None } else { Some(count) }

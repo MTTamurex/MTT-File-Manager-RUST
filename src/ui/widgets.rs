@@ -122,6 +122,7 @@ pub fn toggle_icon_button(
 }
 
 /// Renders a toggle button with configurable icon size/padding.
+#[allow(clippy::too_many_arguments)]
 pub fn toggle_icon_button_sized(
     ui: &mut egui::Ui,
     svg_manager: &mut SvgIconManager,

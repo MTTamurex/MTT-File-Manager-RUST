@@ -12,7 +12,6 @@
 /// The arena is append-only.  Deletions leave "dead" bytes that are reclaimed
 /// when the index is persisted and reloaded (the arena is rebuilt from the
 /// surviving records).
-
 /// Compact reference to a name stored in the arena.
 /// Total size: 6 bytes (packed into 8 with alignment in CompactFileRecord).
 #[derive(Clone, Copy, Debug)]

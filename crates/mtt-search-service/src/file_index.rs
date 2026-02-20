@@ -144,6 +144,7 @@ pub struct SearchResult {
 pub struct SearchPage {
     pub items: Vec<SearchResult>,
     pub has_more: bool,
+    #[allow(dead_code)]
     pub total_matches: Option<usize>,
 }
 
@@ -217,7 +218,7 @@ pub fn search_page(
         for (&frn, record) in &index.records {
             // Check deadline every 50K records to avoid Instant::now() overhead
             scanned += 1;
-            if scanned % 50_000 == 0 && std::time::Instant::now() > deadline {
+            if scanned.is_multiple_of(50_000) && std::time::Instant::now() > deadline {
                 eprintln!(
                     "[SEARCH] Time limit reached after scanning {} records, returning {} partial results",
                     scanned,

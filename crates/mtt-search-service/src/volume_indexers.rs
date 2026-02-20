@@ -185,8 +185,8 @@ pub(crate) fn index_volume(
     };
 
     eprintln!(
-        "[USN] {}:\\ Journal ID: {}, Next USN: {}",
-        drive_letter, journal_info.journal_id, journal_info.next_usn
+        "[USN] {}:\\ Journal ID: {}, First USN: {}, Next USN: {}",
+        drive_letter, journal_info.journal_id, journal_info.first_usn, journal_info.next_usn
     );
 
     let mut index = file_index::VolumeIndex::new(drive_letter);
@@ -194,14 +194,20 @@ pub(crate) fn index_volume(
 
     // Check if we can use cached data.
     if let Some(state) = cached_state {
+        if state.drive_letter != drive_letter {
+            eprintln!(
+                "[USN] Cache drive mismatch: expected {}:\\, got {}:\\; continuing with requested volume",
+                drive_letter, state.drive_letter
+            );
+        }
         if state.journal_id == journal_info.journal_id {
             // Stream records from DB directly into arena (no intermediate Vec<String>).
             if let Some(count) = db.load_into_index(&mut index) {
                 index.names.shrink_to_fit();
                 let (arena_used, _arena_cap, map_est) = index.memory_usage();
                 eprintln!(
-                    "[USN] {}:\\ Loaded {} cached records, catching up from USN {}...",
-                    drive_letter, count, state.last_usn
+                    "[USN] {}:\\ Loaded {} cached records (db reported {}), catching up from USN {}...",
+                    drive_letter, count, state.files_indexed, state.last_usn
                 );
                 eprintln!(
                     "[USN] {}:\\ Memory after DB load: arena {:.1} MB, map ~{:.1} MB",

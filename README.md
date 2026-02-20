@@ -221,10 +221,11 @@ O serviço de busca (`mtt-search-service`) roda como Windows Service e usa dois 
 - **USN (NTFS/ReFS)**: indexação por journal com catch-up incremental (2s)
 - **Fallback sem USN (exFAT/FAT32/FUSE/CryptoFS etc.)**: snapshot SQLite no startup + full scan periódico (30s para FUSE/CryptoFS/WinFsp/Dokan, 120s para físicos)
 
-**Nota**: privilégios de administrador continuam necessários para o caminho USN (`FSCTL_*`).
+**Nota**: privilégios de administrador e runtime em `LocalSystem` são necessários para o caminho USN (`FSCTL_*`).
 
 ```powershell
 # Instalar o serviço (requer PowerShell como Administrador)
+# Runtime suportado: LocalSystem (necessário para USN)
 .\target\release\mtt-search-service.exe install
 
 # Iniciar o serviço
@@ -242,6 +243,18 @@ sc.exe stop MTTFileManagerSearch
 # Modo debug (sem instalar como serviço)
 .\target\release\mtt-search-service.exe run-console
 ```
+
+### Hardening opcional do IPC (sem impacto por padrão)
+
+Para reduzir exposição de metadados de status em ambientes mais restritivos, habilite redacão de métricas do `GetStatus` no serviço:
+
+```powershell
+$env:MTT_SEARCH_REDACT_STATUS_METRICS = "1"
+sc.exe stop MTTFileManagerSearch
+sc.exe start MTTFileManagerSearch
+```
+
+Com essa flag ativa, o serviço mantém busca/paginação e retorna estados de volume como `redacted` e contagens zeradas no `GetStatus`.
 
 ### Estrutura do Projeto
 ```

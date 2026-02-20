@@ -161,7 +161,7 @@ fn load_webview2_loader() -> Result<HMODULE> {
             "[WebView2] WebView2Loader.dll not found beside executable; using default DLL search (debug-only fallback)"
         );
         unsafe {
-            return LoadLibraryW(w!("WebView2Loader.dll"));
+            LoadLibraryW(w!("WebView2Loader.dll"))
         }
     }
 

@@ -20,6 +20,7 @@ use windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES;
 
 use crate::file_index::{IndexState, VolumeIndex};
 use crate::ipc_authorization::collect_authorized_search_page;
+use crate::security_policy::IpcSecurityPolicy;
 use mtt_search_protocol::*;
 
 const PIPE_BUFFER_SIZE: u32 = 64 * 1024;
@@ -44,6 +45,11 @@ const IO_TIMEOUT_SECS: u64 = 30;
 pub fn run_ipc_server(indices: Arc<RwLock<Vec<VolumeIndex>>>, shutdown: Arc<AtomicBool>) {
     let is_warming = Arc::new(AtomicBool::new(false));
     let active_clients = Arc::new(AtomicU32::new(0));
+    let security_policy = Arc::new(IpcSecurityPolicy::from_env());
+
+    if security_policy.redact_status_metrics {
+        eprintln!("[IPC] Security policy: status metrics redaction is enabled");
+    }
 
     loop {
         if shutdown.load(Ordering::Relaxed) {
@@ -104,6 +110,7 @@ pub fn run_ipc_server(indices: Arc<RwLock<Vec<VolumeIndex>>>, shutdown: Arc<Atom
         let indices_for_client = indices.clone();
         let warming_for_client = is_warming.clone();
         let active_for_client = active_clients.clone();
+        let policy_for_client = security_policy.clone();
         let pipe_raw = pipe.0 as usize;
         std::thread::spawn(move || {
             let pipe = HANDLE(pipe_raw as *mut core::ffi::c_void);
@@ -134,7 +141,7 @@ pub fn run_ipc_server(indices: Arc<RwLock<Vec<VolumeIndex>>>, shutdown: Arc<Atom
             });
 
             if let Err(e) = catch_unwind(AssertUnwindSafe(|| {
-                handle_client(pipe, &indices_for_client, &warming_for_client)
+                handle_client(pipe, &indices_for_client, &warming_for_client, &policy_for_client)
             })) {
                 eprintln!("[IPC] Client handler panic: {:?}", e);
             }
@@ -158,8 +165,10 @@ fn wait_for_client(pipe: HANDLE, shutdown: &Arc<AtomicBool>) -> bool {
             Err(_) => return false,
         };
 
-        let mut overlapped = OVERLAPPED::default();
-        overlapped.hEvent = event;
+        let mut overlapped = OVERLAPPED {
+            hEvent: event,
+            ..Default::default()
+        };
 
         let result = ConnectNamedPipe(pipe, Some(&mut overlapped));
 
@@ -351,6 +360,7 @@ fn handle_client(
     pipe: HANDLE,
     indices: &Arc<RwLock<Vec<VolumeIndex>>>,
     is_warming: &Arc<AtomicBool>,
+    security_policy: &IpcSecurityPolicy,
 ) {
     let request_data = match read_message(pipe) {
         Some(data) => data,
@@ -415,30 +425,11 @@ fn handle_client(
                     poisoned.into_inner()
                 }
             };
-            let mut total_indexed = 0u64;
-            let mut volumes = Vec::new();
-
-            for vol in indices_lock.iter() {
-                let count = vol.records.len() as u64;
-                total_indexed += count;
-                volumes.push(VolumeStatus {
-                    drive_letter: vol.drive_letter,
-                    state: match &vol.state {
-                        IndexState::NotStarted => "not_started".to_string(),
-                        IndexState::Scanning => "scanning".to_string(),
-                        IndexState::Ready => "ready".to_string(),
-                        IndexState::Error(e) => format!("error: {}", e),
-                    },
-                    files_indexed: count,
-                });
-            }
+            let status = build_status_response(&indices_lock, security_policy);
 
             let _ = send_response(
                 pipe,
-                &SearchResponse::Status(IndexStatusInfo {
-                    volumes,
-                    total_files_indexed: total_indexed,
-                }),
+                &SearchResponse::Status(status),
             );
         }
         SearchRequest::Query {
@@ -492,6 +483,91 @@ fn handle_client(
                 }
             }
         }
+    }
+}
+
+fn build_status_response(indices: &[VolumeIndex], security_policy: &IpcSecurityPolicy) -> IndexStatusInfo {
+    let mut total_indexed = 0u64;
+    let mut volumes = Vec::with_capacity(indices.len());
+
+    if security_policy.redact_status_metrics {
+        for vol in indices {
+            volumes.push(VolumeStatus {
+                drive_letter: vol.drive_letter,
+                state: "redacted".to_string(),
+                files_indexed: 0,
+            });
+        }
+    } else {
+        for vol in indices {
+            let count = vol.records.len() as u64;
+            total_indexed += count;
+            volumes.push(VolumeStatus {
+                drive_letter: vol.drive_letter,
+                state: match &vol.state {
+                    IndexState::NotStarted => "not_started".to_string(),
+                    IndexState::Scanning => "scanning".to_string(),
+                    IndexState::Ready => "ready".to_string(),
+                    IndexState::Error(e) => format!("error: {}", e),
+                },
+                files_indexed: count,
+            });
+        }
+    }
+
+    IndexStatusInfo {
+        volumes,
+        total_files_indexed: total_indexed,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::file_index::IndexState;
+
+    fn make_volume(drive_letter: char, records_len: usize, state: IndexState) -> VolumeIndex {
+        let mut index = VolumeIndex::new(drive_letter);
+        index.state = state;
+        for i in 0..records_len {
+            index.insert_record(i as u64 + 1, "sample.txt", 0, false);
+        }
+        index
+    }
+
+    #[test]
+    fn status_response_keeps_existing_behavior_by_default() {
+        let indices = vec![
+            make_volume('C', 2, IndexState::Ready),
+            make_volume('D', 1, IndexState::Scanning),
+        ];
+        let policy = IpcSecurityPolicy {
+            redact_status_metrics: false,
+        };
+
+        let status = build_status_response(&indices, &policy);
+        assert_eq!(status.total_files_indexed, 3);
+        assert_eq!(status.volumes.len(), 2);
+        assert_eq!(status.volumes[0].files_indexed, 2);
+        assert_eq!(status.volumes[1].state, "scanning");
+    }
+
+    #[test]
+    fn status_response_redacts_when_policy_enabled() {
+        let indices = vec![
+            make_volume('C', 2, IndexState::Ready),
+            make_volume('D', 1, IndexState::Error("io".to_string())),
+        ];
+        let policy = IpcSecurityPolicy {
+            redact_status_metrics: true,
+        };
+
+        let status = build_status_response(&indices, &policy);
+        assert_eq!(status.total_files_indexed, 0);
+        assert_eq!(status.volumes.len(), 2);
+        assert_eq!(status.volumes[0].state, "redacted");
+        assert_eq!(status.volumes[0].files_indexed, 0);
+        assert_eq!(status.volumes[1].state, "redacted");
     }
 }
 

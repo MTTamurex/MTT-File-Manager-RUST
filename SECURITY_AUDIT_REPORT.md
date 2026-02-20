@@ -140,7 +140,7 @@ The process trust level is **LocalSystem**, while client access includes regular
 
 - Enforce caller-aware authorization at the IPC boundary before returning result paths.
 - Filter results by effective caller access (ACL check) prior to response serialization.
-- Re-evaluate service account scope for least privilege if LocalSystem is not strictly required.
+- Service account reduction is **N/A** while USN Journal access remains a hard requirement; prioritize IPC authorization and data-minimization controls.
 
 ---
 
@@ -248,6 +248,8 @@ If ACL hardening does not apply successfully, cache/index files may become more 
 
 ## 8) Remediation Roadmap
 
+**Constraint note (confirmed):** because USN access requires elevated runtime privileges in this architecture, the service runtime remains `LocalSystem` for functional correctness.
+
 ### Quick Wins (0–7 days)
 
 - Add explicit runtime warning/log when WebView2 fallback loader path is used in [init()](src/pdf_viewer/webview.rs:134).
@@ -262,7 +264,7 @@ If ACL hardening does not apply successfully, cache/index files may become more 
 
 ### Long Term (6+ weeks)
 
-- Rework global search architecture to minimize privilege asymmetry and cross-user metadata exposure.
+- Rework global search architecture to minimize privilege asymmetry and cross-user metadata exposure while keeping elevated USN indexing isolated.
 - Establish a repeatable security verification suite (path, IPC, loader, ACL, and shell boundary tests).
 
 ---

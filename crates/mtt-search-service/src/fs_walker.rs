@@ -43,7 +43,7 @@ pub fn scan_volume(
 
     while let Some((dir_path, parent_ref)) = queue.pop_front() {
         // Check shutdown every 100 directories to allow graceful stop.
-        if directories_scanned % 100 == 0 && shutdown.load(Ordering::Relaxed) {
+        if directories_scanned.is_multiple_of(100) && shutdown.load(Ordering::Relaxed) {
             return Err("scan interrupted by shutdown".to_string());
         }
         directories_scanned += 1;

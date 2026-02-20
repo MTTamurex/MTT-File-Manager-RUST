@@ -48,6 +48,7 @@ mod tests {
             folder_cover: None,
             drive_info: None,
             sync_status: crate::domain::file_entry::SyncStatus::None,
+            is_hidden: false,
             deletion_date: None,
             recycle_original_path: None,
         }
@@ -63,6 +64,7 @@ mod tests {
             folder_cover: None,
             drive_info: None,
             sync_status: crate::domain::file_entry::SyncStatus::None,
+            is_hidden: false,
             deletion_date: None,
             recycle_original_path: None,
         }

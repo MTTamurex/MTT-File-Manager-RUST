@@ -40,7 +40,8 @@ pub fn install_service() {
         executable_path: exe_path.clone(),
         launch_arguments: vec![],
         dependencies: vec![],
-        account_name: None, // Runs as LocalSystem
+        // USN journal indexing requires elevated privileges; keep LocalSystem runtime.
+        account_name: None,
         account_password: None,
     };
 
