@@ -254,6 +254,9 @@ pub struct ImageViewerApp {
     // Debounce for paste key (keys_down can fire multiple times)
     pub paste_key_debounce: bool,
 
+    // One-shot guard: suppress Enter-to-open in file views after committing address bar input.
+    pub suppress_next_enter_open: bool,
+
     // Window handle for native shell interactions
     pub native_hwnd: Option<HWND>,
 

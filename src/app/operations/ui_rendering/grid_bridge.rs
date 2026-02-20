@@ -199,7 +199,9 @@ impl ImageViewerApp {
 
             // Enter to open (only when not renaming)
             if nav_result.enter_pressed {
-                if let Some(selected) = &self.selected_file.clone() {
+                if self.suppress_next_enter_open {
+                    self.suppress_next_enter_open = false;
+                } else if let Some(selected) = &self.selected_file.clone() {
                     if selected.is_dir {
                         self.navigate_to(&selected.path.to_string_lossy());
                         return; // Exit early after navigation
@@ -207,6 +209,8 @@ impl ImageViewerApp {
                         open_with_shell(self, &selected.path);
                     }
                 }
+            } else if self.suppress_next_enter_open {
+                self.suppress_next_enter_open = false;
             }
         }
 
