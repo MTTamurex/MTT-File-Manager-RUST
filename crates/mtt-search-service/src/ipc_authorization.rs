@@ -157,3 +157,47 @@ pub fn collect_authorized_search_page(
     })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::file_index::{IndexState, SearchResult, SearchPage};
+
+    #[test]
+    fn returns_empty_for_zero_limit_or_empty_query() {
+        let res_zero = collect_authorized_search_page(HANDLE(std::ptr::null_mut()), &[], "abc", 0, 0)
+            .expect("zero-limit should succeed");
+        assert!(res_zero.items.is_empty());
+        assert!(!res_zero.has_more);
+        assert_eq!(res_zero.total_matches, Some(0));
+
+        let res_empty_query =
+            collect_authorized_search_page(HANDLE(std::ptr::null_mut()), &[], "", 0, 10)
+                .expect("empty-query should succeed");
+        assert!(res_empty_query.items.is_empty());
+        assert!(!res_empty_query.has_more);
+        assert_eq!(res_empty_query.total_matches, Some(0));
+    }
+
+    #[test]
+    fn search_result_contract_still_matches_expected_shape() {
+        let sample = SearchResult {
+            name: "a.txt".to_string(),
+            full_path: r"C:\temp\a.txt".to_string(),
+            is_dir: false,
+        };
+        assert!(!sample.is_dir);
+        assert!(sample.full_path.ends_with("a.txt"));
+
+        let page = SearchPage {
+            items: vec![sample],
+            has_more: false,
+            total_matches: Some(1),
+        };
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.total_matches, Some(1));
+
+        let state = IndexState::Ready;
+        assert!(matches!(state, IndexState::Ready));
+    }
+}
+
