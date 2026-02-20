@@ -128,7 +128,16 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
     let tracked_volumes = Arc::new(Mutex::new(HashSet::<char>::new()));
 
     // Open persistence
-    let db_path = index_db::get_db_path();
+    let db_path = match index_db::get_db_path() {
+        Ok(path) => path,
+        Err(e) => {
+            eprintln!(
+                "[SERVICE] Secure persistence path initialization failed: {}",
+                redact_paths(&e)
+            );
+            return;
+        }
+    };
     eprintln!("[SERVICE] Index database ready");
     let db = match index_db::IndexDb::open(&db_path) {
         Ok(db) => Arc::new(db),
