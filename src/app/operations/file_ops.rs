@@ -5,25 +5,14 @@
 use crate::app::state::ImageViewerApp;
 use crate::application::file_operations;
 use crate::domain::file_entry::FileEntry;
+use crate::infrastructure::security::classify_shell_namespace_path;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const SHELL_OPEN_CONFIRMATION_WINDOW: Duration = Duration::from_secs(10);
 
 fn is_explicit_shell_namespace_path(path: &Path) -> bool {
-    let raw = path.to_string_lossy();
-    let trimmed = raw.trim();
-
-    if trimmed.starts_with("shell:") {
-        return true;
-    }
-
-    let normalized = trimmed
-        .strip_prefix(r"\\?\")
-        .or_else(|| trimmed.strip_prefix(r"\\.\"))
-        .unwrap_or(trimmed);
-
-    normalized.starts_with("::")
+    classify_shell_namespace_path(path).is_some()
 }
 
 fn is_unc_path(path: &Path) -> bool {
