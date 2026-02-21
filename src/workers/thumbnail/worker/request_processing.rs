@@ -33,17 +33,28 @@ pub(super) fn process_thumbnail_request(
 
     // EARLY EXIT 1: Skip files that already failed in this session.
     // Prevents repeated slow retries on broken files (e.g., 0x8004B205).
+    //
+    // OneDrive special-case:
+    // If a file was previously cloud-only (transient failure) but is now locally available,
+    // clear backoff immediately and retry in the same request so thumbnails recover without
+    // requiring manual refresh.
     if is_known_failure(path) {
-        let _ = tx.send(ThumbnailData {
-            path: path.clone(),
-            image_data: Vec::new(),
-            width: 0,
-            height: 0,
-            generation: req_gen,
-            not_found: false,
-        });
-        throttle_repaint_with_priority(ctx, last_repaint, req_priority);
-        return;
+        let can_retry_now = onedrive::is_onedrive_path(path) && onedrive::is_locally_available_safe(path);
+
+        if can_retry_now {
+            clear_failure_cache(path);
+        } else {
+            let _ = tx.send(ThumbnailData {
+                path: path.clone(),
+                image_data: Vec::new(),
+                width: 0,
+                height: 0,
+                generation: req_gen,
+                not_found: false,
+            });
+            throttle_repaint_with_priority(ctx, last_repaint, req_priority);
+            return;
+        }
     }
 
     // PERFORMANCE FIX: Check SQLite disk cache BEFORE any source file I/O.
@@ -141,20 +152,9 @@ pub(super) fn process_thumbnail_request(
             }
         }
 
-        // EARLY EXIT 3: skip cloud-only OneDrive files (not downloaded).
-        if !onedrive::is_locally_available_safe(path) {
-            mark_as_transient_failure(path.clone());
-            let _ = tx.send(ThumbnailData {
-                path: path.clone(),
-                image_data: Vec::new(),
-                width: 0,
-                height: 0,
-                generation: req_gen,
-                not_found: false,
-            });
-            throttle_repaint_with_priority(ctx, last_repaint, req_priority);
-            return;
-        }
+        // NOTE: Do NOT skip cloud-only OneDrive files here.
+        // Windows Explorer can still obtain thumbnails for placeholders via Shell/
+        // thumbnail cache providers. We should attempt extraction and let the pipeline decide.
     } else {
         // Non-OneDrive: use fast_path_exists (GetFileAttributesW).
         if !onedrive::fast_path_exists(path) {

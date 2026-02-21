@@ -94,6 +94,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                             ));
                     }
 
+                    app.loaded_path.clear();
                     app.load_folder(false);
                     context_menu.close();
                     app.context_menu = context_menu;
@@ -120,6 +121,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                                 for path in &target_paths {
                                     let _ = crate::infrastructure::onedrive::set_pin_state(path, command);
                                 }
+                                app.loaded_path.clear();
                                 app.load_folder(false);
                             }
                         }
