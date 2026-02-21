@@ -5,6 +5,19 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+fn should_preserve_onedrive_media_thumbnail(path: &Path) -> bool {
+    if !crate::infrastructure::onedrive::is_onedrive_path(path)
+        && !crate::infrastructure::onedrive::path_has_cloud_attributes(path)
+    {
+        return false;
+    }
+
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(crate::infrastructure::windows::is_media_extension)
+        .unwrap_or(false)
+}
+
 impl ImageViewerApp {
     pub(super) fn should_ignore_watcher_path(
         &self,
@@ -250,7 +263,11 @@ impl ImageViewerApp {
         }
 
         let cleaned = Self::clean_path(path);
-        self.cache_manager.texture_cache.pop(&cleaned);
+        let preserve_media_thumb = should_preserve_onedrive_media_thumbnail(&cleaned);
+
+        if !preserve_media_thumb {
+            self.cache_manager.texture_cache.pop(&cleaned);
+        }
         self.cache_manager.failed_thumbnails.pop(&cleaned);
         crate::workers::thumbnail::clear_failure_cache(&cleaned);
 
@@ -270,8 +287,8 @@ impl ImageViewerApp {
         // unchanged, so we do NOT invalidate the DirectoryCache or trigger a
         // full auto-reload. This prevents unnecessary disk rescans on FUSE/WinFsp
         // drivers (Cryptomator, VeraCrypt) that emit frequent MODIFY events
-        // during internal operations.  The texture/thumbnail caches were already
-        // evicted above, so the *visual* thumbnail will be refreshed lazily.
+        // during internal operations. For OneDrive media placeholders we keep
+        // the last thumbnail (Explorer-like behavior) to avoid icon flicker.
         // Directory listing metadata (size/mtime) is refreshed on next
         // navigation or manual reload (F5).
         #[cfg(debug_assertions)]

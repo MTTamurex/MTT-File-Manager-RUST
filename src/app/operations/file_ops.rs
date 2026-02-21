@@ -31,6 +31,20 @@ fn is_high_risk_shell_open_source(path: &Path) -> bool {
     is_unc_path(path) || is_explicit_shell_namespace_path(path)
 }
 
+fn is_onedrive_media_file(path: &Path) -> bool {
+    let is_cloud = crate::infrastructure::onedrive::is_onedrive_path(path)
+        || crate::infrastructure::onedrive::path_has_cloud_attributes(path);
+
+    if !is_cloud {
+        return false;
+    }
+
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(crate::infrastructure::windows::is_media_extension)
+        .unwrap_or(false)
+}
+
 impl ImageViewerApp {
     pub fn open_with_shell_guarded(&mut self, path: &Path) {
         if is_high_risk_shell_open_source(path) {
@@ -67,6 +81,15 @@ impl ImageViewerApp {
             self.notifications.push(crate::application::AppNotification::warning(
                 "Falha ao abrir item com o aplicativo padrão.".to_string(),
             ));
+        } else if is_onedrive_media_file(path) {
+            // Hydration/open may not always emit a watcher path that triggers thumbnail retry.
+            // Force a light retry path for media files in OneDrive.
+            let path_buf = path.to_path_buf();
+            crate::workers::thumbnail::clear_failure_cache(&path_buf);
+            self.cache_manager.failed_thumbnails.pop(&path_buf);
+
+            // Requeue thumbnail extraction while keeping current visual until new data arrives.
+            self.request_thumbnail_load_with_modified(path_buf, self.thumbnail_size as u32, 0);
         }
     }
 

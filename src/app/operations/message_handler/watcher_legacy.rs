@@ -1,6 +1,19 @@
 use crate::app::state::ImageViewerApp;
 use std::path::PathBuf;
 
+fn should_preserve_onedrive_media_thumbnail(path: &std::path::Path) -> bool {
+    if !crate::infrastructure::onedrive::is_onedrive_path(path)
+        && !crate::infrastructure::onedrive::path_has_cloud_attributes(path)
+    {
+        return false;
+    }
+
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(crate::infrastructure::windows::is_media_extension)
+        .unwrap_or(false)
+}
+
 impl ImageViewerApp {
     #[cfg(feature = "notify-watcher")]
     pub(super) fn process_legacy_notify_events(
@@ -112,7 +125,10 @@ impl ImageViewerApp {
                         }
 
                         let cleaned = Self::clean_path(path);
-                        self.cache_manager.texture_cache.pop(&cleaned);
+                        let preserve_media_thumb = should_preserve_onedrive_media_thumbnail(&cleaned);
+                        if !preserve_media_thumb {
+                            self.cache_manager.texture_cache.pop(&cleaned);
+                        }
                         self.cache_manager.failed_thumbnails.pop(&cleaned);
                         crate::workers::thumbnail::clear_failure_cache(&cleaned);
                     }
