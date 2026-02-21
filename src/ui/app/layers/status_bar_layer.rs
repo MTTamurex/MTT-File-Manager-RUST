@@ -50,6 +50,7 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                 app.fps_avg,
                 app.upload_budget_ms,
                 app.navigation_state.is_computer_view,
+                app.navigation_state.is_recycle_bin_view,
                 bulk_progress,
                 app.current_folder_locked,
                 &mut app.show_hidden_files,

@@ -106,6 +106,7 @@ pub fn render_status_bar(
     _fps_avg: f32,
     _upload_budget_ms: f32,
     is_computer_view: bool,
+    is_recycle_bin_view: bool,
     bulk_progress: Option<(usize, usize)>,
     folder_locked: bool,
     show_hidden_files: &mut bool,
@@ -167,26 +168,33 @@ pub fn render_status_bar(
 
             // === SHOW HIDDEN FILES TOGGLE ===
             {
+                let should_disable_show_hidden = is_computer_view || is_recycle_bin_view;
                 let tooltip = if *show_hidden_files {
                     "Esconder itens ocultos"
                 } else {
                     "Exibir itens ocultos"
                 };
-                if widgets::toggle_icon_button_sized(
-                    ui,
-                    svg_manager,
-                    "eye",
-                    *show_hidden_files,
-                    tooltip,
-                    theme::ICON_SIZE_MD - 2.0,
-                    2.0,
-                    -1.0,
-                )
-                .clicked()
-                {
-                    *show_hidden_files = !*show_hidden_files;
-                    action = StatusBarAction::ShowHiddenChanged;
-                }
+                ui.scope(|ui| {
+                    if should_disable_show_hidden {
+                        ui.disable();
+                    }
+
+                    if widgets::toggle_icon_button_sized(
+                        ui,
+                        svg_manager,
+                        "eye",
+                        *show_hidden_files,
+                        tooltip,
+                        theme::ICON_SIZE_MD - 2.0,
+                        2.0,
+                        -1.0,
+                    )
+                    .clicked()
+                    {
+                        *show_hidden_files = !*show_hidden_files;
+                        action = StatusBarAction::ShowHiddenChanged;
+                    }
+                });
             }
 
             ui.separator();
