@@ -226,6 +226,7 @@ pub fn get_active_timeout_threads() -> u64 {
 const FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: u32 = 0x00400000;
 const FILE_ATTRIBUTE_RECALL_ON_OPEN: u32 = 0x00040000; // File is being synced
 const FILE_ATTRIBUTE_PINNED: u32 = 0x00080000;
+const FILE_ATTRIBUTE_UNPINNED: u32 = 0x00100000; // "Free up space" intent (dehydration pending)
 const FILE_ATTRIBUTE_OFFLINE: u32 = 0x00001000;
 
 /// Timeout for metadata operations on OneDrive files (milliseconds)
@@ -456,6 +457,16 @@ mod tests {
     #[test]
     fn test_sync_status_locally_available() {
         assert_eq!(get_sync_status(0, true), SyncStatus::LocallyAvailable);
+    }
+
+    #[test]
+    fn test_sync_status_unpinned_shows_cloud_only() {
+        // UNPINNED = "Free up space" intent, dehydration pending.
+        // Should show CloudOnly immediately (before RECALL flags appear).
+        assert_eq!(
+            get_sync_status(FILE_ATTRIBUTE_UNPINNED, true),
+            SyncStatus::CloudOnly
+        );
     }
 
     #[test]

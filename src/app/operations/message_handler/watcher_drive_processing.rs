@@ -273,7 +273,13 @@ impl ImageViewerApp {
 
         // Register parent folder as changed so its cover/preview caches
         // are invalidated when the modified file was the cover source.
-        Self::register_changed_folder(&cleaned, folders_with_changed_contents);
+        // Skip registration for OneDrive media files whose thumbnails are preserved:
+        // pin-state transitions (attrib +U/-P) fire MODIFY events but don't change
+        // file content, so the existing folder preview is still valid.  Re-generating
+        // it during dehydration would produce a degraded icon-based preview.
+        if !preserve_media_thumb {
+            Self::register_changed_folder(&cleaned, folders_with_changed_contents);
+        }
 
         if let Some(ref selected) = self.selected_file {
             if selected.path == cleaned {

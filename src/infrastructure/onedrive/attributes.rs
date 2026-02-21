@@ -6,6 +6,7 @@ pub(super) fn has_cloud_attributes(attrs: u32) -> bool {
     (attrs & super::FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0
         || (attrs & super::FILE_ATTRIBUTE_RECALL_ON_OPEN) != 0
         || (attrs & super::FILE_ATTRIBUTE_PINNED) != 0
+        || (attrs & super::FILE_ATTRIBUTE_UNPINNED) != 0
         || (attrs & super::FILE_ATTRIBUTE_OFFLINE) != 0
 }
 
@@ -78,6 +79,13 @@ pub(super) fn get_sync_status(attrs: u32, is_onedrive: bool) -> SyncStatus {
 
     if (attrs & super::FILE_ATTRIBUTE_PINNED) != 0 {
         return SyncStatus::Pinned;
+    }
+
+    // UNPINNED = user selected "Free up space" but dehydration hasn't completed yet.
+    // The file data is still local, but the intent is cloud-only.
+    // Show CloudOnly immediately (matches Windows Explorer behavior).
+    if (attrs & super::FILE_ATTRIBUTE_UNPINNED) != 0 {
+        return SyncStatus::CloudOnly;
     }
 
     SyncStatus::LocallyAvailable

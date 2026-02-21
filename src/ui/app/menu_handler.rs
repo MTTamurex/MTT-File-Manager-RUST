@@ -94,6 +94,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                             ));
                     }
 
+                    app.directory_cache.invalidate(&std::path::PathBuf::from(&app.navigation_state.current_path));
                     app.loaded_path.clear();
                     app.load_folder(false);
                     context_menu.close();
@@ -121,6 +122,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                                 for path in &target_paths {
                                     let _ = crate::infrastructure::onedrive::set_pin_state(path, command);
                                 }
+                                app.directory_cache.invalidate(&std::path::PathBuf::from(&app.navigation_state.current_path));
                                 app.loaded_path.clear();
                                 app.load_folder(false);
                             }
