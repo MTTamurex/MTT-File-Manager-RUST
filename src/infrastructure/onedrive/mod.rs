@@ -15,6 +15,7 @@ use crate::domain::file_entry::SyncStatus;
 mod attributes;
 mod directory_enum;
 mod path_detection;
+mod pin_state;
 mod timeout_ops;
 
 // Base worker count for timeout-protected OneDrive I/O.
@@ -304,6 +305,16 @@ pub fn get_sync_status(attrs: u32, is_onedrive: bool) -> SyncStatus {
 /// Returns true if the file data is on disk, false if it needs download.
 pub fn is_locally_available(path: &Path) -> bool {
     attributes::is_locally_available(path)
+}
+
+pub use pin_state::PinCommand;
+
+/// Apply OneDrive pin-state operation using Windows `attrib` flags.
+///
+/// - [`PinCommand::AlwaysKeepOnDevice`](src/infrastructure/onedrive/pin_state.rs:7) => `+P -U`
+/// - [`PinCommand::FreeUpSpace`](src/infrastructure/onedrive/pin_state.rs:8) => `+U -P`
+pub fn set_pin_state(path: &Path, command: PinCommand) -> std::io::Result<()> {
+    pin_state::set_pin_state(path, command)
 }
 
 /// Result of a timeout-protected I/O operation

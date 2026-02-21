@@ -2,6 +2,43 @@ use crate::app::ImageViewerApp;
 use eframe::egui;
 use std::path::{Path, PathBuf};
 
+fn is_onedrive_pin_text(text: &str) -> bool {
+    let lower = text.trim().to_lowercase();
+    lower.contains("always keep on this device") || lower.contains("sempre manter neste dispositivo")
+}
+
+fn is_onedrive_free_text(text: &str) -> bool {
+    let lower = text.trim().to_lowercase();
+    lower.contains("free up space") || lower.contains("liberar espaço")
+}
+
+fn onedrive_pin_command_from_text(text: &str) -> Option<crate::infrastructure::onedrive::PinCommand> {
+    if is_onedrive_pin_text(text) {
+        Some(crate::infrastructure::onedrive::PinCommand::AlwaysKeepOnDevice)
+    } else if is_onedrive_free_text(text) {
+        Some(crate::infrastructure::onedrive::PinCommand::FreeUpSpace)
+    } else {
+        None
+    }
+}
+
+fn find_menu_item_text_by_id(
+    items: &[crate::application::context_menu::ContextMenuItem],
+    id: i32,
+) -> Option<String> {
+    for item in items {
+        if item.id == id {
+            return Some(item.text.clone());
+        }
+
+        if let Some(text) = find_menu_item_text_by_id(&item.sub_items, id) {
+            return Some(text);
+        }
+    }
+
+    None
+}
+
 pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
     // 1. Render the menu (ui construction)
     let mut context_menu = std::mem::take(&mut app.context_menu);
@@ -24,15 +61,69 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
     if let Some(id) = context_menu.selected_command_id.take() {
         if id > 0 {
             // Shell command
+            let selected_shell_item_text = find_menu_item_text_by_id(&context_menu.items, id);
+
+            let direct_onedrive_pin_command = selected_shell_item_text
+                .as_deref()
+                .and_then(onedrive_pin_command_from_text);
+
+            if let Some(command) = direct_onedrive_pin_command {
+                let is_cloud_target = target_paths.iter().any(|path| {
+                    crate::infrastructure::onedrive::is_onedrive_path(path)
+                        || crate::infrastructure::onedrive::path_has_cloud_attributes(path)
+                });
+
+                if is_cloud_target {
+                    let mut had_error = false;
+                    for path in &target_paths {
+                        if let Err(e) = crate::infrastructure::onedrive::set_pin_state(path, command) {
+                            had_error = true;
+                            log::warn!(
+                                "[OneDrive] Failed to apply pin command {:?} to {:?}: {}",
+                                command,
+                                path,
+                                e
+                            );
+                        }
+                    }
+
+                    if had_error {
+                        app.notifications
+                            .push(crate::application::AppNotification::error(
+                                "Falha ao aplicar comando do OneDrive em um ou mais itens".to_string(),
+                            ));
+                    }
+
+                    app.load_folder(false);
+                    context_menu.close();
+                    app.context_menu = context_menu;
+                    return;
+                }
+            }
+
             if let Some(native_ctx) = &context_menu.native_context {
                 if let Some(shell_ctx) = native_ctx.downcast_ref::<crate::infrastructure::windows::native_menu::ShellMenuContext>() {
-                    let _ = crate::infrastructure::windows::native_menu::invoke_menu_command(
+                    let shell_result = crate::infrastructure::windows::native_menu::invoke_menu_command(
                         app.native_hwnd.unwrap_or_default(),
                         &shell_ctx.context_menu,
                         id as u32,
                         context_menu.position.x as i32,
                         context_menu.position.y as i32,
                     );
+
+                    // Fallback for OneDrive pin-state commands when shell invoke fails silently.
+                    if shell_result.is_err() {
+                        if let Some(text) = selected_shell_item_text.as_deref() {
+                            let command = onedrive_pin_command_from_text(text);
+
+                            if let Some(command) = command {
+                                for path in &target_paths {
+                                    let _ = crate::infrastructure::onedrive::set_pin_state(path, command);
+                                }
+                                app.load_folder(false);
+                            }
+                        }
+                    }
                 }
             }
         } else {

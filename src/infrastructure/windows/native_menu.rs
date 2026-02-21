@@ -382,16 +382,32 @@ pub fn invoke_menu_command(
     screen_y: i32,
 ) -> Result<()> {
     unsafe {
+        // QueryContextMenu() was called with idCmdFirst = 1.
+        // InvokeCommand expects a zero-based offset encoded as MAKEINTRESOURCE.
+        let command_offset = command_id.saturating_sub(1) as usize;
+
+        // Use the real cursor position when available (screen coordinates),
+        // because egui menu coordinates are not guaranteed to be absolute screen coords.
+        let mut invoke_point = POINT {
+            x: screen_x,
+            y: screen_y,
+        };
+        let has_cursor_point = GetCursorPos(&mut invoke_point).is_ok();
+
+        // Unicode + async improve compatibility with modern shell extensions (including cloud providers).
+        let mut invoke_mask = SEE_MASK_UNICODE | SEE_MASK_ASYNCOK;
+        if has_cursor_point {
+            invoke_mask |= CMIC_MASK_PTINVOKE;
+        }
+
         let invoke = CMINVOKECOMMANDINFOEX {
             cbSize: std::mem::size_of::<CMINVOKECOMMANDINFOEX>() as u32,
-            fMask: CMIC_MASK_PTINVOKE,
+            fMask: invoke_mask,
             hwnd,
-            lpVerb: PCSTR((command_id - 1) as usize as *const u8),
+            lpVerb: PCSTR(command_offset as *const u8),
+            lpVerbW: PCWSTR(command_offset as *const u16),
             nShow: SW_SHOWNORMAL.0,
-            ptInvoke: POINT {
-                x: screen_x,
-                y: screen_y,
-            },
+            ptInvoke: invoke_point,
             ..Default::default()
         };
 
