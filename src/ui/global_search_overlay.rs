@@ -227,6 +227,8 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     ];
 
     let drives = available_drives(&app.global_search.results);
+    let drive_filter_row_count = (drives.len() + 1) as f32; // +1 for "Todos"
+    let drive_filter_popup_height = drive_filter_row_count * 24.0;
     if app
         .global_search
         .drive_filter
@@ -269,6 +271,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
             |ui| {
                 egui::ComboBox::from_id_salt("global_search_drive_filter")
                     .width(120.0)
+                    .height(drive_filter_popup_height)
                     .selected_text(match app.global_search.drive_filter {
                         Some(drive) => format!("{}:\\", drive),
                         None => "Todos".to_string(),
