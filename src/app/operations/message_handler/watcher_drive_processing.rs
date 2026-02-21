@@ -5,10 +5,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+fn is_onedrive_file(path: &Path) -> bool {
+    crate::infrastructure::onedrive::is_onedrive_path(path)
+        || crate::infrastructure::onedrive::path_has_cloud_attributes(path)
+}
+
 fn should_preserve_onedrive_media_thumbnail(path: &Path) -> bool {
-    if !crate::infrastructure::onedrive::is_onedrive_path(path)
-        && !crate::infrastructure::onedrive::path_has_cloud_attributes(path)
-    {
+    if !is_onedrive_file(path) {
         return false;
     }
 
@@ -273,11 +276,14 @@ impl ImageViewerApp {
 
         // Register parent folder as changed so its cover/preview caches
         // are invalidated when the modified file was the cover source.
-        // Skip registration for OneDrive media files whose thumbnails are preserved:
-        // pin-state transitions (attrib +U/-P) fire MODIFY events but don't change
-        // file content, so the existing folder preview is still valid.  Re-generating
-        // it during dehydration would produce a degraded icon-based preview.
-        if !preserve_media_thumb {
+        // Skip registration for ALL OneDrive MODIFY events: pin-state and sync
+        // transitions fire MODIFY events that change file attributes (not content),
+        // so the existing folder preview remains valid.  Re-generating it while
+        // files are hydrating/dehydrating produces degraded icon-based previews.
+        // Actual content changes from other devices arrive as CREATE/DELETE pairs
+        // or are caught by the consistency probe.
+        let is_onedrive = is_onedrive_file(&cleaned);
+        if !is_onedrive {
             Self::register_changed_folder(&cleaned, folders_with_changed_contents);
         }
 

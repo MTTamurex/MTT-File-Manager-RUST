@@ -46,15 +46,18 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
     // === FOLDER DRAWING ===
     let has_cover = item.folder_cover.is_some();
 
-    // Never keep/render stale folder preview when we don't have a known cover candidate.
-    // This avoids showing old previews for empty folders or folders whose cover was removed.
-    if !ctx.is_recycle_bin_view && !has_cover {
-        ctx.folder_preview_cache.pop(&item.path);
+    // Shell API native folder preview ("sandwich" effect).
+    // Clean up loading state only for folders that genuinely have no cover
+    // AND no cached preview.  When has_cover is temporarily false during
+    // a reload window (e.g. OneDrive pin-state change), we preserve the
+    // existing cached preview to avoid visual degradation.
+    if !ctx.is_recycle_bin_view
+        && !has_cover
+        && ctx.folder_preview_cache.peek(&item.path).is_none()
+    {
         ctx.folder_preview_loading.remove(&item.path);
     }
-
-    // 1. Try to use the native preview (Shell Sandwich)
-    let native_preview = if ctx.is_recycle_bin_view || !has_cover {
+    let native_preview = if ctx.is_recycle_bin_view {
         None
     } else {
         ctx.folder_preview_cache.get(&item.path)
