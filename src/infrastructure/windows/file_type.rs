@@ -275,9 +275,17 @@ pub fn is_image_extension(extension: &str) -> bool {
     get_perceived_type(extension) == PerceivedType::Image
 }
 
-/// Finds the first media item (image or video) in a folder to use as a preview
-/// Checks only the first 15 files for performance
-/// CRITICAL: Uses timeout-protected enumeration for OneDrive to prevent indefinite blocking
+/// Finds the first media item (image or video) in a folder to use as a preview.
+///
+/// Scans up to `MAX_ENTRIES` directory entries total (to avoid slow scans on
+/// huge folders), but only counts **files** against the check budget — directories
+/// are skipped without counting. This ensures folders with many subfolders but
+/// few media files (e.g. 100 subfolders + 1 jpg) still find the media item.
+///
+/// CRITICAL: Uses timeout-protected enumeration for OneDrive to prevent indefinite blocking.
+const MAX_ENTRIES_SCAN: usize = 500;
+const MAX_FILES_CHECK: usize = 30;
+
 pub fn find_folder_preview_item(folder_path: &Path) -> Option<PathBuf> {
     use crate::infrastructure::onedrive::{
         is_onedrive_path, onedrive_read_directory, IoTimeoutResult,
@@ -288,16 +296,25 @@ pub fn find_folder_preview_item(folder_path: &Path) -> Option<PathBuf> {
     if is_onedrive_path(folder_path) {
         match onedrive_read_directory(folder_path) {
             IoTimeoutResult::Ok(entries) => {
-                for (filename, attrs, _, _) in entries.into_iter().take(15) {
-                    // Check if it's a file (not directory) using attributes
+                let mut files_checked = 0usize;
+                for (idx, (filename, attrs, _, _)) in entries.into_iter().enumerate() {
+                    if idx >= MAX_ENTRIES_SCAN {
+                        break;
+                    }
+                    // Skip directories — don't count against budget
                     let is_dir = (attrs & 0x10) != 0; // FILE_ATTRIBUTE_DIRECTORY
-                    if !is_dir {
-                        let path = folder_path.join(&filename);
-                        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                            let ptype = get_perceived_type(ext);
-                            if ptype == PerceivedType::Image || ptype == PerceivedType::Video {
-                                return Some(path);
-                            }
+                    if is_dir {
+                        continue;
+                    }
+                    files_checked += 1;
+                    if files_checked > MAX_FILES_CHECK {
+                        break;
+                    }
+                    let path = folder_path.join(&filename);
+                    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                        let ptype = get_perceived_type(ext);
+                        if ptype == PerceivedType::Image || ptype == PerceivedType::Video {
+                            return Some(path);
                         }
                     }
                 }
@@ -313,19 +330,29 @@ pub fn find_folder_preview_item(folder_path: &Path) -> Option<PathBuf> {
 
     // Standard path (non-OneDrive) - use regular fs::read_dir
     if let Ok(entries) = fs::read_dir(folder_path) {
-        for entry in entries.flatten().take(15) {
+        let mut files_checked = 0usize;
+        for (idx, entry) in entries.flatten().enumerate() {
+            if idx >= MAX_ENTRIES_SCAN {
+                break;
+            }
             let file_type = match entry.file_type() {
                 Ok(ft) => ft,
                 Err(_) => continue,
             };
-            if file_type.is_file() {
-                let path = entry.path();
-                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                    // For folder preview, we only want images or videos
-                    let ptype = get_perceived_type(ext);
-                    if ptype == PerceivedType::Image || ptype == PerceivedType::Video {
-                        return Some(path);
-                    }
+            // Skip directories — don't count against budget
+            if !file_type.is_file() {
+                continue;
+            }
+            files_checked += 1;
+            if files_checked > MAX_FILES_CHECK {
+                break;
+            }
+            let path = entry.path();
+            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                // For folder preview, we only want images or videos
+                let ptype = get_perceived_type(ext);
+                if ptype == PerceivedType::Image || ptype == PerceivedType::Video {
+                    return Some(path);
                 }
             }
         }
