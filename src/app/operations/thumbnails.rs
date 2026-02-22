@@ -129,6 +129,12 @@ impl ImageViewerApp {
             if cached_max_dim >= size_px {
                 // Data is in RAM cache - add directly to pending_thumbnails for GPU upload
                 // No disk I/O needed!
+                //
+                // FIX: Remove from loading_set since we won't go through the worker channel.
+                // The caller (file_slot/list_view) inserts into loading_set before calling us.
+                // Without this, loading_set leaks entries on every RAM-cache hit, eventually
+                // reaching the 200-entry cap and blocking ALL new thumbnail loads.
+                self.cache_manager.finish_loading(&path);
                 self.cache_manager.start_pending_upload(path.clone());
                 self.pending_thumbnails.push_back(ThumbnailData {
                     path,

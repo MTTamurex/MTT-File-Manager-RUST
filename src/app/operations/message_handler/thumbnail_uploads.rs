@@ -138,8 +138,42 @@ impl ImageViewerApp {
             }
 
             while self.pending_thumbnails.len() >= MAX_PENDING_THUMBNAILS {
-                if let Some(old) = self.pending_thumbnails.pop_front() {
-                    self.cache_manager.finish_pending_upload(&old.path);
+                // FIX: Smart eviction — prefer removing off-screen items to keep visible
+                // ones alive. On SSD, the worker queue processes most-recently-added items
+                // first (LIFO), so items from the user's final scroll position arrive first
+                // and sit at the front of the deque. Blind FIFO eviction (pop_front) would
+                // eject exactly the items the user is looking at. Instead, scan for the
+                // first off-screen item and evict it; fall back to FIFO only when every
+                // pending item is visible (extremely unlikely with MAX_PENDING=64).
+                let evict_idx = self.visible_index_range
+                    .and_then(|(min_vis, max_vis)| {
+                        let items = &self.items;
+                        if items.is_empty() {
+                            return None;
+                        }
+                        let max_vis = max_vis.min(items.len().saturating_sub(1));
+                        // Build a small visibility set (only visible items, typically 20-60)
+                        let visible: HashSet<&std::path::Path> = (min_vis..=max_vis)
+                            .map(|i| items[i].path.as_path())
+                            .collect();
+                        // Find first off-screen item in the deque
+                        self.pending_thumbnails
+                            .iter()
+                            .position(|t| !visible.contains(t.path.as_path()))
+                    });
+
+                match evict_idx {
+                    Some(idx) => {
+                        if let Some(old) = self.pending_thumbnails.remove(idx) {
+                            self.cache_manager.finish_pending_upload(&old.path);
+                        }
+                    }
+                    None => {
+                        // All items visible — fall back to FIFO
+                        if let Some(old) = self.pending_thumbnails.pop_front() {
+                            self.cache_manager.finish_pending_upload(&old.path);
+                        }
+                    }
                 }
             }
 
