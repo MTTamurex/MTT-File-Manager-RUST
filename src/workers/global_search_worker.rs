@@ -102,8 +102,8 @@ fn query_service_with_retry(
     }
 }
 
-fn should_skip_service_query(query: &str, offset: u32) -> bool {
-    offset == 0 && query.chars().count() < MIN_QUERY_LEN_FOR_SERVICE_SEARCH
+fn should_skip_service_query(query: &str, _offset: u32) -> bool {
+    query.chars().count() < MIN_QUERY_LEN_FOR_SERVICE_SEARCH
 }
 
 fn filter_existing_results(
