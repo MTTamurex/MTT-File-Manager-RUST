@@ -3,6 +3,7 @@ use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::directory_index::DirectoryIndex;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
+use crate::infrastructure::folder_compose::FolderComposer;
 use crate::infrastructure::onedrive;
 use crate::infrastructure::windows as windows_infra;
 use crate::workers::thumbnail::{spawn_thumbnail_workers, PriorityThumbnailQueue};
@@ -136,8 +137,9 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
 
     let (icon_req_tx, icon_res_rx) = spawn_icon_worker(ctx, shared_gen.clone());
     let (meta_req_tx, meta_res_rx) = spawn_metadata_worker(ctx);
+    let folder_composer = Arc::new(FolderComposer::new());
     let (folder_preview_tx, folder_preview_res_rx) =
-        spawn_folder_preview_workers(ctx, disk_cache.clone());
+        spawn_folder_preview_workers(ctx, disk_cache.clone(), folder_composer);
     let (folder_size_req_tx, folder_size_res_rx, folder_size_cancel) =
         spawn_folder_size_worker(ctx);
 

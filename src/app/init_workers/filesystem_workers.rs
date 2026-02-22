@@ -41,6 +41,7 @@ pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
 pub(in crate::app) fn spawn_folder_preview_workers(
     ctx: &egui::Context,
     disk_cache: Arc<ThumbnailDiskCache>,
+    folder_composer: Arc<crate::infrastructure::folder_compose::FolderComposer>,
 ) -> (
     mpsc::Sender<PathBuf>,
     mpsc::Receiver<crate::workers::folder_preview_worker::FolderPreviewData>,
@@ -61,6 +62,7 @@ pub(in crate::app) fn spawn_folder_preview_workers(
                 folder_preview_res_tx.clone(),
                 ctx.clone(),
                 disk_cache.clone(),
+                folder_composer.clone(),
             );
         }
     }
