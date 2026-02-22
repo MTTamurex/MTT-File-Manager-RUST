@@ -9,6 +9,7 @@ pub const APP_ICON_PNG: &[u8] = include_bytes!("../appicon.png");
 // Embed folder composition layers (PNG, both 512px wide)
 pub const FOLDER_BACK_PNG: &[u8] = include_bytes!("../assets/folder_back_512.png");
 pub const FOLDER_FRONT_PNG: &[u8] = include_bytes!("../assets/folder_front_512.png");
+pub const PAPER_SHEET_PNG: &[u8] = include_bytes!("../assets/paper_sheet.png");
 
 // Embed SVG icons
 pub const ICON_COPY: &[u8] = include_bytes!("../assets/icons/copy_duotone_black_blue_lighter2.svg");

@@ -45,6 +45,8 @@ pub struct FolderComposer {
     back: RgbaImage,
     /// Folder front overlay, scaled to OUTPUT_W wide
     front: RgbaImage,
+    /// Paper sheet fallback, pre-scaled to fit the content gap
+    paper_sheet: RgbaImage,
     /// Canvas height (max of back/front heights, both bottom-aligned)
     canvas_h: u32,
     /// Y position of back layer on canvas (bottom-aligned)
@@ -85,6 +87,17 @@ impl FolderComposer {
         let back_y = canvas_h.saturating_sub(back.height());
         let front_y = canvas_h.saturating_sub(front.height());
 
+        // Pre-scale paper_sheet to fit the content gap width.
+        let gap_w = OUTPUT_W.saturating_sub(CONTENT_MARGIN_LEFT + CONTENT_MARGIN_RIGHT);
+        let sheet_img = image::load(
+            Cursor::new(crate::embedded_assets::PAPER_SHEET_PNG),
+            image::ImageFormat::Png,
+        )
+        .expect("Failed to decode embedded paper_sheet.png");
+        let paper_sheet = sheet_img
+            .resize(gap_w, u32::MAX, imageops::FilterType::CatmullRom)
+            .to_rgba8();
+
         log::info!(
             "[FOLDER COMPOSE] Layers decoded — back: {}×{} (y={}), front: {}×{} (y={}), canvas: {}×{}",
             back.width(), back.height(), back_y,
@@ -95,27 +108,32 @@ impl FolderComposer {
         Self {
             back,
             front,
+            paper_sheet,
             canvas_h,
             back_y,
             front_y,
         }
     }
 
-    /// Composes a folder cover with no media content — just back + front layers.
+    /// Composes a folder cover with no media content.
     ///
-    /// Used for folders that contain no image or video files.
+    /// Uses the pre-scaled `paper_sheet.png` as the middle layer so empty
+    /// folders still show a distinct interior instead of a blank silhouette.
     pub fn compose_empty(&self) -> (Vec<u8>, u32, u32) {
-        let mut canvas = RgbaImage::new(OUTPUT_W, self.canvas_h);
-
-        let bx = OUTPUT_W.saturating_sub(self.back.width()) / 2;
-        imageops::overlay(&mut canvas, &self.back, bx as i64, self.back_y as i64);
-
-        let fx = OUTPUT_W.saturating_sub(self.front.width()) / 2;
-        imageops::overlay(&mut canvas, &self.front, fx as i64, self.front_y as i64);
-
-        let w = canvas.width();
-        let h = canvas.height();
-        (canvas.into_raw(), w, h)
+        let sheet = &self.paper_sheet;
+        let result = self.compose(sheet.as_raw(), sheet.width(), sheet.height());
+        // compose() only returns None on malformed input — paper_sheet is always valid.
+        result.unwrap_or_else(|| {
+            // Absolute fallback: bare back + front (should never happen).
+            let mut canvas = RgbaImage::new(OUTPUT_W, self.canvas_h);
+            let bx = OUTPUT_W.saturating_sub(self.back.width()) / 2;
+            imageops::overlay(&mut canvas, &self.back, bx as i64, self.back_y as i64);
+            let fx = OUTPUT_W.saturating_sub(self.front.width()) / 2;
+            imageops::overlay(&mut canvas, &self.front, fx as i64, self.front_y as i64);
+            let w = canvas.width();
+            let h = canvas.height();
+            (canvas.into_raw(), w, h)
+        })
     }
 
     /// Composes a folder cover image from a media thumbnail.
