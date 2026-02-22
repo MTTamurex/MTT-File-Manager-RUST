@@ -2,6 +2,7 @@ use crate::domain::thumbnail::ThumbnailData;
 use crate::infrastructure::disk_cache::{ThumbnailCacheEntry, ThumbnailDiskCache};
 use crate::infrastructure::io_priority::IOPriority;
 use crate::infrastructure::onedrive::{self, IoTimeoutResult};
+use crate::infrastructure::windows::is_mpeg_ts_file;
 use crate::workers::thumbnail::extraction::generate_thumbnail_hybrid;
 use crate::workers::thumbnail::processing::resize::{get_bucket_size, resize_to_bucket};
 use eframe::egui;
@@ -27,9 +28,31 @@ pub(super) fn process_thumbnail_request(
     last_repaint: &mut Instant,
 ) {
     use crate::workers::thumbnail::{
-        clear_failure_cache, clear_transient_failure, is_known_failure, mark_as_failed,
-        mark_as_transient_failure,
+        clear_failure_cache, clear_transient_failure, is_known_failure, is_permanent_failure,
+        mark_as_failed, mark_as_transient_failure,
     };
+
+    // Block .ts files that are NOT real MPEG-TS video (e.g. TypeScript sources).
+    // Real MPEG-TS starts with sync byte 0x47; anything else is rejected permanently.
+    if path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("ts"))
+    {
+        if !is_mpeg_ts_file(path) {
+            mark_as_failed(path.clone());
+            let _ = tx.send(ThumbnailData {
+                path: path.clone(),
+                image_data: Vec::new(),
+                width: 0,
+                height: 0,
+                generation: req_gen,
+                not_found: true,
+            });
+            throttle_repaint_with_priority(ctx, last_repaint, req_priority);
+            return;
+        }
+    }
 
     // EARLY EXIT 1: Skip files that already failed in this session.
     // Prevents repeated slow retries on broken files (e.g., 0x8004B205).
@@ -50,7 +73,7 @@ pub(super) fn process_thumbnail_request(
                 width: 0,
                 height: 0,
                 generation: req_gen,
-                not_found: false,
+                not_found: is_permanent_failure(path),
             });
             throttle_repaint_with_priority(ctx, last_repaint, req_priority);
             return;

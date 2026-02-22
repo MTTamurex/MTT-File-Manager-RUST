@@ -203,7 +203,7 @@ pub fn render_status_bar(
             // This shifts content UP by ~0.5px without changing the row height
             // (because buttons/eye are taller, so the Frame never becomes the
             // tallest element → no coupling / vicious circle).
-            egui::Frame::none()
+            egui::Frame::NONE
                 .inner_margin(egui::Margin { left: 0, right: 0, top: 0, bottom: 2 })
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {

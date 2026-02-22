@@ -1,6 +1,7 @@
 use crate::app::state::ImageViewerApp;
 use crate::infrastructure::windows::{is_image_extension, is_video_extension};
 use std::collections::HashSet;
+use std::path::Path;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -148,7 +149,12 @@ impl ImageViewerApp {
             }
 
             let cover_opt = if let Some(cover) = db_covers.get(&folder_path) {
-                Some(cover.clone())
+                if is_invalid_cached_cover_path(cover) {
+                    self.disk_cache.remove_folder_cover(&folder_path);
+                    None
+                } else {
+                    Some(cover.clone())
+                }
             } else {
                 // INDEX PATH: If DB has no cover, try DirectoryIndex (no HDD hit)
                 let mut found = None;
@@ -239,7 +245,10 @@ impl ImageViewerApp {
         }
 
         let total_ms = total_start.elapsed().as_millis();
-        if total_ms > 40 || requested_folders >= 24 || resolve_budget_exhausted {
+        let should_warn = total_ms > 40 || requested_folders >= 24;
+        let should_debug_budget_only = !should_warn && resolve_budget_exhausted;
+
+        if should_warn {
             log::warn!(
                 "[PERF-FOLDER-SCAN] total={}ms db={}ms resolve={}ms apply={}ms thumbs={}ms filter={}ms | requested={} resolved={} worker_fallback={} worker_fallback_miss={} worker_fallback_budget={} deferred_worker={} sync_cap={} resolve_budget_ms={} resolve_budget_exit={} non_usn_fallback={} thumb_requests={} all_items={} items={}",
                 total_ms,
@@ -262,6 +271,32 @@ impl ImageViewerApp {
                 all_items_len_before,
                 items_len_before,
             );
+        } else if should_debug_budget_only {
+            log::debug!(
+                "[PERF-FOLDER-SCAN] total={}ms db={}ms resolve={}ms apply={}ms thumbs={}ms filter={}ms | requested={} resolved={} worker_fallback={} worker_fallback_miss={} worker_fallback_budget={} deferred_worker={} sync_cap={} resolve_budget_ms={} resolve_budget_exit={} non_usn_fallback={} thumb_requests={} all_items={} items={}",
+                total_ms,
+                db_ms,
+                resolve_ms,
+                apply_ms,
+                thumbs_ms,
+                filter_ms,
+                requested_folders,
+                resolved_count,
+                worker_fallback_count,
+                worker_fallback_missing_count,
+                worker_fallback_due_to_budget,
+                deferred_to_worker,
+                sync_cap,
+                resolve_budget_ms,
+                resolve_budget_exhausted,
+                non_usn_fallback,
+                thumb_requests,
+                all_items_len_before,
+                items_len_before,
+            );
+        }
+
+        if should_warn || should_debug_budget_only {
             log::debug!(
                 "[PERF-FOLDER-SCAN-STATE] frame_pressure_ms={:.1} last_actual_ms={:.1} avg_frame_ms={:.1} critical_pressure={} moderate_pressure={} peak_ms={:.1} tabs={} base_sync_cap={} tab_sync_adjust={} base_resolve_budget_ms={} tab_budget_adjust_ms={}",
                 frame_pressure_ms,
@@ -278,4 +313,15 @@ impl ImageViewerApp {
             );
         }
     }
+}
+
+fn is_invalid_cached_cover_path(path: &Path) -> bool {
+    if !path.exists() {
+        return true;
+    }
+
+    path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("ts"))
 }

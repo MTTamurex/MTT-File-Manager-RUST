@@ -32,7 +32,7 @@ pub use file_flags::*;
 pub use file_system::*;
 pub use file_type::{
     find_folder_preview_item, get_perceived_type, is_audio_extension, is_image_extension,
-    is_media_extension, is_video_extension, PerceivedType,
+    is_media_extension, is_mpeg_ts_file, is_video_extension, PerceivedType,
 };
 pub use formatting::*;
 pub use hdd_directory_reader::*;
