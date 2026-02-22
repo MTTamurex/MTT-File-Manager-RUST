@@ -42,6 +42,12 @@ impl ImageViewerApp {
                         // Empty batch = "End of Loading" signal from thread
                         saw_end_of_load = true;
                     } else {
+                        // Deferred clear: replace stale items on first real batch
+                        // so the UI never shows an empty list during watcher reloads.
+                        if self.pending_all_items_clear {
+                            self.all_items.clear();
+                            self.pending_all_items_clear = false;
+                        }
                         // Data arrived! Add to master list
                         self.pending_items_count =
                             self.pending_items_count.saturating_add(new_batch.len());

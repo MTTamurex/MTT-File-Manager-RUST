@@ -230,6 +230,7 @@ impl ImageViewerApp {
             last_items_rebuild: Instant::now(),
             pending_items_rebuild: false,
             pending_items_count: 0,
+            pending_all_items_clear: false,
             renaming_state: None,
             focus_rename: false,
 
