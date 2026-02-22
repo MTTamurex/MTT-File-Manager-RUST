@@ -557,6 +557,7 @@ impl ImageViewerApp {
         let current_path_norm =
             Self::normalize_for_match(std::path::Path::new(&self.navigation_state.current_path));
         for folder_path in folders_with_changed_contents {
+            self.invalidate_folder_size_cache(&folder_path);
             // Also evict the in-memory GPU texture so the stale preview
             // stops being rendered immediately (not just on LRU eviction).
             self.cache_manager.invalidate_folder_preview(&folder_path);

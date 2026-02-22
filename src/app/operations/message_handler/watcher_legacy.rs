@@ -1,5 +1,19 @@
 use crate::app::state::ImageViewerApp;
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+
+fn register_changed_folder(changed_path: &Path, out: &mut HashSet<PathBuf>) {
+    if changed_path.extension().is_some() {
+        if let Some(parent) = changed_path.parent() {
+            out.insert(parent.to_path_buf());
+        }
+    } else {
+        out.insert(changed_path.to_path_buf());
+        if let Some(parent) = changed_path.parent() {
+            out.insert(parent.to_path_buf());
+        }
+    }
+}
 
 fn should_preserve_onedrive_media_thumbnail(path: &std::path::Path) -> bool {
     if !crate::infrastructure::onedrive::is_onedrive_path(path)
@@ -44,10 +58,14 @@ impl ImageViewerApp {
             self.directory_cache.clear();
             if !self.navigation_state.is_computer_view && !self.navigation_state.is_recycle_bin_view
             {
+                let current_path = PathBuf::from(&self.navigation_state.current_path);
+                self.invalidate_folder_size_cache(current_path.as_path());
                 self.pending_auto_reload = true;
             }
             return;
         }
+
+        let mut folders_with_changed_contents: HashSet<PathBuf> = HashSet::new();
 
         for event in legacy_events {
             match event {
@@ -66,6 +84,7 @@ impl ImageViewerApp {
                             meaningful_change = true;
 
                             let cleaned = Self::clean_path(path);
+                            register_changed_folder(&cleaned, &mut folders_with_changed_contents);
                             if let Some(parent) = cleaned.parent() {
                                 self.directory_cache.invalidate(&parent.to_path_buf());
                             }
@@ -125,6 +144,7 @@ impl ImageViewerApp {
                         }
 
                         let cleaned = Self::clean_path(path);
+                        register_changed_folder(&cleaned, &mut folders_with_changed_contents);
                         let preserve_media_thumb = should_preserve_onedrive_media_thumbnail(&cleaned);
                         if !preserve_media_thumb {
                             self.cache_manager.texture_cache.pop(&cleaned);
@@ -142,6 +162,10 @@ impl ImageViewerApp {
                     log::warn!("Erro de watch: {:?}", _err);
                 }
             }
+        }
+
+        for folder_path in folders_with_changed_contents {
+            self.invalidate_folder_size_cache(&folder_path);
         }
     }
 }

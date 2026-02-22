@@ -1,5 +1,6 @@
 use crate::app::state::ImageViewerApp;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 impl ImageViewerApp {
@@ -26,6 +27,16 @@ impl ImageViewerApp {
         self.directory_cache.invalidate(&path_buf);
         if let Some(di) = &self.directory_index {
             let _ = di.invalidate(path);
+        }
+    }
+
+    pub(super) fn invalidate_folder_size_cache(&mut self, folder: &Path) {
+        let folder_path = folder.to_path_buf();
+        let was_loading = self.folder_size_state.loading.remove(&folder_path);
+        self.folder_size_state.cache.pop(&folder_path);
+
+        if was_loading {
+            self.folder_size_state.cancel.store(true, Ordering::Release);
         }
     }
 

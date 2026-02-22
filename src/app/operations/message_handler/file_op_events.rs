@@ -52,6 +52,7 @@ impl ImageViewerApp {
 
     fn invalidate_folder_and_tab_caches(&mut self, folder: &Path) {
         self.invalidate_directory_caches(folder);
+        self.invalidate_folder_size_cache(folder);
         let folder_norm = Self::normalize_for_match(folder);
         self.clear_tab_cache_for_normalized_path(&folder_norm);
     }
@@ -153,10 +154,8 @@ impl ImageViewerApp {
         let source_str = Self::normalize_for_match(source_folder.as_path());
         let dest_str = Self::normalize_for_match(dest_folder.as_path());
 
-        self.invalidate_directory_caches(&source_folder);
-        self.invalidate_directory_caches(&dest_folder);
-        self.clear_tab_cache_for_normalized_path(&source_str);
-        self.clear_tab_cache_for_normalized_path(&dest_str);
+        self.invalidate_folder_and_tab_caches(&source_folder);
+        self.invalidate_folder_and_tab_caches(&dest_folder);
 
         self.cache_manager.clear_failed();
         crate::workers::thumbnail::clear_all_failures();
@@ -195,9 +194,9 @@ impl ImageViewerApp {
         crate::workers::thumbnail::clear_all_failures();
 
         for source_folder in &source_folders {
-            self.invalidate_directory_caches(source_folder);
+            self.invalidate_folder_and_tab_caches(source_folder);
         }
-        self.invalidate_directory_caches(&dest_folder);
+        self.invalidate_folder_and_tab_caches(&dest_folder);
 
         // If any moved file was a folder cover, force re-discovery.
         for source_folder in &source_folders {
@@ -224,9 +223,7 @@ impl ImageViewerApp {
             if current_path_norm == source_str {
                 should_reload_source_view = true;
             }
-            self.clear_tab_cache_for_normalized_path(&source_str);
         }
-        self.clear_tab_cache_for_normalized_path(&dest_str);
 
         if should_reload_source_view {
             self.loaded_path.clear();
