@@ -148,6 +148,8 @@ pub fn collect_authorized_search_page(
         has_more_authorized = true;
     }
 
+    let has_more = has_more_authorized || (raw_has_more && !authorized_items.is_empty());
+
     let total_matches = if !raw_has_more && !has_more_authorized {
         Some(authorized_total_seen.min(u32::MAX as usize) as u32)
     } else {
@@ -156,7 +158,7 @@ pub fn collect_authorized_search_page(
 
     Ok(AuthorizedSearchPage {
         items: authorized_items,
-        has_more: has_more_authorized || raw_has_more,
+        has_more,
         total_matches,
     })
 }
