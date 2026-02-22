@@ -2,6 +2,10 @@
 //!
 //! Main use case: virtual mounts exposed only in the interactive user session
 //! (e.g. Cryptomator/CryptoFS via WinFsp/FUSE).
+//!
+//! Persists indexed items to a local SQLite database so that results are
+//! available immediately on the next app startup (before the first rescan
+//! completes).
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::os::windows::fs::MetadataExt;
@@ -53,16 +57,34 @@ pub struct UserSessionSearchIndex {
     volumes: HashMap<char, IndexedVolume>,
     watchers: HashMap<char, DriveWatcher>,
     last_discovery: Option<Instant>,
-    last_scanned_letter: Option<char>,
+    /// Optional SQLite connection for persisting/loading indexed items.
+    db: Option<rusqlite::Connection>,
 }
 
 impl UserSessionSearchIndex {
     pub fn new() -> Self {
+        let db = open_session_db();
+        let volumes = match &db {
+            Some(conn) => load_all_volumes(conn),
+            None => HashMap::new(),
+        };
+
+        if !volumes.is_empty() {
+            let total: usize = volumes.values().map(|v| v.items.len()).sum();
+            let drives: Vec<char> = volumes.keys().copied().collect();
+            log::info!(
+                "[SESSION-SEARCH] Loaded {} cached entries from {} volume(s) {:?}",
+                total,
+                drives.len(),
+                drives
+            );
+        }
+
         Self {
-            volumes: HashMap::new(),
+            volumes,
             watchers: HashMap::new(),
             last_discovery: None,
-            last_scanned_letter: None,
+            db,
         }
     }
 
@@ -119,12 +141,18 @@ impl UserSessionSearchIndex {
         self.sync_watchers(&active_letters);
         self.apply_pending_events();
 
-        if let Some(candidate) =
-            pick_next_stale_candidate(&stale_candidates, self.last_scanned_letter)
-        {
+        // Scan ALL stale candidates at once (not just one per cycle) so that
+        // results for every non-NTFS/virtual volume become available quickly.
+        for candidate in &stale_candidates {
             match scan_volume(candidate.drive_letter) {
                 Ok(scan) => {
                     let count = scan.items.len();
+
+                    // Persist to SQLite so next startup is instant.
+                    if let Some(conn) = &self.db {
+                        save_volume(conn, candidate.drive_letter, &scan.items);
+                    }
+
                     self.volumes.insert(
                         candidate.drive_letter,
                         IndexedVolume {
@@ -135,7 +163,6 @@ impl UserSessionSearchIndex {
                             live_paths: scan.live_paths,
                         },
                     );
-                    self.last_scanned_letter = Some(candidate.drive_letter);
                     log::info!(
                         "[SESSION-SEARCH] {}:\\ indexed {} entries in {:.2}s (dirs: {}, errors: {})",
                         candidate.drive_letter,
@@ -152,6 +179,19 @@ impl UserSessionSearchIndex {
                         e
                     );
                 }
+            }
+        }
+
+        // Remove volumes that are no longer active candidates.
+        let removed_letters: Vec<char> = self
+            .volumes
+            .keys()
+            .filter(|letter| !active_letters.contains(letter))
+            .copied()
+            .collect();
+        for letter in &removed_letters {
+            if let Some(conn) = &self.db {
+                delete_volume(conn, *letter);
             }
         }
 
@@ -311,28 +351,6 @@ fn normalize_path_key(path: &Path) -> String {
     } else {
         stripped.to_string()
     }
-}
-
-fn pick_next_stale_candidate(
-    stale_candidates: &[CandidateVolume],
-    last_scanned_letter: Option<char>,
-) -> Option<&CandidateVolume> {
-    if stale_candidates.is_empty() {
-        return None;
-    }
-
-    let Some(last_letter) = last_scanned_letter else {
-        return stale_candidates.first();
-    };
-
-    if let Some(next) = stale_candidates
-        .iter()
-        .find(|c| c.drive_letter > last_letter)
-    {
-        return Some(next);
-    }
-
-    stale_candidates.first()
 }
 
 fn discover_candidate_volumes(
@@ -501,4 +519,176 @@ fn scan_volume(drive_letter: char) -> Result<ScanOutcome, String> {
         errors,
         elapsed: start.elapsed(),
     })
+}
+
+// ── SQLite persistence ──────────────────────────────────────────────────
+
+/// Open (or create) the session-search database.
+fn open_session_db() -> Option<rusqlite::Connection> {
+    let cache_dir = dirs::data_local_dir()?.join("MTT-File-Manager").join("thumbnails");
+    let db_path = cache_dir.join("session_search.db");
+
+    if let Err(e) = std::fs::create_dir_all(&cache_dir) {
+        log::warn!("[SESSION-SEARCH] Failed to create cache dir {:?}: {}", cache_dir, e);
+        return None;
+    }
+
+    let conn = match rusqlite::Connection::open(&db_path) {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("[SESSION-SEARCH] Failed to open session_search.db: {}", e);
+            return None;
+        }
+    };
+
+    let _ = conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;");
+
+    if let Err(e) = conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS session_items (
+            drive_letter TEXT NOT NULL,
+            name         TEXT NOT NULL,
+            full_path    TEXT NOT NULL,
+            is_dir       INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_session_items_drive
+            ON session_items(drive_letter);
+        CREATE TABLE IF NOT EXISTS session_volumes (
+            drive_letter  TEXT PRIMARY KEY,
+            label         TEXT NOT NULL,
+            file_system   TEXT NOT NULL
+        );",
+    ) {
+        log::warn!("[SESSION-SEARCH] Failed to create session tables: {}", e);
+        return None;
+    }
+
+    Some(conn)
+}
+
+/// Load all persisted volumes from SQLite into in-memory structures.
+fn load_all_volumes(conn: &rusqlite::Connection) -> HashMap<char, IndexedVolume> {
+    let mut volumes = HashMap::new();
+
+    // Load volume metadata.
+    let mut vol_stmt = match conn.prepare(
+        "SELECT drive_letter, label, file_system FROM session_volumes",
+    ) {
+        Ok(s) => s,
+        Err(_) => return volumes,
+    };
+
+    let vol_rows = match vol_stmt.query_map([], |row| {
+        let dl: String = row.get(0)?;
+        let label: String = row.get(1)?;
+        let fs: String = row.get(2)?;
+        Ok((dl, label, fs))
+    }) {
+        Ok(rows) => rows,
+        Err(_) => return volumes,
+    };
+
+    for row in vol_rows.flatten() {
+        let Some(letter) = row.0.chars().next() else { continue };
+        volumes.insert(
+            letter,
+            IndexedVolume {
+                label: row.1,
+                file_system: row.2,
+                last_scan: Instant::now(), // treat cached data as fresh for initial serving
+                items: Vec::new(),
+                live_paths: HashSet::new(),
+            },
+        );
+    }
+
+    if volumes.is_empty() {
+        return volumes;
+    }
+
+    // Load items per volume.
+    let mut item_stmt = match conn.prepare(
+        "SELECT drive_letter, name, full_path, is_dir FROM session_items",
+    ) {
+        Ok(s) => s,
+        Err(_) => return volumes,
+    };
+
+    let item_rows = match item_stmt.query_map([], |row| {
+        let dl: String = row.get(0)?;
+        let name: String = row.get(1)?;
+        let full_path: String = row.get(2)?;
+        let is_dir: bool = row.get(3)?;
+        Ok((dl, name, full_path, is_dir))
+    }) {
+        Ok(rows) => rows,
+        Err(_) => return volumes,
+    };
+
+    for (dl, name, full_path, is_dir) in item_rows.flatten() {
+        let Some(letter) = dl.chars().next() else { continue };
+        let Some(volume) = volumes.get_mut(&letter) else { continue };
+
+        let path_key = normalize_path_key(Path::new(&full_path));
+        volume.items.push(IndexedItem {
+            name_lower: name.to_lowercase(),
+            name,
+            full_path,
+            path_key: path_key.clone(),
+            is_dir,
+        });
+        volume.live_paths.insert(path_key);
+    }
+
+    // Remove empty volumes (items may have been pruned).
+    volumes.retain(|_, v| !v.items.is_empty());
+
+    volumes
+}
+
+/// Replace all persisted items for a volume with the fresh scan.
+fn save_volume(conn: &rusqlite::Connection, drive_letter: char, items: &[IndexedItem]) {
+    let dl = drive_letter.to_string();
+
+    let tx = match conn.execute("BEGIN IMMEDIATE", []) {
+        Ok(_) => true,
+        Err(e) => {
+            log::warn!("[SESSION-SEARCH] Failed to begin transaction: {}", e);
+            false
+        }
+    };
+
+    // Delete old items for this drive.
+    let _ = conn.execute("DELETE FROM session_items WHERE drive_letter = ?1", [&dl]);
+
+    // Insert new items in batches.
+    if let Ok(mut stmt) = conn.prepare(
+        "INSERT INTO session_items (drive_letter, name, full_path, is_dir) VALUES (?1, ?2, ?3, ?4)",
+    ) {
+        for item in items {
+            let _ = stmt.execute(rusqlite::params![dl, item.name, item.full_path, item.is_dir]);
+        }
+    }
+
+    // Upsert volume metadata.
+    let _ = conn.execute(
+        "INSERT OR REPLACE INTO session_volumes (drive_letter, label, file_system) VALUES (?1, '', '')",
+        [&dl],
+    );
+
+    if tx {
+        let _ = conn.execute("COMMIT", []);
+    }
+
+    log::info!(
+        "[SESSION-SEARCH] Persisted {} items for {}:\\",
+        items.len(),
+        drive_letter
+    );
+}
+
+/// Remove persisted data for a volume that is no longer active.
+fn delete_volume(conn: &rusqlite::Connection, drive_letter: char) {
+    let dl = drive_letter.to_string();
+    let _ = conn.execute("DELETE FROM session_items WHERE drive_letter = ?1", [&dl]);
+    let _ = conn.execute("DELETE FROM session_volumes WHERE drive_letter = ?1", [&dl]);
 }
