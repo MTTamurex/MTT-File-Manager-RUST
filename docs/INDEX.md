@@ -58,6 +58,7 @@ Este índice fornece navegação para todos os documentos técnicos do MTT File 
 - Lixeira
 - Navegação por teclado
 - Busca global (Ctrl+Shift+F → Named Pipe → índice híbrido USN/fallback)
+- Folder cover composition (composição customizada com layers PNG)
 - Debugging por fluxo
 
 ### [07_storage_config.md](07_storage_config.md)
@@ -286,4 +287,4 @@ MTT-File-Manager-RUST/
 
 ---
 
-*Última atualização: 2026-02-14 (documentado fallback de busca para volumes sem USN)*
+*Última atualização: 2026-02-22 (documentado sistema de folder cover composition customizada)*

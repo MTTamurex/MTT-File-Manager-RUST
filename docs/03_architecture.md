@@ -198,6 +198,7 @@ Fornece acesso a recursos externos e serviços de sistema.
 - **`watcher.rs`** - Watcher genérico de filesystem
 - **`windows_clipboard.rs`** - Integração nativa com clipboard Windows
 - **`onedrive/mod.rs`** - Detecção de status OneDrive (path_detection, attributes, timeout_ops, directory_enum)
+- **`folder_compose.rs`** - Composição customizada de covers de pasta (back + thumbnail + front layers via `image` crate)
 - **`security.rs`** - Validações de segurança
 
 **Integrações Windows** (`src/infrastructure/windows/`):
@@ -254,7 +255,7 @@ Threads de background para processamento assíncrono.
   - `extraction/stage5_media_foundation.rs` - Stage 5: Media Foundation
 - **`thumbnail_loader.rs`** - Loader de thumbnails
 - **`folder_scanner.rs`** - Scanner de pastas em background
-- **`folder_preview_worker.rs`** - Geração de previews de pastas
+- **`folder_preview_worker.rs`** - Geração de previews de pastas (composição customizada com layers PNG embutidos)
 - **`file_operation_worker.rs`** - Operações de arquivo assíncronas
 - **`prefetch_worker.rs`** - Pré-carregamento de dados
 - **`predictive_prefetch.rs`** - Prefetch preditivo
@@ -503,6 +504,18 @@ pub struct SharedState {
 4. Stage 4: Extração forçada de frames
 5. Stage 5: Media Foundation para vídeos
 
+### Folder Cover Customizado
+Substitui completamente a geração de covers de pasta via Windows Shell API.
+Composição em 3 camadas usando `image` crate:
+1. **folder_back_512.png** — fundo da pasta (silhueta)
+2. **Thumbnail do conteúdo** — primeira imagem/vídeo encontrada dentro da pasta (extraída pelo pipeline de 5 estágios)
+3. **folder_front_512.png** — frente da pasta (aba sobreposta)
+
+PNGs embutidos no binário via `include_bytes!`, decodificados uma vez no startup (~2ms).
+Cada composição leva ~1-2ms (vs 20-200ms da Shell API via COM).
+Pastas sem mídia recebem cover "vazio" (back + front sem thumbnail).
+Resultados são cacheados em SQLite (`folder_previews`) com invalidação por mtime.
+
 ## Pontos de Extensão
 
 ### Novos Tipos de Preview
@@ -528,5 +541,5 @@ pub struct SharedState {
 
 ---
 
-*Última atualização: 2026-02-14 (documentado fluxo híbrido de busca para volumes sem USN)*
+*Última atualização: 2026-02-22 (documentado sistema de composição customizada de folder covers)*
 

@@ -744,5 +744,134 @@ sc.exe query MTTFileManagerSearch
 
 ---
 
-*Última atualização: 2026-02-18 (adicionado fluxo Acesso Rápido — pastas fixadas na sidebar)*
+## 11. Folder Cover Composition (Custom Folder Preview)
+
+### Visão Geral
+O sistema de folder covers customizados substitui completamente a geração de previews via Windows Shell API (`IThumbnailCache` / `IShellItemImageFactory`). A Shell API gerava covers com problemas frequentes: fundos pretos, ícones genéricos em vez de thumbnails, e previews quebrados.
+
+A nova implementação compõe covers programaticamente com 3 camadas PNG usando a crate `image`:
+1. **folder_back_512.png** — silhueta de fundo da pasta (layer traseiro)
+2. **Thumbnail do conteúdo** — primeira imagem/vídeo encontrada dentro da pasta
+3. **folder_front_512.png** — aba frontal da pasta (overlay superior)
+
+### Sequência de Chamadas
+```
+UI renderiza folder slot (grid/list view)
+    ↓
+src/ui/components/item_slot/folder_slot.rs - request_folder_preview_load()
+    ↓ (todas as pastas normais, sem guard de has_cover)
+Channel send → folder_preview_sender
+    ↓
+src/workers/folder_preview_worker.rs - spawn_folder_preview_worker()
+    ↓
+  ├── FAST PATH: SQLite disk cache check (~1ms)
+  │   → disk_cache.get_folder_preview_cache(&path)
+  │   → Verificação de staleness: folder mtime > cache created_at?
+  │   → Se cache fresh: retorna imediatamente
+  │
+  ├── SLOW PATH (com mídia):
+  │   ↓
+  │   find_folder_preview_item(folder_path) → primeira imagem/vídeo
+  │   ↓
+  │   generate_thumbnail_hybrid(media_path) → pipeline 5 estágios
+  │   ↓
+  │   composer.compose(content_rgba, w, h) → back + thumbnail + front
+  │   ↓
+  │   disk_cache.put_folder_preview_cache() → persiste em SQLite (WebP)
+  │
+  └── FALLBACK (sem mídia):
+      ↓
+      composer.compose_empty() → back + front (sem thumbnail)
+      ↓
+      disk_cache.put_folder_preview_cache() → persiste em SQLite
+    ↓
+FolderPreviewData via channel → UI
+    ↓
+src/ui/cache.rs - CacheManager::upload_to_gpu()
+```
+
+### Arquivos Envolvidos
+- **`src/embedded_assets.rs`** - PNGs embutidos via `include_bytes!` (folder_back_512.png, folder_front_512.png)
+- **`src/infrastructure/folder_compose.rs`** - `FolderComposer` (decodifica layers uma vez, compõe covers)
+- **`src/workers/folder_preview_worker.rs`** - Worker thread (cache check → compose → envio)
+- **`src/app/init_bootstrap.rs`** - Cria `Arc<FolderComposer>` no startup
+- **`src/app/init_workers/filesystem_workers.rs`** - Passa `Arc<FolderComposer>` aos workers
+- **`src/ui/components/item_slot/folder_slot.rs`** - Solicita preview para todas as pastas
+- **`src/ui/preview_panel/fallback_renderer.rs`** - Usa cover customizado no painel de detalhes
+- **`src/infrastructure/disk_cache/folder_previews.rs`** - CRUD de previews no SQLite
+
+### Arquitetura do FolderComposer
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  FolderComposer (Arc, shared)                │
+│                                                              │
+│  Startup (uma vez):                                          │
+│    folder_back_512.png  → decode → resize(256px) → back     │
+│    folder_front_512.png → decode → resize(256px) → front    │
+│                                                              │
+│  compose(content_rgba):          compose_empty():            │
+│    canvas 256×173 (transparent)    canvas 256×173            │
+│    ├── overlay back (bottom-aligned)  ├── overlay back       │
+│    ├── thumbnail (fill-width,         └── overlay front      │
+│    │   top-aligned, cropped)                                 │
+│    └── overlay front (bottom-aligned)                        │
+│                                                              │
+│  Constantes:                                                 │
+│    OUTPUT_W = 256px                                          │
+│    CONTENT_MARGIN: L=10, R=10, T=30, B=0                    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Performance
+| Operação | Tempo |
+|----------|-------|
+| Decode dos PNGs (startup, uma vez) | ~2ms |
+| Cache hit SQLite (NVMe) | ~1ms |
+| Composição com thumbnail | ~1-2ms |
+| Composição vazia (sem mídia) | ~0.5ms |
+| Shell API anterior (COM interop) | 20-200ms |
+
+### Cache e Invalidação
+- Covers compostos são armazenados em SQLite (tabela `folder_previews`) como blobs WebP
+- No próximo acesso, o worker verifica `created_at` do cache vs `mtime` da pasta
+- Se a pasta foi modificada (arquivo adicionado/removido), o cover é recomposto
+- O `CacheManager` (GPU) também armazena texturas em memória para acesso imediato
+
+### Pontos de Bug Comuns
+1. **Folder cover não aparece**
+   - **Causa**: Worker não recebeu a solicitação, ou `folder_preview_sender` congestionado
+   - **Debug**: Verificar logs `[FOLDER PREVIEW]` para DB HIT/MISS/STALE
+   - **Solução**: `request_folder_preview_load()` é chamado para toda pasta normal
+
+2. **Cover mostra pasta vazia quando tem mídia**
+   - **Causa**: `find_folder_preview_item()` não encontrou arquivos de mídia (extensão não reconhecida) ou pipeline falhou
+   - **Debug**: Verificar logs `[FOLDER PREVIEW] Custom compose FAILED`
+   - **Solução**: Verificar extensões suportadas em `find_folder_preview_item`
+
+3. **Cover desatualizado após adicionar/remover arquivos**
+   - **Causa**: Cache SQLite ainda fresh (mtime não atualizado pelo OS para o diretório)
+   - **Debug**: Verificar `is_stale` no worker
+   - **Solução**: O DriveWatcher invalida o cache quando detecta mudanças na pasta
+
+4. **Performance lenta na primeira vez em pasta com muitas subpastas**
+   - **Causa**: Todas as subpastas precisam composição (sem cache)
+   - **Debug**: Verificar logs de composição e fila do worker
+   - **Solução**: Workers processam em paralelo (2-6 threads baseado em CPU count)
+
+### Como Debugar
+```rust
+// Logs automáticos no worker:
+// [FOLDER PREVIEW] DB HIT "FolderName" (256x173, 0.8ms)
+// [FOLDER PREVIEW] DB MISS "FolderName" (0.1ms)  
+// [FOLDER PREVIEW] DB STALE "FolderName" (folder modified after cache)
+// [FOLDER PREVIEW] Custom compose SUCCESS "FolderName" via "photo.jpg" (1.5ms)
+// [FOLDER PREVIEW] Custom compose FAILED for "FolderName"
+
+// Verificar composer no startup:
+// [FOLDER COMPOSE] Layers decoded — back: 256×173, front: 256×112, canvas: 256×173
+```
+
+---
+
+*Última atualização: 2026-02-22 (adicionado fluxo de Folder Cover Composition customizada)*
 

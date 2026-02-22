@@ -67,7 +67,7 @@ image = { version = "0.25", features = ["webp", "gif"] }
 ```
 - **Propósito**: Decodificação/encodificação de imagens
 - **Features**: Suporte a WebP e GIF animado
-- **Uso**: Geração de thumbnails, processamento de imagens (Stage 1)
+- **Uso**: Geração de thumbnails (Stage 1), composição de folder covers (alpha blending de layers PNG)
 
 ```toml
 webp = "0.3"
@@ -413,4 +413,4 @@ cargo audit
 
 ---
 
-*Última atualização: 2026-02-11 (adicionadas dependências do serviço de busca e workspace)*
+*Última atualização: 2026-02-22 (atualizado uso de image crate para folder cover composition)*

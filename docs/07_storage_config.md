@@ -88,6 +88,16 @@ CREATE TABLE pinned_folders (
     display_name TEXT NOT NULL,
     position INTEGER NOT NULL DEFAULT 0
 );
+
+-- Folder previews — covers customizados de pastas (composição back + thumbnail + front)
+CREATE TABLE folder_previews (
+    path_hash INTEGER PRIMARY KEY,
+    file_path TEXT NOT NULL,
+    width INTEGER NOT NULL,
+    height INTEGER NOT NULL,
+    image_data BLOB NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+);
 ```
 
 ### Acesso ao Banco
@@ -461,4 +471,4 @@ Copy-Item $source $dest -Recurse -Force
 
 ---
 
-*Última atualização: 2026-02-18 (adicionadas tabelas folder_locks e pinned_folders ao schema)*
+*Última atualização: 2026-02-22 (adicionada tabela folder_previews para covers customizados de pastas)*

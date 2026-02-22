@@ -223,6 +223,7 @@ pub enum AppError {
 - **`security.rs`** - Validações de segurança
 - **`virtual_drive_config.rs`** - Configuração de drives virtuais
 - **`watcher.rs`** - Watcher genérico de filesystem
+- **`folder_compose.rs`** - Composição customizada de covers de pasta (FolderComposer: back + thumbnail + front layers)
 - **`windows_clipboard.rs`** - Clipboard Windows (CF_HDROP)
 - **`global_search.rs`** - Cliente IPC (Named Pipe) para o serviço de busca global
 
@@ -425,7 +426,7 @@ pub fn is_active(&self) -> bool
 **Workers individuais**:
 - **`batch_thumbnail_loader.rs`** - Loader em batch (não usado atualmente)
 - **`file_operation_worker.rs`** - Operações de arquivo (copiar, mover, deletar)
-- **`folder_preview_worker.rs`** - Geração de previews de pastas
+- **`folder_preview_worker.rs`** - Geração de previews de pastas (composição customizada com FolderComposer; Shell API removida)
 - **`folder_scanner.rs`** - Scanner de pastas
 - **`global_search_worker.rs`** - Worker de busca global (IPC com mtt-search-service)
 - **`idle_warmup.rs`** - Warmup de cache em idle
@@ -525,6 +526,8 @@ pub enum IndexState { NotStarted, Scanning, Ready, Error(String) }
 
 **`src/embedded_assets.rs`**:
 - Fontes embarcadas (remixicon.ttf)
+- Ícones SVG embarcados (copiar, colar, deletar, etc.)
+- Layers PNG para composição de folder covers (folder_back_512.png, folder_front_512.png)
 - Recursos para executável portátil
 
 ## Fluxo de Dados Principal
@@ -590,4 +593,4 @@ mtt-search-service (processo separado)
 
 ---
 
-*Última atualização: 2026-02-18 (adicionado pinned_folder, pinned_folder_ops, disk_cache/pinned_folders, folder_lock_ops, folder_locks)*
+*Última atualização: 2026-02-22 (adicionado folder_compose.rs, atualizado embedded_assets e folder_preview_worker)*

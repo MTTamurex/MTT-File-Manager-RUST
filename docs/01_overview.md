@@ -24,6 +24,7 @@ O MTT File Manager é um gerenciador de arquivos nativo para Windows desenvolvid
 - **Reprodução de vídeo** - Player baseado em libmpv para formatos de vídeo diversos com suporte a controles, tela cheia e janela destacada
 - **Visualizador de PDF** - Integração com WebView2 (Edge) para PDFs
 - **Thumbnails inteligentes** - Geração e cache de thumbnails com múltiplos backends (image crate, WIC, Shell API, Media Foundation)
+- **Folder covers customizados** - Composição própria de previews de pastas com layers PNG (substitui Shell API)
 - **Suporte a GIFs animados** - Reprodução otimizada de GIFs com controles de play/pause
 - **Extração de metadados** - EXIF de imagens, metadados de vídeo e áudio
 
@@ -49,6 +50,7 @@ O MTT File Manager é um gerenciador de arquivos nativo para Windows desenvolvid
 - **Indexação de diretórios** - Cache de estrutura de diretórios para navegação rápida
 - **Virtualização de listas** - Renderização eficiente para pastas com muitos arquivos
 - **Geração de thumbnails em estágios** - Fallback progressivo: image crate → WIC → Shell API → Media Foundation
+- **Folder covers customizados** - Composição com 3 layers PNG via `image` crate (substitui Shell API completamente)
 
 ## Arquitetura de Alto Nível
 
@@ -146,4 +148,4 @@ O MTT File Manager é um gerenciador de arquivos nativo para Windows desenvolvid
 
 ---
 
-*Última atualização: 2026-02-18 (adicionado Acesso Rápido com pastas fixadas e scroll na sidebar)*
+*Última atualização: 2026-02-22 (adicionado Folder covers customizados com pastas fixadas e scroll na sidebar)*
