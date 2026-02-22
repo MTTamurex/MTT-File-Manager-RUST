@@ -51,14 +51,9 @@ fn compute_backoff(attempts: u8) -> Duration {
     Duration::from_millis(ms)
 }
 
-/// Check if a path has previously failed extraction
+/// Check if a path has previously failed extraction (permanent or under backoff).
 pub fn is_known_failure(path: &PathBuf) -> bool {
-    let permanent_failure = get_failed_paths()
-        .lock()
-        .map(|set| set.contains(path))
-        .unwrap_or(false);
-
-    if permanent_failure {
+    if is_permanent_failure(path) {
         return true;
     }
 
@@ -70,6 +65,14 @@ pub fn is_known_failure(path: &PathBuf) -> bool {
         })
         .unwrap_or(false)
 }
+
+    /// Check if a path is permanently failed.
+    pub fn is_permanent_failure(path: &PathBuf) -> bool {
+        get_failed_paths()
+        .lock()
+        .map(|set| set.contains(path))
+        .unwrap_or(false)
+    }
 
 /// Mark a path as failed (won't retry until app restart)
 pub fn mark_as_failed(path: PathBuf) {
@@ -85,6 +88,8 @@ pub fn mark_as_failed(path: PathBuf) {
 /// Register a transient failure using exponential backoff.
 /// Requests can retry automatically after the cooldown expires.
 pub fn mark_as_transient_failure(path: PathBuf) {
+    const MAX_TRANSIENT_ATTEMPTS: u8 = 6;
+
     if let Ok(mut map) = get_failure_backoff().lock() {
         if map.len() > 4096 {
             map.clear();
@@ -92,7 +97,15 @@ pub fn mark_as_transient_failure(path: PathBuf) {
 
         let attempts = map
             .get(&path)
-            .map_or(1, |state| state.attempts.saturating_add(1).min(8));
+            .map_or(1, |state| state.attempts.saturating_add(1));
+
+        if attempts >= MAX_TRANSIENT_ATTEMPTS {
+            map.remove(&path);
+            drop(map);
+            mark_as_failed(path);
+            return;
+        }
+
         let retry_after = Instant::now() + compute_backoff(attempts);
         map.insert(
             path,

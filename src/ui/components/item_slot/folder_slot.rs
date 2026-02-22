@@ -21,6 +21,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
         if let Some(ref cover_path) = item.folder_cover {
             if !ctx.texture_cache.contains(cover_path)
                 && !ctx.loading_set.contains(cover_path)
+                && !ctx.failed_thumbnails.contains(cover_path)
                 && ctx.loading_set.len() < 200
             {
                 ctx.loading_set.insert(cover_path.clone());

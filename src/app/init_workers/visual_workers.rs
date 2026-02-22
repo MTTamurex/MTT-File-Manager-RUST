@@ -1,5 +1,6 @@
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::windows as windows_infra;
+use crate::infrastructure::windows::is_mpeg_ts_file;
 use eframe::egui;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
@@ -26,7 +27,18 @@ pub(in crate::app) fn spawn_cover_worker(
         );
 
         while let Ok(folder_path) = cover_req_rx.recv() {
-            let cover = windows_infra::find_folder_preview_item(&folder_path);
+            let cover = windows_infra::find_folder_preview_item(&folder_path)
+                .filter(|p| {
+                    // Reject .ts files that aren't real MPEG-TS video.
+                    // Real MPEG-TS starts with sync byte 0x47.
+                    if p.extension()
+                        .and_then(|e| e.to_str())
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("ts"))
+                    {
+                        return is_mpeg_ts_file(p);
+                    }
+                    true
+                });
 
             if let Some(c) = &cover {
                 cover_worker_cache.set_folder_cover(&folder_path, c);

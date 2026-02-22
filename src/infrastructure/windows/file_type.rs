@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs;
+use std::io::Read;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -48,11 +49,7 @@ fn get_perceived_type_fast(ext: &str) -> Option<PerceivedType> {
 
     match bytes.len() {
         2 => {
-            let b = [bytes[0].to_ascii_lowercase(), bytes[1].to_ascii_lowercase()];
-            match &b {
-                b"ts" => Some(PerceivedType::Video),
-                _ => None,
-            }
+            None
         }
         3 => {
             let b = [
@@ -144,7 +141,6 @@ pub fn get_perceived_type(extension: &str) -> PerceivedType {
                 | "wmv"
                 | "flv"
                 | "ogm"
-                | "ts"
                 | "mts"
                 | "m2ts"
                 | "vob"
@@ -313,7 +309,9 @@ pub fn find_folder_preview_item(folder_path: &Path) -> Option<PathBuf> {
                     let path = folder_path.join(&filename);
                     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                         let ptype = get_perceived_type(ext);
-                        if ptype == PerceivedType::Image || ptype == PerceivedType::Video {
+                        if (ptype == PerceivedType::Image || ptype == PerceivedType::Video)
+                            && is_valid_media_candidate(&path, ptype)
+                        {
                             return Some(path);
                         }
                     }
@@ -351,13 +349,47 @@ pub fn find_folder_preview_item(folder_path: &Path) -> Option<PathBuf> {
             if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                 // For folder preview, we only want images or videos
                 let ptype = get_perceived_type(ext);
-                if ptype == PerceivedType::Image || ptype == PerceivedType::Video {
+                if (ptype == PerceivedType::Image || ptype == PerceivedType::Video)
+                    && is_valid_media_candidate(&path, ptype)
+                {
                     return Some(path);
                 }
             }
         }
     }
     None
+}
+
+/// Check if a `.ts` file is a real MPEG Transport Stream (sync byte 0x47).
+/// Returns `false` for TypeScript or unreadable files.
+pub fn is_mpeg_ts_file(path: &Path) -> bool {
+    let mut file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+
+    let mut first_byte = [0u8; 1];
+    if file.read_exact(&mut first_byte).is_err() {
+        return false;
+    }
+
+    first_byte[0] == 0x47
+}
+
+fn is_valid_media_candidate(path: &Path, ptype: PerceivedType) -> bool {
+    if ptype != PerceivedType::Video {
+        return true;
+    }
+
+    if path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("ts"))
+    {
+        return is_mpeg_ts_file(path);
+    }
+
+    true
 }
 
 #[cfg(test)]
@@ -370,7 +402,6 @@ mod tests {
         assert_eq!(get_perceived_type("mkv"), PerceivedType::Video);
         assert_eq!(get_perceived_type("avi"), PerceivedType::Video);
         assert_eq!(get_perceived_type("ogm"), PerceivedType::Video);
-        assert_eq!(get_perceived_type("ts"), PerceivedType::Video);
         assert_eq!(get_perceived_type("vob"), PerceivedType::Video);
     }
 
