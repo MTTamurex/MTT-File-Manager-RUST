@@ -57,8 +57,17 @@ impl ImageViewerApp {
             self.directory_cache.clear();
         }
 
-        self.items = Arc::new(Vec::new()); // New empty Arc (old one is dropped automatically)
-        self.all_items.clear(); // Clear master backup too
+        if force_refresh {
+            // Hard refresh (F5): clear everything immediately.
+            self.items = Arc::new(Vec::new());
+            self.all_items.clear();
+            self.pending_all_items_clear = false;
+        } else {
+            // Watcher-triggered soft reload: keep old items visible to prevent
+            // a blank screen flash. They will be replaced atomically once the
+            // first batch of the new generation arrives.
+            self.pending_all_items_clear = true;
+        }
         self.cache_manager.loading_set.clear(); // Clear only pending requests, keep texture cache
         self.cache_manager.folder_preview_loading.clear(); // Clear folder preview loading
         self.cache_manager.pending_upload_set.clear(); // Clear thumbnails awaiting GPU upload

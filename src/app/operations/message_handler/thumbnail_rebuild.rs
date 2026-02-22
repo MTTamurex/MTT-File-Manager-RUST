@@ -118,6 +118,13 @@ impl ImageViewerApp {
         self.pending_items_rebuild = false;
         self.pending_items_count = 0;
 
+        // If the deferred clear was never consumed (e.g., empty folder),
+        // apply it now so stale items don't leak into the final snapshot.
+        if self.pending_all_items_clear {
+            self.all_items.clear();
+            self.pending_all_items_clear = false;
+        }
+
         if self.all_items.len() <= INLINE_REBUILD_THRESHOLD {
             let result_items = self.build_sorted_items_snapshot();
             self.items = Arc::new(result_items);
