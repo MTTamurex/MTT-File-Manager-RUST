@@ -1,4 +1,5 @@
 use crate::app::state::ImageViewerApp;
+use crate::domain::file_entry::IconSize;
 use crate::ui::global_search_overlay::filters::build_filtered_indices;
 use crate::ui::theme;
 use eframe::egui;
@@ -8,6 +9,35 @@ const ICON_SIZE: f32 = 18.0;
 const LOAD_MORE_STEP: u32 = 500;
 const MAX_RESULTS_CAP: u32 = 10_000;
 const MAX_METADATA_PROBES_PER_FRAME: usize = 8;
+
+#[inline]
+fn cache_key_for_icon(path: &std::path::Path, size: IconSize) -> String {
+    format!("{}_{:?}", path.to_string_lossy(), size)
+}
+
+#[inline]
+fn lookup_icon_with_size_guard(
+    app: &mut ImageViewerApp,
+    ctx: &egui::Context,
+    path: &std::path::Path,
+    is_dir: bool,
+) -> Option<egui::TextureHandle> {
+    // Primary path: request Large so it matches async worker cache key ("_Large").
+    if let Some(icon) = app
+        .item_icon_loader
+        .get_or_load_icon_sized(ctx, path, IconSize::Large, is_dir, false)
+    {
+        return Some(icon);
+    }
+
+    // Safety guard: if another code path populated Small first, reuse it instead of
+    // forcing an unnecessary async request (prevents hit-rate regressions).
+    let small_key = cache_key_for_icon(path, IconSize::Small);
+    app.item_icon_loader
+        .icon_cache
+        .get(&small_key)
+        .cloned()
+}
 
 pub(super) fn render_results_panel(
     ui: &mut egui::Ui,
@@ -148,13 +178,7 @@ pub(super) fn render_results_panel(
                             .unwrap_or_else(|| "-".to_string());
                         let meta_text = format!("{} | {}", file_type, size_text);
 
-                        let icon_tex = app.item_icon_loader.get_or_load_icon_sized(
-                            ctx,
-                            &path_buf,
-                            crate::domain::file_entry::IconSize::Small,
-                            is_dir,
-                            false,
-                        );
+                        let icon_tex = lookup_icon_with_size_guard(app, ctx, &path_buf, is_dir);
                         // Request async extraction for unique-icon files (.exe, .lnk, etc.).
                         if icon_tex.is_none()
                             && !is_dir
