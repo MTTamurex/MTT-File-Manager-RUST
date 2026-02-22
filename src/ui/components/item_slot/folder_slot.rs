@@ -44,19 +44,9 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
     let folder_rect = egui::Rect::from_min_size(start_pos, egui::vec2(folder_w, folder_h));
 
     // === FOLDER DRAWING ===
-    let has_cover = item.folder_cover.is_some();
 
-    // Shell API native folder preview ("sandwich" effect).
-    // Clean up loading state only for folders that genuinely have no cover
-    // AND no cached preview.  When has_cover is temporarily false during
-    // a reload window (e.g. OneDrive pin-state change), we preserve the
-    // existing cached preview to avoid visual degradation.
-    if !ctx.is_recycle_bin_view
-        && !has_cover
-        && ctx.folder_preview_cache.peek(&item.path).is_none()
-    {
-        ctx.folder_preview_loading.remove(&item.path);
-    }
+    // All normal folders use our custom composed preview (with or without media content).
+    // We never prematurely clear loading state — the worker always returns a result.
     let native_preview = if ctx.is_recycle_bin_view {
         None
     } else {
@@ -136,68 +126,42 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
                     .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
             }
         } else {
-            // NORMAL FOLDER: Trigger loading if not yet started
-            if has_cover && !is_loading {
+            // NORMAL FOLDER: Always request our custom composed preview.
+            // Worker produces back+front+thumbnail (or back+front only if no media).
+            if !is_loading {
                 ops.request_folder_preview_load(item.path.clone());
             }
 
-            if has_cover {
-                // Show loading only when we have a cover candidate and are waiting for native preview.
-                let spinner_size = folder_rect.width().min(folder_rect.height()) * 0.3;
-                let spinner_rect = egui::Rect::from_center_size(
-                    folder_rect.center(),
-                    egui::vec2(spinner_size, spinner_size),
-                );
+            // Show spinner while waiting for composed preview
+            let spinner_size = folder_rect.width().min(folder_rect.height()) * 0.3;
+            let spinner_rect = egui::Rect::from_center_size(
+                folder_rect.center(),
+                egui::vec2(spinner_size, spinner_size),
+            );
 
-                // Draw light background
-                ui.painter()
-                    .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
+            ui.painter()
+                .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
 
-                let time = ui.input(|i| i.time);
-                let angle = (time * 3.0) as f32;
+            let time = ui.input(|i| i.time);
+            let angle = (time * 3.0) as f32;
 
-                // Draw spinner arc
-                let center = spinner_rect.center();
-                let radius = spinner_size / 2.0 - 2.0;
-                let stroke = egui::Stroke::new(3.0, egui::Color32::from_rgb(100, 150, 220));
+            let center = spinner_rect.center();
+            let radius = spinner_size / 2.0 - 2.0;
+            let stroke = egui::Stroke::new(3.0, egui::Color32::from_rgb(100, 150, 220));
 
-                // Draw an arc (rotating semi-circle)
-                let points: Vec<egui::Pos2> = (0..20)
-                    .map(|i| {
-                        let t = i as f32 / 19.0 * std::f32::consts::PI * 1.5; // 270 graus
-                        let a = angle + t;
-                        egui::pos2(center.x + radius * a.cos(), center.y + radius * a.sin())
-                    })
-                    .collect();
+            let points: Vec<egui::Pos2> = (0..20)
+                .map(|i| {
+                    let t = i as f32 / 19.0 * std::f32::consts::PI * 1.5;
+                    let a = angle + t;
+                    egui::pos2(center.x + radius * a.cos(), center.y + radius * a.sin())
+                })
+                .collect();
 
-                ui.painter().add(egui::Shape::line(points, stroke));
+            ui.painter().add(egui::Shape::line(points, stroke));
 
-                // PERFORMANCE: Request repaint after delay instead of immediate.
-                // Spinner only needs ~15 FPS to look smooth (66ms interval).
-                // This prevents CPU spinning at 60+ FPS when multiple folders are loading.
-                ui.ctx()
-                    .request_repaint_after(std::time::Duration::from_millis(66));
-            } else {
-                // No cover candidate: draw regular folder icon immediately.
-                ctx.icon_loader.ensure_folder_icon(ui.ctx());
-                if let Some(sys_icon) = ctx.icon_loader.folder_icon() {
-                    let icon_size = folder_w.min(folder_h);
-                    let icon_rect = egui::Rect::from_center_size(
-                        folder_rect.center(),
-                        egui::vec2(icon_size, icon_size),
-                    );
-
-                    ui.put(
-                        icon_rect,
-                        egui::Image::new(sys_icon)
-                            .fit_to_original_size(1.0)
-                            .max_size(egui::vec2(icon_size, icon_size)),
-                    );
-                } else {
-                    ui.painter()
-                        .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
-                }
-            }
+            // PERFORMANCE: Spinner only needs ~15 FPS (66ms interval).
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(66));
         }
     }
 

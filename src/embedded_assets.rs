@@ -6,6 +6,10 @@ pub const REMIXICON_TTF: &[u8] = include_bytes!("../assets/remixicon.ttf");
 // Embed application icon (PNG)
 pub const APP_ICON_PNG: &[u8] = include_bytes!("../appicon.png");
 
+// Embed folder composition layers (PNG, both 512px wide)
+pub const FOLDER_BACK_PNG: &[u8] = include_bytes!("../assets/folder_back_512.png");
+pub const FOLDER_FRONT_PNG: &[u8] = include_bytes!("../assets/folder_front_512.png");
+
 // Embed SVG icons
 pub const ICON_COPY: &[u8] = include_bytes!("../assets/icons/copy_duotone_black_blue_lighter2.svg");
 pub const ICON_CUT: &[u8] = include_bytes!("../assets/icons/cut_duotone_black_blue_lighter2.svg");
