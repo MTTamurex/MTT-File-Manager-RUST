@@ -259,7 +259,12 @@ pub(super) fn handle_delete_permanently(
             if valid_paths.is_empty() {
                 return;
             }
-            shell_operations::delete_items_permanently_with_shell(&valid_paths, hwnd.0);
+            let success =
+                shell_operations::delete_items_permanently_with_shell(&valid_paths, hwnd.0);
+            if !success {
+                log::warn!("[FILE-OP] Permanent delete cancelled or failed");
+                return;
+            }
             let mut parents = std::collections::HashSet::new();
             for path in &valid_paths {
                 if let Some(parent) = path.parent() {
