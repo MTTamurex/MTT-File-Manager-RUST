@@ -62,19 +62,6 @@ pub fn render_fallback(
                 ui.label(egui::RichText::new("📁").size(icon_size * 0.6));
             }
         } else {
-            let has_cover_candidate = file.folder_cover.is_some();
-            if !has_cover_candidate {
-                // No known cover candidate: keep stable generic folder icon.
-                // This avoids fallback <-> preview oscillation in details panel.
-                item_icon_loader.ensure_folder_icon(ui.ctx());
-                if let Some(icon) = item_icon_loader.folder_icon() {
-                    ui.add(egui::Image::new(icon).max_size(egui::vec2(icon_size, icon_size)));
-                } else {
-                    ui.label(egui::RichText::new("📁").size(icon_size * 0.6));
-                }
-                return val_action;
-            }
-
             let folder_rect = ui
                 .allocate_exact_size(egui::vec2(icon_size, icon_size), egui::Sense::hover())
                 .0;
