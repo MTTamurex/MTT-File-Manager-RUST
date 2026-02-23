@@ -79,12 +79,12 @@ pub(super) fn try_handle_fast_paths(
                         if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
                             return true;
                         }
+                        *batch_start = std::time::Instant::now();
                         let end = (offset + *batch_size).min(entries_to_send.len());
                         let chunk = entries_to_send[offset..end].to_vec();
                         let _ = file_entry_sender.send((my_gen, chunk));
                         ctx.request_repaint();
-                        batch_tracker
-                            .record_batch(std::time::Instant::now().elapsed(), end - offset);
+                        batch_tracker.record_batch(batch_start.elapsed(), end - offset);
                         *batch_size = batch_tracker.batch_size();
                         offset = end;
                     }
@@ -119,11 +119,12 @@ pub(super) fn try_handle_fast_paths(
                     if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
                         return true;
                     }
+                    *batch_start = std::time::Instant::now();
                     let end = (offset + *batch_size).min(entries_to_send.len());
                     let chunk = entries_to_send[offset..end].to_vec();
                     let _ = file_entry_sender.send((my_gen, chunk));
                     ctx.request_repaint();
-                    batch_tracker.record_batch(std::time::Instant::now().elapsed(), end - offset);
+                    batch_tracker.record_batch(batch_start.elapsed(), end - offset);
                     *batch_size = batch_tracker.batch_size();
                     offset = end;
                 }
@@ -334,11 +335,12 @@ pub(super) fn try_handle_fast_paths(
                 if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
                     return true;
                 }
+                *batch_start = std::time::Instant::now();
                 let end = (offset + *batch_size).min(cached_entries.len());
                 let chunk = cached_entries[offset..end].to_vec();
                 let _ = file_entry_sender.send((my_gen, chunk));
                 ctx.request_repaint();
-                batch_tracker.record_batch(std::time::Instant::now().elapsed(), end - offset);
+                batch_tracker.record_batch(batch_start.elapsed(), end - offset);
                 *batch_size = batch_tracker.batch_size();
                 offset = end;
             }

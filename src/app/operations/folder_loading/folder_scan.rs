@@ -316,7 +316,7 @@ impl ImageViewerApp {
 }
 
 fn is_invalid_cached_cover_path(path: &Path) -> bool {
-    if !path.exists() {
+    if !crate::infrastructure::onedrive::fast_path_exists(path) {
         return true;
     }
 
