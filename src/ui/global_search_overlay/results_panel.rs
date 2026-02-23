@@ -8,7 +8,6 @@ const RESULT_ROW_HEIGHT: f32 = 46.0;
 const ICON_SIZE: f32 = 18.0;
 const LOAD_MORE_STEP: u32 = 500;
 const MAX_RESULTS_CAP: u32 = 10_000;
-const MAX_METADATA_PROBES_PER_FRAME: usize = 8;
 
 #[inline]
 fn cache_key_for_icon(path: &std::path::Path, size: IconSize) -> String {
@@ -46,7 +45,6 @@ pub(super) fn render_results_panel(
     modal_max_height: f32,
     hover_color: egui::Color32,
 ) {
-    let mut metadata_probes_left = MAX_METADATA_PROBES_PER_FRAME;
     let filtered_indices = build_filtered_indices(
         &app.global_search.results,
         app.global_search.category,
@@ -171,7 +169,6 @@ pub(super) fn render_results_panel(
                             &result.full_path,
                             is_dir,
                             result.size,
-                            &mut metadata_probes_left,
                         );
                         let size_text = size_opt
                             .map(crate::infrastructure::windows::format_size)
@@ -402,7 +399,6 @@ fn resolve_result_size(
     full_path: &str,
     is_dir: bool,
     size: u64,
-    metadata_probes_left: &mut usize,
 ) -> Option<u64> {
     if is_dir {
         return None;
@@ -416,20 +412,8 @@ fn resolve_result_size(
         return *cached;
     }
 
-    if *metadata_probes_left == 0 {
-        return None;
-    }
-
-    // Avoid I/O for UNC paths; network metadata can block.
-    let computed = if full_path.starts_with("\\\\") {
-        None
-    } else {
-        *metadata_probes_left = metadata_probes_left.saturating_sub(1);
-        std::fs::metadata(full_path).ok().map(|m| m.len())
-    };
-
     app.global_search
         .size_cache
-        .put(full_path.to_string(), computed);
-    computed
+        .put(full_path.to_string(), None);
+    None
 }
