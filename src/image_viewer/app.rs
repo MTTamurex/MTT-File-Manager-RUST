@@ -1,7 +1,6 @@
-use crate::image_viewer::cache::{LoadKind, LoadPriority, PrefetchEngine, WindowCache};
+use crate::image_viewer::cache::{LoadPriority, PrefetchEngine, WindowCache};
 use crate::image_viewer::indexer::ImageSequence;
 use crate::image_viewer::loader;
-use crate::image_viewer::metrics::Metrics;
 use eframe::egui;
 use eframe::egui::scroll_area::ScrollBarVisibility;
 use std::collections::HashSet;
@@ -17,16 +16,14 @@ pub struct DedicatedImageViewerApp {
     current_index: usize,
     cache: WindowCache,
     prefetch: PrefetchEngine,
-    requested_jobs: HashSet<(u64, usize, LoadKind)>,
-    request_sequence: u64,
+    requested_jobs: HashSet<usize>,
     texture_serial: u64,
     texture: Option<egui::TextureHandle>,
-    texture_kind: Option<LoadKind>,
-    metrics: Arc<Metrics>,
     last_error: Option<String>,
     zoom_factor: f32,
     zoom_percent_display: f32,
     image_resolution: Option<(u32, u32)>,
+    repaint_ctx_set: bool,
 }
 
 impl DedicatedImageViewerApp {
@@ -36,40 +33,40 @@ impl DedicatedImageViewerApp {
             .unwrap_or(2)
             .clamp(1, 4);
 
-        let mut app = Self {
-            current_index: sequence.current_index.min(sequence.entries.len().saturating_sub(1)),
+        let start_index = sequence.current_index.min(sequence.entries.len().saturating_sub(1));
+
+        // Sync-load the first image so the viewer opens instantly with content
+        // instead of a spinner (matches viewskater approach).
+        let mut cache = WindowCache::new(DEFAULT_CACHE_RADIUS);
+        if let Some(path) = sequence.entries.get(start_index) {
+            match loader::decode_full_frame_with_priority(path, loader::DecodePriority::Interactive)
+            {
+                Ok(frame) => {
+                    cache.put(start_index, Arc::new(frame));
+                }
+                Err(e) => {
+                    log::warn!("[IMAGE-VIEWER] failed to sync-load first image: {}", e);
+                }
+            }
+        }
+
+        let app = Self {
+            current_index: start_index,
             sequence,
-            cache: WindowCache::new(DEFAULT_CACHE_RADIUS),
-            prefetch: PrefetchEngine::new(worker_count, 64),
+            cache,
+            prefetch: PrefetchEngine::new(worker_count, DEFAULT_CACHE_RADIUS),
             requested_jobs: HashSet::new(),
-            request_sequence: 0,
             texture_serial: 0,
             texture: None,
-            texture_kind: None,
-            metrics: Arc::new(Metrics::default()),
             last_error: None,
             zoom_factor: 1.0,
             zoom_percent_display: 100.0,
             image_resolution: None,
+            repaint_ctx_set: false,
         };
 
-        app.sync_image_resolution_from_path();
-        app.bump_sequence();
+        app.prefetch.set_center(start_index);
         app
-    }
-
-    fn sync_image_resolution_from_path(&mut self) {
-        self.image_resolution = self
-            .current_path()
-            .and_then(|path| image::image_dimensions(path).ok());
-    }
-
-    fn bump_sequence(&mut self) {
-        self.request_sequence = self.request_sequence.wrapping_add(1);
-        self.requested_jobs.clear();
-        self.prefetch.set_active_sequence(self.request_sequence);
-        self.cache
-            .retain_window(self.current_index, self.sequence.entries.len());
     }
 
     fn current_path(&self) -> Option<&std::path::PathBuf> {
@@ -83,13 +80,12 @@ impl DedicatedImageViewerApp {
             .unwrap_or_else(|| "<unknown>".to_string())
     }
 
-    fn request_job_if_needed(&mut self, index: usize, kind: LoadKind, priority: LoadPriority) {
-        if self.cache.has(index, kind) {
+    fn request_job_if_needed(&mut self, index: usize, priority: LoadPriority) {
+        if self.cache.has(index) {
             return;
         }
 
-        let key = (self.request_sequence, index, kind);
-        if self.requested_jobs.contains(&key) {
+        if self.requested_jobs.contains(&index) {
             return;
         }
 
@@ -99,9 +95,9 @@ impl DedicatedImageViewerApp {
 
         if self
             .prefetch
-            .request(self.request_sequence, index, path, kind, priority)
+            .request(index, path, priority)
         {
-            self.requested_jobs.insert(key);
+            self.requested_jobs.insert(index);
         }
     }
 
@@ -111,35 +107,30 @@ impl DedicatedImageViewerApp {
         }
 
         let center = self.current_index;
+        let total = self.sequence.entries.len();
         let min_idx = center.saturating_sub(self.cache.radius());
-        let max_idx = (center + self.cache.radius()).min(self.sequence.entries.len() - 1);
+        let max_idx = (center + self.cache.radius()).min(total - 1);
 
-        self.request_job_if_needed(center, LoadKind::Preview, LoadPriority::High);
-        self.request_job_if_needed(center, LoadKind::Full, LoadPriority::High);
+        // Current image: highest priority
+        self.request_job_if_needed(center, LoadPriority::High);
 
+        // Immediate neighbors: high priority
         let left = center.saturating_sub(1);
         if left != center {
-            self.request_job_if_needed(left, LoadKind::Preview, LoadPriority::High);
-            self.request_job_if_needed(left, LoadKind::Full, LoadPriority::Normal);
+            self.request_job_if_needed(left, LoadPriority::High);
         }
 
-        let right = (center + 1).min(self.sequence.entries.len() - 1);
+        let right = (center + 1).min(total - 1);
         if right != center {
-            self.request_job_if_needed(right, LoadKind::Preview, LoadPriority::High);
-            self.request_job_if_needed(right, LoadKind::Full, LoadPriority::Normal);
+            self.request_job_if_needed(right, LoadPriority::High);
         }
 
+        // Rest of window: normal priority
         for idx in min_idx..=max_idx {
             if idx == center || idx == left || idx == right {
                 continue;
             }
-
-            self.request_job_if_needed(idx, LoadKind::Preview, LoadPriority::Normal);
-
-            let is_priority_full = idx == center || idx.abs_diff(center) <= 1;
-            if is_priority_full {
-                self.request_job_if_needed(idx, LoadKind::Full, LoadPriority::Normal);
-            }
+            self.request_job_if_needed(idx, LoadPriority::Normal);
         }
     }
 
@@ -147,11 +138,8 @@ impl DedicatedImageViewerApp {
         &mut self,
         ctx: &egui::Context,
         index: usize,
-        kind: LoadKind,
         frame: Arc<loader::DecodedFrame>,
     ) {
-        let upload_start = std::time::Instant::now();
-
         if frame.width == 0 || frame.height == 0 || frame.rgba.is_empty() {
             self.last_error = Some("decoded frame is empty".to_string());
             return;
@@ -163,63 +151,47 @@ impl DedicatedImageViewerApp {
         );
 
         let texture_name = format!(
-            "image-viewer-{}-{}-{:?}-{}",
-            self.request_sequence, index, kind, self.texture_serial
+            "iv-{}-{}",
+            index, self.texture_serial
         );
         self.texture_serial = self.texture_serial.wrapping_add(1);
 
         let texture = ctx.load_texture(texture_name, color_image, egui::TextureOptions::LINEAR);
 
-        self.metrics
-            .record_upload_us(upload_start.elapsed().as_micros() as u64);
         self.texture = Some(texture);
-        self.texture_kind = Some(kind);
-        if matches!(kind, LoadKind::Full) || self.image_resolution.is_none() {
-            self.image_resolution = Some((frame.width, frame.height));
-        }
+        self.image_resolution = Some((frame.width, frame.height));
         self.last_error = None;
     }
 
     fn try_show_cached_current(&mut self, ctx: &egui::Context) {
-        let Some((kind, frame)) = self.cache.get_best(self.current_index) else {
-            self.texture = None;
-            self.texture_kind = None;
+        let Some(frame) = self.cache.get(self.current_index) else {
+            // Do NOT clear texture here — keep showing the previous image
+            // until the new one arrives (matches viewskater behavior).
             return;
         };
 
-        self.upload_frame(ctx, self.current_index, kind, frame);
+        self.upload_frame(ctx, self.current_index, frame);
     }
 
     fn handle_prefetch_results(&mut self, ctx: &egui::Context) {
         for output in self.prefetch.drain_results(32) {
-            self.requested_jobs
-                .remove(&(output.sequence, output.index, output.kind));
-
-            if output.sequence != self.request_sequence {
-                continue;
-            }
+            self.requested_jobs.remove(&output.index);
 
             match output.frame {
                 Ok(frame) => {
-                    self.metrics.record_decode_us(output.decode_us);
                     let frame = Arc::new(frame);
-                    self.cache.put(output.index, output.kind, Arc::clone(&frame));
+                    self.cache.put(output.index, Arc::clone(&frame));
 
                     if output.index == self.current_index {
-                        let should_replace = match self.texture_kind {
-                            None => true,
-                            Some(LoadKind::Preview) => {
-                                matches!(output.kind, LoadKind::Preview | LoadKind::Full)
-                            }
-                            Some(LoadKind::Full) => matches!(output.kind, LoadKind::Full),
-                        };
-
-                        if should_replace {
-                            self.upload_frame(ctx, output.index, output.kind, frame);
-                        }
+                        self.upload_frame(ctx, output.index, frame);
                     }
                 }
                 Err(err) => {
+                    // Interrupted = job was skipped by worker (too far from center).
+                    // Just remove from requested_jobs so it can be retried later.
+                    if err.kind() == std::io::ErrorKind::Interrupted {
+                        continue;
+                    }
                     if output.index == self.current_index {
                         self.last_error = Some(format!("{}", err));
                     }
@@ -237,12 +209,43 @@ impl DedicatedImageViewerApp {
             return;
         }
 
+        let old_index = self.current_index;
         self.current_index = index;
         self.zoom_factor = 1.0;
-        self.sync_image_resolution_from_path();
-        self.bump_sequence();
+
+        // Update the atomic center so workers skip irrelevant jobs.
+        self.prefetch.set_center(index);
+
+        // Evict cache entries outside the sliding window.
+        let total = self.sequence.entries.len();
+        self.cache.retain_window(index, total);
+
+        // Prune requested_jobs to the current window only (don't clear —
+        // clearing causes mass re-submission of duplicate jobs).
+        let radius = self.cache.radius();
+        let min_idx = index.saturating_sub(radius);
+        let max_idx = (index + radius).min(total.saturating_sub(1));
+        self.requested_jobs
+            .retain(|&idx| idx >= min_idx && idx <= max_idx);
+
+        // Show from cache immediately if available; keep old image otherwise
+        // (like viewskater: don't clear texture, don't show spinner).
         self.try_show_cached_current(ctx);
-        self.schedule_window_requests();
+
+        // Like viewskater: only request the NEW tail image that entered the
+        // window, plus the current image if not cached. All other images
+        // should already be cached or in-flight from previous steps.
+        let tail = if index > old_index {
+            // Moving right → new right edge
+            (index + radius).min(total.saturating_sub(1))
+        } else {
+            // Moving left → new left edge
+            index.saturating_sub(radius)
+        };
+        self.request_job_if_needed(index, LoadPriority::High);
+        if tail != index {
+            self.request_job_if_needed(tail, LoadPriority::High);
+        }
     }
 
     fn navigate_prev(&mut self, ctx: &egui::Context) {
@@ -361,14 +364,7 @@ impl DedicatedImageViewerApp {
                 // egui layout works in points, while texture size is in pixels.
                 // Convert first to avoid implicit upscale on high-DPI monitors.
                 let pixels_per_point = ui.ctx().pixels_per_point().max(f32::EPSILON);
-                let preview_logical_size_px = self
-                    .image_resolution
-                    .map(|(w, h)| egui::vec2(w as f32, h as f32));
-                let base_size_px = match self.texture_kind {
-                    Some(LoadKind::Preview) => preview_logical_size_px.unwrap_or_else(|| tex.size_vec2()),
-                    _ => tex.size_vec2(),
-                };
-                let tex_size = base_size_px / pixels_per_point;
+                let tex_size = tex.size_vec2() / pixels_per_point;
                 let viewport_size = ui.available_size();
 
                 // Fit-to-window only downscales; never upscales small images.
@@ -526,12 +522,16 @@ impl DedicatedImageViewerApp {
 
 impl eframe::App for DedicatedImageViewerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if !self.repaint_ctx_set {
+            self.prefetch.set_repaint_ctx(ctx.clone());
+            self.repaint_ctx_set = true;
+        }
+
         self.handle_shortcuts(ctx);
         self.sync_window_title(ctx);
 
-        self.cache
-            .retain_window(self.current_index, self.sequence.entries.len());
         self.handle_prefetch_results(ctx);
+        self.cache.evict_over_budget(self.current_index);
 
         if self.sequence.entries.is_empty() {
             self.render_top_bar(ctx);
@@ -544,14 +544,20 @@ impl eframe::App for DedicatedImageViewerApp {
             self.try_show_cached_current(ctx);
         }
 
+        // Fill any gaps in the cache window during idle frames.
+        // This is NOT called during navigate_to (which only requests the tail).
+        // Matches viewskater: neighbors are loaded asynchronously after render.
         self.schedule_window_requests();
 
         self.render_top_bar(ctx);
         self.render_center(ctx);
         self.render_bottom_bar(ctx);
 
-        if !self.cache.has(self.current_index, LoadKind::Full) {
-            ctx.request_repaint_after(Duration::from_millis(16));
+        // Low-frequency fallback poll — workers trigger immediate repaints via
+        // ctx.request_repaint(), but this ensures progress even if the signal
+        // is missed (e.g. during the first frame before ctx is propagated).
+        if !self.cache.has(self.current_index) {
+            ctx.request_repaint_after(Duration::from_millis(200));
         }
     }
 }

@@ -1,17 +1,11 @@
 use crate::image_viewer::loader;
 use crossbeam_channel::{Receiver, Sender};
+use eframe::egui;
 use std::collections::HashMap;
-use std::hash::Hash;
 use std::io;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum LoadKind {
-    Preview,
-    Full,
-}
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LoadPriority {
@@ -21,31 +15,25 @@ pub enum LoadPriority {
 
 #[derive(Debug)]
 pub struct LoadOutput {
-    pub sequence: u64,
     pub index: usize,
-    pub kind: LoadKind,
     pub frame: io::Result<loader::DecodedFrame>,
-    pub decode_us: u64,
 }
 
 #[derive(Clone, Debug)]
 struct LoadJob {
-    sequence: u64,
     index: usize,
     path: PathBuf,
-    kind: LoadKind,
     priority: LoadPriority,
 }
 
-#[derive(Default)]
-struct CachedImageLevels {
-    preview: Option<Arc<loader::DecodedFrame>>,
-    full: Option<Arc<loader::DecodedFrame>>,
-}
+/// Maximum memory budget for the image cache.
+/// Full-resolution 4K images use ~33 MB each; 512 MB allows ~15 full-res entries.
+const MAX_CACHE_BYTES: usize = 512 * 1024 * 1024;
 
 pub struct WindowCache {
     radius: usize,
-    items: HashMap<usize, CachedImageLevels>,
+    items: HashMap<usize, Arc<loader::DecodedFrame>>,
+    total_bytes: usize,
 }
 
 impl WindowCache {
@@ -53,6 +41,7 @@ impl WindowCache {
         Self {
             radius,
             items: HashMap::new(),
+            total_bytes: 0,
         }
     }
 
@@ -60,84 +49,103 @@ impl WindowCache {
         self.radius
     }
 
-    pub fn has(&self, index: usize, kind: LoadKind) -> bool {
-        self.items
-            .get(&index)
-            .is_some_and(|entry| match kind {
-                LoadKind::Preview => entry.preview.is_some(),
-                LoadKind::Full => entry.full.is_some(),
-            })
+    pub fn has(&self, index: usize) -> bool {
+        self.items.contains_key(&index)
     }
 
-    pub fn put(&mut self, index: usize, kind: LoadKind, frame: Arc<loader::DecodedFrame>) {
-        let entry = self.items.entry(index).or_default();
-        match kind {
-            LoadKind::Preview => entry.preview = Some(frame),
-            LoadKind::Full => entry.full = Some(frame),
+    pub fn put(&mut self, index: usize, frame: Arc<loader::DecodedFrame>) {
+        let new_bytes = frame.rgba.len();
+        if let Some(old) = self.items.insert(index, frame) {
+            self.total_bytes = self.total_bytes.saturating_sub(old.rgba.len());
         }
+        self.total_bytes += new_bytes;
     }
 
-    pub fn get_best(&self, index: usize) -> Option<(LoadKind, Arc<loader::DecodedFrame>)> {
-        let entry = self.items.get(&index)?;
-        if let Some(frame) = &entry.full {
-            return Some((LoadKind::Full, Arc::clone(frame)));
-        }
-        entry
-            .preview
-            .as_ref()
-            .map(|frame| (LoadKind::Preview, Arc::clone(frame)))
+    pub fn get(&self, index: usize) -> Option<Arc<loader::DecodedFrame>> {
+        self.items.get(&index).map(Arc::clone)
     }
 
     pub fn retain_window(&mut self, center: usize, total_len: usize) {
         if total_len == 0 {
             self.items.clear();
+            self.total_bytes = 0;
             return;
         }
 
         let min_idx = center.saturating_sub(self.radius);
         let max_idx = (center + self.radius).min(total_len.saturating_sub(1));
+        let evict_bytes: usize = self
+            .items
+            .iter()
+            .filter(|(&idx, _)| idx < min_idx || idx > max_idx)
+            .map(|(_, frame)| frame.rgba.len())
+            .sum();
         self.items
             .retain(|&idx, _| idx >= min_idx && idx <= max_idx);
+        self.total_bytes = self.total_bytes.saturating_sub(evict_bytes);
+    }
+
+    /// Evicts entries from the furthest indices until under budget.
+    pub fn evict_over_budget(&mut self, center: usize) {
+        if self.total_bytes <= MAX_CACHE_BYTES {
+            return;
+        }
+
+        let mut indices: Vec<usize> = self.items.keys().copied().collect();
+        indices.sort_by(|a, b| b.abs_diff(center).cmp(&a.abs_diff(center)));
+
+        for idx in indices {
+            if self.total_bytes <= MAX_CACHE_BYTES {
+                break;
+            }
+
+            if let Some(frame) = self.items.remove(&idx) {
+                self.total_bytes = self.total_bytes.saturating_sub(frame.rgba.len());
+            }
+        }
     }
 }
 
 pub struct PrefetchEngine {
-    high_jobs_tx: Sender<LoadJob>,
-    normal_jobs_tx: Sender<LoadJob>,
+    jobs_tx: Sender<LoadJob>,
+    bg_jobs_tx: Sender<LoadJob>,
     results_rx: Receiver<LoadOutput>,
-    active_sequence: Arc<AtomicU64>,
+    active_center: Arc<AtomicUsize>,
+    repaint_ctx: Arc<OnceLock<egui::Context>>,
 }
 
 impl PrefetchEngine {
-    pub fn new(worker_count: usize, max_queue: usize) -> Self {
+    pub fn new(worker_count: usize, skip_radius: usize) -> Self {
         let worker_count = worker_count.clamp(1, 6);
-        let max_queue = max_queue.max(8);
-        let high_queue = (max_queue / 2).max(4);
-
-        let (high_jobs_tx, high_jobs_rx) = crossbeam_channel::bounded::<LoadJob>(high_queue);
-        let (normal_jobs_tx, normal_jobs_rx) = crossbeam_channel::bounded::<LoadJob>(max_queue);
+        // Bounded channels sized to the cache window (2*radius+1).
+        // This prevents unbounded queue growth during fast navigation.
+        let window_size = skip_radius * 2 + 1;
+        let (jobs_tx, jobs_rx) = crossbeam_channel::bounded::<LoadJob>(window_size);
+        let (bg_jobs_tx, bg_jobs_rx) = crossbeam_channel::bounded::<LoadJob>(window_size);
         let (results_tx, results_rx) = crossbeam_channel::unbounded::<LoadOutput>();
-        let active_sequence = Arc::new(AtomicU64::new(0));
+        let active_center = Arc::new(AtomicUsize::new(0));
+        let repaint_ctx = Arc::new(OnceLock::<egui::Context>::new());
 
         for worker_id in 0..worker_count {
-            let high_jobs_rx = high_jobs_rx.clone();
-            let normal_jobs_rx = normal_jobs_rx.clone();
+            let jobs_rx = jobs_rx.clone();
+            let bg_jobs_rx = bg_jobs_rx.clone();
             let results_tx = results_tx.clone();
-            let active_sequence = Arc::clone(&active_sequence);
+            let active_center = Arc::clone(&active_center);
+            let repaint_ctx = Arc::clone(&repaint_ctx);
             let spawn_result = std::thread::Builder::new()
                 .name(format!("image-viewer-loader-{}", worker_id))
                 .spawn(move || {
                     loop {
-                        let job = match high_jobs_rx.try_recv() {
+                        let job = match jobs_rx.try_recv() {
                             Ok(job) => job,
                             Err(crossbeam_channel::TryRecvError::Disconnected) => break,
                             Err(crossbeam_channel::TryRecvError::Empty) => {
                                 crossbeam_channel::select! {
-                                    recv(high_jobs_rx) -> recv_res => match recv_res {
+                                    recv(jobs_rx) -> recv_res => match recv_res {
                                         Ok(job) => job,
                                         Err(_) => break,
                                     },
-                                    recv(normal_jobs_rx) -> recv_res => match recv_res {
+                                    recv(bg_jobs_rx) -> recv_res => match recv_res {
                                         Ok(job) => job,
                                         Err(_) => break,
                                     }
@@ -145,45 +153,47 @@ impl PrefetchEngine {
                             }
                         };
 
-                        if job.sequence != active_sequence.load(Ordering::Relaxed) {
+                        // Skip jobs for images too far from the current view.
+                        let center = active_center.load(Ordering::Relaxed);
+                        if job.index.abs_diff(center) > skip_radius + 2 {
+                            // Notify the UI that this job was skipped so it can
+                            // clear the entry from requested_jobs and retry later.
+                            let _ = results_tx.send(LoadOutput {
+                                index: job.index,
+                                frame: Err(io::Error::new(
+                                    io::ErrorKind::Interrupted,
+                                    "skipped: too far from center",
+                                )),
+                            });
+                            if let Some(ctx) = repaint_ctx.get() {
+                                ctx.request_repaint();
+                            }
                             continue;
                         }
 
-                        let started = std::time::Instant::now();
                         let decode_priority = match job.priority {
                             LoadPriority::High => loader::DecodePriority::Interactive,
                             LoadPriority::Normal => loader::DecodePriority::Background,
                         };
 
-                        let preview_side = match job.priority {
-                            LoadPriority::High => 1280,
-                            LoadPriority::Normal => 768,
-                        };
+                        let frame = loader::decode_full_frame_with_priority(
+                            &job.path,
+                            decode_priority,
+                        );
 
-                        let frame = match job.kind {
-                            LoadKind::Preview => loader::decode_preview_frame_with_priority(
-                                &job.path,
-                                preview_side,
-                                decode_priority,
-                            ),
-                            LoadKind::Full => loader::decode_full_frame_with_priority(
-                                &job.path,
-                                decode_priority,
-                            ),
-                        };
-
-                        if job.sequence != active_sequence.load(Ordering::Relaxed) {
+                        // Re-check relevance after (potentially slow) decode.
+                        let center = active_center.load(Ordering::Relaxed);
+                        if job.index.abs_diff(center) > skip_radius + 2 {
                             continue;
                         }
 
-                        let elapsed = started.elapsed().as_micros() as u64;
                         let _ = results_tx.send(LoadOutput {
-                            sequence: job.sequence,
                             index: job.index,
-                            kind: job.kind,
                             frame,
-                            decode_us: elapsed,
                         });
+                        if let Some(ctx) = repaint_ctx.get() {
+                            ctx.request_repaint();
+                        }
                     }
                 });
 
@@ -197,36 +207,40 @@ impl PrefetchEngine {
         }
 
         Self {
-            high_jobs_tx,
-            normal_jobs_tx,
+            jobs_tx,
+            bg_jobs_tx,
             results_rx,
-            active_sequence,
+            active_center,
+            repaint_ctx,
         }
     }
 
-    pub fn set_active_sequence(&self, sequence: u64) {
-        self.active_sequence.store(sequence, Ordering::Relaxed);
+    /// Provides the egui context so worker threads can trigger repaints
+    /// when decode results are ready, avoiding UI polling.
+    pub fn set_repaint_ctx(&self, ctx: egui::Context) {
+        let _ = self.repaint_ctx.set(ctx);
+    }
+
+    /// Update the center index so workers can skip irrelevant jobs.
+    pub fn set_center(&self, index: usize) {
+        self.active_center.store(index, Ordering::Relaxed);
     }
 
     pub fn request(
         &self,
-        sequence: u64,
         index: usize,
         path: PathBuf,
-        kind: LoadKind,
         priority: LoadPriority,
     ) -> bool {
         let job = LoadJob {
-            sequence,
             index,
             path,
-            kind,
             priority,
         };
 
         match job.priority {
-            LoadPriority::High => self.high_jobs_tx.try_send(job).is_ok(),
-            LoadPriority::Normal => self.normal_jobs_tx.try_send(job).is_ok(),
+            LoadPriority::High => self.jobs_tx.try_send(job).is_ok(),
+            LoadPriority::Normal => self.bg_jobs_tx.try_send(job).is_ok(),
         }
     }
 

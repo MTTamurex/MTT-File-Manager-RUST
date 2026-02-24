@@ -5,7 +5,6 @@ mod app;
 mod cache;
 mod indexer;
 mod loader;
-mod metrics;
 
 pub fn open_image_viewer(path: PathBuf) {
     let exe = match std::env::current_exe() {
