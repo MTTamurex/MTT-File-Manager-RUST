@@ -84,7 +84,7 @@ pub fn render_texture_with_overlay(
             )
             .clicked()
     {
-        crate::pdf_viewer::open_image_viewer(file.path.clone());
+        crate::image_viewer::open_image_viewer(file.path.clone());
     }
 
     None

@@ -126,9 +126,11 @@ pub fn render_fallback(
                 egui::Image::new(&icon).max_size(egui::vec2(icon_size * 0.8, icon_size * 0.8)),
             );
 
-            // PDF Overlay for Fallback Icons
+            // PDF/Image overlay for fallback icons
             let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if extension.eq_ignore_ascii_case("pdf") {
+            let is_pdf = extension.eq_ignore_ascii_case("pdf");
+            let is_image = crate::infrastructure::windows::is_image_extension(extension);
+            if is_pdf || is_image {
                 let media_rect = image_resp.rect;
                 let hover_pos = ui.input(|i| i.pointer.hover_pos());
                 let is_hovered = hover_pos.is_some_and(|pos| media_rect.contains(pos));
@@ -169,12 +171,20 @@ pub fn render_fallback(
                 if ui
                     .interact(
                         media_rect,
-                        egui::Id::new("pdf_fallback_overlay"),
+                        egui::Id::new(if is_pdf {
+                            "pdf_fallback_overlay"
+                        } else {
+                            "image_fallback_overlay"
+                        }),
                         egui::Sense::click(),
                     )
                     .clicked()
                 {
-                    crate::pdf_viewer::open_pdf_viewer(file.path.clone());
+                    if is_pdf {
+                        crate::pdf_viewer::open_pdf_viewer(file.path.clone());
+                    } else if is_image {
+                        crate::image_viewer::open_image_viewer(file.path.clone());
+                    }
                 }
             }
         } else {

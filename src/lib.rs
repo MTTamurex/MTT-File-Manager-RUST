@@ -2,6 +2,7 @@ pub mod app; // NEW - Application state and initialization
 pub mod application;
 pub mod domain;
 pub mod embedded_assets; // Embedded resources for portable executable
+pub mod image_viewer;
 pub mod infrastructure;
 pub mod pdf_viewer;
 pub mod tabs;

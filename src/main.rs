@@ -1,5 +1,6 @@
 use eframe::egui;
 use mtt_file_manager::app::ImageViewerApp;
+use std::path::PathBuf;
 
 /// Load application icon from embedded PNG bytes
 fn load_app_icon() -> Option<egui::IconData> {
@@ -29,6 +30,20 @@ fn main() -> eframe::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,mtt_file_manager=info"))
         .format_timestamp_millis()
         .init();
+
+    // Standalone dedicated image viewer mode (separate process).
+    let mut args = std::env::args_os();
+    let _exe = args.next();
+    if let Some(flag) = args.next() {
+        if flag.to_string_lossy().eq_ignore_ascii_case("--image-viewer") {
+            if let Some(path_arg) = args.next() {
+                return mtt_file_manager::image_viewer::run_standalone(PathBuf::from(path_arg));
+            }
+
+            log::error!("[IMAGE-VIEWER] missing path argument for --image-viewer");
+            return Ok(());
+        }
+    }
 
     log::info!("MTT File Manager starting");
 
