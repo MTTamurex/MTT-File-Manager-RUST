@@ -20,6 +20,79 @@ impl ImageViewerApp {
         self.run_memory_maintenance_now();
     }
 
+    /// Starts video playback in the preview panel using the same flow as clicking
+    /// the play overlay in the details panel.
+    pub fn request_video_preview_playback(&mut self, path: std::path::PathBuf) {
+        use crate::ui::components::media_preview::MediaPreview;
+        use crate::ui::components::MpvPreview;
+
+        // TAKE OVER: Stop and drop existing player if any
+        if matches!(self.media_preview.as_ref(), Some(MediaPreview::Video(_))) {
+            self.destroy_media_preview();
+        }
+
+        // Take ownership and start new player
+        let mut player = MpvPreview::new(path);
+        player.play_on_init = true; // Start playing as soon as initialized
+        player.show_player = true; // Ensure player is visible immediately
+
+        // Set initial volume (will be applied when MPV is ready)
+        player.initial_volume = self.session_volume;
+
+        let tab_id = self.tab_manager.active().id;
+        self.media_preview = Some(MediaPreview::Video(Box::new(player)));
+        self.media_preview_owner_tab_id = Some(tab_id);
+
+        // Final sync: hide/show correctly
+        self.update_video_visibility();
+    }
+
+    /// Triggers the same action exposed by the preview overlays
+    /// (video play / image viewer / PDF viewer) for the currently selected file.
+    /// Returns true when an action was triggered.
+    pub fn trigger_selected_preview_overlay_action(&mut self) -> bool {
+        let (path, is_video, is_pdf, is_image) = {
+            let Some(selected) = self.selected_file.as_ref() else {
+                return false;
+            };
+
+            if selected.is_dir {
+                return false;
+            }
+
+            let ext = selected
+                .path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_owned();
+            let path = selected.path.clone();
+            (
+                path,
+                crate::infrastructure::windows::is_video_extension(&ext),
+                ext.eq_ignore_ascii_case("pdf"),
+                crate::infrastructure::windows::is_image_extension(&ext),
+            )
+        };
+
+        if is_video {
+            self.request_video_preview_playback(path);
+            return true;
+        }
+
+        if is_pdf {
+            crate::pdf_viewer::open_pdf_viewer(path);
+            return true;
+        }
+
+        if is_image {
+            crate::image_viewer::open_image_viewer(path);
+            return true;
+        }
+
+        false
+    }
+
     pub fn update_selected_thumbnail(&mut self) {
         // Selection change only updates the persistent thumbnail and metadata.
         // It NO LONGER clears or sets the global media_preview automatically.

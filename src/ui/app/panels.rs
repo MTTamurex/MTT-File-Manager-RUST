@@ -234,31 +234,7 @@ fn render_preview_panel_layout(
                             if let Some(act) = action {
                                 match act {
                                     PreviewPanelAction::RequestPlay(path) => {
-                                        use crate::ui::components::media_preview::MediaPreview;
-                                        use crate::ui::components::MpvPreview;
-
-                                        // TAKE OVER: Stop and drop existing player if any
-                                        if matches!(
-                                            app.media_preview.as_ref(),
-                                            Some(MediaPreview::Video(_))
-                                        ) {
-                                            app.destroy_media_preview();
-                                        }
-
-                                        // Take ownership and start new player
-                                        let mut player = MpvPreview::new(path);
-                                        player.play_on_init = true; // Start playing as soon as initialized
-                                        player.show_player = true; // Ensure player is visible immediately
-
-                                        // Set initial volume (will be applied when MPV is ready)
-                                        player.initial_volume = app.session_volume;
-
-                                        app.media_preview =
-                                            Some(MediaPreview::Video(Box::new(player)));
-                                        app.media_preview_owner_tab_id = Some(tab_id);
-
-                                        // Final sync: hide/show correctly
-                                        app.update_video_visibility();
+                                        app.request_video_preview_playback(path);
                                     }
                                     PreviewPanelAction::RefreshThumbnail(path) => {
                                         // Check if it's a folder or a file
