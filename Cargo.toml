@@ -23,6 +23,7 @@ natord = "1.0"
 dirs = "5.0"
 dashmap = "5.5"
 image = { version = "0.25", features = ["webp", "gif"] }
+memmap2 = "0.9"
 thiserror = "2.0"
 tempfile = "3.10"
 rusqlite = { version = "0.32", features = ["bundled"] }
@@ -101,6 +102,10 @@ winresource = "0.1"
 
 [dev-dependencies]
 criterion = "0.5"
+
+[[bench]]
+name = "image_viewer_decode"
+harness = false
 
 [profile.release]
 opt-level = 3

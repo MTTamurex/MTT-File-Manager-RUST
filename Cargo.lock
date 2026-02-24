@@ -2739,6 +2739,7 @@ dependencies = [
  "libmpv2",
  "log",
  "lru",
+ "memmap2",
  "mtt-search-protocol",
  "natord",
  "notify",
