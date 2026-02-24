@@ -4,6 +4,32 @@ use crate::workers::idle_warmup::IdleWarmupMessage;
 use eframe::egui;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 
+fn handle_space_preview_action(app: &mut ImageViewerApp, ctx: &egui::Context) -> bool {
+    // Ignore while typing/editing any text input context
+    if app.renaming_state.is_some()
+        || app.is_address_editing
+        || app.global_search.active
+        || ctx.wants_keyboard_input()
+    {
+        return false;
+    }
+
+    let space_pressed = ctx.input(|i| {
+        i.key_pressed(egui::Key::Space)
+            && !i.modifiers.ctrl
+            && !i.modifiers.alt
+            && !i.modifiers.shift
+            && !i.modifiers.mac_cmd
+            && !i.modifiers.command
+    });
+
+    if !space_pressed {
+        return false;
+    }
+
+    app.trigger_selected_preview_overlay_action()
+}
+
 pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
     let mut user_active = false;
     if app.renaming_state.is_none() && !app.is_address_editing {
@@ -256,8 +282,16 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             user_active = true;
         }
 
+        // Space: same behavior as preview overlay action for selected media/image/pdf
+        let consumed_space_preview_action = handle_space_preview_action(app, ctx);
+        if consumed_space_preview_action {
+            user_active = true;
+        }
+
         // QUICK SEARCH: Type-to-search like Explorer
-        handle_quick_search(app, ctx);
+        if !consumed_space_preview_action {
+            handle_quick_search(app, ctx);
+        }
     } else {
         // During rename: ESC cancels the operation
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
