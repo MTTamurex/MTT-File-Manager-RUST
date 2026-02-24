@@ -420,4 +420,43 @@ Write-Host "===================================="
 
 ---
 
-*Última atualização: 2026-02-03 (pós-refatoração)*
+### 9. Visualizador de Imagens Dedicado
+
+#### Diagnóstico
+```powershell
+# Verificar se processo do viewer está rodando
+Get-Process mtt-file-manager | Select-Object Id, CPU, WorkingSet
+
+# Logs do viewer (stderr do processo separado)
+.\target\release\mtt-file-manager.exe --image-viewer "C:\caminho\imagem.jpg" 2>&1 | Tee-Object "viewer.log"
+```
+
+#### Problemas e Soluções
+
+**9.1. Spinner ao abrir imagem**
+- **Causa**: Decodificação síncrona da primeira imagem falhou ou demorou
+- **Solução**: Verificar se o arquivo de imagem é válido e acessível
+
+**9.2. Spinner durante navegação rápida**
+- **Causa**: Cache miss em navegação muito rápida (mais rápido que decodificação)
+- **Comportamento esperado**: A imagem anterior deve permanecer visível até a nova estar pronta
+- **Se aparecer spinner**: Verificar se `try_show_cached_current()` não está limpando textura
+
+**9.3. Uso alto de memória no viewer**
+- **Comportamento normal**: Até 512MB para cache de imagens (budget configurado)
+- **Se exceder**: Verificar `MAX_CACHE_BYTES` e `evict_over_budget()` em `cache.rs`
+- **Nota**: Memória é liberada pelo SO ao fechar o viewer (processo separado)
+
+**9.4. Imagens não carregam (tela preta)**
+- **Causa possível**: Formato não suportado, arquivo corrompido, EXIF malformado
+- **Debug**: Verificar logs `[IMAGE-VIEWER]` para erros de decodificação
+- **Fallback**: O loader tenta WIC como fallback se o image crate falhar
+
+**9.5. Viewer não abre**
+- **Causa**: Falha ao spawnar processo (`Command::new` falhou)
+- **Debug**: Verificar se o executável existe no path esperado
+- **Nota**: O viewer é o mesmo binário com flag `--image-viewer`
+
+---
+
+*Última atualização: 2026-02-24 (adicionada seção de troubleshooting do visualizador de imagens dedicado)*

@@ -25,6 +25,7 @@ O MTT File Manager usa **eprintln!()** para logging - logs vão para **stderr**.
 | **[WATCHER]** | Watcher | Eventos do filesystem watcher |
 | **[PDF]** | PDF | Operações de PDF |
 | **[MPV]** | MPV | Eventos do player de vídeo |
+| **[IMAGE-VIEWER]** | Image Viewer | Visualizador de imagens dedicado (processo separado) |
 | **[FLOW]** | Fluxos | Debug de fluxos específicos |
 | **[STATE]** | Estado | Dump de estado |
 
@@ -397,4 +398,4 @@ Write-Host "Diagnostics saved to: $diagDir"
 
 ---
 
-*Última atualização: 2026-02-03 (pós-refatoração)*
+*Última atualização: 2026-02-24 (adicionado prefixo [IMAGE-VIEWER] para visualizador dedicado)*

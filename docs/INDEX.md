@@ -25,6 +25,7 @@ Este índice fornece navegação para todos os documentos técnicos do MTT File 
 - Estrutura do Cargo Workspace (3 crates)
 - Camadas e responsabilidades (UI, Application, Domain, Infrastructure)
 - Serviço de Busca Global (processo externo com indexação híbrida: USN + full-scan fallback)
+- Visualizador de Imagens Dedicado (processo separado com cache sliding-window)
 - Principais boundaries
 - Ciclo de vida da aplicação
 - Estado global e gerenciamento
@@ -36,6 +37,7 @@ Este índice fornece navegação para todos os documentos técnicos do MTT File 
 - Estrutura de diretórios completa (workspace com 3 crates)
 - Responsabilidades por módulo
 - Crates: mtt-search-protocol e mtt-search-service
+- Visualizador de imagens dedicado (`src/image_viewer/`)
 - Principais structs e funções
 - Dependências entre módulos
 - Fluxo de dados principal
@@ -59,6 +61,7 @@ Este índice fornece navegação para todos os documentos técnicos do MTT File 
 - Navegação por teclado
 - Busca global (Ctrl+Shift+F → Named Pipe → índice híbrido USN/fallback)
 - Folder cover composition (composição customizada com layers PNG)
+- Visualizador de imagens dedicado (processo separado, cache sliding-window, prefetch)
 - Debugging por fluxo
 
 ### [07_storage_config.md](07_storage_config.md)
@@ -152,6 +155,12 @@ Este índice fornece navegação para todos os documentos técnicos do MTT File 
 - `src/ui/components/mpv_preview/mod.rs` - Preview de vídeo
 - `src/ui/components/item_slot/mod.rs` - Renderização de slot de item (grid)
 - `src/pdf_viewer/` - Visualizador de PDF
+- `src/image_viewer/` - Visualizador de imagens dedicado (processo separado)
+  - `src/image_viewer/mod.rs` - Entry points (open_image_viewer, run_standalone)
+  - `src/image_viewer/app.rs` - App struct, UI, navegação, zoom
+  - `src/image_viewer/cache.rs` - WindowCache + PrefetchEngine
+  - `src/image_viewer/indexer.rs` - Leitura e ordenação do diretório
+  - `src/image_viewer/loader.rs` - Decodificação de imagens (mmap, EXIF, WIC)
 
 ## Comandos Úteis
 
@@ -229,7 +238,13 @@ MTT-File-Manager-RUST/
 │   │   ├── global_search_worker.rs   # Worker de busca global
 │   │   └── ...
 │   ├── pdf_viewer/                   # Visualizador PDF
-│   ├── tabs/                         # Sistema de abas
+│   ├── image_viewer/                  # Visualizador de imagens (processo separado)
+│   │   ├── mod.rs                     # Entry points
+│   │   ├── app.rs                     # App struct + UI + navegação
+│   │   ├── cache.rs                   # WindowCache + PrefetchEngine
+│   │   ├── indexer.rs                 # Leitura de diretório
+│   │   └── loader.rs                  # Decodificação (mmap, EXIF, WIC)
+│   ├── tabs/                          # Sistema de abas
 │   ├── lib.rs                        # Entry point lib
 │   └── main.rs                       # Entry point bin
 ├── crates/
@@ -287,4 +302,4 @@ MTT-File-Manager-RUST/
 
 ---
 
-*Última atualização: 2026-02-22 (documentado sistema de folder cover composition customizada)*
+*Última atualização: 2026-02-24 (documentado visualizador de imagens dedicado)*

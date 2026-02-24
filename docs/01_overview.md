@@ -21,6 +21,7 @@ O MTT File Manager é um gerenciador de arquivos nativo para Windows desenvolvid
 
 ### Preview e Mídia
 - **Preview integrado** - Visualização de imagens, vídeos, GIFs e PDFs sem sair do aplicativo
+- **Visualizador de imagens dedicado** - Processo separado com cache sliding-window, decodificação multi-thread e navegação instantânea entre imagens da pasta
 - **Reprodução de vídeo** - Player baseado em libmpv para formatos de vídeo diversos com suporte a controles, tela cheia e janela destacada
 - **Visualizador de PDF** - Integração com WebView2 (Edge) para PDFs
 - **Thumbnails inteligentes** - Geração e cache de thumbnails com múltiplos backends (image crate, WIC, Shell API, Media Foundation)
@@ -98,11 +99,12 @@ O MTT File Manager é um gerenciador de arquivos nativo para Windows desenvolvid
 | Cache | SQLite (rusqlite) | 0.32 | Persistência de thumbnails |
 | Vídeo | libmpv2 | 5.0.3 | Reprodução de vídeo |
 | PDF | WebView2 | - | Visualização de PDFs |
-| Imagens | image crate | 0.25 | Processamento de imagens (WebP, GIF) |
+| Imagens | image crate | 0.25 | Processamento de imagens (WebP, GIF), decodificação no visualizador dedicado |
 | SVG | resvg/usvg | 0.44 | Renderização de SVG |
 | Paralelismo | rayon | 1.10 | Processamento paralelo |
-| Comunicação | crossbeam-channel | 0.5.15 | Canais MPSC de alta performance |
+| Comunicação | crossbeam-channel | 0.5.15 | Canais MPSC de alta performance (app principal + image viewer workers) |
 | Hashing | rustc-hash/fxhash | 2.0/0.2.1 | Hash rápida para PathBuf |
+| Memory Mapping | memmap2 | 0.9 | Leitura eficiente de imagens grandes no image viewer |
 | EXIF | kamadak-exif | 0.5 | Leitura de metadados JPEG |
 | Compressão | webp | 0.3 | Compressão WebP para thumbnails |
 | Clipboard | clipboard-win | 5.4 | Integração clipboard Windows |
@@ -148,4 +150,4 @@ O MTT File Manager é um gerenciador de arquivos nativo para Windows desenvolvid
 
 ---
 
-*Última atualização: 2026-02-22 (adicionado Folder covers customizados com pastas fixadas e scroll na sidebar)*
+*Última atualização: 2026-02-24 (documentado visualizador de imagens dedicado com cache sliding-window)*

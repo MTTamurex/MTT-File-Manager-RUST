@@ -39,6 +39,7 @@ O MTT File Manager é um gerenciador de arquivos desktop que combina a performan
 
 ### 🎬 Preview e Mídia
 - **Preview integrado** - Visualização sem sair do aplicativo
+- **Visualizador de imagens dedicado** - Processo separado com cache sliding-window, navegação instantânea e prefetch inteligente
 - **Reprodução de vídeo** - Player baseado em libmpv para formatos diversos
 - **Visualizador de PDF** - Integração com WebView2 (Edge)
 - **Thumbnails inteligentes** - Cache multi-nível com geração otimizada
@@ -152,7 +153,7 @@ winget install Microsoft.EdgeWebView2Runtime
 3. **Busca**: Comece a digitar para buscar arquivos na pasta atual
 
 ### Visualização de Mídia
-- **Imagens**: JPG, PNG, GIF, WebP, BMP, TIFF, SVG
+- **Imagens**: JPG, PNG, GIF, WebP, BMP, TIFF, SVG — duplo clique abre o visualizador dedicado com navegação rápida pela pasta
 - **Vídeos**: MP4, MKV, AVI, MOV, WebM (requer libmpv)
 - **PDFs**: Visualização completa com WebView2
 - **GIFs**: Reprodução automática com controle de velocidade

@@ -67,7 +67,13 @@ image = { version = "0.25", features = ["webp", "gif"] }
 ```
 - **Propósito**: Decodificação/encodificação de imagens
 - **Features**: Suporte a WebP e GIF animado
-- **Uso**: Geração de thumbnails (Stage 1), composição de folder covers (alpha blending de layers PNG)
+- **Uso**: Geração de thumbnails (Stage 1), composição de folder covers, decodificação no visualizador de imagens dedicado
+
+```toml
+memmap2 = "0.9"
+```
+- **Propósito**: Memory-mapped file I/O
+- **Uso**: Decodificação de imagens >1MB no visualizador dedicado (evita cópia desnecessária)
 
 ```toml
 webp = "0.3"
@@ -149,7 +155,7 @@ bincode = "1.3"
 crossbeam-channel = "0.5.15"
 ```
 - **Propósito**: Canais MPSC de alta performance
-- **Uso**: Comunicação UI ↔ Workers (thumbnails, ícones, metadados, operações)
+- **Uso**: Comunicação UI ↔ Workers (thumbnails, ícones, metadados, operações); canais bounded no PrefetchEngine do visualizador de imagens dedicado
 
 ### Diretórios e Paths
 ```toml
@@ -354,6 +360,7 @@ codegen-units = 1  # Single codegen unit (melhor otimização)
 │   ├── libmpv2 5.0.3
 │   ├── rayon 1.10
 │   ├── crossbeam-channel 0.5.15
+│   ├── memmap2 0.9
 │   └── ... (outras)
 ├── mtt-search-protocol (lib IPC)
 │   ├── serde 1.0 (workspace)
@@ -413,4 +420,4 @@ cargo audit
 
 ---
 
-*Última atualização: 2026-02-22 (atualizado uso de image crate para folder cover composition)*
+*Última atualização: 2026-02-24 (adicionado memmap2 e atualizado uso de image/crossbeam para visualizador de imagens dedicado)*

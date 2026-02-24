@@ -15,6 +15,7 @@ MTT-File-Manager-RUST/
 │   ├── application/                  # Serviços de lógica de negócios
 │   ├── domain/                       # Modelos de dados e regras de negócio
 │   ├── infrastructure/               # Integrações com sistema e recursos externos
+│   ├── image_viewer/                 # Visualizador de imagens dedicado (processo separado)
 │   ├── pdf_viewer/                   # Visualizador de PDF externo (WebView2)
 │   ├── tabs/                         # Sistema de abas
 │   ├── ui/                           # Interface do usuário
@@ -461,6 +462,50 @@ pub fn is_active(&self) -> bool
 
 ---
 
+### 8.1. `src/image_viewer/` - Visualizador de Imagens Dedicado
+**Propósito**: Visualização de imagens em processo separado com navegação rápida e cache sliding-window
+
+**Arquitetura**: Executado como **processo separado** (`--image-viewer <path>`), com janela eframe/egui própria. Recursos são liberados pelo SO ao fechar o processo — sem risco de leak de texturas/memória no app principal.
+
+**Arquivos**:
+- **`mod.rs`** - Entry points: `open_image_viewer()` (spawna processo), `run_standalone()` (cria janela eframe)
+- **`app.rs`** - `DedicatedImageViewerApp`: struct principal com estado, navegação, zoom, atalhos de teclado e renderização
+- **`cache.rs`** - `WindowCache` (HashMap com sliding-window + budget de 512MB) e `PrefetchEngine` (pool de workers com canais crossbeam bounded)
+- **`indexer.rs`** - `build_sequence()`: lê diretório, filtra imagens suportadas, ordena por nome natural, retorna `ImageSequence`
+- **`loader.rs`** - Decodificação de imagens: `decode_full_frame_with_priority()`, `mmap` para arquivos >1MB, orientação EXIF, fallback WIC
+
+**Principais structs**:
+```rust
+pub struct DedicatedImageViewerApp {
+    sequence: ImageSequence,      // Lista de imagens da pasta
+    current_index: usize,         // Índice atual
+    cache: WindowCache,           // Cache sliding-window (radius=6, até 13 imagens)
+    prefetch: PrefetchEngine,     // Workers de decodificação em background
+    texture: Option<TextureHandle>, // Textura GPU da imagem atual
+    zoom_factor: f32,             // Fator de zoom
+}
+
+pub struct WindowCache { radius, items: HashMap<usize, Arc<DecodedFrame>>, total_bytes }
+pub struct PrefetchEngine { jobs_tx, bg_jobs_tx, results_rx, active_center: Arc<AtomicUsize> }
+pub struct DecodedFrame { rgba: Vec<u8>, width: u32, height: u32 }
+```
+
+**Fluxo de navegação**:
+1. Primeira imagem é carregada **sincronamente** no startup (sem spinner)
+2. Workers decodificam vizinhos em background (sliding-window de ±6 imagens)
+3. Ao navegar: lê do cache (instantâneo), solicita apenas a nova imagem da borda
+4. Imagem anterior permanece visível até a nova estar pronta (sem spinner)
+5. Workers pulam jobs obsoletos via `AtomicUsize` center check
+
+**Características de performance**:
+- Canais bounded dimensionados para a janela (evita acúmulo de jobs)
+- Workers enviam notificação de skip para cleanup de `requested_jobs`
+- Memory budget de 512MB com evição por distância
+- `mmap` para I/O de arquivos grandes (>1MB)
+- Event-driven repaint (workers chamam `ctx.request_repaint()`) com fallback de 200ms
+
+---
+
 ### 9. `crates/mtt-search-protocol/` - Protocolo IPC
 **Propósito**: Tipos compartilhados entre app e serviço de busca para comunicação via Named Pipes
 
@@ -559,6 +604,7 @@ lib.rs
     │   └──► workers/    ├──► infrastructure/
     ├── ui/ ◄────────────┘         │
     ├── tabs/                      └──► mtt-search-protocol (IPC types)
+    ├── image_viewer/ (processo separado)
     └── pdf_viewer/
 
 mtt-search-service (processo separado)

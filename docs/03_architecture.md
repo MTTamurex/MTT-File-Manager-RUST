@@ -98,6 +98,18 @@ O MTT File Manager segue uma arquitetura em camadas com separação clara de res
 │  │  └────────────┴────────────┴────────────┴────────────┴──────────┘  │  │
 │  └─────────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────┘
+                                │
+┌─────────────────────────────────────────────────────────────────────────────┐
+│              External: Image Viewer (separate process, same binary)        │
+│  ┌─────────────────────────────────────────────────────────────────────┐  │
+│  │              mtt-file-manager.exe --image-viewer <path>              │  │
+│  │  ┌────────────┬────────────┬────────────┬────────────┬──────────┐  │  │
+│  │  │Dedicated   │Window      │Prefetch    │Image       │Directory │  │  │
+│  │  │ViewerApp   │Cache       │Engine      │Loader      │Indexer   │  │  │
+│  │  │(eframe)    │(512MB)     │(workers)   │(mmap+WIC)  │(sort)    │  │  │
+│  │  └────────────┴────────────┴────────────┴────────────┴──────────┘  │  │
+│  └─────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Camadas e Responsabilidades
@@ -300,6 +312,30 @@ Serviço Windows separado que indexa todos os arquivos do sistema com estratégi
 - Retry apenas em `PIPE_BUSY` (serviço sobrecarregado)
 - Worker dedicado (`src/workers/global_search_worker.rs`) com coalescing de queries
 
+### 7. Image Viewer (Processo Separado)
+**Localização**: `src/image_viewer/`
+
+Visualizador de imagens dedicado executado como **processo separado** (mesmo binário, flag `--image-viewer`). Toda memória e texturas são liberadas pelo SO ao fechar o processo — sem risco de leak no app principal.
+
+**Componentes**:
+- **`mod.rs`** - `open_image_viewer()` spawna o processo, `run_standalone()` configura e inicia a janela eframe
+- **`app.rs`** - `DedicatedImageViewerApp`: struct principal, navegação, zoom, atalhos de teclado, renderização
+- **`cache.rs`** - `WindowCache` (HashMap sliding-window, 512MB budget, evição por distância) + `PrefetchEngine` (pool de workers com canais crossbeam bounded, center atômico)
+- **`indexer.rs`** - `build_sequence()`: lê diretório, filtra imagens, ordenação natural
+- **`loader.rs`** - Decodificação: `mmap` para arquivos >1MB, orientação EXIF, fallback WIC
+
+**Arquitetura de cache e prefetch**:
+- Sliding-window com radius=6 (até 13 imagens em cache)
+- Workers verificam `AtomicUsize` center antes de decodificar — jobs obsoletos são pulados e notificados
+- Canais bounded dimensionados para `2*radius+1` (evita acúmulo infinito de jobs)
+- Navegação solicita apenas a nova imagem da borda (tail-only), não a janela inteira
+- Imagem anterior permanece visível até a nova estar pronta (sem spinner durante navegação rápida)
+- Primeira imagem carregada sincronamente no startup (sem spinner ao abrir)
+
+**Repaint event-driven**:
+- Workers chamam `ctx.request_repaint()` ao completar decodificação
+- Fallback de 200ms apenas como safety net
+
 ## Principais Boundaries
 
 ### UI ↔ Application Boundary
@@ -316,6 +352,11 @@ Serviço Windows separado que indexa todos os arquivos do sistema com estratégi
 - **API**: windows-rs crate para bindings seguros
 - **COM**: Inicialização e gerenciamento adequado de COM
 - **Resources**: RAII para gerenciamento de recursos Windows
+
+### App Principal ↔ Image Viewer Boundary
+- **Interface**: Processo separado via `Command::new(exe).arg("--image-viewer").arg(path)`
+- **Isolamento**: Memória e texturas GPU completamente isoladas
+- **Cleanup**: SO libera tudo automaticamente ao fechar o processo
 
 ## Ciclo de Vida do App
 
@@ -541,5 +582,5 @@ Resultados são cacheados em SQLite (`folder_previews`) com invalidação por mt
 
 ---
 
-*Última atualização: 2026-02-22 (documentado sistema de composição customizada de folder covers)*
+*Última atualização: 2026-02-24 (documentado visualizador de imagens dedicado como processo separado com cache sliding-window)*
 

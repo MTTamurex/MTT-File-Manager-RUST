@@ -873,5 +873,156 @@ src/ui/cache.rs - CacheManager::upload_to_gpu()
 
 ---
 
-*Última atualização: 2026-02-22 (adicionado fluxo de Folder Cover Composition customizada)*
+## 12. Visualizador de Imagens Dedicado
+
+### Visão Geral
+O visualizador de imagens roda como **processo separado** (mesmo binário com flag `--image-viewer`). Quando o usuário abre uma imagem, o app principal spawna um novo processo que cria sua própria janela eframe/egui, completamente isolado do app principal.
+
+### Sequência: Abertura
+```
+User Double-Click em imagem (ou Enter)
+    ↓
+src/app/operations/ - detecta abertura de imagem
+    ↓
+src/image_viewer/mod.rs - open_image_viewer(path)
+    ↓
+Command::new(current_exe()).arg("--image-viewer").arg(path).spawn()
+    ↓
+[NOVO PROCESSO]
+    ↓
+src/main.rs - detecta flag "--image-viewer"
+    ↓
+src/image_viewer/mod.rs - run_standalone(path)
+    ↓
+src/image_viewer/indexer.rs - build_sequence(path)
+    │   → Lê diretório, filtra imagens suportadas, ordena por nome natural
+    ↓
+src/image_viewer/app.rs - DedicatedImageViewerApp::new()
+    │   → Cria WindowCache (radius=6)
+    │   → Cria PrefetchEngine (workers + canais bounded)
+    │   → Carrega PRIMEIRA IMAGEM SINCRONAMENTE (sem spinner ao abrir)
+    │   → Submete vizinhos para prefetch em background
+    ↓
+eframe::run_native() - inicia loop de renderização
+```
+
+### Sequência: Navegação (Seta Direita/Esquerda)
+```
+User pressiona → ou ←
+    ↓
+src/image_viewer/app.rs - handle key event
+    ↓
+navigate_to(new_index)
+    │
+    ├── 1. Atualiza current_index
+    ├── 2. Atualiza PrefetchEngine.active_center (AtomicUsize)
+    ├── 3. Cache hit? → Mostra imagem instantaneamente
+    ├── 4. Cache miss? → MANTÉM imagem anterior visível (sem spinner)
+    ├── 5. Solicita APENAS imagem da borda nova (tail-only)
+    │       → Ex: ao ir de index 5 para 6, solicita apenas index 12 (nova borda)
+    ├── 6. Prune requested_jobs para nova janela (retain, não clear)
+    └── 7. try_show_cached_current() tenta mostrar se já no cache
+```
+
+### Sequência: Prefetch Engine (Background)
+```
+PrefetchEngine::new()
+    ↓
+Spawna N worker threads (1 por CPU core, max 4)
+    ↓
+Cada worker:
+    loop {
+        select! {
+            recv(high_priority_rx) → job    // Jobs prioritários (imagem atual)
+            recv(background_rx) → job       // Jobs de prefetch
+        }
+        ↓
+        Verifica |job.index - active_center| <= radius
+            → SE NÃO: envia Interrupted de volta, pula job
+            → SE SIM: decodifica imagem
+        ↓
+        src/image_viewer/loader.rs - decode_full_frame_with_priority()
+            │   → Arquivo >1MB? usa mmap (memmap2)
+            │   → Decodifica via image crate
+            │   → Aplica orientação EXIF
+            │   → Fallback WIC se necessário
+        ↓
+        Envia resultado via results_tx (bounded channel)
+        ↓
+        ctx.request_repaint() → acorda a UI
+    }
+```
+
+### Sequência: Recebimento de Resultados (UI Thread)
+```
+DedicatedImageViewerApp::update()
+    ↓
+handle_prefetch_results()
+    │
+    ├── try_recv() do results channel
+    ├── Ok(frame) → cache.insert(index, frame)
+    │               → Se index == current → atualiza textura GPU
+    │               → Remove de requested_jobs
+    ├── Err(Interrupted) → Remove de requested_jobs (será re-submetido se ainda na janela)
+    └── Err(outros) → Log de erro
+    ↓
+schedule_window_requests()
+    │   → Verifica se há slots vazios na janela atual
+    │   → Submete jobs faltantes (que não estão em requested_jobs nem no cache)
+    ↓
+Renderiza imagem atual com zoom (fit-to-window por padrão)
+```
+
+### Arquivos Envolvidos
+- **`src/image_viewer/mod.rs`** - Entry points (`open_image_viewer`, `run_standalone`)
+- **`src/image_viewer/app.rs`** - App struct, UI, navegação, zoom, atalhos
+- **`src/image_viewer/cache.rs`** - `WindowCache` (sliding-window) + `PrefetchEngine` (workers)
+- **`src/image_viewer/indexer.rs`** - Leitura e ordenação do diretório
+- **`src/image_viewer/loader.rs`** - Decodificação de imagens (mmap, EXIF, WIC)
+- **`src/main.rs`** - Detecção da flag `--image-viewer`
+
+### Constantes Importantes
+| Constante | Valor | Descrição |
+|-----------|-------|-----------|
+| `DEFAULT_CACHE_RADIUS` | 6 | Pré-carrega ±6 imagens (janela de 13) |
+| `MAX_CACHE_BYTES` | 512 MB | Budget de memória do cache |
+| `MIN_ZOOM_FACTOR` | 0.10 | Zoom mínimo (10%) |
+| `MAX_ZOOM_FACTOR` | 8.0 | Zoom máximo (800%) |
+| Channel size | `2*radius+1` | Canais bounded dimensionados para a janela |
+
+### Pontos de Bug Comuns
+1. **Spinner ao abrir imagem**
+   - **Causa**: Primeira imagem não carregou sincronamente
+   - **Debug**: Verificar logs `[IMAGE-VIEWER]` no stderr
+   - **Solução**: `new()` faz decode síncrono da primeira imagem
+
+2. **Spinner durante navegação rápida**
+   - **Causa**: Cache miss + imagem anterior não mantida
+   - **Debug**: Verificar se `try_show_cached_current()` está mantendo textura anterior
+   - **Solução**: Nunca setar `self.texture = None` em cache miss
+
+3. **Imagens não pré-carregam (cache sempre vazio)**
+   - **Causa**: Workers pulando todos os jobs (center desatualizado)
+   - **Debug**: Verificar se `active_center` está sendo atualizado em `navigate_to`
+   - **Solução**: Usar `AtomicUsize::store()` com `Ordering::Release`
+
+4. **Memória cresce indefinidamente**
+   - **Causa**: Budget de cache não funcionando
+   - **Debug**: Verificar `total_bytes` vs `MAX_CACHE_BYTES`
+   - **Solução**: `evict_over_budget()` deve remover entradas mais distantes do center
+
+### Como Debugar
+```rust
+// Logs do viewer (stderr do processo separado)
+eprintln!("[IMAGE-VIEWER] navigate_to({}) — cache hit: {}", index, cache.contains(index));
+eprintln!("[IMAGE-VIEWER] prefetch result: index={}, size={}bytes", index, frame.size_bytes());
+eprintln!("[IMAGE-VIEWER] cache: {} items, {} MB", cache.len(), cache.total_bytes / 1_048_576);
+
+// Para capturar logs do processo separado:
+// Stdout/stderr vão para o console se lançado via terminal
+```
+
+---
+
+*Última atualização: 2026-02-24 (adicionado fluxo do Visualizador de Imagens Dedicado)*
 
