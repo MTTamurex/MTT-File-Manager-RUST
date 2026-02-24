@@ -1,5 +1,13 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
+use windows::core::PCWSTR;
+use windows::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT};
+use windows::Win32::Storage::FileSystem::{
+    FindCloseChangeNotification, FindFirstChangeNotificationW, FindNextChangeNotification,
+    FILE_NOTIFY_CHANGE_ATTRIBUTES, FILE_NOTIFY_CHANGE_CREATION, FILE_NOTIFY_CHANGE_DIR_NAME,
+    FILE_NOTIFY_CHANGE_FILE_NAME, FILE_NOTIFY_CHANGE_LAST_WRITE, FILE_NOTIFY_CHANGE_SIZE,
+};
+use windows::Win32::System::Threading::WaitForSingleObject;
 
 use crate::file_index;
 use crate::fs_walker;
@@ -8,8 +16,21 @@ use crate::usn_journal;
 
 const INCREMENTAL_APPLY_RETRY_ATTEMPTS: usize = 3;
 const INCREMENTAL_APPLY_RETRY_SLEEP: std::time::Duration = std::time::Duration::from_millis(35);
-const INCREMENTAL_CONTENTION_LOG_INTERVAL: std::time::Duration =
-    std::time::Duration::from_secs(30);
+const INCREMENTAL_CONTENTION_LOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+const NON_USN_WAIT_STEP: std::time::Duration = std::time::Duration::from_millis(500);
+
+#[derive(Clone, Copy)]
+struct NonUsnScanCadence {
+    periodic_interval: std::time::Duration,
+    min_trigger_gap: std::time::Duration,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NonUsnWaitResult {
+    Shutdown,
+    Triggered,
+    Timeout,
+}
 
 pub(crate) fn wait_for_shutdown_or_timeout(
     shutdown: &Arc<AtomicBool>,
@@ -37,11 +58,20 @@ pub(crate) fn index_non_ntfs_volume(
     db: Arc<index_db::IndexDb>,
     shutdown: Arc<AtomicBool>,
 ) {
-    let rescan_interval = non_usn_rescan_interval(&file_system);
+    let cadence = non_usn_scan_cadence(&file_system);
+    let change_monitor = NonUsnChangeMonitor::new(drive_letter);
 
     eprintln!(
-        "[SCAN] Starting fallback indexer for {}:\\ (filesystem: {})",
-        drive_letter, file_system
+        "[SCAN] Starting fallback indexer for {}:\\ (filesystem: {}, periodic={}s, trigger-gap={}s, change-monitor={})",
+        drive_letter,
+        file_system,
+        cadence.periodic_interval.as_secs(),
+        cadence.min_trigger_gap.as_secs(),
+        if change_monitor.is_some() {
+            "enabled"
+        } else {
+            "disabled"
+        }
     );
 
     // Fast startup path: reuse persisted snapshot while a fresh scan runs.
@@ -117,30 +147,159 @@ pub(crate) fn index_non_ntfs_volume(
             }
         }
 
-        if wait_for_shutdown_or_timeout(&shutdown, rescan_interval) {
-            break;
+        let wait_result = if let Some(monitor) = &change_monitor {
+            monitor.wait_for_change_or_timeout(&shutdown, cadence.periodic_interval)
+        } else if wait_for_shutdown_or_timeout(&shutdown, cadence.periodic_interval) {
+            NonUsnWaitResult::Shutdown
+        } else {
+            NonUsnWaitResult::Timeout
+        };
+
+        match wait_result {
+            NonUsnWaitResult::Shutdown => break,
+            NonUsnWaitResult::Timeout => {}
+            NonUsnWaitResult::Triggered => {
+                // Guardrail against scan thrash on chatty filesystems.
+                if wait_for_shutdown_or_timeout(&shutdown, cadence.min_trigger_gap) {
+                    break;
+                }
+            }
         }
     }
 
     eprintln!("[SCAN] {}:\\ Fallback indexer stopped", drive_letter);
 }
 
-fn non_usn_rescan_interval(file_system: &str) -> std::time::Duration {
+fn non_usn_scan_cadence(file_system: &str) -> NonUsnScanCadence {
     let fs = file_system.to_ascii_lowercase();
-    if fs.contains("cryptofs")
-        || fs.contains("fuse")
-        || fs.contains("dokan")
-        || fs.contains("winfsp")
-    {
+    if is_virtual_or_fuse_fs(&fs) {
         // Virtual/encrypted mounts change frequently and usually have fewer entries.
-        std::time::Duration::from_secs(30)
+        NonUsnScanCadence {
+            periodic_interval: std::time::Duration::from_secs(30),
+            min_trigger_gap: std::time::Duration::from_secs(3),
+        }
+    } else if is_fat_family_fs(&fs) {
+        // Physical FAT-family filesystems (exFAT/FAT32/FAT) can be large and noisy.
+        NonUsnScanCadence {
+            periodic_interval: std::time::Duration::from_secs(120),
+            min_trigger_gap: std::time::Duration::from_secs(15),
+        }
     } else {
-        // Physical non-USN filesystems (e.g., exFAT/FAT32) keep a safer cadence.
-        std::time::Duration::from_secs(120)
+        // Conservative default for unknown non-USN filesystems.
+        NonUsnScanCadence {
+            periodic_interval: std::time::Duration::from_secs(90),
+            min_trigger_gap: std::time::Duration::from_secs(10),
+        }
     }
 }
 
-fn upsert_volume_index(indices: &mut Vec<file_index::VolumeIndex>, new_index: file_index::VolumeIndex) {
+fn is_virtual_or_fuse_fs(fs: &str) -> bool {
+    fs.contains("cryptofs") || fs.contains("fuse") || fs.contains("dokan") || fs.contains("winfsp")
+}
+
+fn is_fat_family_fs(fs: &str) -> bool {
+    matches!(fs, "exfat" | "fat32" | "fat" | "fat16" | "fat12")
+}
+
+struct NonUsnChangeMonitor {
+    handle: HANDLE,
+}
+
+impl NonUsnChangeMonitor {
+    fn new(drive_letter: char) -> Option<Self> {
+        let root = format!("{}:\\", drive_letter);
+        let wide_root: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
+
+        let notify_filter = FILE_NOTIFY_CHANGE_FILE_NAME
+            | FILE_NOTIFY_CHANGE_DIR_NAME
+            | FILE_NOTIFY_CHANGE_ATTRIBUTES
+            | FILE_NOTIFY_CHANGE_SIZE
+            | FILE_NOTIFY_CHANGE_LAST_WRITE
+            | FILE_NOTIFY_CHANGE_CREATION;
+
+        let handle = unsafe {
+            FindFirstChangeNotificationW(PCWSTR(wide_root.as_ptr()), true, notify_filter)
+        };
+
+        match handle {
+            Ok(h) if h != INVALID_HANDLE_VALUE => Some(Self { handle: h }),
+            Ok(_) => {
+                eprintln!(
+                    "[SCAN] {}:\\ change monitor unavailable: invalid handle",
+                    drive_letter
+                );
+                None
+            }
+            Err(e) => {
+                eprintln!(
+                    "[SCAN] {}:\\ change monitor unavailable: {}",
+                    drive_letter,
+                    crate::redact_paths(&e.to_string())
+                );
+                None
+            }
+        }
+    }
+
+    fn wait_for_change_or_timeout(
+        &self,
+        shutdown: &Arc<AtomicBool>,
+        timeout: std::time::Duration,
+    ) -> NonUsnWaitResult {
+        let start = std::time::Instant::now();
+
+        while start.elapsed() < timeout {
+            if shutdown.load(Ordering::Relaxed) {
+                return NonUsnWaitResult::Shutdown;
+            }
+
+            let remaining = timeout.saturating_sub(start.elapsed());
+            let wait_for = NON_USN_WAIT_STEP.min(remaining);
+            let wait_ms = wait_for.as_millis().min(u32::MAX as u128) as u32;
+            let wait = unsafe { WaitForSingleObject(self.handle, wait_ms) };
+
+            if wait == WAIT_OBJECT_0 {
+                let rearmed = unsafe { FindNextChangeNotification(self.handle).is_ok() };
+                if !rearmed {
+                    eprintln!(
+                        "[SCAN] non-USN change monitor rearm failed; falling back to periodic scans"
+                    );
+                    return NonUsnWaitResult::Timeout;
+                }
+                return NonUsnWaitResult::Triggered;
+            }
+
+            if wait == WAIT_TIMEOUT {
+                continue;
+            }
+
+            eprintln!(
+                "[SCAN] non-USN change monitor wait failed with status {}",
+                wait.0
+            );
+            return NonUsnWaitResult::Timeout;
+        }
+
+        if shutdown.load(Ordering::Relaxed) {
+            NonUsnWaitResult::Shutdown
+        } else {
+            NonUsnWaitResult::Timeout
+        }
+    }
+}
+
+impl Drop for NonUsnChangeMonitor {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = FindCloseChangeNotification(self.handle);
+        }
+    }
+}
+
+fn upsert_volume_index(
+    indices: &mut Vec<file_index::VolumeIndex>,
+    new_index: file_index::VolumeIndex,
+) {
     if let Some(existing) = indices
         .iter_mut()
         .find(|v| v.drive_letter == new_index.drive_letter)
@@ -437,7 +596,8 @@ pub(crate) fn index_volume(
         }
     }
 
-    if contention_retries > 0 || contention_applied_after_retry > 0 || contention_skipped_cycles > 0 {
+    if contention_retries > 0 || contention_applied_after_retry > 0 || contention_skipped_cycles > 0
+    {
         eprintln!(
             "[USN] {}:\\ Final incremental contention stats: retries={}, applied_after_retry={}, skipped_cycles={}",
             drive_letter,
