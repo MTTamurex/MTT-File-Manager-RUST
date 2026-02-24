@@ -18,7 +18,6 @@ use crate::infrastructure::drive_watcher::{DriveWatcher, DriveWatcherEvent};
 
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
 const DISCOVERY_INTERVAL: Duration = Duration::from_secs(12);
-const RESCAN_INTERVAL: Duration = Duration::from_secs(300);
 const MAX_ITEMS_PER_VOLUME: usize = 1_500_000;
 
 #[derive(Clone)]
@@ -123,11 +122,14 @@ impl UserSessionSearchIndex {
         for candidate in candidates {
             active_letters.insert(candidate.drive_letter);
 
+            let rescan_interval =
+                rescan_interval_for_volume(&candidate.file_system, &candidate.label);
+
             let should_rescan = self
                 .volumes
                 .get(&candidate.drive_letter)
                 .map(|existing| {
-                    existing.last_scan.elapsed() >= RESCAN_INTERVAL
+                    existing.last_scan.elapsed() >= rescan_interval
                         || existing.file_system != candidate.file_system
                         || existing.label != candidate.label
                 })
@@ -417,6 +419,27 @@ fn is_virtual_indicator(label: &str, file_system: &str) -> bool {
         || fs_lower == "fuse"
 }
 
+fn is_fat_family_fs(file_system: &str) -> bool {
+    matches!(
+        file_system.trim().to_ascii_lowercase().as_str(),
+        "exfat" | "fat32" | "fat" | "fat16" | "fat12"
+    )
+}
+
+fn rescan_interval_for_volume(file_system: &str, label: &str) -> Duration {
+    if is_virtual_indicator(label, file_system) {
+        // User-session virtual mounts benefit from faster fallback reconciliation
+        // when watcher notifications are incomplete.
+        Duration::from_secs(30)
+    } else if is_fat_family_fs(file_system) {
+        // FAT-family volumes can miss cross-process notifications.
+        Duration::from_secs(120)
+    } else {
+        // Conservative default for other user-session candidates.
+        Duration::from_secs(180)
+    }
+}
+
 fn is_usn_filesystem(file_system: &str) -> bool {
     file_system.eq_ignore_ascii_case("NTFS") || file_system.eq_ignore_ascii_case("ReFS")
 }
@@ -525,11 +548,17 @@ fn scan_volume(drive_letter: char) -> Result<ScanOutcome, String> {
 
 /// Open (or create) the session-search database.
 fn open_session_db() -> Option<rusqlite::Connection> {
-    let cache_dir = dirs::data_local_dir()?.join("MTT-File-Manager").join("thumbnails");
+    let cache_dir = dirs::data_local_dir()?
+        .join("MTT-File-Manager")
+        .join("thumbnails");
     let db_path = cache_dir.join("session_search.db");
 
     if let Err(e) = std::fs::create_dir_all(&cache_dir) {
-        log::warn!("[SESSION-SEARCH] Failed to create cache dir {:?}: {}", cache_dir, e);
+        log::warn!(
+            "[SESSION-SEARCH] Failed to create cache dir {:?}: {}",
+            cache_dir,
+            e
+        );
         return None;
     }
 
@@ -570,12 +599,11 @@ fn load_all_volumes(conn: &rusqlite::Connection) -> HashMap<char, IndexedVolume>
     let mut volumes = HashMap::new();
 
     // Load volume metadata.
-    let mut vol_stmt = match conn.prepare(
-        "SELECT drive_letter, label, file_system FROM session_volumes",
-    ) {
-        Ok(s) => s,
-        Err(_) => return volumes,
-    };
+    let mut vol_stmt =
+        match conn.prepare("SELECT drive_letter, label, file_system FROM session_volumes") {
+            Ok(s) => s,
+            Err(_) => return volumes,
+        };
 
     let vol_rows = match vol_stmt.query_map([], |row| {
         let dl: String = row.get(0)?;
@@ -588,7 +616,9 @@ fn load_all_volumes(conn: &rusqlite::Connection) -> HashMap<char, IndexedVolume>
     };
 
     for row in vol_rows.flatten() {
-        let Some(letter) = row.0.chars().next() else { continue };
+        let Some(letter) = row.0.chars().next() else {
+            continue;
+        };
         volumes.insert(
             letter,
             IndexedVolume {
@@ -606,12 +636,11 @@ fn load_all_volumes(conn: &rusqlite::Connection) -> HashMap<char, IndexedVolume>
     }
 
     // Load items per volume.
-    let mut item_stmt = match conn.prepare(
-        "SELECT drive_letter, name, full_path, is_dir FROM session_items",
-    ) {
-        Ok(s) => s,
-        Err(_) => return volumes,
-    };
+    let mut item_stmt =
+        match conn.prepare("SELECT drive_letter, name, full_path, is_dir FROM session_items") {
+            Ok(s) => s,
+            Err(_) => return volumes,
+        };
 
     let item_rows = match item_stmt.query_map([], |row| {
         let dl: String = row.get(0)?;
@@ -625,8 +654,12 @@ fn load_all_volumes(conn: &rusqlite::Connection) -> HashMap<char, IndexedVolume>
     };
 
     for (dl, name, full_path, is_dir) in item_rows.flatten() {
-        let Some(letter) = dl.chars().next() else { continue };
-        let Some(volume) = volumes.get_mut(&letter) else { continue };
+        let Some(letter) = dl.chars().next() else {
+            continue;
+        };
+        let Some(volume) = volumes.get_mut(&letter) else {
+            continue;
+        };
 
         let path_key = normalize_path_key(Path::new(&full_path));
         volume.items.push(IndexedItem {
@@ -665,7 +698,12 @@ fn save_volume(conn: &rusqlite::Connection, drive_letter: char, items: &[Indexed
         "INSERT INTO session_items (drive_letter, name, full_path, is_dir) VALUES (?1, ?2, ?3, ?4)",
     ) {
         for item in items {
-            let _ = stmt.execute(rusqlite::params![dl, item.name, item.full_path, item.is_dir]);
+            let _ = stmt.execute(rusqlite::params![
+                dl,
+                item.name,
+                item.full_path,
+                item.is_dir
+            ]);
         }
     }
 
