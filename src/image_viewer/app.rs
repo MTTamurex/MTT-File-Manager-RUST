@@ -8,6 +8,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const DEFAULT_CACHE_RADIUS: usize = 6;
+const MIN_ZOOM_FACTOR: f32 = 0.10;
+const MAX_ZOOM_FACTOR: f32 = 8.0;
 
 pub struct DedicatedImageViewerApp {
     sequence: ImageSequence,
@@ -21,6 +23,9 @@ pub struct DedicatedImageViewerApp {
     texture_kind: Option<LoadKind>,
     metrics: Arc<Metrics>,
     last_error: Option<String>,
+    zoom_factor: f32,
+    zoom_percent_display: f32,
+    image_resolution: Option<(u32, u32)>,
 }
 
 impl DedicatedImageViewerApp {
@@ -42,6 +47,9 @@ impl DedicatedImageViewerApp {
             texture_kind: None,
             metrics: Arc::new(Metrics::default()),
             last_error: None,
+            zoom_factor: 1.0,
+            zoom_percent_display: 100.0,
+            image_resolution: None,
         };
 
         app.bump_sequence();
@@ -158,6 +166,9 @@ impl DedicatedImageViewerApp {
             .record_upload_us(upload_start.elapsed().as_micros() as u64);
         self.texture = Some(texture);
         self.texture_kind = Some(kind);
+        if matches!(kind, LoadKind::Full) || self.image_resolution.is_none() {
+            self.image_resolution = Some((frame.width, frame.height));
+        }
         self.last_error = None;
     }
 
@@ -165,6 +176,7 @@ impl DedicatedImageViewerApp {
         let Some((kind, frame)) = self.cache.get_best(self.current_index) else {
             self.texture = None;
             self.texture_kind = None;
+            self.image_resolution = None;
             return;
         };
 
@@ -219,6 +231,8 @@ impl DedicatedImageViewerApp {
         }
 
         self.current_index = index;
+        self.zoom_factor = 1.0;
+        self.image_resolution = None;
         self.bump_sequence();
         self.try_show_cached_current(ctx);
         self.schedule_window_requests();
@@ -272,14 +286,14 @@ impl DedicatedImageViewerApp {
                 let next_enabled = self.current_index + 1 < total;
 
                 if ui
-                    .add_enabled(prev_enabled, egui::Button::new("◀ Prev"))
+                    .add_enabled(prev_enabled, egui::Button::new("◀ Anterior"))
                     .clicked()
                 {
                     self.navigate_prev(ctx);
                 }
 
                 if ui
-                    .add_enabled(next_enabled, egui::Button::new("Next ▶"))
+                    .add_enabled(next_enabled, egui::Button::new("Próximo ▶"))
                     .clicked()
                 {
                     self.navigate_next(ctx);
@@ -309,20 +323,26 @@ impl DedicatedImageViewerApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
     }
 
-    fn render_bottom_bar(&self, ctx: &egui::Context) {
+    fn render_bottom_bar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("image_viewer_bottom_bar").show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.small("Keys: ←/→, A/D, Esc");
+                ui.label("Zoom");
+
+                let mut slider_zoom = self.zoom_factor;
+                let slider = egui::Slider::new(&mut slider_zoom, MIN_ZOOM_FACTOR..=MAX_ZOOM_FACTOR)
+                    .show_value(false);
+
+                if ui.add_sized([260.0, 20.0], slider).changed() {
+                    self.zoom_factor = slider_zoom.clamp(MIN_ZOOM_FACTOR, MAX_ZOOM_FACTOR);
+                }
+
+                ui.label(format!("{:.0}%", self.zoom_percent_display.round()));
+
                 ui.separator();
-                ui.small(format!("decode avg: {:.2} ms", self.metrics.decode_avg_ms()));
-                ui.separator();
-                ui.small(format!("upload avg: {:.2} ms", self.metrics.upload_avg_ms()));
-                if let Some(kind) = self.texture_kind {
-                    ui.separator();
-                    ui.small(match kind {
-                        LoadKind::Preview => "quality: preview",
-                        LoadKind::Full => "quality: full",
-                    });
+                if let Some((w, h)) = self.image_resolution {
+                    ui.label(format!("Resolução: {} × {}", w, h));
+                } else {
+                    ui.label("Resolução: —");
                 }
             });
         });
@@ -330,22 +350,122 @@ impl DedicatedImageViewerApp {
 
     fn render_center(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.vertical_centered_justified(|ui| {
-                if let Some(tex) = &self.texture {
-                    ui.add(
-                        egui::Image::new(tex)
-                            .max_size(ui.available_size())
-                            .shrink_to_fit(),
-                    );
-                } else if let Some(err) = &self.last_error {
-                    ui.label(egui::RichText::new(err).color(egui::Color32::from_rgb(220, 80, 80)));
-                } else if self.sequence.entries.is_empty() {
-                    ui.label("No image available");
+            if let Some(tex) = &self.texture {
+                // egui layout works in points, while texture size is in pixels.
+                // Convert first to avoid implicit upscale on high-DPI monitors.
+                let pixels_per_point = ui.ctx().pixels_per_point().max(f32::EPSILON);
+                let tex_size = tex.size_vec2() / pixels_per_point;
+                let panel_rect = ui.max_rect();
+                let avail = panel_rect.size();
+
+                // Fit-to-window only downscales; never upscales small images.
+                let fit_scale = if tex_size.x <= 0.0 || tex_size.y <= 0.0 {
+                    1.0
                 } else {
-                    ui.add(egui::Spinner::new());
-                    ui.label("Loading image...");
+                    let sx = avail.x / tex_size.x;
+                    let sy = avail.y / tex_size.y;
+                    sx.min(sy).min(1.0)
+                };
+
+                let draw_size = tex_size * fit_scale * self.zoom_factor;
+                self.zoom_percent_display = fit_scale * self.zoom_factor * 100.0;
+
+                let image = egui::Image::new(tex)
+                    .fit_to_exact_size(draw_size)
+                    .sense(egui::Sense::click());
+                let image_rect = egui::Rect::from_center_size(panel_rect.center(), draw_size);
+                let response = ui.put(image_rect, image).on_hover_cursor(egui::CursorIcon::ZoomIn);
+
+                if response.hovered() {
+                    // Native ZoomIn cursor is not consistently available on Windows/winit.
+                    // Hide the system cursor and render an explicit magnifier overlay.
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+
+                    if let Some(pointer_pos) = ui
+                        .ctx()
+                        .pointer_latest_pos()
+                        .or_else(|| ui.input(|i| i.pointer.hover_pos()))
+                    {
+                        let lens_center = pointer_pos + egui::vec2(10.0, 10.0);
+                        let radius = 7.0;
+                        let handle_start = lens_center + egui::vec2(4.0, 4.0);
+                        let handle_end = handle_start + egui::vec2(6.0, 6.0);
+                        let painter = ui.ctx().layer_painter(egui::LayerId::new(
+                            egui::Order::Foreground,
+                            egui::Id::new("image_viewer_zoom_cursor"),
+                        ));
+
+                        let shadow = egui::Color32::from_black_alpha(180);
+                        painter.circle_stroke(
+                            lens_center,
+                            radius,
+                            egui::Stroke::new(3.0, shadow),
+                        );
+                        painter.line_segment(
+                            [handle_start, handle_end],
+                            egui::Stroke::new(3.0, shadow),
+                        );
+
+                        painter.circle_stroke(
+                            lens_center,
+                            radius,
+                            egui::Stroke::new(1.6, egui::Color32::WHITE),
+                        );
+                        painter.line_segment(
+                            [handle_start, handle_end],
+                            egui::Stroke::new(1.6, egui::Color32::WHITE),
+                        );
+                    }
+
+                    let wheel_delta = ui.input(|i| i.raw_scroll_delta.y);
+                    if wheel_delta.abs() > f32::EPSILON {
+                        // Granular zoom: track wheel delta continuously.
+                        let factor = 1.0 + wheel_delta * 0.0015;
+                        if factor > 0.0 {
+                            self.zoom_factor =
+                                (self.zoom_factor * factor).clamp(MIN_ZOOM_FACTOR, MAX_ZOOM_FACTOR);
+                        }
+                    }
+
+                    let left_click = ui.input(|i| i.pointer.button_clicked(egui::PointerButton::Primary));
+                    if left_click {
+                        self.zoom_factor =
+                            (self.zoom_factor * 1.25).clamp(MIN_ZOOM_FACTOR, MAX_ZOOM_FACTOR);
+                    }
+
+                    let right_click =
+                        ui.input(|i| i.pointer.button_clicked(egui::PointerButton::Secondary));
+                    if right_click {
+                        self.zoom_factor =
+                            (self.zoom_factor / 1.25).clamp(MIN_ZOOM_FACTOR, MAX_ZOOM_FACTOR);
+                    }
                 }
-            });
+            } else if let Some(err) = &self.last_error {
+                self.zoom_percent_display = 100.0;
+                ui.with_layout(
+                    egui::Layout::centered_and_justified(egui::Direction::TopDown),
+                    |ui| {
+                        ui.label(egui::RichText::new(err).color(egui::Color32::from_rgb(220, 80, 80)));
+                    },
+                );
+            } else if self.sequence.entries.is_empty() {
+                self.zoom_percent_display = 100.0;
+                ui.with_layout(
+                    egui::Layout::centered_and_justified(egui::Direction::TopDown),
+                    |ui| {
+                        ui.label("No image available");
+                    },
+                );
+            } else {
+                self.zoom_percent_display = 100.0;
+                ui.with_layout(
+                    egui::Layout::centered_and_justified(egui::Direction::TopDown),
+                    |ui| {
+                        ui.add(egui::Spinner::new());
+                        ui.label("Loading image...");
+                    },
+                );
+            }
         });
     }
 }

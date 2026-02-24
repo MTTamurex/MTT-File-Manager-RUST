@@ -19,6 +19,7 @@ impl Metrics {
         self.upload_total_us.fetch_add(elapsed_us, Ordering::Relaxed);
     }
 
+    #[allow(dead_code)]
     pub fn decode_avg_ms(&self) -> f32 {
         let count = self.decode_count.load(Ordering::Relaxed);
         if count == 0 {
@@ -28,6 +29,7 @@ impl Metrics {
         (total_us as f32 / count as f32) / 1000.0
     }
 
+    #[allow(dead_code)]
     pub fn upload_avg_ms(&self) -> f32 {
         let count = self.upload_count.load(Ordering::Relaxed);
         if count == 0 {
