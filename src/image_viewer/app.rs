@@ -53,8 +53,15 @@ impl DedicatedImageViewerApp {
             image_resolution: None,
         };
 
+        app.sync_image_resolution_from_path();
         app.bump_sequence();
         app
+    }
+
+    fn sync_image_resolution_from_path(&mut self) {
+        self.image_resolution = self
+            .current_path()
+            .and_then(|path| image::image_dimensions(path).ok());
     }
 
     fn bump_sequence(&mut self) {
@@ -177,7 +184,6 @@ impl DedicatedImageViewerApp {
         let Some((kind, frame)) = self.cache.get_best(self.current_index) else {
             self.texture = None;
             self.texture_kind = None;
-            self.image_resolution = None;
             return;
         };
 
@@ -233,7 +239,7 @@ impl DedicatedImageViewerApp {
 
         self.current_index = index;
         self.zoom_factor = 1.0;
-        self.image_resolution = None;
+        self.sync_image_resolution_from_path();
         self.bump_sequence();
         self.try_show_cached_current(ctx);
         self.schedule_window_requests();
@@ -355,7 +361,14 @@ impl DedicatedImageViewerApp {
                 // egui layout works in points, while texture size is in pixels.
                 // Convert first to avoid implicit upscale on high-DPI monitors.
                 let pixels_per_point = ui.ctx().pixels_per_point().max(f32::EPSILON);
-                let tex_size = tex.size_vec2() / pixels_per_point;
+                let preview_logical_size_px = self
+                    .image_resolution
+                    .map(|(w, h)| egui::vec2(w as f32, h as f32));
+                let base_size_px = match self.texture_kind {
+                    Some(LoadKind::Preview) => preview_logical_size_px.unwrap_or_else(|| tex.size_vec2()),
+                    _ => tex.size_vec2(),
+                };
+                let tex_size = base_size_px / pixels_per_point;
                 let viewport_size = ui.available_size();
 
                 // Fit-to-window only downscales; never upscales small images.
