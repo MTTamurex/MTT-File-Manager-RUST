@@ -1,6 +1,34 @@
 use super::badges::render_sync_badge;
 use super::*;
 
+/// Paints a texture centered within `container`, preserving aspect ratio.
+fn paint_texture_centered(
+    ui: &egui::Ui,
+    tex_id: egui::TextureId,
+    tex_size: egui::Vec2,
+    container: egui::Rect,
+) {
+    let aspect = tex_size.x / tex_size.y;
+    let container_aspect = container.width() / container.height();
+    let (draw_w, draw_h) = if aspect > container_aspect {
+        (container.width(), container.width() / aspect)
+    } else {
+        (container.height() * aspect, container.height())
+    };
+    let offset_x = (container.width() - draw_w) / 2.0;
+    let offset_y = (container.height() - draw_h) / 2.0;
+    let draw_rect = egui::Rect::from_min_size(
+        container.min + egui::vec2(offset_x, offset_y),
+        egui::vec2(draw_w, draw_h),
+    );
+    ui.painter().image(
+        tex_id,
+        draw_rect,
+        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+        egui::Color32::WHITE,
+    );
+}
+
 /// Renders a directory slot
 pub(super) fn render_directory_slot<O: ItemSlotOperations>(
     ui: &mut egui::Ui,
@@ -59,30 +87,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
 
     if let Some(tex) = native_preview {
         // If we have the native preview, draw maintaining aspect ratio and centering
-        let tex_size = tex.size_vec2();
-        let aspect = tex_size.x / tex_size.y;
-
-        // Calculate size maintaining aspect ratio
-        let (draw_w, draw_h) = if aspect > 1.0 {
-            (folder_rect.width(), folder_rect.width() / aspect)
-        } else {
-            (folder_rect.height() * aspect, folder_rect.height())
-        };
-
-        // Center in folder_rect
-        let offset_x = (folder_rect.width() - draw_w) / 2.0;
-        let offset_y = (folder_rect.height() - draw_h) / 2.0;
-        let draw_rect = egui::Rect::from_min_size(
-            folder_rect.min + egui::vec2(offset_x, offset_y),
-            egui::vec2(draw_w, draw_h),
-        );
-
-        ui.painter().image(
-            tex.id(),
-            draw_rect,
-            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-            egui::Color32::WHITE,
-        );
+        paint_texture_centered(ui, tex.id(), tex.size_vec2(), folder_rect);
     } else {
         // If no native preview
         let is_virtual_path = ctx.is_recycle_bin_view
@@ -91,75 +96,32 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
                 item.is_dir,
             );
 
-        if is_virtual_path {
-            // IN RECYCLE BIN or ZIP (Virtual Paths)
-            // Use System Folder Icon for these virtual folders
-            ctx.icon_loader.ensure_folder_icon(ui.ctx());
+        if is_virtual_path || ctx.skip_folder_media_reads {
+            // Virtual paths (recycle bin, ZIP) or system folders (C:\Windows tree):
+            // Use system folder icon directly, no preview composition.
             if let Some(sys_icon) = ctx.icon_loader.folder_icon() {
-                let tex_size = sys_icon.size_vec2();
-                let aspect = tex_size.x / tex_size.y;
-                let (draw_w, draw_h) = if aspect > folder_rect.width() / folder_rect.height() {
-                    (folder_rect.width(), folder_rect.width() / aspect)
+                paint_texture_centered(ui, sys_icon.id(), sys_icon.size_vec2(), folder_rect);
+            } else if is_virtual_path {
+                // Extra fallback for virtual paths: try item-specific icon
+                if let Some(icon) =
+                    ctx.icon_loader
+                        .get_or_load_icon(ui.ctx(), &item.path, true, true)
+                {
+                    let icon_size = folder_w.min(folder_h);
+                    let icon_rect = egui::Rect::from_center_size(
+                        folder_rect.center(),
+                        egui::vec2(icon_size, icon_size),
+                    );
+                    ui.painter().image(
+                        icon.id(),
+                        icon_rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
                 } else {
-                    (folder_rect.height() * aspect, folder_rect.height())
-                };
-                let offset_x = (folder_rect.width() - draw_w) / 2.0;
-                let offset_y = (folder_rect.height() - draw_h) / 2.0;
-                let draw_rect = egui::Rect::from_min_size(
-                    folder_rect.min + egui::vec2(offset_x, offset_y),
-                    egui::vec2(draw_w, draw_h),
-                );
-                ui.painter().image(
-                    sys_icon.id(),
-                    draw_rect,
-                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
-                );
-            } else if let Some(icon) =
-                ctx.icon_loader
-                    .get_or_load_icon(ui.ctx(), &item.path, true, true)
-            {
-                // Fallback to item-specific icon (allow_blocking=true for folders usually safe)
-                let icon_size = folder_w.min(folder_h);
-                let icon_rect = egui::Rect::from_center_size(
-                    folder_rect.center(),
-                    egui::vec2(icon_size, icon_size),
-                );
-                ui.painter().image(
-                    icon.id(),
-                    icon_rect,
-                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
-                );
-            } else {
-                // Final Fallback for virtual paths: styled empty area
-                ui.painter()
-                    .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
-            }
-        } else if ctx.skip_folder_media_reads {
-            // SYSTEM FOLDER (C:\Windows tree): Use system folder icon directly.
-            // No preview composition, no spinner, no async requests.
-            ctx.icon_loader.ensure_folder_icon(ui.ctx());
-            if let Some(sys_icon) = ctx.icon_loader.folder_icon() {
-                let tex_size = sys_icon.size_vec2();
-                let aspect = tex_size.x / tex_size.y;
-                let (draw_w, draw_h) = if aspect > folder_rect.width() / folder_rect.height() {
-                    (folder_rect.width(), folder_rect.width() / aspect)
-                } else {
-                    (folder_rect.height() * aspect, folder_rect.height())
-                };
-                let offset_x = (folder_rect.width() - draw_w) / 2.0;
-                let offset_y = (folder_rect.height() - draw_h) / 2.0;
-                let draw_rect = egui::Rect::from_min_size(
-                    folder_rect.min + egui::vec2(offset_x, offset_y),
-                    egui::vec2(draw_w, draw_h),
-                );
-                ui.painter().image(
-                    sys_icon.id(),
-                    draw_rect,
-                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
-                );
+                    ui.painter()
+                        .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
+                }
             } else {
                 ui.painter()
                     .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));

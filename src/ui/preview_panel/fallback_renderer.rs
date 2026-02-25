@@ -4,6 +4,34 @@ use crate::ui::preview_panel::actions::PreviewPanelAction;
 use crate::ui::svg_icons::SvgIconManager;
 use eframe::egui;
 
+/// Paints a texture centered within `container`, preserving aspect ratio.
+fn paint_texture_centered(
+    ui: &egui::Ui,
+    tex_id: egui::TextureId,
+    tex_size: egui::Vec2,
+    container: egui::Rect,
+) {
+    let aspect = tex_size.x / tex_size.y;
+    let container_aspect = container.width() / container.height();
+    let (draw_w, draw_h) = if aspect > container_aspect {
+        (container.width(), container.width() / aspect)
+    } else {
+        (container.height() * aspect, container.height())
+    };
+    let offset_x = (container.width() - draw_w) / 2.0;
+    let offset_y = (container.height() - draw_h) / 2.0;
+    let draw_rect = egui::Rect::from_min_size(
+        container.min + egui::vec2(offset_x, offset_y),
+        egui::vec2(draw_w, draw_h),
+    );
+    ui.painter().image(
+        tex_id,
+        draw_rect,
+        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+        egui::Color32::WHITE,
+    );
+}
+
 pub fn render_fallback(
     ui: &mut egui::Ui,
     file: &FileEntry,
@@ -46,28 +74,16 @@ pub fn render_fallback(
 
         // Detect system paths (C:\Windows tree) — always use static folder icon,
         // no async preview, no spinner, no placeholder.
-        let norm = file
-            .path
-            .to_string_lossy()
-            .replace('/', "\\")
-            .trim_end_matches('\\')
-            .to_ascii_lowercase();
         let is_system_path =
-            norm == "c:\\windows" || norm.starts_with("c:\\windows\\");
+            crate::infrastructure::windows::is_windows_system_path(&file.path.to_string_lossy());
 
-        if is_recycle_bin_view || is_system_path {
-            item_icon_loader.ensure_folder_icon(ui.ctx());
-            if let Some(icon) = item_icon_loader.folder_icon() {
-                ui.add(egui::Image::new(icon).max_size(egui::vec2(icon_size, icon_size)));
-            } else {
-                ui.label(egui::RichText::new("📁").size(icon_size * 0.6));
-            }
-        } else if crate::infrastructure::windows::shell_folder::is_shell_navigation_path(
-            &file.path,
-            file.is_dir,
-        ) {
-            // ZIP / SHELL PATH: Use System Folder Icon (No Preview)
-            item_icon_loader.ensure_folder_icon(ui.ctx());
+        if is_recycle_bin_view || is_system_path
+            || crate::infrastructure::windows::shell_folder::is_shell_navigation_path(
+                &file.path,
+                file.is_dir,
+            )
+        {
+            // Recycle bin, system path, or shell navigation: simple folder icon
             if let Some(icon) = item_icon_loader.folder_icon() {
                 ui.add(egui::Image::new(icon).max_size(egui::vec2(icon_size, icon_size)));
             } else {
@@ -79,77 +95,15 @@ pub fn render_fallback(
                 .0;
 
             if let Some(tex) = folder_preview_peek.as_ref() {
-                let tex_size = tex.size_vec2();
-                let aspect = tex_size.x / tex_size.y;
-
-                let (draw_w, draw_h) = if aspect > 1.0 {
-                    (folder_rect.width(), folder_rect.width() / aspect)
-                } else {
-                    (folder_rect.height() * aspect, folder_rect.height())
-                };
-
-                let offset_x = (folder_rect.width() - draw_w) / 2.0;
-                let offset_y = (folder_rect.height() - draw_h) / 2.0;
-                let draw_rect = egui::Rect::from_min_size(
-                    folder_rect.min + egui::vec2(offset_x, offset_y),
-                    egui::vec2(draw_w, draw_h),
-                );
-
-                ui.painter().image(
-                    tex.id(),
-                    draw_rect,
-                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
-                );
-            } else if is_folder_preview_loading {
-                // Show our custom folder icon while preview loads (no spinner/placeholder)
-                item_icon_loader.ensure_folder_icon(ui.ctx());
-                if let Some(icon) = item_icon_loader.folder_icon() {
-                    let tex_size = icon.size_vec2();
-                    let aspect = tex_size.x / tex_size.y;
-                    let (draw_w, draw_h) = if aspect > folder_rect.width() / folder_rect.height() {
-                        (folder_rect.width(), folder_rect.width() / aspect)
-                    } else {
-                        (folder_rect.height() * aspect, folder_rect.height())
-                    };
-                    let offset_x = (folder_rect.width() - draw_w) / 2.0;
-                    let offset_y = (folder_rect.height() - draw_h) / 2.0;
-                    let draw_rect = egui::Rect::from_min_size(
-                        folder_rect.min + egui::vec2(offset_x, offset_y),
-                        egui::vec2(draw_w, draw_h),
-                    );
-                    ui.painter().image(
-                        icon.id(),
-                        draw_rect,
-                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                        egui::Color32::WHITE,
-                    );
-                }
+                paint_texture_centered(ui, tex.id(), tex.size_vec2(), folder_rect);
             } else {
-                // Trigger loading and show folder icon immediately (no placeholder)
-                val_action = Some(PreviewPanelAction::LoadFolderPreview(file.path.clone()));
-
-                item_icon_loader.ensure_folder_icon(ui.ctx());
+                if !is_folder_preview_loading {
+                    // Trigger loading
+                    val_action = Some(PreviewPanelAction::LoadFolderPreview(file.path.clone()));
+                }
+                // Show folder icon while preview loads or triggers
                 if let Some(icon) = item_icon_loader.folder_icon() {
-                    let tex_size = icon.size_vec2();
-                    let aspect = tex_size.x / tex_size.y;
-                    let (draw_w, draw_h) = if aspect > folder_rect.width() / folder_rect.height() {
-                        (folder_rect.width(), folder_rect.width() / aspect)
-                    } else {
-                        (folder_rect.height() * aspect, folder_rect.height())
-                    };
-                    let offset_x = (folder_rect.width() - draw_w) / 2.0;
-                    let offset_y = (folder_rect.height() - draw_h) / 2.0;
-                    let draw_rect = egui::Rect::from_min_size(
-                        folder_rect.min + egui::vec2(offset_x, offset_y),
-                        egui::vec2(draw_w, draw_h),
-                    );
-                    ui.painter().image(
-                        icon.id(),
-                        draw_rect,
-                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                        egui::Color32::WHITE,
-                    );
+                    paint_texture_centered(ui, icon.id(), icon.size_vec2(), folder_rect);
                 }
             }
         }

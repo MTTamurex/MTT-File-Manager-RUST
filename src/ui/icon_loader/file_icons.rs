@@ -3,14 +3,6 @@ use std::path::Path;
 use super::*;
 
 impl IconLoader {
-    /// Ensures the folder icon texture is loaded.
-    /// If not already set (e.g. by pre-loading from custom compose), this is a no-op.
-    /// The folder icon is pre-set at startup from our custom composed folder graphic.
-    pub fn ensure_folder_icon(&mut self, _ctx: &egui::Context) {
-        // folder_icon_texture is pre-set at init from custom composed folder icon.
-        // Nothing to do here — the icon is always available after init.
-    }
-
     /// Sets the custom folder icon from pre-composed RGBA data.
     pub fn set_folder_icon(&mut self, ctx: &egui::Context, pixels: &[u8], width: u32, height: u32) {
         let texture = ctx.load_texture(
@@ -24,7 +16,7 @@ impl IconLoader {
         self.folder_icon_texture = Some(texture);
     }
 
-    /// Gets the folder icon texture (must call ensure_folder_icon first).
+    /// Gets the folder icon texture (pre-set at init via `set_folder_icon`).
     pub fn folder_icon(&self) -> Option<&egui::TextureHandle> {
         self.folder_icon_texture.as_ref()
     }

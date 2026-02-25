@@ -483,37 +483,7 @@ impl CacheManager {
         }
     }
 
-    /// Ensures folder icon is loaded.
-    /// No-op when the icon was pre-set at init via `set_folder_icon`.
-    pub fn ensure_folder_icon(
-        &mut self,
-        ctx: &egui::Context,
-        extract_fn: impl Fn() -> Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>>,
-    ) {
-        if self.folder_icon_texture.is_some() {
-            return;
-        }
-
-        match extract_fn() {
-            Ok((rgba_data, width, height)) => {
-                let texture = ctx.load_texture(
-                    "folder_icon",
-                    egui::ColorImage::from_rgba_unmultiplied(
-                        [width as usize, height as usize],
-                        &rgba_data,
-                    ),
-                    egui::TextureOptions::LINEAR,
-                );
-                self.folder_icon_texture = Some(texture);
-            }
-            Err(_) => {
-                // Fallback: keep emoji
-            }
-        }
-    }
-
     /// Pre-sets the folder icon from custom composed RGBA data.
-    /// Once set, `ensure_folder_icon` becomes a no-op.
     pub fn set_folder_icon(&mut self, ctx: &egui::Context, pixels: &[u8], width: u32, height: u32) {
         let texture = ctx.load_texture(
             "folder_icon_composed",

@@ -101,15 +101,7 @@ impl eframe::App for ImageViewerApp {
             }
         }
 
-        let t_icons_start = std::time::Instant::now();
-        self.ensure_folder_icon(ctx);
         self.ensure_computer_icon(ctx);
-        self.item_icon_loader.ensure_folder_icon(ctx);
-        let t_icons_end = std::time::Instant::now();
-        let icons_ms = t_icons_end.duration_since(t_icons_start).as_millis();
-        if icons_ms > 50 {
-            log::warn!("[PERF] Slow ensure_icons: {}ms", icons_ms);
-        }
 
         // Poll background icon extractions (sidebar drive/folder icons)
         self.item_icon_loader.poll_async_icons(ctx);

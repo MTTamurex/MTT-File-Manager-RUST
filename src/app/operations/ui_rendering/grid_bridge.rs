@@ -17,17 +17,6 @@ fn open_with_shell(app: &mut ImageViewerApp, path: &Path) {
     app.open_with_shell_guarded(path);
 }
 
-/// Returns true when `path` is `C:\Windows` or any descendant.
-/// Used to suppress heavy I/O (thumbnails, folder scans, previews) that the
-/// Shell already handles efficiently via extension-based icons.
-fn is_windows_system_path(path: &str) -> bool {
-    let norm = path
-        .replace('/', "\\")
-        .trim_end_matches('\\')
-        .to_ascii_lowercase();
-    norm == "c:\\windows" || norm.starts_with("c:\\windows\\")
-}
-
 /// Action types for grid view operations
 #[derive(Debug)]
 pub enum GridAction {
@@ -248,7 +237,7 @@ impl ImageViewerApp {
 
         // Check if video is playing in docked mode to reduce disk I/O
         let is_video_docked_visible = self.is_video_docked_visible();
-        let skip_folder_media_reads = is_windows_system_path(&self.navigation_state.current_path);
+        let skip_folder_media_reads = crate::infrastructure::windows::is_windows_system_path(&self.navigation_state.current_path);
 
         // Non-blocking in render loop: use cached profile only.
         // Unknown drives fall back to HDD behavior to avoid UI stalls.
