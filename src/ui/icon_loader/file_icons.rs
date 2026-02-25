@@ -4,23 +4,24 @@ use super::*;
 
 impl IconLoader {
     /// Ensures the folder icon texture is loaded.
-    pub fn ensure_folder_icon(&mut self, ctx: &egui::Context) {
-        if self.folder_icon_texture.is_some() {
-            return;
-        }
+    /// If not already set (e.g. by pre-loading from custom compose), this is a no-op.
+    /// The folder icon is pre-set at startup from our custom composed folder graphic.
+    pub fn ensure_folder_icon(&mut self, _ctx: &egui::Context) {
+        // folder_icon_texture is pre-set at init from custom composed folder icon.
+        // Nothing to do here — the icon is always available after init.
+    }
 
-        // Try to load native Windows folder icon.
-        if let Ok((pixels, width, height)) = windows::extract_folder_icon(IconSize::Jumbo) {
-            let texture = ctx.load_texture(
-                "folder_icon",
-                egui::ColorImage::from_rgba_unmultiplied(
-                    [width as usize, height as usize],
-                    &pixels,
-                ),
-                egui::TextureOptions::LINEAR,
-            );
-            self.folder_icon_texture = Some(texture);
-        }
+    /// Sets the custom folder icon from pre-composed RGBA data.
+    pub fn set_folder_icon(&mut self, ctx: &egui::Context, pixels: &[u8], width: u32, height: u32) {
+        let texture = ctx.load_texture(
+            "folder_icon_custom",
+            egui::ColorImage::from_rgba_unmultiplied(
+                [width as usize, height as usize],
+                pixels,
+            ),
+            egui::TextureOptions::LINEAR,
+        );
+        self.folder_icon_texture = Some(texture);
     }
 
     /// Gets the folder icon texture (must call ensure_folder_icon first).
@@ -72,7 +73,8 @@ impl IconLoader {
                 });
 
             if let Some(ref ext) = ext_str {
-                if matches!(ext.as_str(), "exe" | "lnk" | "ico" | "cur" | "ani" | "com") {
+                if matches!(ext.as_str(), "exe" | "lnk" | "ico" | "cur" | "ani" | "com")
+                {
                     // Check cache first - async worker may have loaded the real icon.
                     if let Some(texture) = self.icon_cache.get(&cache_key) {
                         return Some(texture.clone());
@@ -180,6 +182,16 @@ impl IconLoader {
                     return Some(texture.clone());
                 }
             }
+
+            // Extension not cached yet. For non-blocking callers (render loop),
+            // NEVER call get_file_type_icon synchronously — a single call can
+            // take 100-500ms for a cold extension (COM/registry overhead).
+            // Return None so file_slot triggers request_icon_load → async worker.
+            // The worker loads the icon and populates extension_cache; subsequent
+            // frames serve the icon instantly from cache.
+            if !allow_blocking {
+                return None;
+            }
         }
 
         let icon_result = if is_folder {
@@ -188,7 +200,11 @@ impl IconLoader {
             }
             let lookup_start = std::time::Instant::now();
             let result = windows::get_file_type_icon(true, "", size);
-            self.record_non_blocking_sync_icon_lookup(lookup_start.elapsed(), allow_blocking);
+            let elapsed = lookup_start.elapsed();
+            if elapsed.as_millis() > 5 {
+                log::warn!("[PERF-ICON] SLOW get_file_type_icon(folder) {}ms path={:?}", elapsed.as_millis(), path);
+            }
+            self.record_non_blocking_sync_icon_lookup(elapsed, allow_blocking);
             result
         } else if let Some(ext) = path.extension() {
             let ext_str = ext.to_string_lossy().to_lowercase();
@@ -197,7 +213,11 @@ impl IconLoader {
             }
             let lookup_start = std::time::Instant::now();
             let result = windows::get_file_type_icon(false, &ext_str, size);
-            self.record_non_blocking_sync_icon_lookup(lookup_start.elapsed(), allow_blocking);
+            let elapsed = lookup_start.elapsed();
+            if elapsed.as_millis() > 5 {
+                log::warn!("[PERF-ICON] SLOW get_file_type_icon(ext={}) {}ms path={:?}", ext_str, elapsed.as_millis(), path);
+            }
+            self.record_non_blocking_sync_icon_lookup(elapsed, allow_blocking);
             result
         } else {
             // No extension - try manual parsing or generic fallback.

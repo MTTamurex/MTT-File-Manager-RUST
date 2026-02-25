@@ -97,6 +97,7 @@ impl<'a> ListViewOperations for ListOps<'a> {
 impl ImageViewerApp {
     /// Render list view with extracted navigation logic
     pub fn render_list_view(&mut self, ui: &mut egui::Ui) {
+        let t_total = Instant::now();
         // Keyboard navigation (ONLY when not renaming and media is NOT focused)
         if !self.global_search.active
             && should_handle_navigation(
@@ -190,6 +191,8 @@ impl ImageViewerApp {
                 self.suppress_next_enter_open = false;
             }
         }
+
+        let t_after_nav = Instant::now();
 
         // Extract data to avoid multiple borrows
         let items = self.items.clone();
@@ -307,7 +310,11 @@ impl ImageViewerApp {
             actions: &mut actions,
         };
 
+        let t_after_prepare = Instant::now();
+
         let action = list_view::render_list_view(ui, &mut ctx, &mut ops);
+
+        let t_after_core_render = Instant::now();
 
         // Update state from context
         self.sort_mode = ctx.sort_mode;
@@ -480,6 +487,8 @@ impl ImageViewerApp {
             self.cancel_item_drag();
         }
 
+        let t_after_interactions = Instant::now();
+
         // PERFORMANCE: Collect folder scans for batching (single SQLite query + single filter_items)
         let mut folder_scan_paths: Vec<PathBuf> = Vec::new();
 
@@ -517,5 +526,22 @@ impl ImageViewerApp {
 
         // Reset scroll trigger after view has consumed it
         self.scroll_to_selected = false;
+
+        let total_ms = t_total.elapsed().as_millis();
+        if total_ms > 120 {
+            log::warn!(
+                "[PERF-CENTRAL-LIST] total={}ms nav={}ms prepare={}ms core_render={}ms interactions={}ms exec_actions={}ms items={} visible={:?} loading_icons={} pending_uploads={}",
+                total_ms,
+                t_after_nav.duration_since(t_total).as_millis(),
+                t_after_prepare.duration_since(t_after_nav).as_millis(),
+                t_after_core_render.duration_since(t_after_prepare).as_millis(),
+                t_after_interactions.duration_since(t_after_core_render).as_millis(),
+                t_total.elapsed().as_millis().saturating_sub(t_after_interactions.duration_since(t_total).as_millis()),
+                self.items.len(),
+                self.visible_index_range,
+                self.loading_icons.len(),
+                self.cache_manager.pending_upload_set.len(),
+            );
+        }
     }
 }

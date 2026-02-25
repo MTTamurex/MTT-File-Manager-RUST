@@ -213,6 +213,7 @@ fn render_item_slot_for_grid(
             failed_icons: ctx.failed_icons,
             folder_preview_cache: ctx.folder_preview_cache,
             folder_preview_loading: ctx.folder_preview_loading,
+            skip_folder_media_reads: ctx.skip_folder_media_reads,
             failed_thumbnails: ctx.failed_thumbnails,
             pending_upload_set: ctx.pending_upload_set,
             is_dense_mode: false,

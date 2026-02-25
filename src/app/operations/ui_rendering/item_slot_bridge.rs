@@ -39,6 +39,14 @@ impl ImageViewerApp {
         // Create context with mutable reference to the clone
         {
             let renaming_text = renaming_text_clone.as_mut();
+            let norm = self
+                .navigation_state
+                .current_path
+                .replace('/', "\\")
+                .trim_end_matches('\\')
+                .to_ascii_lowercase();
+            let skip_folder_media_reads =
+                norm == "c:\\windows" || norm.starts_with("c:\\windows\\");
 
             let mut ctx = ItemSlotContext {
                 item,
@@ -56,6 +64,7 @@ impl ImageViewerApp {
                 failed_icons: &self.failed_icons,
                 folder_preview_cache: &mut self.cache_manager.folder_preview_cache,
                 folder_preview_loading: &mut self.cache_manager.folder_preview_loading,
+                skip_folder_media_reads,
                 failed_thumbnails: &self.cache_manager.failed_thumbnails,
                 pending_upload_set: &mut self.cache_manager.pending_upload_set,
                 is_dense_mode: false,

@@ -49,7 +49,17 @@ fn get_perceived_type_fast(ext: &str) -> Option<PerceivedType> {
 
     match bytes.len() {
         2 => {
-            None
+            let b = [
+                bytes[0].to_ascii_lowercase(),
+                bytes[1].to_ascii_lowercase(),
+            ];
+            match &b {
+                // Common non-media: avoid API call entirely
+                b"db" | b"js" | b"py" | b"cs" | b"rs" | b"md" | b"7z" | b"gz" => {
+                    Some(PerceivedType::Other)
+                }
+                _ => None,
+            }
         }
         3 => {
             let b = [
@@ -68,6 +78,16 @@ fn get_perceived_type_fast(ext: &str) -> Option<PerceivedType> {
                 // Audio
                 b"mp3" | b"wav" | b"ogg" | b"wma" | b"aac" | b"m4a" | b"ape" | b"mid" => {
                     Some(PerceivedType::Audio)
+                }
+                // Common non-media: avoid API call entirely
+                b"exe" | b"dll" | b"sys" | b"ini" | b"cfg" | b"log" | b"txt" | b"xml"
+                | b"dat" | b"nls" | b"bin" | b"cat" | b"msi" | b"cab" | b"tmp" | b"bat"
+                | b"cmd" | b"reg" | b"inf" | b"ttf" | b"otf" | b"zip" | b"rar" | b"lnk"
+                | b"url" | b"htm" | b"css" | b"pdf" | b"doc" | b"xls" | b"ppt" | b"rtf"
+                | b"msc" | b"cpl" | b"scr" | b"com" | b"drv" | b"ocx" | b"mui" | b"man"
+                | b"mof" | b"mum" | b"prx" | b"nfo" | b"ion" | b"rll" | b"tlb" | b"mfl"
+                | b"sdb" | b"cur" | b"ani" => {
+                    Some(PerceivedType::Other)
                 }
                 _ => None,
             }
@@ -88,6 +108,11 @@ fn get_perceived_type_fast(ext: &str) -> Option<PerceivedType> {
                 b"webm" | b"mpeg" | b"m2ts" | b"divx" | b"rmvb" => Some(PerceivedType::Video),
                 // Audio
                 b"flac" | b"alac" | b"opus" | b"aiff" | b"weba" => Some(PerceivedType::Audio),
+                // Common non-media: avoid API call entirely
+                b"docx" | b"xlsx" | b"pptx" | b"json" | b"yaml" | b"toml" | b"html"
+                | b"lock" | b"conf" | b"java" | b"xaml" => {
+                    Some(PerceivedType::Other)
+                }
                 _ => None,
             }
         }
@@ -206,8 +231,10 @@ pub fn get_perceived_type(extension: &str) -> PerceivedType {
         }
     }
 
-    // Only cache successful results (not Other)
-    if perceived != PerceivedType::Other {
+    // Cache ALL results (including Other) to avoid repeated Windows API calls.
+    // Previously, Other was not cached, causing AssocGetPerceivedType to be called
+    // for every non-media file on every frame (2-20ms per call).
+    {
         let mut cache_guard = cache.lock().unwrap_or_else(|e| e.into_inner());
         cache_guard.insert(ext_with_dot, perceived);
     }

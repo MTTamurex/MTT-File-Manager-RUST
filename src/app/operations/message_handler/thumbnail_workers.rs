@@ -1,5 +1,6 @@
 use crate::app::state::ImageViewerApp;
 use eframe::egui;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 impl ImageViewerApp {
@@ -110,18 +111,61 @@ impl ImageViewerApp {
     }
 
     pub(super) fn process_icon_worker_results(&mut self, ctx: &egui::Context) {
-        let max_icon_uploads = if self.is_video_playing_docked() { 8 } else { 32 };
-        let max_icon_messages = if self.is_video_playing_docked() { 48 } else { 128 };
+        // Phase 1: Drain ALL pre-warm results eagerly (no budget limit).
+        // Pre-warm results use usize::MAX generation and fake paths.
+        // We only need to populate extension_cache, skip icon_cache.
+        loop {
+            match self.icon_res_receiver.try_recv() {
+                Ok((path, icon_generation, pixels, width, height)) => {
+                    if icon_generation == usize::MAX {
+                        // Pre-warm result: populate extension_cache only.
+                        if !pixels.is_empty() && width > 0 && height > 0 {
+                            if let Some(ext) = path.extension() {
+                                let ext_str = ext.to_string_lossy().to_lowercase();
+                                let ext_key = format!("{}_Large", ext_str);
+                                if !self.item_icon_loader.extension_cache.contains_key(&ext_key) {
+                                    let texture = ctx.load_texture(
+                                        ext_key.clone(),
+                                        egui::ColorImage::from_rgba_unmultiplied(
+                                            [width as usize, height as usize],
+                                            &pixels,
+                                        ),
+                                        egui::TextureOptions::LINEAR,
+                                    );
+                                    self.item_icon_loader.extension_cache.insert(ext_key, texture);
+                                }
+                            }
+                            // Remove extension from loading set.
+                            if let Some(ext) = path.extension() {
+                                self.loading_extensions.remove(
+                                    &ext.to_string_lossy().to_lowercase(),
+                                );
+                            }
+                        }
+                        continue; // Keep draining pre-warm results.
+                    }
+                    // Non-pre-warm result found — push back for Phase 2.
+                    // We can't push back into mpsc, so process it inline.
+                    self.process_single_icon_result(ctx, path, icon_generation, pixels, width, height);
+                    break; // Switch to budgeted Phase 2.
+                }
+                Err(_) => break, // Channel empty.
+            }
+        }
+
+        // Phase 2: Process regular icon results with frame budget.
+        let max_icon_uploads = if self.is_video_playing_docked() { 8 } else { 64 };
+        let max_icon_messages = if self.is_video_playing_docked() { 48 } else { 256 };
         let icon_budget = if self.frame_time_peak_ms > 33.33 {
-            Duration::from_millis(2)
-        } else if self.frame_time_peak_ms > 25.0 {
             Duration::from_millis(3)
+        } else if self.frame_time_peak_ms > 25.0 {
+            Duration::from_millis(4)
         } else {
-            Duration::from_millis(5)
+            Duration::from_millis(6)
         };
         let start = Instant::now();
-        let mut icon_uploads = 0;
-        let mut processed_messages = 0usize;
+        let mut icon_uploads = 1; // Count the one already processed above.
+        let mut processed_messages = 1usize;
         let mut has_more = false;
 
         while processed_messages < max_icon_messages && icon_uploads < max_icon_uploads {
@@ -133,32 +177,33 @@ impl ImageViewerApp {
                 self.icon_res_receiver.try_recv()
             {
                 processed_messages += 1;
-                // Ignore stale icon results from previous folder generations.
-                if icon_generation != self.generation {
-                    continue;
+                // Pre-warm that arrived during Phase 2 — handle eagerly.
+                if icon_generation == usize::MAX {
+                    if !pixels.is_empty() && width > 0 && height > 0 {
+                        if let Some(ext) = path.extension() {
+                            let ext_str = ext.to_string_lossy().to_lowercase();
+                            let ext_key = format!("{}_Large", ext_str);
+                            if !self.item_icon_loader.extension_cache.contains_key(&ext_key) {
+                                let texture = ctx.load_texture(
+                                    ext_key.clone(),
+                                    egui::ColorImage::from_rgba_unmultiplied(
+                                        [width as usize, height as usize],
+                                        &pixels,
+                                    ),
+                                    egui::TextureOptions::LINEAR,
+                                );
+                                self.item_icon_loader.extension_cache.insert(ext_key, texture);
+                            }
+                        }
+                        if let Some(ext) = path.extension() {
+                            self.loading_extensions.remove(
+                                &ext.to_string_lossy().to_lowercase(),
+                            );
+                        }
+                    }
+                    continue; // Don't count against budget.
                 }
-
-                self.loading_icons.remove(&path);
-
-                if pixels.is_empty() || width == 0 || height == 0 {
-                    self.failed_icons.put(path, ());
-                    icon_uploads += 1;
-                    continue;
-                }
-
-                let cache_key = format!("{}_Large", path.to_string_lossy());
-                if !self.item_icon_loader.icon_cache.contains(&cache_key) {
-                    let texture = ctx.load_texture(
-                        cache_key.clone(),
-                        egui::ColorImage::from_rgba_unmultiplied(
-                            [width as usize, height as usize],
-                            &pixels,
-                        ),
-                        egui::TextureOptions::LINEAR,
-                    );
-                    self.item_icon_loader.icon_cache.put(cache_key, texture);
-                }
-
+                self.process_single_icon_result(ctx, path, icon_generation, pixels, width, height);
                 icon_uploads += 1;
             } else {
                 break;
@@ -171,6 +216,61 @@ impl ImageViewerApp {
 
         if has_more {
             ctx.request_repaint();
+        }
+    }
+
+    /// Process a single regular (non-pre-warm) icon result.
+    fn process_single_icon_result(
+        &mut self,
+        ctx: &egui::Context,
+        path: PathBuf,
+        icon_generation: usize,
+        pixels: Vec<u8>,
+        width: u32,
+        height: u32,
+    ) {
+        // Ignore stale icon results from previous folder generations.
+        if icon_generation != self.generation {
+            return;
+        }
+
+        self.loading_icons.remove(&path);
+        // Remove extension from loading set.
+        if let Some(ext) = path.extension() {
+            self.loading_extensions.remove(
+                &ext.to_string_lossy().to_lowercase(),
+            );
+        }
+
+        if pixels.is_empty() || width == 0 || height == 0 {
+            self.failed_icons.put(path, ());
+            return;
+        }
+
+        let cache_key = format!("{}_Large", path.to_string_lossy());
+        if !self.item_icon_loader.icon_cache.contains(&cache_key) {
+            let texture = ctx.load_texture(
+                cache_key.clone(),
+                egui::ColorImage::from_rgba_unmultiplied(
+                    [width as usize, height as usize],
+                    &pixels,
+                ),
+                egui::TextureOptions::LINEAR,
+            );
+
+            // Populate extension cache for instant icon sharing.
+            if let Some(ext) = path.extension() {
+                let ext_str = ext.to_string_lossy().to_lowercase();
+                if !matches!(ext_str.as_str(), "exe" | "lnk" | "ico" | "cur" | "ani" | "com") {
+                    let ext_key = format!("{}_Large", ext_str);
+                    self.item_icon_loader
+                        .extension_cache
+                        .entry(ext_key)
+                        .or_insert_with(|| texture.clone());
+                }
+            }
+
+            self.item_icon_loader.icon_cache.put(cache_key, texture);
         }
     }
 

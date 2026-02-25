@@ -38,7 +38,7 @@ pub struct IconLoader {
     /// Remember failed drive/shell icon attempts to avoid retrying every frame
     failed_drive_icons: HashSet<String>,
     /// Cache for extension-based icons (extension -> texture)
-    extension_cache: HashMap<String, egui::TextureHandle>,
+    pub extension_cache: HashMap<String, egui::TextureHandle>,
     /// Keys currently being loaded in background threads (prevents duplicate requests)
     loading_drive_icons: HashSet<String>,
     /// Channel to receive completed icon extractions from background threads
@@ -80,12 +80,13 @@ impl IconLoader {
         }
     }
 
-    /// Clears all icon caches.
+    /// Clears all icon caches (preserves folder_icon_texture since it's a static composed graphic).
     pub fn clear(&mut self) {
         self.icon_cache.clear();
         self.drive_icon_cache.clear();
         self.failed_drive_icons.clear();
-        self.folder_icon_texture = None;
+        // NOTE: folder_icon_texture is NOT cleared — it's a static custom composed
+        // graphic set once at startup (back+front+paper_sheet layers).
         self.computer_icon_texture = None;
         self.sync_icon_budget_window_start = Instant::now();
         self.sync_icon_budget_elapsed = Duration::ZERO;
@@ -115,7 +116,7 @@ impl IconLoader {
         }
 
         const WINDOW: Duration = Duration::from_millis(16);
-        const MAX_CALLS_PER_WINDOW: usize = 2;
+        const MAX_CALLS_PER_WINDOW: usize = 6;
         const MAX_TIME_PER_WINDOW: Duration = Duration::from_millis(4);
 
         if self.sync_icon_budget_window_start.elapsed() >= WINDOW {

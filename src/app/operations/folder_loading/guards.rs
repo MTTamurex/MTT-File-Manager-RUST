@@ -73,6 +73,7 @@ impl ImageViewerApp {
         self.cache_manager.pending_upload_set.clear(); // Clear thumbnails awaiting GPU upload
         self.pending_thumbnails.clear(); // Clear pending thumbnails buffer
         self.loading_icons.clear(); // Clear icon loading requests
+        self.loading_extensions.clear(); // Clear extension dedup tracking
         self.failed_icons.clear(); // Retry icon extraction in the new folder generation
         self.scanned_folders.clear();
         self.selected_item = None;

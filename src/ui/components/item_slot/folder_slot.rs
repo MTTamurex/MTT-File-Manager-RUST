@@ -9,7 +9,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
     ops: &mut O,
 ) {
     let item = ctx.item;
-    if !ctx.is_recycle_bin_view {
+    if !ctx.is_recycle_bin_view && !ctx.skip_folder_media_reads {
         // --- LAZY LOAD TRIGGER ---
         // If no cover AND not yet scanned: Trigger Scan.
         if item.folder_cover.is_none() && ctx.scanned_folders.peek(&item.path).is_none() {
@@ -48,7 +48,9 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
 
     // All normal folders use our custom composed preview (with or without media content).
     // We never prematurely clear loading state — the worker always returns a result.
-    let native_preview = if ctx.is_recycle_bin_view {
+    // For system folders (C:\Windows tree) and Recycle Bin, skip the preview cache
+    // to avoid size jumps when the preview panel triggers an async compose.
+    let native_preview = if ctx.is_recycle_bin_view || ctx.skip_folder_media_reads {
         None
     } else {
         ctx.folder_preview_cache.get(&item.path)
@@ -94,35 +96,71 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
             // Use System Folder Icon for these virtual folders
             ctx.icon_loader.ensure_folder_icon(ui.ctx());
             if let Some(sys_icon) = ctx.icon_loader.folder_icon() {
-                let icon_size = folder_w.min(folder_h);
-                let icon_rect = egui::Rect::from_center_size(
-                    folder_rect.center(),
-                    egui::vec2(icon_size, icon_size),
+                let tex_size = sys_icon.size_vec2();
+                let aspect = tex_size.x / tex_size.y;
+                let (draw_w, draw_h) = if aspect > folder_rect.width() / folder_rect.height() {
+                    (folder_rect.width(), folder_rect.width() / aspect)
+                } else {
+                    (folder_rect.height() * aspect, folder_rect.height())
+                };
+                let offset_x = (folder_rect.width() - draw_w) / 2.0;
+                let offset_y = (folder_rect.height() - draw_h) / 2.0;
+                let draw_rect = egui::Rect::from_min_size(
+                    folder_rect.min + egui::vec2(offset_x, offset_y),
+                    egui::vec2(draw_w, draw_h),
                 );
-
-                ui.put(
-                    icon_rect,
-                    egui::Image::new(sys_icon)
-                        .fit_to_original_size(1.0)
-                        .max_size(egui::vec2(icon_size, icon_size)),
+                ui.painter().image(
+                    sys_icon.id(),
+                    draw_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
                 );
             } else if let Some(icon) =
                 ctx.icon_loader
                     .get_or_load_icon(ui.ctx(), &item.path, true, true)
             {
-                // Fallback to item-specific icon (allow_blocking=true for folders usually safe, or use false if needed)
+                // Fallback to item-specific icon (allow_blocking=true for folders usually safe)
                 let icon_size = folder_w.min(folder_h);
                 let icon_rect = egui::Rect::from_center_size(
                     folder_rect.center(),
                     egui::vec2(icon_size, icon_size),
                 );
-
-                ui.put(
+                ui.painter().image(
+                    icon.id(),
                     icon_rect,
-                    egui::Image::new(&icon).max_size(egui::vec2(icon_size, icon_size)),
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
                 );
             } else {
                 // Final Fallback for virtual paths: styled empty area
+                ui.painter()
+                    .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
+            }
+        } else if ctx.skip_folder_media_reads {
+            // SYSTEM FOLDER (C:\Windows tree): Use system folder icon directly.
+            // No preview composition, no spinner, no async requests.
+            ctx.icon_loader.ensure_folder_icon(ui.ctx());
+            if let Some(sys_icon) = ctx.icon_loader.folder_icon() {
+                let tex_size = sys_icon.size_vec2();
+                let aspect = tex_size.x / tex_size.y;
+                let (draw_w, draw_h) = if aspect > folder_rect.width() / folder_rect.height() {
+                    (folder_rect.width(), folder_rect.width() / aspect)
+                } else {
+                    (folder_rect.height() * aspect, folder_rect.height())
+                };
+                let offset_x = (folder_rect.width() - draw_w) / 2.0;
+                let offset_y = (folder_rect.height() - draw_h) / 2.0;
+                let draw_rect = egui::Rect::from_min_size(
+                    folder_rect.min + egui::vec2(offset_x, offset_y),
+                    egui::vec2(draw_w, draw_h),
+                );
+                ui.painter().image(
+                    sys_icon.id(),
+                    draw_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            } else {
                 ui.painter()
                     .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
             }
