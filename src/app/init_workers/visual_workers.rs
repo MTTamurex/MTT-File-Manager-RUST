@@ -161,16 +161,19 @@ pub(in crate::app) fn spawn_icon_worker(
             .name(format!("icon-worker-{}", worker_id))
             .spawn(move || {
                 use crate::domain::file_entry::IconSize;
-                use crate::infrastructure::windows::{extract_file_icon_by_path, extract_file_icon};
+                use crate::infrastructure::windows::{extract_file_icon_by_path, get_file_type_icon};
                 use windows::Win32::System::Com::{
-                    CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED,
+                    CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED,
                 };
 
                 // Extensions that may have unique per-file icons (embedded resources).
                 const UNIQUE_ICON_EXTS: &[&str] = &["exe", "lnk", "ico", "cur", "ani", "com", "scr", "url"];
 
+                // STA (COINIT_APARTMENTTHREADED) is required for SHGetFileInfoW to
+                // correctly resolve ProgID-based icons (e.g. dllfile, sysfile, batfile).
+                // Using MTA causes generic icons for those types.
                 unsafe {
-                    let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+                    let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
                 }
 
                 crate::infrastructure::io_priority::set_thread_priority(
@@ -224,7 +227,11 @@ pub(in crate::app) fn spawn_icon_worker(
                         {
                             Ok(cached)
                         } else {
-                            let r = extract_file_icon(&dot_ext, IconSize::Large);
+                            // Use get_file_type_icon (with internal CoInitialize)
+                            // instead of extract_file_icon — the latter produces
+                            // generic icons for ProgID-based types (dll, sys, bat)
+                            // on worker threads.
+                            let r = get_file_type_icon(false, ext_str, IconSize::Large);
                             if let Ok(ref data) = r {
                                 if let Ok(mut cache) = ext_cache.lock() {
                                     cache.insert(dot_ext, data.clone());
