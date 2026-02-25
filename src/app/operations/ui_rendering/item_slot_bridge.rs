@@ -39,14 +39,8 @@ impl ImageViewerApp {
         // Create context with mutable reference to the clone
         {
             let renaming_text = renaming_text_clone.as_mut();
-            let norm = self
-                .navigation_state
-                .current_path
-                .replace('/', "\\")
-                .trim_end_matches('\\')
-                .to_ascii_lowercase();
             let skip_folder_media_reads =
-                norm == "c:\\windows" || norm.starts_with("c:\\windows\\");
+                crate::infrastructure::windows::is_windows_system_path(&self.navigation_state.current_path);
 
             let mut ctx = ItemSlotContext {
                 item,

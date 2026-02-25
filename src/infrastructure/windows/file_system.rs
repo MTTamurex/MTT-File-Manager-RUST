@@ -28,3 +28,14 @@ pub fn is_file(path: &Path) -> bool {
     let attrs = get_file_attributes(path);
     attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY.0) == 0
 }
+
+/// Returns `true` when `path` is `C:\Windows` or any descendant.
+/// Used to suppress heavy I/O (thumbnails, folder scans, previews) that the
+/// Shell already handles efficiently via extension-based icons.
+pub fn is_windows_system_path(path: &str) -> bool {
+    let norm = path
+        .replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_ascii_lowercase();
+    norm == "c:\\windows" || norm.starts_with("c:\\windows\\")
+}
