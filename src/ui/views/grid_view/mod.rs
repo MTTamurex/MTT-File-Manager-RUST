@@ -148,6 +148,7 @@ pub struct GridViewContext<'a> {
     pub item_icon_loader: &'a mut crate::ui::icon_loader::IconLoader,
     pub folder_preview_cache: &'a mut lru::LruCache<PathBuf, egui::TextureHandle>,
     pub folder_preview_loading: &'a mut FxHashSet<PathBuf>,
+    pub skip_folder_media_reads: bool,
     /// PERFORMANCE: Shared buffer for pending operations (reused across items)
     pub pending_ops: &'a mut PendingOperations,
     /// Paths that failed thumbnail generation (LRU bounded)
@@ -224,6 +225,7 @@ pub fn render_grid_view(
     ctx: &mut GridViewContext,
     ops: &mut dyn GridViewOperations,
 ) -> Option<GridViewAction> {
+    let t_total = std::time::Instant::now();
     // ENFORCE MINIMUM ZOOM (Hard Floor)
     // Prevents any calculation or render with size smaller than 96px
     ctx.thumbnail_size = ctx.thumbnail_size.max(MIN_THUMBNAIL_SIZE);
@@ -270,6 +272,7 @@ pub fn render_grid_view(
     scroll::apply_scroll_input(ui, ctx.mut_scroll_offset_y, max_scroll, consume_scroll);
     let (current_scroll, scroll_delta) =
         scroll::compute_visual_scroll(ui, *ctx.mut_scroll_offset_y, viewport_h);
+    let t_after_scroll = std::time::Instant::now();
 
     // PERFORMANCE: Track scroll changes
     if (*ctx.mut_scroll_offset_y - *ctx.last_scroll_offset).abs() > 0.1 {
@@ -323,6 +326,7 @@ pub fn render_grid_view(
         &mut double_clicked_item,
         &mut secondary_clicked_item,
     );
+    let t_after_virtualized = std::time::Instant::now();
 
     scroll::render_custom_scrollbar(
         ui,
@@ -333,10 +337,30 @@ pub fn render_grid_view(
         max_scroll,
         ctx.mut_scroll_offset_y,
     );
+    let t_after_scrollbar = std::time::Instant::now();
     // --- MANUAL VIRTUALIZATION END ---
 
     prefetch::flush_pending_operations(ctx, ops);
+    let t_after_flush = std::time::Instant::now();
     prefetch::process_visible_range_prefetch(ctx, cols, visible_rows_range, ops);
+    let t_after_prefetch = std::time::Instant::now();
+
+    let total_ms = t_total.elapsed().as_millis();
+    if total_ms > 120 {
+        log::warn!(
+            "[PERF-GRID-CORE] total={}ms scroll={}ms virtualized={}ms scrollbar={}ms flush_ops={}ms prefetch={}ms rows={} cols={} items={} visible_rows={:?}",
+            total_ms,
+            t_after_scroll.duration_since(t_total).as_millis(),
+            t_after_virtualized.duration_since(t_after_scroll).as_millis(),
+            t_after_scrollbar.duration_since(t_after_virtualized).as_millis(),
+            t_after_flush.duration_since(t_after_scrollbar).as_millis(),
+            t_after_prefetch.duration_since(t_after_flush).as_millis(),
+            total_rows,
+            cols,
+            count,
+            visible_rows_range,
+        );
+    }
 
     interactions::resolve_grid_action(
         clicked_item,

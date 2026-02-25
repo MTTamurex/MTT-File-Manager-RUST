@@ -4,10 +4,12 @@ use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::directory_index::DirectoryIndex;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::folder_compose::FolderComposer;
+use crate::infrastructure::icon_disk_cache::IconDiskCache;
 use crate::infrastructure::onedrive;
 use crate::infrastructure::windows as windows_infra;
 use crate::workers::thumbnail::{spawn_thumbnail_workers, PriorityThumbnailQueue};
 use eframe::egui;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{mpsc, Arc};
@@ -81,6 +83,14 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) drive_scan_rx: mpsc::Receiver<Vec<(String, String)>>,
     pub(in crate::app) drive_info_tx: mpsc::Sender<Vec<(String, DriveInfo)>>,
     pub(in crate::app) drive_info_rx: mpsc::Receiver<Vec<(String, DriveInfo)>>,
+
+    /// Pre-loaded extension icon pixel data from disk cache.
+    /// Key = extension (e.g. "dll"), Value = (rgba_pixels, width, height).
+    pub(in crate::app) preloaded_extension_icons: HashMap<String, (Vec<u8>, u32, u32)>,
+
+    /// Custom composed empty folder icon (back+front+paper_sheet).
+    /// Used as the default folder icon instead of the Windows yellow folder.
+    pub(in crate::app) custom_folder_icon: (Vec<u8>, u32, u32),
 }
 
 pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
@@ -135,9 +145,59 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         pending_deletions.clone(),
     );
 
-    let (icon_req_tx, icon_res_rx) = spawn_icon_worker(ctx, shared_gen.clone());
+    // --- Icon disk cache: persist extension icons across app launches ---
+    let app_data_dir = cache_dir
+        .parent()
+        .unwrap_or(&cache_dir)
+        .to_path_buf();
+    let icon_disk_cache = Arc::new(IconDiskCache::new(&app_data_dir));
+    let preloaded_extension_icons = icon_disk_cache.load_all();
+
+    let (icon_req_tx, icon_res_rx) =
+        spawn_icon_worker(ctx, shared_gen.clone(), icon_disk_cache, &preloaded_extension_icons);
+
+    // Pre-warm: only send requests for extensions NOT already in disk cache.
+    // Disk-cached extensions are loaded instantly in ImageViewerApp::new().
+    {
+        const PREWARM: &[&str] = &[
+            // C:\Windows visible extensions (highest priority — first in queue)
+            "dll", "sys", "log", "txt", "ini", "xml", "bat", "bin",
+            "exe", "cmd", "dat", "prx", "cat", "mun", "nls", "inf",
+            // Common document/code extensions
+            "pdf", "json", "html", "css", "js", "md", "csv", "rtf",
+            "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+            // Archives
+            "zip", "rar", "7z", "tar", "gz",
+            // Images
+            "jpg", "png", "gif", "bmp", "svg", "ico", "webp",
+            // Media
+            "mp3", "mp4", "mkv", "avi", "wav", "flac",
+            // Code
+            "py", "rs", "cpp", "c", "h", "java", "cs", "go", "ts",
+            "toml", "yaml", "cfg", "reg", "msi", "cab", "tmp",
+        ];
+        let mut prewarm_skipped = 0usize;
+        for ext in PREWARM {
+            if preloaded_extension_icons.contains_key(*ext) {
+                prewarm_skipped += 1;
+                continue; // Already in disk cache — will be loaded instantly.
+            }
+            let fake = PathBuf::from(format!("__prewarm__\\file.{}", ext));
+            let _ = icon_req_tx.send((fake, usize::MAX));
+        }
+        if prewarm_skipped > 0 {
+            log::info!(
+                "[IconPrewarm] Skipped {} extensions (disk-cached), sending {} to workers",
+                prewarm_skipped,
+                PREWARM.len() - prewarm_skipped,
+            );
+        }
+    }
+
     let (meta_req_tx, meta_res_rx) = spawn_metadata_worker(ctx);
     let folder_composer = Arc::new(FolderComposer::new());
+    // Compose the custom empty folder icon ONCE before sharing the composer.
+    let custom_folder_icon = folder_composer.compose_empty();
     let (folder_preview_tx, folder_preview_res_rx) =
         spawn_folder_preview_workers(ctx, disk_cache.clone(), folder_composer);
     let (folder_size_req_tx, folder_size_res_rx, folder_size_cancel) =
@@ -205,5 +265,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         drive_scan_rx,
         drive_info_tx,
         drive_info_rx,
+        preloaded_extension_icons,
+        custom_folder_icon,
     }
 }

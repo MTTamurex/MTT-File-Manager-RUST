@@ -127,11 +127,23 @@ pub fn is_archive_extension(name: &str) -> bool {
 /// Checks if a path (already in lowercase) passes through an archive file.
 /// E.g.: "C:\archive.7z\subdir\file.txt" → true
 pub fn path_contains_archive_segment(path_lower: &str) -> bool {
-    ARCHIVE_EXTENSIONS.iter().any(|ext| {
-        let with_backslash = format!("{}\\", ext);
-        let with_fwdslash = format!("{}/", ext);
-        path_lower.contains(&with_backslash) || path_lower.contains(&with_fwdslash)
-    })
+    // PERFORMANCE: Check if path contains an archive extension followed by a separator.
+    // Zero-allocation version — avoids 28 format!() calls per icon lookup.
+    for ext in ARCHIVE_EXTENSIONS {
+        // Look for "{ext}\" or "{ext}/" in the path
+        let mut start = 0;
+        while let Some(pos) = path_lower[start..].find(ext) {
+            let abs_pos = start + pos + ext.len();
+            if abs_pos < path_lower.len() {
+                let next_byte = path_lower.as_bytes()[abs_pos];
+                if next_byte == b'\\' || next_byte == b'/' {
+                    return true;
+                }
+            }
+            start = start + pos + 1;
+        }
+    }
+    false
 }
 
 /// Returns the type label for displaying an archive file.

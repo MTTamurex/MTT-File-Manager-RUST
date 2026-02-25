@@ -17,6 +17,17 @@ fn open_with_shell(app: &mut ImageViewerApp, path: &Path) {
     app.open_with_shell_guarded(path);
 }
 
+/// Returns true when `path` is `C:\Windows` or any descendant.
+/// Used to suppress heavy I/O (thumbnails, folder scans, previews) that the
+/// Shell already handles efficiently via extension-based icons.
+fn is_windows_system_path(path: &str) -> bool {
+    let norm = path
+        .replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_ascii_lowercase();
+    norm == "c:\\windows" || norm.starts_with("c:\\windows\\")
+}
+
 /// Action types for grid view operations
 #[derive(Debug)]
 pub enum GridAction {
@@ -113,6 +124,7 @@ impl<'a> GridViewOperations for GridOps<'a> {
 impl ImageViewerApp {
     /// Render grid view with extracted navigation logic
     pub fn render_grid_view(&mut self, ui: &mut egui::Ui) {
+        let t_total = Instant::now();
         // Calculate cols for keyboard navigation
         let padding = 8.0;
         let item_w = self.thumbnail_size;
@@ -214,6 +226,8 @@ impl ImageViewerApp {
             }
         }
 
+        let t_after_nav = Instant::now();
+
         // Extract data to avoid multiple borrows
         let items = self.items.clone();
         let selected_item = self.selected_item;
@@ -234,6 +248,7 @@ impl ImageViewerApp {
 
         // Check if video is playing in docked mode to reduce disk I/O
         let is_video_docked_visible = self.is_video_docked_visible();
+        let skip_folder_media_reads = is_windows_system_path(&self.navigation_state.current_path);
 
         // Non-blocking in render loop: use cached profile only.
         // Unknown drives fall back to HDD behavior to avoid UI stalls.
@@ -266,6 +281,7 @@ impl ImageViewerApp {
             item_icon_loader: &mut self.item_icon_loader,
             folder_preview_cache: &mut self.cache_manager.folder_preview_cache,
             folder_preview_loading: &mut self.cache_manager.folder_preview_loading,
+            skip_folder_media_reads,
             pending_ops: &mut self.pending_ops,
             failed_thumbnails: &self.cache_manager.failed_thumbnails,
             scroll_offset_y: self.scroll_offset_y,
@@ -294,7 +310,11 @@ impl ImageViewerApp {
             actions: &mut actions,
         };
 
+        let t_after_prepare = Instant::now();
+
         let action = grid_view::render_grid_view(ui, &mut ctx, &mut ops);
+
+        let t_after_core_render = Instant::now();
 
         // Update state from context
         self.last_grid_cols = ctx.last_grid_cols;
@@ -448,6 +468,8 @@ impl ImageViewerApp {
             self.cancel_item_drag();
         }
 
+        let t_after_interactions = Instant::now();
+
         // PERFORMANCE: Collect folder scans for batching (single SQLite query + single filter_items)
         let mut folder_scan_paths: Vec<PathBuf> = Vec::new();
 
@@ -491,5 +513,22 @@ impl ImageViewerApp {
 
         // Reset scroll trigger after view has consumed it
         self.scroll_to_selected = false;
+
+        let total_ms = t_total.elapsed().as_millis();
+        if total_ms > 120 {
+            log::warn!(
+                "[PERF-CENTRAL-GRID] total={}ms nav={}ms prepare={}ms core_render={}ms interactions={}ms exec_actions={}ms items={} visible={:?} loading_icons={} pending_uploads={}",
+                total_ms,
+                t_after_nav.duration_since(t_total).as_millis(),
+                t_after_prepare.duration_since(t_after_nav).as_millis(),
+                t_after_core_render.duration_since(t_after_prepare).as_millis(),
+                t_after_interactions.duration_since(t_after_core_render).as_millis(),
+                t_total.elapsed().as_millis().saturating_sub(t_after_interactions.duration_since(t_total).as_millis()),
+                self.items.len(),
+                self.visible_index_range,
+                self.loading_icons.len(),
+                self.cache_manager.pending_upload_set.len(),
+            );
+        }
     }
 }

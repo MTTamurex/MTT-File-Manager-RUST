@@ -23,6 +23,7 @@ pub(super) fn render_virtualized_grid(
     double_clicked_item: &mut Option<usize>,
     secondary_clicked_item: &mut Option<usize>,
 ) -> Option<(usize, usize)> {
+    let t_total = std::time::Instant::now();
     let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(viewport_rect));
     child_ui.set_clip_rect(viewport_rect);
     let content_min = viewport_rect.min;
@@ -32,6 +33,7 @@ pub(super) fn render_virtualized_grid(
     let visible_rows_range = Some((vis_min_row, vis_max_row));
 
     cleanup_loading_set(ctx, vis_min_row, vis_max_row, total_rows, cols, count);
+    let t_after_cleanup = std::time::Instant::now();
 
     let overscan = if ctx.frame_time_peak_ms > 80.0 {
         // Recovering from inactivity wake — minimize off-screen work
@@ -86,6 +88,26 @@ pub(super) fn render_virtualized_grid(
             clicked_item,
             double_clicked_item,
             secondary_clicked_item,
+        );
+    }
+
+    let t_after_render = std::time::Instant::now();
+
+    let total_ms = t_total.elapsed().as_millis();
+    if total_ms > 120 {
+        log::warn!(
+            "[PERF-GRID-VIRTUAL] total={}ms cleanup={}ms render={}ms computer_view={} rows_loop={}..{} vis_rows={:?} items={} cols={} overscan={} scrolling={}",
+            total_ms,
+            t_after_cleanup.duration_since(t_total).as_millis(),
+            t_after_render.duration_since(t_after_cleanup).as_millis(),
+            ctx.is_computer_view,
+            loop_min_row,
+            loop_max_row,
+            visible_rows_range,
+            count,
+            cols,
+            overscan,
+            is_scrolling,
         );
     }
 
@@ -276,6 +298,9 @@ fn render_standard_grid(
     double_clicked_item: &mut Option<usize>,
     secondary_clicked_item: &mut Option<usize>,
 ) {
+    let t_start = std::time::Instant::now();
+    let mut rendered_items = 0usize;
+    let mut slow_items: Vec<(usize, &str, bool, u128)> = Vec::new();
     for row in loop_min_row..loop_max_row {
         for col in 0..cols {
             let index = row * cols + col;
@@ -291,6 +316,7 @@ fn render_standard_grid(
                 egui::vec2(item_w, item_h),
             );
 
+            let t_item = std::time::Instant::now();
             item_renderer::render_grid_item(
                 ui,
                 index,
@@ -301,6 +327,31 @@ fn render_standard_grid(
                 double_clicked_item,
                 secondary_clicked_item,
                 is_scrolling,
+            );
+            let item_ms = t_item.elapsed().as_millis();
+            if item_ms > 5 {
+                slow_items.push((index, &ctx.items[index].name, ctx.items[index].is_dir, item_ms));
+            }
+            rendered_items += 1;
+        }
+    }
+
+    let elapsed_ms = t_start.elapsed().as_millis();
+    if elapsed_ms > 120 {
+        log::warn!(
+            "[PERF-GRID-ITEMS] total={}ms rendered_items={} row_range={}..{} cols={} scrolling={} slow_items={}",
+            elapsed_ms,
+            rendered_items,
+            loop_min_row,
+            loop_max_row,
+            cols,
+            is_scrolling,
+            slow_items.len(),
+        );
+        for (idx, name, is_dir, ms) in &slow_items {
+            log::warn!(
+                "[PERF-GRID-ITEM] idx={} name={:?} is_dir={} time={}ms",
+                idx, name, is_dir, ms,
             );
         }
     }

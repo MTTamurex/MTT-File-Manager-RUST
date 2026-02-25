@@ -220,6 +220,7 @@ pub struct ImageViewerApp {
     pub icon_req_sender: Sender<(PathBuf, usize)>, // UI → Worker
     pub icon_res_receiver: Receiver<(PathBuf, usize, Vec<u8>, u32, u32)>, // Worker → UI
     pub loading_icons: FxHashSet<PathBuf>, // Tracking in-progress
+    pub loading_extensions: rustc_hash::FxHashSet<String>, // Dedup by extension (prevent 10x .dll requests)
     pub failed_icons: LruCache<PathBuf, ()>, // Icons that failed extraction (LRU bounded)
 
     // NOTIFICATION SYSTEM (toast messages)

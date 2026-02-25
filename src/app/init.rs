@@ -113,6 +113,8 @@ impl ImageViewerApp {
             drive_scan_rx,
             drive_info_tx,
             drive_info_rx,
+            preloaded_extension_icons,
+            custom_folder_icon,
         } = bootstrap_app(&ctx);
 
         let StartupPreferences {
@@ -264,12 +266,40 @@ impl ImageViewerApp {
             context_menu: ContextMenuState::new(),
 
             // PERSISTENT ICON LOADER
-            item_icon_loader: IconLoader::new(),
+            item_icon_loader: {
+                let mut loader = IconLoader::new();
+                // Pre-populate extension_cache from disk cache → instant icons on first frame.
+                for (ext, (pixels, width, height)) in &preloaded_extension_icons {
+                    let ext_key = format!("{}_Large", ext);
+                    let texture = ctx.load_texture(
+                        ext_key.clone(),
+                        eframe::egui::ColorImage::from_rgba_unmultiplied(
+                            [*width as usize, *height as usize],
+                            pixels,
+                        ),
+                        eframe::egui::TextureOptions::LINEAR,
+                    );
+                    loader.extension_cache.insert(ext_key, texture);
+                }
+                if !preloaded_extension_icons.is_empty() {
+                    log::info!(
+                        "[IconDiskCache] Pre-populated {} extension textures from disk cache",
+                        preloaded_extension_icons.len(),
+                    );
+                }
+                // Pre-set custom composed folder icon (back+front+paper_sheet).
+                {
+                    let (ref pixels, width, height) = custom_folder_icon;
+                    loader.set_folder_icon(&ctx, pixels, width, height);
+                }
+                loader
+            },
 
             // ASYNC ICON WORKER
             icon_req_sender: icon_req_tx,
             icon_res_receiver: icon_res_rx,
             loading_icons: FxHashSet::default(),
+            loading_extensions: rustc_hash::FxHashSet::default(),
             failed_icons: LruCache::new(
                 NonZeroUsize::new(1000).expect("failed_icons cache size must be non-zero"),
             ),
@@ -426,6 +456,12 @@ impl ImageViewerApp {
             // Media keyboard debounce
             last_media_key_press: std::time::Instant::now(),
         };
+
+        // Pre-set custom composed folder icon on cache_manager (used by grid/list bridges)
+        {
+            let (pixels, width, height) = custom_folder_icon;
+            app.cache_manager.set_folder_icon(&ctx, &pixels, width, height);
+        }
 
         // Apply folder lock for the initial folder (if it has one saved)
         app.apply_folder_lock_if_present();

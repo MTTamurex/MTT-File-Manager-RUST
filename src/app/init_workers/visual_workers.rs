@@ -1,4 +1,5 @@
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
+use crate::infrastructure::icon_disk_cache::IconDiskCache;
 use crate::infrastructure::windows as windows_infra;
 use crate::infrastructure::windows::is_mpeg_ts_file;
 use eframe::egui;
@@ -122,30 +123,51 @@ pub(in crate::app) fn spawn_async_font_loader() -> mpsc::Receiver<egui::FontDefi
 pub(in crate::app) fn spawn_icon_worker(
     ctx: &egui::Context,
     current_generation: Arc<AtomicUsize>,
+    icon_disk_cache: Arc<IconDiskCache>,
+    preloaded_icons: &std::collections::HashMap<String, (Vec<u8>, u32, u32)>,
 ) -> (mpsc::Sender<IconRequest>, mpsc::Receiver<IconResponse>) {
     let (icon_req_tx, icon_req_rx_thread) = mpsc::channel::<IconRequest>();
     let icon_req_rx = Arc::new(Mutex::new(icon_req_rx_thread));
     let (icon_res_tx, icon_res_rx) = mpsc::channel::<IconResponse>();
 
+    // Shared extension icon cache across all workers.
+    // Pre-populated with disk-cached data so workers never call SHGetFileInfoW
+    // for already-known extensions.
+    let shared_ext_cache: Arc<Mutex<std::collections::HashMap<String, (Vec<u8>, u32, u32)>>> = {
+        let mut initial = std::collections::HashMap::with_capacity(128);
+        for (ext, data) in preloaded_icons {
+            let dot_ext = format!(".{}", ext);
+            initial.insert(dot_ext, data.clone());
+        }
+        Arc::new(Mutex::new(initial))
+    };
+
     let cpu = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(4);
-    let worker_count = cpu.clamp(2, 6);
+    // SHGetFileInfoW is IO-bound (registry + COM), not CPU-bound.
+    // More threads = more parallel cold-extension lookups.
+    let worker_count = cpu.clamp(2, 16);
 
     for worker_id in 0..worker_count {
         let icon_ctx = ctx.clone();
         let icon_req_rx = icon_req_rx.clone();
         let icon_res_tx = icon_res_tx.clone();
         let generation_ref = current_generation.clone();
+        let ext_cache = shared_ext_cache.clone();
+        let disk_cache = icon_disk_cache.clone();
 
         let _ = std::thread::Builder::new()
             .name(format!("icon-worker-{}", worker_id))
             .spawn(move || {
                 use crate::domain::file_entry::IconSize;
-                use crate::infrastructure::windows::extract_file_icon_by_path;
+                use crate::infrastructure::windows::{extract_file_icon_by_path, extract_file_icon};
                 use windows::Win32::System::Com::{
                     CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED,
                 };
+
+                // Extensions that may have unique per-file icons (embedded resources).
+                const UNIQUE_ICON_EXTS: &[&str] = &["exe", "lnk", "ico", "cur", "ani", "com", "scr", "url"];
 
                 unsafe {
                     let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
@@ -167,11 +189,54 @@ pub(in crate::app) fn spawn_icon_worker(
                     };
 
                     // Drop stale requests quickly when user has already navigated away.
-                    if req_generation != generation_ref.load(AtomicOrdering::Relaxed) {
+                    // usize::MAX = pre-warm requests (always process).
+                    if req_generation != usize::MAX
+                        && req_generation != generation_ref.load(AtomicOrdering::Relaxed)
+                    {
                         continue;
                     }
 
-                    match extract_file_icon_by_path(&path, IconSize::Large) {
+                    // Fast path: for files that don't have unique per-file icons,
+                    // use extension-based extraction (SHGFI_USEFILEATTRIBUTES, ~0.5ms)
+                    // instead of real-path extraction (SHGetFileInfoW on real file, ~80ms).
+                    // This matches how Windows Explorer resolves icons.
+                    let ext_lower = path.extension()
+                        .map(|e| e.to_string_lossy().to_lowercase());
+                    let needs_real_path = ext_lower.as_deref()
+                        .map(|e| UNIQUE_ICON_EXTS.contains(&e))
+                        .unwrap_or(false);
+
+                    let icon_result = if needs_real_path {
+                        extract_file_icon_by_path(&path, IconSize::Large)
+                    } else {
+                        let ext_str = ext_lower.as_deref().unwrap_or("");
+                        let dot_ext = if ext_str.is_empty() {
+                            String::new()
+                        } else {
+                            format!(".{}", ext_str)
+                        };
+                        // Check shared cache first — another worker may have
+                        // already extracted this extension's icon.
+                        if let Some(cached) = ext_cache
+                            .lock()
+                            .ok()
+                            .and_then(|c| c.get(&dot_ext).cloned())
+                        {
+                            Ok(cached)
+                        } else {
+                            let r = extract_file_icon(&dot_ext, IconSize::Large);
+                            if let Ok(ref data) = r {
+                                if let Ok(mut cache) = ext_cache.lock() {
+                                    cache.insert(dot_ext, data.clone());
+                                }
+                                // Persist to disk for instant loading on next app launch.
+                                disk_cache.save(ext_str, &data.0, data.1, data.2);
+                            }
+                            r
+                        }
+                    };
+
+                    match icon_result {
                         Ok((pixels, width, height)) => {
                             let _ = icon_res_tx.send((path, req_generation, pixels, width, height));
                         }

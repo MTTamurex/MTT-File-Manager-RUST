@@ -43,7 +43,19 @@ pub fn render_fallback(
         }
     } else if file.is_dir && !file.is_archive() {
         // FOLDER (Except compressed files)
-        if is_recycle_bin_view {
+
+        // Detect system paths (C:\Windows tree) — always use static folder icon,
+        // no async preview, no spinner, no placeholder.
+        let norm = file
+            .path
+            .to_string_lossy()
+            .replace('/', "\\")
+            .trim_end_matches('\\')
+            .to_ascii_lowercase();
+        let is_system_path =
+            norm == "c:\\windows" || norm.starts_with("c:\\windows\\");
+
+        if is_recycle_bin_view || is_system_path {
             item_icon_loader.ensure_folder_icon(ui.ctx());
             if let Some(icon) = item_icon_loader.folder_icon() {
                 ui.add(egui::Image::new(icon).max_size(egui::vec2(icon_size, icon_size)));
@@ -90,24 +102,55 @@ pub fn render_fallback(
                     egui::Color32::WHITE,
                 );
             } else if is_folder_preview_loading {
-                // Spinner
-                ui.painter()
-                    .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
-                ui.add(egui::Spinner::new());
+                // Show our custom folder icon while preview loads (no spinner/placeholder)
+                item_icon_loader.ensure_folder_icon(ui.ctx());
+                if let Some(icon) = item_icon_loader.folder_icon() {
+                    let tex_size = icon.size_vec2();
+                    let aspect = tex_size.x / tex_size.y;
+                    let (draw_w, draw_h) = if aspect > folder_rect.width() / folder_rect.height() {
+                        (folder_rect.width(), folder_rect.width() / aspect)
+                    } else {
+                        (folder_rect.height() * aspect, folder_rect.height())
+                    };
+                    let offset_x = (folder_rect.width() - draw_w) / 2.0;
+                    let offset_y = (folder_rect.height() - draw_h) / 2.0;
+                    let draw_rect = egui::Rect::from_min_size(
+                        folder_rect.min + egui::vec2(offset_x, offset_y),
+                        egui::vec2(draw_w, draw_h),
+                    );
+                    ui.painter().image(
+                        icon.id(),
+                        draw_rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                }
             } else {
-                // Trigger loading
+                // Trigger loading and show folder icon immediately (no placeholder)
                 val_action = Some(PreviewPanelAction::LoadFolderPreview(file.path.clone()));
 
-                // Placeholder
-                ui.painter()
-                    .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(240));
-                ui.painter().text(
-                    folder_rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "📁",
-                    egui::FontId::proportional(icon_size * 0.4),
-                    egui::Color32::from_gray(180),
-                );
+                item_icon_loader.ensure_folder_icon(ui.ctx());
+                if let Some(icon) = item_icon_loader.folder_icon() {
+                    let tex_size = icon.size_vec2();
+                    let aspect = tex_size.x / tex_size.y;
+                    let (draw_w, draw_h) = if aspect > folder_rect.width() / folder_rect.height() {
+                        (folder_rect.width(), folder_rect.width() / aspect)
+                    } else {
+                        (folder_rect.height() * aspect, folder_rect.height())
+                    };
+                    let offset_x = (folder_rect.width() - draw_w) / 2.0;
+                    let offset_y = (folder_rect.height() - draw_h) / 2.0;
+                    let draw_rect = egui::Rect::from_min_size(
+                        folder_rect.min + egui::vec2(offset_x, offset_y),
+                        egui::vec2(draw_w, draw_h),
+                    );
+                    ui.painter().image(
+                        icon.id(),
+                        draw_rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                }
             }
         }
     } else {

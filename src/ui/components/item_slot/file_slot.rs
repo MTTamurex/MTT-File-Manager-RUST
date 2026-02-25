@@ -13,8 +13,8 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
     // PERFORMANCE: Use is_media() method to avoid registry lookups per frame
     let is_media_file = item.is_media();
 
-    // Thumbnail loading for media files (disabled in Recycle Bin)
-    if is_media_file && !ctx.is_recycle_bin_view {
+    // Thumbnail loading for media files (disabled in Recycle Bin and system folders)
+    if is_media_file && !ctx.is_recycle_bin_view && !ctx.skip_folder_media_reads {
         let has_texture = ctx.texture_cache.contains(&item.path);
         let is_loading = ctx.loading_set.contains(&item.path);
         let is_failed = ctx.failed_thumbnails.contains(&item.path);

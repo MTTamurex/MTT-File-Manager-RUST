@@ -4,6 +4,7 @@ pub mod adaptive_batch;
 pub mod directory_cache;
 pub mod directory_index;
 pub mod disk_cache;
+pub mod icon_disk_cache;
 pub mod drive_watcher;
 pub mod folder_compose;
 pub mod drive_watcher_integration;

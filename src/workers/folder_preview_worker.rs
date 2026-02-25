@@ -19,6 +19,15 @@ use std::sync::{Arc, Mutex};
 use std::time::{Instant, UNIX_EPOCH};
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 
+fn is_windows_system_path(path: &std::path::Path) -> bool {
+    let norm = path
+        .to_string_lossy()
+        .replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_ascii_lowercase();
+    norm == "c:\\windows" || norm.starts_with("c:\\windows\\")
+}
+
 /// Data returned from folder preview worker
 pub struct FolderPreviewData {
     pub path: PathBuf,
@@ -54,6 +63,18 @@ pub fn spawn_folder_preview_worker(
         let mut last_ssd_state: Option<bool> = None;
 
         while let Some(path) = rx.lock().ok().and_then(|lock| lock.recv().ok()) {
+            if is_windows_system_path(&path) {
+                let (rgba_data, width, height) = composer.compose_empty();
+                let _ = tx.send(FolderPreviewData {
+                    path,
+                    rgba_data,
+                    width,
+                    height,
+                });
+                throttle_repaint(&ctx, &mut last_repaint);
+                continue;
+            }
+
             let is_ssd = crate::infrastructure::io_priority::is_ssd(&path);
             if last_ssd_state != Some(is_ssd) {
                 let priority = if is_ssd {

@@ -177,11 +177,27 @@ impl ImageViewerApp {
     }
 
     pub fn request_icon_load(&mut self, path: PathBuf) {
-        if !self.loading_icons.contains(&path) {
-            self.loading_icons.insert(path.clone());
-            if self.icon_req_sender.send((path.clone(), self.generation)).is_err() {
-                self.loading_icons.remove(&path);
+        if self.loading_icons.contains(&path) {
+            return;
+        }
+
+        // Dedup by extension: if another file with the same extension is already
+        // being loaded, skip.  Once that result arrives, extension_cache is
+        // populated and ALL files with that extension get the icon immediately.
+        // Only applies to non-unique-icon extensions.
+        if let Some(ext) = path.extension() {
+            let ext_lower = ext.to_string_lossy().to_lowercase();
+            if !matches!(ext_lower.as_str(), "exe" | "lnk" | "ico" | "cur" | "ani" | "com" | "scr" | "url") {
+                if self.loading_extensions.contains(&ext_lower) {
+                    return; // Another file with this ext is already in-flight.
+                }
+                self.loading_extensions.insert(ext_lower.clone());
             }
+        }
+
+        self.loading_icons.insert(path.clone());
+        if self.icon_req_sender.send((path.clone(), self.generation)).is_err() {
+            self.loading_icons.remove(&path);
         }
     }
 }

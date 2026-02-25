@@ -71,6 +71,8 @@ pub struct ItemSlotContext<'a> {
     pub folder_preview_cache: &'a mut lru::LruCache<std::path::PathBuf, egui::TextureHandle>,
     /// Set of folders loading native preview
     pub folder_preview_loading: &'a mut FxHashSet<std::path::PathBuf>,
+    /// Skip media discovery/cover scan for folder previews in special directories.
+    pub skip_folder_media_reads: bool,
     /// Paths that failed thumbnail generation (LRU bounded)
     pub failed_thumbnails: &'a lru::LruCache<std::path::PathBuf, ()>,
     /// Set of items awaiting GPU upload
