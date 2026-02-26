@@ -11,6 +11,17 @@ const DEFAULT_CACHE_RADIUS: usize = 6;
 const MIN_ZOOM_FACTOR: f32 = 0.10;
 const MAX_ZOOM_FACTOR: f32 = 8.0;
 
+/// Holds pre-uploaded textures for each frame of an animated GIF along with
+/// display timing information.
+struct GifAnimation {
+    textures: Vec<egui::TextureHandle>,
+    delays_ms: Vec<u32>,
+    current_frame: usize,
+    frame_started: std::time::Instant,
+    width: u32,
+    height: u32,
+}
+
 pub struct DedicatedImageViewerApp {
     sequence: ImageSequence,
     current_index: usize,
@@ -24,6 +35,10 @@ pub struct DedicatedImageViewerApp {
     zoom_percent_display: f32,
     image_resolution: Option<(u32, u32)>,
     repaint_ctx_set: bool,
+    /// Animated GIF state; `Some` when the current image is a multi-frame GIF.
+    gif_animation: Option<GifAnimation>,
+    /// Index for which GIF loading was already attempted (avoids retrying).
+    gif_loaded_index: Option<usize>,
 }
 
 impl DedicatedImageViewerApp {
@@ -63,6 +78,8 @@ impl DedicatedImageViewerApp {
             zoom_percent_display: 100.0,
             image_resolution: None,
             repaint_ctx_set: false,
+            gif_animation: None,
+            gif_loaded_index: None,
         };
 
         app.prefetch.set_center(start_index);
@@ -200,6 +217,92 @@ impl DedicatedImageViewerApp {
         }
     }
 
+    // --- GIF animation helpers ---
+
+    fn is_current_gif(&self) -> bool {
+        self.current_path()
+            .and_then(|p| p.extension())
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("gif"))
+            .unwrap_or(false)
+    }
+
+    /// Decodes all frames of the current GIF (if not already attempted) and
+    /// uploads them as textures into `gif_animation`. No-op for non-GIF images
+    /// or if the load was already attempted for this index.
+    fn load_gif_if_needed(&mut self, ctx: &egui::Context) {
+        if self.gif_loaded_index == Some(self.current_index) {
+            return;
+        }
+        // Mark as attempted regardless of success to avoid retrying every frame.
+        self.gif_loaded_index = Some(self.current_index);
+        self.gif_animation = None;
+
+        if !self.is_current_gif() {
+            return;
+        }
+
+        let Some(path) = self.current_path().cloned() else {
+            return;
+        };
+
+        match loader::decode_gif_frames(&path) {
+            Ok(frames) if frames.len() > 1 => {
+                let (w, h) = (frames[0].frame.width, frames[0].frame.height);
+                let mut textures = Vec::with_capacity(frames.len());
+                let mut delays = Vec::with_capacity(frames.len());
+
+                for (i, gif_frame) in frames.into_iter().enumerate() {
+                    let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                        [gif_frame.frame.width as usize, gif_frame.frame.height as usize],
+                        &gif_frame.frame.rgba,
+                    );
+                    let tex = ctx.load_texture(
+                        format!("iv-gif-{}-{}", self.current_index, i),
+                        color_image,
+                        egui::TextureOptions::LINEAR,
+                    );
+                    textures.push(tex);
+                    delays.push(gif_frame.delay_ms);
+                }
+
+                self.gif_animation = Some(GifAnimation {
+                    textures,
+                    delays_ms: delays,
+                    current_frame: 0,
+                    frame_started: std::time::Instant::now(),
+                    width: w,
+                    height: h,
+                });
+                self.image_resolution = Some((w, h));
+            }
+            Ok(_) => {
+                // Single-frame GIF — let the normal static path render it.
+            }
+            Err(e) => {
+                log::warn!("[IMAGE-VIEWER] GIF decode failed for '{}': {}", path.display(), e);
+            }
+        }
+    }
+
+    /// Advances the animation to the next frame when the current frame's delay
+    /// has elapsed, and schedules a repaint for the next frame transition.
+    fn advance_gif_frame(&mut self, ctx: &egui::Context) {
+        let Some(anim) = self.gif_animation.as_mut() else {
+            return;
+        };
+
+        let delay = Duration::from_millis(anim.delays_ms[anim.current_frame] as u64);
+        if anim.frame_started.elapsed() >= delay {
+            anim.current_frame = (anim.current_frame + 1) % anim.textures.len();
+            anim.frame_started = std::time::Instant::now();
+        }
+
+        let elapsed = anim.frame_started.elapsed();
+        let remaining = delay.saturating_sub(elapsed).max(Duration::from_millis(10));
+        ctx.request_repaint_after(remaining);
+    }
+
     fn navigate_to(&mut self, index: usize, ctx: &egui::Context) {
         if index >= self.sequence.entries.len() {
             return;
@@ -212,6 +315,10 @@ impl DedicatedImageViewerApp {
         let old_index = self.current_index;
         self.current_index = index;
         self.zoom_factor = 1.0;
+
+        // Reset GIF animation state for the new image.
+        self.gif_animation = None;
+        self.gif_loaded_index = None;
 
         // Update the atomic center so workers skip irrelevant jobs.
         self.prefetch.set_center(index);
@@ -360,7 +467,15 @@ impl DedicatedImageViewerApp {
 
     fn render_center(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            if let Some(tex) = &self.texture {
+            // Prefer the current GIF animation frame; fall back to static texture.
+            // Clone is cheap: egui::TextureHandle is reference-counted.
+            let active_tex: Option<egui::TextureHandle> = if let Some(anim) = &self.gif_animation {
+                anim.textures.get(anim.current_frame).cloned()
+            } else {
+                self.texture.clone()
+            };
+
+            if let Some(tex) = active_tex {
                 // egui layout works in points, while texture size is in pixels.
                 // Convert first to avoid implicit upscale on high-DPI monitors.
                 let pixels_per_point = ui.ctx().pixels_per_point().max(f32::EPSILON);
@@ -400,70 +515,14 @@ impl DedicatedImageViewerApp {
                         ui.set_min_size(canvas_size);
                         let (canvas_rect, _) = ui.allocate_at_least(canvas_size, egui::Sense::hover());
 
-                        let image = egui::Image::new(tex)
+                        let image = egui::Image::new(&tex)
                             .fit_to_exact_size(draw_size)
                             .sense(egui::Sense::click());
                         let image_rect = egui::Rect::from_center_size(canvas_rect.center(), draw_size);
                         let response = ui
-                            .put(image_rect, image)
-                            .on_hover_cursor(egui::CursorIcon::ZoomIn);
-
-                        let pointer_pos = response
-                            .interact_pointer_pos()
-                            .or_else(|| response.hover_pos())
-                            .or_else(|| ui.ctx().pointer_latest_pos())
-                            .or_else(|| ui.input(|i| i.pointer.hover_pos()));
-                        let secondary_down =
-                            ui.input(|i| i.pointer.button_down(egui::PointerButton::Secondary));
-                        let secondary_down_on_image =
-                            secondary_down && response.is_pointer_button_down_on();
-                        let secondary_drag_active =
-                            secondary_down_on_image
-                                || (secondary_down
-                                    && pointer_pos.is_some_and(|p| image_rect.contains(p)));
+                            .put(image_rect, image);
 
                         if response.hovered() {
-                            // Native ZoomIn cursor is not consistently available on Windows/winit.
-                            // Hide the system cursor and render an explicit magnifier overlay.
-                            if !secondary_drag_active {
-                                ui.ctx().set_cursor_icon(egui::CursorIcon::None);
-                            }
-
-                            if let Some(pointer_pos) = ui
-                                .ctx()
-                                .pointer_latest_pos()
-                                .or_else(|| ui.input(|i| i.pointer.hover_pos()))
-                            {
-                                let lens_center = pointer_pos + egui::vec2(10.0, 10.0);
-                                let radius = 7.0;
-                                let handle_start = lens_center + egui::vec2(4.0, 4.0);
-                                let handle_end = handle_start + egui::vec2(6.0, 6.0);
-                                let painter = ui.ctx().layer_painter(egui::LayerId::new(
-                                    egui::Order::Foreground,
-                                    egui::Id::new("image_viewer_zoom_cursor"),
-                                ));
-
-                                let shadow = egui::Color32::from_black_alpha(180);
-                                painter.circle_stroke(
-                                    lens_center,
-                                    radius,
-                                    egui::Stroke::new(3.0, shadow),
-                                );
-                                painter.line_segment(
-                                    [handle_start, handle_end],
-                                    egui::Stroke::new(3.0, shadow),
-                                );
-
-                                painter.circle_stroke(
-                                    lens_center,
-                                    radius,
-                                    egui::Stroke::new(1.6, egui::Color32::WHITE),
-                                );
-                                painter.line_segment(
-                                    [handle_start, handle_end],
-                                    egui::Stroke::new(1.6, egui::Color32::WHITE),
-                                );
-                            }
 
                             let wheel_delta = ui.input(|i| i.raw_scroll_delta.y);
                             if wheel_delta.abs() > f32::EPSILON {
@@ -548,6 +607,10 @@ impl eframe::App for DedicatedImageViewerApp {
         // This is NOT called during navigate_to (which only requests the tail).
         // Matches viewskater: neighbors are loaded asynchronously after render.
         self.schedule_window_requests();
+
+        // Decode and upload all GIF frames (once per image), then advance timer.
+        self.load_gif_if_needed(ctx);
+        self.advance_gif_frame(ctx);
 
         self.render_top_bar(ctx);
         self.render_center(ctx);

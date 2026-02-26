@@ -92,18 +92,40 @@ pub fn render_texture_with_overlay(
 
 pub fn render_gif_preview(
     ui: &mut egui::Ui,
+    file: &crate::domain::file_entry::FileEntry,
     gif_player: &mut crate::ui::components::media_preview::GifPlayer,
+    svg_manager: &mut SvgIconManager,
 ) {
     gif_player.update(ui.ctx());
     if let Some(texture) = gif_player.texture() {
         let max_preview_width = ui.available_width() - 16.0;
         let max_preview_height = PREVIEW_MAX_HEIGHT;
         let max_preview_size = egui::vec2(max_preview_width, max_preview_height);
-        ui.add(
+
+        let image_resp = ui.add(
             egui::Image::new(texture)
                 .max_size(max_preview_size)
                 .shrink_to_fit(),
         );
+
+        let media_rect = image_resp.rect;
+        let hover_pos = ui.input(|i| i.pointer.hover_pos());
+        let is_hovered = hover_pos.is_some_and(|pos| media_rect.contains(pos));
+
+        if is_hovered {
+            draw_search_overlay(ui, media_rect, svg_manager);
+        }
+
+        if ui
+            .interact(
+                media_rect,
+                egui::Id::new("gif_thumb_overlay"),
+                egui::Sense::click(),
+            )
+            .clicked()
+        {
+            crate::image_viewer::open_image_viewer(file.path.clone());
+        }
     } else {
         ui.add(egui::Spinner::new());
     }
