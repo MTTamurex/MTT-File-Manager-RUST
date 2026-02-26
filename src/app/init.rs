@@ -204,6 +204,7 @@ impl ImageViewerApp {
             selected_gif: None,
             media_preview: None,
             media_preview_owner_tab_id: None,
+            video_player_process: None,
             selected_metadata: None,
             show_preview_panel, // Loaded from SQLite
             drive_state: build_drive_state(

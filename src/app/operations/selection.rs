@@ -9,6 +9,33 @@ use crate::app::state::ImageViewerApp;
 use crate::infrastructure::onedrive;
 
 impl ImageViewerApp {
+    /// Kill the standalone video player process if one is running.
+    pub fn kill_video_player_process(&mut self) {
+        if let Some(mut child) = self.video_player_process.take() {
+            log::info!("[VIDEO-PLAYER] Killing standalone video player process");
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+
+    /// Reap the standalone video player process if it has exited naturally.
+    /// Called periodically from the update loop to detect when the user closes the player window.
+    pub fn reap_video_player_process(&mut self) {
+        if let Some(child) = &mut self.video_player_process {
+            match child.try_wait() {
+                Ok(Some(_status)) => {
+                    log::info!("[VIDEO-PLAYER] Standalone player exited");
+                    self.video_player_process = None;
+                }
+                Ok(None) => {} // Still running
+                Err(e) => {
+                    log::warn!("[VIDEO-PLAYER] Error checking player status: {}", e);
+                    self.video_player_process = None;
+                }
+            }
+        }
+    }
+
     /// Teardown media preview resources immediately (MPV buffers, thread, HWND).
     pub fn destroy_media_preview(&mut self) {
         if let Some(mut preview) = self.media_preview.take() {
@@ -25,6 +52,9 @@ impl ImageViewerApp {
     pub fn request_video_preview_playback(&mut self, path: std::path::PathBuf) {
         use crate::ui::components::media_preview::MediaPreview;
         use crate::ui::components::MpvPreview;
+
+        // Kill standalone video player process if one is running
+        self.kill_video_player_process();
 
         // TAKE OVER: Stop and drop existing player if any
         if matches!(self.media_preview.as_ref(), Some(MediaPreview::Video(_))) {

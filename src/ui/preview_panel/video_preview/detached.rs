@@ -1,6 +1,6 @@
 use crate::ui::components::MediaPreview;
 use crate::ui::preview_panel::actions::PreviewPanelAction;
-use crate::ui::preview_panel::video_preview::controls::draw_video_controls;
+use crate::ui::preview_panel::video_preview::controls::{draw_video_controls, ControlAction};
 use crate::ui::svg_icons::SvgIconManager;
 use eframe::egui;
 
@@ -265,7 +265,7 @@ pub fn render_detached_video(
 
             let mut control_ui = ui.new_child(egui::UiBuilder::new().max_rect(control_rect));
             control_ui.add_space(6.0);
-            if let Some(vol) = draw_video_controls(
+            if let Some(ctrl) = draw_video_controls(
                 &mut control_ui,
                 preview,
                 control_rect.width() - 20.0,
@@ -277,7 +277,14 @@ pub fn render_detached_video(
                 is_muted,
                 true,
             ) {
-                vol_action = Some(PreviewPanelAction::VolumeChanged(vol));
+                match ctrl {
+                    ControlAction::VolumeChanged(vol) => {
+                        vol_action = Some(PreviewPanelAction::VolumeChanged(vol));
+                    }
+                    ControlAction::DetachRequested => {
+                        // Already detached — this shouldn't happen, but handle gracefully
+                    }
+                }
             }
         }
 

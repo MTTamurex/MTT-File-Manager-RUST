@@ -128,6 +128,9 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
 }
 
 pub fn handle_exit(app: &mut ImageViewerApp) {
+    // Kill standalone video player process if running
+    app.kill_video_player_process();
+
     // Gracefully stop thumbnail workers waiting on the queue.
     app.thumbnail_queue.shutdown();
 

@@ -7,6 +7,7 @@ pub mod infrastructure;
 pub mod pdf_viewer;
 pub mod tabs;
 pub mod ui;
+pub mod video_player;
 pub mod workers;
 
 // Re-export main app struct for easy access
