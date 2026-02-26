@@ -86,6 +86,8 @@ impl eframe::App for ImageViewerApp {
             let t4 = std::time::Instant::now();
             // Bound long-session cache growth without disrupting interactive work.
             self.run_memory_maintenance();
+            // Reap standalone video player process if it exited naturally.
+            self.reap_video_player_process();
             let t5 = std::time::Instant::now();
 
             let msg_ms = t1.duration_since(t0).as_millis();

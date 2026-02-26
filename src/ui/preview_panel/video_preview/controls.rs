@@ -5,6 +5,14 @@ use eframe::egui;
 mod detached;
 mod pickers;
 
+/// Result from video control interactions.
+pub enum ControlAction {
+    /// User changed the volume slider.
+    VolumeChanged(f32),
+    /// User clicked the detach button while in docked mode.
+    DetachRequested,
+}
+
 /// Helper: Create frameless button with hover effect
 pub(super) fn add_icon_button(
     ui: &mut egui::Ui,
@@ -74,7 +82,7 @@ fn draw_seek_bar(
 }
 
 /// Draw basic controls: Play/Pause, Detach, Volume
-/// Returns `Some(new_volume)` if the user changed the volume via the slider.
+/// Returns a `ControlAction` if the user interacted with a control.
 fn draw_basic_controls(
     ui: &mut egui::Ui,
     preview: &mut MediaPreview,
@@ -83,7 +91,7 @@ fn draw_basic_controls(
     volume: f32,
     is_muted: bool,
     is_detached: bool,
-) -> Option<f32> {
+) -> Option<ControlAction> {
     let icon_color_val = icon_color(ui.visuals().dark_mode);
     let btn_size = 18.0;
 
@@ -111,18 +119,24 @@ fn draw_basic_controls(
     };
     if let Some(tex) = svg_manager.get_icon(ui.ctx(), detach_icon_name, 48, icon_color_val) {
         if add_icon_button(ui, &tex, btn_size, detach_tooltip, ui.visuals().dark_mode) {
-            if is_detached && preview.is_maximized() {
-                preview.set_fullscreen_applied(false);
-                preview.set_forced_size(None);
-                preview.reset_last_rect();
-                ui.ctx()
-                    .send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
-                if preview.prev_app_maximized() {
+            if !is_detached {
+                // In docked mode: signal a detach request (spawns standalone process)
+                return Some(ControlAction::DetachRequested);
+            } else {
+                // In detached mode (standalone controls): re-dock
+                if preview.is_maximized() {
+                    preview.set_fullscreen_applied(false);
+                    preview.set_forced_size(None);
+                    preview.reset_last_rect();
                     ui.ctx()
-                        .send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                        .send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                    if preview.prev_app_maximized() {
+                        ui.ctx()
+                            .send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                    }
                 }
+                preview.toggle_detached();
             }
-            preview.toggle_detached();
         }
     }
 
@@ -154,7 +168,7 @@ fn draw_basic_controls(
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             preview.set_volume(vol);
         }));
-        return Some(vol);
+        return Some(ControlAction::VolumeChanged(vol));
     }
     None
 }
@@ -176,7 +190,7 @@ fn draw_time_display(ui: &mut egui::Ui, current_time: f64, duration: f64) {
 
 /// Draw simple controls for docked mode (preview panel)
 /// Shows only: seek bar, play/pause, detach, volume, time
-/// Returns `Some(new_volume)` if the user changed the volume via the slider.
+/// Returns a `ControlAction` if the user interacted with a control.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_docked_controls(
     ui: &mut egui::Ui,
@@ -188,7 +202,7 @@ pub fn draw_docked_controls(
     duration: f64,
     volume: f32,
     is_muted: bool,
-) -> Option<f32> {
+) -> Option<ControlAction> {
     ui.set_width(full_width);
 
     // Seek Bar
@@ -197,10 +211,10 @@ pub fn draw_docked_controls(
     ui.add_space(6.0);
 
     // Buttons row - only basic controls for docked mode
-    let mut new_vol = None;
+    let mut result = None;
     ui.horizontal(|ui| {
         // Basic controls (play, detach, volume)
-        new_vol = draw_basic_controls(
+        result = draw_basic_controls(
             ui,
             preview,
             svg_manager,
@@ -215,12 +229,12 @@ pub fn draw_docked_controls(
         // Time display
         draw_time_display(ui, current_time, duration);
     });
-    new_vol
+    result
 }
 
 /// Draw full controls for detached mode (floating window)
 /// Shows all controls including audio/subtitle pickers, normalizer, fullscreen, VSR
-/// Returns `Some(new_volume)` if the user changed the volume via the slider.
+/// Returns a `ControlAction` if the user interacted with a control.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_detached_controls(
     ui: &mut egui::Ui,
@@ -232,7 +246,7 @@ pub fn draw_detached_controls(
     duration: f64,
     volume: f32,
     is_muted: bool,
-) -> Option<f32> {
+) -> Option<ControlAction> {
     ui.set_width(full_width);
 
     // Seek Bar
@@ -241,10 +255,10 @@ pub fn draw_detached_controls(
     ui.add_space(6.0);
 
     // Buttons row - full controls for detached mode
-    let mut new_vol = None;
+    let mut result = None;
     ui.horizontal(|ui| {
         // Basic controls (play, detach, volume)
-        new_vol = draw_basic_controls(ui, preview, svg_manager, is_playing, volume, is_muted, true);
+        result = draw_basic_controls(ui, preview, svg_manager, is_playing, volume, is_muted, true);
 
         ui.add_space(10.0);
 
@@ -265,11 +279,11 @@ pub fn draw_detached_controls(
         // Right-aligned buttons (fullscreen, VSR)
         detached::draw_detached_buttons(ui, preview, svg_manager);
     });
-    new_vol
+    result
 }
 
 /// Legacy function for backward compatibility - delegates to appropriate version
-/// Returns `Some(new_volume)` if the user changed the volume via the slider.
+/// Returns a `ControlAction` if the user interacted with a control.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_video_controls(
     ui: &mut egui::Ui,
@@ -282,7 +296,7 @@ pub fn draw_video_controls(
     volume: f32,
     is_muted: bool,
     is_detached: bool,
-) -> Option<f32> {
+) -> Option<ControlAction> {
     if is_detached {
         draw_detached_controls(
             ui,

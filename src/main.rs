@@ -35,12 +35,40 @@ fn main() -> eframe::Result<()> {
     let mut args = std::env::args_os();
     let _exe = args.next();
     if let Some(flag) = args.next() {
-        if flag.to_string_lossy().eq_ignore_ascii_case("--image-viewer") {
+        let flag_str = flag.to_string_lossy();
+        if flag_str.eq_ignore_ascii_case("--image-viewer") {
             if let Some(path_arg) = args.next() {
                 return mtt_file_manager::image_viewer::run_standalone(PathBuf::from(path_arg));
             }
 
             log::error!("[IMAGE-VIEWER] missing path argument for --image-viewer");
+            return Ok(());
+        }
+        if flag_str.eq_ignore_ascii_case("--video-player") {
+            if let Some(path_arg) = args.next() {
+                let mut position: f64 = 0.0;
+                let mut volume: f32 = 1.0;
+                // Parse optional --position and --volume args
+                while let Some(opt) = args.next() {
+                    let opt_str = opt.to_string_lossy().to_string();
+                    if opt_str.eq_ignore_ascii_case("--position") {
+                        if let Some(val) = args.next() {
+                            position = val.to_string_lossy().parse().unwrap_or(0.0);
+                        }
+                    } else if opt_str.eq_ignore_ascii_case("--volume") {
+                        if let Some(val) = args.next() {
+                            volume = val.to_string_lossy().parse().unwrap_or(1.0);
+                        }
+                    }
+                }
+                return mtt_file_manager::video_player::run_standalone(
+                    PathBuf::from(path_arg),
+                    position,
+                    volume,
+                );
+            }
+
+            log::error!("[VIDEO-PLAYER] missing path argument for --video-player");
             return Ok(());
         }
     }

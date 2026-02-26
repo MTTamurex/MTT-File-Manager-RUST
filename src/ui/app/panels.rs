@@ -236,6 +236,16 @@ fn render_preview_panel_layout(
                                     PreviewPanelAction::RequestPlay(path) => {
                                         app.request_video_preview_playback(path);
                                     }
+                                    PreviewPanelAction::DetachVideo { path, position, volume } => {
+                                        // 1. Kill any existing standalone player
+                                        app.kill_video_player_process();
+                                        // 2. Destroy the in-process media preview (frees MPV/HWND)
+                                        app.destroy_media_preview();
+                                        // 3. Spawn standalone video player process
+                                        if let Some(child) = crate::video_player::open_video_player(path, position, volume) {
+                                            app.video_player_process = Some(child);
+                                        }
+                                    }
                                     PreviewPanelAction::RefreshThumbnail(path) => {
                                         // Check if it's a folder or a file
                                         let is_folder = app
