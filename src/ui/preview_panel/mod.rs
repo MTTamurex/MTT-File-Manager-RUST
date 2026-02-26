@@ -94,7 +94,7 @@ pub fn render_preview_panel(
 
         if let Some(gif_player) = selected_gif {
             // === NATIVE GIF AUTOPLAY (PRIORITY 1) ===
-            render_gif_preview(ui, gif_player);
+            render_gif_preview(ui, file, gif_player, svg_manager);
         } else if let Some(preview) = media_preview {
             if is_video {
                 // VIDEO PLAYER LOGIC (MPV)

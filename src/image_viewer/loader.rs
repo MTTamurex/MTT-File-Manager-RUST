@@ -45,6 +45,60 @@ pub struct DecodedFrame {
     pub height: u32,
 }
 
+/// One frame of a multi-frame (animated) GIF.
+#[derive(Clone, Debug)]
+pub struct GifAnimationFrame {
+    pub frame: DecodedFrame,
+    /// How long this frame should be displayed, in milliseconds.
+    pub delay_ms: u32,
+}
+
+/// Decodes all frames of an animated GIF. Returns an error if the file is not
+/// a valid GIF or has no decodable frames. For single-frame / static GIFs the
+/// returned `Vec` will contain exactly one element.
+pub fn decode_gif_frames(path: &Path) -> io::Result<Vec<GifAnimationFrame>> {
+    use image::AnimationDecoder;
+    use image::codecs::gif::GifDecoder;
+
+    let bytes = read_file_fast(path, DecodePriority::Interactive)?;
+    let cursor = Cursor::new(bytes.as_slice());
+    let decoder = GifDecoder::new(cursor)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+
+    let mut frames_out: Vec<GifAnimationFrame> = Vec::new();
+    for frame_result in decoder.into_frames() {
+        match frame_result {
+            Ok(f) => {
+                let (numer, denom) = f.delay().numer_denom_ms();
+                // GIF spec: 0 delay → display "as fast as possible". Use 10 ms minimum.
+                let delay_ms = if denom == 0 { 100 } else { (numer / denom).max(10) };
+                let rgba = f.into_buffer();
+                frames_out.push(GifAnimationFrame {
+                    frame: DecodedFrame {
+                        width: rgba.width(),
+                        height: rgba.height(),
+                        rgba: rgba.into_raw(),
+                    },
+                    delay_ms,
+                });
+            }
+            Err(e) => {
+                log::warn!("[IMAGE-VIEWER] GIF frame decode error: {}", e);
+                break;
+            }
+        }
+    }
+
+    if frames_out.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "no decodable GIF frames",
+        ));
+    }
+
+    Ok(frames_out)
+}
+
 pub fn decode_full_frame(path: &Path) -> io::Result<DecodedFrame> {
     decode_full_frame_with_priority(path, DecodePriority::Interactive)
 }
