@@ -154,6 +154,21 @@ impl ImageViewerApp {
                 .map(|ext| ext.to_lowercase() == "gif")
                 .unwrap_or(false);
 
+            // CLEANUP LOGIC: If we are the owner of a VIDEO, and focus changed to a DIFFERENT file, stop the player.
+            // This must run regardless of whether the new selection is a GIF or any other type.
+            let is_owner = self.media_preview_owner_tab_id == Some(active_tab_id);
+            if is_owner {
+                use crate::ui::components::media_preview::MediaPreview;
+                let should_stop = match &mut self.media_preview {
+                    Some(MediaPreview::Video(player)) => player.path != path,
+                    _ => false,
+                };
+
+                if should_stop {
+                    self.destroy_media_preview();
+                }
+            }
+
             if is_gif {
                 // Initialize async GIF player
                 use crate::ui::components::media_preview::GifPlayer;
@@ -162,20 +177,6 @@ impl ImageViewerApp {
             } else {
                 // Not a GIF -> Cleanup non-active GIFs (subject to memory/TTL)
                 self.gif_manager.cleanup(false);
-
-                // CLEANUP LOGIC: If we are the owner of a VIDEO, and focus changed to a DIFFERENT file, stop the player.
-                let is_owner = self.media_preview_owner_tab_id == Some(active_tab_id);
-                if is_owner {
-                    use crate::ui::components::media_preview::MediaPreview;
-                    let should_stop = match &mut self.media_preview {
-                        Some(MediaPreview::Video(player)) => player.path != path,
-                        _ => false, // GIFs/Images don't "own" global media_preview anymore
-                    };
-
-                    if should_stop {
-                        self.destroy_media_preview();
-                    }
-                }
             }
         } else {
             // No selection -> if owner, clear media
