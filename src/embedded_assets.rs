@@ -42,6 +42,8 @@ pub const ICON_REFRESH: &[u8] = include_bytes!("../assets/icons/refresh.svg");
 pub const ICON_RENAME: &[u8] =
     include_bytes!("../assets/icons/rename_duotone_black_blue_lighter2.svg");
 pub const ICON_SEARCH: &[u8] = include_bytes!("../assets/icons/search.svg");
+pub const ICON_SETTINGS: &[u8] = include_bytes!("../assets/icons/settings.svg");
+pub const ICON_IMAGE: &[u8] = include_bytes!("../assets/icons/image.svg");
 pub const ICON_VIEW_GRID: &[u8] = include_bytes!("../assets/icons/view_grid.svg");
 pub const ICON_VIEW_LIST: &[u8] = include_bytes!("../assets/icons/view_list.svg");
 pub const ICON_VOL_HIGH: &[u8] = include_bytes!("../assets/icons/vol_high.svg");
@@ -77,6 +79,8 @@ pub fn get_icon(name: &str) -> Option<&'static [u8]> {
         "refresh" => Some(ICON_REFRESH),
         "rename" => Some(ICON_RENAME),
         "search" => Some(ICON_SEARCH),
+        "settings" => Some(ICON_SETTINGS),
+        "image" => Some(ICON_IMAGE),
         "view_grid" => Some(ICON_VIEW_GRID),
         "view_list" => Some(ICON_VIEW_LIST),
         "vol_high" => Some(ICON_VOL_HIGH),

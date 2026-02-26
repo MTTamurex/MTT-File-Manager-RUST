@@ -139,10 +139,17 @@ pub fn render_status_bar(
 
         ui.horizontal(|ui| {
             // === LEFTMOST: Virtual drive settings button ===
-            if ui
-                .button(egui::RichText::new("⚙").color(egui::Color32::BLACK))
-                .on_hover_text("Configurar otimização de drives virtuais")
-                .clicked()
+            if widgets::toggle_icon_button_sized(
+                ui,
+                svg_manager,
+                "settings",
+                false,
+                "Configurar otimização de drives virtuais",
+                theme::ICON_SIZE_SM,
+                1.0,
+                0.75,
+            )
+            .clicked()
             {
                 action = StatusBarAction::OpenVirtualDriveSettings;
             }
@@ -156,10 +163,17 @@ pub fn render_status_bar(
                         .small()
                 );
             } else if !is_computer_view
-                && ui
-                    .button(egui::RichText::new("🖼").color(egui::Color32::BLACK))
-                    .on_hover_text("Gerar thumbnails para todas as subpastas")
-                    .clicked()
+                && widgets::toggle_icon_button_sized(
+                    ui,
+                    svg_manager,
+                    "image",
+                    false,
+                    "Gerar thumbnails para todas as subpastas",
+                    theme::ICON_SIZE_SM,
+                    1.0,
+                    0.75,
+                )
+                .clicked()
             {
                 action = StatusBarAction::BulkThumbnailScan;
             }
