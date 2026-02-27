@@ -4,7 +4,6 @@
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Ui};
 
 use crate::domain::file_entry::IconSize;
-use crate::infrastructure::windows;
 
 /// Context for computer view rendering
 pub struct ComputerViewContext<'a> {
@@ -33,28 +32,12 @@ pub fn render_computer_view(
     let mut clicked_disk = None;
 
     for (disk_path, disk_label) in ctx.disks {
-        // Preload drive icon if not in cache
+        // Preload drive icon if not in cache — delegate to ops (non-blocking)
         let drive_icon = if let Some(icon) = ctx.drive_icon_cache.get(disk_path) {
             Some(icon.clone())
         } else {
-            // Try loading real drive icon
-            if let Ok((rgba_data, width, height)) =
-                windows::extract_drive_icon(disk_path, IconSize::Small)
-            {
-                let texture = ui.ctx().load_texture(
-                    format!("drive_{}", disk_path),
-                    egui::ColorImage::from_rgba_unmultiplied(
-                        [width as usize, height as usize],
-                        &rgba_data,
-                    ),
-                    egui::TextureOptions::NEAREST,
-                );
-                let cloned = texture.clone();
-                ctx.drive_icon_cache.put(disk_path.clone(), texture);
-                Some(cloned)
-            } else {
-                None
-            }
+            // Non-blocking: ops implementation must use async extraction (e.g. IconLoader)
+            _ops.extract_drive_icon(disk_path, IconSize::Small)
         };
 
         // Render drive with icon + label using interact() for full cursor control

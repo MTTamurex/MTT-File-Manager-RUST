@@ -119,12 +119,10 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
                         egui::Color32::WHITE,
                     );
                 } else {
-                    ui.painter()
-                        .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
+                    // No system icon available — leave space empty (no placeholder)
                 }
             } else {
-                ui.painter()
-                    .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
+                // No system icon available — leave space empty (no placeholder)
             }
         } else {
             // NORMAL FOLDER: Always request our custom composed preview.
@@ -133,36 +131,13 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
                 ops.request_folder_preview_load(item.path.clone());
             }
 
-            // Show spinner while waiting for composed preview
-            let spinner_size = folder_rect.width().min(folder_rect.height()) * 0.3;
-            let spinner_rect = egui::Rect::from_center_size(
-                folder_rect.center(),
-                egui::vec2(spinner_size, spinner_size),
-            );
-
-            ui.painter()
-                .rect_filled(folder_rect, 4.0, egui::Color32::from_gray(245));
-
-            let time = ui.input(|i| i.time);
-            let angle = (time * 3.0) as f32;
-
-            let center = spinner_rect.center();
-            let radius = spinner_size / 2.0 - 2.0;
-            let stroke = egui::Stroke::new(3.0, egui::Color32::from_rgb(100, 150, 220));
-
-            let points: Vec<egui::Pos2> = (0..20)
-                .map(|i| {
-                    let t = i as f32 / 19.0 * std::f32::consts::PI * 1.5;
-                    let a = angle + t;
-                    egui::pos2(center.x + radius * a.cos(), center.y + radius * a.sin())
-                })
-                .collect();
-
-            ui.painter().add(egui::Shape::line(points, stroke));
-
-            // PERFORMANCE: Spinner only needs ~15 FPS (66ms interval).
-            ui.ctx()
-                .request_repaint_after(std::time::Duration::from_millis(66));
+            // While preview is loading: show system folder icon (the final content for
+            // folders without media). When the composed preview arrives it replaces this
+            // directly — no spinner, no grey rect placeholder.
+            if let Some(sys_icon) = ctx.icon_loader.folder_icon() {
+                paint_texture_centered(ui, sys_icon.id(), sys_icon.size_vec2(), folder_rect);
+            }
+            // If no system icon cached yet: leave space empty — no placeholder
         }
     }
 

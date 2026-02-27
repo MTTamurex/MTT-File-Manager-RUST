@@ -291,3 +291,14 @@ pub(super) fn handle_empty_recycle_bin(
     let _ = recycle_bin::empty_recycle_bin(hwnd.0);
     let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
 }
+
+/// Shows Windows Properties dialog for each path in the background.
+/// Fire-and-forget: `SHObjectProperties` opens a modeless dialog that manages its own lifetime.
+pub(super) fn handle_show_properties(paths: Vec<std::path::PathBuf>, hwnd: SendHwnd) {
+    use crate::infrastructure::windows::native_menu::show_properties_dialog;
+    for path in &paths {
+        if let Err(e) = show_properties_dialog(hwnd.0, path) {
+            log::warn!("[PROPERTIES] Failed to show properties for {}: {:?}", path.display(), e);
+        }
+    }
+}

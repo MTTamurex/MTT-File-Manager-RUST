@@ -98,9 +98,8 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
     }
 
     if !drew_something {
-        // Fallback to Windows icon only (no generic placeholder glyphs)
-        ui.painter()
-            .rect_filled(thumb_rect, 4.0, egui::Color32::from_gray(248));
+        // Render Windows Shell icon directly — it IS the final content for this file type.
+        // No grey rect: if the icon hasn't loaded yet the space is left empty (no placeholder).
         if let Some(icon_texture) = file_icon {
             let icon_size = thumb_size * 0.5;
             let icon_rect =
@@ -112,6 +111,7 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
                 egui::Color32::WHITE,
             );
         }
+        // If icon not yet loaded: space stays empty — no placeholder
     }
 
     // Render sync status badge (OneDrive)

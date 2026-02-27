@@ -175,43 +175,19 @@ impl ImageViewerApp {
             return;
         }
 
-        if let Some(hwnd) = self.native_hwnd {
-            // Use shell context menu to invoke properties (handles single and multiple files)
-            if let Ok(shell_ctx) =
-                crate::infrastructure::windows::native_menu::extract_shell_menu(hwnd, &paths)
-            {
-                let items = shell_ctx.items.borrow();
+        let Some(hwnd) = self.native_hwnd else {
+            return;
+        };
 
-                // Look for properties verb
-                let mut prop_id = None;
-                for item in items.iter() {
-                    if let Some(verb) = &item.command_string {
-                        if verb.eq_ignore_ascii_case("properties") {
-                            prop_id = Some(item.id);
-                            break;
-                        }
-                    }
-                }
-
-                if let Some(id) = prop_id {
-                    let _ = crate::infrastructure::windows::native_menu::invoke_menu_command(
-                        hwnd,
-                        &shell_ctx.context_menu,
-                        id,
-                        0,
-                        0,
-                    );
-                    return;
-                }
-            }
-
-            // Fallback for single file if menu extraction failed or no property item found
-            if paths.len() == 1 {
-                let _ = crate::infrastructure::windows::native_menu::show_properties_dialog(
-                    hwnd, &paths[0],
-                );
-            }
-        }
+        // Dispatch to the file operation worker (STA COM thread) — avoids blocking the UI thread.
+        // SHObjectProperties opens a modeless dialog that manages its own lifetime.
+        let _ = self
+            .file_operation_state
+            .file_op_sender
+            .send(crate::workers::file_operation_worker::FileOperationRequest::show_properties(
+                paths, hwnd,
+            ));
+        // Note: do NOT increment file_ops_in_progress — this is fire-and-forget.
     }
 
     pub fn create_new_folder(&mut self) {

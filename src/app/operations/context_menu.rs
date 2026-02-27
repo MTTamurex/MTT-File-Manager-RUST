@@ -36,15 +36,12 @@ impl ImageViewerApp {
 
     pub fn populate_context_menu(
         &mut self,
-        ctx: &egui::Context,
+        _ctx: &egui::Context,
         paths: &[PathBuf],
         is_empty_area: bool,
         _item_index: Option<usize>,
     ) {
         use crate::application::context_menu::ContextMenuItem;
-        use crate::infrastructure::windows::native_menu::{
-            extract_shell_menu, is_known_verb, ShellMenuItem,
-        };
 
         let mut items = Vec::new();
 
@@ -177,7 +174,19 @@ impl ImageViewerApp {
             // Quick Access pin/unpin — only for folders (not drives)
             if !is_drive {
                 if let Some(target_path) = paths.first().and_then(|p| p.to_str()) {
-                    if std::path::Path::new(target_path).is_dir() {
+                    // Use cached is_dir field — avoids blocking I/O on OneDrive/network paths
+                    let target_is_dir = _item_index
+                        .and_then(|idx| self.items.get(idx))
+                        .map(|item| item.is_dir)
+                        .unwrap_or_else(|| {
+                            // Fallback: search already-loaded items by path (no I/O)
+                            self.items
+                                .iter()
+                                .find(|it| it.path.to_str() == Some(target_path))
+                                .map(|it| it.is_dir)
+                                .unwrap_or(false)
+                        });
+                    if target_is_dir {
                         let is_pinned = self
                             .pinned_folders
                             .iter()
@@ -200,209 +209,178 @@ impl ImageViewerApp {
             );
         }
 
-        // ========== SHELL ITEMS (Third-party extensions) ==========
+        // ========== SHELL ITEMS — extracted asynchronously on the worker thread ==========
+        // Dispatch to the STA worker so Shell extensions cannot block the UI thread.
+        // Results arrive via `shell_menu_res_rx`; the app polls them in its update loop
+        // and calls `apply_async_shell_items` to merge them into `self.context_menu.items`.
         if let Some(hwnd) = self.native_hwnd {
-            if let Ok(shell_ctx) = extract_shell_menu(hwnd, paths) {
-                // Convert Shell items to UI items, filtering known verbs
-                fn convert(
-                    ui_ctx: &egui::Context,
-                    shell_item: &ShellMenuItem,
-                ) -> Option<ContextMenuItem> {
-                    // Filter items we handle internally
-                    if let Some(ref verb) = shell_item.command_string {
-                        if is_known_verb(verb) {
-                            return None;
-                        }
-                    }
-
-                    // Fallback text-based filter for localized or verbless items
-                    let lower_text = shell_item.text.to_lowercase();
-                    let blacklisted_texts = [
-                        "pin to quick access",
-                        "fixar no acesso rápido",
-                        "restore previous versions",
-                        "restaurar versões anteriores",
-                        "copy as path",
-                        "copiar como caminho",
-                        "create shortcut",
-                        "criar atalho",
-                    ];
-                    if blacklisted_texts.iter().any(|&t| lower_text.contains(t)) {
-                        return None;
-                    }
-
-                    // Resize icon to 16x16 if needed
-                    let icon = shell_item.icon_rgba.as_ref().map(|(rgba, w, h)| {
-                        let (final_rgba, fw, fh) = if *w != 16 || *h != 16 {
-                            // Simple resize - in production would use proper resampling
-                            (rgba.clone(), *w, *h)
-                        } else {
-                            (rgba.clone(), *w, *h)
-                        };
-                        let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                            [fw as usize, fh as usize],
-                            &final_rgba,
-                        );
-                        ui_ctx.load_texture(
-                            format!("menu_icon_{}", shell_item.id),
-                            color_image,
-                            Default::default(),
-                        )
-                    });
-
-                    let sub_items: Vec<ContextMenuItem> = shell_item
-                        .sub_items
-                        .iter()
-                        .filter_map(|s| convert(ui_ctx, s))
-                        .collect();
-
-                    Some(ContextMenuItem {
-                        id: shell_item.id as i32,
-                        text: shell_item.text.clone(),
-                        icon,
-                        sub_items,
-                        is_separator: shell_item.is_separator,
-                        is_enabled: shell_item.is_enabled,
-                        is_primary: false,
-                        keyboard_shortcut: None,
-                        command_string: shell_item.command_string.clone(),
-                        show_in_overflow: false,
-                        has_pending_submenu: shell_item.pending_submenu_handle.is_some(),
-                    })
-                }
-
-                let shell_items: Vec<ContextMenuItem> = shell_ctx
-                    .items
-                    .borrow()
-                    .iter()
-                    .filter_map(|s| convert(ctx, s))
-                    .collect();
-
-                // Separate shell items: common ones visible, rest go to overflow
-                let mut visible_shell_items = Vec::new();
-                let mut overflow_shell_items = Vec::new();
-
-                for s_item in shell_items {
-                    // Keep items with submenus OR pending submenus (like 7-Zip, WinRAR) visible
-                    if !s_item.sub_items.is_empty() || s_item.has_pending_submenu {
-                        visible_shell_items.push(s_item);
-                    } else if !s_item.is_separator {
-                        overflow_shell_items.push(s_item);
-                    }
-                }
-
-                // Add visible shell items (with submenus like 7-Zip)
-                if !visible_shell_items.is_empty() {
-                    items.push(ContextMenuItem::separator());
-                    for s_item in visible_shell_items {
-                        items.push(s_item);
-                    }
-                }
-
-                // Add overflow submenu with remaining shell items
-                if !overflow_shell_items.is_empty() {
-                    items.push(ContextMenuItem::separator());
-                    items.push(
-                        ContextMenuItem::new(-99, "Mostrar mais opções")
-                            .with_subitems(overflow_shell_items),
-                    );
-                }
-
-                // Keep the native context alive for command invocation
-                self.context_menu.native_context = Some(std::rc::Rc::new(shell_ctx));
-            }
+            let _ = self.shell_menu_req_tx.send(
+                crate::infrastructure::shell_menu_worker::ShellMenuRequest::Extract {
+                    hwnd_isize: hwnd.0 as isize,
+                    paths: paths.to_vec(),
+                },
+            );
+            self.shell_menu_loading = true;
         }
 
         self.context_menu.items = items;
     }
 
-    pub fn handle_lazy_submenu_load(&mut self, egui_ctx: &egui::Context, item_id: i32) {
+    /// Convert `ShellMenuItemData` items received from the worker and merge them into
+    /// the already-populated context menu.  Called from the update-loop polling code.
+    pub fn apply_async_shell_items(
+        &mut self,
+        shell_items: Vec<crate::infrastructure::shell_menu_worker::ShellMenuItemData>,
+        ctx: &egui::Context,
+    ) {
         use crate::application::context_menu::ContextMenuItem;
-        use crate::infrastructure::windows::native_menu::{ShellMenuContext, ShellMenuItem};
+        use crate::infrastructure::windows::native_menu::is_known_verb;
+        use crate::infrastructure::shell_menu_worker::ShellMenuItemData;
 
-        let native_ctx = self.context_menu.native_context.clone();
-        let Some(native_ctx) = native_ctx else { return };
-        // Use as_ref() to get &dyn Any before downcasting
-        let Some(shell_ctx) = native_ctx.as_ref().downcast_ref::<ShellMenuContext>() else {
-            return;
-        };
+        fn convert(
+            ui_ctx: &egui::Context,
+            item: &ShellMenuItemData,
+        ) -> Option<ContextMenuItem> {
+            // Filter verbs handled internally
+            if let Some(ref verb) = item.command_string {
+                if is_known_verb(verb) {
+                    return None;
+                }
+            }
+            // Text-based blacklist (localised strings)
+            let lower = item.text.to_lowercase();
+            const BLACKLIST: &[&str] = &[
+                "pin to quick access",
+                "fixar no acesso rápido",
+                "restore previous versions",
+                "restaurar versões anteriores",
+                "copy as path",
+                "copiar como caminho",
+                "create shortcut",
+                "criar atalho",
+            ];
+            if BLACKLIST.iter().any(|&t| lower.contains(t)) {
+                return None;
+            }
 
-        // 1. Find the ShellMenuItem recursively
-        fn find_shell_item_mut(items: &mut [ShellMenuItem], id: u32) -> Option<&mut ShellMenuItem> {
+            let icon = item.icon_rgba.as_ref().map(|(rgba, w, h)| {
+                ui_ctx.load_texture(
+                    format!("menu_icon_{}", item.id),
+                    egui::ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], rgba),
+                    Default::default(),
+                )
+            });
+
+            let sub_items = item.sub_items.iter().filter_map(|s| convert(ui_ctx, s)).collect();
+
+            Some(ContextMenuItem {
+                id: item.id as i32,
+                text: item.text.clone(),
+                icon,
+                sub_items,
+                is_separator: item.is_separator,
+                is_enabled: item.is_enabled,
+                is_primary: false,
+                keyboard_shortcut: None,
+                command_string: item.command_string.clone(),
+                show_in_overflow: false,
+                has_pending_submenu: item.has_submenu,
+            })
+        }
+
+        let mut visible = Vec::new();
+        let mut overflow = Vec::new();
+
+        for raw in &shell_items {
+            if let Some(item) = convert(ctx, raw) {
+                if !item.sub_items.is_empty() || item.has_pending_submenu {
+                    visible.push(item);
+                } else if !item.is_separator {
+                    overflow.push(item);
+                }
+            }
+        }
+
+        let items = &mut self.context_menu.items;
+
+        if !visible.is_empty() {
+            items.push(ContextMenuItem::separator());
+            items.extend(visible);
+        }
+        if !overflow.is_empty() {
+            items.push(ContextMenuItem::separator());
+            items.push(ContextMenuItem::new(-99, "Mostrar mais opções").with_subitems(overflow));
+        }
+
+        self.shell_menu_loading = false;
+    }
+
+    pub fn handle_lazy_submenu_load(&mut self, _egui_ctx: &egui::Context, item_id: i32) {
+        // The ShellMenuContext now lives exclusively on the worker thread.
+        // Send a LoadSubmenu request; the SubmenuLoaded response is processed in
+        // the update-loop polling code which calls `apply_async_submenu_items`.
+        let _ = self.shell_menu_req_tx.send(
+            crate::infrastructure::shell_menu_worker::ShellMenuRequest::LoadSubmenu {
+                item_id: item_id as u32,
+            },
+        );
+        // Re-open the polling gate so the SubmenuLoaded response is picked up.
+        self.shell_menu_loading = true;
+    }
+
+    /// Merge lazily-loaded submenu items (received from the worker) into the context menu tree.
+    pub fn apply_async_submenu_items(
+        &mut self,
+        item_id: u32,
+        sub_items: Vec<crate::infrastructure::shell_menu_worker::ShellMenuItemData>,
+        ctx: &egui::Context,
+    ) {
+        use crate::application::context_menu::ContextMenuItem;
+        use crate::infrastructure::shell_menu_worker::ShellMenuItemData;
+
+        fn convert_item(ui_ctx: &egui::Context, item: &ShellMenuItemData) -> ContextMenuItem {
+            let icon = item.icon_rgba.as_ref().map(|(rgba, w, h)| {
+                ui_ctx.load_texture(
+                    format!("menu_icon_{}", item.id),
+                    egui::ColorImage::from_rgba_unmultiplied([*w as usize, *h as usize], rgba),
+                    Default::default(),
+                )
+            });
+            ContextMenuItem {
+                id: item.id as i32,
+                text: item.text.clone(),
+                icon,
+                sub_items: item.sub_items.iter().map(|s| convert_item(ui_ctx, s)).collect(),
+                is_separator: item.is_separator,
+                is_enabled: item.is_enabled,
+                is_primary: false,
+                keyboard_shortcut: None,
+                command_string: item.command_string.clone(),
+                show_in_overflow: false,
+                has_pending_submenu: item.has_submenu,
+            }
+        }
+
+        fn update_ui_item(
+            items: &mut [ContextMenuItem],
+            id: i32,
+            new_subitems: Vec<ContextMenuItem>,
+        ) -> bool {
             for item in items {
                 if item.id == id {
-                    return Some(item);
+                    item.sub_items = new_subitems;
+                    item.has_pending_submenu = false;
+                    return true;
                 }
-                if let Some(found) = find_shell_item_mut(&mut item.sub_items, id) {
-                    return Some(found);
+                if update_ui_item(&mut item.sub_items, id, new_subitems.clone()) {
+                    return true;
                 }
             }
-            None
+            false
         }
 
-        let mut items = shell_ctx.items.borrow_mut();
-        if let Some(shell_item) = find_shell_item_mut(&mut items, item_id as u32) {
-            if shell_ctx.load_pending_submenu(shell_item) {
-                // 2. Success! Now update the ContextMenuItem tree
-                fn convert_item(
-                    ui_ctx: &egui::Context,
-                    shell_item: &ShellMenuItem,
-                ) -> ContextMenuItem {
-                    let icon = shell_item.icon_rgba.as_ref().map(|(rgba, w, h)| {
-                        ui_ctx.load_texture(
-                            format!("menu_icon_{}", shell_item.id),
-                            egui::ColorImage::from_rgba_unmultiplied(
-                                [*w as usize, *h as usize],
-                                rgba,
-                            ),
-                            Default::default(),
-                        )
-                    });
-
-                    ContextMenuItem {
-                        id: shell_item.id as i32,
-                        text: shell_item.text.clone(),
-                        icon,
-                        sub_items: shell_item
-                            .sub_items
-                            .iter()
-                            .map(|s| convert_item(ui_ctx, s))
-                            .collect(),
-                        is_separator: shell_item.is_separator,
-                        is_enabled: shell_item.is_enabled,
-                        is_primary: false,
-                        keyboard_shortcut: None,
-                        command_string: shell_item.command_string.clone(),
-                        show_in_overflow: false,
-                        has_pending_submenu: shell_item.pending_submenu_handle.is_some(),
-                    }
-                }
-
-                fn update_ui_item(
-                    items: &mut [ContextMenuItem],
-                    id: i32,
-                    new_subitems: Vec<ContextMenuItem>,
-                ) -> bool {
-                    for item in items {
-                        if item.id == id {
-                            item.sub_items = new_subitems;
-                            item.has_pending_submenu = false;
-                            return true;
-                        }
-                        if update_ui_item(&mut item.sub_items, id, new_subitems.clone()) {
-                            return true;
-                        }
-                    }
-                    false
-                }
-
-                let new_subitems: Vec<ContextMenuItem> = shell_item
-                    .sub_items
-                    .iter()
-                    .map(|s| convert_item(egui_ctx, s))
-                    .collect();
-                update_ui_item(&mut self.context_menu.items, item_id, new_subitems);
-            }
-        }
+        let new_subitems: Vec<ContextMenuItem> =
+            sub_items.iter().map(|s| convert_item(ctx, s)).collect();
+        update_ui_item(&mut self.context_menu.items, item_id as i32, new_subitems);
     }
 }

@@ -1,0 +1,228 @@
+//! Background worker for Windows Shell context menu extraction and invocation.
+//!
+//! Shell extensions (antivirus, cloud sync) can block `IContextMenu::QueryContextMenu`
+//! for 1–10+ seconds. This worker runs in a dedicated STA COM thread so those
+//! blocking calls never reach the UI thread.
+//!
+//! ## Threading model
+//! - The worker thread is the ONLY thread that creates or uses `IContextMenu` objects.
+//! - `ShellMenuItemData` (the send-safe result type) carries no COM handles.
+//! - Command invocation is also sent to this thread — it reuses the stored COM context.
+
+use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver, Sender};
+
+use windows::Win32::Foundation::HWND;
+use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+
+use crate::infrastructure::windows::native_menu::{
+    extract_shell_menu, invoke_menu_command, is_known_verb, ShellMenuItem,
+};
+
+// ── Public request / response types ────────────────────────────────────────
+
+/// Commands sent to the shell menu worker thread.
+pub enum ShellMenuRequest {
+    /// Extract the context menu for `paths`. The worker replies with `Ready` or `Error`.
+    Extract {
+        hwnd_isize: isize,
+        paths: Vec<PathBuf>,
+    },
+    /// Invoke a previously extracted shell command (positive `id` from the menu).
+    Invoke {
+        command_id: u32,
+        menu_x: i32,
+        menu_y: i32,
+        hwnd_isize: isize,
+    },
+    /// Discard the active `ShellMenuContext` (menu was dismissed without a command).
+    Cancel,
+    /// Expand a pending submenu for `item_id` (triggered by hover on a lazy item).
+    LoadSubmenu {
+        item_id: u32,
+    },
+}
+
+/// Send-safe representation of a `ShellMenuItem` — carries no COM handles or OS handles.
+#[derive(Clone)]
+pub struct ShellMenuItemData {
+    pub id: u32,
+    pub text: String,
+    /// Raw RGBA pixels + dimensions, ready to upload to the GPU.
+    pub icon_rgba: Option<(Vec<u8>, u32, u32)>,
+    pub sub_items: Vec<ShellMenuItemData>,
+    pub is_separator: bool,
+    pub is_enabled: bool,
+    pub command_string: Option<String>,
+    /// True when a submenu exists (but HMENU is not forwarded across threads).
+    pub has_submenu: bool,
+}
+
+impl ShellMenuItemData {
+    fn from_shell_item(item: &ShellMenuItem) -> Self {
+        Self {
+            id: item.id,
+            text: item.text.clone(),
+            icon_rgba: item.icon_rgba.clone(),
+            sub_items: item.sub_items.iter().map(Self::from_shell_item).collect(),
+            is_separator: item.is_separator,
+            is_enabled: item.is_enabled,
+            command_string: item.command_string.clone(),
+            has_submenu: item.pending_submenu_handle.is_some() && item.sub_items.is_empty(),
+        }
+    }
+}
+
+/// Responses sent back from the worker to the UI thread.
+pub enum ShellMenuResponse {
+    /// Extraction complete; these items can be merged into the context menu.
+    Ready(Vec<ShellMenuItemData>),
+    /// Extraction failed (e.g. no shell extensions registered).
+    Error(String),
+    /// A shell command was invoked (informational only; no result needed).
+    Invoked,
+    /// Submenu for `item_id` was lazily loaded; replace its sub_items in the UI.
+    SubmenuLoaded {
+        item_id: u32,
+        sub_items: Vec<ShellMenuItemData>,
+    },
+}
+
+// ── Worker startup ──────────────────────────────────────────────────────────
+
+/// Starts the dedicated shell menu STA thread.
+/// Returns a `Sender` to send requests and a `Receiver` to collect responses.
+pub fn start_shell_menu_worker() -> (Sender<ShellMenuRequest>, Receiver<ShellMenuResponse>) {
+    let (req_tx, req_rx) = mpsc::channel::<ShellMenuRequest>();
+    let (res_tx, res_rx) = mpsc::channel::<ShellMenuResponse>();
+
+    std::thread::Builder::new()
+        .name("shell-menu-worker".into())
+        .spawn(move || shell_menu_loop(req_rx, res_tx))
+        .expect("failed to spawn shell-menu-worker thread");
+
+    (req_tx, res_rx)
+}
+
+// ── Worker loop (runs on its own STA thread) ────────────────────────────────
+
+struct ComGuard;
+
+impl ComGuard {
+    fn init_sta() -> Self {
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        }
+        Self
+    }
+}
+
+impl Drop for ComGuard {
+    fn drop(&mut self) {
+        unsafe { CoUninitialize() }
+    }
+}
+
+fn shell_menu_loop(rx: Receiver<ShellMenuRequest>, tx: Sender<ShellMenuResponse>) {
+    let _com = ComGuard::init_sta();
+    // Active shell context — kept alive between Extract and Invoke/Cancel.
+    let mut active_ctx: Option<crate::infrastructure::windows::native_menu::ShellMenuContext> =
+        None;
+
+    while let Ok(req) = rx.recv() {
+        match req {
+            ShellMenuRequest::Extract { hwnd_isize, paths } => {
+                // Drop any previous context before starting a new extraction.
+                active_ctx = None;
+
+                let hwnd = HWND(hwnd_isize as *mut _);
+                match extract_shell_menu(hwnd, &paths) {
+                    Ok(ctx) => {
+                        let items: Vec<ShellMenuItemData> = ctx
+                            .items
+                            .borrow()
+                            .iter()
+                            .filter(|item| {
+                                // Filter known verbs so we don't duplicate internal items.
+                                if let Some(ref verb) = item.command_string {
+                                    if is_known_verb(verb) {
+                                        return false;
+                                    }
+                                }
+                                true
+                            })
+                            .map(ShellMenuItemData::from_shell_item)
+                            .collect();
+
+                        active_ctx = Some(ctx);
+                        let _ = tx.send(ShellMenuResponse::Ready(items));
+                    }
+                    Err(e) => {
+                        let _ = tx.send(ShellMenuResponse::Error(e.to_string()));
+                    }
+                }
+            }
+
+            ShellMenuRequest::Invoke {
+                command_id,
+                menu_x,
+                menu_y,
+                hwnd_isize,
+            } => {
+                let hwnd = HWND(hwnd_isize as *mut _);
+                if let Some(ref ctx) = active_ctx {
+                    let _ = invoke_menu_command(
+                        hwnd,
+                        &ctx.context_menu,
+                        command_id,
+                        menu_x,
+                        menu_y,
+                    );
+                } else {
+                    log::warn!("[ShellMenuWorker] Invoke called with no active context");
+                }
+                // Context is still valid until the menu closes — keep it alive.
+                let _ = tx.send(ShellMenuResponse::Invoked);
+            }
+
+            ShellMenuRequest::Cancel => {
+                active_ctx = None;
+                // No response needed.
+            }
+
+            ShellMenuRequest::LoadSubmenu { item_id } => {
+                if let Some(ref ctx) = active_ctx {
+                    fn find_item_mut(
+                        items: &mut Vec<crate::infrastructure::windows::native_menu::ShellMenuItem>,
+                        id: u32,
+                    ) -> Option<&mut crate::infrastructure::windows::native_menu::ShellMenuItem>
+                    {
+                        for item in items.iter_mut() {
+                            if item.id == id {
+                                return Some(item);
+                            }
+                            if let Some(found) = find_item_mut(&mut item.sub_items, id) {
+                                return Some(found);
+                            }
+                        }
+                        None
+                    }
+
+                    let mut items_guard = ctx.items.borrow_mut();
+                    if let Some(shell_item) = find_item_mut(&mut items_guard, item_id) {
+                        if ctx.load_pending_submenu(shell_item) {
+                            let sub_items = shell_item
+                                .sub_items
+                                .iter()
+                                .map(ShellMenuItemData::from_shell_item)
+                                .collect();
+                            let _ = tx.send(ShellMenuResponse::SubmenuLoaded { item_id, sub_items });
+                        }
+                    }
+                } else {
+                    log::warn!("[ShellMenuWorker] LoadSubmenu called with no active context");
+                }
+            }
+        }
+    }
+}

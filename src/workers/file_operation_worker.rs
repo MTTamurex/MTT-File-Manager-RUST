@@ -94,6 +94,12 @@ pub(crate) enum FileOperationRequest {
     EmptyRecycleBin {
         hwnd: SendHwnd,
     },
+    /// Show Windows Properties dialog for a set of paths.
+    /// Fire-and-forget: SHObjectProperties opens a modeless dialog.
+    ShowProperties {
+        paths: Vec<PathBuf>,
+        hwnd: SendHwnd,
+    },
 }
 
 impl FileOperationRequest {
@@ -128,6 +134,12 @@ impl FileOperationRequest {
         Self::MoveBatch {
             paths,
             dest_folder,
+            hwnd: SendHwnd(hwnd),
+        }
+    }
+    pub fn show_properties(paths: Vec<PathBuf>, hwnd: HWND) -> Self {
+        Self::ShowProperties {
+            paths,
             hwnd: SendHwnd(hwnd),
         }
     }
@@ -276,6 +288,11 @@ pub(crate) fn start_file_operation_worker(
                 } => handlers::handle_delete_permanently(physical_paths, hwnd, &result_sender),
                 FileOperationRequest::EmptyRecycleBin { hwnd } => {
                     handlers::handle_empty_recycle_bin(hwnd, &result_sender);
+                }
+                FileOperationRequest::ShowProperties { paths, hwnd } => {
+                    handlers::handle_show_properties(paths, hwnd);
+                    // No Finished message — fire-and-forget, dialog manages itself
+                    continue;
                 }
             }
 
