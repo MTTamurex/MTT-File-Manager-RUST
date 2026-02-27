@@ -218,6 +218,8 @@ impl UserSessionSearchIndex {
         }
 
         let query_lower = query.to_lowercase();
+        // Split into tokens; a single-word query produces one token (same behaviour as before).
+        let tokens: Vec<&str> = query_lower.split_whitespace().collect();
         let mut results = Vec::with_capacity(limit.min(128));
         let mut matched = 0usize;
 
@@ -227,7 +229,7 @@ impl UserSessionSearchIndex {
                     continue;
                 }
 
-                if !item.name_lower.contains(&query_lower) {
+                if !tokens.iter().all(|token| item.name_lower.contains(token)) {
                     continue;
                 }
 

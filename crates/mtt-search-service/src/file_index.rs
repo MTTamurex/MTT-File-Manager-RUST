@@ -184,6 +184,14 @@ fn contains_case_insensitive(haystack: &str, needle_lower: &str) -> bool {
     haystack_lower.contains(needle_lower)
 }
 
+/// Returns `true` if all whitespace-separated tokens in `tokens` appear
+/// (case-insensitively) somewhere in `haystack`.
+/// Single-token slices behave identically to the old `contains_case_insensitive` call.
+#[inline]
+fn matches_all_tokens(haystack: &str, tokens: &[&str]) -> bool {
+    tokens.iter().all(|token| contains_case_insensitive(haystack, token))
+}
+
 /// Search the indices for files matching a query string.
 /// Returns one page (`offset`, `limit`) of matching records with resolved paths.
 /// Enforces a time limit to avoid holding locks indefinitely on cold memory.
@@ -202,6 +210,8 @@ pub fn search_page(
     }
 
     let query_lower = query.to_lowercase();
+    // Split into tokens; a single-word query produces one token (same behaviour as before).
+    let tokens: Vec<&str> = query_lower.split_whitespace().collect();
     let mut items = Vec::with_capacity(limit.min(1000));
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
     let mut scanned: u64 = 0;
@@ -230,7 +240,7 @@ pub fn search_page(
 
             let name = index.names.get(record.name_ref());
 
-            if contains_case_insensitive(name, &query_lower) {
+            if matches_all_tokens(name, &tokens) {
                 if let Some(full_path) = path_resolver::resolve_path_cached(frn, index, &mut dir_path_cache) {
                     if matched_after_filters < offset {
                         matched_after_filters += 1;
