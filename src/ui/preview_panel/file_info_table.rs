@@ -24,9 +24,10 @@ pub fn render_file_info_table(
             ui.horizontal(|ui| {
                 ui.add_space(5.0);
 
-                // Show button for: files (non-folders) that are not drives, OR for folders (to refresh preview)
-                let has_button = (!file.is_dir && file.drive_info.is_none())
-                    || (file.is_dir && !file.is_archive());
+                // Show refresh button only for image/video files that generate thumbnails.
+                // Folders and drives do not get this button.
+                let has_button =
+                    !file.is_dir && file.drive_info.is_none() && file.is_media();
                 // Reserve space for button if needed
                 let button_width = if has_button { 22.0 } else { 0.0 };
                 // Calculate available width for text
@@ -44,46 +45,35 @@ pub fn render_file_info_table(
                     },
                 );
 
-                // 2. Refresh Button (Right aligned)
+                // 2. Refresh Button (Right aligned) — only for media files
                 if has_button {
-                    // Show refresh button for media files OR folders (in grid view with preview)
-                    let is_media = file.is_media();
-                    let is_folder = file.is_dir && !file.is_archive();
-
-                    if is_media || is_folder {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                            ui.add_space(5.0); // Spacing between text and button
-                            let icon_color = if ui.visuals().dark_mode {
-                                [220, 220, 220, 255]
-                            } else {
-                                [60, 60, 60, 255]
-                            };
-                            if let Some(tex) =
-                                svg_manager.get_icon(ui.ctx(), "refresh", 32, icon_color)
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                        ui.add_space(5.0); // Spacing between text and button
+                        let icon_color = if ui.visuals().dark_mode {
+                            [220, 220, 220, 255]
+                        } else {
+                            [60, 60, 60, 255]
+                        };
+                        if let Some(tex) =
+                            svg_manager.get_icon(ui.ctx(), "refresh", 32, icon_color)
+                        {
+                            if ui
+                                .add(
+                                    egui::ImageButton::new(egui::load::SizedTexture::new(
+                                        tex.id(),
+                                        egui::vec2(16.0, 16.0),
+                                    ))
+                                    .frame(false),
+                                )
+                                .on_hover_text("Recarregar Thumbnail")
+                                .clicked()
                             {
-                                let hover_text = if is_folder {
-                                    "Recarregar Preview da Pasta"
-                                } else {
-                                    "Recarregar Thumbnail"
-                                };
-                                if ui
-                                    .add(
-                                        egui::ImageButton::new(egui::load::SizedTexture::new(
-                                            tex.id(),
-                                            egui::vec2(16.0, 16.0),
-                                        ))
-                                        .frame(false),
-                                    )
-                                    .on_hover_text(hover_text)
-                                    .clicked()
-                                {
-                                    action = Some(PreviewPanelAction::RefreshThumbnail(
-                                        file.path.clone(),
-                                    ));
-                                }
+                                action = Some(PreviewPanelAction::RefreshThumbnail(
+                                    file.path.clone(),
+                                ));
                             }
-                        });
-                    }
+                        }
+                    });
                 }
             });
             ui.add_space(10.0);
