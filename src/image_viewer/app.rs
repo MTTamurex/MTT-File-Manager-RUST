@@ -18,8 +18,6 @@ struct GifAnimation {
     delays_ms: Vec<u32>,
     current_frame: usize,
     frame_started: std::time::Instant,
-    width: u32,
-    height: u32,
 }
 
 pub struct DedicatedImageViewerApp {
@@ -271,8 +269,6 @@ impl DedicatedImageViewerApp {
                     delays_ms: delays,
                     current_frame: 0,
                     frame_started: std::time::Instant::now(),
-                    width: w,
-                    height: h,
                 });
                 self.image_resolution = Some((w, h));
             }
