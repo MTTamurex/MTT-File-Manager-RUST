@@ -103,30 +103,29 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 }
             }
 
-            if let Some(native_ctx) = &context_menu.native_context {
-                if let Some(shell_ctx) = native_ctx.downcast_ref::<crate::infrastructure::windows::native_menu::ShellMenuContext>() {
-                    let shell_result = crate::infrastructure::windows::native_menu::invoke_menu_command(
-                        app.native_hwnd.unwrap_or_default(),
-                        &shell_ctx.context_menu,
-                        id as u32,
-                        context_menu.position.x as i32,
-                        context_menu.position.y as i32,
-                    );
+            if let Some(hwnd) = app.native_hwnd {
+                // Dispatch to the worker thread — no blocking on the UI thread.
+                let _ = app.shell_menu_req_tx.send(
+                    crate::infrastructure::shell_menu_worker::ShellMenuRequest::Invoke {
+                        command_id: id as u32,
+                        menu_x: context_menu.position.x as i32,
+                        menu_y: context_menu.position.y as i32,
+                        hwnd_isize: hwnd.0 as isize,
+                    },
+                );
 
-                    // Fallback for OneDrive pin-state commands when shell invoke fails silently.
-                    if shell_result.is_err() {
-                        if let Some(text) = selected_shell_item_text.as_deref() {
-                            let command = onedrive_pin_command_from_text(text);
-
-                            if let Some(command) = command {
-                                for path in &target_paths {
-                                    let _ = crate::infrastructure::onedrive::set_pin_state(path, command);
-                                }
-                                app.directory_cache.invalidate(&std::path::PathBuf::from(&app.navigation_state.current_path));
-                                app.loaded_path.clear();
-                                app.load_folder(false);
-                            }
+                // OneDrive pin fallback: apply the managed command in addition to
+                // the shell invoke (some OneDrive shell extensions fire silently).
+                if let Some(text) = selected_shell_item_text.as_deref() {
+                    if let Some(command) = onedrive_pin_command_from_text(text) {
+                        for path in &target_paths {
+                            let _ = crate::infrastructure::onedrive::set_pin_state(path, command);
                         }
+                        app.directory_cache.invalidate(&std::path::PathBuf::from(
+                            &app.navigation_state.current_path,
+                        ));
+                        app.loaded_path.clear();
+                        app.load_folder(false);
                     }
                 }
             }
@@ -249,6 +248,13 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
             }
         }
         context_menu.close();
+    } else if !context_menu.is_open {
+        // Menu was dismissed without any command being invoked (Escape / click outside).
+        // Tell the worker to release its COM context.
+        let _ = app.shell_menu_req_tx.send(
+            crate::infrastructure::shell_menu_worker::ShellMenuRequest::Cancel,
+        );
+        app.shell_menu_loading = false;
     }
     app.context_menu = context_menu;
 }

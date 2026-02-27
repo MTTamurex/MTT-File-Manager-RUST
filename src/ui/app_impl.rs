@@ -108,6 +108,31 @@ impl eframe::App for ImageViewerApp {
         // Poll background icon extractions (sidebar drive/folder icons)
         self.item_icon_loader.poll_async_icons(ctx);
 
+        // Poll shell menu worker results (async extraction / lazy submenu loading)
+        if self.shell_menu_loading {
+            use crate::infrastructure::shell_menu_worker::ShellMenuResponse;
+            while let Ok(response) = self.shell_menu_res_rx.try_recv() {
+                match response {
+                    ShellMenuResponse::Ready(items) => {
+                        if self.context_menu.is_open {
+                            let ctx_clone = ctx.clone();
+                            self.apply_async_shell_items(items, &ctx_clone);
+                        }
+                        self.shell_menu_loading = false;
+                    }
+                    ShellMenuResponse::Error(e) => {
+                        log::debug!("[ShellMenu] Extraction error: {}", e);
+                        self.shell_menu_loading = false;
+                    }
+                    ShellMenuResponse::SubmenuLoaded { item_id, sub_items } => {
+                        let ctx_clone = ctx.clone();
+                        self.apply_async_submenu_items(item_id, sub_items, &ctx_clone);
+                    }
+                    ShellMenuResponse::Invoked => {}
+                }
+            }
+        }
+
         // 4. Input: Keyboard shortcuts (resize borders handled by native subclass)
         if !is_in_size_move {
             app::input::handle_input(self, ctx);

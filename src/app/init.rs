@@ -145,6 +145,10 @@ impl ImageViewerApp {
         // Determine initial path based on last saved folder
         let (initial_path, is_computer_view_initial) = determine_initial_path(&disk_cache);
 
+        // Start the dedicated shell menu worker (STA COM thread for async extraction).
+        let (shell_menu_req_tx, shell_menu_res_rx) =
+            crate::infrastructure::shell_menu_worker::start_shell_menu_worker();
+
         // Create tab manager with the initial path
         let mut tab_manager = if is_computer_view_initial {
             crate::tabs::TabManager::new()
@@ -222,6 +226,7 @@ impl ImageViewerApp {
             drag_source_folder: None,
             drag_target_folder: None,
             drag_hovered_folder: None,
+            drag_icon_cache: None,
             total_items: 0,
             // Search & Navigation (NEW)
             all_items: Vec::new(),
@@ -265,6 +270,9 @@ impl ImageViewerApp {
 
             // CONTEXT MENU STATE
             context_menu: ContextMenuState::new(),
+            shell_menu_req_tx,
+            shell_menu_res_rx,
+            shell_menu_loading: false,
 
             // PERSISTENT ICON LOADER
             item_icon_loader: {

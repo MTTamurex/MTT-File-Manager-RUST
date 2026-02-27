@@ -58,6 +58,37 @@ impl ImageViewerApp {
         self.drag_source_folder = Some(PathBuf::from(&self.navigation_state.current_path));
         self.drag_target_folder = None;
         self.drag_hovered_folder = None;
+
+        // Pre-cache the drag icon once — avoids blocking Shell calls every frame in render.
+        let ui_ctx = self.ui_ctx.clone();
+        let primary_item = self
+            .drag_payload_paths
+            .first()
+            .and_then(|p| self.items.iter().find(|it| &it.path == p))
+            .cloned();
+        self.drag_icon_cache = if let Some(ref primary) = primary_item {
+            if primary.drive_info.is_some() {
+                self.item_icon_loader
+                    .get_or_load_drive_icon(&ui_ctx, &primary.path.to_string_lossy())
+            } else if primary.is_dir && !primary.is_archive() {
+                let from_loader =
+                    self.item_icon_loader
+                        .get_or_load_icon(&ui_ctx, &primary.path, true, true);
+                from_loader.or_else(|| self.cache_manager.folder_icon_texture.clone())
+            } else if primary.is_media() {
+                let from_cache = self.cache_manager.texture_cache.get(&primary.path).cloned();
+                from_cache.or_else(|| {
+                    self.item_icon_loader
+                        .get_or_load_icon(&ui_ctx, &primary.path, false, true)
+                })
+            } else {
+                self.item_icon_loader
+                    .get_or_load_icon(&ui_ctx, &primary.path, false, true)
+            }
+        } else {
+            None
+        };
+
         self.ui_ctx.request_repaint();
     }
 
@@ -156,28 +187,8 @@ impl ImageViewerApp {
                 item.name.clone()
             };
 
-            // allow_blocking = true: drag preview is a single icon (not in scroll loop),
-            // so blocking Shell API calls are acceptable for reliability.
-            let icon_texture = if item.drive_info.is_some() {
-                self.item_icon_loader
-                    .get_or_load_drive_icon(ctx, &item.path.to_string_lossy())
-            } else if item.is_dir && !item.is_archive() {
-                self.item_icon_loader
-                    .get_or_load_icon(ctx, &item.path, true, true)
-                    .or_else(|| self.cache_manager.folder_icon_texture.clone())
-            } else if item.is_media() {
-                self.cache_manager
-                    .texture_cache
-                    .get(&item.path)
-                    .cloned()
-                    .or_else(|| {
-                        self.item_icon_loader
-                            .get_or_load_icon(ctx, &item.path, false, true)
-                    })
-            } else {
-                self.item_icon_loader
-                    .get_or_load_icon(ctx, &item.path, false, true)
-            };
+            // Use pre-cached icon (loaded once in begin_item_drag) — no Shell calls per frame.
+            let icon_texture = self.drag_icon_cache.clone();
 
             (display_name, icon_texture)
         } else {
@@ -349,6 +360,7 @@ impl ImageViewerApp {
         self.is_item_dragging = false;
         self.drag_target_folder = None;
         self.drag_hovered_folder = None;
+        self.drag_icon_cache = None;
 
         // Clear selection so the detail panel updates to show folder info
         // instead of stale references to the moved/copied items.
@@ -388,6 +400,7 @@ impl ImageViewerApp {
         self.drag_source_folder = None;
         self.drag_target_folder = None;
         self.drag_hovered_folder = None;
+        self.drag_icon_cache = None;
     }
 
     fn collect_drag_payload(&self, item_idx: usize) -> Vec<PathBuf> {

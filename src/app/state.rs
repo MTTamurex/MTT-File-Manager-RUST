@@ -136,6 +136,8 @@ pub struct ImageViewerApp {
     pub drag_source_folder: Option<PathBuf>,
     pub drag_target_folder: Option<PathBuf>,
     pub drag_hovered_folder: Option<PathBuf>,
+    /// Icon pre-loaded when drag starts — avoids blocking Shell calls in the render loop.
+    pub drag_icon_cache: Option<egui::TextureHandle>,
     pub selected_thumbnail: Option<egui::TextureHandle>, // Persistent thumbnail for preview panel
     pub selected_gif: Option<crate::ui::components::media_preview::GifPlayer>, // Local GIF for preview panel
     pub media_preview: Option<MediaPreview>, // Global media preview (video/image)
@@ -210,6 +212,12 @@ pub struct ImageViewerApp {
 
     // CONTEXT MENU STATE
     pub context_menu: ContextMenuState,
+    /// Channel to send requests to the shell menu background thread (async extraction).
+    pub shell_menu_req_tx: std::sync::mpsc::Sender<crate::infrastructure::shell_menu_worker::ShellMenuRequest>,
+    /// Channel to receive results from the shell menu background thread.
+    pub shell_menu_res_rx: std::sync::mpsc::Receiver<crate::infrastructure::shell_menu_worker::ShellMenuResponse>,
+    /// True while the background thread is extracting shell items for the active menu.
+    pub shell_menu_loading: bool,
 
     // PERSISTENT ICON LOADER (avoids creating a new one each frame)
     pub item_icon_loader: IconLoader,
