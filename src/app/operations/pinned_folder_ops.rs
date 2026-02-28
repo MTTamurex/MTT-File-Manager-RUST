@@ -37,6 +37,22 @@ impl ImageViewerApp {
         self.disk_cache.update_pinned_positions(&ordered);
     }
 
+    /// Remove pinned folders whose paths no longer exist on disk.
+    /// Called after delete/move operations to keep Quick Access in sync.
+    pub fn cleanup_deleted_pinned_folders(&mut self) {
+        let gone: Vec<String> = self
+            .pinned_folders
+            .iter()
+            .filter(|pf| !std::path::Path::new(&pf.path).exists())
+            .map(|pf| pf.path.clone())
+            .collect();
+
+        for path in gone {
+            log::info!("[PinnedFolders] Auto-removing deleted folder: {}", path);
+            self.unpin_folder(&path);
+        }
+    }
+
     /// Reorder pinned folders by moving item at `from` to position `to`.
     pub fn reorder_pinned_folder(&mut self, from: usize, to: usize) {
         if from == to || from >= self.pinned_folders.len() {

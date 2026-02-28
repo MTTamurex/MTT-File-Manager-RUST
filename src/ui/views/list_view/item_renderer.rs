@@ -81,7 +81,11 @@ pub(super) fn render_list_item(
             *ctx.drag_started_item = Some(i);
         }
         let is_pointer_over = response.contains_pointer() || response.hovered();
-        if is_pointer_over && item.is_dir {
+        // For drag-hover detection use ONLY contains_pointer() (geometric check).
+        // response.hovered() stays locked to the drag-source widget in egui,
+        // so when the source is rendered AFTER the real target (target is above),
+        // it would overwrite drag_hovered_item → wrong target → denied cursor.
+        if response.contains_pointer() && item.is_dir {
             *ctx.drag_hovered_item = Some(i);
         }
 

@@ -23,6 +23,9 @@ pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
 
+            // Remove pinned folders that were deleted while the app was closed
+            app.cleanup_deleted_pinned_folders();
+
             // FINAL INITIALIZATION: Now that the UI is ready, ensure the initial tab is populated
             if app.navigation_state.is_computer_view {
                 app.setup_computer_view();
