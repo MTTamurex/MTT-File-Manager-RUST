@@ -67,7 +67,7 @@ impl ImageViewerApp {
             Self::normalize_for_match(Path::new(&self.navigation_state.current_path));
 
         // BLOCKING: Process all available file operation results in batch
-        self.process_file_operation_results(&current_path_norm);
+        self.process_file_operation_results(&current_path_norm, ctx);
 
         // 2. CHECK DE AUTO-REFRESH (WATCHER)
         let watcher_perf = self.process_watcher_events_and_auto_reload(&current_path_norm);

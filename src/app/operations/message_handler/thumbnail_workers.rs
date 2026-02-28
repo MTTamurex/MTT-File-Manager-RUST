@@ -114,6 +114,7 @@ impl ImageViewerApp {
         // Phase 1: Drain ALL pre-warm results eagerly (no budget limit).
         // Pre-warm results use usize::MAX generation and fake paths.
         // We only need to populate extension_cache, skip icon_cache.
+        let mut phase1_processed_regular = false;
         loop {
             match self.icon_res_receiver.try_recv() {
                 Ok((path, icon_generation, pixels, width, height)) => {
@@ -147,6 +148,7 @@ impl ImageViewerApp {
                     // Non-pre-warm result found — push back for Phase 2.
                     // We can't push back into mpsc, so process it inline.
                     self.process_single_icon_result(ctx, path, icon_generation, pixels, width, height);
+                    phase1_processed_regular = true;
                     break; // Switch to budgeted Phase 2.
                 }
                 Err(_) => break, // Channel empty.
@@ -164,8 +166,8 @@ impl ImageViewerApp {
             Duration::from_millis(6)
         };
         let start = Instant::now();
-        let mut icon_uploads = 1; // Count the one already processed above.
-        let mut processed_messages = 1usize;
+        let mut icon_uploads = usize::from(phase1_processed_regular);
+        let mut processed_messages = usize::from(phase1_processed_regular);
         let mut has_more = false;
 
         while processed_messages < max_icon_messages && icon_uploads < max_icon_uploads {
@@ -247,7 +249,10 @@ impl ImageViewerApp {
             return;
         }
 
-        let cache_key = format!("{}_Large", path.to_string_lossy());
+        let path_text = path.to_string_lossy();
+        let mut cache_key = String::with_capacity(path_text.len() + 6);
+        cache_key.push_str(path_text.as_ref());
+        cache_key.push_str("_Large");
         if !self.item_icon_loader.icon_cache.contains(&cache_key) {
             let texture = ctx.load_texture(
                 cache_key.clone(),
@@ -262,7 +267,9 @@ impl ImageViewerApp {
             if let Some(ext) = path.extension() {
                 let ext_str = ext.to_string_lossy().to_lowercase();
                 if !matches!(ext_str.as_str(), "exe" | "lnk" | "ico" | "cur" | "ani" | "com") {
-                    let ext_key = format!("{}_Large", ext_str);
+                    let mut ext_key = String::with_capacity(ext_str.len() + 6);
+                    ext_key.push_str(&ext_str);
+                    ext_key.push_str("_Large");
                     self.item_icon_loader
                         .extension_cache
                         .entry(ext_key)

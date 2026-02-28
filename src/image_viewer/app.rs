@@ -610,8 +610,8 @@ impl DedicatedImageViewerApp {
                 ui.with_layout(
                     egui::Layout::centered_and_justified(egui::Direction::TopDown),
                     |ui| {
-                        ui.add(egui::Spinner::new());
-                        ui.label("Loading image...");
+                        let available = ui.available_size();
+                        ui.allocate_response(available, egui::Sense::hover());
                     },
                 );
             }

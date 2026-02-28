@@ -2,51 +2,85 @@ use crate::app::state::ImageViewerApp;
 use crate::workers::file_operation_worker::FileOperationResult;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::TryRecvError;
+use std::time::{Duration, Instant};
 
 impl ImageViewerApp {
-    pub(super) fn process_file_operation_results(&mut self, current_path_norm: &str) {
-        loop {
+    pub(super) fn process_file_operation_results(
+        &mut self,
+        current_path_norm: &str,
+        ctx: &eframe::egui::Context,
+    ) {
+        const MAX_FILE_OP_RESULTS_PER_FRAME: usize = 96;
+        let budget = if self.frame_time_peak_ms > 33.33 {
+            Duration::from_millis(2)
+        } else if self.frame_time_peak_ms > 25.0 {
+            Duration::from_millis(3)
+        } else {
+            Duration::from_millis(5)
+        };
+
+        let start = Instant::now();
+        let mut processed = 0usize;
+        let mut has_more = false;
+
+        while processed < MAX_FILE_OP_RESULTS_PER_FRAME {
+            if start.elapsed() >= budget {
+                has_more = true;
+                break;
+            }
+
             match self.file_operation_state.file_op_res_receiver.try_recv() {
-                Ok(res) => match res {
-                    FileOperationResult::RenameCompleted {
-                        path,
-                        new_name,
-                        parent_folder,
-                    } => self.handle_rename_completed(
-                        path,
-                        new_name,
-                        parent_folder,
-                        current_path_norm,
-                    ),
-                    FileOperationResult::RecycleBinChanged => self.handle_recycle_bin_changed(),
-                    FileOperationResult::RestoreCompleted { parent_folders } => {
-                        self.handle_parent_folder_updates(parent_folders, current_path_norm)
+                Ok(res) => {
+                    processed += 1;
+                    match res {
+                        FileOperationResult::RenameCompleted {
+                            path,
+                            new_name,
+                            parent_folder,
+                        } => self.handle_rename_completed(
+                            path,
+                            new_name,
+                            parent_folder,
+                            current_path_norm,
+                        ),
+                        FileOperationResult::RecycleBinChanged => self.handle_recycle_bin_changed(),
+                        FileOperationResult::RestoreCompleted { parent_folders } => {
+                            self.handle_parent_folder_updates(parent_folders, current_path_norm)
+                        }
+                        FileOperationResult::DeleteCompleted { parent_folders } => {
+                            self.handle_parent_folder_updates(parent_folders, current_path_norm)
+                        }
+                        FileOperationResult::CopyCompleted { dest_folder } => {
+                            self.handle_copy_completed(dest_folder, current_path_norm)
+                        }
+                        FileOperationResult::MoveCompleted {
+                            source_folder,
+                            dest_folder,
+                        } => self.handle_move_completed(source_folder, dest_folder, current_path_norm),
+                        FileOperationResult::MoveBatchCompleted {
+                            source_folders,
+                            dest_folder,
+                            moved_files,
+                        } => self.handle_move_batch_completed(
+                            source_folders,
+                            dest_folder,
+                            moved_files,
+                            current_path_norm,
+                        ),
+                        FileOperationResult::Finished => self.handle_file_operation_finished(),
                     }
-                    FileOperationResult::DeleteCompleted { parent_folders } => {
-                        self.handle_parent_folder_updates(parent_folders, current_path_norm)
-                    }
-                    FileOperationResult::CopyCompleted { dest_folder } => {
-                        self.handle_copy_completed(dest_folder, current_path_norm)
-                    }
-                    FileOperationResult::MoveCompleted {
-                        source_folder,
-                        dest_folder,
-                    } => self.handle_move_completed(source_folder, dest_folder, current_path_norm),
-                    FileOperationResult::MoveBatchCompleted {
-                        source_folders,
-                        dest_folder,
-                        moved_files,
-                    } => self.handle_move_batch_completed(
-                        source_folders,
-                        dest_folder,
-                        moved_files,
-                        current_path_norm,
-                    ),
-                    FileOperationResult::Finished => self.handle_file_operation_finished(),
-                },
+                }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => break,
             }
+        }
+
+        if processed >= MAX_FILE_OP_RESULTS_PER_FRAME {
+            has_more = true;
+        }
+
+        if has_more {
+            ctx.request_repaint();
         }
     }
 

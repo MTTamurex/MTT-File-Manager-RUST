@@ -148,7 +148,7 @@ impl MediaPreview {
                     let max_size = egui::vec2(ui.available_width(), ui.available_height());
                     ui.add(egui::Image::new(texture).max_size(max_size).shrink_to_fit())
                 } else {
-                    ui.spinner()
+                    ui.allocate_response(ui.available_size(), egui::Sense::hover())
                 }
             }
             MediaPreview::Video(player) => {

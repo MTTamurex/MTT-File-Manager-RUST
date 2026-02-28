@@ -156,9 +156,8 @@ pub fn render_status_bar(
 
             // === BULK THUMBNAIL SCAN button ===
             if let Some((done, total)) = bulk_progress {
-                ui.spinner();
                 ui.label(
-                    egui::RichText::new(format!("{}/{}", done, total))
+                    egui::RichText::new(format!("Processando {}/{}", done, total))
                         .color(egui::Color32::BLACK)
                         .small()
                 );
@@ -224,7 +223,6 @@ pub fn render_status_bar(
 
             // === LEFT SIDE: Item count and loading status ===
             if *is_loading_folder {
-                ui.spinner();
                 ui.label("Carregando...");
             } else {
                 let item_text = if total_items == 1 {

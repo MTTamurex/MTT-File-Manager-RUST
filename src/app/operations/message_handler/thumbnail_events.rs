@@ -1,6 +1,6 @@
 use crate::app::state::ImageViewerApp;
 use eframe::egui;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 impl ImageViewerApp {
     pub(super) fn process_streaming_and_thumbnail_events(
@@ -85,16 +85,31 @@ impl ImageViewerApp {
         self.process_icon_worker_results(ctx);
         let t_icons = Instant::now();
 
-        // 4. Metadata worker results
-        self.process_metadata_worker_results(ctx);
-        let t_meta = Instant::now();
-
-        // 5. Thumbnails + folder previews upload pipeline
+        // 4. Thumbnails + folder previews upload pipeline (higher UX priority)
         let mut received_any = self.process_thumbnail_upload_pipeline(ctx);
         let t_thumbs = Instant::now();
 
-        // 6. Folder size updates
-        received_any |= self.process_folder_size_results();
+        // Under frame pressure, preserve smoothness by deferring lower-priority
+        // metadata/folder-size processing to subsequent frames.
+        let pressure_budget = if self.frame_time_peak_ms > 33.33 {
+            Duration::from_millis(10)
+        } else if self.frame_time_peak_ms > 25.0 {
+            Duration::from_millis(12)
+        } else {
+            Duration::from_millis(16)
+        };
+        let should_defer_low_priority = stream_start.elapsed() >= pressure_budget;
+
+        // 5. Metadata worker results (lower priority than visible media uploads)
+        if !should_defer_low_priority {
+            self.process_metadata_worker_results(ctx);
+        }
+        let t_meta = Instant::now();
+
+        // 6. Folder size updates (lowest priority in critical frames)
+        if !should_defer_low_priority {
+            received_any |= self.process_folder_size_results();
+        }
         let t_sizes = Instant::now();
 
         let total_ms = stream_start.elapsed().as_millis();
@@ -105,8 +120,8 @@ impl ImageViewerApp {
                 t_rebuild.duration_since(t_stream_recv).as_millis(),
                 streaming_done.duration_since(t_rebuild).as_millis(),
                 t_icons.duration_since(streaming_done).as_millis(),
-                t_meta.duration_since(t_icons).as_millis(),
-                t_thumbs.duration_since(t_meta).as_millis(),
+                t_meta.duration_since(t_thumbs).as_millis(),
+                t_thumbs.duration_since(t_icons).as_millis(),
                 t_sizes.duration_since(t_thumbs).as_millis(),
                 processed_batches,
                 self.pending_items_count,
@@ -118,6 +133,6 @@ impl ImageViewerApp {
             ctx.request_repaint();
         }
 
-        streaming_done
+        t_sizes
     }
 }

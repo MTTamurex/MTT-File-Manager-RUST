@@ -127,12 +127,15 @@ pub(super) fn render_grid_item(
                     ui.vertical(|ui| {
                         ui.label(egui::RichText::new(&item.name).strong());
                         ui.separator();
-                        ui.label(format!("Tipo: {}", get_file_type_string(item)));
+                        ui.horizontal(|ui| {
+                            ui.label("Tipo:");
+                            ui.label(get_file_type_string(item));
+                        });
                         if !item.is_dir || item.is_archive() {
-                            ui.label(format!(
-                                "Tamanho: {}",
-                                crate::infrastructure::windows::format_size(item.size)
-                            ));
+                            ui.horizontal(|ui| {
+                                ui.label("Tamanho:");
+                                ui.label(crate::infrastructure::windows::format_size(item.size));
+                            });
                         }
                         let (date_lbl, date_val) = if is_recycle {
                             (
@@ -151,7 +154,11 @@ pub(super) fn render_grid_item(
                                 crate::infrastructure::windows::format_date(item.modified),
                             )
                         };
-                        ui.label(format!("{}: {}", date_lbl, date_val));
+                        ui.horizontal(|ui| {
+                            ui.label(date_lbl);
+                            ui.label(":");
+                            ui.label(date_val);
+                        });
                     });
                 },
             );

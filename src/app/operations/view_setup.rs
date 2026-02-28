@@ -263,76 +263,85 @@ impl ImageViewerApp {
 
     /// Poll for completed background drive scans. Called once per frame.
     pub fn poll_drive_scan(&mut self) {
-        if let Ok(new_disks) = self.drive_state.drive_scan_rx.try_recv() {
-            self.drive_state.drive_scan_pending = false;
-            let old_disks = std::mem::take(&mut self.drive_state.disks);
-            let changed = new_disks != old_disks;
-            self.drive_state.disks = new_disks;
+        match self.drive_state.drive_scan_rx.try_recv() {
+            Ok(new_disks) => {
+                self.drive_state.drive_scan_pending = false;
+                let old_disks = std::mem::take(&mut self.drive_state.disks);
+                let changed = new_disks != old_disks;
+                self.drive_state.disks = new_disks;
 
-            if changed {
-                // Invalidate cached drive types since drive list changed
-                crate::ui::sidebar::invalidate_drive_type_cache();
+                if changed {
+                    // Invalidate cached drive types since drive list changed
+                    crate::ui::sidebar::invalidate_drive_type_cache();
 
-                // Detect removed drives: if user is browsing inside a removed drive,
-                // navigate them to "Este Computador" to avoid showing stale cached data.
-                let removed_drives: Vec<String> = old_disks
-                    .iter()
-                    .filter(|(old_path, _)| {
-                        !self
-                            .drive_state
-                            .disks
-                            .iter()
-                            .any(|(new_path, _)| new_path == old_path)
-                    })
-                    .map(|(path, _)| path.clone())
-                    .collect();
+                    // Detect removed drives: if user is browsing inside a removed drive,
+                    // navigate them to "Este Computador" to avoid showing stale cached data.
+                    let removed_drives: Vec<String> = old_disks
+                        .iter()
+                        .filter(|(old_path, _)| {
+                            !self
+                                .drive_state
+                                .disks
+                                .iter()
+                                .any(|(new_path, _)| new_path == old_path)
+                        })
+                        .map(|(path, _)| path.clone())
+                        .collect();
 
-                if !removed_drives.is_empty() {
-                    log::info!("[DRIVE-REFRESH] Drives removed: {:?}", removed_drives);
+                    if !removed_drives.is_empty() {
+                        log::info!("[DRIVE-REFRESH] Drives removed: {:?}", removed_drives);
 
-                    // Check if user is currently browsing inside a removed drive
-                    let current = self.navigation_state.current_path.clone();
-                    let on_removed_drive = !self.navigation_state.is_computer_view
-                        && !self.navigation_state.is_recycle_bin_view
-                        && removed_drives.iter().any(|d| current.starts_with(d));
+                        // Check if user is currently browsing inside a removed drive
+                        let current = self.navigation_state.current_path.clone();
+                        let on_removed_drive = !self.navigation_state.is_computer_view
+                            && !self.navigation_state.is_recycle_bin_view
+                            && removed_drives.iter().any(|d| current.starts_with(d));
 
-                    if on_removed_drive {
-                        log::warn!(
-                            "[DRIVE-REFRESH] Current path '{}' is on a removed drive, redirecting to Este Computador",
-                            current
-                        );
-                        self.directory_cache.clear();
-                        self.drive_watcher.cleanup_unused_watchers(None);
-                        self.navigate_to_computer();
-                        return;
-                    }
-                }
-
-                // AUTO-FOCUS FOR RECENTLY MOUNTED ISO
-                if let Some(_iso_path) = self.file_operation_state.pending_iso_mount.take() {
-                    let mut target_drive = None;
-                    for (new_path, _label) in &self.drive_state.disks {
-                        if !old_disks.iter().any(|(old_path, _)| old_path == new_path)
-                            && crate::infrastructure::onedrive::fast_path_exists(
-                                std::path::Path::new(new_path),
-                            )
-                        {
-                            target_drive = Some(new_path.clone());
-                            break;
+                        if on_removed_drive {
+                            log::warn!(
+                                "[DRIVE-REFRESH] Current path '{}' is on a removed drive, redirecting to Este Computador",
+                                current
+                            );
+                            self.directory_cache.clear();
+                            self.drive_watcher.cleanup_unused_watchers(None);
+                            self.navigate_to_computer();
+                            return;
                         }
                     }
 
-                    if let Some(drive) = target_drive {
-                        self.navigate_to(&drive);
-                    } else {
-                        self.file_operation_state.pending_iso_mount = Some(_iso_path);
+                    // AUTO-FOCUS FOR RECENTLY MOUNTED ISO
+                    if let Some(_iso_path) = self.file_operation_state.pending_iso_mount.take() {
+                        let mut target_drive = None;
+                        for (new_path, _label) in &self.drive_state.disks {
+                            if !old_disks.iter().any(|(old_path, _)| old_path == new_path)
+                                && crate::infrastructure::onedrive::fast_path_exists(
+                                    std::path::Path::new(new_path),
+                                )
+                            {
+                                target_drive = Some(new_path.clone());
+                                break;
+                            }
+                        }
+
+                        if let Some(drive) = target_drive {
+                            self.navigate_to(&drive);
+                        } else {
+                            self.file_operation_state.pending_iso_mount = Some(_iso_path);
+                        }
+                    }
+
+                    if self.navigation_state.is_computer_view {
+                        self.setup_computer_view();
                     }
                 }
-
-                if self.navigation_state.is_computer_view {
-                    self.setup_computer_view();
-                }
             }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                if self.drive_state.drive_scan_pending {
+                    log::warn!("[DRIVE-REFRESH] drive_scan channel disconnected; clearing pending flag");
+                }
+                self.drive_state.drive_scan_pending = false;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
         }
     }
 

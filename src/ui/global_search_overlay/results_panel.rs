@@ -60,7 +60,6 @@ pub(super) fn render_results_panel(
             egui::Layout::top_down(egui::Align::Center),
             |ui| {
                 ui.add_space(20.0);
-                ui.spinner();
                 ui.label("Buscando...");
             },
         );
@@ -141,7 +140,11 @@ pub(super) fn render_results_panel(
             .color(egui::Color32::from_gray(120)),
         );
         if app.global_search.loading {
-            ui.spinner();
+            ui.label(
+                egui::RichText::new("Buscando...")
+                    .size(11.0)
+                    .color(egui::Color32::from_gray(120)),
+            );
         }
     });
 
@@ -157,19 +160,17 @@ pub(super) fn render_results_panel(
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     for &source_idx in &filtered_indices {
-                        let Some(result) = app.global_search.results.get(source_idx).cloned()
+                        let Some((full_path, is_dir, size)) = app
+                            .global_search
+                            .results
+                            .get(source_idx)
+                            .map(|r| (r.full_path.clone(), r.is_dir, r.size))
                         else {
                             continue;
                         };
-                        let path_buf = std::path::PathBuf::from(&result.full_path);
-                        let is_dir = result.is_dir;
-                        let file_type = file_type_label(&result.full_path, is_dir);
-                        let size_opt = resolve_result_size(
-                            app,
-                            &result.full_path,
-                            is_dir,
-                            result.size,
-                        );
+                        let path_buf = std::path::PathBuf::from(&full_path);
+                        let file_type = file_type_label(&full_path, is_dir);
+                        let size_opt = resolve_result_size(app, &full_path, is_dir, size);
                         let size_text = size_opt
                             .map(crate::infrastructure::windows::format_size)
                             .unwrap_or_else(|| "-".to_string());
@@ -223,9 +224,15 @@ pub(super) fn render_results_panel(
 
                         row_ui.add_space(8.0);
                         row_ui.vertical(|ui| {
+                            let result_name = app
+                                .global_search
+                                .results
+                                .get(source_idx)
+                                .map(|r| r.name.as_str())
+                                .unwrap_or("");
                             ui.add(
                                 egui::Label::new(
-                                    egui::RichText::new(&result.name).strong().size(13.0),
+                                    egui::RichText::new(result_name).strong().size(13.0),
                                 )
                                 .truncate(),
                             );
@@ -238,7 +245,7 @@ pub(super) fn render_results_panel(
                                 ui.add_space(6.0);
                                 ui.add(
                                     egui::Label::new(
-                                        egui::RichText::new(&result.full_path)
+                                        egui::RichText::new(&full_path)
                                             .size(10.0)
                                             .color(egui::Color32::from_gray(120)),
                                     )
@@ -249,7 +256,7 @@ pub(super) fn render_results_panel(
 
                         // Double-click navigates to location.
                         if row_resp.double_clicked() {
-                            activate_result = Some((result.full_path.clone(), is_dir));
+                            activate_result = Some((full_path.clone(), is_dir));
                         }
 
                         ui.separator();
@@ -324,8 +331,13 @@ pub(super) fn render_results_panel(
             .unwrap_or(filtered_indices[0]);
         app.global_search.selected_index = Some(selected_idx);
 
-        if let Some(result) = app.global_search.results.get(selected_idx).cloned() {
-            activate_result = Some((result.full_path, result.is_dir));
+        if let Some((full_path, is_dir)) = app
+            .global_search
+            .results
+            .get(selected_idx)
+            .map(|r| (r.full_path.clone(), r.is_dir))
+        {
+            activate_result = Some((full_path, is_dir));
         }
     }
 

@@ -297,8 +297,12 @@ impl ImageViewerApp {
             };
             if (self.upload_budget_ms - target_budget_ms).abs() >= 0.5 {
                 self.upload_budget_ms = target_budget_ms.clamp(2.0, 10.0);
-                self.disk_cache
-                    .set_preference("upload_budget_ms", &self.upload_budget_ms.to_string());
+                let entries = [("upload_budget_ms", self.upload_budget_ms.to_string())];
+                if !self.disk_cache.try_set_preferences_batch(&entries) {
+                    log::debug!(
+                        "[PERF-THUMB-UPLOAD] Skipped upload_budget_ms persist this frame (writer busy)"
+                    );
+                }
             }
             self.last_upload_budget_update = now;
         }
@@ -411,13 +415,19 @@ impl ImageViewerApp {
                     }
                 }
 
-                let path = thumbnail_data.path.clone();
+                let path = thumbnail_data.path;
                 let width = thumbnail_data.width;
                 let height = thumbnail_data.height;
                 let rgba_data = thumbnail_data.image_data;
+                let is_selected = self
+                    .selected_file
+                    .as_ref()
+                    .is_some_and(|selected_file| selected_file.path == path);
+
+                let texture_name = path.to_string_lossy().into_owned();
 
                 let texture = ctx.load_texture(
-                    path.to_string_lossy().to_string(),
+                    texture_name,
                     egui::ColorImage::from_rgba_unmultiplied(
                         [width as usize, height as usize],
                         &rgba_data,
@@ -425,16 +435,14 @@ impl ImageViewerApp {
                     egui::TextureOptions::LINEAR,
                 );
 
+                self.cache_manager.finish_pending_upload(&path);
                 self.cache_manager
                     .put_rgba_data(path.clone(), rgba_data, width, height);
                 self.cache_manager
-                    .put_thumbnail(path.clone(), texture.clone());
-                self.cache_manager.finish_pending_upload(&path);
+                    .put_thumbnail(path, texture.clone());
 
-                if let Some(selected_file) = &self.selected_file {
-                    if selected_file.path == path {
-                        self.selected_thumbnail = Some(texture);
-                    }
+                if is_selected {
+                    self.selected_thumbnail = Some(texture);
                 }
 
                 uploads_this_frame += 1;
@@ -544,8 +552,10 @@ impl ImageViewerApp {
                 self.cache_manager.finish_folder_preview_loading(&data.path);
 
                 if !data.rgba_data.is_empty() {
+                    let mut texture_name = String::from("folder_preview_");
+                    texture_name.push_str(data.path.to_string_lossy().as_ref());
                     let texture = ctx.load_texture(
-                        format!("folder_preview_{}", data.path.to_string_lossy()),
+                        texture_name,
                         egui::ColorImage::from_rgba_unmultiplied(
                             [data.width as usize, data.height as usize],
                             &data.rgba_data,

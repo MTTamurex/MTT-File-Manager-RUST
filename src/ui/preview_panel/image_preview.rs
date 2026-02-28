@@ -127,6 +127,7 @@ pub fn render_gif_preview(
             crate::image_viewer::open_image_viewer(file.path.clone());
         }
     } else {
-        ui.add(egui::Spinner::new());
+        let reserve = egui::vec2((ui.available_width() - 16.0).max(0.0), PREVIEW_MAX_HEIGHT);
+        ui.allocate_response(reserve, egui::Sense::hover());
     }
 }
