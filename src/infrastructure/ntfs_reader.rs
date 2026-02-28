@@ -72,13 +72,21 @@ fn get_nt_query_directory_file() -> Option<NtQueryDirectoryFileFn> {
 pub fn read_directory_fast(dir_path: &Path) -> Option<Vec<DirectoryEntry>> {
     let nt_query = get_nt_query_directory_file()?;
 
+    // H-4: RAII wrapper — CloseHandle guaranteed on return AND panic
+    struct HandleGuard(HANDLE);
+    impl Drop for HandleGuard {
+        fn drop(&mut self) {
+            unsafe { let _ = CloseHandle(self.0); }
+        }
+    }
+
     let dir_wide: Vec<u16> = dir_path
         .to_string_lossy()
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect();
 
-    let handle = unsafe {
+    let handle = HandleGuard(unsafe {
         CreateFileW(
             PCWSTR(dir_wide.as_ptr()),
             FILE_LIST_DIRECTORY.0,
@@ -89,7 +97,7 @@ pub fn read_directory_fast(dir_path: &Path) -> Option<Vec<DirectoryEntry>> {
             None,
         )
         .ok()?
-    };
+    });
 
     let mut entries = Vec::with_capacity(1000);
     let mut buffer = vec![0u8; BUFFER_SIZE];
@@ -103,7 +111,7 @@ pub fn read_directory_fast(dir_path: &Path) -> Option<Vec<DirectoryEntry>> {
 
         let status = unsafe {
             nt_query(
-                handle,
+                handle.0,
                 HANDLE::default(),
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
@@ -169,7 +177,7 @@ pub fn read_directory_fast(dir_path: &Path) -> Option<Vec<DirectoryEntry>> {
                 entries.push(DirectoryEntry {
                     name,
                     is_dir,
-                    size: entry.end_of_file as u64,
+                    size: entry.end_of_file.max(0) as u64,  // M-14: guard against negative value from corrupted NTFS metadata
                     modified,
                     attributes: entry.file_attributes,
                 });
@@ -182,10 +190,7 @@ pub fn read_directory_fast(dir_path: &Path) -> Option<Vec<DirectoryEntry>> {
         }
     }
 
-    unsafe {
-        let _ = CloseHandle(handle);
-    }
-
+    // handle dropped here — CloseHandle() guaranteed by HandleGuard RAII
     Some(entries)
 }
 

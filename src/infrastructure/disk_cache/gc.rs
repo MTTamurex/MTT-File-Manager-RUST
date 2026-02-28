@@ -89,17 +89,24 @@ impl ThumbnailDiskCache {
         let sampled_folder_previews: Vec<String>;
 
         {
-            let db = match self.reader.lock() {
+            // M-17: Use writer connection so reader is always free for concurrent thumbnail lookups.
+            let db = match self.writer.lock() {
                 Ok(db) => db,
                 Err(_) => {
-                    log::warn!("[GC] Incremental pass skipped: reader lock failed");
+                    log::warn!("[GC] Incremental pass skipped: writer lock failed");
                     return 0;
                 }
             };
 
+            // M-15: ROWID modular sampling — O(log n) via rowid index instead of O(n log n).
+            // Starts at a random rowid offset and scans forward; may return < limit near the
+            // end of the table, which is acceptable for best-effort incremental GC.
             sampled_entries = db
                 .prepare(
-                    "SELECT id, path FROM thumbnails WHERE path IS NOT NULL ORDER BY RANDOM() LIMIT ?1",
+                    "SELECT id, path FROM thumbnails \
+                     WHERE path IS NOT NULL \
+                       AND rowid >= (ABS(RANDOM()) % MAX((SELECT COALESCE(MAX(rowid),0)+1 FROM thumbnails),1)) \
+                     LIMIT ?1",
                 )
                 .and_then(|mut stmt| {
                     stmt.query_map(params![limit], |row| {
@@ -110,7 +117,11 @@ impl ThumbnailDiskCache {
                 .unwrap_or_default();
 
             sampled_folders = db
-                .prepare("SELECT folder_path FROM folder_covers ORDER BY RANDOM() LIMIT ?1")
+                .prepare(
+                    "SELECT folder_path FROM folder_covers \
+                     WHERE rowid >= (ABS(RANDOM()) % MAX((SELECT COALESCE(MAX(rowid),0)+1 FROM folder_covers),1)) \
+                     LIMIT ?1",
+                )
                 .and_then(|mut stmt| {
                     stmt.query_map(params![limit], |row| row.get::<_, String>(0))
                         .map(|rows| rows.flatten().collect())
@@ -118,7 +129,11 @@ impl ThumbnailDiskCache {
                 .unwrap_or_default();
 
             sampled_folder_previews = db
-                .prepare("SELECT folder_path FROM folder_previews ORDER BY RANDOM() LIMIT ?1")
+                .prepare(
+                    "SELECT folder_path FROM folder_previews \
+                     WHERE rowid >= (ABS(RANDOM()) % MAX((SELECT COALESCE(MAX(rowid),0)+1 FROM folder_previews),1)) \
+                     LIMIT ?1",
+                )
                 .and_then(|mut stmt| {
                     stmt.query_map(params![limit], |row| row.get::<_, String>(0))
                         .map(|rows| rows.flatten().collect())
@@ -173,23 +188,31 @@ impl ThumbnailDiskCache {
         }
 
         let mut removed = 0;
-        if let Ok(db) = self.writer.lock() {
-            let _ = db.execute("BEGIN TRANSACTION", []);
-            if !orphan_thumbs.is_empty() {
-                removed += Self::execute_batch_delete(&db, CacheTable::Thumbnails, &orphan_thumbs);
+        // H-5: rusqlite Transaction — auto-rollback on error/panic
+        if let Ok(mut db) = self.writer.lock() {
+            if let Ok(tx) = db.transaction() {
+                if !orphan_thumbs.is_empty() {
+                    removed +=
+                        Self::execute_batch_delete(&tx, CacheTable::Thumbnails, &orphan_thumbs);
+                }
+                if !orphan_folders.is_empty() {
+                    removed += Self::execute_batch_delete(
+                        &tx,
+                        CacheTable::FolderCovers,
+                        &orphan_folders,
+                    );
+                }
+                if !orphan_folder_previews.is_empty() {
+                    removed += Self::execute_batch_delete(
+                        &tx,
+                        CacheTable::FolderPreviews,
+                        &orphan_folder_previews,
+                    );
+                }
+                if let Err(e) = tx.commit() {
+                    log::error!("[GC] Incremental: transaction commit failed: {:?}", e);
+                }
             }
-            if !orphan_folders.is_empty() {
-                removed +=
-                    Self::execute_batch_delete(&db, CacheTable::FolderCovers, &orphan_folders);
-            }
-            if !orphan_folder_previews.is_empty() {
-                removed += Self::execute_batch_delete(
-                    &db,
-                    CacheTable::FolderPreviews,
-                    &orphan_folder_previews,
-                );
-            }
-            let _ = db.execute("COMMIT", []);
         }
 
         if removed > 0 {
@@ -215,7 +238,8 @@ impl ThumbnailDiskCache {
         let all_folder_previews: Vec<String>;
 
         {
-            let db = match self.reader.lock() {
+            // M-17: Use writer connection so the reader stays free for thumbnail lookups.
+            let db = match self.writer.lock() {
                 Ok(db) => db,
                 Err(_) => {
                     log::error!("[GC] Failed to acquire database lock!");
@@ -290,23 +314,31 @@ impl ThumbnailDiskCache {
         }
 
         let mut removed = 0;
-        if let Ok(db) = self.writer.lock() {
-            let _ = db.execute("BEGIN TRANSACTION", []);
-            if !orphan_thumbs.is_empty() {
-                removed += Self::execute_batch_delete(&db, CacheTable::Thumbnails, &orphan_thumbs);
+        // H-5: rusqlite Transaction — auto-rollback on error/panic
+        if let Ok(mut db) = self.writer.lock() {
+            if let Ok(tx) = db.transaction() {
+                if !orphan_thumbs.is_empty() {
+                    removed +=
+                        Self::execute_batch_delete(&tx, CacheTable::Thumbnails, &orphan_thumbs);
+                }
+                if !orphan_folders.is_empty() {
+                    removed += Self::execute_batch_delete(
+                        &tx,
+                        CacheTable::FolderCovers,
+                        &orphan_folders,
+                    );
+                }
+                if !orphan_folder_previews.is_empty() {
+                    removed += Self::execute_batch_delete(
+                        &tx,
+                        CacheTable::FolderPreviews,
+                        &orphan_folder_previews,
+                    );
+                }
+                if let Err(e) = tx.commit() {
+                    log::error!("[GC] Full GC: transaction commit failed: {:?}", e);
+                }
             }
-            if !orphan_folders.is_empty() {
-                removed +=
-                    Self::execute_batch_delete(&db, CacheTable::FolderCovers, &orphan_folders);
-            }
-            if !orphan_folder_previews.is_empty() {
-                removed += Self::execute_batch_delete(
-                    &db,
-                    CacheTable::FolderPreviews,
-                    &orphan_folder_previews,
-                );
-            }
-            let _ = db.execute("COMMIT", []);
         }
 
         if removed > 0 {

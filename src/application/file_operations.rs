@@ -254,41 +254,52 @@ pub fn create_shortcut(target: &Path, current_path: &str) -> OpResult<PathBuf> {
         }
     }
 
-    let _com = ComApartmentGuard::init_sta()?;
+    // H-2: Wrap COM ops in a closure — on any failure delete the placeholder so no orphan .lnk remains
+    let com_result: Result<(), String> = (|| {
+        let _com = ComApartmentGuard::init_sta()?;
 
-    unsafe {
-        // SAFETY: COM apartment is initialized for this thread by _com guard.
-        let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
-            .map_err(|e| format!("CoCreateInstance ShellLink failed: {e}"))?;
+        unsafe {
+            // SAFETY: COM apartment is initialized for this thread by _com guard.
+            let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
+                .map_err(|e| format!("CoCreateInstance ShellLink failed: {e}"))?;
 
-        let wide_target: Vec<u16> = valid_target
-            .to_string_lossy()
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect();
-        let wide_workdir: Vec<u16> = dest_dir
-            .to_string_lossy()
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect();
+            let wide_target: Vec<u16> = valid_target
+                .to_string_lossy()
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            let wide_workdir: Vec<u16> = dest_dir
+                .to_string_lossy()
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
 
-        link.SetPath(PCWSTR(wide_target.as_ptr()))
-            .map_err(|e| format!("SetPath failed: {e}"))?;
-        link.SetWorkingDirectory(PCWSTR(wide_workdir.as_ptr()))
-            .map_err(|e| format!("SetWorkingDirectory failed: {e}"))?;
+            link.SetPath(PCWSTR(wide_target.as_ptr()))
+                .map_err(|e| format!("SetPath failed: {e}"))?;
+            link.SetWorkingDirectory(PCWSTR(wide_workdir.as_ptr()))
+                .map_err(|e| format!("SetWorkingDirectory failed: {e}"))?;
 
-        let persist: IPersistFile = link
-            .cast()
-            .map_err(|e| format!("IPersistFile cast failed: {e}"))?;
+            let persist: IPersistFile = link
+                .cast()
+                .map_err(|e| format!("IPersistFile cast failed: {e}"))?;
 
-        let wide_dest: Vec<u16> = candidate
-            .to_string_lossy()
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect();
-        persist
-            .Save(PCWSTR(wide_dest.as_ptr()), true)
-            .map_err(|e| format!("Persist Save failed: {e}"))?;
+            let wide_dest: Vec<u16> = candidate
+                .to_string_lossy()
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            persist
+                .Save(PCWSTR(wide_dest.as_ptr()), true)
+                .map_err(|e| format!("Persist Save failed: {e}"))?;
+        }
+
+        Ok(())
+    })();
+
+    if let Err(e) = com_result {
+        // H-2: clean up the placeholder before reporting the error
+        let _ = std::fs::remove_file(&candidate);
+        return Err(e);
     }
 
     Ok(candidate)

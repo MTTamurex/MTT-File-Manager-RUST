@@ -3,7 +3,7 @@ use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use eframe::egui;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc};
 
 pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
     disk_cache: Arc<ThumbnailDiskCache>,
@@ -43,12 +43,13 @@ pub(in crate::app) fn spawn_folder_preview_workers(
     disk_cache: Arc<ThumbnailDiskCache>,
     folder_composer: Arc<crate::infrastructure::folder_compose::FolderComposer>,
 ) -> (
-    mpsc::Sender<PathBuf>,
+    crossbeam_channel::Sender<PathBuf>,
     mpsc::Receiver<crate::workers::folder_preview_worker::FolderPreviewData>,
 ) {
-    let (folder_preview_tx, folder_preview_rx_thread) = mpsc::channel::<PathBuf>();
+    // M-18: crossbeam Receiver is Clone + Send + Sync — workers share it directly
+    // without the Arc<Mutex<>> serialisation bottleneck.
+    let (folder_preview_tx, folder_preview_rx) = crossbeam_channel::unbounded::<PathBuf>();
     let (folder_preview_res_tx, folder_preview_res_rx) = mpsc::channel();
-    let folder_preview_rx = Arc::new(Mutex::new(folder_preview_rx_thread));
 
     {
         use crate::workers::folder_preview_worker::spawn_folder_preview_worker;

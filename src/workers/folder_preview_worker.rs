@@ -14,8 +14,8 @@ use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::folder_compose::FolderComposer;
 use eframe::egui;
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::Sender;
+use std::sync::Arc;
 use std::time::{Instant, UNIX_EPOCH};
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 
@@ -27,6 +27,14 @@ pub struct FolderPreviewData {
     pub height: u32,
 }
 
+/// M-19: RAII guard — ensures `CoUninitialize` runs even if the worker panics.
+struct ComGuard;
+impl Drop for ComGuard {
+    fn drop(&mut self) {
+        unsafe { CoUninitialize(); }
+    }
+}
+
 /// Spawns a folder preview worker thread
 ///
 /// # Arguments
@@ -36,24 +44,25 @@ pub struct FolderPreviewData {
 /// * `disk_cache` - SQLite disk cache for persistent folder preview storage
 /// * `composer` - Pre-decoded folder layers for custom composition
 pub fn spawn_folder_preview_worker(
-    rx: Arc<Mutex<Receiver<PathBuf>>>,
+    rx: crossbeam_channel::Receiver<PathBuf>,
     tx: Sender<FolderPreviewData>,
     ctx: egui::Context,
     disk_cache: Arc<ThumbnailDiskCache>,
     composer: Arc<FolderComposer>,
 ) {
     std::thread::spawn(move || {
-        unsafe {
-            // SAFETY: Initializing COM for this worker thread
+        // M-19: RAII guard — CoUninitialize guaranteed on normal exit AND panic
+        let _com = unsafe {
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        }
+            ComGuard
+        };
 
         // Empty DashMap — content thumbnail extraction doesn't need deletion tracking
         let empty_deletions = dashmap::DashMap::new();
         let mut last_repaint = Instant::now();
         let mut last_ssd_state: Option<bool> = None;
 
-        while let Some(path) = rx.lock().ok().and_then(|lock| lock.recv().ok()) {
+        while let Ok(path) = rx.recv() {
             if crate::infrastructure::windows::is_windows_system_path(&path.to_string_lossy()) {
                 let (rgba_data, width, height) = composer.compose_empty();
                 let _ = tx.send(FolderPreviewData {
@@ -158,11 +167,7 @@ pub fn spawn_folder_preview_worker(
         }
 
         crate::infrastructure::io_priority::reset_thread_priority();
-
-        unsafe {
-            // SAFETY: Cleanup COM for this thread
-            CoUninitialize();
-        }
+        // _com dropped here — CoUninitialize() guaranteed by RAII
     });
 }
 

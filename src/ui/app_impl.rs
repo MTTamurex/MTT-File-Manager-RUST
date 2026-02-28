@@ -10,9 +10,11 @@ impl eframe::App for ImageViewerApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let t_frame_start = std::time::Instant::now();
 
-        // Impede que Ctrl+Scroll (zoom_delta) altere o fator de zoom da UI.
-        // O zoom_delta é capturado em handle_input para ajustar thumbnail_size.
-        ctx.set_zoom_factor(1.0);
+        // L-15: Only reset zoom when it has drifted (Ctrl+Scroll captured by input handler).
+        // Avoids a no-op write to context state on every frame when zoom is already 1.0.
+        if (ctx.zoom_factor() - 1.0).abs() > f32::EPSILON {
+            ctx.set_zoom_factor(1.0);
+        }
 
         // True while Windows is in interactive move/resize loop (WM_ENTERSIZEMOVE..EXITSIZEMOVE).
         let is_in_size_move = is_in_size_move();

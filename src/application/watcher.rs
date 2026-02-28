@@ -33,8 +33,12 @@ impl WatcherState {
 
     /// Requests an auto-reload
     pub fn request_auto_reload(&mut self) {
+        // L-10: only start the debounce timer on the FIRST event in a burst.
+        // Resetting last_auto_reload on every event would defer the reload indefinitely.
+        if !self.pending_auto_reload {
+            self.last_auto_reload = Instant::now();
+        }
         self.pending_auto_reload = true;
-        self.last_auto_reload = Instant::now();
     }
 
     /// Completes an auto-reload

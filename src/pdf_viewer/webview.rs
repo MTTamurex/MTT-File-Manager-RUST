@@ -121,6 +121,11 @@ pub struct WebViewState {
 impl Drop for WebViewState {
     fn drop(&mut self) {
         unsafe {
+            // H-7: Call Close() before Release() as required by WebView2 docs —
+            // prevents orphaned Edge/WebView2 renderer processes.
+            let close_vtbl = *(self.controller.ptr as *mut *mut ICoreWebView2Controller_Vtbl);
+            let _ = ((*close_vtbl).Close)(self.controller.ptr);
+
             let vtbl = *(self.controller.ptr as *mut *mut ICoreWebView2Controller_Vtbl);
             ((*vtbl).base.Release)(self.controller.ptr);
 

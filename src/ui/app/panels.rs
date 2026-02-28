@@ -91,33 +91,30 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) {
         .show(ctx, |ui| {
             use crate::ui::sidebar::{render_sidebar, SidebarContext};
 
-            let disks = app.drive_state.disks.clone();
-            let current_path = app.navigation_state.current_path.clone();
             let is_computer_view = app.navigation_state.is_computer_view;
-            let computer_icon = app.cache_manager.computer_icon.clone();
-
             let is_folder_dragging = app.is_item_dragging
                 && app.drag_payload_paths.iter().all(|p| p.is_dir())
                 && app.drag_payload_paths.len() == 1;
-            let dragging_path_str: Option<String> = if is_folder_dragging {
-                app.drag_payload_paths.first().and_then(|p| p.to_str()).map(|s| s.to_string())
+            // H-1: borrow directly — no String/Vec/TextureHandle clone per frame
+            let dragging_path: Option<&str> = if is_folder_dragging {
+                app.drag_payload_paths.first().and_then(|p| p.to_str())
             } else {
                 None
             };
 
             let mut sidebar_ctx = SidebarContext {
-                disks: &disks,
-                current_path: &current_path,
+                disks: &app.drive_state.disks,
+                current_path: &app.navigation_state.current_path,
                 is_computer_view,
                 is_recycle_bin_view: app.navigation_state.is_recycle_bin_view,
-                computer_icon: computer_icon.as_ref(),
+                computer_icon: app.cache_manager.computer_icon.as_ref(),
                 is_renaming: app.renaming_state.is_some(),
                 icon_loader: &mut app.item_icon_loader,
                 onedrive_path: app.onedrive_path.as_deref(),
                 onedrive_icon: app.onedrive_icon.as_ref(),
                 pinned_folders: &app.pinned_folders,
                 is_folder_dragging,
-                dragging_path: dragging_path_str.as_deref(),
+                dragging_path,
             };
 
             egui::ScrollArea::vertical()

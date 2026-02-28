@@ -22,7 +22,6 @@ pub mod navigation_state;
 pub mod operations;
 pub mod state;
 pub mod ui_state;
-pub mod worker_state;
 
 // Re-export navigation module for easy access
 pub use operations::navigation;
