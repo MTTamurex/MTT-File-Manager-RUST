@@ -143,6 +143,13 @@ pub struct ContextMenuState {
     /// Dynamic items extracted from Shell or built for empty area
     pub items: Vec<ContextMenuItem>,
 
+    // M-5: Pre-partitioned indices into `items` — computed once on assignment,
+    // not rebuilt every frame. Set `partition_dirty = true` whenever items change.
+    pub partition_dirty: bool,
+    pub primary_indices: Vec<usize>,
+    pub secondary_indices: Vec<usize>,
+    pub overflow_indices: Vec<usize>,
+
     /// The ID of the command selected by the user (positive for Shell, negative for internal)
     pub selected_command_id: Option<i32>,
 
@@ -165,6 +172,10 @@ impl Default for ContextMenuState {
             target_paths: Vec::new(),
             is_empty_area: false,
             items: Vec::new(),
+            partition_dirty: true,
+            primary_indices: Vec::new(),
+            secondary_indices: Vec::new(),
+            overflow_indices: Vec::new(),
             selected_command_id: None,
             native_context: None,
             pending_load_item: None,
@@ -202,9 +213,31 @@ impl ContextMenuState {
         self.target_paths.clear();
         self.is_empty_area = false;
         self.items.clear();
+        self.partition_dirty = true;
+        self.primary_indices.clear();
+        self.secondary_indices.clear();
+        self.overflow_indices.clear();
         self.selected_command_id = None;
         self.native_context = None;
         self.pending_load_item = None;
+    }
+
+    /// Recompute primary/secondary/overflow index partitions.
+    /// Call after any mutation to `items`.
+    pub fn partition_items(&mut self) {
+        self.primary_indices.clear();
+        self.secondary_indices.clear();
+        self.overflow_indices.clear();
+        for (i, item) in self.items.iter().enumerate() {
+            if item.is_primary && !item.is_separator {
+                self.primary_indices.push(i);
+            } else if item.show_in_overflow {
+                self.overflow_indices.push(i);
+            } else {
+                self.secondary_indices.push(i);
+            }
+        }
+        self.partition_dirty = false;
     }
 
     /// Checks if the context menu is open for a specific item

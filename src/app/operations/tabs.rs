@@ -19,8 +19,11 @@ impl ImageViewerApp {
         if self.navigation_state.is_computer_view || self.navigation_state.is_recycle_bin_view {
             active.all_items = self.all_items.clone();
         } else {
-            // PERF: Move instead of clone to reduce memory duplication
-            active.all_items = std::mem::take(&mut self.all_items);
+            // L-13: Clone instead of mem::take to avoid a brief window where self.all_items
+            // is empty between sync_to_tab and the next load_folder completion.
+            // all_items is cleared at the start of each folder load (guards.rs), so
+            // having a stale copy in self during navigation is harmless.
+            active.all_items = self.all_items.clone();
         }
         active.selected_item = self.selected_item;
         active.selected_file = self.selected_file.clone();

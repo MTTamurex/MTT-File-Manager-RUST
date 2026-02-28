@@ -2,7 +2,14 @@ use crate::app::ImageViewerApp;
 use crate::domain::file_entry::{FileEntry, SyncStatus, ViewMode};
 use crate::infrastructure::windows as windows_infra;
 use eframe::egui;
+use std::cell::RefCell;
 use std::path::PathBuf;
+
+// M-12: Per-frame cache for "current folder" FileEntry (when no file is selected).
+// Keyed by (current_path, modified_hint); invalidated on navigation or folder update.
+thread_local! {
+    static FOLDER_ENTRY_CACHE: RefCell<Option<(String, u64, FileEntry)>> = RefCell::new(None);
+}
 
 // Sidebar width constraints
 const LEFT_SIDEBAR_MIN: f32 = 150.0;
@@ -143,7 +150,18 @@ fn render_preview_panel_layout(
     frame: &eframe::Frame,
 ) {
     if app.show_preview_panel {
-        app.refresh_selected_metadata();
+        // M-2: Only call refresh_selected_metadata when the selection actually changed.
+        // The function has its own early-return for same-path, but this skips the call
+        // entirely (avoiding closure + field reads) on the common no-change frame.
+        let needs_metadata_refresh = match (&app.selected_file, &app.last_metadata_path) {
+            (Some(f), _) if f.is_dir => false,
+            (Some(f), Some(p)) => f.path != *p,
+            (Some(_), None) => true, // watcher cleared last_metadata_path to force re-fetch
+            (None, _) => false,
+        };
+        if needs_metadata_refresh {
+            app.refresh_selected_metadata();
+        }
 
         // Clamp width to valid range BEFORE using it
         let target_width = app
@@ -444,18 +462,32 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             recycle_original_path: None,
         })
     } else {
-        let path = std::path::PathBuf::from(&app.navigation_state.current_path);
-        let current_folder_modified = app
+        // M-12: Check cache before rebuilding the folder entry every frame.
+        let mod_hint = app
             .current_folder_modified_hint
             .as_ref()
-            .and_then(|(hint_path, modified)| {
-                if hint_path == &path && *modified > 0 {
-                    Some(*modified)
+            .and_then(|(hp, m)| {
+                if hp.to_string_lossy() == app.navigation_state.current_path.as_str() && *m > 0 {
+                    Some(*m)
                 } else {
                     None
                 }
             })
-            .unwrap_or(0);
+            .unwrap_or(0u64);
+        let cache_hit = FOLDER_ENTRY_CACHE.with(|c| {
+            c.borrow().as_ref().and_then(|(cp, cm, e)| {
+                if cp == &app.navigation_state.current_path && *cm == mod_hint {
+                    Some(e.clone())
+                } else {
+                    None
+                }
+            })
+        });
+        if let Some(entry) = cache_hit {
+            return Some(entry);
+        }
+        let path = std::path::PathBuf::from(&app.navigation_state.current_path);
+        let current_folder_modified = mod_hint; // reuse already-computed value
         // CRITICAL FIX: Do NOT use FileEntry::from_path() here!
         // from_path() calls std::fs::metadata() which uses CreateFileW internally.
         // On OneDrive, this can block the UI thread for 30-60s on cloud-only files.
@@ -524,6 +556,14 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| app.navigation_state.current_path.clone());
         }
+        // M-12: Update cache before returning
+        FOLDER_ENTRY_CACHE.with(|c| {
+            *c.borrow_mut() = Some((
+                app.navigation_state.current_path.clone(),
+                mod_hint,
+                entry.clone(),
+            ));
+        });
         Some(entry)
     }
 }
