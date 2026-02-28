@@ -192,12 +192,13 @@ impl ImageViewerApp {
 
             (display_name, icon_texture)
         } else {
+            // Item not in current tab's list (cross-tab drag) — still use cached icon.
             (
                 primary_path
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| primary_path.to_string_lossy().to_string()),
-                None,
+                self.drag_icon_cache.clone(),
             )
         };
 

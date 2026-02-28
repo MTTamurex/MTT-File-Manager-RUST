@@ -126,22 +126,12 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
     // Track the start Y for drag-to-pin zone detection
     let qa_section_start_y = ui.cursor().top();
 
-    // Section header row — highlighted when a folder drag is active
+    // Section header row — highlighted only when a folder drag hovers over the
+    // Quick Access zone (not the entire time a drag is active).
     let (qa_label_rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 16.0), Sense::hover());
     if ui.is_rect_visible(qa_label_rect) {
-        if ctx.is_folder_dragging {
-            let highlight = egui::Rect::from_min_max(
-                egui::pos2(ui.clip_rect().min.x, qa_label_rect.min.y),
-                egui::pos2(ui.clip_rect().max.x, qa_label_rect.max.y),
-            );
-            ui.painter().rect_stroke(
-                highlight,
-                2.0,
-                egui::Stroke::new(1.5, Color32::from_rgb(0, 120, 215)),
-                egui::StrokeKind::Outside,
-            );
-        }
+        // Defer highlight drawing until after we know the full QA zone (see below).
         ui.painter().text(
             Pos2::new(qa_label_rect.min.x + 8.0, qa_label_rect.center().y),
             egui::Align2::LEFT_CENTER,
@@ -295,19 +285,34 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
             egui::pos2(ui.clip_rect().min.x, qa_section_start_y),
             egui::pos2(ui.clip_rect().max.x, qa_section_end_y),
         );
+
+        // Only highlight the header when the pointer is actually inside the QA zone,
+        // so it doesn't look "selected" while dragging elsewhere.
+        let pointer_in_zone = ui
+            .ctx()
+            .input(|inp| inp.pointer.hover_pos())
+            .map(|p| qa_zone.contains(p))
+            .unwrap_or(false);
+
+        if pointer_in_zone && ui.is_rect_visible(qa_label_rect) {
+            let highlight = egui::Rect::from_min_max(
+                egui::pos2(ui.clip_rect().min.x, qa_label_rect.min.y),
+                egui::pos2(ui.clip_rect().max.x, qa_label_rect.max.y),
+            );
+            ui.painter().rect_stroke(
+                highlight,
+                2.0,
+                egui::Stroke::new(1.5, Color32::from_rgb(0, 120, 215)),
+                egui::StrokeKind::Outside,
+            );
+        }
+
         let released = ui.ctx().input(|inp| inp.pointer.primary_released());
-        if released {
-            let hovered_zone = ui
-                .ctx()
-                .input(|inp| inp.pointer.hover_pos())
-                .map(|p| qa_zone.contains(p))
-                .unwrap_or(false);
-            if hovered_zone {
-                if let Some(path) = ctx.dragging_path {
-                    let already_pinned = ctx.pinned_folders.iter().any(|pf| pf.path == path);
-                    if !already_pinned && action.is_none() {
-                        action = Some(SidebarAction::PinFolder(path.to_string()));
-                    }
+        if released && pointer_in_zone {
+            if let Some(path) = ctx.dragging_path {
+                let already_pinned = ctx.pinned_folders.iter().any(|pf| pf.path == path);
+                if !already_pinned && action.is_none() {
+                    action = Some(SidebarAction::PinFolder(path.to_string()));
                 }
             }
         }
