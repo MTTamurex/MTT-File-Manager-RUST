@@ -1,6 +1,7 @@
 use crate::app::ImageViewerApp;
 use crate::domain::file_entry::{FileEntry, SyncStatus, ViewMode};
 use crate::infrastructure::windows as windows_infra;
+use crate::ui::sidebar::SidebarAction;
 use eframe::egui;
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -28,8 +29,14 @@ pub fn render_panels(app: &mut ImageViewerApp, ctx: &egui::Context, _frame: &mut
 
     // 2. Left Sidebar (forced width from app state)
     let t_sidebar = std::time::Instant::now();
-    render_sidebar_panel(app, ctx);
+    let sidebar_action = render_sidebar_panel(app, ctx);
     let sidebar_ms = t_sidebar.elapsed().as_millis();
+
+    // Handle sidebar action OUTSIDE the sidebar timing to avoid attributing
+    // navigate_to I/O (watch_current_folder, etc.) to sidebar render time.
+    if let Some(action) = sidebar_action {
+        handle_sidebar_action(app, action);
+    }
 
     // 3. Right Preview Panel (forced width from app state)
     let t_preview = std::time::Instant::now();
@@ -78,7 +85,7 @@ pub fn render_panels(app: &mut ImageViewerApp, ctx: &egui::Context, _frame: &mut
     }
 }
 
-fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) {
+fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option<SidebarAction> {
     let t_sidebar_fn = std::time::Instant::now();
     // Clamp width to valid range BEFORE using it
     let target_width = app
@@ -141,31 +148,34 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) {
         );
     }
 
-    if let Some(action) = sidebar_response.inner {
-        use crate::ui::sidebar::SidebarAction;
-        match action {
-            SidebarAction::NavigateTo(path) => {
-                // If this path is a pinned folder that no longer exists, auto-unpin + notify
-                let is_pinned = app.pinned_folders.iter().any(|pf| pf.path == path);
-                if is_pinned && !std::path::Path::new(&path).exists() {
-                    app.unpin_folder(&path);
-                    app.notifications.warning(format!(
-                        "Pasta removida do Acesso Rápido (não encontrada): {}",
-                        std::path::Path::new(&path)
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or(&path)
-                    ));
-                } else {
-                    app.navigate_to(&path);
-                }
+    sidebar_response.inner
+}
+
+/// Handle sidebar actions separately from sidebar rendering to avoid
+/// attributing navigate_to I/O to sidebar render time.
+fn handle_sidebar_action(app: &mut ImageViewerApp, action: SidebarAction) {
+    match action {
+        SidebarAction::NavigateTo(path) => {
+            // If this path is a pinned folder that no longer exists, auto-unpin + notify
+            let is_pinned = app.pinned_folders.iter().any(|pf| pf.path == path);
+            if is_pinned && !std::path::Path::new(&path).exists() {
+                app.unpin_folder(&path);
+                app.notifications.warning(format!(
+                    "Pasta removida do Acesso Rápido (não encontrada): {}",
+                    std::path::Path::new(&path)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(&path)
+                ));
+            } else {
+                app.navigate_to(&path);
             }
-            SidebarAction::NavigateToComputer => app.navigate_to_computer(),
-            SidebarAction::NavigateToRecycleBin => app.navigate_to_recycle_bin(),
-            SidebarAction::PinFolder(path) => app.pin_folder(&path),
-            SidebarAction::UnpinFolder(path) => app.unpin_folder(&path),
-            SidebarAction::ReorderPinnedFolder { from, to } => app.reorder_pinned_folder(from, to),
         }
+        SidebarAction::NavigateToComputer => app.navigate_to_computer(),
+        SidebarAction::NavigateToRecycleBin => app.navigate_to_recycle_bin(),
+        SidebarAction::PinFolder(path) => app.pin_folder(&path),
+        SidebarAction::UnpinFolder(path) => app.unpin_folder(&path),
+        SidebarAction::ReorderPinnedFolder { from, to } => app.reorder_pinned_folder(from, to),
     }
 }
 

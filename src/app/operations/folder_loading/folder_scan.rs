@@ -156,10 +156,12 @@ impl ImageViewerApp {
                     Some(cover.clone())
                 }
             } else {
-                // INDEX PATH: If DB has no cover, try DirectoryIndex (no HDD hit)
+                // INDEX PATH: If DB has no cover, try DirectoryIndex (no HDD hit).
+                // Use try_get_directory (non-blocking) to avoid stalling the UI thread
+                // when a background worker holds the DirectoryIndex Mutex during put_directory.
                 let mut found = None;
                 if let Some(di) = &self.directory_index {
-                    if let Some((_meta, files)) = di.get_directory(&folder_path) {
+                    if let Some((_meta, files)) = di.try_get_directory(&folder_path) {
                         for file in files.iter() {
                             if file.is_dir {
                                 continue;

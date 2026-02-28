@@ -106,6 +106,54 @@ impl DirectoryIndex {
         Some((meta, files))
     }
 
+    /// Non-blocking variant for UI-thread callers.
+    /// Returns `None` immediately if the connection lock is held by a writer.
+    pub fn try_get_directory(&self, dir_path: &Path) -> Option<(DirectoryMeta, Vec<IndexedFile>)> {
+        let conn = match self.conn.try_lock() {
+            Ok(c) => c,
+            Err(_) => return None, // Writer busy — treat as cache miss
+        };
+        let dir_str = dir_path.to_string_lossy();
+
+        let meta: DirectoryMeta = conn
+            .query_row(
+                "SELECT file_count, total_size, last_scan_time, scan_duration_ms
+                 FROM directory_index WHERE dir_path = ?",
+                [&dir_str],
+                |row| {
+                    Ok(DirectoryMeta {
+                        file_count: row.get::<_, i64>(0)? as usize,
+                        total_size: row.get::<_, i64>(1)? as u64,
+                        last_scan: row.get::<_, i64>(2)? as u64,
+                        scan_duration_ms: row.get::<_, i64>(3)? as u64,
+                    })
+                },
+            )
+            .ok()?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT file_name, file_size, modified_time, is_dir
+                 FROM file_index WHERE dir_path = ?",
+            )
+            .ok()?;
+
+        let files: Vec<IndexedFile> = stmt
+            .query_map([&dir_str], |row| {
+                Ok(IndexedFile {
+                    name: row.get(0)?,
+                    size: row.get::<_, i64>(1)? as u64,
+                    modified: row.get::<_, i64>(2)? as u64,
+                    is_dir: row.get::<_, i64>(3)? != 0,
+                })
+            })
+            .ok()?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Some((meta, files))
+    }
+
     pub fn put_directory(
         &self,
         dir_path: &Path,
