@@ -139,7 +139,8 @@ impl ImageViewerApp {
                         // Pre-warm result: populate extension_cache only.
                         if !pixels.is_empty() && width > 0 && height > 0 {
                             if let Some(ext) = path.extension() {
-                                let ext_str = ext.to_string_lossy().to_lowercase();
+                                let ext_raw = ext.to_string_lossy().to_lowercase();
+                                let ext_str = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
                                 let ext_key = format!("{}_Large", ext_str);
                                 if !self.item_icon_loader.extension_cache.contains_key(&ext_key) {
                                     let texture = ctx.load_texture(
@@ -201,7 +202,8 @@ impl ImageViewerApp {
                 if icon_generation == usize::MAX {
                     if !pixels.is_empty() && width > 0 && height > 0 {
                         if let Some(ext) = path.extension() {
-                            let ext_str = ext.to_string_lossy().to_lowercase();
+                            let ext_raw = ext.to_string_lossy().to_lowercase();
+                            let ext_str = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
                             let ext_key = format!("{}_Large", ext_str);
                             if !self.item_icon_loader.extension_cache.contains_key(&ext_key) {
                                 let texture = ctx.load_texture(
@@ -283,10 +285,11 @@ impl ImageViewerApp {
 
             // Populate extension cache for instant icon sharing.
             if let Some(ext) = path.extension() {
-                let ext_str = ext.to_string_lossy().to_lowercase();
-                if !matches!(ext_str.as_str(), "exe" | "lnk" | "ico" | "cur" | "ani" | "com") {
+                let ext_raw = ext.to_string_lossy().to_lowercase();
+                let ext_str = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
+                if !matches!(ext_str, "exe" | "lnk" | "ico" | "cur" | "ani" | "com") {
                     let mut ext_key = String::with_capacity(ext_str.len() + 6);
-                    ext_key.push_str(&ext_str);
+                    ext_key.push_str(ext_str);
                     ext_key.push_str("_Large");
                     self.item_icon_loader
                         .extension_cache

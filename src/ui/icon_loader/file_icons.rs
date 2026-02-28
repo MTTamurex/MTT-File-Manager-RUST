@@ -192,7 +192,9 @@ impl IconLoader {
         // For other files (not unique icon types): check extension cache FIRST (no alloc needed).
         if !is_folder {
             if let Some(ext) = path.extension() {
-                let ext_str = ext.to_string_lossy().to_lowercase();
+                let ext_raw = ext.to_string_lossy().to_lowercase();
+                // Map extensions that share the same shell icon (sys→dll etc.)
+                let ext_str = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
                 let ext_key = format!("{}_{:?}", ext_str, size);
 
                 if let Some(texture) = self.extension_cache.get(&ext_key) {

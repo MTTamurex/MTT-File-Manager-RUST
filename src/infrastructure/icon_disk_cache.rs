@@ -42,6 +42,20 @@ impl IconDiskCache {
                 Some(e) => e.to_lowercase(),
                 None => continue,
             };
+
+            // If this extension maps to a different canonical form (e.g. sys→dll),
+            // the cached icon is stale (wrong icon from a pre-mapping session).
+            // Delete the file and skip — the worker will re-extract under the
+            // canonical key on the next run.
+            let canonical = crate::infrastructure::windows::icons::canonical_icon_ext(&ext);
+            if canonical != ext {
+                log::info!(
+                    "[IconDiskCache] Removing stale mapped icon {:?} (canonical={})",
+                    path, canonical,
+                );
+                let _ = std::fs::remove_file(&path);
+                continue;
+            }
             let data = match std::fs::read(&path) {
                 Ok(d) => d,
                 Err(_) => {
@@ -79,7 +93,10 @@ impl IconDiskCache {
         if ext.is_empty() || pixels.is_empty() || width == 0 || height == 0 {
             return;
         }
-        let path = self.dir.join(format!("{}.rgba", ext.to_lowercase()));
+        // Always save under the canonical extension so mapped types (sys→dll)
+        // share a single cache file.
+        let canonical = crate::infrastructure::windows::icons::canonical_icon_ext(ext);
+        let path = self.dir.join(format!("{}.rgba", canonical.to_lowercase()));
         // Don't overwrite if already exists (another worker may have written it).
         if path.exists() {
             return;
