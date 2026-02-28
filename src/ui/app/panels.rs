@@ -79,6 +79,7 @@ pub fn render_panels(app: &mut ImageViewerApp, ctx: &egui::Context, _frame: &mut
 }
 
 fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) {
+    let t_sidebar_fn = std::time::Instant::now();
     // Clamp width to valid range BEFORE using it
     let target_width = app
         .layout
@@ -131,6 +132,14 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 .show(ui, |ui| render_sidebar(ui, &mut sidebar_ctx))
                 .inner
         });
+
+    let show_ms = t_sidebar_fn.elapsed().as_millis();
+    if show_ms > 50 {
+        log::warn!(
+            "[PERF-SIDEBAR-PANEL] show={}ms (egui panel + scroll + content)",
+            show_ms,
+        );
+    }
 
     if let Some(action) = sidebar_response.inner {
         use crate::ui::sidebar::SidebarAction;
