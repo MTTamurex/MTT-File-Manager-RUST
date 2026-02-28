@@ -162,7 +162,8 @@ impl ImageViewerApp {
 
                         // DON'T clear failure cache for files still being written
                         // (active downloads). See watcher_drive_processing.rs for details.
-                        if !crate::infrastructure::windows::file_flags::is_file_unsafe_to_read(&cleaned) {
+                        // Uses _fast variant to avoid blocking UI thread.
+                        if !crate::infrastructure::windows::file_flags::is_file_unsafe_to_read_fast(&cleaned) {
                             crate::workers::thumbnail::clear_failure_cache(&cleaned);
                         }
                     }
