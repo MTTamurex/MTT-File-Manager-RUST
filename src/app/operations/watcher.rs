@@ -112,6 +112,13 @@ impl ImageViewerApp {
     pub fn watch_current_folder(&mut self) {
         let watch_start = Instant::now();
         let current_path = self.navigation_state.current_path.clone();
+
+        // Skip virtual views that aren't real filesystem paths (e.g. "Lixeira", "Computador").
+        if self.navigation_state.is_recycle_bin_view || self.navigation_state.is_computer_view {
+            log::debug!("[WATCHER] Skipping watch for virtual view: {}", current_path);
+            return;
+        }
+
         log::debug!("[WATCHER] Setting up for: {}", current_path);
 
         // Try using drive-wide watcher first (File Pilot optimization)

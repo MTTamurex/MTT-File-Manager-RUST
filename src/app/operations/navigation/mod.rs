@@ -253,7 +253,9 @@ impl ImageViewerApp {
             .navigation
             .navigate_to("Lixeira".to_string());
         self.reset_selection_and_search();
-        self.watch_current_folder();
+        // NOTE: Do NOT call watch_current_folder() here.
+        // "Lixeira" is a virtual view, not a real filesystem path — notify would
+        // fail with "Input watch path is neither a file nor a directory".
         self.setup_recycle_bin_view();
         self.sync_to_tab();
     }
