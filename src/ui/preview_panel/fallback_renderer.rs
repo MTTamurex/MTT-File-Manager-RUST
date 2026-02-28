@@ -117,7 +117,10 @@ pub fn render_fallback(
             &file.path,
             IconSize::Jumbo,
             treat_as_folder,
-            false,
+            true, // allow_blocking: preview panel renders a single selected file,
+                  // so a one-time ~1-5ms synchronous extraction is acceptable.
+                  // The async icon workers only populate _Large keys, not _Jumbo,
+                  // so non-blocking always misses for Jumbo and returns None.
         ) {
             let image_resp = ui.add(
                 egui::Image::new(&icon).max_size(egui::vec2(icon_size * 0.8, icon_size * 0.8)),
