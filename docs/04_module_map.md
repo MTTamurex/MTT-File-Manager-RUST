@@ -451,14 +451,52 @@ pub fn is_active(&self) -> bool
 
 ---
 
-### 8. `src/pdf_viewer/` - Visualizador de PDF
-**Propósito**: Visualização de PDFs via WebView2
+### 8. `src/pdf_viewer/` - Visualizador de PDF Nativo
+**Propósito**: Visualização de PDFs 100% nativa usando Windows.Data.Pdf (WinRT), sem dependências externas
+
+**Arquitetura**: Executado como **processo separado** (`--pdf-viewer <path>`), com janela eframe/egui própria. Renderização assíncrona em thread dedicada para manter UI fluida. Rotação via GPU (UV mapping) sem custo de CPU.
 
 **Arquivos**:
-- **`mod.rs`** - Re-exports
-- **`thread.rs`** - Thread dedicada para WebView2
-- **`webview.rs`** - Interface com WebView2
-- **`window.rs`** - Gerenciamento de janela PDF
+- **`mod.rs`** - Entry points: `open_pdf_viewer()` (spawna processo), `run_standalone()` (cria janela eframe), `warmup()` (no-op)
+- **`renderer.rs`** - `PdfRenderer`: wraps `PdfDocument` (WinRT), renderiza páginas para RGBA via `RenderWithOptionsToStreamAsync`
+- **`render_worker.rs`** - `RenderWorker`: thread de background com canais crossbeam, drain+dedup de requests, prefetch
+- **`viewer_app.rs`** - `PdfViewerApp`: struct principal com scroll contínuo, zoom, rotação, cache de texturas GPU
+- **`toolbar.rs`** - Toolbar com navegação (⏮◀ página ▶⏭), zoom (➖ % ➕ Fit Width/Page), rotação (↺ graus ↻)
+
+**Principais structs**:
+```rust
+pub struct PdfViewerApp {
+    renderer_staging: Option<PdfRenderer>, // Movido para worker na 1ª frame
+    worker: Option<RenderWorker>,          // Thread de renderização
+    textures: HashMap<u32, PageTexture>,   // Cache de texturas GPU
+    pending: HashSet<u32>,                 // Páginas em renderização
+    page_count: u32,                       // Total de páginas
+    zoom_mode: ZoomMode,                   // FitWidth / FitPage / Fixed(f32)
+    rotation: u32,                         // 0, 90, 180, 270 graus
+    effective_zoom_pct: f32,               // Percentual real de zoom
+}
+
+pub struct PdfRenderer { doc: PdfDocument }
+pub struct RenderWorker { request_tx, result_rx, _handle: JoinHandle }
+pub struct RenderRequest { page_index, width, height }
+pub struct RenderResult { page_index, rgba, width, height }
+```
+
+**Fluxo de renderização**:
+1. `PdfRenderer` é criado no startup e movido para a thread do `RenderWorker` na primeira frame
+2. Páginas visíveis são submetidas para renderização assíncrona
+3. Worker drena e deduplica requests (mantém apenas o mais recente por página)
+4. Resultado RGBA retorna via canal crossbeam → upload para textura GPU
+5. Textura stale é exibida (esticada) enquanto nova resolução renderiza
+6. Rotação é aplicada via UV mapping no egui Mesh (custo zero de CPU)
+7. Prefetch de ±2 páginas além do visível; evição de páginas além de ±6
+
+**Características de performance**:
+- Renderização 100% assíncrona (UI nunca bloqueia)
+- Tolerância de zoom 90%-200% para evitar re-renders desnecessários
+- GPU rotation via UV mapping (sem manipulação de pixels)
+- Prefetch de páginas vizinhas (±2)
+- Evição inteligente por distância (±6 páginas do centro)
 
 ---
 

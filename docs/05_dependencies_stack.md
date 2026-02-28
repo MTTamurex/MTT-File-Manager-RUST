@@ -251,6 +251,10 @@ features = [
 | `Win32_UI_WindowsAndMessaging` | Janelas, mensagens, subclassing |
 | `Win32_Storage_Vhd` | Montagem de ISOs |
 | `Win32_System_Pipes` | Named Pipes para IPC com serviço de busca |
+| `Foundation` | Tipos base WinRT (IAsyncAction, Uri, etc.) |
+| `Data_Pdf` | Windows.Data.Pdf — renderização nativa de PDF |
+| `Storage` | StorageFile para abrir PDFs via WinRT |
+| `Storage_Streams` | InMemoryRandomAccessStream, DataReader para streams de renderização |
 
 ## Features do Cargo
 
@@ -338,10 +342,8 @@ codegen-units = 1  # Single codegen unit (melhor otimização)
 |-------------|--------|------------|
 | libmpv-2.dll | Latest | https://sourceforge.net/projects/mpv-player-windows/files/libmpv/ |
 
-### Opcionais (mas recomendadas)
-| Dependência | Versão | Onde Obter |
-|-------------|--------|------------|
-| WebView2 Runtime | Latest | `winget install Microsoft.EdgeWebView2Runtime` |
+### Notas
+- O visualizador de PDF usa a API nativa **Windows.Data.Pdf** (WinRT), incluída no Windows 10+. Não requer runtime adicional.
 
 ## Árvore de Dependências Simplificada
 

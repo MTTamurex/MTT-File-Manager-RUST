@@ -94,7 +94,7 @@ src/ui/preview_panel/mod.rs - render_preview_panel()
   ├── Vídeo: src/ui/preview_panel/video_preview/ 
   │         └── src/ui/components/mpv_preview/mod.rs
   ├── GIF: src/ui/components/gif_manager.rs
-  └── PDF: src/pdf_viewer/mod.rs - show_pdf_window()
+  └── PDF: src/pdf_viewer/mod.rs - open_pdf_viewer() (processo separado)
 ```
 
 ### Arquivos Envolvidos
@@ -124,9 +124,9 @@ src/ui/preview_panel/mod.rs - render_preview_panel()
    - **Solução**: Copiar libmpv-2.dll para diretório do executável
 
 3. **PDF não abre**
-   - **Causa**: WebView2 Runtime não instalado
-   - **Debug**: Verificar `pdf_viewer::warmup()` logs
-   - **Solução**: Instalar Microsoft Edge WebView2 Runtime
+   - **Causa**: Arquivo corrompido ou API Windows.Data.Pdf indisponível (requer Windows 10+)
+   - **Debug**: Verificar logs com `Select-String "PDF"` na saída do executável
+   - **Solução**: Verificar se o arquivo abre em outro leitor; confirmar Windows 10+
 
 4. **GIF animado não reproduz**
    - **Causa**: GifManager não inicializado, erro de decodificação
@@ -143,7 +143,7 @@ src/ui/preview_panel/mod.rs - render_preview_panel()
 mpv.exe arquivo.mp4
 
 # Verificar logs de PDF
-.\target\release\mtt-file-manager.exe 2>&1 | Select-String "PDF|WebView"
+.\target\release\mtt-file-manager.exe 2>&1 | Select-String "PDF"
 ```
 
 ---

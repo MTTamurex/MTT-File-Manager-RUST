@@ -53,23 +53,14 @@ Copy-Item "libmpv-2.dll" -Destination ".\target\release\"
 [Environment]::SetEnvironmentVariable("PATH", $env:PATH + ";C:\Path\To\MPV", "Machine")
 ```
 
-**1.2. WebView2 Runtime não instalado**
-```powershell
-# Instalar via winget
-winget install Microsoft.EdgeWebView2Runtime
-
-# Ou baixar manualmente
-# https://developer.microsoft.com/microsoft-edge/webview2/
-```
-
-**1.3. Runtime Visual C++**
+**1.2. Runtime Visual C++**
 ```powershell
 # Instalar VC++ Redistributable
 winget install Microsoft.VCRedist.2015+.x64
 winget install Microsoft.VCRedist.2015+.x86
 ```
 
-**1.4. Cache corrompido**
+**1.3. Cache corrompido**
 ```powershell
 # Limpar cache e tentar novamente
 Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager" -Recurse -Force
@@ -193,21 +184,22 @@ mpv.exe "caminho\para\video.mp4"
 
 #### Diagnóstico
 ```powershell
-# Verificar WebView2
-Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" | Select-Object pv
+# Verificar logs de PDF
+.\target\release\mtt-file-manager.exe 2>&1 | Select-String "PDF" | Tee-Object "pdf_debug.log"
 
-# Verificar logs
-.\target\release\mtt-file-manager.exe 2>&1 | Select-String "PDF|WebView" | Tee-Object "pdf_debug.log"
-
-# Testar Edge
-start microsoft-edge:"https://www.google.com"
+# Verificar versão do Windows (requer Windows 10+)
+[System.Environment]::OSVersion.Version
 ```
 
 #### Soluções
 
-**5.1. WebView2 não instalado**
-- Instalar via winget ou manualmente
-- Verificar se Edge está atualizado
+**5.1. Windows versão antiga**
+- O visualizador de PDF usa a API nativa `Windows.Data.Pdf`, disponível a partir do Windows 10
+- Atualizar o Windows se necessário
+
+**5.2. Arquivo corrompido ou formato não suportado**
+- Testar o arquivo em outro leitor de PDF
+- Verificar se o arquivo não está protegido por senha (não suportado)
 - Reiniciar após instalação
 
 **5.2. PDF corrompido**

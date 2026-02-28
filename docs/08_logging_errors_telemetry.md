@@ -340,7 +340,7 @@ while ($true) {
 
 # Logs de PDF
 .\target\release\mtt-file-manager.exe 2>&1 | 
-    Select-String "PDF|WebView"
+    Select-String "PDF"
 ```
 
 ## Variáveis de Ambiente Úteis

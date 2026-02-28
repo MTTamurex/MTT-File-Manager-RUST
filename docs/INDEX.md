@@ -154,7 +154,7 @@ Este índice fornece navegação para todos os documentos técnicos do MTT File 
 - `src/ui/components/media_preview.rs` - Preview de mídia
 - `src/ui/components/mpv_preview/mod.rs` - Preview de vídeo
 - `src/ui/components/item_slot/mod.rs` - Renderização de slot de item (grid)
-- `src/pdf_viewer/` - Visualizador de PDF
+- `src/pdf_viewer/` - Visualizador de PDF nativo (processo separado, Windows.Data.Pdf)
 - `src/image_viewer/` - Visualizador de imagens dedicado (processo separado)
   - `src/image_viewer/mod.rs` - Entry points (open_image_viewer, run_standalone)
   - `src/image_viewer/app.rs` - App struct, UI, navegação, zoom
@@ -237,7 +237,12 @@ MTT-File-Manager-RUST/
 │   ├── workers/                      # Threads de background
 │   │   ├── global_search_worker.rs   # Worker de busca global
 │   │   └── ...
-│   ├── pdf_viewer/                   # Visualizador PDF
+│   ├── pdf_viewer/                   # Visualizador PDF nativo (processo separado)
+│   │   ├── mod.rs                     # Entry points (open_pdf_viewer, run_standalone)
+│   │   ├── renderer.rs                # PdfRenderer (Windows.Data.Pdf WinRT)
+│   │   ├── render_worker.rs           # Thread de renderização assíncrona
+│   │   ├── viewer_app.rs              # PdfViewerApp (scroll, zoom, rotação)
+│   │   └── toolbar.rs                 # Toolbar (navegação, zoom, rotação)
 │   ├── image_viewer/                  # Visualizador de imagens (processo separado)
 │   │   ├── mod.rs                     # Entry points
 │   │   ├── app.rs                     # App struct + UI + navegação
@@ -298,8 +303,8 @@ MTT-File-Manager-RUST/
 
 ### Dependências Externas
 - [mpv/libmpv](https://mpv.io/)
-- [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)
+- [Windows.Data.Pdf API](https://learn.microsoft.com/uwp/api/windows.data.pdf)
 
 ---
 
-*Última atualização: 2026-02-24 (documentado visualizador de imagens dedicado)*
+*Última atualização: 2025-06-26 (PDF viewer migrado de WebView2 para Windows.Data.Pdf nativo)*
