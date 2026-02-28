@@ -9,7 +9,6 @@ mod virtualization;
 use eframe::egui::{self, Color32, FontId, Ui};
 use lru::LruCache;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
@@ -29,8 +28,11 @@ thread_local! {
 
 // PERFORMANCE: Thread-local cache for text truncation results to avoid redundant binary search
 // Key is hash of (text, max_width as bits), value is the truncated string
+// M-6: LruCache for truncation results — evicts LRU entry on overflow instead of wiping all 2000
 thread_local! {
-    static TRUNCATION_CACHE: RefCell<HashMap<u64, String>> = RefCell::new(HashMap::with_capacity(2000));
+    static TRUNCATION_CACHE: RefCell<LruCache<u64, String>> = RefCell::new(LruCache::new(
+        NonZeroUsize::new(2000).expect("truncation cache size must be non-zero")
+    ));
 }
 
 /// Clear the truncation cache (call when column widths change)
@@ -98,7 +100,7 @@ pub(crate) fn truncate_text_for_column(
 ) -> String {
     // PERFORMANCE: Check cache first using hash of (text, max_width)
     let cache_key = truncation_cache_key(text, max_width);
-    let cached_result = TRUNCATION_CACHE.with(|cache| cache.borrow().get(&cache_key).cloned());
+    let cached_result = TRUNCATION_CACHE.with(|cache| cache.borrow_mut().get(&cache_key).cloned());
     if let Some(result) = cached_result {
         return result;
     }
@@ -108,13 +110,7 @@ pub(crate) fn truncate_text_for_column(
     if full_width <= max_width {
         let result = text.to_string();
         // Cache the result
-        TRUNCATION_CACHE.with(|cache| {
-            let mut cache = cache.borrow_mut();
-            if cache.len() > 2000 {
-                cache.clear();
-            }
-            cache.insert(cache_key, result.clone());
-        });
+        TRUNCATION_CACHE.with(|cache| cache.borrow_mut().put(cache_key, result.clone()));
         return result;
     }
 
@@ -125,13 +121,7 @@ pub(crate) fn truncate_text_for_column(
     if available_width <= 0.0 {
         let result = ellipsis.to_string();
         // Cache the result
-        TRUNCATION_CACHE.with(|cache| {
-            let mut cache = cache.borrow_mut();
-            if cache.len() > 2000 {
-                cache.clear();
-            }
-            cache.insert(cache_key, result.clone());
-        });
+        TRUNCATION_CACHE.with(|cache| cache.borrow_mut().put(cache_key, result.clone()));
         return result;
     }
 
@@ -142,13 +132,7 @@ pub(crate) fn truncate_text_for_column(
     if char_count == 0 {
         let result = ellipsis.to_string();
         // Cache the result
-        TRUNCATION_CACHE.with(|cache| {
-            let mut cache = cache.borrow_mut();
-            if cache.len() > 2000 {
-                cache.clear();
-            }
-            cache.insert(cache_key, result.clone());
-        });
+        TRUNCATION_CACHE.with(|cache| cache.borrow_mut().put(cache_key, result.clone()));
         return result;
     }
 
@@ -176,13 +160,7 @@ pub(crate) fn truncate_text_for_column(
     if left == 0 {
         let result = ellipsis.to_string();
         // Cache the result
-        TRUNCATION_CACHE.with(|cache| {
-            let mut cache = cache.borrow_mut();
-            if cache.len() > 2000 {
-                cache.clear();
-            }
-            cache.insert(cache_key, result.clone());
-        });
+        TRUNCATION_CACHE.with(|cache| cache.borrow_mut().put(cache_key, result.clone()));
         return result;
     }
 
@@ -196,13 +174,7 @@ pub(crate) fn truncate_text_for_column(
     result.push_str(ellipsis);
 
     // Cache the result before returning
-    TRUNCATION_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if cache.len() > 2000 {
-            cache.clear();
-        }
-        cache.insert(cache_key, result.clone());
-    });
+    TRUNCATION_CACHE.with(|cache| cache.borrow_mut().put(cache_key, result.clone()));
 
     result
 }

@@ -2,10 +2,24 @@ use eframe::egui::{self, ColorImage, TextureHandle, TextureOptions};
 use lru::LruCache;
 use std::num::NonZeroUsize;
 
+/// M-7: u64 hash of (icon_name, size, effective_color, ppp_100).
+/// Eliminates a String allocation on every cache hit.
+/// Collision probability ≈ 8×10⁻¹² for a 200-entry cache.
+#[inline]
+fn svg_icon_key(icon_name: &str, size: u32, effective_color: [u8; 4], ppp_100: u32) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    icon_name.hash(&mut h);
+    size.hash(&mut h);
+    effective_color.hash(&mut h);
+    ppp_100.hash(&mut h);
+    h.finish()
+}
+
 /// Manages SVG icon loading and caching
 pub struct SvgIconManager {
-    /// Cache of rendered textures keyed by (icon_name, size, color, pixels_per_point)
-    cache: LruCache<(String, u32, [u8; 4], u32), TextureHandle>,
+    /// Cache of rendered textures keyed by a u64 hash of (icon_name, size, color, pixels_per_point)
+    cache: LruCache<u64, TextureHandle>,
 }
 
 impl Default for SvgIconManager {
@@ -43,13 +57,10 @@ impl SvgIconManager {
         let preserve_colors = is_duotone && !is_disabled;
 
         let ppp = ctx.pixels_per_point();
-        // Include pixels_per_point and preserve_colors in cache key
-        let cache_key = (
-            icon_name.to_string(),
-            size,
-            if preserve_colors { [0, 0, 0, 0] } else { color },
-            (ppp * 100.0) as u32,
-        );
+        // M-7: hash key — no String alloc on cache hit
+        let effective_color = if preserve_colors { [0, 0, 0, 0] } else { color };
+        let ppp_100 = (ppp * 100.0) as u32;
+        let cache_key = svg_icon_key(icon_name, size, effective_color, ppp_100);
 
         // Return cached texture if available
         if let Some(texture) = self.cache.get(&cache_key) {
@@ -68,13 +79,7 @@ impl SvgIconManager {
         };
 
         let texture = ctx.load_texture(
-            format!(
-                "icon_{}_{}_{}_{}",
-                icon_name,
-                size,
-                (ppp * 100.0) as u32,
-                color_str
-            ),
+            format!("icon_{}_{}_{}_{}", icon_name, size, ppp_100, color_str),
             image,
             TextureOptions::LINEAR,
         );

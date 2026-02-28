@@ -154,12 +154,14 @@ pub(super) fn render_tabs(
         let font_id = egui::FontId::proportional(13.0);
         let title_color = if is_active { text_color } else { inactive_text };
 
-        let full_text = tab.title.clone();
-        let mut title_text = full_text.clone();
+        // M-4: borrow tab.title — removes 3 String clones per tab per frame
+        let full_text: &str = &tab.title;
 
         let galley = ui
             .painter()
-            .layout_no_wrap(title_text.clone(), font_id.clone(), title_color);
+            .layout_no_wrap(full_text.to_string(), font_id.clone(), title_color);
+
+        let draw_pos = egui::pos2(title_x, content_rect.center().y);
 
         if galley.rect.width() > title_max_width {
             let mut boundaries: Vec<usize> = full_text.char_indices().map(|(i, _)| i).collect();
@@ -173,7 +175,7 @@ pub(super) fn render_tabs(
                 let test_text = format!("{}...", &full_text[..byte_idx]);
                 let test_galley =
                     ui.painter()
-                        .layout_no_wrap(test_text.clone(), font_id.clone(), title_color);
+                        .layout_no_wrap(test_text, font_id.clone(), title_color);
 
                 if test_galley.rect.width() <= title_max_width {
                     low = mid;
@@ -182,21 +184,23 @@ pub(super) fn render_tabs(
                 }
             }
 
-            if low > 0 {
-                let byte_idx = boundaries[low];
-                title_text = format!("{}...", &full_text[..byte_idx]);
+            let title_text = if low > 0 {
+                format!("{}...", &full_text[..boundaries[low]])
             } else {
-                title_text = "...".to_string();
-            }
+                "...".to_owned()
+            };
+            ui.painter().text(
+                draw_pos,
+                egui::Align2::LEFT_CENTER,
+                title_text,
+                font_id,
+                title_color,
+            );
+        } else {
+            // M-4: reuse already-computed galley — no re-layout inside painter.text()
+            let paint_rect = egui::Align2::LEFT_CENTER.anchor_size(draw_pos, galley.size());
+            ui.painter().galley(paint_rect.min, galley.into(), title_color);
         }
-
-        ui.painter().text(
-            egui::pos2(title_x, content_rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            title_text,
-            font_id,
-            title_color,
-        );
 
         if has_speaker {
             let speaker_x = rect.max.x - close_btn_size - tab_padding - speaker_btn_size - 4.0;
@@ -208,7 +212,7 @@ pub(super) fn render_tabs(
 
             let speaker_response = ui.interact(
                 speaker_rect,
-                egui::Id::new(format!("speaker_{}", idx)),
+                egui::Id::new(idx).with("speaker"),  // M-8: no format! alloc
                 egui::Sense::click(),
             );
 
@@ -254,7 +258,7 @@ pub(super) fn render_tabs(
 
         let close_response = ui.interact(
             close_btn_rect,
-            egui::Id::new(format!("close_{}", idx)),
+            egui::Id::new(idx).with("tab_close"),  // M-9: no format! alloc
             egui::Sense::click(),
         );
 

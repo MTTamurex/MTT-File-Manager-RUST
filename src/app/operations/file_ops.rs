@@ -105,12 +105,16 @@ impl ImageViewerApp {
         }
 
         self.file_operation_state.file_ops_in_progress += 1;
-        let _ = self.file_operation_state.file_op_sender.send(
+        if self.file_operation_state.file_op_sender.send(
             crate::workers::file_operation_worker::FileOperationRequest::delete_permanently(
                 paths.clone(),
                 self.native_hwnd.unwrap_or_default(),
             ),
-        );
+        ).is_err() {
+            self.file_operation_state.file_ops_in_progress =
+                self.file_operation_state.file_ops_in_progress.saturating_sub(1);
+            log::warn!("[FileOps] H-3: worker channel closed on delete_permanently");
+        }
 
         for path in &paths {
             self.file_operation_state
@@ -139,12 +143,16 @@ impl ImageViewerApp {
 
         // Send request to background worker (BATCH)
         self.file_operation_state.file_ops_in_progress += 1;
-        let _ = self.file_operation_state.file_op_sender.send(
+        if self.file_operation_state.file_op_sender.send(
             crate::workers::file_operation_worker::FileOperationRequest::delete(
                 paths.to_vec(),
                 self.native_hwnd.unwrap_or_default(),
             ),
-        );
+        ).is_err() {
+            self.file_operation_state.file_ops_in_progress =
+                self.file_operation_state.file_ops_in_progress.saturating_sub(1);
+            log::warn!("[FileOps] H-3: worker channel closed on delete");
+        }
 
         // Track pending deletions to suppress thumbnail extraction for these files
         for path in paths {
@@ -242,13 +250,17 @@ impl ImageViewerApp {
             if let Some(item) = self.items.get(idx) {
                 // Send request to background worker
                 self.file_operation_state.file_ops_in_progress += 1;
-                let _ = self.file_operation_state.file_op_sender.send(
+                if self.file_operation_state.file_op_sender.send(
                     crate::workers::file_operation_worker::FileOperationRequest::rename(
                         item.path.clone(),
                         new_name,
                         self.native_hwnd.unwrap_or_default(),
                     ),
-                );
+                ).is_err() {
+                    self.file_operation_state.file_ops_in_progress =
+                        self.file_operation_state.file_ops_in_progress.saturating_sub(1);
+                    log::warn!("[FileOps] H-3: worker channel closed on rename");
+                }
             }
         }
     }

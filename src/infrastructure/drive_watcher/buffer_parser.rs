@@ -33,6 +33,16 @@ pub(super) fn parse_notify_buffer(buffer: &[u8], drive_root: &Path) -> Vec<Drive
             // Extract filename (comes as relative path from watched directory).
             let name_len = info.FileNameLength as usize / 2;
             let name_ptr = info.FileName.as_ptr();
+
+            // M-21: bounds-check the filename slice before dereferencing kernel data.
+            // Corrupted or truncated buffers can have FileNameLength pointing past the end.
+            let buf_start = buffer.as_ptr() as usize;
+            let name_start = (name_ptr as usize).wrapping_sub(buf_start);
+            let name_end = name_start.saturating_add(name_len * 2);
+            if name_end > buffer.len() {
+                break; // corrupted entry — stop parsing
+            }
+
             let name_slice = std::slice::from_raw_parts(name_ptr, name_len);
             let filename = OsString::from_wide(name_slice);
             let filename_str = filename.to_string_lossy();
@@ -68,7 +78,12 @@ pub(super) fn parse_notify_buffer(buffer: &[u8], drive_root: &Path) -> Vec<Drive
             if info.NextEntryOffset == 0 {
                 break;
             }
-            offset += info.NextEntryOffset as usize;
+            // M-21: guard against wrap-around from corrupt NextEntryOffset
+            let next_offset = offset.saturating_add(info.NextEntryOffset as usize);
+            if next_offset <= offset || next_offset > buffer.len() {
+                break; // corrupt offset — stop parsing
+            }
+            offset = next_offset;
         }
     }
 

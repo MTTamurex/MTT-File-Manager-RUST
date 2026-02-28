@@ -53,7 +53,7 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) icon_res_rx: mpsc::Receiver<(PathBuf, usize, Vec<u8>, u32, u32)>,
     pub(in crate::app) meta_req_tx: mpsc::Sender<(PathBuf, u64)>,
     pub(in crate::app) meta_res_rx: mpsc::Receiver<(PathBuf, u64, windows_infra::MediaMetadata)>,
-    pub(in crate::app) folder_preview_tx: mpsc::Sender<PathBuf>,
+    pub(in crate::app) folder_preview_tx: crossbeam_channel::Sender<PathBuf>,
     pub(in crate::app) folder_preview_res_rx:
         mpsc::Receiver<crate::workers::folder_preview_worker::FolderPreviewData>,
     pub(in crate::app) folder_size_req_tx: mpsc::Sender<PathBuf>,

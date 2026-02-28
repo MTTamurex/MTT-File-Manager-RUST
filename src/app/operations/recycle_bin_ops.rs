@@ -63,9 +63,13 @@ impl ImageViewerApp {
                     restore_items.len()
                 )));
             self.file_operation_state.file_ops_in_progress += 1;
-            let _ = self.file_operation_state.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::RestoreFromRecycleBin {
+            if self.file_operation_state.file_op_sender.send(crate::workers::file_operation_worker::FileOperationRequest::RestoreFromRecycleBin {
                 items: restore_items,
-            });
+            }).is_err() {
+                self.file_operation_state.file_ops_in_progress =
+                    self.file_operation_state.file_ops_in_progress.saturating_sub(1);
+                log::warn!("[FileOps] H-3: worker channel closed on restore");
+            }
 
             // Clear selection after restore batch is sent
             self.reset_selection_and_search();
@@ -90,12 +94,16 @@ impl ImageViewerApp {
         // Windows will show a native confirmation dialog before deleting.
         let hwnd = self.native_hwnd.unwrap_or_default();
         self.file_operation_state.file_ops_in_progress += 1;
-        let _ = self.file_operation_state.file_op_sender.send(
+        if self.file_operation_state.file_op_sender.send(
             crate::workers::file_operation_worker::FileOperationRequest::DeletePermanently {
                 physical_paths: paths.to_vec(),
                 hwnd: crate::workers::file_operation_worker::SendHwnd(hwnd),
             },
-        );
+        ).is_err() {
+            self.file_operation_state.file_ops_in_progress =
+                self.file_operation_state.file_ops_in_progress.saturating_sub(1);
+            log::warn!("[FileOps] H-3: worker channel closed on DeletePermanently");
+        }
 
         // Clear selection after delete batch is sent
         self.reset_selection_and_search();
@@ -109,10 +117,14 @@ impl ImageViewerApp {
         // Windows will show a native confirmation dialog before emptying.
         let hwnd = self.native_hwnd.unwrap_or_default();
         self.file_operation_state.file_ops_in_progress += 1;
-        let _ = self.file_operation_state.file_op_sender.send(
+        if self.file_operation_state.file_op_sender.send(
             crate::workers::file_operation_worker::FileOperationRequest::EmptyRecycleBin {
                 hwnd: crate::workers::file_operation_worker::SendHwnd(hwnd),
             },
-        );
+        ).is_err() {
+            self.file_operation_state.file_ops_in_progress =
+                self.file_operation_state.file_ops_in_progress.saturating_sub(1);
+            log::warn!("[FileOps] H-3: worker channel closed on EmptyRecycleBin");
+        }
     }
 }

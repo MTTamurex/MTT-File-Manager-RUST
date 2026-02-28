@@ -3,6 +3,9 @@
 
 use std::collections::VecDeque;
 
+/// Cap on navigation history entries — prevents unbounded growth in long sessions (M-22)
+const MAX_HISTORY: usize = 500;
+
 /// Navigation history with linear timeline
 #[derive(Clone, Debug)]
 pub struct NavigationHistory {
@@ -31,6 +34,12 @@ impl NavigationHistory {
 
         self.paths.push_back(path);
         self.current_index = self.paths.len() - 1;
+
+        // M-22: cap history to prevent unbounded growth in long sessions
+        while self.paths.len() > MAX_HISTORY {
+            self.paths.pop_front();
+            self.current_index = self.current_index.saturating_sub(1);
+        }
     }
 
     /// Goes back in history

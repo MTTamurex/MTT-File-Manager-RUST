@@ -37,6 +37,12 @@ pub struct DedicatedImageViewerApp {
     gif_animation: Option<GifAnimation>,
     /// Index for which GIF loading was already attempted (avoids retrying).
     gif_loaded_index: Option<usize>,
+    /// In-flight async GIF decode: (target_index, receiver).
+    /// `None` when idle; dropped automatically if user navigates away.
+    gif_decode_rx: Option<(
+        usize,
+        std::sync::mpsc::Receiver<Result<Vec<loader::GifAnimationFrame>, String>>,
+    )>,
 }
 
 impl DedicatedImageViewerApp {
@@ -78,6 +84,7 @@ impl DedicatedImageViewerApp {
             repaint_ctx_set: false,
             gif_animation: None,
             gif_loaded_index: None,
+            gif_decode_rx: None,
         };
 
         app.prefetch.set_center(start_index);
@@ -225,16 +232,16 @@ impl DedicatedImageViewerApp {
             .unwrap_or(false)
     }
 
-    /// Decodes all frames of the current GIF (if not already attempted) and
-    /// uploads them as textures into `gif_animation`. No-op for non-GIF images
-    /// or if the load was already attempted for this index.
+    /// Kicks off an async GIF decode if the current image is a GIF that hasn't
+    /// been loaded yet. Returns immediately — frames arrive via `poll_gif_decode`.
     fn load_gif_if_needed(&mut self, ctx: &egui::Context) {
         if self.gif_loaded_index == Some(self.current_index) {
             return;
         }
-        // Mark as attempted regardless of success to avoid retrying every frame.
+        // Mark as attempted to avoid re-spawning on every frame.
         self.gif_loaded_index = Some(self.current_index);
         self.gif_animation = None;
+        self.gif_decode_rx = None; // drop any stale decode
 
         if !self.is_current_gif() {
             return;
@@ -244,8 +251,36 @@ impl DedicatedImageViewerApp {
             return;
         };
 
-        match loader::decode_gif_frames(&path) {
-            Ok(frames) if frames.len() > 1 => {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ctx_clone = ctx.clone();
+        std::thread::Builder::new()
+            .name("gif-decode".into())
+            .spawn(move || {
+                let result = loader::decode_gif_frames(&path)
+                    .map_err(|e| e.to_string());
+                let _ = tx.send(result);
+                ctx_clone.request_repaint();
+            })
+            .ok();
+        self.gif_decode_rx = Some((self.current_index, rx));
+    }
+
+    /// Polls the in-flight GIF decode channel. When decoding is complete,
+    /// uploads all frames as textures and builds the `GifAnimation` struct.
+    fn poll_gif_decode(&mut self, ctx: &egui::Context) {
+        let Some((decode_index, rx)) = &self.gif_decode_rx else {
+            return;
+        };
+        let decode_index = *decode_index;
+
+        // User navigated away before the decode finished — discard.
+        if decode_index != self.current_index {
+            self.gif_decode_rx = None;
+            return;
+        }
+
+        match rx.try_recv() {
+            Ok(Ok(frames)) if frames.len() > 1 => {
                 let (w, h) = (frames[0].frame.width, frames[0].frame.height);
                 let mut textures = Vec::with_capacity(frames.len());
                 let mut delays = Vec::with_capacity(frames.len());
@@ -256,7 +291,7 @@ impl DedicatedImageViewerApp {
                         &gif_frame.frame.rgba,
                     );
                     let tex = ctx.load_texture(
-                        format!("iv-gif-{}-{}", self.current_index, i),
+                        format!("iv-gif-{}-{}", decode_index, i),
                         color_image,
                         egui::TextureOptions::LINEAR,
                     );
@@ -271,12 +306,21 @@ impl DedicatedImageViewerApp {
                     frame_started: std::time::Instant::now(),
                 });
                 self.image_resolution = Some((w, h));
+                self.gif_decode_rx = None;
             }
-            Ok(_) => {
-                // Single-frame GIF — let the normal static path render it.
+            Ok(Ok(_)) => {
+                // Single-frame GIF — static path renders it.
+                self.gif_decode_rx = None;
             }
-            Err(e) => {
-                log::warn!("[IMAGE-VIEWER] GIF decode failed for '{}': {}", path.display(), e);
+            Ok(Err(e)) => {
+                log::warn!("[IMAGE-VIEWER] GIF decode failed for index {}: {}", decode_index, e);
+                self.gif_decode_rx = None;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                // Decode still running — ctx.request_repaint was called by the worker.
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.gif_decode_rx = None;
             }
         }
     }
@@ -606,6 +650,7 @@ impl eframe::App for DedicatedImageViewerApp {
 
         // Decode and upload all GIF frames (once per image), then advance timer.
         self.load_gif_if_needed(ctx);
+        self.poll_gif_decode(ctx);
         self.advance_gif_frame(ctx);
 
         self.render_top_bar(ctx);
