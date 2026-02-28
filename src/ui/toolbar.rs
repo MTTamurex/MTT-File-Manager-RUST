@@ -4,6 +4,56 @@ use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::theme;
 use crate::ui::widgets;
 use eframe::egui;
+use std::cell::RefCell;
+
+// M-3: Cache breadcrumb segments — recomputed only when current_path changes.
+// Each entry is (display_label, navigation_target).
+thread_local! {
+    static BREADCRUMB_CACHE: RefCell<(String, Vec<(String, String)>)> =
+        RefCell::new((String::new(), Vec::new()));
+}
+
+// Returns the pre-split breadcrumb segments for `current_path`.
+// On a cache hit (same path) the cached Vec is cloned; on a miss segments are
+// recomputed from Path::components() and the cache is updated.
+fn breadcrumb_segments(current_path: &str) -> Vec<(String, String)> {
+    BREADCRUMB_CACHE.with(|cache| {
+        let mut c = cache.borrow_mut();
+        if c.0 == current_path {
+            return c.1.clone();
+        }
+        // cache miss — recompute
+        let mut full = std::path::PathBuf::new();
+        let path = std::path::Path::new(current_path);
+        let components: Vec<_> = path.components().collect();
+        let mut segs = Vec::with_capacity(components.len());
+        for (i, comp) in components.iter().enumerate() {
+            let comp_str = comp.as_os_str().to_string_lossy();
+            let display_name = comp_str.trim_end_matches('\\');
+            if display_name.is_empty() && i > 0 {
+                continue;
+            }
+            full.push(comp);
+            let target = {
+                let p = full.to_string_lossy().to_string();
+                if p.len() == 2 && p.ends_with(':') {
+                    format!("{}\\" , p)
+                } else {
+                    p
+                }
+            };
+            let display = if display_name.is_empty() {
+                comp_str.into_owned()
+            } else {
+                display_name.to_string()
+            };
+            segs.push((display, target));
+        }
+        c.0 = current_path.to_string();
+        c.1 = segs.clone();
+        segs
+    })
+}
 
 #[derive(Debug, Clone)]
 pub enum ToolbarAction {
@@ -261,34 +311,11 @@ pub fn render_toolbar(
                             .color(egui::Color32::BLACK),
                     );
                 } else {
-                    let path = std::path::Path::new(current_path);
-                    let mut full_accumulated = std::path::PathBuf::new();
-                    let components: Vec<_> = path.components().collect();
+                    // M-3: use cached segments — only recomputed on path change
+                    let segments = breadcrumb_segments(current_path);
+                    let seg_count = segments.len();
 
-                    for (i, comp) in components.iter().enumerate() {
-                        let comp_str = comp.as_os_str().to_string_lossy();
-                        let display_name = comp_str.trim_end_matches('\\');
-
-                        if display_name.is_empty() && i > 0 {
-                            continue;
-                        }
-
-                        full_accumulated.push(comp);
-                        let target_path = {
-                            let p = full_accumulated.to_string_lossy().to_string();
-                            if p.len() == 2 && p.ends_with(':') {
-                                format!("{}\\", p)
-                            } else {
-                                p
-                            }
-                        };
-
-                        let display = if display_name.is_empty() {
-                            comp_str.into_owned()
-                        } else {
-                            display_name.to_string()
-                        };
-
+                    for (seg_idx, (display, target_path)) in segments.into_iter().enumerate() {
                         // Clickable breadcrumb - transparent, light gray on hover
                         let btn_resp = addr_ui
                             .scope(|ui| {
@@ -320,7 +347,7 @@ pub fn render_toolbar(
                             action = Some(ToolbarAction::Navigate(target_path));
                         }
 
-                        if i < components.len() - 1 {
+                        if seg_idx < seg_count - 1 {
                             addr_ui.label(
                                 egui::RichText::new("›")
                                     .size(14.0)

@@ -64,21 +64,26 @@ pub fn render_context_menu(
     let mut pending_load_item: Option<i32> = None;
     let mut should_close = false;
 
-    // Separate primary (header) and secondary items
+    // M-5: Ensure partition indices are up-to-date (normally pre-computed at item assignment).
+    if menu_state.partition_dirty {
+        menu_state.partition_items();
+    }
+
+    // Use pre-partitioned indices — no per-frame filter().collect()
     let primary_items: Vec<&ContextMenuItem> = menu_state
-        .items
+        .primary_indices
         .iter()
-        .filter(|i| i.is_primary && !i.is_separator)
+        .map(|&i| &menu_state.items[i])
         .collect();
     let secondary_items: Vec<&ContextMenuItem> = menu_state
-        .items
+        .secondary_indices
         .iter()
-        .filter(|i| !i.is_primary && !i.show_in_overflow)
+        .map(|&i| &menu_state.items[i])
         .collect();
     let overflow_items: Vec<&ContextMenuItem> = menu_state
-        .items
+        .overflow_indices
         .iter()
-        .filter(|i| i.show_in_overflow)
+        .map(|&i| &menu_state.items[i])
         .collect();
 
     // SMART ALIGNMENT: If the menu would open over the player area, shift it to the left

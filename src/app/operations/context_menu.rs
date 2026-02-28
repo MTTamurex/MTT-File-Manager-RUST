@@ -7,31 +7,32 @@ use eframe::egui;
 use std::path::PathBuf;
 
 impl ImageViewerApp {
-    pub fn context_target_paths(&self, item_idx: Option<usize>) -> Vec<PathBuf> {
+    pub fn context_target_paths<'a>(&'a self, item_idx: Option<usize>) -> std::borrow::Cow<'a, [std::path::PathBuf]> {
         // 1. Prioritize context menu state (populated by right-click)
+        // L-12: Borrow the Vec instead of cloning — avoids allocation on the hot path.
         if !self.context_menu.target_paths.is_empty() {
-            return self.context_menu.target_paths.clone();
+            return std::borrow::Cow::Borrowed(&self.context_menu.target_paths);
         }
 
         // 2. Explicit item index
         if let Some(idx) = item_idx {
             if let Some(i) = self.items.get(idx) {
-                return vec![i.path.clone()];
+                return std::borrow::Cow::Owned(vec![i.path.clone()]);
             }
         }
 
         // 3. Multi-selection
         if !self.multi_selection.is_empty() {
-            return self.multi_selection.iter().cloned().collect();
+            return std::borrow::Cow::Owned(self.multi_selection.iter().cloned().collect());
         }
 
         // 4. Single selection
         if let Some(sel) = &self.selected_file {
-            return vec![sel.path.clone()];
+            return std::borrow::Cow::Owned(vec![sel.path.clone()]);
         }
 
         // 5. Current folder
-        vec![PathBuf::from(&self.navigation_state.current_path)]
+        std::borrow::Cow::Owned(vec![std::path::PathBuf::from(&self.navigation_state.current_path)])
     }
 
     pub fn populate_context_menu(
@@ -61,6 +62,7 @@ impl ImageViewerApp {
             );
 
             self.context_menu.items = items;
+            self.context_menu.partition_items(); // M-5
             return;
         }
 
@@ -70,6 +72,7 @@ impl ImageViewerApp {
                 ContextMenuItem::new(-54, "Esvaziar Lixeira").with_command("empty_recycle_bin"),
             );
             self.context_menu.items = items;
+            self.context_menu.partition_items(); // M-5
             return;
         }
 
@@ -224,6 +227,7 @@ impl ImageViewerApp {
         }
 
         self.context_menu.items = items;
+        self.context_menu.partition_items(); // M-5
     }
 
     /// Convert `ShellMenuItemData` items received from the worker and merge them into
@@ -312,6 +316,7 @@ impl ImageViewerApp {
             items.push(ContextMenuItem::new(-99, "Mostrar mais opções").with_subitems(overflow));
         }
 
+        self.context_menu.partition_items(); // M-5: re-partition after shell items are merged
         self.shell_menu_loading = false;
     }
 

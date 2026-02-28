@@ -16,7 +16,7 @@ mod init_bootstrap;
 mod init_post_startup;
 mod init_preferences;
 mod init_state_builders;
-mod init_workers;
+pub(crate) mod init_workers;
 pub mod layout_state;
 pub mod navigation_state;
 pub mod operations;

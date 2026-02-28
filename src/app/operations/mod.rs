@@ -34,6 +34,7 @@ pub mod navigation;
 pub mod preferences;
 pub mod recycle_bin_ops;
 pub mod selection;
+pub mod shutdown;
 pub mod tabs;
 pub mod thumbnails;
 pub mod trait_impls;

@@ -1,5 +1,5 @@
 mod background_jobs;
-pub(super) mod consistency_probe_worker;
+pub(crate) mod consistency_probe_worker;
 mod filesystem_workers;
 mod pipeline_workers;
 mod visual_workers;

@@ -94,12 +94,14 @@ impl ImageViewerApp {
     }
 
     pub fn delete_with_shell_for_idx(&mut self, idx: Option<usize>) {
-        let paths = self.context_target_paths(idx);
+        // L-12: into_owned() breaks the Cow borrow before the mutable call below
+        let paths = self.context_target_paths(idx).into_owned();
         self.delete_with_shell_for_paths(&paths);
     }
 
     pub fn delete_permanently_for_idx(&mut self, idx: Option<usize>) {
-        let paths = self.context_target_paths(idx);
+        // L-12: .into_owned() converts Cow<[PathBuf]> to Vec<PathBuf> (clone only when borrowed)
+        let paths: Vec<PathBuf> = self.context_target_paths(idx).into_owned();
         if paths.is_empty() {
             return;
         }
@@ -178,7 +180,8 @@ impl ImageViewerApp {
     }
 
     pub fn show_properties_for_idx(&mut self, idx: Option<usize>) {
-        let paths = self.context_target_paths(idx);
+        // L-12: into_owned() converts Cow<[PathBuf]> to Vec<PathBuf>
+        let paths: Vec<PathBuf> = self.context_target_paths(idx).into_owned();
         if paths.is_empty() {
             return;
         }
