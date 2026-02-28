@@ -119,7 +119,7 @@ impl MpvPreview {
             // SAFETY: Don't open files that are actively being downloaded/written.
             // mpv/libmpv opens files with potentially restrictive sharing flags,
             // which can cause sharing violations that cancel active downloads.
-            if crate::infrastructure::windows::file_flags::is_file_unsafe_to_read(&self.path) {
+            if crate::infrastructure::windows::file_flags::is_file_unsafe_to_read_fast(&self.path) {
                 log::debug!(
                     "[MpvPreview] Skipping file unsafe to read (download in progress): {:?}",
                     self.path.file_name()

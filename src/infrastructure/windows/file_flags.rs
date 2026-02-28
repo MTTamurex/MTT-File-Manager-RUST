@@ -189,7 +189,8 @@ pub fn is_file_locked_for_write(path: &Path) -> bool {
 ///
 /// Three layers of defense:
 /// 1. **Extension check**: `.crdownload`, `.part`, etc. (instant, zero cost)
-/// 2. **Write-lock probe**: Detects another process holding WRITE access (5µs, single syscall)
+/// 2. **Write-lock probe**: Detects another process holding WRITE access (5µs on NVMe,
+///    but can take **hundreds of ms on virtual/network drives**). Only safe on worker threads.
 /// 3. **Recently-modified guard**: If the file's mtime is within the last
 ///    2 minutes, assume it's still being written to. This catches race
 ///    conditions where torrent/encoding clients briefly release the file handle
@@ -201,6 +202,9 @@ pub fn is_file_locked_for_write(path: &Path) -> bool {
 ///    between pieces for 30-90 seconds on slow connections, and the cost of
 ///    waiting an extra minute for a thumbnail is negligible compared to killing
 ///    a multi-GB download.
+///
+/// **WARNING**: Contains `CreateFileW` probe (layer 2) that can block on
+/// network/virtual drives. Use [`is_file_unsafe_to_read_fast`] on the UI thread.
 pub fn is_file_unsafe_to_read(path: &Path) -> bool {
     if is_incomplete_download(path) {
         log::debug!(
@@ -218,24 +222,30 @@ pub fn is_file_unsafe_to_read(path: &Path) -> bool {
         return true;
     }
 
-    // LAYER 3: Race-condition safety net.
-    //
-    // Thumbnail/metadata extraction uses COM APIs that open files internally
-    // with unknown (likely restrictive) sharing flags. If a torrent client
-    // or encoder briefly releases the file handle between writes, our lock
-    // probe succeeds, we hand the path to a COM API, and the COM API opens
-    // it WITHOUT FILE_SHARE_WRITE — causing a sharing violation that kills
-    // the download.
-    //
-    // If the file was modified within the last WRITE_GUARD_SECS, it's very
-    // likely still being written to. Skip it.
-    //
-    // Uses GetFileAttributesExW (via std::fs::metadata) — no file handle opened.
     if is_recently_modified(path) {
         log::debug!(
             "[FileFlags] Skipping recently-modified file (likely active download/encode): {:?}",
             path.file_name()
         );
+        return true;
+    }
+
+    false
+}
+
+/// Lightweight version of [`is_file_unsafe_to_read`] safe for the UI thread.
+///
+/// Only performs cheap checks (extension + mtime), skipping the `CreateFileW`
+/// write-lock probe which can block for hundreds of ms on network/virtual drives.
+/// This is sufficient for UI-thread decisions (watcher events, metadata requests)
+/// because the full check will still be performed on the worker thread before any
+/// file I/O occurs.
+pub fn is_file_unsafe_to_read_fast(path: &Path) -> bool {
+    if is_incomplete_download(path) {
+        return true;
+    }
+
+    if is_recently_modified(path) {
         return true;
     }
 

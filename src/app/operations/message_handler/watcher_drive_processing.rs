@@ -278,7 +278,9 @@ impl ImageViewerApp {
         // → UI re-requests thumbnail/metadata → COM API opens file without FILE_SHARE_WRITE
         // → sharing violation kills the download. The cache will be cleared naturally
         // once the file is no longer unsafe to read (download completes).
-        if !crate::infrastructure::windows::file_flags::is_file_unsafe_to_read(&cleaned) {
+        // Uses _fast variant (no CreateFileW probe) to avoid blocking the UI thread
+        // on network/virtual drives.
+        if !crate::infrastructure::windows::file_flags::is_file_unsafe_to_read_fast(&cleaned) {
             crate::workers::thumbnail::clear_failure_cache(&cleaned);
         }
 
@@ -301,7 +303,8 @@ impl ImageViewerApp {
                 // the UI would immediately re-request metadata, which opens the file
                 // via COM APIs (MFCreateSourceReaderFromURL, etc.) without FILE_SHARE_WRITE,
                 // killing active downloads.
-                if !crate::infrastructure::windows::file_flags::is_file_unsafe_to_read(&cleaned) {
+                // Uses _fast variant to avoid blocking UI thread on network/virtual drives.
+                if !crate::infrastructure::windows::file_flags::is_file_unsafe_to_read_fast(&cleaned) {
                     self.metadata_cache.pop(&cleaned);
                     self.last_metadata_path = None;
                 }
