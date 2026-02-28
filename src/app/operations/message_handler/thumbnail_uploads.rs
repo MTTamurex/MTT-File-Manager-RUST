@@ -137,6 +137,20 @@ impl ImageViewerApp {
                 continue;
             }
 
+            // PERF FIX (M-4): Build visibility set ONCE outside the eviction loop
+            // (was being rebuilt on every iteration, causing redundant allocations).
+            let eviction_visible: Option<HashSet<&std::path::Path>> = self.visible_index_range
+                .and_then(|(min_vis, max_vis)| {
+                    let items = &self.items;
+                    if items.is_empty() {
+                        return None;
+                    }
+                    let max_vis = max_vis.min(items.len().saturating_sub(1));
+                    Some((min_vis..=max_vis)
+                        .map(|i| items[i].path.as_path())
+                        .collect())
+                });
+
             while self.pending_thumbnails.len() >= MAX_PENDING_THUMBNAILS {
                 // FIX: Smart eviction — prefer removing off-screen items to keep visible
                 // ones alive. On SSD, the worker queue processes most-recently-added items
@@ -145,17 +159,8 @@ impl ImageViewerApp {
                 // eject exactly the items the user is looking at. Instead, scan for the
                 // first off-screen item and evict it; fall back to FIFO only when every
                 // pending item is visible (extremely unlikely with MAX_PENDING=64).
-                let evict_idx = self.visible_index_range
-                    .and_then(|(min_vis, max_vis)| {
-                        let items = &self.items;
-                        if items.is_empty() {
-                            return None;
-                        }
-                        let max_vis = max_vis.min(items.len().saturating_sub(1));
-                        // Build a small visibility set (only visible items, typically 20-60)
-                        let visible: HashSet<&std::path::Path> = (min_vis..=max_vis)
-                            .map(|i| items[i].path.as_path())
-                            .collect();
+                let evict_idx = eviction_visible.as_ref()
+                    .and_then(|visible| {
                         // Find first off-screen item in the deque
                         self.pending_thumbnails
                             .iter()

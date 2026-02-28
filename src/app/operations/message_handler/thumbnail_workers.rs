@@ -123,11 +123,18 @@ impl ImageViewerApp {
     }
 
     pub(super) fn process_icon_worker_results(&mut self, ctx: &egui::Context) {
-        // Phase 1: Drain ALL pre-warm results eagerly (no budget limit).
+        // Phase 1: Drain pre-warm results with a cap to prevent GPU upload storms (A-5).
         // Pre-warm results use usize::MAX generation and fake paths.
         // We only need to populate extension_cache, skip icon_cache.
+        const MAX_PREWARM_UPLOADS_PER_FRAME: usize = 16;
         let mut phase1_processed_regular = false;
+        let mut prewarm_uploads = 0usize;
         loop {
+            if prewarm_uploads >= MAX_PREWARM_UPLOADS_PER_FRAME {
+                // More pre-warm results may remain — continue next frame.
+                ctx.request_repaint();
+                break;
+            }
             match self.icon_res_receiver.try_recv() {
                 Ok((path, icon_generation, pixels, width, height)) => {
                     if icon_generation == usize::MAX {
@@ -146,6 +153,7 @@ impl ImageViewerApp {
                                         egui::TextureOptions::LINEAR,
                                     );
                                     self.item_icon_loader.extension_cache.insert(ext_key, texture);
+                                    prewarm_uploads += 1;
                                 }
                             }
                             // Remove extension from loading set.
@@ -155,7 +163,7 @@ impl ImageViewerApp {
                                 );
                             }
                         }
-                        continue; // Keep draining pre-warm results.
+                        continue; // Keep draining pre-warm results (within cap).
                     }
                     // Non-pre-warm result found — push back for Phase 2.
                     // We can't push back into mpsc, so process it inline.
@@ -294,8 +302,30 @@ impl ImageViewerApp {
     }
 
     pub(super) fn process_metadata_worker_results(&mut self, ctx: &egui::Context) {
+        // PERF FIX (A-1): Cap + time budget to prevent stutter when many metadata
+        // results arrive at once (e.g. after navigating to a large media folder).
+        const MAX_METADATA_MSGS_PER_FRAME: usize = 32;
+        let metadata_budget = if self.frame_time_peak_ms > 33.33 {
+            Duration::from_millis(2)
+        } else if self.frame_time_peak_ms > 25.0 {
+            Duration::from_millis(3)
+        } else {
+            Duration::from_millis(4)
+        };
+        let start = Instant::now();
         let mut metadata_updated = false;
-        while let Ok((path, mtime, meta)) = self.metadata_res_receiver.try_recv() {
+        let mut processed = 0usize;
+        let mut has_more = false;
+
+        while processed < MAX_METADATA_MSGS_PER_FRAME {
+            if start.elapsed() >= metadata_budget {
+                has_more = true;
+                break;
+            }
+            let Ok((path, mtime, meta)) = self.metadata_res_receiver.try_recv() else {
+                break;
+            };
+            processed += 1;
             self.metadata_loading.remove(&path);
             self.metadata_cache.put(path.clone(), (mtime, meta.clone()));
 
@@ -307,7 +337,11 @@ impl ImageViewerApp {
             }
         }
 
-        if metadata_updated {
+        if processed >= MAX_METADATA_MSGS_PER_FRAME {
+            has_more = true;
+        }
+
+        if metadata_updated || has_more {
             ctx.request_repaint();
         }
     }

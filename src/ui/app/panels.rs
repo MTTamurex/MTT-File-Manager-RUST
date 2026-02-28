@@ -298,7 +298,8 @@ fn render_preview_panel_layout(
                                                 path
                                             );
                                             // Clear all caches to allow retry
-                                            app.disk_cache.remove_cache_for_path(&path);
+                                            // PERF FIX (C-1): Dispatch SQLite cleanup to background worker
+                                            app.enqueue_disk_cache_invalidations(vec![path.clone()]);
                                             log::debug!("[REFRESH THUMBNAIL] Disk cache cleared");
                                             app.cache_manager.texture_cache.pop(&path);
                                             log::debug!("[REFRESH THUMBNAIL] Texture cache cleared");
@@ -424,14 +425,17 @@ fn render_resize_handles(app: &mut ImageViewerApp, ctx: &egui::Context) {
 }
 
 fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
-    if let Some(file) = app.selected_file.clone() {
+    // PERF FIX (M-1): Return a reference-based approach — clone only when the
+    // selected file actually changed since last frame. For the common case
+    // (same file selected across frames), we reuse the cached entry.
+    if let Some(ref file) = app.selected_file {
         // PERFORMANCE FIX: NEVER call path.exists() in render loop!
         // On HDD with video playing, this causes I/O spikes every frame.
         // File existence is validated on:
         // 1. Selection (when user clicks)
         // 2. File system watcher events (auto-refresh)
         // Trust the cached state - it's updated by the file watcher.
-        Some(file)
+        Some(file.clone())
     } else if app.navigation_state.is_recycle_bin_view {
         Some(FileEntry {
             path: PathBuf::from("Lixeira"),
