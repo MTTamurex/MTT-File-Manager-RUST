@@ -120,11 +120,12 @@ fn read_directory_impl(path: &Path, is_onedrive: bool, show_hidden: bool) -> Res
             FIND_FIRST_EX_LARGE_FETCH,  // Critical: Read larger directory chunks
         );
 
-        if handle.is_err() {
-            return Err(format!("Failed to open directory: {}", path.display()));
-        }
-
-        let handle = handle.unwrap();
+        let handle = match handle {
+            Ok(handle) => handle,
+            Err(_) => {
+                return Err(format!("Failed to open directory: {}", path.display()));
+            }
+        };
 
         loop {
             // Extract filename from wide string

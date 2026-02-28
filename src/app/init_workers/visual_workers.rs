@@ -102,17 +102,19 @@ pub(in crate::app) fn spawn_async_font_loader() -> mpsc::Receiver<egui::FontDefi
         }
 
         if !loaded_fonts.is_empty() {
-            fonts
+            if let Some(proportional) = fonts
                 .families
                 .get_mut(&eframe::egui::FontFamily::Proportional)
-                .unwrap()
-                .extend(loaded_fonts.clone());
+            {
+                proportional.extend(loaded_fonts.clone());
+            }
 
-            fonts
+            if let Some(monospace) = fonts
                 .families
                 .get_mut(&eframe::egui::FontFamily::Monospace)
-                .unwrap()
-                .extend(loaded_fonts.clone());
+            {
+                monospace.extend(loaded_fonts.clone());
+            }
         }
 
         let _ = font_tx.send(fonts);
