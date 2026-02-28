@@ -73,7 +73,7 @@ pub struct ImageViewerApp {
 
     // --- OPTIMIZED THUMBNAIL SYSTEM ---
     pub thumbnail_queue: Arc<PriorityThumbnailQueue>, // UI -> Worker Pool (Priority Queue)
-    pub image_receiver: Receiver<ThumbnailData>,      // Worker Pool -> UI
+    pub image_receiver: crossbeam_channel::Receiver<ThumbnailData>, // Worker Pool -> UI
     pub pending_thumbnails: VecDeque<ThumbnailData>,  // PERFORMANCE: Buffer for throttled uploads
 
     // File system

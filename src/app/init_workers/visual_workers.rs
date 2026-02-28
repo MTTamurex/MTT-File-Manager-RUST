@@ -129,8 +129,18 @@ pub(in crate::app) fn spawn_icon_worker(
     preloaded_icons: &std::collections::HashMap<String, (Vec<u8>, u32, u32)>,
 ) -> (mpsc::Sender<IconRequest>, mpsc::Receiver<IconResponse>) {
     let (icon_req_tx, icon_req_rx_thread) = mpsc::channel::<IconRequest>();
-    let icon_req_rx = Arc::new(Mutex::new(icon_req_rx_thread));
+    let (fanout_tx, fanout_rx) = crossbeam_channel::unbounded::<IconRequest>();
     let (icon_res_tx, icon_res_rx) = mpsc::channel::<IconResponse>();
+
+    // Keep std::sync::mpsc sender API for the app state, but fan-out requests into
+    // a cloneable crossbeam receiver so icon workers consume truly in parallel.
+    std::thread::spawn(move || {
+        while let Ok(req) = icon_req_rx_thread.recv() {
+            if fanout_tx.send(req).is_err() {
+                break;
+            }
+        }
+    });
 
     // Shared extension icon cache across all workers.
     // Pre-populated with disk-cached data so workers never call SHGetFileInfoW
@@ -153,7 +163,7 @@ pub(in crate::app) fn spawn_icon_worker(
 
     for worker_id in 0..worker_count {
         let icon_ctx = ctx.clone();
-        let icon_req_rx = icon_req_rx.clone();
+        let icon_req_rx = fanout_rx.clone();
         let icon_res_tx = icon_res_tx.clone();
         let generation_ref = current_generation.clone();
         let ext_cache = shared_ext_cache.clone();
@@ -182,16 +192,7 @@ pub(in crate::app) fn spawn_icon_worker(
                     crate::infrastructure::io_priority::IOPriority::Interactive,
                 );
 
-                loop {
-                    let recv_result = match icon_req_rx.lock() {
-                        Ok(rx) => rx.recv(),
-                        Err(_) => break,
-                    };
-
-                    let (path, req_generation) = match recv_result {
-                        Ok(data) => data,
-                        Err(_) => break,
-                    };
+                while let Ok((path, req_generation)) = icon_req_rx.recv() {
 
                     // Drop stale requests quickly when user has already navigated away.
                     // usize::MAX = pre-warm requests (always process).

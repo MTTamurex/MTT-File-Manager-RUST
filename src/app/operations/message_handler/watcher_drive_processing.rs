@@ -272,7 +272,15 @@ impl ImageViewerApp {
             self.cache_manager.texture_cache.pop(&cleaned);
         }
         self.cache_manager.failed_thumbnails.pop(&cleaned);
-        crate::workers::thumbnail::clear_failure_cache(&cleaned);
+
+        // DON'T clear failure cache for files that are still being downloaded/written.
+        // Otherwise: torrent writes piece → watcher fires MODIFY → failure cache cleared
+        // → UI re-requests thumbnail/metadata → COM API opens file without FILE_SHARE_WRITE
+        // → sharing violation kills the download. The cache will be cleared naturally
+        // once the file is no longer unsafe to read (download completes).
+        if !crate::infrastructure::windows::file_flags::is_file_unsafe_to_read(&cleaned) {
+            crate::workers::thumbnail::clear_failure_cache(&cleaned);
+        }
 
         // Register parent folder as changed so its cover/preview caches
         // are invalidated when the modified file was the cover source.
@@ -289,8 +297,14 @@ impl ImageViewerApp {
 
         if let Some(ref selected) = self.selected_file {
             if selected.path == cleaned {
-                self.metadata_cache.pop(&cleaned);
-                self.last_metadata_path = None;
+                // Don't invalidate metadata cache for files actively being written —
+                // the UI would immediately re-request metadata, which opens the file
+                // via COM APIs (MFCreateSourceReaderFromURL, etc.) without FILE_SHARE_WRITE,
+                // killing active downloads.
+                if !crate::infrastructure::windows::file_flags::is_file_unsafe_to_read(&cleaned) {
+                    self.metadata_cache.pop(&cleaned);
+                    self.last_metadata_path = None;
+                }
             }
         }
 

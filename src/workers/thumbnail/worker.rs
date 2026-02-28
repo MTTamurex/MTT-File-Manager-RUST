@@ -9,9 +9,9 @@ use crate::domain::thumbnail::ThumbnailData;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::io_priority::{self, IOPriority};
 use crate::workers::thumbnail::queue::PriorityThumbnailQueue;
+use crossbeam_channel::Sender;
 use eframe::egui;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::Sender;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Instant;
 use windows::Win32::Media::MediaFoundation::{MFShutdown, MFStartup, MFSTARTUP_NOSOCKET};
@@ -28,6 +28,10 @@ pub struct Semaphore {
     count: Mutex<usize>,
     condvar: Condvar,
     max: usize,
+}
+
+struct SemaphorePermit<'a> {
+    semaphore: &'a Semaphore,
 }
 
 impl Semaphore {
@@ -53,6 +57,17 @@ impl Semaphore {
             *count -= 1;
         }
         self.condvar.notify_one();
+    }
+
+    fn acquire_guard(&self) -> SemaphorePermit<'_> {
+        self.acquire();
+        SemaphorePermit { semaphore: self }
+    }
+}
+
+impl Drop for SemaphorePermit<'_> {
+    fn drop(&mut self) {
+        self.semaphore.release();
     }
 }
 

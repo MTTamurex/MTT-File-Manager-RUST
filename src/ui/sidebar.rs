@@ -249,13 +249,6 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
                 );
                 cursor_x += 24.0;
             } else {
-                ui.painter().text(
-                    Pos2::new(cursor_x + 8.0, rect.center().y),
-                    egui::Align2::CENTER_CENTER,
-                    "🗑",
-                    egui::FontId::proportional(14.0),
-                    ui.visuals().text_color(),
-                );
                 cursor_x += 24.0;
             }
 
@@ -382,14 +375,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
                     );
                     cursor_x += 24.0;
                 } else {
-                    ui.painter().text(
-                        Pos2::new(cursor_x, rect.center().y),
-                        egui::Align2::LEFT_CENTER,
-                        "💽",
-                        egui::FontId::proportional(12.0),
-                        ui.visuals().text_color(),
-                    );
-                    cursor_x += 20.0;
+                    cursor_x += 24.0;
                 }
 
                 ui.painter().text(
@@ -515,13 +501,6 @@ fn render_pinned_folders(
                 );
                 cursor_x += 24.0;
             } else {
-                ui.painter().text(
-                    Pos2::new(cursor_x + 8.0, rect.center().y),
-                    egui::Align2::CENTER_CENTER,
-                    "📁",
-                    egui::FontId::proportional(13.0),
-                    ui.visuals().text_color(),
-                );
                 cursor_x += 24.0;
             }
 

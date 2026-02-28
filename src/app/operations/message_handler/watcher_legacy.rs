@@ -159,7 +159,12 @@ impl ImageViewerApp {
                             self.cache_manager.texture_cache.pop(&cleaned);
                         }
                         self.cache_manager.failed_thumbnails.pop(&cleaned);
-                        crate::workers::thumbnail::clear_failure_cache(&cleaned);
+
+                        // DON'T clear failure cache for files still being written
+                        // (active downloads). See watcher_drive_processing.rs for details.
+                        if !crate::infrastructure::windows::file_flags::is_file_unsafe_to_read(&cleaned) {
+                            crate::workers::thumbnail::clear_failure_cache(&cleaned);
+                        }
                     }
 
                     if meaningful_change {

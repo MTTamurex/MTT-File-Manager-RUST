@@ -69,6 +69,16 @@ pub fn extract_media_metadata(path: &Path) -> MediaMetadata {
         return MediaMetadata::default();
     }
 
+    // CRITICAL FIX: Skip files that are still being downloaded or written to.
+    // Metadata extraction opens files via MFCreateSourceReaderFromURL,
+    // SHGetPropertyStoreFromParsingName, File::open (codec sniffing), etc.
+    // These APIs open the file WITHOUT FILE_SHARE_WRITE, causing sharing
+    // violations that cancel active downloads (browsers, torrents, encoders).
+    if crate::infrastructure::windows::file_flags::is_file_unsafe_to_read(path) {
+        log::debug!("[METADATA] Skipping file unsafe to read (download/write in progress): {:?}", path.file_name());
+        return MediaMetadata::default();
+    }
+
     let ext = path
         .extension()
         .and_then(|e| e.to_str())

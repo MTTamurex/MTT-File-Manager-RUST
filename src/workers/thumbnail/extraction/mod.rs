@@ -60,6 +60,13 @@ pub fn generate_thumbnail_hybrid(
         return None;
     }
 
+    // DEFENSE: Skip files that are still being downloaded or written to.
+    // Reading them can interrupt active downloads (sharing violation) or
+    // produce corrupt/partial thumbnails from incomplete data.
+    if crate::infrastructure::windows::file_flags::is_file_unsafe_to_read(path) {
+        return None;
+    }
+
     // Stage 1: image crate (Fast Path)
     log::trace!("[Thumbnail] Trying Stage 1 (image crate)...");
     if let Some(result) = stage1_image_crate::extract(path, priority) {
