@@ -25,10 +25,10 @@ fn onedrive_pin_command_from_text(text: &str) -> Option<crate::infrastructure::o
 fn find_menu_item_text_by_id(
     items: &[crate::application::context_menu::ContextMenuItem],
     id: i32,
-) -> Option<String> {
+) -> Option<&str> {
     for item in items {
         if item.id == id {
-            return Some(item.text.clone());
+            return Some(item.text.as_str());
         }
 
         if let Some(text) = find_menu_item_text_by_id(&item.sub_items, id) {
@@ -42,7 +42,6 @@ fn find_menu_item_text_by_id(
 pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
     // 1. Render the menu (ui construction)
     let mut context_menu = std::mem::take(&mut app.context_menu);
-    let target_paths = context_menu.target_paths.clone(); // PRESERVE PATHS
 
     let _ = crate::ui::context_menu::render_context_menu(
         ctx,
@@ -64,18 +63,17 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
             let selected_shell_item_text = find_menu_item_text_by_id(&context_menu.items, id);
 
             let direct_onedrive_pin_command = selected_shell_item_text
-                .as_deref()
                 .and_then(onedrive_pin_command_from_text);
 
             if let Some(command) = direct_onedrive_pin_command {
-                let is_cloud_target = target_paths.iter().any(|path| {
+                let is_cloud_target = context_menu.target_paths.iter().any(|path| {
                     crate::infrastructure::onedrive::is_onedrive_path(path)
                         || crate::infrastructure::onedrive::path_has_cloud_attributes(path)
                 });
 
                 if is_cloud_target {
                     let mut had_error = false;
-                    for path in &target_paths {
+                    for path in &context_menu.target_paths {
                         if let Err(e) = crate::infrastructure::onedrive::set_pin_state(path, command) {
                             had_error = true;
                             log::warn!(
@@ -97,7 +95,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     app.directory_cache.invalidate(&std::path::PathBuf::from(&app.navigation_state.current_path));
                     // Invalidate each target and its children so navigation into
                     // affected folders reads fresh sync_status from disk, not cache.
-                    for path in &target_paths {
+                    for path in &context_menu.target_paths {
                         app.directory_cache.invalidate(path);
                         app.directory_cache.invalidate_children(path);
                     }
@@ -122,16 +120,16 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
                 // OneDrive pin fallback: apply the managed command in addition to
                 // the shell invoke (some OneDrive shell extensions fire silently).
-                if let Some(text) = selected_shell_item_text.as_deref() {
+                if let Some(text) = selected_shell_item_text {
                     if let Some(command) = onedrive_pin_command_from_text(text) {
-                        for path in &target_paths {
+                        for path in &context_menu.target_paths {
                             let _ = crate::infrastructure::onedrive::set_pin_state(path, command);
                         }
                         app.directory_cache.invalidate(&std::path::PathBuf::from(
                             &app.navigation_state.current_path,
                         ));
                         // Same invalidation for the shell-invoke fallback path.
-                        for path in &target_paths {
+                        for path in &context_menu.target_paths {
                             app.directory_cache.invalidate(path);
                             app.directory_cache.invalidate_children(path);
                         }
@@ -157,8 +155,8 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     }
                 }
                 -6 | -34 => {
-                    if !target_paths.is_empty() {
-                        app.delete_with_shell_for_paths(&target_paths);
+                    if !context_menu.target_paths.is_empty() {
+                        app.delete_with_shell_for_paths(&context_menu.target_paths);
                     }
                 }
                 -20 => {
@@ -231,13 +229,13 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 }
                 -28 => app.show_properties_for_idx(item_idx),
                 -50 | -52 => {
-                    if !target_paths.is_empty() {
-                        app.restore_from_recycle_bin(&target_paths);
+                    if !context_menu.target_paths.is_empty() {
+                        app.restore_from_recycle_bin(&context_menu.target_paths);
                     }
                 }
                 -51 | -53 => {
-                    if !target_paths.is_empty() {
-                        app.delete_permanently(&target_paths);
+                    if !context_menu.target_paths.is_empty() {
+                        app.delete_permanently(&context_menu.target_paths);
                     }
                 }
                 -54 => app.empty_recycle_bin(),

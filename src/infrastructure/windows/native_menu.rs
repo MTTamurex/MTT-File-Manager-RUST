@@ -37,6 +37,55 @@ pub struct ShellMenuContext {
     hmenu: HMENU,
 }
 
+struct ComApartmentGuard {
+    should_uninitialize: bool,
+}
+
+impl ComApartmentGuard {
+    fn init_sta() -> Self {
+        let should_uninitialize = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok() };
+        Self {
+            should_uninitialize,
+        }
+    }
+}
+
+impl Drop for ComApartmentGuard {
+    fn drop(&mut self) {
+        if self.should_uninitialize {
+            unsafe {
+                CoUninitialize();
+            }
+        }
+    }
+}
+
+struct PidlCleanupGuard {
+    pidls: Vec<*mut ITEMIDLIST>,
+}
+
+impl PidlCleanupGuard {
+    fn new(capacity: usize) -> Self {
+        Self {
+            pidls: Vec::with_capacity(capacity),
+        }
+    }
+
+    fn push(&mut self, pidl: *mut ITEMIDLIST) {
+        self.pidls.push(pidl);
+    }
+}
+
+impl Drop for PidlCleanupGuard {
+    fn drop(&mut self) {
+        unsafe {
+            for pidl in self.pidls.drain(..) {
+                CoTaskMemFree(Some(pidl as _));
+            }
+        }
+    }
+}
+
 impl Drop for ShellMenuContext {
     fn drop(&mut self) {
         unsafe {
@@ -88,7 +137,7 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
         );
 
         // Parse all paths to PIDLs and collect children
-        let mut pidls_to_free = Vec::with_capacity(paths.len());
+        let mut pidls_to_free = PidlCleanupGuard::new(paths.len());
         let mut child_pidls = Vec::with_capacity(paths.len());
         let mut parent_folder_opt: Option<IShellFolder> = None;
 
@@ -115,22 +164,25 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
         }
 
         if parent_folder_opt.is_none() || child_pidls.is_empty() {
-            for pidl in pidls_to_free {
-                CoTaskMemFree(Some(pidl as _));
-            }
             return Err(Error::from_win32());
         }
 
-        let parent_folder = parent_folder_opt.unwrap();
+        let Some(parent_folder) = parent_folder_opt else {
+            return Err(Error::from_win32());
+        };
 
         // Get IContextMenu
         let context_menu: IContextMenu = parent_folder.GetUIObjectOf(hwnd, &child_pidls, None)?;
 
         // Create popup menu to extract items
         let hmenu = CreatePopupMenu()?;
-        context_menu
+        if let Err(e) = context_menu
             .QueryContextMenu(hmenu, 0, 1, 0x7FFF, CMF_NORMAL)
-            .ok()?;
+            .ok()
+        {
+            let _ = DestroyMenu(hmenu);
+            return Err(e);
+        }
 
         let count = GetMenuItemCount(Some(hmenu));
         log::debug!("[ShellMenu] Total menu items: {}", count);
@@ -159,10 +211,6 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
             pending_count
         );
 
-        for pidl in pidls_to_free {
-            CoTaskMemFree(Some(pidl as _));
-        }
-
         Ok(ShellMenuContext {
             items: std::cell::RefCell::new(items),
             context_menu,
@@ -177,9 +225,7 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
 pub fn warmup_shell_extensions(hwnd: HWND) {
     // Initialize COM on this thread (required for IShellFolder/IContextMenu).
     // Uses STA because shell extensions are apartment-threaded COM objects.
-    unsafe {
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-    }
+    let _com = ComApartmentGuard::init_sta();
 
     // Use the system drive root to trigger shell extension loading
     let system_drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_string());

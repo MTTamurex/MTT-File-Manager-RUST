@@ -22,7 +22,7 @@ fn draw_header_resizable(
     let header_rect = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(*width, 22.0));
 
     // Header clickable area (for sorting)
-    let header_id = ui.id().with(format!("header_{}", text));
+    let header_id = ui.id().with(("header", text));
     let header_response = ui.interact(header_rect, header_id, Sense::click());
 
     let is_active = sort_mode == mode;
@@ -71,7 +71,7 @@ fn draw_header_resizable(
         egui::vec2(handle_width, 22.0),
     );
 
-    let handle_id = ui.id().with(format!("resize_{}", text));
+    let handle_id = ui.id().with(("resize", text));
     let handle_response = ui.interact(handle_rect, handle_id, Sense::click_and_drag());
 
     // Change cursor on hover

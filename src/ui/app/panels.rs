@@ -578,7 +578,6 @@ fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
         .show(ctx, |ui| {
             if app.is_loading_folder && app.items.is_empty() {
                 ui.centered_and_justified(|ui| {
-                    ui.spinner();
                     ui.label("Carregando...");
                 });
 
@@ -684,12 +683,16 @@ fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
                 if app.is_loading_folder {
                     let rect = ui.max_rect();
-                    let spinner_rect = egui::Rect::from_min_size(
-                        rect.right_bottom() - egui::vec2(24.0, 24.0),
-                        egui::vec2(16.0, 16.0),
+                    let status_rect = egui::Rect::from_min_size(
+                        rect.right_bottom() - egui::vec2(124.0, 22.0),
+                        egui::vec2(110.0, 16.0),
                     );
-                    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(spinner_rect), |ui| {
-                        ui.spinner();
+                    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(status_rect), |ui| {
+                        ui.label(
+                            egui::RichText::new("Atualizando...")
+                                .size(11.0)
+                                .color(egui::Color32::from_gray(130)),
+                        );
                     });
                 }
             }

@@ -14,17 +14,8 @@ impl ImageViewerApp {
         active.is_recycle_bin_view = self.navigation_state.is_recycle_bin_view;
         active.navigation = self.navigation_state.navigation.clone();
         active.items = self.items.clone();
-        // Special views still receive async in-place updates (ex: poll_drive_info for drives).
-        // Moving all_items out of app state would make those updaters rebuild the UI from an empty list.
-        if self.navigation_state.is_computer_view || self.navigation_state.is_recycle_bin_view {
-            active.all_items = self.all_items.clone();
-        } else {
-            // L-13: Clone instead of mem::take to avoid a brief window where self.all_items
-            // is empty between sync_to_tab and the next load_folder completion.
-            // all_items is cleared at the start of each folder load (guards.rs), so
-            // having a stale copy in self during navigation is harmless.
-            active.all_items = self.all_items.clone();
-        }
+        // Keep app-side all_items intact to avoid transient empty-state windows in the same frame.
+        active.all_items = self.all_items.clone();
         active.selected_item = self.selected_item;
         active.selected_file = self.selected_file.clone();
         // PERF: Keep thumbnail when syncing (user might return to this tab)
@@ -57,7 +48,6 @@ impl ImageViewerApp {
     pub fn sync_from_tab(&mut self) {
         let sync_start = std::time::Instant::now();
         let source_tab_id = self.tab_manager.active().id;
-        let source_tab_path = self.tab_manager.active().path.clone();
         let source_tab_items_len = self.tab_manager.active().items.len();
         let source_tab_all_items_len = self.tab_manager.active().all_items.len();
         let source_tab_selection_len = self.tab_manager.active().multi_selection.len();
@@ -111,10 +101,10 @@ impl ImageViewerApp {
                 }
             }
 
-            self.selected_thumbnail = active.selected_thumbnail.clone();
-            self.selected_gif = active.selected_gif.clone();
-            self.selected_metadata = active.selected_metadata.clone();
-            self.search_query = active.search_query.clone();
+            self.selected_thumbnail = std::mem::take(&mut active.selected_thumbnail);
+            self.selected_gif = std::mem::take(&mut active.selected_gif);
+            self.selected_metadata = std::mem::take(&mut active.selected_metadata);
+            self.search_query = std::mem::take(&mut active.search_query);
             self.scroll_to_selected = active.scroll_to_selected;
             self.scroll_offset_y = active.scroll_offset_y;
             self.total_items = active.total_items;
@@ -149,6 +139,7 @@ impl ImageViewerApp {
 
         let sync_ms = sync_start.elapsed().as_millis();
         if sync_ms > 80 {
+            let source_tab_path = self.tab_manager.active().path.clone();
             log::warn!(
                 "[PERF-TAB] sync_from_tab total={}ms tab_id={} path={} src_items={} src_all_items={} src_selection={} app_items={} app_all_items={} app_selection={} needs_reload={}",
                 sync_ms,

@@ -1,6 +1,7 @@
 use crate::app::state::ImageViewerApp;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 fn register_changed_folder(changed_path: &Path, out: &mut HashSet<PathBuf>) {
     if changed_path.extension().is_some() {
@@ -45,29 +46,34 @@ impl ImageViewerApp {
             return;
         }
 
-        let mut legacy_events = Vec::new();
-        while let Ok(event) = self.fs_event_receiver.try_recv() {
-            legacy_events.push(event);
-        }
+        let budget = if self.layout.saved_is_minimized {
+            Duration::from_millis(1)
+        } else if self.frame_time_peak_ms > 33.33 {
+            Duration::from_millis(2)
+        } else if self.frame_time_peak_ms > 25.0 {
+            Duration::from_millis(3)
+        } else {
+            Duration::from_millis(5)
+        };
 
-        if legacy_events.len() > max_events_individual {
-            log::warn!(
-                "[FS-WATCH-LEGACY] Event flood detected: {} events. Triggering full reload.",
-                legacy_events.len()
-            );
-            self.directory_cache.clear();
-            if !self.navigation_state.is_computer_view && !self.navigation_state.is_recycle_bin_view
-            {
-                let current_path = PathBuf::from(&self.navigation_state.current_path);
-                self.invalidate_folder_size_cache(current_path.as_path());
-                self.pending_auto_reload = true;
-            }
-            return;
-        }
+        let start = Instant::now();
+        let mut processed_events = 0usize;
+        let mut has_more_events = false;
 
         let mut folders_with_changed_contents: HashSet<PathBuf> = HashSet::new();
 
-        for event in legacy_events {
+        while processed_events < max_events_individual {
+            if start.elapsed() >= budget {
+                has_more_events = true;
+                break;
+            }
+
+            let event = match self.fs_event_receiver.try_recv() {
+                Ok(event) => event,
+                Err(_) => break,
+            };
+            processed_events += 1;
+
             match event {
                 Ok(evt) => {
                     let mut meaningful_change = false;
@@ -164,8 +170,27 @@ impl ImageViewerApp {
             }
         }
 
+        if processed_events >= max_events_individual {
+            has_more_events = true;
+            log::warn!(
+                "[FS-WATCH-LEGACY] Event flood detected (processed {} in one frame). Triggering full reload.",
+                processed_events
+            );
+            self.directory_cache.clear();
+            if !self.navigation_state.is_computer_view && !self.navigation_state.is_recycle_bin_view
+            {
+                let current_path = PathBuf::from(&self.navigation_state.current_path);
+                self.invalidate_folder_size_cache(current_path.as_path());
+                self.pending_auto_reload = true;
+            }
+        }
+
         for folder_path in folders_with_changed_contents {
             self.invalidate_folder_size_cache(&folder_path);
+        }
+
+        if has_more_events {
+            self.ui_ctx.request_repaint();
         }
     }
 }

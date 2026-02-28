@@ -319,9 +319,15 @@ fn render_item_tooltip(
                     ui.vertical(|ui| {
                         ui.label(RichText::new(&item.name).strong());
                         ui.separator();
-                        ui.label(format!("Tipo: {}", get_file_type_string(item)));
+                        ui.horizontal(|ui| {
+                            ui.label("Tipo:");
+                            ui.label(get_file_type_string(item));
+                        });
                         if !item.is_dir || item.is_archive() {
-                            ui.label(format!("Tamanho: {}", format_size(item.size)));
+                            ui.horizontal(|ui| {
+                                ui.label("Tamanho:");
+                                ui.label(format_size(item.size));
+                            });
                         }
                         let date_lbl = if is_recycle_bin {
                             "Data de Exclusão"
@@ -339,7 +345,11 @@ fn render_item_tooltip(
                         } else {
                             format_date(item.modified)
                         };
-                        ui.label(format!("{}: {}", date_lbl, date_val));
+                        ui.horizontal(|ui| {
+                            ui.label(date_lbl);
+                            ui.label(":");
+                            ui.label(date_val);
+                        });
                     });
                 },
             );

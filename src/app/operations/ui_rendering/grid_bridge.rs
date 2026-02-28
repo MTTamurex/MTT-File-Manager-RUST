@@ -202,12 +202,13 @@ impl ImageViewerApp {
             if nav_result.enter_pressed {
                 if self.suppress_next_enter_open {
                     self.suppress_next_enter_open = false;
-                } else if let Some(selected) = &self.selected_file.clone() {
+                } else if let Some(selected) = self.selected_file.as_ref() {
+                    let selected_path = selected.path.clone();
                     if selected.is_dir {
-                        self.navigate_to(&selected.path.to_string_lossy());
+                        self.navigate_to(&selected_path.to_string_lossy());
                         return; // Exit early after navigation
                     } else {
-                        open_with_shell(self, &selected.path);
+                        open_with_shell(self, &selected_path);
                     }
                 }
             } else if self.suppress_next_enter_open {
@@ -253,7 +254,7 @@ impl ImageViewerApp {
             multi_selection,
             thumbnail_size,
             last_grid_cols,
-            renaming_state: renaming_state.clone(),
+            renaming_state,
             focus_rename,
             scroll_to_selected,
             is_computer_view: self.navigation_state.is_computer_view,
@@ -405,7 +406,6 @@ impl ImageViewerApp {
                     // Collect all selected paths
                     let selected_paths: Vec<PathBuf> =
                         self.multi_selection.iter().cloned().collect();
-                    self.context_menu.target_paths = selected_paths.clone();
 
                     // Use the new styled menu system
                     let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
