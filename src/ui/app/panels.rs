@@ -120,6 +120,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 onedrive_path: app.onedrive_path.as_deref(),
                 onedrive_icon: app.onedrive_icon.as_ref(),
                 pinned_folders: &app.pinned_folders,
+                is_item_dragging: app.is_item_dragging,
                 is_folder_dragging,
                 dragging_path,
             };
@@ -134,7 +135,22 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) {
     if let Some(action) = sidebar_response.inner {
         use crate::ui::sidebar::SidebarAction;
         match action {
-            SidebarAction::NavigateTo(path) => app.navigate_to(&path),
+            SidebarAction::NavigateTo(path) => {
+                // If this path is a pinned folder that no longer exists, auto-unpin + notify
+                let is_pinned = app.pinned_folders.iter().any(|pf| pf.path == path);
+                if is_pinned && !std::path::Path::new(&path).exists() {
+                    app.unpin_folder(&path);
+                    app.notifications.warning(format!(
+                        "Pasta removida do Acesso Rápido (não encontrada): {}",
+                        std::path::Path::new(&path)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or(&path)
+                    ));
+                } else {
+                    app.navigate_to(&path);
+                }
+            }
             SidebarAction::NavigateToComputer => app.navigate_to_computer(),
             SidebarAction::NavigateToRecycleBin => app.navigate_to_recycle_bin(),
             SidebarAction::PinFolder(path) => app.pin_folder(&path),

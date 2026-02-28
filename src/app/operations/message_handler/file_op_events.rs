@@ -48,7 +48,8 @@ impl ImageViewerApp {
                             self.handle_parent_folder_updates(parent_folders, current_path_norm)
                         }
                         FileOperationResult::DeleteCompleted { parent_folders } => {
-                            self.handle_parent_folder_updates(parent_folders, current_path_norm)
+                            self.handle_parent_folder_updates(parent_folders, current_path_norm);
+                            self.cleanup_deleted_pinned_folders();
                         }
                         FileOperationResult::CopyCompleted { dest_folder } => {
                             self.handle_copy_completed(dest_folder, current_path_norm)
@@ -56,17 +57,23 @@ impl ImageViewerApp {
                         FileOperationResult::MoveCompleted {
                             source_folder,
                             dest_folder,
-                        } => self.handle_move_completed(source_folder, dest_folder, current_path_norm),
+                        } => {
+                            self.handle_move_completed(source_folder, dest_folder, current_path_norm);
+                            self.cleanup_deleted_pinned_folders();
+                        }
                         FileOperationResult::MoveBatchCompleted {
                             source_folders,
                             dest_folder,
                             moved_files,
-                        } => self.handle_move_batch_completed(
-                            source_folders,
-                            dest_folder,
-                            moved_files,
-                            current_path_norm,
-                        ),
+                        } => {
+                            self.handle_move_batch_completed(
+                                source_folders,
+                                dest_folder,
+                                moved_files,
+                                current_path_norm,
+                            );
+                            self.cleanup_deleted_pinned_folders();
+                        }
                         FileOperationResult::Finished => self.handle_file_operation_finished(),
                     }
                 }

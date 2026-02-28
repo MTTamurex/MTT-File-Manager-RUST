@@ -13,14 +13,25 @@ pub enum NotificationLevel {
 }
 
 impl NotificationLevel {
-    /// Get the background color for this notification level
+    /// Get the background color for this notification level (dark, high-contrast)
     pub fn color(&self) -> eframe::egui::Color32 {
         use eframe::egui::Color32;
         match self {
-            NotificationLevel::Info => Color32::from_rgb(59, 130, 246), // Blue
-            NotificationLevel::Success => Color32::from_rgb(34, 197, 94), // Green
-            NotificationLevel::Warning => Color32::from_rgb(234, 179, 8), // Yellow
-            NotificationLevel::Error => Color32::from_rgb(239, 68, 68), // Red
+            NotificationLevel::Info => Color32::from_rgb(30, 58, 95),    // Dark blue
+            NotificationLevel::Success => Color32::from_rgb(20, 70, 45), // Dark green
+            NotificationLevel::Warning => Color32::from_rgb(80, 60, 10), // Dark amber
+            NotificationLevel::Error => Color32::from_rgb(95, 25, 25),   // Dark red
+        }
+    }
+
+    /// Get the accent/border color for this notification level
+    pub fn accent_color(&self) -> eframe::egui::Color32 {
+        use eframe::egui::Color32;
+        match self {
+            NotificationLevel::Info => Color32::from_rgb(100, 160, 255),
+            NotificationLevel::Success => Color32::from_rgb(80, 200, 120),
+            NotificationLevel::Warning => Color32::from_rgb(240, 190, 50),
+            NotificationLevel::Error => Color32::from_rgb(240, 90, 90),
         }
     }
 
@@ -51,7 +62,7 @@ impl AppNotification {
             message: message.into(),
             level,
             created_at: Instant::now(),
-            duration: Duration::from_secs(4),
+            duration: Duration::from_secs(6),
         }
     }
 

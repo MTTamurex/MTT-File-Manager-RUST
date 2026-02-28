@@ -40,6 +40,7 @@ pub struct SidebarContext<'a> {
     pub onedrive_path: Option<&'a str>, // OneDrive path (if installed)
     pub onedrive_icon: Option<&'a egui::TextureHandle>, // Native OneDrive icon
     pub pinned_folders: &'a [PinnedFolder],
+    pub is_item_dragging: bool,   // ANY item (file or folder) is being dragged
     pub is_folder_dragging: bool,  // A folder is being dragged from the main content area
     pub dragging_path: Option<&'a str>, // Path of the folder being dragged
 }
@@ -75,7 +76,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
         if is_selected {
             ui.painter()
                 .rect_filled(header_rect_full, 0.0, crate::ui::theme::COLOR_SELECTION);
-        } else if header_response.hovered() {
+        } else if header_response.hovered() && !ctx.is_item_dragging {
             ui.painter().rect_filled(
                 header_rect_full,
                 0.0,
@@ -126,8 +127,9 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
     // Track the start Y for drag-to-pin zone detection
     let qa_section_start_y = ui.cursor().top();
 
-    // Section header row — highlighted only when a folder drag hovers over the
-    // Quick Access zone (not the entire time a drag is active).
+    // Section header — pure label, not interactive.
+    // Using Sense::hover() so we can detect pointer position for drag-to-pin
+    // highlight, but the label itself is never a clickable or selectable item.
     let (qa_label_rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 16.0), Sense::hover());
     if ui.is_rect_visible(qa_label_rect) {
@@ -221,7 +223,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
             if is_selected {
                 ui.painter()
                     .rect_filled(rect, 0.0, crate::ui::theme::COLOR_SELECTION);
-            } else if response.hovered() {
+            } else if response.hovered() && !ctx.is_item_dragging {
                 ui.painter()
                     .rect_filled(rect, 0.0, crate::ui::theme::color_selection_hover());
             }
@@ -286,26 +288,15 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
             egui::pos2(ui.clip_rect().max.x, qa_section_end_y),
         );
 
-        // Only highlight the header when the pointer is actually inside the QA zone,
-        // so it doesn't look "selected" while dragging elsewhere.
         let pointer_in_zone = ui
             .ctx()
             .input(|inp| inp.pointer.hover_pos())
             .map(|p| qa_zone.contains(p))
             .unwrap_or(false);
 
-        if pointer_in_zone && ui.is_rect_visible(qa_label_rect) {
-            let highlight = egui::Rect::from_min_max(
-                egui::pos2(ui.clip_rect().min.x, qa_label_rect.min.y),
-                egui::pos2(ui.clip_rect().max.x, qa_label_rect.max.y),
-            );
-            ui.painter().rect_stroke(
-                highlight,
-                2.0,
-                egui::Stroke::new(1.5, Color32::from_rgb(0, 120, 215)),
-                egui::StrokeKind::Outside,
-            );
-        }
+        // No visual highlight on the QA zone — pinned folders already show
+        // their own hover feedback individually. The zone is only used for
+        // the functional "pin folder on drop" logic below.
 
         let released = ui.ctx().input(|inp| inp.pointer.primary_released());
         if released && pointer_in_zone {
