@@ -123,6 +123,15 @@ impl ImageViewerApp {
         // UPDATE THE WATCHER
         self.watch_current_folder();
 
+        // Clear old items immediately for path-change navigation.
+        // Prevents stale items from the previous folder flashing on screen
+        // while the new folder loads (especially noticeable for archives
+        // like ZIP/RAR which take longer to enumerate via Shell API).
+        // Watcher-triggered reloads (same path) don't go through navigate_to()
+        // so they still benefit from stale-while-revalidate in load_folder.
+        self.items = std::sync::Arc::new(Vec::new());
+        self.all_items.clear();
+
         self.load_folder(false);
     }
 
@@ -171,6 +180,11 @@ impl ImageViewerApp {
                 self.reset_selection_and_search();
                 self.apply_folder_lock_if_present();
                 self.watch_current_folder(); // Update the watcher
+
+                // Clear stale items (see navigate_to comment)
+                self.items = std::sync::Arc::new(Vec::new());
+                self.all_items.clear();
+
                 self.load_folder(false);
             }
         }
@@ -222,6 +236,11 @@ impl ImageViewerApp {
                 self.reset_selection_and_search();
                 self.apply_folder_lock_if_present();
                 self.watch_current_folder();
+
+                // Clear stale items (see navigate_to comment)
+                self.items = std::sync::Arc::new(Vec::new());
+                self.all_items.clear();
+
                 self.load_folder(false);
             }
         }
