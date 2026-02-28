@@ -5,9 +5,9 @@ use crate::infrastructure::onedrive::{self, IoTimeoutResult};
 use crate::infrastructure::windows::is_mpeg_ts_file;
 use crate::workers::thumbnail::extraction::generate_thumbnail_hybrid;
 use crate::workers::thumbnail::processing::resize::{get_bucket_size, resize_to_bucket};
+use crossbeam_channel::Sender;
 use eframe::egui;
 use image::ImageFormat;
-use std::sync::mpsc::Sender;
 use std::time::{Instant, SystemTime};
 
 use super::Semaphore;
@@ -41,7 +41,7 @@ pub(super) fn process_thumbnail_request(
     {
         if !is_mpeg_ts_file(path) {
             mark_as_failed(path.clone());
-            let _ = tx.send(ThumbnailData {
+            send_thumbnail_result(tx, req_priority, ThumbnailData {
                 path: path.clone(),
                 image_data: Vec::new(),
                 width: 0,
@@ -67,7 +67,7 @@ pub(super) fn process_thumbnail_request(
         if can_retry_now {
             clear_failure_cache(path);
         } else {
-            let _ = tx.send(ThumbnailData {
+            send_thumbnail_result(tx, req_priority, ThumbnailData {
                 path: path.clone(),
                 image_data: Vec::new(),
                 width: 0,
@@ -125,7 +125,7 @@ pub(super) fn process_thumbnail_request(
     // If DB cache hit, send result and return - no source drive I/O needed.
     if let Some((data, w, h)) = final_result {
         clear_failure_cache(path);
-        let _ = tx.send(ThumbnailData {
+        send_thumbnail_result(tx, req_priority, ThumbnailData {
             path: path.clone(),
             image_data: data,
             width: w,
@@ -144,7 +144,7 @@ pub(super) fn process_thumbnail_request(
         match onedrive::onedrive_exists(path) {
             IoTimeoutResult::Ok(false) => {
                 mark_as_failed(path.clone());
-                let _ = tx.send(ThumbnailData {
+                send_thumbnail_result(tx, req_priority, ThumbnailData {
                     path: path.clone(),
                     image_data: Vec::new(),
                     width: 0,
@@ -162,7 +162,7 @@ pub(super) fn process_thumbnail_request(
             IoTimeoutResult::Ok(true) => {}
             IoTimeoutResult::Err(_) => {
                 mark_as_transient_failure(path.clone());
-                let _ = tx.send(ThumbnailData {
+                send_thumbnail_result(tx, req_priority, ThumbnailData {
                     path: path.clone(),
                     image_data: Vec::new(),
                     width: 0,
@@ -182,7 +182,7 @@ pub(super) fn process_thumbnail_request(
         // Non-OneDrive: use fast_path_exists (GetFileAttributesW).
         if !onedrive::fast_path_exists(path) {
             mark_as_failed(path.clone());
-            let _ = tx.send(ThumbnailData {
+            send_thumbnail_result(tx, req_priority, ThumbnailData {
                 path: path.clone(),
                 image_data: Vec::new(),
                 width: 0,
@@ -220,7 +220,7 @@ pub(super) fn process_thumbnail_request(
     if final_result.is_none() {
         // Cancellation: skip extraction if file is pending deletion.
         if pending_deletions.contains_key(path) {
-            let _ = tx.send(ThumbnailData {
+            send_thumbnail_result(tx, req_priority, ThumbnailData {
                 path: path.clone(),
                 image_data: Vec::new(),
                 width: 0,
@@ -233,7 +233,7 @@ pub(super) fn process_thumbnail_request(
         }
 
         // Wait until a slot is available.
-        semaphore.acquire();
+        let _permit = semaphore.acquire_guard();
 
         // Re-check disk cache under semaphore (another worker may have filled it
         // while we waited, avoiding redundant extraction).
@@ -269,13 +269,11 @@ pub(super) fn process_thumbnail_request(
             }
         }
 
-        // Release slot.
-        semaphore.release();
     }
 
     let (data, w, h) = final_result.unwrap_or_else(|| (Vec::new(), 0, 0));
 
-    let _ = tx.send(ThumbnailData {
+    send_thumbnail_result(tx, req_priority, ThumbnailData {
         path: path.clone(),
         image_data: data,
         width: w,
@@ -284,6 +282,21 @@ pub(super) fn process_thumbnail_request(
         not_found: false,
     });
     throttle_repaint_with_priority(ctx, last_repaint, req_priority);
+}
+
+fn send_thumbnail_result(tx: &Sender<ThumbnailData>, priority: IOPriority, data: ThumbnailData) {
+    if matches!(priority, IOPriority::Interactive) {
+        let _ = tx.send(data);
+        return;
+    }
+
+    match tx.try_send(data) {
+        Ok(()) => {}
+        Err(crossbeam_channel::TrySendError::Full(_)) => {
+            // Under saturation, drop non-interactive results to protect UI latency.
+        }
+        Err(crossbeam_channel::TrySendError::Disconnected(_)) => {}
+    }
 }
 
 fn decode_cache_entry(entry: ThumbnailCacheEntry, req_size: u32) -> Option<(Vec<u8>, u32, u32)> {

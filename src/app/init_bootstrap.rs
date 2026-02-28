@@ -45,7 +45,7 @@ pub(in crate::app) struct AppBootstrap {
 
     pub(in crate::app) thumbnail_queue: Arc<PriorityThumbnailQueue>,
     pub(in crate::app) shared_gen: Arc<AtomicUsize>,
-    pub(in crate::app) img_rx: mpsc::Receiver<crate::domain::thumbnail::ThumbnailData>,
+    pub(in crate::app) img_rx: crossbeam_channel::Receiver<crate::domain::thumbnail::ThumbnailData>,
     pub(in crate::app) pending_deletions: Arc<dashmap::DashMap<PathBuf, ()>>,
     pub(in crate::app) font_rx: mpsc::Receiver<egui::FontDefinitions>,
 
@@ -94,6 +94,8 @@ pub(in crate::app) struct AppBootstrap {
 }
 
 pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
+    const THUMBNAIL_RESULT_CHANNEL_CAPACITY: usize = 2048;
+
     let (file_entry_sender, file_entry_receiver) = mpsc::channel::<(usize, Vec<FileEntry>)>();
     let (items_rebuild_sender, items_rebuild_receiver) = mpsc::channel::<ItemsRebuildResult>();
 
@@ -126,7 +128,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     let (device_event_sender, device_event_receiver) = mpsc::channel();
     windows_infra::start_device_change_listener(device_event_sender, ctx.clone());
 
-    let (img_tx, img_rx) = mpsc::channel();
+    let (img_tx, img_rx) = crossbeam_channel::bounded(THUMBNAIL_RESULT_CHANNEL_CAPACITY);
     let thumbnail_queue = Arc::new(PriorityThumbnailQueue::new());
     let shared_gen = Arc::new(AtomicUsize::new(0));
 

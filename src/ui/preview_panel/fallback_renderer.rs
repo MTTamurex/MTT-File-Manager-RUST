@@ -52,7 +52,7 @@ pub fn render_fallback(
         if let Some(icon) = item_icon_loader.computer_icon() {
             ui.add(egui::Image::new(icon).max_size(egui::vec2(icon_size, icon_size)));
         } else {
-            ui.label(egui::RichText::new("💻").size(icon_size * 0.6));
+            ui.allocate_response(egui::vec2(icon_size, icon_size), egui::Sense::hover());
         }
     } else if file.drive_info.is_some() {
         if let Some(icon) =
@@ -60,14 +60,14 @@ pub fn render_fallback(
         {
             ui.add(egui::Image::new(&icon).max_size(egui::vec2(icon_size, icon_size)));
         } else {
-            ui.label(egui::RichText::new("??").size(icon_size * 0.8));
+            ui.allocate_response(egui::vec2(icon_size, icon_size), egui::Sense::hover());
         }
     } else if is_recycle_bin_view && file.name == "Lixeira" {
         // RECYCLE BIN
         if let Some(icon) = item_icon_loader.ensure_recycle_bin_icon(ui.ctx()) {
             ui.add(egui::Image::new(&icon).max_size(egui::vec2(icon_size, icon_size)));
         } else {
-            ui.label(egui::RichText::new("🗑").size(icon_size * 0.6));
+            ui.allocate_response(egui::vec2(icon_size, icon_size), egui::Sense::hover());
         }
     } else if file.is_dir && !file.is_archive() {
         // FOLDER (Except compressed files)
@@ -87,7 +87,7 @@ pub fn render_fallback(
             if let Some(icon) = item_icon_loader.folder_icon() {
                 ui.add(egui::Image::new(icon).max_size(egui::vec2(icon_size, icon_size)));
             } else {
-                ui.label(egui::RichText::new("📁").size(icon_size * 0.6));
+                ui.allocate_response(egui::vec2(icon_size, icon_size), egui::Sense::hover());
             }
         } else {
             let folder_rect = ui
@@ -117,7 +117,7 @@ pub fn render_fallback(
             &file.path,
             IconSize::Jumbo,
             treat_as_folder,
-            true,
+            false,
         ) {
             let image_resp = ui.add(
                 egui::Image::new(&icon).max_size(egui::vec2(icon_size * 0.8, icon_size * 0.8)),
@@ -185,7 +185,10 @@ pub fn render_fallback(
                 }
             }
         } else {
-            ui.label(egui::RichText::new("??").size(icon_size * 0.6));
+            ui.allocate_response(
+                egui::vec2(icon_size * 0.8, icon_size * 0.8),
+                egui::Sense::hover(),
+            );
         }
     }
     val_action

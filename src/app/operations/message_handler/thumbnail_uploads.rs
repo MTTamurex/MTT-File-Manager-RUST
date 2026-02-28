@@ -100,6 +100,17 @@ impl ImageViewerApp {
         };
         let incoming_start = Instant::now();
         let mut not_found_failures: Vec<PathBuf> = Vec::new();
+        let eviction_visible: Option<HashSet<PathBuf>> = self.visible_index_range
+            .and_then(|(min_vis, max_vis)| {
+                let items = &self.items;
+                if items.is_empty() {
+                    return None;
+                }
+                let max_vis = max_vis.min(items.len().saturating_sub(1));
+                Some((min_vis..=max_vis)
+                    .map(|i| items[i].path.clone())
+                    .collect())
+            });
 
         while incoming_count < MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME {
             if incoming_start.elapsed() >= incoming_budget {
@@ -108,8 +119,8 @@ impl ImageViewerApp {
             }
             let thumbnail_data = match self.image_receiver.try_recv() {
                 Ok(data) => data,
-                Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+                Err(crossbeam_channel::TryRecvError::Empty) => break,
+                Err(crossbeam_channel::TryRecvError::Disconnected) => break,
             };
 
             incoming_count += 1;
@@ -137,20 +148,6 @@ impl ImageViewerApp {
                 continue;
             }
 
-            // PERF FIX (M-4): Build visibility set ONCE outside the eviction loop
-            // (was being rebuilt on every iteration, causing redundant allocations).
-            let eviction_visible: Option<HashSet<&std::path::Path>> = self.visible_index_range
-                .and_then(|(min_vis, max_vis)| {
-                    let items = &self.items;
-                    if items.is_empty() {
-                        return None;
-                    }
-                    let max_vis = max_vis.min(items.len().saturating_sub(1));
-                    Some((min_vis..=max_vis)
-                        .map(|i| items[i].path.as_path())
-                        .collect())
-                });
-
             while self.pending_thumbnails.len() >= MAX_PENDING_THUMBNAILS {
                 // FIX: Smart eviction — prefer removing off-screen items to keep visible
                 // ones alive. On SSD, the worker queue processes most-recently-added items
@@ -164,7 +161,7 @@ impl ImageViewerApp {
                         // Find first off-screen item in the deque
                         self.pending_thumbnails
                             .iter()
-                            .position(|t| !visible.contains(t.path.as_path()))
+                            .position(|t| !visible.contains(&t.path))
                     });
 
                 match evict_idx {

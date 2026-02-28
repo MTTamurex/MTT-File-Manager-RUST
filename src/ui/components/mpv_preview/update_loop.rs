@@ -116,7 +116,18 @@ impl MpvPreview {
 
         // Load file once
         if self.loaded_path.as_ref() != Some(&self.path) {
-            if let Some(m) = &self.mpv {
+            // SAFETY: Don't open files that are actively being downloaded/written.
+            // mpv/libmpv opens files with potentially restrictive sharing flags,
+            // which can cause sharing violations that cancel active downloads.
+            if crate::infrastructure::windows::file_flags::is_file_unsafe_to_read(&self.path) {
+                log::debug!(
+                    "[MpvPreview] Skipping file unsafe to read (download in progress): {:?}",
+                    self.path.file_name()
+                );
+                // Mark as loaded to avoid re-checking every frame while download continues.
+                // The file watcher will trigger a refresh when the download completes.
+                self.loaded_path = Some(self.path.clone());
+            } else if let Some(m) = &self.mpv {
                 let path_str = self.path.to_string_lossy().to_string();
                 let _ = m.command("loadfile", &[&path_str]);
 

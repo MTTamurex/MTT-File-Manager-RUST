@@ -105,7 +105,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
                 // Extra fallback for virtual paths: try item-specific icon
                 if let Some(icon) =
                     ctx.icon_loader
-                        .get_or_load_icon(ui.ctx(), &item.path, true, true)
+                        .get_or_load_icon(ui.ctx(), &item.path, true, false)
                 {
                     let icon_size = folder_w.min(folder_h);
                     let icon_rect = egui::Rect::from_center_size(

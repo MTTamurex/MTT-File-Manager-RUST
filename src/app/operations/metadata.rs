@@ -47,8 +47,13 @@ impl ImageViewerApp {
                 }
 
                 if !self.metadata_loading.contains(&path) {
-                    let _ = self.metadata_req_sender.send((path.clone(), mtime));
-                    self.metadata_loading.insert(path.clone());
+                    // Don't send metadata requests for files that are being
+                    // downloaded/written — the extraction would open them with
+                    // COM APIs that lack FILE_SHARE_WRITE, killing the download.
+                    if !crate::infrastructure::windows::file_flags::is_file_unsafe_to_read(&path) {
+                        let _ = self.metadata_req_sender.send((path.clone(), mtime));
+                        self.metadata_loading.insert(path.clone());
+                    }
                 }
 
                 if !matches!(self.selected_metadata.as_ref(), Some((p, _)) if p == &path) {
