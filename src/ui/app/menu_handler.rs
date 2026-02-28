@@ -95,6 +95,12 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     }
 
                     app.directory_cache.invalidate(&std::path::PathBuf::from(&app.navigation_state.current_path));
+                    // Invalidate each target and its children so navigation into
+                    // affected folders reads fresh sync_status from disk, not cache.
+                    for path in &target_paths {
+                        app.directory_cache.invalidate(path);
+                        app.directory_cache.invalidate_children(path);
+                    }
                     app.loaded_path.clear();
                     app.load_folder(false);
                     context_menu.close();
@@ -124,6 +130,11 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         app.directory_cache.invalidate(&std::path::PathBuf::from(
                             &app.navigation_state.current_path,
                         ));
+                        // Same invalidation for the shell-invoke fallback path.
+                        for path in &target_paths {
+                            app.directory_cache.invalidate(path);
+                            app.directory_cache.invalidate_children(path);
+                        }
                         app.loaded_path.clear();
                         app.load_folder(false);
                     }
