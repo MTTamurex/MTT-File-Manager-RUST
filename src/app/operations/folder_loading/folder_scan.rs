@@ -248,7 +248,7 @@ impl ImageViewerApp {
         }
 
         let total_ms = total_start.elapsed().as_millis();
-        let should_warn = total_ms > 40 || requested_folders >= 24;
+        let should_warn = total_ms > 40;
         let should_debug_budget_only = !should_warn && resolve_budget_exhausted;
 
         if should_warn {
