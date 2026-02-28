@@ -125,8 +125,11 @@ impl ImageViewerApp {
         }
         self.thumbnail_queue.remove_paths(&paths);
 
+        // PERF FIX (C-1): Batch SQLite cache cleanup to background worker instead
+        // of running 8-DELETE transactions per file on the UI thread.
+        self.enqueue_disk_cache_invalidations(paths.to_vec());
+
         for path in &paths {
-            self.disk_cache.remove_cache_for_path(path);
             self.multi_selection.remove(path);
         }
 
@@ -164,9 +167,12 @@ impl ImageViewerApp {
         }
         self.thumbnail_queue.remove_paths(paths);
 
+        // PERF FIX (C-1): Batch SQLite cache cleanup to background worker instead
+        // of running 8-DELETE transactions per file on the UI thread.
+        self.enqueue_disk_cache_invalidations(paths.to_vec());
+
         for path in paths {
-            // Clear cache and selection proactively
-            self.disk_cache.remove_cache_for_path(path);
+            // Clear selection proactively
             self.multi_selection.remove(path);
         }
 

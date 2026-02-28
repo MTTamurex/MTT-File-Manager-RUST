@@ -165,14 +165,10 @@ impl CacheManager {
             return current_items;
         }
 
-        let mut new_cache = LruCache::new(nz_cache_size(target_items, "texture_cache(retune)"));
-
-        while let Some((path, tex)) = self.texture_cache.pop_lru() {
-            // put() keeps most recently inserted items if we exceed cap.
-            new_cache.put(path, tex);
-        }
-
-        self.texture_cache = new_cache;
+        // PERF FIX (4.2): Use LruCache::resize() instead of manually popping all
+        // entries and re-inserting into a new cache. resize() is O(evicted) not O(n).
+        self.texture_cache
+            .resize(nz_cache_size(target_items, "texture_cache(retune)"));
 
         target_items
     }

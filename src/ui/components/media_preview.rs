@@ -33,80 +33,67 @@ impl GifPlayer {
     }
 
     pub fn update(&mut self, ctx: &egui::Context) {
-        let (frame_to_show, delay_ms, is_complete) = {
-            match self.data.lock() {
-                Ok(d) => {
-                    if d.frames.is_empty() {
-                        return;
-                    }
-
-                    let frame_idx = self.current_frame % d.frames.len();
-                    let frame = &d.frames[frame_idx];
-                    (Some(frame.clone()), frame.delay_ms, d.is_complete)
-                }
-                Err(_) => {
-                    log::error!("[GifPlayer] Erro ao lock dados - Mutex poisonado");
-                    return;
-                }
+        // PERF FIX (A-6): Single mutex lock instead of 3 separate locks.
+        // Reads frame data by reference under the guard, avoiding clone of
+        // the ~1MB RGBA Vec<u8> per frame advance.
+        let data = match self.data.lock() {
+            Ok(d) => d,
+            Err(e) => {
+                log::error!("[GifPlayer] Erro ao lock dados - Mutex poisonado");
+                e.into_inner()
             }
         };
 
-        if let Some(frame) = frame_to_show {
-            // Initial texture creation or update
-            if self.texture.is_none() {
-                let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                    [frame.width as usize, frame.height as usize],
-                    &frame.rgba,
-                );
-                self.texture = Some(ctx.load_texture(
-                    format!("gif_player_{}", self.path.display()),
-                    color_image,
-                    Default::default(),
-                ));
-            } else if self.last_update.elapsed() >= Duration::from_millis(delay_ms) {
-                // Update existing texture content
-                self.current_frame += 1;
-                let next_idx = {
-                    match self.data.lock() {
-                        Ok(d) => self.current_frame % d.frames.len(),
-                        Err(_) => {
-                            log::error!(
-                                "[GifPlayer] Erro ao lock dados para next_idx - Mutex poisonado"
-                            );
-                            return;
-                        }
-                    }
-                };
-
-                let next_frame = {
-                    match self.data.lock() {
-                        Ok(d) => d.frames[next_idx].clone(),
-                        Err(_) => {
-                            log::error!(
-                                "[GifPlayer] Erro ao lock dados para next_frame - Mutex poisonado"
-                            );
-                            return;
-                        }
-                    }
-                };
-
-                let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                    [next_frame.width as usize, next_frame.height as usize],
-                    &next_frame.rgba,
-                );
-
-                if let Some(tex) = &mut self.texture {
-                    tex.set(color_image, Default::default());
-                }
-
-                self.last_update = Instant::now();
-                ctx.request_repaint_after(Duration::from_millis(next_frame.delay_ms));
-            } else {
-                // Not yet time for next frame
-                let remaining =
-                    Duration::from_millis(delay_ms).saturating_sub(self.last_update.elapsed());
-                ctx.request_repaint_after(remaining);
+        if data.frames.is_empty() {
+            let is_complete = data.is_complete;
+            drop(data);
+            if !is_complete {
+                ctx.request_repaint_after(Duration::from_millis(100));
             }
+            return;
+        }
+
+        let is_complete = data.is_complete;
+        let frame_idx = self.current_frame % data.frames.len();
+        let frame = &data.frames[frame_idx];
+        let delay_ms = frame.delay_ms;
+
+        if self.texture.is_none() {
+            // Initial texture creation — read directly from reference (no clone)
+            let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                [frame.width as usize, frame.height as usize],
+                &frame.rgba,
+            );
+            drop(data); // Release lock before GPU upload
+            self.texture = Some(ctx.load_texture(
+                format!("gif_player_{}", self.path.display()),
+                color_image,
+                Default::default(),
+            ));
+        } else if self.last_update.elapsed() >= Duration::from_millis(delay_ms) {
+            // Advance to next frame — read directly from reference (no clone)
+            self.current_frame += 1;
+            let next_idx = self.current_frame % data.frames.len();
+            let next_frame = &data.frames[next_idx];
+            let next_delay = next_frame.delay_ms;
+            let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                [next_frame.width as usize, next_frame.height as usize],
+                &next_frame.rgba,
+            );
+            drop(data); // Release lock before GPU upload
+
+            if let Some(tex) = &mut self.texture {
+                tex.set(color_image, Default::default());
+            }
+
+            self.last_update = Instant::now();
+            ctx.request_repaint_after(Duration::from_millis(next_delay));
+        } else {
+            // Not yet time for next frame
+            let remaining =
+                Duration::from_millis(delay_ms).saturating_sub(self.last_update.elapsed());
+            drop(data);
+            ctx.request_repaint_after(remaining);
         }
 
         // If not complete, keep checking for new frames

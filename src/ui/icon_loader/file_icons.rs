@@ -2,6 +2,22 @@ use std::path::Path;
 
 use super::*;
 
+/// Build a cache key for icon_cache without per-call allocation on the hot path.
+/// Only called when we actually need to access icon_cache (cache miss on extension_cache).
+#[inline]
+fn make_cache_key(path: &Path, size: IconSize) -> String {
+    let path_text = path.to_string_lossy();
+    let suffix = match size {
+        IconSize::Small => "_Small",
+        IconSize::Large => "_Large",
+        IconSize::Jumbo => "_Jumbo",
+    };
+    let mut key = String::with_capacity(path_text.len() + suffix.len());
+    key.push_str(path_text.as_ref());
+    key.push_str(suffix);
+    key
+}
+
 impl IconLoader {
     /// Sets the custom folder icon from pre-composed RGBA data.
     pub fn set_folder_icon(&mut self, ctx: &egui::Context, pixels: &[u8], width: u32, height: u32) {
@@ -44,7 +60,9 @@ impl IconLoader {
         is_folder: bool,
         allow_blocking: bool,
     ) -> Option<egui::TextureHandle> {
-        let cache_key = format!("{}_{:?}", path.to_string_lossy(), size);
+        // PERF FIX (A-3): Build cache_key lazily — only when we actually need it for
+        // icon_cache insertion. For the hot path (extension cache hit), we avoid the
+        // per-frame String allocation entirely.
 
         // Unique-icon file types.
         if !is_folder {
@@ -67,6 +85,7 @@ impl IconLoader {
             if let Some(ref ext) = ext_str {
                 if matches!(ext.as_str(), "exe" | "lnk" | "ico" | "cur" | "ani" | "com")
                 {
+                    let cache_key = make_cache_key(path, size);
                     // Check cache first - async worker may have loaded the real icon.
                     if let Some(texture) = self.icon_cache.get(&cache_key) {
                         return Some(texture.clone());
@@ -74,7 +93,7 @@ impl IconLoader {
 
                     // Also check Jumbo size cache (async worker uses Jumbo for high-quality).
                     if size != IconSize::Jumbo {
-                        let jumbo_key = format!("{}_{:?}", path.to_string_lossy(), IconSize::Jumbo);
+                        let jumbo_key = make_cache_key(path, IconSize::Jumbo);
                         if let Some(texture) = self.icon_cache.get(&jumbo_key) {
                             return Some(texture.clone());
                         }
@@ -86,7 +105,12 @@ impl IconLoader {
                         crate::domain::file_entry::path_contains_archive_segment(&path_lower);
 
                     if is_virtual_path {
-                        // Virtual path (inside ZIP): try Shell Namespace (PIDL) for correct icon.
+                        // PERF FIX (A-4): Virtual path (inside ZIP) — delegate to async worker
+                        // instead of blocking the UI thread with Shell Namespace calls.
+                        if !allow_blocking {
+                            return None;
+                        }
+                        // Preview panel: blocking extraction allowed.
                         if let Ok((pixels, width, height)) = windows::extract_shell_icon(path, size) {
                             let texture = ctx.load_texture(
                                 cache_key.clone(),
@@ -133,9 +157,15 @@ impl IconLoader {
             crate::domain::file_entry::path_contains_archive_segment(&path_str.to_lowercase());
 
         if is_virtual_path {
+            let cache_key = make_cache_key(path, size);
             // Check cache first (specific to this file).
             if let Some(texture) = self.icon_cache.get(&cache_key) {
                 return Some(texture.clone());
+            }
+
+            // PERF FIX (A-4): Non-blocking callers skip Shell Namespace calls on virtual paths.
+            if !allow_blocking {
+                return None;
             }
 
             // Not in cache - use Shell Namespace API (PIDL) to get correct icon.
@@ -159,12 +189,7 @@ impl IconLoader {
             }
         }
 
-        // For other files (not unique icon types): check cache first.
-        if let Some(texture) = self.icon_cache.get(&cache_key) {
-            return Some(texture.clone());
-        }
-
-        // Check extension cache (memory) before hitting Windows Shell API.
+        // For other files (not unique icon types): check extension cache FIRST (no alloc needed).
         if !is_folder {
             if let Some(ext) = path.extension() {
                 let ext_str = ext.to_string_lossy().to_lowercase();
@@ -184,6 +209,12 @@ impl IconLoader {
             if !allow_blocking {
                 return None;
             }
+        }
+
+        // Fallback: check icon_cache with full cache_key (lazy allocation only for misses).
+        let cache_key = make_cache_key(path, size);
+        if let Some(texture) = self.icon_cache.get(&cache_key) {
+            return Some(texture.clone());
         }
 
         let icon_result = if is_folder {

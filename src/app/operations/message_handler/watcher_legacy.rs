@@ -126,7 +126,9 @@ impl ImageViewerApp {
                                     "[FS] Direct subfolder modified: {:?}",
                                     cleaned.file_name()
                                 );
-                                self.disk_cache.remove_folder_preview_cache(&cleaned);
+                                // PERF FIX (M-6): Defer SQLite writer lock to background
+                                // instead of blocking UI thread during watcher events.
+                                pending_disk_cache_invalidations.push(cleaned);
                             }
                         }
 
@@ -144,7 +146,8 @@ impl ImageViewerApp {
                                         "[FS] File in subfolder modified, invalidating: {:?}",
                                         cleaned_parent.file_name()
                                     );
-                                    self.disk_cache.remove_folder_preview_cache(&cleaned_parent);
+                                    // PERF FIX (M-6): Defer SQLite writer lock to background.
+                                    pending_disk_cache_invalidations.push(cleaned_parent);
                                 }
                             }
                         }

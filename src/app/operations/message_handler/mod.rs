@@ -94,7 +94,7 @@ impl ImageViewerApp {
         }
     }
 
-    fn enqueue_disk_cache_invalidations(&self, paths: Vec<PathBuf>) {
+    pub(crate) fn enqueue_disk_cache_invalidations(&self, paths: Vec<PathBuf>) {
         if paths.is_empty() {
             return;
         }

@@ -17,18 +17,25 @@ pub use queue::PriorityThumbnailQueue;
 pub use types::{ThumbnailPriority, ThumbnailRequest};
 pub use worker::spawn_thumbnail_workers;
 
-use rustc_hash::FxHashSet;
+use lru::LruCache;
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+// --- Capacity constants for failure caches ---
+const FAILED_PATHS_CAP: usize = 2048;
+const FAILURE_BACKOFF_CAP: usize = 4096;
+
 /// Global cache of paths that failed thumbnail extraction (shared across workers)
-/// Prevents re-attempting extraction on files that consistently fail (e.g., corrupt files)
-static FAILED_PATHS_CACHE: std::sync::OnceLock<Mutex<FxHashSet<PathBuf>>> =
+/// Uses LRU eviction so oldest failures are dropped instead of clearing everything.
+static FAILED_PATHS_CACHE: std::sync::OnceLock<Mutex<LruCache<PathBuf, ()>>> =
     std::sync::OnceLock::new();
 
-fn get_failed_paths() -> &'static Mutex<FxHashSet<PathBuf>> {
-    FAILED_PATHS_CACHE.get_or_init(|| Mutex::new(FxHashSet::default()))
+fn get_failed_paths() -> &'static Mutex<LruCache<PathBuf, ()>> {
+    FAILED_PATHS_CACHE.get_or_init(|| {
+        Mutex::new(LruCache::new(NonZeroUsize::new(FAILED_PATHS_CAP).unwrap()))
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -37,11 +44,13 @@ struct FailureBackoffState {
     retry_after: Instant,
 }
 
-static FAILURE_BACKOFF_CACHE: std::sync::OnceLock<Mutex<rustc_hash::FxHashMap<PathBuf, FailureBackoffState>>> =
+static FAILURE_BACKOFF_CACHE: std::sync::OnceLock<Mutex<LruCache<PathBuf, FailureBackoffState>>> =
     std::sync::OnceLock::new();
 
-fn get_failure_backoff() -> &'static Mutex<rustc_hash::FxHashMap<PathBuf, FailureBackoffState>> {
-    FAILURE_BACKOFF_CACHE.get_or_init(|| Mutex::new(rustc_hash::FxHashMap::default()))
+fn get_failure_backoff() -> &'static Mutex<LruCache<PathBuf, FailureBackoffState>> {
+    FAILURE_BACKOFF_CACHE.get_or_init(|| {
+        Mutex::new(LruCache::new(NonZeroUsize::new(FAILURE_BACKOFF_CAP).unwrap()))
+    })
 }
 
 fn compute_backoff(attempts: u8) -> Duration {
@@ -60,28 +69,25 @@ pub fn is_known_failure(path: &PathBuf) -> bool {
     get_failure_backoff()
         .lock()
         .map(|map| {
-            map.get(path)
+            map.peek(path)
                 .is_some_and(|state| Instant::now() < state.retry_after)
         })
         .unwrap_or(false)
 }
 
-    /// Check if a path is permanently failed.
-    pub fn is_permanent_failure(path: &PathBuf) -> bool {
-        get_failed_paths()
+/// Check if a path is permanently failed.
+pub fn is_permanent_failure(path: &PathBuf) -> bool {
+    get_failed_paths()
         .lock()
         .map(|set| set.contains(path))
         .unwrap_or(false)
-    }
+}
 
-/// Mark a path as failed (won't retry until app restart)
+/// Mark a path as failed (won't retry until app restart).
+/// LRU eviction ensures oldest entries are dropped transparently.
 pub fn mark_as_failed(path: PathBuf) {
     if let Ok(mut set) = get_failed_paths().lock() {
-        // Limit cache size to prevent memory issues (keep last 1000 failures)
-        if set.len() > 1000 {
-            set.clear();
-        }
-        set.insert(path);
+        set.put(path, ());
     }
 }
 
@@ -91,23 +97,19 @@ pub fn mark_as_transient_failure(path: PathBuf) {
     const MAX_TRANSIENT_ATTEMPTS: u8 = 6;
 
     if let Ok(mut map) = get_failure_backoff().lock() {
-        if map.len() > 4096 {
-            map.clear();
-        }
-
         let attempts = map
-            .get(&path)
+            .peek(&path)
             .map_or(1, |state| state.attempts.saturating_add(1));
 
         if attempts >= MAX_TRANSIENT_ATTEMPTS {
-            map.remove(&path);
+            map.pop(&path);
             drop(map);
             mark_as_failed(path);
             return;
         }
 
         let retry_after = Instant::now() + compute_backoff(attempts);
-        map.insert(
+        map.put(
             path,
             FailureBackoffState {
                 attempts,
@@ -120,7 +122,7 @@ pub fn mark_as_transient_failure(path: PathBuf) {
 /// Clear transient failure status after a successful load.
 pub fn clear_transient_failure(path: &PathBuf) {
     if let Ok(mut map) = get_failure_backoff().lock() {
-        map.remove(path);
+        map.pop(path);
     }
 }
 
@@ -128,10 +130,10 @@ pub fn clear_transient_failure(path: &PathBuf) {
 /// Used when manually refreshing a thumbnail after file changes
 pub fn clear_failure_cache(path: &PathBuf) {
     if let Ok(mut set) = get_failed_paths().lock() {
-        set.remove(path);
+        set.pop(path);
     }
     if let Ok(mut map) = get_failure_backoff().lock() {
-        map.remove(path);
+        map.pop(path);
     }
 }
 

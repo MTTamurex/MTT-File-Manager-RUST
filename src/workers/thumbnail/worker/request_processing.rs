@@ -214,16 +214,9 @@ pub(super) fn process_thumbnail_request(
         }
     };
 
-    // STEP 0: check disk cache with size validation (exact mtime, then fallback).
-    if final_result.is_none() {
-        if let Some(entry) = disk_cache.get(path, modified) {
-            final_result = decode_cache_entry(entry, req_size);
-        } else if let Some(entry) = disk_cache.get_latest(path) {
-            final_result = decode_cache_entry(entry, req_size);
-        }
-    }
-
-    // STEP 1: if not cached, decode with concurrency limit.
+    // STEP 0+1: acquire semaphore, then check cache + extract under concurrency limit.
+    // This prevents N simultaneous WebP decodes (~4 MB each) from spiking RAM when
+    // all workers find cache hits at the same time.
     if final_result.is_none() {
         // Cancellation: skip extraction if file is pending deletion.
         if pending_deletions.contains_key(path) {
@@ -242,28 +235,38 @@ pub(super) fn process_thumbnail_request(
         // Wait until a slot is available.
         semaphore.acquire();
 
-        if let Some((raw_data, w, h)) =
-            generate_thumbnail_hybrid(path, req_priority, pending_deletions)
-        {
-            // Resize to bucket (frees RAM and optimizes GPU upload).
-            let bucket_size = get_bucket_size(req_size);
-            let resized = resize_to_bucket(raw_data, w, h, bucket_size);
+        // Re-check disk cache under semaphore (another worker may have filled it
+        // while we waited, avoiding redundant extraction).
+        if let Some(entry) = disk_cache.get(path, modified) {
+            final_result = decode_cache_entry(entry, req_size);
+        } else if let Some(entry) = disk_cache.get_latest(path) {
+            final_result = decode_cache_entry(entry, req_size);
+        }
 
-            // Save optimized version to SQLite.
-            if let Err(e) = disk_cache.put(path, modified, req_size, &resized.0, resized.1, resized.2)
+        if final_result.is_none() {
+            if let Some((raw_data, w, h)) =
+                generate_thumbnail_hybrid(path, req_priority, pending_deletions)
             {
-                log::error!(
-                    "[Thumbnail-CACHE] PUT FAILED for {:?}: {:?}",
-                    path.file_name(),
-                    e
-                );
-            }
+                // Resize to bucket (frees RAM and optimizes GPU upload).
+                let bucket_size = get_bucket_size(req_size);
+                let resized = resize_to_bucket(raw_data, w, h, bucket_size);
 
-            final_result = Some(resized);
-            clear_transient_failure(path);
-        } else {
-            // Extraction failed: mark as failed to skip future attempts.
-            mark_as_transient_failure(path.clone());
+                // Save optimized version to SQLite.
+                if let Err(e) = disk_cache.put(path, modified, req_size, &resized.0, resized.1, resized.2)
+                {
+                    log::error!(
+                        "[Thumbnail-CACHE] PUT FAILED for {:?}: {:?}",
+                        path.file_name(),
+                        e
+                    );
+                }
+
+                final_result = Some(resized);
+                clear_transient_failure(path);
+            } else {
+                // Extraction failed: mark as failed to skip future attempts.
+                mark_as_transient_failure(path.clone());
+            }
         }
 
         // Release slot.

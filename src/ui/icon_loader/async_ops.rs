@@ -4,8 +4,15 @@ impl IconLoader {
     /// Poll for completed background icon extractions and upload to GPU.
     /// Call this once per frame (lightweight - just drains the channel).
     pub fn poll_async_icons(&mut self, ctx: &egui::Context) {
+        // PERF FIX (A-2): Cap GPU uploads per frame to prevent stutter when
+        // many drive/folder icon results arrive simultaneously.
+        const MAX_ASYNC_ICON_UPLOADS: usize = 8;
+        let mut uploads = 0usize;
         let mut received_any = false;
-        while let Ok(result) = self.icon_result_rx.try_recv() {
+        while uploads < MAX_ASYNC_ICON_UPLOADS {
+            let Ok(result) = self.icon_result_rx.try_recv() else {
+                break;
+            };
             received_any = true;
             self.loading_drive_icons.remove(&result.key);
             match result.data {
@@ -19,6 +26,7 @@ impl IconLoader {
                         egui::TextureOptions::LINEAR,
                     );
                     self.drive_icon_cache.insert(result.key, texture);
+                    uploads += 1;
                 }
                 None => {
                     self.failed_drive_icons.insert(result.key);
