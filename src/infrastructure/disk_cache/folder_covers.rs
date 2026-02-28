@@ -67,6 +67,23 @@ impl ThumbnailDiskCache {
         }
     }
 
+    /// Non-blocking variant of `set_folder_cover`.
+    /// Returns `true` if the write succeeded, `false` if the writer lock was busy.
+    /// Use on the UI thread to avoid blocking when a worker holds the lock.
+    /// [WRITER — non-blocking]
+    pub fn try_set_folder_cover(&self, folder_path: &Path, cover_path: &Path) -> bool {
+        match self.writer.try_lock() {
+            Ok(db) => {
+                let _ = db.execute(
+                    "INSERT OR REPLACE INTO folder_covers (folder_path, cover_path) VALUES (?, ?)",
+                    [folder_path.to_string_lossy(), cover_path.to_string_lossy()],
+                );
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
     /// Remove a capa armazenada de uma pasta
     /// [WRITER]
     pub fn remove_folder_cover(&self, folder_path: &Path) {

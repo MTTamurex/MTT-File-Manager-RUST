@@ -210,9 +210,12 @@ impl ImageViewerApp {
                 }
             }
 
-            // Persist covers to DB outside the iter_mut loop
+            // Persist covers to DB — non-blocking to avoid stalling the
+            // UI thread when a worker holds the SQLite writer lock.
+            // Covers that fail to persist will be re-discovered on next visit
+            // or saved by the background cover worker.
             for (folder_path, cover) in &resolved {
-                self.disk_cache.set_folder_cover(folder_path, cover);
+                self.disk_cache.try_set_folder_cover(folder_path, cover);
             }
         }
         let apply_ms = apply_start.elapsed().as_millis();
@@ -316,9 +319,11 @@ impl ImageViewerApp {
 }
 
 fn is_invalid_cached_cover_path(path: &Path) -> bool {
-    if !crate::infrastructure::onedrive::fast_path_exists(path) {
-        return true;
-    }
+    // NOTE: Do NOT call fast_path_exists / GetFileAttributesW here.
+    // On virtual/encrypted drives (Cryptomator, Z:) a single
+    // GetFileAttributesW call can take 100-150ms, freezing the UI thread.
+    // Stale covers are harmless: the thumbnail worker will fail to load the
+    // missing file and the entry is cleaned up lazily.
 
     path
         .extension()
