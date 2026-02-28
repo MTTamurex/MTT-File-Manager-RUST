@@ -35,12 +35,11 @@ fn breadcrumb_segments(current_path: &str) -> Vec<(String, String)> {
             }
             full.push(comp);
             let target = {
-                let p = full.to_string_lossy().to_string();
+                let mut p = full.to_string_lossy().into_owned();
                 if p.len() == 2 && p.ends_with(':') {
-                    format!("{}\\" , p)
-                } else {
-                    p
+                    p.push('\\');
                 }
+                p
             };
             let display = if display_name.is_empty() {
                 comp_str.into_owned()

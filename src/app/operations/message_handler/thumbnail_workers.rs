@@ -39,27 +39,39 @@ impl ImageViewerApp {
         }
 
         let mut folder_updates = false;
+        let pending_paths: std::collections::HashSet<&std::path::PathBuf> =
+            cover_updates.keys().collect();
 
-        // Apply updates to master list.
+        // Apply updates to master list (lookup-driven, early-exit once all targets found).
+        let mut remaining_master = pending_paths.len();
         for item in self.all_items.iter_mut() {
+            if remaining_master == 0 {
+                break;
+            }
             if let Some(cover_opt) = cover_updates.get(&item.path) {
                 if item.folder_cover != *cover_opt {
                     item.folder_cover = cover_opt.clone();
                     folder_updates = true;
                 }
+                remaining_master = remaining_master.saturating_sub(1);
             }
         }
 
         let t_all_items = Instant::now();
 
-        // Apply updates to currently rendered list without full filter/sort rebuild.
+        // Apply updates to currently rendered list (same lookup-driven approach).
         let items = std::sync::Arc::make_mut(&mut self.items);
+        let mut remaining_visible = pending_paths.len();
         for item in items.iter_mut() {
+            if remaining_visible == 0 {
+                break;
+            }
             if let Some(cover_opt) = cover_updates.get(&item.path) {
                 if item.folder_cover != *cover_opt {
                     item.folder_cover = cover_opt.clone();
                     folder_updates = true;
                 }
+                remaining_visible = remaining_visible.saturating_sub(1);
             }
         }
 

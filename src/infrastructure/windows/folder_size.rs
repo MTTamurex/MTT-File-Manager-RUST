@@ -141,7 +141,11 @@ fn parallel_scan_recursive(
                 0 => break, // Leaf — done with this chain
                 1 => {
                     // Single child → continue inline (no rayon overhead)
-                    current = sub_dirs.into_iter().next().unwrap();
+                    if let Some(next_dir) = sub_dirs.pop() {
+                        current = next_dir;
+                    } else {
+                        break;
+                    }
                 }
                 _ => {
                     // Multiple children → flush and yield to rayon for parallelism

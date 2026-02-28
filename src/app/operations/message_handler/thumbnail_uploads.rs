@@ -489,8 +489,12 @@ impl ImageViewerApp {
 
         let mut folders_to_refresh: HashSet<PathBuf> = HashSet::new();
         let mut updated_any = false;
+        let mut remaining_master = failed_paths.len();
 
         for item in self.all_items.iter_mut() {
+            if remaining_master == 0 {
+                break;
+            }
             if item
                 .folder_cover
                 .as_ref()
@@ -501,11 +505,16 @@ impl ImageViewerApp {
                 self.disk_cache.remove_folder_cover(&folder_path);
                 folders_to_refresh.insert(folder_path);
                 updated_any = true;
+                remaining_master = remaining_master.saturating_sub(1);
             }
         }
 
         let items = std::sync::Arc::make_mut(&mut self.items);
+        let mut remaining_visible = failed_paths.len();
         for item in items.iter_mut() {
+            if remaining_visible == 0 {
+                break;
+            }
             if item
                 .folder_cover
                 .as_ref()
@@ -513,6 +522,7 @@ impl ImageViewerApp {
             {
                 item.folder_cover = None;
                 updated_any = true;
+                remaining_visible = remaining_visible.saturating_sub(1);
             }
         }
 

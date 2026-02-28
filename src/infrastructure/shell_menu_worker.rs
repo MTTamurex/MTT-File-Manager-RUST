@@ -96,10 +96,7 @@ pub fn start_shell_menu_worker() -> (Sender<ShellMenuRequest>, Receiver<ShellMen
     let (req_tx, req_rx) = mpsc::channel::<ShellMenuRequest>();
     let (res_tx, res_rx) = mpsc::channel::<ShellMenuResponse>();
 
-    std::thread::Builder::new()
-        .name("shell-menu-worker".into())
-        .spawn(move || shell_menu_loop(req_rx, res_tx))
-        .expect("failed to spawn shell-menu-worker thread");
+    std::thread::spawn(move || shell_menu_loop(req_rx, res_tx));
 
     (req_tx, res_rx)
 }

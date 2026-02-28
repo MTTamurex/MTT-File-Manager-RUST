@@ -14,7 +14,7 @@ impl ThumbnailDiskCache {
             && path.as_bytes()[1] == b':'
             && (path.as_bytes()[2] == b'\\' || path.as_bytes()[2] == b'/')
         {
-            Some(format!("{}:\\", path.chars().next().unwrap()))
+            Some(format!("{}:\\", path.as_bytes()[0] as char))
         } else {
             None
         }

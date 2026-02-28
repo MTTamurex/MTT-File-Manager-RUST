@@ -172,7 +172,9 @@ pub(super) fn render_tabs(
             while low < high {
                 let mid = (low + high).div_ceil(2);
                 let byte_idx = boundaries[mid];
-                let test_text = format!("{}...", &full_text[..byte_idx]);
+                let mut test_text = String::with_capacity(byte_idx + 3);
+                test_text.push_str(&full_text[..byte_idx]);
+                test_text.push_str("...");
                 let test_galley =
                     ui.painter()
                         .layout_no_wrap(test_text, font_id.clone(), title_color);
@@ -185,7 +187,11 @@ pub(super) fn render_tabs(
             }
 
             let title_text = if low > 0 {
-                format!("{}...", &full_text[..boundaries[low]])
+                let keep_idx = boundaries[low];
+                let mut out = String::with_capacity(keep_idx + 3);
+                out.push_str(&full_text[..keep_idx]);
+                out.push_str("...");
+                out
             } else {
                 "...".to_owned()
             };
