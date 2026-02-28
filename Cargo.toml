@@ -87,6 +87,10 @@ features = [
     "Win32_System_Time",
     "Win32_NetworkManagement_WNet",
     "Win32_Globalization",
+    "Foundation",
+    "Data_Pdf",
+    "Storage",
+    "Storage_Streams",
 ]
 
 [features]

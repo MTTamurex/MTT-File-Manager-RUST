@@ -1,0 +1,480 @@
+//! Native PDF viewer application built on eframe/egui.
+//!
+//! Background rendering via a dedicated worker thread, GPU-based rotation
+//! through UV mapping, stale-texture display during zoom transitions, and
+//! prefetching for fluid scrolling.
+
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+
+use eframe::egui;
+
+use super::render_worker::{RenderRequest, RenderWorker};
+use super::renderer::PdfRenderer;
+
+/// Pages beyond ±CACHE_RADIUS from the current view are evicted.
+const CACHE_RADIUS: u32 = 6;
+
+/// Number of pages to prefetch ahead/behind the visible range.
+const PREFETCH_AHEAD: u32 = 2;
+
+// ── Types ────────────────────────────────────────────────────────────────────
+
+/// Zoom strategy.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum ZoomMode {
+    FitWidth,
+    FitPage,
+    Custom,
+}
+
+/// GPU-uploaded page texture with render-resolution metadata.
+struct PageTexture {
+    texture: egui::TextureHandle,
+    render_w: u32,
+    render_h: u32,
+}
+
+// ── App ──────────────────────────────────────────────────────────────────────
+
+pub struct PdfViewerApp {
+    /// Renderer is staged here until the first `update()`, then moved to the
+    /// worker thread.
+    renderer_staging: Option<PdfRenderer>,
+    worker: Option<RenderWorker>,
+
+    pub(super) total_pages: u32,
+    /// Natural (unrotated) page sizes in DIP.
+    pub(super) page_sizes: Vec<(f32, f32)>,
+
+    // View state
+    pub(super) zoom: f32,
+    pub(super) zoom_mode: ZoomMode,
+    pub(super) rotation: u16, // 0 | 90 | 180 | 270
+
+    // Navigation
+    pub(super) current_page: u32,
+    pub(super) page_input: String,
+    pub(super) scroll_to_page: Option<u32>,
+
+    /// Effective zoom percentage (always reflects actual scale applied).
+    pub(super) effective_zoom_pct: f32,
+
+    // Texture cache (survives zoom/rotation — stale textures shown until replaced)
+    textures: HashMap<u32, PageTexture>,
+    /// Pages with in-flight render requests.
+    pending: HashSet<u32>,
+}
+
+impl PdfViewerApp {
+    pub fn new(path: PathBuf) -> Result<Self, String> {
+        let renderer = PdfRenderer::open(&path)?;
+        let total_pages = renderer.page_count();
+
+        let mut page_sizes = Vec::with_capacity(total_pages as usize);
+        for i in 0..total_pages {
+            page_sizes.push(renderer.page_size(i).unwrap_or((612.0, 792.0)));
+        }
+
+        Ok(Self {
+            renderer_staging: Some(renderer),
+            worker: None,
+            total_pages,
+            page_sizes,
+            zoom: 1.0,
+            zoom_mode: ZoomMode::FitWidth,
+            rotation: 0,
+            current_page: 0,
+            page_input: "1".into(),
+            scroll_to_page: None,
+            effective_zoom_pct: 100.0,
+            textures: HashMap::new(),
+            pending: HashSet::new(),
+        })
+    }
+
+    // ── Worker management ────────────────────────────────────────────────
+
+    fn ensure_worker(&mut self, ctx: &egui::Context) {
+        if self.worker.is_none() {
+            if let Some(r) = self.renderer_staging.take() {
+                self.worker = Some(RenderWorker::spawn(r, ctx.clone()));
+            }
+        }
+    }
+
+    fn poll_results(&mut self, ctx: &egui::Context) {
+        let results = match &self.worker {
+            Some(w) => w.drain_results(),
+            None => return,
+        };
+        for r in results {
+            self.pending.remove(&r.page_idx);
+            let tex = ctx.load_texture(
+                format!("pdf_p{}", r.page_idx),
+                egui::ColorImage::from_rgba_unmultiplied(
+                    [r.width as usize, r.height as usize],
+                    &r.pixels,
+                ),
+                egui::TextureOptions::LINEAR,
+            );
+            self.textures.insert(
+                r.page_idx,
+                PageTexture {
+                    texture: tex,
+                    render_w: r.width,
+                    render_h: r.height,
+                },
+            );
+        }
+    }
+
+    fn submit_render(&mut self, page_idx: u32, need_w: u32, need_h: u32) {
+        if self.pending.contains(&page_idx) {
+            return;
+        }
+        if let Some(w) = &self.worker {
+            w.request(RenderRequest {
+                page_idx,
+                width: need_w,
+                height: need_h,
+            });
+            self.pending.insert(page_idx);
+        }
+    }
+
+    // ── Geometry ─────────────────────────────────────────────────────────
+
+    pub(super) fn get_scale(&self, page_idx: u32, aw: f32, ah: f32) -> f32 {
+        let (nw, nh) = self.page_sizes[page_idx as usize];
+        let (rw, rh) = if self.rotation % 180 != 0 {
+            (nh, nw)
+        } else {
+            (nw, nh)
+        };
+        match self.zoom_mode {
+            ZoomMode::FitWidth => aw / rw,
+            ZoomMode::FitPage => (aw / rw).min(ah / rh),
+            ZoomMode::Custom => self.zoom,
+        }
+    }
+
+    fn display_size(&self, page_idx: u32, scale: f32) -> (f32, f32) {
+        let (nw, nh) = self.page_sizes[page_idx as usize];
+        let (rw, rh) = if self.rotation % 180 != 0 {
+            (nh, nw)
+        } else {
+            (nw, nh)
+        };
+        (rw * scale, rh * scale)
+    }
+
+    /// Pixel dimensions the renderer should produce (unrotated, DPI-scaled).
+    fn needed_render_size(&self, page_idx: u32, scale: f32, ppp: f32) -> (u32, u32) {
+        let (nw, nh) = self.page_sizes[page_idx as usize];
+        (
+            (nw * scale * ppp).max(1.0).min(8192.0) as u32,
+            (nh * scale * ppp).max(1.0).min(8192.0) as u32,
+        )
+    }
+
+    /// Returns `true` if the cached texture resolution is close enough to what
+    /// we need (between 90 % and 200 %).  Outside that range the texture is
+    /// either too blurry or wastefully large.
+    fn texture_adequate(cached: &PageTexture, need_w: u32, need_h: u32) -> bool {
+        if need_w == 0 || need_h == 0 {
+            return false;
+        }
+        let rw = cached.render_w as f32 / need_w as f32;
+        let rh = cached.render_h as f32 / need_h as f32;
+        rw >= 0.9 && rw <= 2.0 && rh >= 0.9 && rh <= 2.0
+    }
+
+    // ── Cache eviction ───────────────────────────────────────────────────
+
+    fn evict_distant(&mut self) {
+        let lo = self.current_page.saturating_sub(CACHE_RADIUS);
+        let hi = (self.current_page + CACHE_RADIUS).min(self.total_pages.saturating_sub(1));
+        self.textures.retain(|&idx, _| idx >= lo && idx <= hi);
+    }
+
+    // ── GPU-rotated painting ─────────────────────────────────────────────
+
+    /// Paint a page texture with rotation handled entirely in UV coordinates —
+    /// zero CPU pixel manipulation.
+    fn paint_page(
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        tex_id: egui::TextureId,
+        rotation: u16,
+    ) {
+        let mut mesh = egui::Mesh::with_texture(tex_id);
+        let c = egui::Color32::WHITE;
+        let p = [
+            rect.left_top(),
+            rect.right_top(),
+            rect.right_bottom(),
+            rect.left_bottom(),
+        ];
+        // UV corners rotated to match the desired display rotation.
+        let uv: [(f32, f32); 4] = match rotation {
+            90 => [(0.0, 1.0), (0.0, 0.0), (1.0, 0.0), (1.0, 1.0)],
+            180 => [(1.0, 1.0), (0.0, 1.0), (0.0, 0.0), (1.0, 0.0)],
+            270 => [(1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0)],
+            _ => [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)],
+        };
+        for i in 0..4 {
+            mesh.vertices.push(egui::epaint::Vertex {
+                pos: p[i],
+                uv: egui::pos2(uv[i].0, uv[i].1),
+                color: c,
+            });
+        }
+        mesh.indices = vec![0, 1, 2, 0, 2, 3];
+        painter.add(egui::Shape::mesh(mesh));
+    }
+
+    fn paint_placeholder(painter: &egui::Painter, rect: egui::Rect, idx: u32) {
+        painter.rect_filled(rect, 0.0, egui::Color32::from_gray(40));
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            format!("Page {}", idx + 1),
+            egui::FontId::proportional(18.0),
+            egui::Color32::GRAY,
+        );
+    }
+
+    // ── View helpers (called from toolbar.rs) ────────────────────────────
+
+    /// Clear pending set so visible pages can be re-requested at the new scale.
+    pub(super) fn on_view_changed(&mut self) {
+        self.pending.clear();
+    }
+
+    pub(super) fn zoom_in(&mut self) {
+        self.zoom_mode = ZoomMode::Custom;
+        self.zoom = (self.zoom * 1.25).min(5.0);
+        self.on_view_changed();
+    }
+
+    pub(super) fn zoom_out(&mut self) {
+        self.zoom_mode = ZoomMode::Custom;
+        self.zoom = (self.zoom / 1.25).max(0.1);
+        self.on_view_changed();
+    }
+
+    pub(super) fn rotate_cw(&mut self) {
+        self.rotation = (self.rotation + 90) % 360;
+        self.on_view_changed();
+    }
+
+    pub(super) fn rotate_ccw(&mut self) {
+        self.rotation = (self.rotation + 270) % 360;
+        self.on_view_changed();
+    }
+
+    pub(super) fn go_to_page(&mut self, page: u32) {
+        let page = page.min(self.total_pages.saturating_sub(1));
+        self.current_page = page;
+        self.page_input = format!("{}", page + 1);
+        self.scroll_to_page = Some(page);
+    }
+
+    pub(super) fn prev_page(&mut self) {
+        if self.current_page > 0 {
+            self.go_to_page(self.current_page - 1);
+        }
+    }
+
+    pub(super) fn next_page(&mut self) {
+        if self.current_page + 1 < self.total_pages {
+            self.go_to_page(self.current_page + 1);
+        }
+    }
+
+    // ── Keyboard ─────────────────────────────────────────────────────────
+
+    fn handle_keyboard(&mut self, ctx: &egui::Context) {
+        ctx.input(|i| {
+            if i.modifiers.ctrl {
+                if i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals) {
+                    self.zoom_in();
+                }
+                if i.key_pressed(egui::Key::Minus) {
+                    self.zoom_out();
+                }
+                if i.key_pressed(egui::Key::Num0) {
+                    self.zoom = 1.0;
+                    self.zoom_mode = ZoomMode::Custom;
+                    self.on_view_changed();
+                }
+
+                let dy = i.smooth_scroll_delta.y;
+                if dy > 1.0 {
+                    self.zoom_in();
+                } else if dy < -1.0 {
+                    self.zoom_out();
+                }
+            }
+
+            if i.key_pressed(egui::Key::R) && !i.modifiers.ctrl {
+                if i.modifiers.shift {
+                    self.rotate_ccw();
+                } else {
+                    self.rotate_cw();
+                }
+            }
+
+            if i.key_pressed(egui::Key::PageUp) {
+                self.prev_page();
+            }
+            if i.key_pressed(egui::Key::PageDown) {
+                self.next_page();
+            }
+            if i.key_pressed(egui::Key::Home) && i.modifiers.ctrl {
+                self.go_to_page(0);
+            }
+            if i.key_pressed(egui::Key::End) && i.modifiers.ctrl {
+                self.go_to_page(self.total_pages.saturating_sub(1));
+            }
+        });
+    }
+
+    // ── Page layout in ScrollArea ────────────────────────────────────────
+
+    fn show_pages(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        aw: f32,
+        ah: f32,
+    ) {
+        let ppp = ctx.pixels_per_point();
+        let mut first_visible: Option<u32> = None;
+        let mut last_visible: u32 = 0;
+
+        for idx in 0..self.total_pages {
+            let scale = self.get_scale(idx, aw, ah);
+            let (dw, dh) = self.display_size(idx, scale);
+
+            let indent = ((ui.available_width() - dw) / 2.0).max(0.0);
+
+            ui.horizontal(|ui| {
+                ui.add_space(indent);
+
+                let (rect, resp) = ui.allocate_exact_size(
+                    egui::vec2(dw, dh),
+                    egui::Sense::hover(),
+                );
+
+                if self.scroll_to_page == Some(idx) {
+                    resp.scroll_to_me(Some(egui::Align::TOP));
+                    self.scroll_to_page = None;
+                }
+
+                if ui.is_rect_visible(rect) {
+                    if first_visible.is_none() {
+                        first_visible = Some(idx);
+                    }
+                    last_visible = idx;
+
+                    // Check if cached texture is adequate for the current scale
+                    let (need_w, need_h) = self.needed_render_size(idx, scale, ppp);
+                    let needs_render = match self.textures.get(&idx) {
+                        Some(t) => !Self::texture_adequate(t, need_w, need_h),
+                        None => true,
+                    };
+                    if needs_render {
+                        self.submit_render(idx, need_w, need_h);
+                    }
+
+                    // Paint texture (possibly stale / stretched) or placeholder
+                    if let Some(t) = self.textures.get(&idx) {
+                        Self::paint_page(ui.painter(), rect, t.texture.id(), self.rotation);
+                    } else {
+                        Self::paint_placeholder(ui.painter(), rect, idx);
+                    }
+                }
+            });
+
+            ui.add_space(8.0);
+        }
+
+        // Update current-page indicator from scroll position
+        if let Some(fv) = first_visible {
+            if self.scroll_to_page.is_none() {
+                self.current_page = fv;
+                self.page_input = format!("{}", fv + 1);
+            }
+
+            // Prefetch adjacent pages for smooth scrolling
+            let scale0 = self.get_scale(fv, aw, ah);
+            let pf_lo = fv.saturating_sub(PREFETCH_AHEAD);
+            let pf_hi =
+                (last_visible + PREFETCH_AHEAD).min(self.total_pages.saturating_sub(1));
+            for pidx in pf_lo..=pf_hi {
+                let (nw, nh) = self.needed_render_size(pidx, scale0, ppp);
+                let needs = match self.textures.get(&pidx) {
+                    Some(t) => !Self::texture_adequate(t, nw, nh),
+                    None => true,
+                };
+                if needs {
+                    self.submit_render(pidx, nw, nh);
+                }
+            }
+        }
+    }
+}
+
+// ── eframe::App ──────────────────────────────────────────────────────────────
+
+impl eframe::App for PdfViewerApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.ensure_worker(ctx);
+        self.poll_results(ctx);
+        self.handle_keyboard(ctx);
+
+        egui::TopBottomPanel::top("pdf_toolbar").show(ctx, |ui| {
+            self.show_toolbar(ui);
+        });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let aw = (ui.available_width() - 20.0).max(100.0);
+            let ah = ui.available_height().max(100.0);
+
+            if self.total_pages > 0 {
+                self.effective_zoom_pct = self.get_scale(0, aw, ah) * 100.0;
+            }
+
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    self.show_pages(ui, ctx, aw, ah);
+                });
+        });
+
+        self.evict_distant();
+    }
+}
+
+// ── Error fallback app ───────────────────────────────────────────────────────
+
+/// Minimal app shown when the PDF fails to load.
+pub(super) struct ErrorApp {
+    pub message: String,
+}
+
+impl eframe::App for ErrorApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.centered_and_justified(|ui| {
+                ui.label(
+                    egui::RichText::new(&self.message)
+                        .color(egui::Color32::RED)
+                        .size(16.0),
+                );
+            });
+        });
+    }
+}

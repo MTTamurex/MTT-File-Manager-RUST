@@ -19,6 +19,4 @@ pub(in crate::app) fn run_post_startup_jobs(app: &mut ImageViewerApp, ctx: &egui
     );
 
     spawn_incremental_gc_worker(app.disk_cache.clone());
-
-    crate::pdf_viewer::warmup();
 }
