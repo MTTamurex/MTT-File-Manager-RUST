@@ -314,9 +314,9 @@ pub fn get_file_type_icon(
         let dummy_name = if is_folder {
             "folder".to_string()
         } else {
-            // Remove extra dots and ensure a single dot
             let clean_ext = extension.trim_start_matches('.');
-            format!("file.{}", clean_ext) // ex: "file.rar"
+            let mapped_ext = super::canonical_icon_ext(clean_ext);
+            format!("file.{}", mapped_ext) // ex: "file.rar"
         };
 
         let wide_path: Vec<u16> = dummy_name

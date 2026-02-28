@@ -279,7 +279,10 @@ impl ImageViewerApp {
                 let mut loader = IconLoader::new();
                 // Pre-populate extension_cache from disk cache → instant icons on first frame.
                 for (ext, (pixels, width, height)) in &preloaded_extension_icons {
-                    let ext_key = format!("{}_Large", ext);
+                    // Use canonical extension so mapped types (sys→dll) share
+                    // the same texture key as in the render-loop lookup.
+                    let canonical = crate::infrastructure::windows::icons::canonical_icon_ext(ext);
+                    let ext_key = format!("{}_Large", canonical);
                     let texture = ctx.load_texture(
                         ext_key.clone(),
                         eframe::egui::ColorImage::from_rgba_unmultiplied(

@@ -215,7 +215,10 @@ pub(in crate::app) fn spawn_icon_worker(
                     let icon_result = if needs_real_path {
                         extract_file_icon_by_path(&path, IconSize::Large)
                     } else {
-                        let ext_str = ext_lower.as_deref().unwrap_or("");
+                        let ext_raw = ext_lower.as_deref().unwrap_or("");
+                        // Map extensions that share the same shell icon (sys→dll etc.)
+                        // so all variants share a single cache entry.
+                        let ext_str = crate::infrastructure::windows::icons::canonical_icon_ext(ext_raw);
                         let dot_ext = if ext_str.is_empty() {
                             String::new()
                         } else {
