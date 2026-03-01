@@ -112,9 +112,6 @@ impl ImageViewerApp {
         // Restore normal folder sort mode
         self.sort_mode = self.sort_mode_normal;
 
-        // SYNC TAB STATE
-        self.sync_to_tab();
-
         self.reset_selection_and_search();
 
         // Apply folder lock if this folder has locked preferences
@@ -131,6 +128,9 @@ impl ImageViewerApp {
         // so they still benefit from stale-while-revalidate in load_folder.
         self.items = std::sync::Arc::new(Vec::new());
         self.all_items.clear();
+
+        // SYNC TAB STATE after clearing stale lists to avoid heavy cloning on navigation.
+        self.sync_to_tab();
 
         self.load_folder(false);
     }
@@ -184,6 +184,9 @@ impl ImageViewerApp {
                 // Clear stale items (see navigate_to comment)
                 self.items = std::sync::Arc::new(Vec::new());
                 self.all_items.clear();
+
+                // SYNC TAB STATE after clearing stale lists to avoid heavy cloning on navigation.
+                self.sync_to_tab();
 
                 self.load_folder(false);
             }
@@ -240,6 +243,9 @@ impl ImageViewerApp {
                 // Clear stale items (see navigate_to comment)
                 self.items = std::sync::Arc::new(Vec::new());
                 self.all_items.clear();
+
+                // SYNC TAB STATE after clearing stale lists to avoid heavy cloning on navigation.
+                self.sync_to_tab();
 
                 self.load_folder(false);
             }
