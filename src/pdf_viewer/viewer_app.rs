@@ -18,6 +18,10 @@ const CACHE_RADIUS: u32 = 6;
 /// Number of pages to prefetch ahead/behind the visible range.
 const PREFETCH_AHEAD: u32 = 2;
 
+/// Maximum total memory (in bytes) for cached page textures.
+/// When exceeded, furthest pages are evicted even if within CACHE_RADIUS.
+pub(super) const TEXTURE_MEMORY_BUDGET: usize = 512 * 1024 * 1024; // 512 MB
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 /// Zoom strategy.
@@ -33,6 +37,13 @@ struct PageTexture {
     texture: egui::TextureHandle,
     render_w: u32,
     render_h: u32,
+}
+
+impl PageTexture {
+    /// RGBA memory footprint of this texture (4 bytes per pixel).
+    fn byte_size(&self) -> usize {
+        self.render_w as usize * self.render_h as usize * 4
+    }
 }
 
 // ── App ──────────────────────────────────────────────────────────────────────
@@ -64,6 +75,8 @@ pub struct PdfViewerApp {
     textures: HashMap<u32, PageTexture>,
     /// Pages with in-flight render requests.
     pending: HashSet<u32>,
+    /// Current total memory used by cached textures (tracked incrementally).
+    cache_bytes: usize,
 }
 
 impl PdfViewerApp {
@@ -90,6 +103,7 @@ impl PdfViewerApp {
             effective_zoom_pct: 100.0,
             textures: HashMap::new(),
             pending: HashSet::new(),
+            cache_bytes: 0,
         })
     }
 
@@ -118,14 +132,17 @@ impl PdfViewerApp {
                 ),
                 egui::TextureOptions::LINEAR,
             );
-            self.textures.insert(
-                r.page_idx,
-                PageTexture {
-                    texture: tex,
-                    render_w: r.width,
-                    render_h: r.height,
-                },
-            );
+            let new_entry = PageTexture {
+                texture: tex,
+                render_w: r.width,
+                render_h: r.height,
+            };
+            // Update cache_bytes: subtract old texture size (if replacing)
+            if let Some(old) = self.textures.get(&r.page_idx) {
+                self.cache_bytes = self.cache_bytes.saturating_sub(old.byte_size());
+            }
+            self.cache_bytes += new_entry.byte_size();
+            self.textures.insert(r.page_idx, new_entry);
         }
     }
 
@@ -195,7 +212,37 @@ impl PdfViewerApp {
     fn evict_distant(&mut self) {
         let lo = self.current_page.saturating_sub(CACHE_RADIUS);
         let hi = (self.current_page + CACHE_RADIUS).min(self.total_pages.saturating_sub(1));
-        self.textures.retain(|&idx, _| idx >= lo && idx <= hi);
+        self.textures.retain(|&idx, tex| {
+            if idx >= lo && idx <= hi {
+                true
+            } else {
+                self.cache_bytes = self.cache_bytes.saturating_sub(tex.byte_size());
+                false
+            }
+        });
+
+        // If still over budget, evict furthest pages from current_page first.
+        if self.cache_bytes > TEXTURE_MEMORY_BUDGET {
+            let mut pages: Vec<u32> = self.textures.keys().copied().collect();
+            pages.sort_by_key(|&p| {
+                std::cmp::Reverse(
+                    (p as i64 - self.current_page as i64).unsigned_abs()
+                )
+            });
+            while self.cache_bytes > TEXTURE_MEMORY_BUDGET {
+                if let Some(victim) = pages.pop() {
+                    // Never evict the current page
+                    if victim == self.current_page {
+                        continue;
+                    }
+                    if let Some(tex) = self.textures.remove(&victim) {
+                        self.cache_bytes = self.cache_bytes.saturating_sub(tex.byte_size());
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
     }
 
     // ── GPU-rotated painting ─────────────────────────────────────────────
