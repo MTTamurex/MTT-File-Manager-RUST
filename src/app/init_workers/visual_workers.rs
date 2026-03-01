@@ -210,7 +210,7 @@ pub(in crate::app) fn spawn_icon_worker(
                         .map(|e| e.to_string_lossy().to_lowercase());
                     let needs_real_path = ext_lower.as_deref()
                         .map(|e| UNIQUE_ICON_EXTS.contains(&e))
-                        .unwrap_or(false);
+                        .unwrap_or(true);
 
                     let icon_result = if needs_real_path {
                         extract_file_icon_by_path(&path, IconSize::Large)

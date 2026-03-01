@@ -202,6 +202,14 @@ impl IconLoader {
                 }
             }
 
+            // Critical for extensionless files: async worker stores results in
+            // icon_cache (path-based), not extension_cache. We must check it
+            // before returning early in non-blocking mode.
+            let cache_key = make_cache_key(path, size);
+            if let Some(texture) = self.icon_cache.get(&cache_key) {
+                return Some(texture.clone());
+            }
+
             // Extension not cached yet. For non-blocking callers (render loop),
             // NEVER call get_file_type_icon synchronously — a single call can
             // take 100-500ms for a cold extension (COM/registry overhead).

@@ -316,7 +316,11 @@ pub fn get_file_type_icon(
         } else {
             let clean_ext = extension.trim_start_matches('.');
             let mapped_ext = super::canonical_icon_ext(clean_ext);
-            format!("file.{}", mapped_ext) // ex: "file.rar"
+            if mapped_ext.is_empty() {
+                "file".to_string()
+            } else {
+                format!("file.{}", mapped_ext) // ex: "file.rar"
+            }
         };
 
         let wide_path: Vec<u16> = dummy_name
