@@ -4,6 +4,57 @@ use crate::ui::preview_panel::actions::PreviewPanelAction;
 use crate::ui::svg_icons::SvgIconManager;
 use eframe::egui;
 
+#[derive(Clone, Copy)]
+struct LiveFileStat {
+    checked_at: f64,
+    size: u64,
+}
+
+fn probe_file_size(path: &std::path::Path) -> Option<u64> {
+    let metadata = if crate::infrastructure::onedrive::is_onedrive_path(path) {
+        crate::infrastructure::onedrive::onedrive_metadata(path).ok()
+    } else {
+        std::fs::metadata(path).ok()
+    }?;
+
+    if metadata.is_file() {
+        Some(metadata.len())
+    } else {
+        None
+    }
+}
+
+fn resolve_live_file_size(ui: &egui::Ui, file: &FileEntry) -> u64 {
+    if file.is_dir {
+        return file.size;
+    }
+
+    let now = ui.input(|i| i.time);
+    let cache_id = egui::Id::new("preview_live_file_size").with(&file.path);
+    let mut resolved = file.size;
+
+    ui.ctx().data_mut(|d| {
+        let mut state = d.get_temp::<LiveFileStat>(cache_id).unwrap_or(LiveFileStat {
+            checked_at: -10.0,
+            size: file.size,
+        });
+
+        if (now - state.checked_at) >= 1.0 {
+            if let Some(size) = probe_file_size(&file.path) {
+                state.size = size;
+            } else {
+                state.size = file.size;
+            }
+            state.checked_at = now;
+            d.insert_temp(cache_id, state);
+        }
+
+        resolved = state.size;
+    });
+
+    resolved
+}
+
 pub fn render_file_info_table(
     ui: &mut egui::Ui,
     file: &FileEntry,
@@ -154,7 +205,8 @@ pub fn render_file_info_table(
                         "Calculando...".to_string()
                     }
                 } else {
-                    crate::infrastructure::windows::format_size(file.size)
+                    let live_size = resolve_live_file_size(ui, file);
+                    crate::infrastructure::windows::format_size(live_size)
                 };
 
                 add_detail(ui, "Tamanho:", size_str);
