@@ -7,6 +7,59 @@ use super::{truncate_text_for_column, ColumnWidths, ListViewContext, ListViewOpe
 use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::windows::{format_date, format_size};
 
+#[derive(Clone, Copy)]
+struct TooltipLiveFileStat {
+    checked_at: f64,
+    size: u64,
+}
+
+fn probe_file_size(path: &std::path::Path) -> Option<u64> {
+    let metadata = if crate::infrastructure::onedrive::is_onedrive_path(path) {
+        crate::infrastructure::onedrive::onedrive_metadata(path).ok()
+    } else {
+        std::fs::metadata(path).ok()
+    }?;
+
+    if metadata.is_file() {
+        Some(metadata.len())
+    } else {
+        None
+    }
+}
+
+fn resolve_tooltip_live_size(ui: &Ui, item: &FileEntry) -> u64 {
+    if item.is_dir {
+        return item.size;
+    }
+
+    let now = ui.input(|i| i.time);
+    let cache_id = egui::Id::new("tooltip_live_file_size").with(&item.path);
+    let mut resolved = item.size;
+
+    ui.ctx().data_mut(|d| {
+        let mut state = d
+            .get_temp::<TooltipLiveFileStat>(cache_id)
+            .unwrap_or(TooltipLiveFileStat {
+                checked_at: -10.0,
+                size: item.size,
+            });
+
+        if (now - state.checked_at) >= 1.0 {
+            if let Some(size) = probe_file_size(&item.path) {
+                state.size = size;
+            } else {
+                state.size = item.size;
+            }
+            state.checked_at = now;
+            d.insert_temp(cache_id, state);
+        }
+
+        resolved = state.size;
+    });
+
+    resolved
+    }
+
 // PERFORMANCE: Tooltip debounce to avoid creation/destruction during scroll
 const TOOLTIP_DELAY_SECS: f32 = 0.3;
 
@@ -330,7 +383,7 @@ fn render_item_tooltip(
                         if !item.is_dir || item.is_archive() {
                             ui.horizontal(|ui| {
                                 ui.label("Tamanho:");
-                                ui.label(format_size(item.size));
+                                ui.label(format_size(resolve_tooltip_live_size(ui, item)));
                             });
                         }
                         let date_lbl = if is_recycle_bin {

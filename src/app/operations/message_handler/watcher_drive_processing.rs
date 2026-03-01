@@ -46,11 +46,12 @@ impl ImageViewerApp {
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs())
             .unwrap_or(0);
+        let path_norm = Self::normalize_for_match(path);
 
         let mut touched = false;
 
         for item in self.all_items.iter_mut() {
-            if item.path == path {
+            if item.path == path || Self::normalize_for_match(&item.path) == path_norm {
                 item.size = new_size;
                 item.modified = new_modified;
                 touched = true;
@@ -60,7 +61,7 @@ impl ImageViewerApp {
 
         let items = Arc::make_mut(&mut self.items);
         for item in items.iter_mut() {
-            if item.path == path {
+            if item.path == path || Self::normalize_for_match(&item.path) == path_norm {
                 item.size = new_size;
                 item.modified = new_modified;
                 touched = true;
@@ -69,7 +70,7 @@ impl ImageViewerApp {
         }
 
         if let Some(selected) = self.selected_file.as_mut() {
-            if selected.path == path {
+            if selected.path == path || Self::normalize_for_match(&selected.path) == path_norm {
                 selected.size = new_size;
                 selected.modified = new_modified;
                 touched = true;
