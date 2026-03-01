@@ -1419,6 +1419,11 @@ function osc_init()
 
     elements = {}
 
+    -- Reset window-controls tracking so the next render() unconditionally
+    -- re-enables the binding (guards against visibility_mode disabling it
+    -- during fullscreen transitions and never re-enabling it).
+    state.windowcontrols_buttons = false
+
     -- some often needed stuff
     local pl_count = mp.get_property_number("playlist-count", 0)
     local have_pl = (pl_count > 1)
@@ -2167,17 +2172,14 @@ function render()
 
     if osc_param.areas["window-controls"] then
         for _,cords in ipairs(osc_param.areas["window-controls"]) do
-            if state.osc_visible then -- activate only when OSC is actually visible
-                set_virt_mouse_area(cords.x1, cords.y1, cords.x2, cords.y2, "window-controls")
-            end
-            if state.osc_visible ~= state.windowcontrols_buttons then
-                if state.osc_visible then
-                    mp.enable_key_bindings("window-controls")
-                else
-                    mp.disable_key_bindings("window-controls")
-                end
-                state.windowcontrols_buttons = state.osc_visible
-            end
+            -- Window controls (close/minimize/maximize) must always be
+            -- clickable, regardless of OSC visibility, idle state, or
+            -- fullscreen transitions. Always set virt area and always enable
+            -- the binding every render cycle so it is never left disabled
+            -- after visibility_mode() or other code disables it.
+            set_virt_mouse_area(cords.x1, cords.y1, cords.x2, cords.y2, "window-controls")
+            mp.enable_key_bindings("window-controls")
+            state.windowcontrols_buttons = true
 
             if (mouse_hit_coords(cords.x1, cords.y1, cords.x2, cords.y2)) then
                 mouse_over_osc = true
@@ -2369,10 +2371,25 @@ function tick()
 
         if state.showhide_enabled then
             mp.disable_key_bindings("showhide")
-            mp.disable_key_bindings("showhide_wc")
+            -- Note: do NOT disable showhide_wc here. The window-controls area
+            -- (close/minimize/maximize) must remain hoverable at all times,
+            -- including when the player is idle/paused-at-EOF. Disabling it
+            -- prevents show_osc() from firing, which in turn leaves the
+            -- window-controls binding disabled and makes all three buttons
+            -- unresponsive.
             state.showhide_enabled = false
         end
 
+        -- render() is not called in idle mode, but window-controls (close/
+        -- minimize/maximize) must still be clickable. Activate them directly,
+        -- unconditionally, every tick so they can never be left disabled.
+        if window_controls_enabled() and osc_param.areas["window-controls"] then
+            for _,cords in ipairs(osc_param.areas["window-controls"]) do
+                set_virt_mouse_area(cords.x1, cords.y1, cords.x2, cords.y2, "window-controls")
+            end
+            mp.enable_key_bindings("window-controls")
+            state.windowcontrols_buttons = true
+        end
 
     elseif (state.fullscreen and user_opts.showfullscreen)
         or (not state.fullscreen and user_opts.showwindowed) then
@@ -2503,8 +2520,26 @@ mp.observe_property("window-maximized", "bool",
 )
 mp.observe_property("idle-active", "bool",
     function(name, val)
-        state.idle = val
+        -- When keep-open=yes pauses the player at EOF, mpv sets idle-active=true
+        -- even though there is still a visible video frame. In that case we must
+        -- NOT enter OSC idle mode, otherwise tick() disables all mouse/showhide
+        -- bindings and the close/minimize/maximize buttons stop responding to clicks.
+        if val and mp.get_property_bool("eof-reached") then
+            state.idle = false
+        else
+            state.idle = val
+        end
         request_tick()
+    end
+)
+-- When eof-reached fires (possibly after idle-active already fired), ensure we
+-- are not stuck in idle mode — keep-open still has a visible frame to show.
+mp.observe_property("eof-reached", "bool",
+    function(name, val)
+        if val and state.idle then
+            state.idle = false
+            request_tick()
+        end
     end
 )
 mp.observe_property("pause", "bool", pause_state)

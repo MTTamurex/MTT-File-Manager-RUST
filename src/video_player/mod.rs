@@ -208,8 +208,14 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
 
     // Event loop — blocks until mpv shuts down (user closes window or presses 'q')
     let mut seek_applied = false;
+    let mut eof_reached = false;
     loop {
         let event = mpv.wait_event(1.0);
+        // Log every non-None event at debug level so we can trace what fires
+        // when the close button is clicked at EOF (keep-open=yes paused state).
+        if let Some(ref ev) = event {
+            log::debug!("[VIDEO-PLAYER] event: {:?}", ev);
+        }
         match event {
             Some(Ok(mpv::events::Event::Shutdown)) => {
                 log::info!("[VIDEO-PLAYER] mpv shutdown event received");
@@ -234,8 +240,39 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
                     log::info!("[VIDEO-PLAYER] Seeked to {:.1}s", position);
                 }
             }
-            Some(Ok(mpv::events::Event::EndFile(_))) => {
-                // keep-open=yes means we stay open; if the user quits, Shutdown fires
+            Some(Ok(mpv::events::Event::EndFile(reason))) => {
+                log::info!("[VIDEO-PLAYER] EndFile reason={}", reason);
+
+                // MPV_END_FILE_REASON constants: EOF=0, STOP=2, QUIT=3, ERROR=4, REDIRECT=5
+                const REASON_EOF:  u32 = mpv::mpv_end_file_reason::Eof;
+                const REASON_STOP: u32 = mpv::mpv_end_file_reason::Stop;
+                const REASON_QUIT: u32 = mpv::mpv_end_file_reason::Quit;
+
+                match reason {
+                    REASON_EOF => {
+                        // keep-open=yes: video reached end, player stays open showing
+                        // last frame. Mark flag so we know we're in paused-at-EOF state.
+                        eof_reached = true;
+                        log::info!("[VIDEO-PLAYER] EOF reached — keep-open holds player open");
+                    }
+                    REASON_QUIT | REASON_STOP => {
+                        // User explicitly closed the player (OSC close button, 'q' key,
+                        // or equivalent). Exit the event loop.
+                        log::info!("[VIDEO-PLAYER] EndFile Stop/Quit — exiting");
+                        break;
+                    }
+                    _ => {
+                        // ERROR or REDIRECT: only exit if we were already at EOF
+                        // (i.e., the player had finished and something triggered close).
+                        if eof_reached {
+                            log::info!(
+                                "[VIDEO-PLAYER] EndFile reason={} after EOF — exiting",
+                                reason
+                            );
+                            break;
+                        }
+                    }
+                }
             }
             Some(Err(e)) => {
                 log::warn!("[VIDEO-PLAYER] mpv event error: {:?}", e);
