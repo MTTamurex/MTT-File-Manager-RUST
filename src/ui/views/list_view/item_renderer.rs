@@ -14,11 +14,11 @@ struct TooltipLiveFileStat {
 }
 
 fn probe_file_size(path: &std::path::Path) -> Option<u64> {
-    let metadata = if crate::infrastructure::onedrive::is_onedrive_path(path) {
-        crate::infrastructure::onedrive::onedrive_metadata(path).ok()
-    } else {
-        std::fs::metadata(path).ok()
-    }?;
+    if crate::infrastructure::onedrive::is_onedrive_path(path) {
+        return None;
+    }
+
+    let metadata = std::fs::metadata(path).ok()?;
 
     if metadata.is_file() {
         Some(metadata.len())
