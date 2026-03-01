@@ -22,6 +22,72 @@ fn should_preserve_onedrive_media_thumbnail(path: &Path) -> bool {
 }
 
 impl ImageViewerApp {
+    fn try_refresh_modified_file_entry_inline(&mut self, path: &Path, current_path_norm: &str) {
+        let Some(parent) = path.parent() else {
+            return;
+        };
+
+        if Self::normalize_for_match(parent) != current_path_norm {
+            return;
+        }
+
+        let Ok(meta) = std::fs::metadata(path) else {
+            return;
+        };
+
+        if !meta.is_file() {
+            return;
+        }
+
+        let new_size = meta.len();
+        let new_modified = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let mut touched = false;
+
+        for item in self.all_items.iter_mut() {
+            if item.path == path {
+                item.size = new_size;
+                item.modified = new_modified;
+                touched = true;
+                break;
+            }
+        }
+
+        let items = Arc::make_mut(&mut self.items);
+        for item in items.iter_mut() {
+            if item.path == path {
+                item.size = new_size;
+                item.modified = new_modified;
+                touched = true;
+                break;
+            }
+        }
+
+        if let Some(selected) = self.selected_file.as_mut() {
+            if selected.path == path {
+                selected.size = new_size;
+                selected.modified = new_modified;
+                touched = true;
+            }
+        }
+
+        if touched {
+            self.ui_ctx.request_repaint();
+            #[cfg(debug_assertions)]
+            log::trace!(
+                "[FS-WATCH] MODIFY inline metadata update: {:?} size={} modified={}",
+                path.file_name().unwrap_or_default(),
+                new_size,
+                new_modified
+            );
+        }
+    }
+
     pub(super) fn should_ignore_watcher_path(
         &self,
         path: &Path,
@@ -266,6 +332,7 @@ impl ImageViewerApp {
         }
 
         let cleaned = Self::clean_path(path);
+        self.try_refresh_modified_file_entry_inline(&cleaned, _current_path_norm);
         let preserve_media_thumb = should_preserve_onedrive_media_thumbnail(&cleaned);
 
         if !preserve_media_thumb {
@@ -318,8 +385,8 @@ impl ImageViewerApp {
         // drivers (Cryptomator, VeraCrypt) that emit frequent MODIFY events
         // during internal operations. For OneDrive media placeholders we keep
         // the last thumbnail (Explorer-like behavior) to avoid icon flicker.
-        // Directory listing metadata (size/mtime) is refreshed on next
-        // navigation or manual reload (F5).
+        // File size/mtime are updated inline for visible entries to keep the
+        // details panel and list columns accurate without manual reload.
         #[cfg(debug_assertions)]
         if let Some(parent) = cleaned.parent() {
             let current_path_norm = _current_path_norm;
