@@ -2,6 +2,59 @@ use super::{GridViewContext, PendingOperations, TOOLTIP_DELAY_SECS};
 use crate::domain::file_entry::FileEntry;
 use eframe::egui::{self, Color32, Rect, Sense, Ui};
 
+#[derive(Clone, Copy)]
+struct TooltipLiveFileStat {
+    checked_at: f64,
+    size: u64,
+}
+
+fn probe_file_size(path: &std::path::Path) -> Option<u64> {
+    let metadata = if crate::infrastructure::onedrive::is_onedrive_path(path) {
+        crate::infrastructure::onedrive::onedrive_metadata(path).ok()
+    } else {
+        std::fs::metadata(path).ok()
+    }?;
+
+    if metadata.is_file() {
+        Some(metadata.len())
+    } else {
+        None
+    }
+}
+
+fn resolve_tooltip_live_size(ui: &Ui, item: &FileEntry) -> u64 {
+    if item.is_dir {
+        return item.size;
+    }
+
+    let now = ui.input(|i| i.time);
+    let cache_id = egui::Id::new("grid_tooltip_live_file_size").with(&item.path);
+    let mut resolved = item.size;
+
+    ui.ctx().data_mut(|d| {
+        let mut state = d
+            .get_temp::<TooltipLiveFileStat>(cache_id)
+            .unwrap_or(TooltipLiveFileStat {
+                checked_at: -10.0,
+                size: item.size,
+            });
+
+        if (now - state.checked_at) >= 1.0 {
+            if let Some(size) = probe_file_size(&item.path) {
+                state.size = size;
+            } else {
+                state.size = item.size;
+            }
+            state.checked_at = now;
+            d.insert_temp(cache_id, state);
+        }
+
+        resolved = state.size;
+    });
+
+    resolved
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_grid_item(
     ui: &mut Ui,
@@ -138,7 +191,9 @@ pub(super) fn render_grid_item(
                         if !item.is_dir || item.is_archive() {
                             ui.horizontal(|ui| {
                                 ui.label("Tamanho:");
-                                ui.label(crate::infrastructure::windows::format_size(item.size));
+                                ui.label(crate::infrastructure::windows::format_size(
+                                    resolve_tooltip_live_size(ui, item),
+                                ));
                             });
                         }
                         let (date_lbl, date_val) = if is_recycle {
