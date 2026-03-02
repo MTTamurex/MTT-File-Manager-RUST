@@ -302,7 +302,7 @@ impl ImageViewerApp {
         if dropped_drive_events > 0 && !self.layout.saved_is_minimized {
             if dropped_drive_events >= max_events.saturating_mul(4) {
                 log::warn!(
-                    "[FS-WATCH] Dropped {} queued drive events after inactivity burst (kept={} batches<= {}, events<= {}). Scheduling safety reload.",
+                    "[FS-WATCH] Dropped {} queued drive events (event burst overflow, kept={} batches<= {}, events<= {}). Scheduling safety reload.",
                     dropped_drive_events,
                     drive_event_count,
                     max_batches,
