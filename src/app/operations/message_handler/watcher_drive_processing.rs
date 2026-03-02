@@ -240,6 +240,11 @@ impl ImageViewerApp {
         pending_disk_cache_invalidations.push(cleaned.clone());
         Self::register_changed_folder(&cleaned, folders_with_changed_contents);
 
+        // Evict in-memory caches so a future file at the same path
+        // won't inherit the deleted file's stale thumbnail texture.
+        self.cache_manager.texture_cache.pop(&cleaned);
+        self.cache_manager.failed_thumbnails.pop(&cleaned);
+
         // Check if the CURRENT FOLDER (or an ancestor) was deleted.
         // When that happens, the user is stranded in a non-existent path.
         let cleaned_norm = Self::normalize_for_match(&cleaned);
@@ -442,6 +447,7 @@ impl ImageViewerApp {
         }
 
         pending_disk_cache_invalidations.push(cleaned_old.clone());
+        pending_disk_cache_invalidations.push(cleaned_new.clone());
         Self::register_changed_folder(&cleaned_old, folders_with_changed_contents);
         Self::register_changed_folder(&cleaned_new, folders_with_changed_contents);
 

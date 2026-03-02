@@ -123,7 +123,9 @@ pub(in crate::app) fn build_file_operation_state(
     file_op_res_receiver: mpsc::Receiver<
         crate::workers::file_operation_worker::FileOperationResult,
     >,
-    disk_cache_invalidation_sender: mpsc::Sender<Vec<PathBuf>>,
+    disk_cache_invalidation_sender: mpsc::Sender<
+        Vec<crate::app::init_workers::CacheInvalidationEntry>,
+    >,
     prefetch_sender: mpsc::Sender<crate::workers::prefetch_worker::PrefetchMessage>,
     idle_warmup_sender: mpsc::Sender<crate::workers::idle_warmup::IdleWarmupMessage>,
     pending_deletions: Arc<dashmap::DashMap<PathBuf, ()>>,

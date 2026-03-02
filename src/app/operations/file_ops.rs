@@ -125,9 +125,19 @@ impl ImageViewerApp {
         }
         self.thumbnail_queue.remove_paths(&paths);
 
+        // Clear ALL in-memory caches for these paths so a future file at
+        // the same path won't pick up the deleted file's stale thumbnail.
+        for path in &paths {
+            self.cache_manager.texture_cache.pop(path);
+            self.cache_manager.loading_set.remove(path);
+            self.cache_manager.pop_rgba_data(path);
+            self.cache_manager.failed_thumbnails.pop(path);
+        }
+
         // PERF FIX (C-1): Batch SQLite cache cleanup to background worker instead
         // of running 8-DELETE transactions per file on the UI thread.
-        self.enqueue_disk_cache_invalidations(paths.to_vec());
+        // FORCED: skip existence guard — Shell hasn't finished yet.
+        self.enqueue_disk_cache_invalidations_forced(paths.to_vec());
 
         for path in &paths {
             self.multi_selection.remove(path);
@@ -167,9 +177,19 @@ impl ImageViewerApp {
         }
         self.thumbnail_queue.remove_paths(paths);
 
+        // Clear ALL in-memory caches for these paths so a future file at
+        // the same path won't pick up the deleted file's stale thumbnail.
+        for path in paths {
+            self.cache_manager.texture_cache.pop(path);
+            self.cache_manager.loading_set.remove(path);
+            self.cache_manager.pop_rgba_data(path);
+            self.cache_manager.failed_thumbnails.pop(path);
+        }
+
         // PERF FIX (C-1): Batch SQLite cache cleanup to background worker instead
         // of running 8-DELETE transactions per file on the UI thread.
-        self.enqueue_disk_cache_invalidations(paths.to_vec());
+        // FORCED: skip existence guard — Shell hasn't finished yet.
+        self.enqueue_disk_cache_invalidations_forced(paths.to_vec());
 
         for path in paths {
             // Clear selection proactively

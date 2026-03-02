@@ -129,8 +129,25 @@ impl ImageViewerApp {
             self.destroy_media_preview();
         }
 
+        // Clear stale in-memory caches for both old and new paths.
+        // If a previously-deleted file lived at new_path, its thumbnail
+        // texture may still be cached in RAM — evict it so the renamed
+        // file gets a fresh extraction.
+        self.cache_manager.texture_cache.pop(&path);
+        self.cache_manager.loading_set.remove(&path);
+        self.cache_manager.pop_rgba_data(&path);
+        self.cache_manager.failed_thumbnails.pop(&path);
+        let new_path = parent_folder.join(&new_name);
+        self.cache_manager.texture_cache.pop(&new_path);
+        self.cache_manager.loading_set.remove(&new_path);
+        self.cache_manager.pop_rgba_data(&new_path);
+        self.cache_manager.failed_thumbnails.pop(&new_path);
+
+        // Also invalidate SQLite disk cache for the new path (forced) so
+        // get_latest won't return a stale row from a previous file.
+        self.enqueue_disk_cache_invalidations_forced(vec![new_path.clone()]);
+
         if parent_str == current_path_norm {
-            let new_path = parent_folder.join(&new_name);
             self.pending_select_path = Some(new_path);
             self.loaded_path.clear();
             self.load_folder(false);

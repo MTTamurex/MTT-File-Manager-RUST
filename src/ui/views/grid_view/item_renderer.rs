@@ -247,7 +247,7 @@ pub(super) fn render_grid_item(
             );
         }
     } else {
-        let hover_id = response.id.with("hover_start");
+        let hover_id = egui::Id::new("grid_hover_start").with(&item.path);
         ui.ctx().data_mut(|d| d.remove::<f64>(hover_id));
     }
 

@@ -5,31 +5,47 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{mpsc, Arc};
 
+/// Payload for the disk-cache invalidation channel.
+/// When `force` is `true` the existence guard is skipped — used for
+/// app-initiated deletes where the Shell hasn't finished yet.
+pub struct CacheInvalidationEntry {
+    pub path: PathBuf,
+    pub force: bool,
+}
+
 pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
     disk_cache: Arc<ThumbnailDiskCache>,
-) -> mpsc::Sender<Vec<PathBuf>> {
-    let (disk_cache_invalidation_tx, disk_cache_invalidation_rx) = mpsc::channel::<Vec<PathBuf>>();
+) -> mpsc::Sender<Vec<CacheInvalidationEntry>> {
+    let (disk_cache_invalidation_tx, disk_cache_invalidation_rx) =
+        mpsc::channel::<Vec<CacheInvalidationEntry>>();
     let disk_cache_for_invalidation = disk_cache.clone();
     std::thread::spawn(move || {
-        while let Ok(paths) = disk_cache_invalidation_rx.recv() {
-            let mut unique_paths = std::collections::HashSet::with_capacity(paths.len());
-            for path in paths {
-                if unique_paths.insert(path.clone()) {
-                    // Guard: if the path still exists on disk, the DELETE
-                    // event was transient (common on FUSE/WinFsp drivers
-                    // like Cryptomator that emit DELETE+CREATE during
-                    // internal refresh). Keep thumbnail rows intact to avoid
-                    // permanent thumbnail loss, but still clear folder visual
-                    // caches (cover/preview) so stale UI can refresh.
-                    if crate::infrastructure::onedrive::fast_path_exists(path.as_path()) {
-                        disk_cache_for_invalidation.remove_folder_preview_cache(&path);
-                        disk_cache_for_invalidation.remove_folder_cover(&path);
+        while let Ok(entries) = disk_cache_invalidation_rx.recv() {
+            let mut unique_paths = std::collections::HashSet::with_capacity(entries.len());
+            for entry in entries {
+                if unique_paths.insert(entry.path.clone()) {
+                    if entry.force {
+                        // App-initiated delete/refresh: unconditionally remove
+                        // all cache rows. The Shell may not have finished yet,
+                        // so `fast_path_exists` would give a false positive.
+                        disk_cache_for_invalidation.remove_cache_for_path(&entry.path);
+                    } else if crate::infrastructure::onedrive::fast_path_exists(
+                        entry.path.as_path(),
+                    ) {
+                        // Guard: if the path still exists on disk, the DELETE
+                        // event was transient (common on FUSE/WinFsp drivers
+                        // like Cryptomator that emit DELETE+CREATE during
+                        // internal refresh). Keep thumbnail rows intact to avoid
+                        // permanent thumbnail loss, but still clear folder visual
+                        // caches (cover/preview) so stale UI can refresh.
+                        disk_cache_for_invalidation.remove_folder_preview_cache(&entry.path);
+                        disk_cache_for_invalidation.remove_folder_cover(&entry.path);
                         log::debug!(
                             "[CACHE-INVALIDATION] Path exists, invalidated folder visual cache only: {:?}",
-                            path.file_name().unwrap_or_default()
+                            entry.path.file_name().unwrap_or_default()
                         );
                     } else {
-                        disk_cache_for_invalidation.remove_cache_for_path(&path);
+                        disk_cache_for_invalidation.remove_cache_for_path(&entry.path);
                     }
                 }
             }

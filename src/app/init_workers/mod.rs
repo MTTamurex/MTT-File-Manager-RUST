@@ -9,6 +9,7 @@ pub(super) use consistency_probe_worker::spawn_consistency_probe_worker;
 pub(super) use filesystem_workers::{
     spawn_disk_cache_invalidation_worker, spawn_folder_preview_workers, spawn_folder_size_worker,
 };
+pub(crate) use filesystem_workers::CacheInvalidationEntry;
 pub(super) use pipeline_workers::{
     spawn_file_operation_worker, spawn_global_search_worker, spawn_prefetching_workers,
     PrefetchWorkerHandles,

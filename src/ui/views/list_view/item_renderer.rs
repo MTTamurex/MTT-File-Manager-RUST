@@ -433,7 +433,7 @@ fn render_item_tooltip(
         }
     } else {
         // Clear hover time when not hovering
-        let hover_id = response.id.with("hover_start");
+        let hover_id = egui::Id::new("list_hover_start").with(&item.path);
         ui.ctx().data_mut(|d| d.remove::<f64>(hover_id));
     }
 }

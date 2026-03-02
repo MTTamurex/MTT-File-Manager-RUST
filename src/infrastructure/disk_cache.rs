@@ -47,6 +47,9 @@ pub struct ThumbnailCacheEntry {
     pub width: u32,
     pub height: u32,
     pub requested_size: u32,
+    /// The `modified_at` epoch stored in the DB row.  Used by callers to
+    /// detect stale fallback results from `get_latest`.
+    pub modified_at: u64,
 }
 
 /// Manages persistent thumbnail storage in SQLite
