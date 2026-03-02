@@ -43,8 +43,10 @@ impl ImageViewerApp {
         }
         self.media_preview_owner_tab_id = None;
         self.ui_ctx.request_repaint();
-        // Run memory maintenance immediately after tearing down the player.
-        self.run_memory_maintenance_now();
+        // Memory maintenance is handled by the periodic 2s check in the update loop.
+        // Running it synchronously here caused ~880ms UI stalls: MPV shutdown releases
+        // large decoder buffers, and the immediate cache trim amplifies OS working-set
+        // pressure, causing page faults on the very next render frame.
     }
 
     /// Starts video playback in the preview panel using the same flow as clicking
