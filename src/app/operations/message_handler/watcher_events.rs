@@ -195,6 +195,10 @@ impl ImageViewerApp {
                     let folder_path = current_path.join(&item.name);
                     if stale_set.contains(&folder_path) {
                         item.folder_cover = None;
+                        // Evict stale composed preview so it's re-composed with the
+                        // new cover once the cover_worker returns.
+                        self.cache_manager.invalidate_folder_preview(&folder_path);
+                        self.scanned_folders.pop(&folder_path);
                         // Invalidate disk cache cover in background (avoids Mutex on UI thread).
                         pending_disk_cache_invalidations.push(folder_path.clone());
                         // Re-request cover discovery for this subfolder.

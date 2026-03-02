@@ -39,6 +39,7 @@ impl ImageViewerApp {
         }
 
         let mut folder_updates = false;
+        let mut covers_changed: Vec<std::path::PathBuf> = Vec::new();
         // Build a path index for master items and apply only touched updates.
         let mut all_items_index =
             std::collections::HashMap::with_capacity(self.all_items.len());
@@ -51,6 +52,7 @@ impl ImageViewerApp {
                 if item.folder_cover != *cover_opt {
                     item.folder_cover = cover_opt.clone();
                     folder_updates = true;
+                    covers_changed.push(folder_path.clone());
                 }
             }
         }
@@ -71,6 +73,12 @@ impl ImageViewerApp {
                     folder_updates = true;
                 }
             }
+        }
+
+        // When a folder's cover changes, the composed preview is stale —
+        // invalidate it so the next frame triggers a fresh composition.
+        for folder_path in &covers_changed {
+            self.cache_manager.invalidate_folder_preview(folder_path);
         }
 
         let t_items = Instant::now();
