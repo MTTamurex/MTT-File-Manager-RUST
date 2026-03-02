@@ -103,12 +103,27 @@ pub(super) fn process_thumbnail_request(
     }
 
     // Fallback: try get_latest (ignores mtime) when exact match missed.
+    // SAFETY: reject the cached entry when our request carries a valid
+    // modified-time that differs from the DB row.  This prevents showing
+    // a stale thumbnail from a *different* file that previously lived at
+    // the same path (e.g., delete A, rename B → A).
     if final_result.is_none() {
         if let Some(entry) = disk_cache.get_latest(path) {
             let w = entry.width;
             let h = entry.height;
             let rs = entry.requested_size;
-            if let Some(decoded) = decode_cache_entry(entry, req_size) {
+            let cached_mod = entry.modified_at;
+
+            let mtime_mismatch = req_modified > 0
+                && cached_mod > 0
+                && req_modified != cached_mod;
+
+            if mtime_mismatch {
+                log::debug!(
+                    "[Thumbnail-CACHE] LATEST match REJECTED (mtime mismatch): path={:?}, cached_mod={}, req_mod={}",
+                    path.file_name(), cached_mod, req_modified
+                );
+            } else if let Some(decoded) = decode_cache_entry(entry, req_size) {
                 final_result = Some(decoded);
             } else {
                 log::debug!(

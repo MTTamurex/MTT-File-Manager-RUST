@@ -25,7 +25,7 @@ impl ThumbnailDiskCache {
         let db = self.reader.lock().ok()?;
         let mut stmt = db
             .prepare_cached(
-                "SELECT data, width, height, requested_size
+                "SELECT data, width, height, requested_size, modified_at
                  FROM thumbnails
                  WHERE id = ? AND modified_at = ?",
             )
@@ -37,6 +37,7 @@ impl ThumbnailDiskCache {
                 width: row.get::<_, i64>(1)? as u32,
                 height: row.get::<_, i64>(2)? as u32,
                 requested_size: row.get::<_, i64>(3)? as u32,
+                modified_at: row.get::<_, i64>(4)? as u64,
             })
         })
         .ok()
@@ -65,7 +66,7 @@ impl ThumbnailDiskCache {
 
         let mut stmt = db
             .prepare_cached(
-                "SELECT data, width, height, requested_size
+                "SELECT data, width, height, requested_size, modified_at
                  FROM thumbnails
                  WHERE id = ?",
             )
@@ -77,6 +78,7 @@ impl ThumbnailDiskCache {
                 width: row.get::<_, i64>(1)? as u32,
                 height: row.get::<_, i64>(2)? as u32,
                 requested_size: row.get::<_, i64>(3)? as u32,
+                modified_at: row.get::<_, i64>(4)? as u64,
             })
         })
         .ok()

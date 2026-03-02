@@ -334,7 +334,8 @@ fn render_preview_panel_layout(
                                             );
                                             // Clear all caches to allow retry
                                             // PERF FIX (C-1): Dispatch SQLite cleanup to background worker
-                                            app.enqueue_disk_cache_invalidations(vec![path.clone()]);
+                                            // FORCED: user explicitly requested refresh
+                                            app.enqueue_disk_cache_invalidations_forced(vec![path.clone()]);
                                             log::debug!("[REFRESH THUMBNAIL] Disk cache cleared");
                                             app.cache_manager.texture_cache.pop(&path);
                                             log::debug!("[REFRESH THUMBNAIL] Texture cache cleared");
