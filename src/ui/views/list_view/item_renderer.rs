@@ -7,13 +7,28 @@ use super::{truncate_text_for_column, ColumnWidths, ListViewContext, ListViewOpe
 use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::windows::{format_date, format_size};
 
+/// Max age (seconds) for probing live file size on the UI thread.
+const LIVE_SIZE_PROBE_MAX_AGE_SECS: u64 = 300; // 5 minutes
+
 #[derive(Clone, Copy)]
 struct TooltipLiveFileStat {
     checked_at: f64,
     size: u64,
 }
 
-fn probe_file_size(path: &std::path::Path) -> Option<u64> {
+/// Probes current file size via `std::fs::metadata`.
+/// Only called for recently-modified files to avoid blocking on cold cache.
+fn probe_file_size(path: &std::path::Path, modified_epoch: u64) -> Option<u64> {
+    if modified_epoch > 0 {
+        let now_epoch = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        if now_epoch.saturating_sub(modified_epoch) > LIVE_SIZE_PROBE_MAX_AGE_SECS {
+            return None;
+        }
+    }
+
     if crate::infrastructure::onedrive::is_onedrive_path(path) {
         return None;
     }
@@ -27,7 +42,7 @@ fn probe_file_size(path: &std::path::Path) -> Option<u64> {
     }
 }
 
-fn resolve_tooltip_live_size(ui: &Ui, item: &FileEntry) -> u64 {
+fn resolve_tooltip_live_size(ui: &egui::Ui, item: &FileEntry) -> u64 {
     if item.is_dir {
         return item.size;
     }
@@ -45,7 +60,7 @@ fn resolve_tooltip_live_size(ui: &Ui, item: &FileEntry) -> u64 {
             });
 
         if (now - state.checked_at) >= 1.0 {
-            if let Some(size) = probe_file_size(&item.path) {
+            if let Some(size) = probe_file_size(&item.path, item.modified) {
                 state.size = size;
             } else {
                 state.size = item.size;
@@ -58,7 +73,9 @@ fn resolve_tooltip_live_size(ui: &Ui, item: &FileEntry) -> u64 {
     });
 
     resolved
-    }
+}
+
+
 
 // PERFORMANCE: Tooltip debounce to avoid creation/destruction during scroll
 const TOOLTIP_DELAY_SECS: f32 = 0.3;
@@ -326,7 +343,10 @@ fn render_item_tooltip(
 ) {
     if response.hovered() {
         let current_time = ui.input(|i| i.time);
-        let hover_id = response.id.with("hover_start");
+        // PERF FIX: Use path-based hover ID so the tooltip timer resets when
+        // navigating to a different folder (prevents stale timer triggering
+        // immediate tooltip with blocking metadata call on cold cache).
+        let hover_id = egui::Id::new("list_hover_start").with(&item.path);
 
         // Track hover start time using egui's memory
         let hover_start_time = ui

@@ -2,13 +2,33 @@ use super::{GridViewContext, PendingOperations, TOOLTIP_DELAY_SECS};
 use crate::domain::file_entry::FileEntry;
 use eframe::egui::{self, Color32, Rect, Sense, Ui};
 
+/// Max age (seconds) for probing live file size on the UI thread.
+/// Files modified longer ago than this are considered stable — `item.size`
+/// (kept fresh by the filesystem watcher) is used directly, avoiding
+/// potentially slow `std::fs::metadata()` calls on cold cache / virtual drives.
+const LIVE_SIZE_PROBE_MAX_AGE_SECS: u64 = 300; // 5 minutes
+
 #[derive(Clone, Copy)]
 struct TooltipLiveFileStat {
     checked_at: f64,
     size: u64,
 }
 
-fn probe_file_size(path: &std::path::Path) -> Option<u64> {
+/// Probes current file size via `std::fs::metadata`.
+/// Only called for recently-modified files (age < LIVE_SIZE_PROBE_MAX_AGE_SECS)
+/// to avoid blocking the UI thread on cold filesystem cache.
+fn probe_file_size(path: &std::path::Path, modified_epoch: u64) -> Option<u64> {
+    // Skip old files — their size is already stable and correct in item.size.
+    if modified_epoch > 0 {
+        let now_epoch = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        if now_epoch.saturating_sub(modified_epoch) > LIVE_SIZE_PROBE_MAX_AGE_SECS {
+            return None;
+        }
+    }
+
     if crate::infrastructure::onedrive::is_onedrive_path(path) {
         return None;
     }
@@ -40,7 +60,7 @@ fn resolve_tooltip_live_size(ui: &Ui, item: &FileEntry) -> u64 {
             });
 
         if (now - state.checked_at) >= 1.0 {
-            if let Some(size) = probe_file_size(&item.path) {
+            if let Some(size) = probe_file_size(&item.path, item.modified) {
                 state.size = size;
             } else {
                 state.size = item.size;
@@ -143,7 +163,11 @@ pub(super) fn render_grid_item(
 
     if response.hovered() && !ctx.is_item_dragging {
         let current_time = ui.input(|i| i.time);
-        let hover_id = response.id.with("hover_start");
+        // PERF FIX: Use path-based hover ID so the tooltip timer resets when
+        // navigating to a different folder (prevents stale timer from the
+        // previous folder's item at the same index triggering an immediate
+        // tooltip with a blocking std::fs::metadata call on cold cache).
+        let hover_id = egui::Id::new("grid_hover_start").with(&item.path);
         let hover_start_time = ui
             .ctx()
             .data_mut(|d| *d.get_temp_mut_or_insert_with(hover_id, || current_time));
