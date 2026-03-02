@@ -645,26 +645,72 @@ impl ImageViewerApp {
         folders_with_changed_contents: HashSet<PathBuf>,
         pending_disk_cache_invalidations: &mut Vec<PathBuf>,
     ) {
+        if folders_with_changed_contents.is_empty() {
+            return;
+        }
+
         let current_path_norm =
             Self::normalize_for_match(std::path::Path::new(&self.navigation_state.current_path));
-        for folder_path in folders_with_changed_contents {
-            self.invalidate_folder_size_cache(&folder_path);
+        for folder_path in &folders_with_changed_contents {
+            self.invalidate_folder_size_cache(folder_path);
             // Also evict the in-memory GPU texture so the stale preview
             // stops being rendered immediately (not just on LRU eviction).
-            self.cache_manager.invalidate_folder_preview(&folder_path);
-            self.scanned_folders.pop(&folder_path);
+            self.cache_manager.invalidate_folder_preview(folder_path);
+            self.scanned_folders.pop(folder_path);
             // Keep folder listing cache coherent for future navigation.
             // This avoids opening a changed folder with stale cached entries
             // until the non-USN fallback probe runs (~30s).
-            let folder_norm = Self::normalize_for_match(&folder_path);
+            let folder_norm = Self::normalize_for_match(folder_path);
             if folder_norm != current_path_norm {
-                self.directory_cache.invalidate(&folder_path);
+                self.directory_cache.invalidate(folder_path);
                 self.clear_tab_cache_for_normalized_path(&folder_norm);
             }
             // Defer SQLite writes to the background invalidation worker to
             // avoid blocking the UI thread during watcher bursts.
             pending_disk_cache_invalidations.push(folder_path.clone());
             let _ = self.cover_worker_sender.send(folder_path.clone());
+        }
+
+        // Clear stale folder_cover on items whose folder had content changes.
+        // This prevents the UI from loading thumbnails for a cover file that
+        // may no longer exist, and ensures the cover_worker result is the
+        // single source of truth when it arrives.
+        let covers_to_evict: Vec<PathBuf> = self
+            .all_items
+            .iter()
+            .filter(|item| {
+                item.is_dir
+                    && item.folder_cover.is_some()
+                    && folders_with_changed_contents.contains(&item.path)
+            })
+            .filter_map(|item| item.folder_cover.clone())
+            .collect();
+
+        for cover in &covers_to_evict {
+            self.cache_manager.texture_cache.pop(cover);
+            self.cache_manager.loading_set.remove(cover);
+        }
+
+        let mut cleared_any = false;
+        for item in &mut self.all_items {
+            if item.is_dir
+                && item.folder_cover.is_some()
+                && folders_with_changed_contents.contains(&item.path)
+            {
+                item.folder_cover = None;
+                cleared_any = true;
+            }
+        }
+        if cleared_any {
+            let items = std::sync::Arc::make_mut(&mut self.items);
+            for item in items.iter_mut() {
+                if item.is_dir
+                    && item.folder_cover.is_some()
+                    && folders_with_changed_contents.contains(&item.path)
+                {
+                    item.folder_cover = None;
+                }
+            }
         }
     }
 }
