@@ -9,7 +9,7 @@ use notify::{RecursiveMode, Watcher};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-const WATCHER_FS_PROBE_CACHE_TTL: Duration = Duration::from_secs(20);
+const WATCHER_FS_PROBE_CACHE_TTL: Duration = Duration::from_secs(600);
 
 impl ImageViewerApp {
     fn configure_watcher_fallback_mode(&mut self, path: &Path) -> (u128, bool, Option<char>) {

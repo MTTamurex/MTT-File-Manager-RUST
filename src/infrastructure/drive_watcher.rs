@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use windows::core::PCWSTR;
-use windows::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+use windows::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OVERLAPPED, FILE_LIST_DIRECTORY,
     FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
@@ -78,12 +78,9 @@ impl DriveWatcher {
     /// * `Some(DriveWatcher)` if the watcher was successfully created
     /// * `None` if the drive couldn't be opened or is not accessible
     pub fn new(drive_root: PathBuf, initial_prefix: PathBuf) -> Option<Self> {
-        // Validate handle opening in caller thread. This prevents creating a
-        // "running" watcher when the drive cannot be monitored at all.
-        let validation_handle = Self::open_drive_handle(&drive_root)?;
-        unsafe {
-            let _ = CloseHandle(validation_handle);
-        }
+        // NOTE: Validation handle was removed to avoid blocking the UI thread.
+        // CreateFileW on a sleeping HDD can stall for 500-2000ms.
+        // The watcher thread handles open failures gracefully.
 
         let (cmd_tx, cmd_rx) = std::sync::mpsc::channel();
         let (event_tx, event_rx) = std::sync::mpsc::channel();
