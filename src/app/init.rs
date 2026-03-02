@@ -304,6 +304,9 @@ impl ImageViewerApp {
                     let (ref pixels, width, height) = custom_folder_icon;
                     loader.set_folder_icon(&ctx, pixels, width, height);
                 }
+                // Pre-extract special folder icons (Documents, Pictures, etc.)
+                // in a single background thread so they're ready on first render.
+                loader.preload_special_folder_icons();
                 loader
             },
 

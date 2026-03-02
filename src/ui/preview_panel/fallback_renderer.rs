@@ -89,6 +89,16 @@ pub fn render_fallback(
             } else {
                 ui.allocate_response(egui::vec2(icon_size, icon_size), egui::Sense::hover());
             }
+        } else if crate::infrastructure::onedrive::is_special_icon_folder(&file.path) {
+            // Special folder (Documents, Pictures, Desktop, etc.) — use native shell icon
+            let folder_rect = ui
+                .allocate_exact_size(egui::vec2(icon_size, icon_size), egui::Sense::hover())
+                .0;
+            if let Some(icon) = item_icon_loader
+                .get_or_load_folder_path_icon(ui.ctx(), &file.path.to_string_lossy())
+            {
+                paint_texture_centered(ui, icon.id(), icon.size_vec2(), folder_rect);
+            }
         } else {
             let folder_rect = ui
                 .allocate_exact_size(egui::vec2(icon_size, icon_size), egui::Sense::hover())

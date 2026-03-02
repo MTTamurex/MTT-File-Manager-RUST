@@ -488,6 +488,22 @@ fn render_item_icon(
             }
         }
 
+        // Special folders (Documents, Pictures, Desktop, etc.) get their native
+        // Windows icon via async extraction; regular folders get the generic icon.
+        if crate::infrastructure::onedrive::is_special_icon_folder(&item.path) {
+            if let Some(special_icon) = ctx.item_icon_loader
+                .get_or_load_folder_path_icon(ui.ctx(), &item.path.to_string_lossy())
+            {
+                ui.painter().image(
+                    special_icon.id(),
+                    icon_rect,
+                    Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
+                    tint,
+                );
+                return;
+            }
+        }
+
         if let Some(folder_icon) = ctx.folder_icon_texture {
             ui.painter().image(
                 folder_icon.id(),

@@ -255,6 +255,19 @@ pub fn is_onedrive_path(path: &Path) -> bool {
     path_detection::is_onedrive_path(path)
 }
 
+/// Returns true if `path` is a direct child of a OneDrive root or the user
+/// profile directory (Documents, Pictures, Desktop, Downloads, etc.).
+/// Pure string comparison — no I/O.
+pub fn is_special_icon_folder(path: &Path) -> bool {
+    path_detection::is_special_icon_folder(path)
+}
+
+/// Returns the resolved paths of known special folders (Documents, Pictures, etc.).
+/// Used to pre-extract their icons at startup.
+pub fn special_folder_paths() -> Vec<String> {
+    path_detection::special_folder_paths()
+}
+
 /// Fallback detection using file attributes for cases where the OneDrive root
 /// isn't covered by environment variables (e.g., secondary business accounts).
 ///

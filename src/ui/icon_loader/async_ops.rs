@@ -111,4 +111,36 @@ impl IconLoader {
 
         None
     }
+
+    /// Pre-extract icons for known special folders in a single background thread.
+    /// Batches all COM calls (one CoInitialize, all extractions, then cleanup).
+    /// Results arrive via the same `poll_async_icons` channel.
+    pub fn preload_special_folder_icons(&mut self) {
+        let paths = crate::infrastructure::onedrive::special_folder_paths();
+        if paths.is_empty() {
+            return;
+        }
+
+        // Mark all as loading to prevent duplicate requests from the render loop.
+        for p in &paths {
+            self.loading_drive_icons.insert(p.clone());
+        }
+
+        let tx = self.icon_result_tx.clone();
+        std::thread::spawn(move || {
+            // Single COM init for the entire batch.
+            #[cfg(target_os = "windows")]
+            unsafe {
+                let _ = ::windows::Win32::System::Com::CoInitialize(None);
+            }
+
+            for path in paths {
+                let data = windows::extract_drive_icon(&path, IconSize::Jumbo).ok();
+                let _ = tx.send(AsyncIconResult {
+                    key: path,
+                    data,
+                });
+            }
+        });
+    }
 }
