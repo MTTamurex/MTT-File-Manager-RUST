@@ -5,20 +5,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+/// Fast OneDrive check using path prefix only (no I/O).
+/// Avoids `GetFileAttributesW` which can stall on cloud-only files.
+/// Safe because OneDrive roots are resolved at startup via env vars.
 fn is_onedrive_file(path: &Path) -> bool {
     crate::infrastructure::onedrive::is_onedrive_path(path)
-        || crate::infrastructure::onedrive::path_has_cloud_attributes(path)
-}
-
-fn should_preserve_onedrive_media_thumbnail(path: &Path) -> bool {
-    if !is_onedrive_file(path) {
-        return false;
-    }
-
-    path.extension()
-        .and_then(|e| e.to_str())
-        .map(crate::infrastructure::windows::is_media_extension)
-        .unwrap_or(false)
 }
 
 impl ImageViewerApp {
@@ -28,6 +19,13 @@ impl ImageViewerApp {
         };
 
         if Self::normalize_for_match(parent) != current_path_norm {
+            return;
+        }
+
+        // Skip blocking metadata() for OneDrive paths — sync/pin transitions
+        // fire MODIFY events that don't change user-visible content.
+        // The full folder reload will update size/mtime if needed.
+        if is_onedrive_file(path) {
             return;
         }
 
@@ -338,8 +336,15 @@ impl ImageViewerApp {
         }
 
         let cleaned = Self::clean_path(path);
+        let is_onedrive = is_onedrive_file(&cleaned);
+
         self.try_refresh_modified_file_entry_inline(&cleaned, _current_path_norm);
-        let preserve_media_thumb = should_preserve_onedrive_media_thumbnail(&cleaned);
+        let preserve_media_thumb = is_onedrive
+            && path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(crate::infrastructure::windows::is_media_extension)
+                .unwrap_or(false);
 
         if !preserve_media_thumb {
             self.cache_manager.texture_cache.pop(&cleaned);
@@ -351,9 +356,17 @@ impl ImageViewerApp {
         // → UI re-requests thumbnail/metadata → COM API opens file without FILE_SHARE_WRITE
         // → sharing violation kills the download. The cache will be cleared naturally
         // once the file is no longer unsafe to read (download completes).
-        // Uses _fast variant (no CreateFileW probe) to avoid blocking the UI thread
-        // on network/virtual drives.
-        if !crate::infrastructure::windows::file_flags::is_file_unsafe_to_read_fast(&cleaned) {
+        //
+        // For OneDrive paths, skip the is_file_unsafe_to_read_fast check entirely.
+        // OneDrive MODIFY events are sync/pin transitions, not active writes.
+        // The metadata check inside unsafe_to_read does std::fs::metadata which
+        // can stall on cloud-only files.
+        let is_unsafe = if is_onedrive {
+            false
+        } else {
+            crate::infrastructure::windows::file_flags::is_file_unsafe_to_read_fast(&cleaned)
+        };
+        if !is_unsafe {
             crate::workers::thumbnail::clear_failure_cache(&cleaned);
         }
 
@@ -365,19 +378,15 @@ impl ImageViewerApp {
         // files are hydrating/dehydrating produces degraded icon-based previews.
         // Actual content changes from other devices arrive as CREATE/DELETE pairs
         // or are caught by the consistency probe.
-        let is_onedrive = is_onedrive_file(&cleaned);
         if !is_onedrive {
             Self::register_changed_folder(&cleaned, folders_with_changed_contents);
         }
 
         if let Some(ref selected) = self.selected_file {
             if selected.path == cleaned {
-                // Don't invalidate metadata cache for files actively being written —
-                // the UI would immediately re-request metadata, which opens the file
-                // via COM APIs (MFCreateSourceReaderFromURL, etc.) without FILE_SHARE_WRITE,
-                // killing active downloads.
-                // Uses _fast variant to avoid blocking UI thread on network/virtual drives.
-                if !crate::infrastructure::windows::file_flags::is_file_unsafe_to_read_fast(&cleaned) {
+                // Don't invalidate metadata cache for files actively being written.
+                // Reuse the is_unsafe result to avoid a second blocking call.
+                if !is_unsafe {
                     self.metadata_cache.pop(&cleaned);
                     self.last_metadata_path = None;
                 }
@@ -506,10 +515,23 @@ impl ImageViewerApp {
                 // (generating >50 events) and the individual handler never runs.
                 // Note: During our own file operations, this code is unreachable
                 // because process_watcher_events_and_auto_reload() early-returns.
+                //
+                // We avoid calling is_dir() here because it invokes GetFileAttributesW
+                // which can stall on OneDrive/network paths. Instead, check if any
+                // of the flood events explicitly deleted/renamed the current folder.
                 let current_path_pb = PathBuf::from(&self.navigation_state.current_path);
+                let current_folder_deleted = drive_events.iter().any(|ev| match ev {
+                    DriveWatcherEvent::Deleted(p) => {
+                        Self::normalize_for_match(p) == current_path_norm
+                    }
+                    DriveWatcherEvent::Renamed(old, _) => {
+                        Self::normalize_for_match(old) == current_path_norm
+                    }
+                    _ => false,
+                });
                 if !self.navigation_state.is_computer_view
                     && !self.navigation_state.is_recycle_bin_view
-                    && !current_path_pb.is_dir()
+                    && current_folder_deleted
                 {
                     log::warn!(
                         "[FS-WATCH] Flood: current folder vanished: {:?} — navigating up",
