@@ -4,13 +4,28 @@ use crate::ui::preview_panel::actions::PreviewPanelAction;
 use crate::ui::svg_icons::SvgIconManager;
 use eframe::egui;
 
+/// Max age (seconds) for probing live file size on the UI thread.
+const LIVE_SIZE_PROBE_MAX_AGE_SECS: u64 = 300; // 5 minutes
+
 #[derive(Clone, Copy)]
 struct LiveFileStat {
     checked_at: f64,
     size: u64,
 }
 
-fn probe_file_size(path: &std::path::Path) -> Option<u64> {
+/// Probes current file size via `std::fs::metadata`.
+/// Only called for recently-modified files to avoid blocking on cold cache.
+fn probe_file_size(path: &std::path::Path, modified_epoch: u64) -> Option<u64> {
+    if modified_epoch > 0 {
+        let now_epoch = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        if now_epoch.saturating_sub(modified_epoch) > LIVE_SIZE_PROBE_MAX_AGE_SECS {
+            return None;
+        }
+    }
+
     if crate::infrastructure::onedrive::is_onedrive_path(path) {
         return None;
     }
@@ -44,7 +59,7 @@ fn resolve_live_file_size(ui: &egui::Ui, file: &FileEntry, is_metadata_loading: 
         });
 
         if (now - state.checked_at) >= 1.0 {
-            if let Some(size) = probe_file_size(&file.path) {
+            if let Some(size) = probe_file_size(&file.path, file.modified) {
                 state.size = size;
             } else {
                 state.size = file.size;
