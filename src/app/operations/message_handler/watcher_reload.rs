@@ -36,31 +36,25 @@ impl ImageViewerApp {
                 {
                     self.pending_auto_reload = false;
                 } else {
-                    // Before reloading, verify the current folder still exists.
-                    // It may have been deleted by another app (the DriveWatcher
-                    // DELETE event might arrive AFTER the auto-reload fires).
-                    let current = std::path::Path::new(&self.navigation_state.current_path);
-                    if !current.is_dir() {
-                        log::warn!(
-                            "[AUTO-RELOAD] Current folder no longer exists: {:?} — navigating up",
-                            current
-                        );
-                        self.pending_auto_reload = false;
-                        self.navigate_to_nearest_valid_ancestor();
-                    } else {
-                        #[cfg(debug_assertions)]
-                        log::debug!(
-                            "[DEBUG] Auto-reloading with force_refresh=false (watcher-triggered)."
-                        );
-                        // PERFORMANCE: Use force_refresh=false for watcher-triggered reloads.
-                        // force_refresh=true clears ALL caches (textures, thumbnails, folder covers),
-                        // empties the items list, and causes a white screen on HDD while rescanning.
-                        // With false: directory_cache was already invalidated by watcher events above,
-                        // so fresh data is loaded from disk, but texture/thumbnail caches are preserved.
-                        // force_refresh=true is reserved for manual refresh (F5) only.
-                        self.loaded_path.clear();
-                        self.load_folder(false);
-                    }
+                    // FIX: Removed blocking is_dir() check on the UI thread.
+                    // GetFileAttributesW (used by is_dir) can block indefinitely on
+                    // network/cloud/USB drives, causing the app to freeze.
+                    // If the folder was deleted, the DriveWatcher DELETE event
+                    // already fired handle_drive_deleted_event() which calls
+                    // navigate_to_nearest_valid_ancestor(). load_folder() itself
+                    // handles missing folders gracefully via the loading pipeline.
+                    #[cfg(debug_assertions)]
+                    log::debug!(
+                        "[DEBUG] Auto-reloading with force_refresh=false (watcher-triggered)."
+                    );
+                    // PERFORMANCE: Use force_refresh=false for watcher-triggered reloads.
+                    // force_refresh=true clears ALL caches (textures, thumbnails, folder covers),
+                    // empties the items list, and causes a white screen on HDD while rescanning.
+                    // With false: directory_cache was already invalidated by watcher events above,
+                    // so fresh data is loaded from disk, but texture/thumbnail caches are preserved.
+                    // force_refresh=true is reserved for manual refresh (F5) only.
+                    self.loaded_path.clear();
+                    self.load_folder(false);
                 }
                 self.last_auto_reload = Instant::now();
                 self.pending_auto_reload = false;

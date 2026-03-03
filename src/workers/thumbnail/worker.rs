@@ -205,8 +205,9 @@ fn thumbnail_worker_loop(
     };
 
     // PERFORMANCE: Set background priority to minimize HDD contention with video playback
-    // This applies to all 4 thumbnail worker threads
-    io_priority::set_thread_priority(IOPriority::Background);
+    // This applies to all 4 thumbnail worker threads.
+    // RAII guard ensures THREAD_MODE_BACKGROUND_END is called even on panic.
+    let _priority_guard = io_priority::ThreadPriorityGuard::new(IOPriority::Background);
 
     while let Some((path, req_gen, req_size, req_priority, req_modified)) = queue.pop() {
         // Check generation match - skip stale requests

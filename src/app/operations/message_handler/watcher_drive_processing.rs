@@ -29,6 +29,14 @@ impl ImageViewerApp {
             return;
         }
 
+        // FIX: Skip blocking std::fs::metadata() for paths on network/virtual drives.
+        // GetFileInformationByHandle can block indefinitely on sleeping network shares,
+        // VeraCrypt volumes, or USB drives entering standby.  The consistency probe
+        // will pick up changes on the next cycle.
+        if crate::infrastructure::io_priority::is_network_or_virtual(path) {
+            return;
+        }
+
         let Ok(meta) = std::fs::metadata(path) else {
             return;
         };

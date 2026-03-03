@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 pub mod audio_sniffing;
 pub mod image;
@@ -113,28 +113,52 @@ fn extract_media_metadata_inner(path: &Path, is_image: bool) -> MediaMetadata {
 }
 
 /// Timeout-protected metadata extraction for OneDrive files.
-/// Spawns extraction on a separate thread and polls with timeout.
+///
+/// CRITICAL FIX: Previously this function spawned a new `std::thread::spawn` per file
+/// and abandoned the thread on timeout (dropping the `JoinHandle` without joining).
+/// The abandoned thread continued running in kernel mode, blocked on COM/MF/cloud
+/// filter driver I/O. Over prolonged use, these leaked threads accumulated and
+/// congested the cloud filter driver, causing system-wide unresponsiveness.
+///
+/// Now uses the bounded OneDrive I/O pool (`onedrive_io_pool().execute()`), which:
+/// 1. Reuses a fixed set of worker threads (no unbounded thread creation)
+/// 2. Has a capped overflow mechanism (max 24 temporary workers)
+/// 3. Jobs that block in the pool don't create new kernel threads per call
 fn extract_media_metadata_with_timeout(path: &Path, is_image: bool) -> MediaMetadata {
     let path_buf = path.to_path_buf();
     let path_for_log = path_buf.clone();
     let timeout = Duration::from_millis(METADATA_EXTRACTION_TIMEOUT_MS);
-    let start = Instant::now();
 
-    let handle = std::thread::spawn(move || extract_media_metadata_inner(&path_buf, is_image));
+    let (tx, rx) = std::sync::mpsc::channel::<MediaMetadata>();
 
-    loop {
-        if start.elapsed() >= timeout {
+    let submitted = onedrive::onedrive_io_pool_execute(move || {
+        let result = extract_media_metadata_inner(&path_buf, is_image);
+        let _ = tx.send(result);
+    });
+
+    if !submitted {
+        log::warn!(
+            "[METADATA] OneDrive I/O pool rejected job for {:?} — pool saturated",
+            path_for_log
+        );
+        return MediaMetadata::default();
+    }
+
+    match rx.recv_timeout(timeout) {
+        Ok(meta) => meta,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
             log::warn!(
                 "[METADATA TIMEOUT] Extraction exceeded {}ms for {:?} — returning empty",
                 METADATA_EXTRACTION_TIMEOUT_MS, path_for_log
             );
-            return MediaMetadata::default();
+            MediaMetadata::default()
         }
-
-        if handle.is_finished() {
-            return handle.join().unwrap_or_default();
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            log::warn!(
+                "[METADATA] Channel disconnected for {:?} — worker panicked",
+                path_for_log
+            );
+            MediaMetadata::default()
         }
-
-        std::thread::sleep(Duration::from_millis(5));
     }
 }

@@ -32,6 +32,40 @@ pub fn is_virtual_drive_path(path: &Path) -> bool {
     detection::is_virtual_drive_path(path)
 }
 
+/// Fast check: true when the path is on a network share, virtual drive, or UNC path.
+///
+/// Uses `GetDriveTypeW` (cached, < 1ms) — safe for the UI thread.
+/// Synchronous filesystem calls (`std::fs::metadata`, `is_dir`, `exists`)
+/// MUST be avoided on these paths because they can block indefinitely when the
+/// remote server is unreachable or the virtual FS driver is stalled.
+pub fn is_network_or_virtual(path: &Path) -> bool {
+    // UNC paths (\\server\share) are always network
+    if path
+        .to_str()
+        .map(|s| s.starts_with(r"\\"))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    // Check virtual drive (Cryptomator, Dokan, WinFSP, etc.)
+    if is_virtual_drive_path(path) {
+        return true;
+    }
+    // Check Windows drive type (GetDriveTypeW — fast, cached)
+    let path_str = path.to_string_lossy();
+    if path_str.len() >= 2 {
+        let drive_root = &path_str[..2]; // e.g. "E:"
+        let drive_type = crate::infrastructure::windows::detect_drive_type(drive_root);
+        matches!(
+            drive_type,
+            crate::infrastructure::windows::DriveType::Remote
+                | crate::infrastructure::windows::DriveType::Unknown
+        )
+    } else {
+        false
+    }
+}
+
 /// Detect if a path is on an SSD (no seek penalty) or HDD (has seek penalty).
 pub fn is_ssd(path: &Path) -> bool {
     detection::is_ssd(path)
@@ -56,6 +90,29 @@ pub fn set_thread_priority(priority: IOPriority) {
 /// Reset thread priority to normal (call after background work completes).
 pub fn reset_thread_priority() {
     threading::reset_thread_priority()
+}
+
+/// RAII guard that resets thread priority on drop (including panic unwind).
+///
+/// Guarantees `THREAD_MODE_BACKGROUND_END` is called even if the thread panics.
+/// Without this guard, a panicking thread leaks its background mode state,
+/// causing the kernel I/O scheduler to permanently deprioritize that thread's I/O.
+pub struct ThreadPriorityGuard {
+    _private: (), // prevent external construction
+}
+
+impl ThreadPriorityGuard {
+    /// Set thread priority and return a guard that resets it on drop.
+    pub fn new(priority: IOPriority) -> Self {
+        set_thread_priority(priority);
+        Self { _private: () }
+    }
+}
+
+impl Drop for ThreadPriorityGuard {
+    fn drop(&mut self) {
+        reset_thread_priority();
+    }
 }
 
 #[cfg(test)]
