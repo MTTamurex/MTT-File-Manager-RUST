@@ -50,9 +50,22 @@ impl ImageViewerApp {
             if let Some(idx) = all_items_index.get(folder_path) {
                 let item = &mut self.all_items[*idx];
                 if item.folder_cover != *cover_opt {
+                    // Only invalidate composed preview when cover PATH genuinely
+                    // changed (Some(old) → Some(new)  or  Some(_) → None).
+                    // The transition None → Some(path) is NOT a real change —
+                    // it just fills in a field that DirectoryCache didn't have.
+                    // The preview was already composed with this cover, so
+                    // invalidating it causes a visible flash for no reason.
+                    let cover_path_changed = match (&item.folder_cover, cover_opt) {
+                        (Some(old), Some(new)) => old != new,
+                        (Some(_), None) => true,
+                        _ => false, // None→Some or None→None: not a real change
+                    };
                     item.folder_cover = cover_opt.clone();
                     folder_updates = true;
-                    covers_changed.push(folder_path.clone());
+                    if cover_path_changed {
+                        covers_changed.push(folder_path.clone());
+                    }
                 }
             }
         }
