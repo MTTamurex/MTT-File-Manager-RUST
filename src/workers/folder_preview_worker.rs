@@ -152,11 +152,27 @@ pub fn spawn_folder_preview_worker(
 
             // Try custom composition first; fall back to empty (back+front only) for folders
             // without media. Shell API is no longer used — we always use our own folder assets.
-            let (rgba_data, width, height) =
-                try_custom_compose(&path, &composer, io_priority, &empty_deletions)
-                    .unwrap_or_else(|| composer.compose_empty());
+            //
+            // IMPORTANT: When the media file exists but is UnsafeToRead (active
+            // download/torrent), we show compose_empty() as a placeholder but do
+            // NOT persist it to SQLite. This ensures the next request retries
+            // extraction instead of serving a stale empty preview from the DB.
+            let compose_result = try_custom_compose(&path, &composer, io_priority, &empty_deletions);
+            let (rgba_data, width, height, should_cache) = match compose_result {
+                ComposeOutcome::Success(data) => (data.0, data.1, data.2, true),
+                ComposeOutcome::NoMedia => {
+                    let empty = composer.compose_empty();
+                    (empty.0, empty.1, empty.2, true)
+                }
+                ComposeOutcome::MediaUnsafe => {
+                    let empty = composer.compose_empty();
+                    (empty.0, empty.1, empty.2, false) // Do NOT persist placeholder
+                }
+            };
 
-            disk_cache.put_folder_preview_cache(&path, &rgba_data, width, height);
+            if should_cache {
+                disk_cache.put_folder_preview_cache(&path, &rgba_data, width, height);
+            }
             let _ = tx.send(FolderPreviewData {
                 path,
                 rgba_data,
@@ -171,6 +187,21 @@ pub fn spawn_folder_preview_worker(
     });
 }
 
+/// Outcome of folder preview composition.
+///
+/// Distinguishes between "no media found" (safe to cache as empty) and
+/// "media exists but is currently unsafe to read" (must NOT be cached
+/// so that the next request retries with a fresh extraction).
+enum ComposeOutcome {
+    /// Composed preview with real media content.
+    Success((Vec<u8>, u32, u32)),
+    /// Folder contains no media files — compose_empty() is the correct result.
+    NoMedia,
+    /// Media exists but is currently being written/downloaded (UnsafeToRead).
+    /// A placeholder compose_empty() should be shown but NOT persisted to SQLite.
+    MediaUnsafe,
+}
+
 /// PRIMARY: Find a media file inside the folder, extract its thumbnail via the
 /// 5-stage pipeline, then compose with folder back/front layers.
 fn try_custom_compose(
@@ -178,38 +209,62 @@ fn try_custom_compose(
     composer: &FolderComposer,
     priority: crate::infrastructure::io_priority::IOPriority,
     empty_deletions: &dashmap::DashMap<PathBuf, ()>,
-) -> Option<(Vec<u8>, u32, u32)> {
+) -> ComposeOutcome {
     let compose_start = Instant::now();
 
     // 1. Find first image/video inside the folder
-    let media_path = crate::infrastructure::windows::find_folder_preview_item(folder_path)?;
+    let media_path = match crate::infrastructure::windows::find_folder_preview_item(folder_path) {
+        Some(p) => p,
+        None => return ComposeOutcome::NoMedia,
+    };
 
-    // 2. Extract content thumbnail using the existing 5-stage hybrid pipeline
-    let (content_rgba, content_w, content_h) =
-        crate::workers::thumbnail::extraction::generate_thumbnail_hybrid(
-            &media_path,
-            priority,
-            empty_deletions,
-        )?;
+    // 2. Extract content thumbnail using the 5-stage hybrid pipeline.
+    //    Use the _detailed variant so we can distinguish UnsafeToRead from
+    //    real extraction failures — the former must NOT be cached to SQLite.
+    let outcome = crate::workers::thumbnail::extraction::generate_thumbnail_hybrid_detailed(
+        &media_path,
+        priority,
+        empty_deletions,
+    );
+
+    let (content_rgba, content_w, content_h) = match outcome {
+        crate::workers::thumbnail::extraction::ThumbnailExtractionOutcome::Success(data) => data,
+        crate::workers::thumbnail::extraction::ThumbnailExtractionOutcome::UnsafeToRead(reason) => {
+            log::debug!(
+                "[FOLDER PREVIEW] Media {:?} unsafe to read ({:?}), skipping cache",
+                media_path.file_name().unwrap_or_default(),
+                reason
+            );
+            return ComposeOutcome::MediaUnsafe;
+        }
+        crate::workers::thumbnail::extraction::ThumbnailExtractionOutcome::Failed => {
+            log::debug!(
+                "[FOLDER PREVIEW] Extraction failed for {:?}",
+                media_path.file_name().unwrap_or_default(),
+            );
+            return ComposeOutcome::NoMedia;
+        }
+    };
 
     // 3. Compose: back → content → front
-    let result = composer.compose(&content_rgba, content_w, content_h);
-
-    if result.is_some() {
-        log::debug!(
-            "[FOLDER PREVIEW] Custom compose SUCCESS {:?} via {:?} ({:.1}ms)",
-            folder_path.file_name().unwrap_or_default(),
-            media_path.file_name().unwrap_or_default(),
-            compose_start.elapsed().as_secs_f64() * 1000.0
-        );
-    } else {
-        log::debug!(
-            "[FOLDER PREVIEW] Custom compose FAILED for {:?} (compose returned None)",
-            folder_path.file_name().unwrap_or_default(),
-        );
+    match composer.compose(&content_rgba, content_w, content_h) {
+        Some(result) => {
+            log::debug!(
+                "[FOLDER PREVIEW] Custom compose SUCCESS {:?} via {:?} ({:.1}ms)",
+                folder_path.file_name().unwrap_or_default(),
+                media_path.file_name().unwrap_or_default(),
+                compose_start.elapsed().as_secs_f64() * 1000.0
+            );
+            ComposeOutcome::Success(result)
+        }
+        None => {
+            log::debug!(
+                "[FOLDER PREVIEW] Custom compose FAILED for {:?} (compose returned None)",
+                folder_path.file_name().unwrap_or_default(),
+            );
+            ComposeOutcome::NoMedia
+        }
     }
-
-    result
 }
 
 fn throttle_repaint(ctx: &egui::Context, last_repaint: &mut Instant) {

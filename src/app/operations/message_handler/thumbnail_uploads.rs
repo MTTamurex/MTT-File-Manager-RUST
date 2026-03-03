@@ -100,6 +100,7 @@ impl ImageViewerApp {
         };
         let incoming_start = Instant::now();
         let mut not_found_failures: Vec<PathBuf> = Vec::new();
+        let mut successful_thumb_paths: Vec<PathBuf> = Vec::new();
         let eviction_visible: Option<HashSet<PathBuf>> = self.visible_index_range
             .and_then(|(min_vis, max_vis)| {
                 let items = &self.items;
@@ -181,6 +182,7 @@ impl ImageViewerApp {
 
             self.cache_manager
                 .start_pending_upload(thumbnail_data.path.clone());
+            successful_thumb_paths.push(thumbnail_data.path.clone());
             self.pending_thumbnails.push_back(thumbnail_data);
             received_any = true;
         }
@@ -191,6 +193,29 @@ impl ImageViewerApp {
 
         if self.handle_missing_cover_sources(not_found_failures) {
             received_any = true;
+        }
+
+        // When a successfully-loaded thumbnail belongs to a file that is
+        // currently set as a folder_cover, the composed folder preview
+        // (which may contain a stale compose_empty placeholder from when
+        // the file was still being downloaded) must be re-generated.
+        // Invalidate both GPU cache and SQLite so the folder_preview_worker
+        // re-composes with the now-available real thumbnail.
+        if !successful_thumb_paths.is_empty() {
+            let successful_set: HashSet<&PathBuf> = successful_thumb_paths.iter().collect();
+            for item in &self.all_items {
+                if let Some(ref cover) = item.folder_cover {
+                    if item.is_dir && successful_set.contains(cover) {
+                        self.cache_manager.invalidate_folder_preview(&item.path);
+                        self.disk_cache.remove_folder_preview_cache(&item.path);
+                        log::debug!(
+                            "[FOLDER PREVIEW] Invalidated stale preview for {:?} (cover {:?} now available)",
+                            item.path.file_name().unwrap_or_default(),
+                            cover.file_name().unwrap_or_default(),
+                        );
+                    }
+                }
+            }
         }
 
         let is_scrolling = self.last_scroll_time.elapsed() < Duration::from_millis(100);
