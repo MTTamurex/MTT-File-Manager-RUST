@@ -30,6 +30,8 @@ static CACHED_VRAM_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
 static CACHED_GDI_OBJECTS: AtomicU64 = AtomicU64::new(0);
 static CACHED_USER_OBJECTS: AtomicU64 = AtomicU64::new(0);
 static CACHED_HANDLE_COUNT: AtomicU64 = AtomicU64::new(0);
+static CACHED_THREAD_COUNT: AtomicU64 = AtomicU64::new(0);
+static CACHED_PEAK_THREAD_COUNT: AtomicU64 = AtomicU64::new(0);
 static CACHED_KERNEL_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
 
 /// TTL for RAM/VRAM cache (1 second)
@@ -85,6 +87,8 @@ struct KernelResourceMetrics {
     gdi_objects: u32,
     user_objects: u32,
     handle_count: u32,
+    thread_count: u32,
+    peak_thread_count: u32,
 }
 
 /// Returns cached kernel resource metrics (GDI Objects, USER Objects, Handle Count).
@@ -101,13 +105,54 @@ fn get_kernel_resources_cached() -> KernelResourceMetrics {
         CACHED_GDI_OBJECTS.store(metrics.gdi_objects as u64, Ordering::Relaxed);
         CACHED_USER_OBJECTS.store(metrics.user_objects as u64, Ordering::Relaxed);
         CACHED_HANDLE_COUNT.store(metrics.handle_count as u64, Ordering::Relaxed);
+        CACHED_THREAD_COUNT.store(metrics.thread_count as u64, Ordering::Relaxed);
+        // Track peak thread count across the entire session for leak detection.
+        // A monotonically growing peak strongly suggests thread leak.
+        let prev_peak = CACHED_PEAK_THREAD_COUNT.load(Ordering::Relaxed) as u32;
+        if metrics.thread_count > prev_peak {
+            CACHED_PEAK_THREAD_COUNT.store(metrics.thread_count as u64, Ordering::Relaxed);
+        }
+
+        // Dynamic thresholds based on CPU count.
+        // Expected baseline threads ≈ cpu*3 + workers + egui overhead.
+        // Only warn on GROWTH above baseline — it's leak detection, not absolute count.
+        let cpu_count = std::thread::available_parallelism()
+            .map(|n| n.get() as u32)
+            .unwrap_or(4);
+        // Baseline: rayon global (cpu) + folder-size pool (cpu) + icon workers (min(cpu,16))
+        //         + thumbnail (min(cpu,8)) + folder preview (min(cpu,6)) + OneDrive(4)
+        //         + ~20 single-purpose workers + egui (~4)
+        let expected_baseline = cpu_count * 2 + cpu_count.min(16) + cpu_count.min(8) + cpu_count.min(6) + 28;
+        let warn_threshold = expected_baseline + 20;
+        let critical_threshold = expected_baseline + 50;
+        let stalled = crate::infrastructure::onedrive::get_stalled_io_workers();
+        if metrics.thread_count >= critical_threshold {
+            log::error!(
+                "[THREAD MONITOR] CRITICAL: {} threads (baseline: ~{}, peak: {}, stalled OneDrive I/O: {}). \
+                 Possible thread leak causing system-wide stalls.",
+                metrics.thread_count, expected_baseline,
+                prev_peak.max(metrics.thread_count), stalled
+            );
+        } else if metrics.thread_count >= warn_threshold {
+            log::warn!(
+                "[THREAD MONITOR] HIGH thread count: {} (baseline: ~{}, peak: {}, stalled OneDrive I/O: {})",
+                metrics.thread_count, expected_baseline,
+                prev_peak.max(metrics.thread_count), stalled
+            );
+        }
+
         CACHED_KERNEL_TIMESTAMP.store(now, Ordering::Relaxed);
-        metrics
+        KernelResourceMetrics {
+            peak_thread_count: CACHED_PEAK_THREAD_COUNT.load(Ordering::Relaxed) as u32,
+            ..metrics
+        }
     } else {
         KernelResourceMetrics {
             gdi_objects: CACHED_GDI_OBJECTS.load(Ordering::Relaxed) as u32,
             user_objects: CACHED_USER_OBJECTS.load(Ordering::Relaxed) as u32,
             handle_count: CACHED_HANDLE_COUNT.load(Ordering::Relaxed) as u32,
+            thread_count: CACHED_THREAD_COUNT.load(Ordering::Relaxed) as u32,
+            peak_thread_count: CACHED_PEAK_THREAD_COUNT.load(Ordering::Relaxed) as u32,
         }
     }
 }
@@ -139,11 +184,75 @@ fn get_kernel_resources() -> KernelResourceMetrics {
             &mut handles,
         );
 
+        // Thread count via CreateToolhelp32Snapshot — the only reliable way
+        // to count OS threads, since detached Rust threads (JoinHandle dropped)
+        // are invisible to GetProcessHandleCount but still consume kernel
+        // thread objects and can block the cloud filter driver.
+        let thread_count = count_process_threads();
+
         KernelResourceMetrics {
             gdi_objects: gdi,
             user_objects: user,
             handle_count: handles,
+            thread_count,
+            peak_thread_count: 0, // filled by caller
         }
+    }
+}
+
+/// Counts live OS threads for the current process using Toolhelp32Snapshot.
+/// This is the only reliable way to detect detached/leaked threads that are
+/// invisible to Rust's `JoinHandle` tracking and `GetProcessHandleCount`.
+fn count_process_threads() -> u32 {
+    // The `Win32_System_Diagnostics` feature is not enabled in our windows crate,
+    // so we link directly against kernel32 for the Toolhelp32 API.
+    #[repr(C)]
+    #[allow(non_snake_case)]
+    struct THREADENTRY32 {
+        dwSize: u32,
+        cntUsage: u32,
+        th32ThreadID: u32,
+        th32OwnerProcessID: u32,
+        tpBasePri: i32,
+        tpDeltaPri: i32,
+        dwFlags: u32,
+    }
+
+    const TH32CS_SNAPTHREAD: u32 = 0x00000004;
+
+    extern "system" {
+        fn CreateToolhelp32Snapshot(dwflags: u32, th32processid: u32) -> isize;
+        fn Thread32First(hsnapshot: isize, lpte: *mut THREADENTRY32) -> i32;
+        fn Thread32Next(hsnapshot: isize, lpte: *mut THREADENTRY32) -> i32;
+    }
+
+    unsafe {
+        let pid = std::process::id();
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if snapshot == -1 {
+            return 0;
+        }
+
+        let mut entry = std::mem::zeroed::<THREADENTRY32>();
+        entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+
+        let mut count: u32 = 0;
+        if Thread32First(snapshot, &mut entry) != 0 {
+            loop {
+                if entry.th32OwnerProcessID == pid {
+                    count += 1;
+                }
+                entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+                if Thread32Next(snapshot, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+
+        windows::Win32::Foundation::CloseHandle(
+            windows::Win32::Foundation::HANDLE(snapshot as *mut core::ffi::c_void),
+        ).ok();
+        count
     }
 }
 
@@ -414,6 +523,7 @@ pub fn render_status_bar(
                 // Kernel resource monitoring (cached with 1s TTL)
                 // These metrics expose handle/GDI/USER leaks at runtime.
                 let km = get_kernel_resources_cached();
+                ui.label(format!("Threads: {} (pico: {})", km.thread_count, km.peak_thread_count));
                 ui.label(format!("Handles: {}", km.handle_count));
                 ui.label(format!("GDI: {}", km.gdi_objects));
                 ui.label(format!("USER: {}", km.user_objects));

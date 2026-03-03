@@ -26,7 +26,9 @@ static FOLDER_SIZE_POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
 
 fn get_folder_size_pool() -> &'static rayon::ThreadPool {
     FOLDER_SIZE_POOL.get_or_init(|| {
-        let num_threads = (num_cpus() * 2).max(8);
+        // num_cpus is sufficient for I/O-bound directory enumeration.
+        // Previous `num_cpus * 2` was overkill and wasted ~16 OS threads on 16-core machines.
+        let num_threads = num_cpus().max(4);
         rayon::ThreadPoolBuilder::new()
             .num_threads(num_threads)
             .thread_name(|i| format!("folder-size-{}", i))

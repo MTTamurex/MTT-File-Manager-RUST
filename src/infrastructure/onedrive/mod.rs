@@ -25,8 +25,17 @@ const ONEDRIVE_IO_MAX_OVERFLOW_WORKERS: usize = 24;
 // Maximum concurrent timeout requests waiting on results.
 const MAX_CONCURRENT_TIMEOUT_THREADS: u64 = 32;
 
+// Threshold (seconds) after which a worker job is considered "stalled".
+// Cloud filter driver I/O for OneDrive cloud-only files can block 30-60s.
+const STALL_THRESHOLD_SECS: u64 = 10;
+
 // Counter of active timeout threads for monitoring and limiting
 static ACTIVE_TIMEOUT_THREADS: AtomicU64 = AtomicU64::new(0);
+
+// Counter of stalled I/O pool workers (job taking > STALL_THRESHOLD).
+// A growing count indicates cloud filter driver congestion that can cause
+// system-wide unresponsiveness.
+static STALLED_IO_WORKERS: AtomicUsize = AtomicUsize::new(0);
 
 // Global flag indicating if app is minimized (for operation cancellation)
 static APP_MINIMIZED: AtomicBool = AtomicBool::new(false);
@@ -71,8 +80,16 @@ impl OneDriveIoPool {
                     match recv_result {
                         Ok(job) => {
                             active_workers_clone.fetch_add(1, Ordering::SeqCst);
+                            let job_start = std::time::Instant::now();
                             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+                            let elapsed = job_start.elapsed();
                             active_workers_clone.fetch_sub(1, Ordering::SeqCst);
+                            if elapsed.as_secs() >= STALL_THRESHOLD_SECS {
+                                log::warn!(
+                                    "[ONEDRIVE IO-POOL] Base worker {} job took {:.1}s (stall threshold: {}s)",
+                                    worker_id, elapsed.as_secs_f64(), STALL_THRESHOLD_SECS
+                                );
+                            }
                         }
                         Err(_) => break,
                     }
@@ -144,8 +161,17 @@ impl OneDriveIoPool {
 
                 if let Ok(job) = recv_result {
                     active_workers.fetch_add(1, Ordering::SeqCst);
+                    let job_start = std::time::Instant::now();
                     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+                    let elapsed = job_start.elapsed();
                     active_workers.fetch_sub(1, Ordering::SeqCst);
+                    if elapsed.as_secs() >= STALL_THRESHOLD_SECS {
+                        STALLED_IO_WORKERS.fetch_add(1, Ordering::SeqCst);
+                        log::warn!(
+                            "[ONEDRIVE IO-POOL] Overflow worker job took {:.1}s — possible cloud filter stall",
+                            elapsed.as_secs_f64()
+                        );
+                    }
                 }
 
                 overflow_workers.fetch_sub(1, Ordering::SeqCst);
@@ -171,9 +197,18 @@ impl OneDriveIoPool {
             .name("onedrive-io-overflow-direct".to_string())
             .spawn(move || {
                 active_workers.fetch_add(1, Ordering::SeqCst);
+                let job_start = std::time::Instant::now();
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+                let elapsed = job_start.elapsed();
                 active_workers.fetch_sub(1, Ordering::SeqCst);
                 overflow_workers.fetch_sub(1, Ordering::SeqCst);
+                if elapsed.as_secs() >= STALL_THRESHOLD_SECS {
+                    STALLED_IO_WORKERS.fetch_add(1, Ordering::SeqCst);
+                    log::warn!(
+                        "[ONEDRIVE IO-POOL] Overflow-direct worker job took {:.1}s — possible cloud filter stall",
+                        elapsed.as_secs_f64()
+                    );
+                }
             });
 
         if spawn_result.is_err() {
@@ -189,6 +224,20 @@ fn onedrive_io_pool() -> &'static OneDriveIoPool {
     ONEDRIVE_IO_POOL.get_or_init(|| {
         OneDriveIoPool::new(ONEDRIVE_IO_BASE_WORKERS, ONEDRIVE_IO_MAX_OVERFLOW_WORKERS)
     })
+}
+
+/// Execute a job on the OneDrive I/O pool.
+///
+/// This is the safe entry point for any I/O operation that might block on the
+/// cloud filter driver. The pool has a bounded number of workers (4 base + 24 overflow),
+/// preventing unbounded thread creation.
+///
+/// Returns `true` if the job was accepted, `false` if the pool is saturated.
+pub fn onedrive_io_pool_execute<F>(job: F) -> bool
+where
+    F: FnOnce() + Send + 'static,
+{
+    onedrive_io_pool().execute(job)
 }
 
 /// Set the minimized state of the application.
@@ -215,6 +264,12 @@ pub fn is_app_minimized() -> bool {
 /// Get the current count of active timeout threads (for monitoring)
 pub fn get_active_timeout_threads() -> u64 {
     ACTIVE_TIMEOUT_THREADS.load(Ordering::SeqCst)
+}
+
+/// Get the cumulative count of stalled I/O pool workers (job > 10s).
+/// A growing count over time indicates cloud filter driver congestion.
+pub fn get_stalled_io_workers() -> usize {
+    STALLED_IO_WORKERS.load(Ordering::SeqCst)
 }
 
 // NOTE: Cloud attribute detection is NOT cached per drive letter.

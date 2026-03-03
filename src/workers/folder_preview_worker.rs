@@ -184,6 +184,10 @@ pub fn spawn_folder_preview_worker(
 
         crate::infrastructure::io_priority::reset_thread_priority();
         // _com dropped here — CoUninitialize() guaranteed by RAII
+        // NOTE: Folder preview worker uses per-request set_thread_priority() based
+        // on SSD detection. The reset at the end is the final cleanup. Future
+        // improvement: use ThreadPriorityGuard here too, but requires refactoring
+        // the per-request priority change pattern.
     });
 }
 

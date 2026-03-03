@@ -33,6 +33,11 @@ fn probe_file_size(path: &std::path::Path, modified_epoch: u64) -> Option<u64> {
         return None;
     }
 
+    // FIX: Skip blocking metadata() for network/virtual drives (can block indefinitely).
+    if crate::infrastructure::io_priority::is_network_or_virtual(path) {
+        return None;
+    }
+
     let metadata = std::fs::metadata(path).ok()?;
 
     if metadata.is_file() {

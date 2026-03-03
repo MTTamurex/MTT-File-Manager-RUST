@@ -320,22 +320,23 @@ impl ImageViewerApp {
             current
         );
 
-        let mut candidate = current.as_path().parent();
-        while let Some(parent) = candidate {
-            if parent.as_os_str().is_empty() {
-                break;
-            }
-            if parent.is_dir() {
-                log::info!("[NAV] Navigating to nearest valid ancestor: {:?}", parent);
+        // FIX: Avoid blocking is_dir() calls on the UI thread.
+        // GetFileAttributesW can block indefinitely on network/cloud/USB drives.
+        // Instead, navigate directly to the parent directory. If the parent
+        // doesn't exist either, the loading pipeline will detect the error
+        // and we'll handle it via the next watcher event / consistency probe.
+        // For root drives (e.g. "E:\"), go straight to computer view.
+        if let Some(parent) = current.as_path().parent() {
+            if !parent.as_os_str().is_empty() {
+                log::info!("[NAV] Navigating to parent: {:?} (no blocking I/O check)", parent);
                 let target = parent.to_string_lossy().to_string();
                 self.navigate_to(&target);
                 return;
             }
-            candidate = parent.parent();
         }
 
-        // No valid ancestor on disk → go to computer view
-        log::warn!("[NAV] No valid ancestor found — redirecting to Este Computador");
+        // No valid ancestor (root of drive or empty) → go to computer view
+        log::warn!("[NAV] No parent available — redirecting to Este Computador");
         self.navigate_to_computer();
     }
 }
