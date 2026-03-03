@@ -9,7 +9,7 @@
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use windows::core::PCWSTR;
 use windows::Win32::Storage::FileSystem::{
@@ -17,6 +17,23 @@ use windows::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FIND_FIRST_EX_LARGE_FETCH,
     WIN32_FIND_DATAW,
 };
+
+/// Cached rayon thread pool for folder-size calculations.
+/// Previous code created a new pool on every call to `calculate_folder_size_parallel()`,
+/// spawning `num_cpus * 2` OS threads each time. Pools may not be torn down immediately,
+/// leading to thread/kernel-handle accumulation over prolonged use.
+static FOLDER_SIZE_POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
+
+fn get_folder_size_pool() -> &'static rayon::ThreadPool {
+    FOLDER_SIZE_POOL.get_or_init(|| {
+        let num_threads = (num_cpus() * 2).max(8);
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .thread_name(|i| format!("folder-size-{}", i))
+            .build()
+            .expect("Failed to create folder-size rayon thread pool")
+    })
+}
 
 /// Reparse tags for junctions/symlinks — only these redirect to other locations.
 const IO_REPARSE_TAG_MOUNT_POINT: u32 = 0xA0000003;
@@ -69,25 +86,8 @@ pub fn calculate_folder_size_parallel(
         return None;
     }
 
-    // Phase 2: Parallel recursive scan with dedicated I/O thread pool
-    // Use more threads than CPU cores — I/O (especially SSD) benefits from concurrency
-    let num_threads = (num_cpus() * 2).max(8);
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(num_threads)
-        .thread_name(|i| format!("folder-size-{}", i))
-        .build();
-
-    let pool = match pool {
-        Ok(p) => p,
-        Err(_) => {
-            // Fallback: use global rayon pool
-            parallel_scan_recursive(work_queue, &total, cancel, &progress_cb);
-            if cancel.load(Ordering::Relaxed) {
-                return None;
-            }
-            return Some(total.load(Ordering::Relaxed));
-        }
-    };
+    // Phase 2: Parallel recursive scan with dedicated I/O thread pool (reused across calls)
+    let pool = get_folder_size_pool();
 
     pool.install(|| {
         parallel_scan_recursive(work_queue, &total, cancel, &progress_cb);

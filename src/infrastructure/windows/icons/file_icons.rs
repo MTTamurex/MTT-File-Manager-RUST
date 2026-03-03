@@ -278,15 +278,27 @@ pub fn get_file_type_icon(
     size: IconSize,
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     use windows::core::PCWSTR;
-    use windows::Win32::System::Com::CoInitialize;
+    use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
     use windows::Win32::UI::Shell::{
         SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON, SHGFI_SMALLICON,
         SHGFI_USEFILEATTRIBUTES,
     };
 
+    // RAII guard: ensures CoUninitialize is always called to prevent COM refcount leaks.
+    // Previous code called CoInitialize without CoUninitialize, leaking kernel resources
+    // (Non-Paged Pool, User handles) on every call — a major source of system-wide
+    // unresponsiveness after prolonged use.
+    struct ComGuard(bool);
+    impl Drop for ComGuard {
+        fn drop(&mut self) {
+            if self.0 {
+                unsafe { CoUninitialize(); }
+            }
+        }
+    }
+
     unsafe {
-        // Initialize COM to ensure access to the Windows Registry
-        let _ = CoInitialize(None);
+        let _com = ComGuard(CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok());
 
         if matches!(size, IconSize::Jumbo) && is_folder {
             if let Ok(res) = extract_folder_icon(IconSize::Jumbo) {

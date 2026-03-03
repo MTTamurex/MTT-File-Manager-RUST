@@ -23,6 +23,15 @@ static CACHED_VRAM_BYTES: AtomicU64 = AtomicU64::new(0);
 /// Last time VRAM was calculated
 static CACHED_VRAM_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
 
+// --- Kernel resource monitoring (GDI Objects, USER Objects, Handle Count) ---
+// These metrics make resource leaks visible at runtime.
+// Previously, COM refcount leaks and thread-pool accumulation were invisible
+// because Task Manager doesn't show per-process GDI/USER/handle counts by default.
+static CACHED_GDI_OBJECTS: AtomicU64 = AtomicU64::new(0);
+static CACHED_USER_OBJECTS: AtomicU64 = AtomicU64::new(0);
+static CACHED_HANDLE_COUNT: AtomicU64 = AtomicU64::new(0);
+static CACHED_KERNEL_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
+
 /// TTL for RAM/VRAM cache (1 second)
 const STATUS_CACHE_TTL_MS: u64 = 1000;
 
@@ -68,6 +77,73 @@ fn get_vram_usage_cached(texture_cache: &LruCache<PathBuf, egui::TextureHandle>)
         vram
     } else {
         CACHED_VRAM_BYTES.load(Ordering::Relaxed) as usize
+    }
+}
+
+/// Kernel resource metrics for runtime leak detection.
+struct KernelResourceMetrics {
+    gdi_objects: u32,
+    user_objects: u32,
+    handle_count: u32,
+}
+
+/// Returns cached kernel resource metrics (GDI Objects, USER Objects, Handle Count).
+/// Refreshes only after TTL expires. These metrics reveal COM/handle leaks that are
+/// invisible in Task Manager's default view.
+fn get_kernel_resources_cached() -> KernelResourceMetrics {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let last = CACHED_KERNEL_TIMESTAMP.load(Ordering::Relaxed);
+    if now.saturating_sub(last) > STATUS_CACHE_TTL_MS {
+        let metrics = get_kernel_resources();
+        CACHED_GDI_OBJECTS.store(metrics.gdi_objects as u64, Ordering::Relaxed);
+        CACHED_USER_OBJECTS.store(metrics.user_objects as u64, Ordering::Relaxed);
+        CACHED_HANDLE_COUNT.store(metrics.handle_count as u64, Ordering::Relaxed);
+        CACHED_KERNEL_TIMESTAMP.store(now, Ordering::Relaxed);
+        metrics
+    } else {
+        KernelResourceMetrics {
+            gdi_objects: CACHED_GDI_OBJECTS.load(Ordering::Relaxed) as u32,
+            user_objects: CACHED_USER_OBJECTS.load(Ordering::Relaxed) as u32,
+            handle_count: CACHED_HANDLE_COUNT.load(Ordering::Relaxed) as u32,
+        }
+    }
+}
+
+/// Queries GDI Objects, USER Objects, and Handle Count for the current process.
+fn get_kernel_resources() -> KernelResourceMetrics {
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::Threading::GetCurrentProcess;
+
+    // GetGuiResources is not exposed in windows 0.61 via WindowsAndMessaging,
+    // so we link directly against user32.dll.
+    const GR_GDIOBJECTS: u32 = 0;
+    const GR_USEROBJECTS: u32 = 1;
+
+    extern "system" {
+        fn GetGuiResources(hprocess: *mut core::ffi::c_void, uiflags: u32) -> u32;
+    }
+
+    unsafe {
+        let process = GetCurrentProcess();
+        let handle_ptr = process.0 as *mut core::ffi::c_void;
+        let gdi = GetGuiResources(handle_ptr, GR_GDIOBJECTS);
+        let user = GetGuiResources(handle_ptr, GR_USEROBJECTS);
+
+        let mut handles: u32 = 0;
+        let process_handle = HANDLE(process.0);
+        let _ = windows::Win32::System::Threading::GetProcessHandleCount(
+            process_handle,
+            &mut handles,
+        );
+
+        KernelResourceMetrics {
+            gdi_objects: gdi,
+            user_objects: user,
+            handle_count: handles,
+        }
     }
 }
 
@@ -333,6 +409,14 @@ pub fn render_status_bar(
             // === RIGHT SIDE: System info (push to right with available space) ===
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label("MTT File Manager");
+                ui.separator();
+
+                // Kernel resource monitoring (cached with 1s TTL)
+                // These metrics expose handle/GDI/USER leaks at runtime.
+                let km = get_kernel_resources_cached();
+                ui.label(format!("Handles: {}", km.handle_count));
+                ui.label(format!("GDI: {}", km.gdi_objects));
+                ui.label(format!("USER: {}", km.user_objects));
                 ui.separator();
 
                 // RAM usage (cached with 1s TTL — avoids kernel syscall every frame)

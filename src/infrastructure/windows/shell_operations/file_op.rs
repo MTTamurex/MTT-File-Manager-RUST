@@ -9,10 +9,28 @@ use super::shfile_ops::{
     copy_item_with_shell, copy_items_with_shell, move_item_with_shell, move_items_with_shell,
 };
 
+/// RAII guard for balanced COM initialization in file operations.
+/// Previously, each function called CoInitializeEx without CoUninitialize,
+/// leaking COM refcounts and kernel resources on every copy/move operation.
+struct FileOpComGuard(bool);
+impl FileOpComGuard {
+    fn init() -> Self {
+        let ok = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok() };
+        Self(ok)
+    }
+}
+impl Drop for FileOpComGuard {
+    fn drop(&mut self) {
+        if self.0 {
+            unsafe { CoUninitialize(); }
+        }
+    }
+}
+
 /// Robust copy using IFileOperation (supports virtual paths like ZIP items).
 pub fn copy_item_with_file_op(path: &Path, dest_folder: &Path, hwnd: HWND) -> bool {
+    let _com = FileOpComGuard::init();
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
 
         // Use IFileOperation for modern Shell features (like ZIP extraction).
         let file_op: IFileOperation = match CoCreateInstance(&FileOperation, None, CLSCTX_ALL) {
@@ -59,8 +77,8 @@ pub fn copy_items_with_file_op(paths: &[PathBuf], dest_folder: &Path, hwnd: HWND
         return false;
     }
 
+    let _com = FileOpComGuard::init();
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
 
         // Use IFileOperation for modern Shell features (like ZIP extraction).
         let file_op: IFileOperation = match CoCreateInstance(&FileOperation, None, CLSCTX_ALL) {
@@ -120,9 +138,8 @@ pub fn move_item_with_file_op(path: &Path, dest_folder: &Path, hwnd: HWND) -> bo
         }
     }
 
+    let _com = FileOpComGuard::init();
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-
         // Use IFileOperation for modern Shell features.
         let file_op: IFileOperation = match CoCreateInstance(&FileOperation, None, CLSCTX_ALL) {
             Ok(op) => op,
@@ -167,8 +184,8 @@ pub fn move_items_with_file_op(paths: &[PathBuf], dest_folder: &Path, hwnd: HWND
         return false;
     }
 
+    let _com = FileOpComGuard::init();
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
 
         // Use IFileOperation for modern Shell features.
         let file_op: IFileOperation = match CoCreateInstance(&FileOperation, None, CLSCTX_ALL) {
