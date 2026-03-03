@@ -128,11 +128,16 @@ impl IconLoader {
 
         let tx = self.icon_result_tx.clone();
         std::thread::spawn(move || {
-            // Single COM init for the entire batch.
+            // RAII COM guard: ensures CoUninitialize is always called when the thread exits.
+            // Previously CoInitialize was called without CoUninitialize, leaking COM resources.
             #[cfg(target_os = "windows")]
-            unsafe {
-                let _ = ::windows::Win32::System::Com::CoInitialize(None);
-            }
+            let _com_initialized = unsafe {
+                let ok = ::windows::Win32::System::Com::CoInitializeEx(
+                    None,
+                    ::windows::Win32::System::Com::COINIT_APARTMENTTHREADED,
+                ).is_ok();
+                ok
+            };
 
             for path in paths {
                 let data = windows::extract_drive_icon(&path, IconSize::Jumbo).ok();
@@ -140,6 +145,12 @@ impl IconLoader {
                     key: path,
                     data,
                 });
+            }
+
+            // Balance COM init/uninit to prevent refcount leak
+            #[cfg(target_os = "windows")]
+            if _com_initialized {
+                unsafe { ::windows::Win32::System::Com::CoUninitialize(); }
             }
         });
     }
