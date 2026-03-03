@@ -196,23 +196,30 @@ impl ImageViewerApp {
         }
 
         // When a successfully-loaded thumbnail belongs to a file that is
-        // currently set as a folder_cover, the composed folder preview
-        // (which may contain a stale compose_empty placeholder from when
-        // the file was still being downloaded) must be re-generated.
-        // Invalidate both GPU cache and SQLite so the folder_preview_worker
-        // re-composes with the now-available real thumbnail.
+        // currently set as a folder_cover AND the folder has no SQLite-cached
+        // preview, the visible preview is a stale compose_empty placeholder
+        // (our MediaUnsafe fix skips SQLite persistence for those).
+        //
+        // Re-queue the folder for composition WITHOUT invalidating the GPU
+        // cache — the old placeholder stays visible until the worker produces
+        // the new preview, avoiding any visible flicker.
         if !successful_thumb_paths.is_empty() {
             let successful_set: HashSet<&PathBuf> = successful_thumb_paths.iter().collect();
             for item in &self.all_items {
                 if let Some(ref cover) = item.folder_cover {
                     if item.is_dir && successful_set.contains(cover) {
-                        self.cache_manager.invalidate_folder_preview(&item.path);
-                        self.disk_cache.remove_folder_preview_cache(&item.path);
-                        log::debug!(
-                            "[FOLDER PREVIEW] Invalidated stale preview for {:?} (cover {:?} now available)",
-                            item.path.file_name().unwrap_or_default(),
-                            cover.file_name().unwrap_or_default(),
-                        );
+                        // SQLite miss ⇒ the current preview was a MediaUnsafe placeholder.
+                        // SQLite hit  ⇒ preview already composed with real media — skip.
+                        if self.disk_cache.get_folder_preview_cache(&item.path).is_none() {
+                            if self.cache_manager.start_folder_preview_loading(item.path.clone()) {
+                                let _ = self.folder_preview_sender.send(item.path.clone());
+                            }
+                            log::debug!(
+                                "[FOLDER PREVIEW] Re-composing {:?} (cover {:?} now available)",
+                                item.path.file_name().unwrap_or_default(),
+                                cover.file_name().unwrap_or_default(),
+                            );
+                        }
                     }
                 }
             }
