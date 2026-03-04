@@ -9,6 +9,7 @@ use std::sync::{Arc, OnceLock};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LoadPriority {
+    Urgent,
     High,
     Normal,
 }
@@ -109,6 +110,8 @@ impl WindowCache {
 pub struct PrefetchEngine {
     jobs_tx: Sender<LoadJob>,
     bg_jobs_tx: Sender<LoadJob>,
+    urgent_job: Arc<std::sync::Mutex<Option<LoadJob>>>,
+    results_tx: Sender<LoadOutput>,
     results_rx: Receiver<LoadOutput>,
     active_center: Arc<AtomicUsize>,
     repaint_ctx: Arc<OnceLock<egui::Context>>,
@@ -123,12 +126,14 @@ impl PrefetchEngine {
         let (jobs_tx, jobs_rx) = crossbeam_channel::bounded::<LoadJob>(window_size);
         let (bg_jobs_tx, bg_jobs_rx) = crossbeam_channel::bounded::<LoadJob>(window_size);
         let (results_tx, results_rx) = crossbeam_channel::unbounded::<LoadOutput>();
+        let urgent_job = Arc::new(std::sync::Mutex::new(None));
         let active_center = Arc::new(AtomicUsize::new(0));
         let repaint_ctx = Arc::new(OnceLock::<egui::Context>::new());
 
         for worker_id in 0..worker_count {
             let jobs_rx = jobs_rx.clone();
             let bg_jobs_rx = bg_jobs_rx.clone();
+            let urgent_job = Arc::clone(&urgent_job);
             let results_tx = results_tx.clone();
             let active_center = Arc::clone(&active_center);
             let repaint_ctx = Arc::clone(&repaint_ctx);
@@ -136,18 +141,41 @@ impl PrefetchEngine {
                 .name(format!("image-viewer-loader-{}", worker_id))
                 .spawn(move || {
                     loop {
-                        let job = match jobs_rx.try_recv() {
-                            Ok(job) => job,
-                            Err(crossbeam_channel::TryRecvError::Disconnected) => break,
-                            Err(crossbeam_channel::TryRecvError::Empty) => {
-                                crossbeam_channel::select! {
-                                    recv(jobs_rx) -> recv_res => match recv_res {
-                                        Ok(job) => job,
-                                        Err(_) => break,
-                                    },
-                                    recv(bg_jobs_rx) -> recv_res => match recv_res {
-                                        Ok(job) => job,
-                                        Err(_) => break,
+                        let job = if let Ok(mut slot) = urgent_job.lock() {
+                            if let Some(job) = slot.take() {
+                                job
+                            } else {
+                                match jobs_rx.try_recv() {
+                                    Ok(job) => job,
+                                    Err(crossbeam_channel::TryRecvError::Disconnected) => break,
+                                    Err(crossbeam_channel::TryRecvError::Empty) => {
+                                        crossbeam_channel::select! {
+                                            recv(jobs_rx) -> recv_res => match recv_res {
+                                                Ok(job) => job,
+                                                Err(_) => break,
+                                            },
+                                            recv(bg_jobs_rx) -> recv_res => match recv_res {
+                                                Ok(job) => job,
+                                                Err(_) => break,
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            match jobs_rx.try_recv() {
+                                Ok(job) => job,
+                                Err(crossbeam_channel::TryRecvError::Disconnected) => break,
+                                Err(crossbeam_channel::TryRecvError::Empty) => {
+                                    crossbeam_channel::select! {
+                                        recv(jobs_rx) -> recv_res => match recv_res {
+                                            Ok(job) => job,
+                                            Err(_) => break,
+                                        },
+                                        recv(bg_jobs_rx) -> recv_res => match recv_res {
+                                            Ok(job) => job,
+                                            Err(_) => break,
+                                        }
                                     }
                                 }
                             }
@@ -172,6 +200,7 @@ impl PrefetchEngine {
                         }
 
                         let decode_priority = match job.priority {
+                            LoadPriority::Urgent => loader::DecodePriority::Interactive,
                             LoadPriority::High => loader::DecodePriority::Interactive,
                             LoadPriority::Normal => loader::DecodePriority::Background,
                         };
@@ -209,6 +238,8 @@ impl PrefetchEngine {
         Self {
             jobs_tx,
             bg_jobs_tx,
+            urgent_job,
+            results_tx,
             results_rx,
             active_center,
             repaint_ctx,
@@ -239,6 +270,22 @@ impl PrefetchEngine {
         };
 
         match job.priority {
+            LoadPriority::Urgent => {
+                if let Ok(mut slot) = self.urgent_job.lock() {
+                    if let Some(replaced) = slot.replace(job) {
+                        let _ = self.results_tx.send(LoadOutput {
+                            index: replaced.index,
+                            frame: Err(io::Error::new(
+                                io::ErrorKind::Interrupted,
+                                "replaced by newer urgent job",
+                            )),
+                        });
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
             LoadPriority::High => self.jobs_tx.try_send(job).is_ok(),
             LoadPriority::Normal => self.bg_jobs_tx.try_send(job).is_ok(),
         }
