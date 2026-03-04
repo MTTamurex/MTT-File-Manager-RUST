@@ -276,7 +276,7 @@ impl ImageViewerApp {
 
             // PERSISTENT ICON LOADER
             item_icon_loader: {
-                let mut loader = IconLoader::new();
+                let mut loader = IconLoader::new(Some(disk_cache.clone()));
                 // Pre-populate extension_cache from disk cache → instant icons on first frame.
                 for (ext, (pixels, width, height)) in &preloaded_extension_icons {
                     // Use canonical extension so mapped types (sys→dll) share
