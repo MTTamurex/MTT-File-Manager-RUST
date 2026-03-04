@@ -107,7 +107,7 @@ impl DedicatedImageViewerApp {
             return;
         }
 
-        if self.requested_jobs.contains(&index) {
+        if priority != LoadPriority::Urgent && self.requested_jobs.contains(&index) {
             return;
         }
 
@@ -119,7 +119,9 @@ impl DedicatedImageViewerApp {
             .prefetch
             .request(index, path, priority)
         {
-            self.requested_jobs.insert(index);
+            if priority != LoadPriority::Urgent {
+                self.requested_jobs.insert(index);
+            }
         }
     }
 
@@ -134,7 +136,7 @@ impl DedicatedImageViewerApp {
         let max_idx = (center + self.cache.radius()).min(total - 1);
 
         // Current image: highest priority
-        self.request_job_if_needed(center, LoadPriority::High);
+        self.request_job_if_needed(center, LoadPriority::Urgent);
 
         // Immediate neighbors: high priority
         let left = center.saturating_sub(1);
@@ -389,7 +391,7 @@ impl DedicatedImageViewerApp {
             // Moving left → new left edge
             index.saturating_sub(radius)
         };
-        self.request_job_if_needed(index, LoadPriority::High);
+        self.request_job_if_needed(index, LoadPriority::Urgent);
         if tail != index {
             self.request_job_if_needed(tail, LoadPriority::High);
         }
