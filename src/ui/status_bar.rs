@@ -33,9 +33,72 @@ static CACHED_HANDLE_COUNT: AtomicU64 = AtomicU64::new(0);
 static CACHED_THREAD_COUNT: AtomicU64 = AtomicU64::new(0);
 static CACHED_PEAK_THREAD_COUNT: AtomicU64 = AtomicU64::new(0);
 static CACHED_KERNEL_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
+static LAST_THREAD_WARN_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
+static LAST_THREAD_WARN_COUNT: AtomicU64 = AtomicU64::new(0);
+static LAST_THREAD_CRITICAL_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
+static THREAD_CRITICAL_STREAK: AtomicU64 = AtomicU64::new(0);
 
 /// TTL for RAM/VRAM cache (1 second)
 const STATUS_CACHE_TTL_MS: u64 = 1000;
+/// Minimum interval between repeated HIGH thread warnings for stable counts.
+const THREAD_WARN_COOLDOWN_MS: u64 = 30_000;
+/// Number of consecutive 1s samples above critical threshold before escalating.
+const THREAD_CRITICAL_STREAK_MIN: u64 = 6;
+
+fn should_emit_thread_critical(
+    now_ms: u64,
+    thread_count: u32,
+    critical_threshold: u32,
+    stalled_onedrive_workers: usize,
+) -> bool {
+    // If OneDrive workers are stalled, escalate immediately.
+    if stalled_onedrive_workers > 0 {
+        LAST_THREAD_CRITICAL_TIMESTAMP.store(now_ms, Ordering::Relaxed);
+        THREAD_CRITICAL_STREAK.store(1, Ordering::Relaxed);
+        return true;
+    }
+
+    // Very large overshoot is suspicious even if transient.
+    if thread_count >= critical_threshold.saturating_add(25) {
+        LAST_THREAD_CRITICAL_TIMESTAMP.store(now_ms, Ordering::Relaxed);
+        THREAD_CRITICAL_STREAK.store(1, Ordering::Relaxed);
+        return true;
+    }
+
+    let last_ts = LAST_THREAD_CRITICAL_TIMESTAMP.load(Ordering::Relaxed);
+    let streak = if now_ms.saturating_sub(last_ts) <= STATUS_CACHE_TTL_MS + 500 {
+        THREAD_CRITICAL_STREAK
+            .load(Ordering::Relaxed)
+            .saturating_add(1)
+    } else {
+        1
+    };
+
+    LAST_THREAD_CRITICAL_TIMESTAMP.store(now_ms, Ordering::Relaxed);
+    THREAD_CRITICAL_STREAK.store(streak, Ordering::Relaxed);
+    streak >= THREAD_CRITICAL_STREAK_MIN
+}
+
+fn should_emit_thread_warning(now_ms: u64, thread_count: u32) -> bool {
+    let last_ts = LAST_THREAD_WARN_TIMESTAMP.load(Ordering::Relaxed);
+    let last_count = LAST_THREAD_WARN_COUNT.load(Ordering::Relaxed) as u32;
+
+    // Always emit when count grows meaningfully (>= +4 threads).
+    if thread_count >= last_count.saturating_add(4) {
+        LAST_THREAD_WARN_TIMESTAMP.store(now_ms, Ordering::Relaxed);
+        LAST_THREAD_WARN_COUNT.store(thread_count as u64, Ordering::Relaxed);
+        return true;
+    }
+
+    // For stable/slightly changing counts, rate-limit warning spam.
+    if now_ms.saturating_sub(last_ts) >= THREAD_WARN_COOLDOWN_MS {
+        LAST_THREAD_WARN_TIMESTAMP.store(now_ms, Ordering::Relaxed);
+        LAST_THREAD_WARN_COUNT.store(thread_count as u64, Ordering::Relaxed);
+        return true;
+    }
+
+    false
+}
 
 /// Returns cached RAM usage, refreshing only after TTL expires.
 fn get_ram_usage_cached(allow_refresh: bool) -> Option<u64> {
@@ -97,7 +160,7 @@ struct KernelResourceMetrics {
 /// Returns cached kernel resource metrics (GDI Objects, USER Objects, Handle Count).
 /// Refreshes only after TTL expires. These metrics reveal COM/handle leaks that are
 /// invisible in Task Manager's default view.
-fn get_kernel_resources_cached(allow_refresh: bool) -> KernelResourceMetrics {
+fn get_kernel_resources_cached(allow_refresh: bool, video_preview_active: bool) -> KernelResourceMetrics {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -130,18 +193,44 @@ fn get_kernel_resources_cached(allow_refresh: bool) -> KernelResourceMetrics {
         let critical_threshold = expected_baseline + 50;
         let stalled = crate::infrastructure::onedrive::get_stalled_io_workers();
         if metrics.thread_count >= critical_threshold {
-            log::error!(
-                "[THREAD MONITOR] CRITICAL: {} threads (baseline: ~{}, peak: {}, stalled OneDrive I/O: {}). \
-                 Possible thread leak causing system-wide stalls.",
-                metrics.thread_count, expected_baseline,
-                prev_peak.max(metrics.thread_count), stalled
-            );
+            if is_video_preview_thread_spike_expected(video_preview_active, stalled) {
+                // In-panel video playback can legitimately keep thread count high
+                // for long periods. Avoid false-positive CRITICAL/HIGH spam.
+                THREAD_CRITICAL_STREAK.store(0, Ordering::Relaxed);
+            } else if should_emit_thread_critical(now, metrics.thread_count, critical_threshold, stalled)
+            {
+                log::error!(
+                    "[THREAD MONITOR] CRITICAL: {} threads (baseline: ~{}, peak: {}, stalled OneDrive I/O: {}). \
+                     Possible sustained thread leak causing system-wide stalls.",
+                    metrics.thread_count,
+                    expected_baseline,
+                    prev_peak.max(metrics.thread_count),
+                    stalled
+                );
+                LAST_THREAD_WARN_TIMESTAMP.store(now, Ordering::Relaxed);
+                LAST_THREAD_WARN_COUNT.store(metrics.thread_count as u64, Ordering::Relaxed);
+            } else if should_emit_thread_warning(now, metrics.thread_count) {
+                log::warn!(
+                    "[THREAD MONITOR] HIGH transient thread count: {} (baseline: ~{}, peak: {}, stalled OneDrive I/O: {})",
+                    metrics.thread_count,
+                    expected_baseline,
+                    prev_peak.max(metrics.thread_count),
+                    stalled
+                );
+            }
         } else if metrics.thread_count >= warn_threshold {
-            log::warn!(
-                "[THREAD MONITOR] HIGH thread count: {} (baseline: ~{}, peak: {}, stalled OneDrive I/O: {})",
-                metrics.thread_count, expected_baseline,
-                prev_peak.max(metrics.thread_count), stalled
-            );
+            THREAD_CRITICAL_STREAK.store(0, Ordering::Relaxed);
+            if !is_video_preview_thread_spike_expected(video_preview_active, stalled)
+                && should_emit_thread_warning(now, metrics.thread_count)
+            {
+                log::warn!(
+                    "[THREAD MONITOR] HIGH thread count: {} (baseline: ~{}, peak: {}, stalled OneDrive I/O: {})",
+                    metrics.thread_count, expected_baseline,
+                    prev_peak.max(metrics.thread_count), stalled
+                );
+            }
+        } else {
+            THREAD_CRITICAL_STREAK.store(0, Ordering::Relaxed);
         }
 
         CACHED_KERNEL_TIMESTAMP.store(now, Ordering::Relaxed);
@@ -158,6 +247,10 @@ fn get_kernel_resources_cached(allow_refresh: bool) -> KernelResourceMetrics {
             peak_thread_count: CACHED_PEAK_THREAD_COUNT.load(Ordering::Relaxed) as u32,
         }
     }
+}
+
+fn is_video_preview_thread_spike_expected(video_preview_active: bool, stalled_onedrive_workers: usize) -> bool {
+    video_preview_active && stalled_onedrive_workers == 0
 }
 
 /// Queries GDI Objects, USER Objects, and Handle Count for the current process.
@@ -299,6 +392,7 @@ pub fn render_status_bar(
     folder_locked: bool,
     show_hidden_files: &mut bool,
     allow_system_refresh: bool,
+    video_preview_active: bool,
 ) -> StatusBarAction {
     let mut action = StatusBarAction::None;
 
@@ -526,7 +620,7 @@ pub fn render_status_bar(
 
                 // Kernel resource monitoring (cached with 1s TTL)
                 // These metrics expose handle/GDI/USER leaks at runtime.
-                let km = get_kernel_resources_cached(allow_system_refresh);
+                let km = get_kernel_resources_cached(allow_system_refresh, video_preview_active);
                 ui.label(format!("Threads: {} (pico: {})", km.thread_count, km.peak_thread_count));
                 ui.label(format!("Handles: {}", km.handle_count));
                 ui.label(format!("GDI: {}", km.gdi_objects));
