@@ -13,6 +13,7 @@ mod folder_previews;
 mod gc;
 mod pinned_folders;
 mod preferences;
+mod shell_icons;
 mod thumbnails_repo;
 
 /// Allowed table targets for batch-delete operations.
@@ -375,6 +376,19 @@ impl ThumbnailDiskCache {
                 path TEXT PRIMARY KEY,
                 display_name TEXT NOT NULL,
                 position INTEGER NOT NULL DEFAULT 0
+            )",
+            [],
+        )
+        .unwrap_or(0);
+
+        // Shell icon cache (special folders, drives, computer, recycle bin)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS shell_icons (
+                key TEXT PRIMARY KEY,
+                data BLOB NOT NULL,
+                width INTEGER NOT NULL,
+                height INTEGER NOT NULL,
+                created_at INTEGER NOT NULL
             )",
             [],
         )
