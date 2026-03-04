@@ -111,7 +111,6 @@ pub struct PrefetchEngine {
     jobs_tx: Sender<LoadJob>,
     bg_jobs_tx: Sender<LoadJob>,
     urgent_job: Arc<std::sync::Mutex<Option<LoadJob>>>,
-    results_tx: Sender<LoadOutput>,
     results_rx: Receiver<LoadOutput>,
     active_center: Arc<AtomicUsize>,
     repaint_ctx: Arc<OnceLock<egui::Context>>,
@@ -239,7 +238,6 @@ impl PrefetchEngine {
             jobs_tx,
             bg_jobs_tx,
             urgent_job,
-            results_tx,
             results_rx,
             active_center,
             repaint_ctx,
@@ -272,15 +270,7 @@ impl PrefetchEngine {
         match job.priority {
             LoadPriority::Urgent => {
                 if let Ok(mut slot) = self.urgent_job.lock() {
-                    if let Some(replaced) = slot.replace(job) {
-                        let _ = self.results_tx.send(LoadOutput {
-                            index: replaced.index,
-                            frame: Err(io::Error::new(
-                                io::ErrorKind::Interrupted,
-                                "replaced by newer urgent job",
-                            )),
-                        });
-                    }
+                    slot.replace(job);
                     true
                 } else {
                     false
