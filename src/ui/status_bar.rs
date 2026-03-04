@@ -38,13 +38,13 @@ static CACHED_KERNEL_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
 const STATUS_CACHE_TTL_MS: u64 = 1000;
 
 /// Returns cached RAM usage, refreshing only after TTL expires.
-fn get_ram_usage_cached() -> Option<u64> {
+fn get_ram_usage_cached(allow_refresh: bool) -> Option<u64> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64;
     let last = CACHED_RAM_TIMESTAMP.load(Ordering::Relaxed);
-    if now.saturating_sub(last) > STATUS_CACHE_TTL_MS {
+    if allow_refresh && now.saturating_sub(last) > STATUS_CACHE_TTL_MS {
         if let Some(ram) = get_ram_usage() {
             CACHED_RAM_BYTES.store(ram, Ordering::Relaxed);
             CACHED_RAM_TIMESTAMP.store(now, Ordering::Relaxed);
@@ -60,13 +60,16 @@ fn get_ram_usage_cached() -> Option<u64> {
 }
 
 /// Returns cached VRAM estimation, refreshing only after TTL expires.
-fn get_vram_usage_cached(texture_cache: &LruCache<PathBuf, egui::TextureHandle>) -> usize {
+fn get_vram_usage_cached(
+    texture_cache: &LruCache<PathBuf, egui::TextureHandle>,
+    allow_refresh: bool,
+) -> usize {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64;
     let last = CACHED_VRAM_TIMESTAMP.load(Ordering::Relaxed);
-    if now.saturating_sub(last) > STATUS_CACHE_TTL_MS {
+    if allow_refresh && now.saturating_sub(last) > STATUS_CACHE_TTL_MS {
         let vram: usize = texture_cache
             .iter()
             .map(|(_, tex)| {
@@ -94,13 +97,13 @@ struct KernelResourceMetrics {
 /// Returns cached kernel resource metrics (GDI Objects, USER Objects, Handle Count).
 /// Refreshes only after TTL expires. These metrics reveal COM/handle leaks that are
 /// invisible in Task Manager's default view.
-fn get_kernel_resources_cached() -> KernelResourceMetrics {
+fn get_kernel_resources_cached(allow_refresh: bool) -> KernelResourceMetrics {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64;
     let last = CACHED_KERNEL_TIMESTAMP.load(Ordering::Relaxed);
-    if now.saturating_sub(last) > STATUS_CACHE_TTL_MS {
+    if allow_refresh && now.saturating_sub(last) > STATUS_CACHE_TTL_MS {
         let metrics = get_kernel_resources();
         CACHED_GDI_OBJECTS.store(metrics.gdi_objects as u64, Ordering::Relaxed);
         CACHED_USER_OBJECTS.store(metrics.user_objects as u64, Ordering::Relaxed);
@@ -295,6 +298,7 @@ pub fn render_status_bar(
     bulk_progress: Option<(usize, usize)>,
     folder_locked: bool,
     show_hidden_files: &mut bool,
+    allow_system_refresh: bool,
 ) -> StatusBarAction {
     let mut action = StatusBarAction::None;
 
@@ -522,7 +526,7 @@ pub fn render_status_bar(
 
                 // Kernel resource monitoring (cached with 1s TTL)
                 // These metrics expose handle/GDI/USER leaks at runtime.
-                let km = get_kernel_resources_cached();
+                let km = get_kernel_resources_cached(allow_system_refresh);
                 ui.label(format!("Threads: {} (pico: {})", km.thread_count, km.peak_thread_count));
                 ui.label(format!("Handles: {}", km.handle_count));
                 ui.label(format!("GDI: {}", km.gdi_objects));
@@ -530,12 +534,12 @@ pub fn render_status_bar(
                 ui.separator();
 
                 // RAM usage (cached with 1s TTL — avoids kernel syscall every frame)
-                if let Some(ram_usage) = get_ram_usage_cached() {
+                if let Some(ram_usage) = get_ram_usage_cached(allow_system_refresh) {
                     ui.label(format!("RAM: {}", format_size(ram_usage)));
                 }
 
                 // VRAM estimation (cached with 1s TTL — avoids O(n) texture iteration every frame)
-                let vram_usage = get_vram_usage_cached(texture_cache);
+                let vram_usage = get_vram_usage_cached(texture_cache, allow_system_refresh);
 
                 ui.label(format!(
                     "VRAM: {:.1} MB",

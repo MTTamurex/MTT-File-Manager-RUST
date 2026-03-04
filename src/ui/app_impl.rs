@@ -156,7 +156,8 @@ impl eframe::App for ImageViewerApp {
         // Keep full rendering even during move/resize so content/video stays visible and synchronized.
         let t_panels = std::time::Instant::now();
         app::panels::render_panels(self, ctx, frame);
-        let panels_ms = t_panels.elapsed().as_millis();
+        let t_post_panels = std::time::Instant::now();
+        let panels_ms = t_post_panels.duration_since(t_panels).as_millis();
         if panels_ms > 50 {
             log::warn!("[PERF] Slow render_panels: {}ms", panels_ms);
         }
