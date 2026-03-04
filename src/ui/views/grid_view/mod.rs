@@ -345,11 +345,11 @@ pub fn render_grid_view(
     prefetch::process_visible_range_prefetch(ctx, cols, visible_rows_range, ops);
     let t_after_prefetch = std::time::Instant::now();
 
-    let total_ms = t_total.elapsed().as_millis();
-    if total_ms > 120 {
+    let total_us = t_total.elapsed().as_micros();
+    if total_us > 120_000 {
         log::warn!(
             "[PERF-GRID-CORE] total={}ms scroll={}ms virtualized={}ms scrollbar={}ms flush_ops={}ms prefetch={}ms rows={} cols={} items={} visible_rows={:?}",
-            total_ms,
+            total_us / 1000,
             t_after_scroll.duration_since(t_total).as_millis(),
             t_after_virtualized.duration_since(t_after_scroll).as_millis(),
             t_after_scrollbar.duration_since(t_after_virtualized).as_millis(),

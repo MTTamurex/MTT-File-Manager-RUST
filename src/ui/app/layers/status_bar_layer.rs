@@ -35,6 +35,8 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
         .exact_height(24.0)
         .show(ctx, |ui| {
             use crate::ui::status_bar::{render_status_bar, StatusBarAction};
+            let allow_system_refresh =
+                app.last_scroll_time.elapsed() >= std::time::Duration::from_millis(400);
             let action = render_status_bar(
                 ui,
                 &mut app.svg_icon_manager,
@@ -54,6 +56,7 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                 bulk_progress,
                 app.current_folder_locked,
                 &mut app.show_hidden_files,
+                allow_system_refresh,
             );
             match action {
                 StatusBarAction::SortChanged => {
