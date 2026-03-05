@@ -118,6 +118,9 @@ impl ImageViewerApp {
         self.items = std::sync::Arc::new(Vec::new());
         self.all_items.clear();
 
+        // Discard pending mtime rechecks for the old folder's subfolders.
+        self.pending_folder_mtime_recheck.clear();
+
         // SYNC TAB STATE after clearing stale lists to avoid heavy cloning on navigation.
         self.sync_to_tab();
 
