@@ -277,6 +277,10 @@ impl ImageViewerApp {
         // thread while the disk is under heavy I/O.  A full folder reload is
         // triggered in handle_file_operation_finished() once all ops complete.
         if self.file_operation_state.file_ops_in_progress > 0 {
+            log::info!(
+                "[MTIME-SCHED] file_ops_in_progress={}, draining watcher events",
+                self.file_operation_state.file_ops_in_progress
+            );
             let (_drained, _dropped) = self
                 .drive_watcher
                 .poll_events_limited(max_batches, max_events);
@@ -406,6 +410,9 @@ impl ImageViewerApp {
         self.process_consistency_probe_results(&mut pending_disk_cache_invalidations);
         // Send new probe request if interval elapsed (disk read happens in background)
         self.maybe_send_consistency_probe();
+
+        // Process deferred folder mtime rechecks (Windows lazy-write delay)
+        self.process_pending_folder_mtime_rechecks();
 
         self.enqueue_disk_cache_invalidations(pending_disk_cache_invalidations);
         self.apply_watcher_reload_policy();

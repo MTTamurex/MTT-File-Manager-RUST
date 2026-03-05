@@ -200,6 +200,20 @@ pub struct ImageViewerApp {
     /// `true` = RDCW confirmed unreliable (drift was detected at least once).
     /// Drives not in this map are still being verified.
     pub rdcw_unreliable_drives: std::collections::HashMap<char, bool>,
+    /// Debounced folder mtime recheck: folders whose `modified` timestamp should
+    /// be re-read from the filesystem after a short delay.  Windows may not
+    /// update a directory's `LastWriteTime` until all file handles inside it
+    /// are closed, so the first read right after a CREATE event often returns
+    /// the old value.
+    ///
+    /// Uses a sliding-window debounce: each new event for the same folder
+    /// pushes the recheck deadline forward, so rapid-fire events (downloads,
+    /// torrent writes) coalesce into a single metadata read + re-sort.
+    /// Each entry stores `(path, scheduled_recheck_time)`.
+    pub pending_folder_mtime_recheck: Vec<(std::path::PathBuf, Instant)>,
+    /// Timestamp of the last folder-mtime re-sort to enforce a cooldown and
+    /// prevent excessive re-sorts during sustained write bursts.
+    pub last_folder_mtime_sort: Instant,
     /// Cached filesystem probe metadata per local drive letter.
     /// Avoids repeated `GetVolumeInformationW` cost during frequent watcher reconfiguration.
     pub watcher_fs_probe_cache: std::collections::HashMap<char, WatcherFsProbeCacheEntry>,
