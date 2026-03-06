@@ -1349,11 +1349,7 @@ function layouts()
     lo.style = osc_styles.button
 
     lo = add_layout("tog_vsr")
-    lo.geometry = {x = osc_geo.w - 284, y = btnY, an = 5, w = 50, h = btnH}
-    lo.style = osc_styles.button
-
-    lo = add_layout("tog_hdr")
-    lo.geometry = {x = osc_geo.w - 236, y = btnY, an = 5, w = 50, h = btnH}
+    lo.geometry = {x = osc_geo.w - 228, y = btnY, an = 5, w = btnW, h = btnH}
     lo.style = osc_styles.button
 
     lo = add_layout("tog_norm")
@@ -1652,47 +1648,25 @@ function osc_init()
 
     --tog_vsr
     ne = new_element("tog_vsr", "button")
-    ne.visible = (osc_param.playresx >= 760)
+    ne.visible = (osc_param.playresx >= 576)
     ne.tooltip_style = osc_styles.tooltip
     ne.tooltipF = function ()
-        local enabled = mp.get_property_bool("user-data/rtx/vsr-enabled", false)
-        local active = mp.get_property_bool("user-data/rtx/vsr-active", false)
-        local supported = mp.get_property_bool("user-data/rtx/vsr-supported", false)
-        if enabled and not supported then
-            return "RTX VSR: OFF (max 1440p)"
+        local enabled = mp.get_property_bool("user-data/rtx/enabled", false)
+        local hdr_on = mp.get_property_bool("user-data/rtx/hdr-active", false)
+        local vsr_on = mp.get_property_bool("user-data/rtx/vsr-active", false)
+        if not enabled then
+            return "RTX HDR: OFF | RTX VSR: OFF"
         end
-        return string.format("RTX VSR: %s", active and "ON" or "OFF")
+        return string.format("RTX HDR: %s | RTX VSR: %s", hdr_on and "ON" or "OFF", vsr_on and "ON" or "OFF")
     end
     ne.content = function ()
-        local enabled = mp.get_property_bool("user-data/rtx/vsr-enabled", false)
+        local enabled = mp.get_property_bool("user-data/rtx/enabled", false)
         local main_color = enabled and "00FF00" or "808080"
 
-        return string.format("{\\fs11\\1c&H%s}RTX VSR{\\1c&HFFFFFF}", main_color)
+        return string.format("{\\fs13\\1c&H%s}RTX{\\1c&HFFFFFF}", main_color)
     end
     ne.eventresponder["mbtn_left_up"] =
-        function () mp.commandv("script-message-to", "vsr", "toggle-vsr") end
-
-    --tog_hdr
-    ne = new_element("tog_hdr", "button")
-    ne.visible = (osc_param.playresx >= 760)
-    ne.tooltip_style = osc_styles.tooltip
-    ne.tooltipF = function ()
-        local enabled = mp.get_property_bool("user-data/rtx/hdr-enabled", false)
-        local active = mp.get_property_bool("user-data/rtx/hdr-active", false)
-        local supported = mp.get_property_bool("user-data/rtx/hdr-supported", false)
-        if enabled and not supported then
-            return "RTX HDR: OFF (source HDR)"
-        end
-        return string.format("RTX HDR: %s", active and "ON" or "OFF")
-    end
-    ne.content = function ()
-        local enabled = mp.get_property_bool("user-data/rtx/hdr-enabled", false)
-        local main_color = enabled and "00FF00" or "808080"
-
-        return string.format("{\\fs11\\1c&H%s}RTX HDR{\\1c&HFFFFFF}", main_color)
-    end
-    ne.eventresponder["mbtn_left_up"] =
-        function () mp.commandv("script-message-to", "vsr", "toggle-hdr") end
+        function () mp.commandv("script-message-to", "vsr", "toggle-rtx") end
 
     --tog_norm
     ne = new_element("tog_norm", "button")
@@ -1832,17 +1806,10 @@ function osc_init()
                 end
             end
         end
-    -- Keep mouse wheel behavior consistent: always adjust volume, never seek.
     ne.eventresponder["wheel_up_press"] =
-        function ()
-            mp.commandv("set", "mute", "no")
-            mp.commandv("osd-msg", "add", "volume", 5)
-        end
+        function () mp.commandv("seek", 5, "relative-percent", "exact") end
     ne.eventresponder["wheel_down_press"] =
-        function ()
-            mp.commandv("set", "mute", "no")
-            mp.commandv("osd-msg", "add", "volume", -5)
-        end
+        function () mp.commandv("seek", -5, "relative-percent", "exact") end
     ne.eventresponder["reset"] =
         function (element) element.state.lastseek = nil end
 
@@ -2278,15 +2245,6 @@ local function element_has_action(element, action)
 end
 
 function process_event(source, what)
-    -- Global mouse-wheel behavior: always control volume, regardless of cursor
-    -- position over the OSC (buttons, seekbar, background, etc.).
-    if what == "press" and (source == "wheel_up" or source == "wheel_down") then
-        mp.commandv("set", "mute", "no")
-        mp.commandv("osd-msg", "add", "volume", source == "wheel_up" and 5 or -5)
-        request_tick()
-        return
-    end
-
     local action = string.format("%s%s", source,
         what and ("_" .. what) or "")
 
