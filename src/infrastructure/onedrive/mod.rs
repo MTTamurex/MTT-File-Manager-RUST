@@ -29,6 +29,11 @@ const MAX_CONCURRENT_TIMEOUT_THREADS: u64 = 32;
 // Cloud filter driver I/O for OneDrive cloud-only files can block 30-60s.
 const STALL_THRESHOLD_SECS: u64 = 10;
 
+// When this many stall events have been recorded, stop spawning overflow workers
+// and reject new jobs that would require overflow. This prevents escalation when
+// the cloud filter driver is congested (common cause of system-wide freezes).
+const STALL_OVERFLOW_CUTOFF: usize = 4;
+
 // Counter of active timeout threads for monitoring and limiting
 static ACTIVE_TIMEOUT_THREADS: AtomicU64 = AtomicU64::new(0);
 
@@ -85,9 +90,18 @@ impl OneDriveIoPool {
                             let elapsed = job_start.elapsed();
                             active_workers_clone.fetch_sub(1, Ordering::SeqCst);
                             if elapsed.as_secs() >= STALL_THRESHOLD_SECS {
+                                STALLED_IO_WORKERS.fetch_add(1, Ordering::SeqCst);
                                 log::warn!(
                                     "[ONEDRIVE IO-POOL] Base worker {} job took {:.1}s (stall threshold: {}s)",
                                     worker_id, elapsed.as_secs_f64(), STALL_THRESHOLD_SECS
+                                );
+                            } else {
+                                // Successful fast completion: decay the stall counter so the
+                                // pool can recover after a transient congestion episode.
+                                let _ = STALLED_IO_WORKERS.fetch_update(
+                                    Ordering::AcqRel,
+                                    Ordering::Acquire,
+                                    |v| if v > 0 { Some(v - 1) } else { None },
                                 );
                             }
                         }
@@ -109,9 +123,21 @@ impl OneDriveIoPool {
     where
         F: FnOnce() + Send + 'static,
     {
+        // RATE LIMITING: When too many stall events have accumulated,
+        // the cloud filter driver is likely congested. Reject overflow
+        // requests to avoid piling more threads into the blocked driver.
+        let stalled = STALLED_IO_WORKERS.load(Ordering::Acquire);
+
         let queued = match self.sender.try_send(Box::new(job)) {
             Ok(()) => true,
             Err(mpsc::TrySendError::Full(job)) => {
+                if stalled >= STALL_OVERFLOW_CUTOFF {
+                    log::warn!(
+                        "[ONEDRIVE IO-POOL] Rejecting overflow job: {} stall events (cutoff: {})",
+                        stalled, STALL_OVERFLOW_CUTOFF
+                    );
+                    return false;
+                }
                 // Queue is full while workers are likely blocked.
                 // Run job directly on an overflow worker to keep progress.
                 return self.try_spawn_overflow_worker_with_job(job);
@@ -122,7 +148,7 @@ impl OneDriveIoPool {
         if queued {
             let base_saturated =
                 self.active_workers.load(Ordering::Acquire) >= ONEDRIVE_IO_BASE_WORKERS;
-            if base_saturated {
+            if base_saturated && stalled < STALL_OVERFLOW_CUTOFF {
                 let _ = self.try_spawn_overflow_worker();
             }
         }
