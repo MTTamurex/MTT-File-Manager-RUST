@@ -3,6 +3,10 @@ local mp = require 'mp'
 -- Configuration
 local autovsr_enabled = false -- Default to VSR disabled
 local autohdr_enabled = false -- Default to HDR disabled (controlled by shared RTX toggle)
+local VSR_MAX_LONG_SIDE = 2560
+local VSR_MAX_SHORT_SIDE = 1440
+local VSR_MAX_SCALE_FHD_OR_LESS = 2.0
+local VSR_MAX_SCALE_ABOVE_FHD = 1.5
 
 local state = {
     applying_filters = false,
@@ -21,6 +25,31 @@ end
 local function is_hdr_source()
     local gamma = (mp.get_property("video-params/gamma", "") or ""):lower()
     return gamma == "pq" or gamma == "hlg"
+end
+
+local function is_vsr_resolution_supported(video_width, video_height)
+    if not (video_width and video_height) then
+        return false
+    end
+
+    local long_side = math.max(video_width, video_height)
+    local short_side = math.min(video_width, video_height)
+    return long_side <= VSR_MAX_LONG_SIDE and short_side <= VSR_MAX_SHORT_SIDE
+end
+
+local function compute_vsr_scale(video_width, video_height, target_width, target_height)
+    if not (video_width and video_height and target_width and target_height) then
+        return nil
+    end
+
+    local upscale = math.max(target_width / video_width, target_height / video_height)
+    local base_scale = math.max(upscale, 1.0)
+
+    local long_side = math.max(video_width, video_height)
+    local perf_cap = (long_side > 1920) and VSR_MAX_SCALE_ABOVE_FHD or VSR_MAX_SCALE_FHD_OR_LESS
+    local clamped = math.min(base_scale, perf_cap)
+
+    return math.floor(clamped * 10 + 0.5) / 10
 end
 
 local function remove_managed_filters()
@@ -46,15 +75,6 @@ local function apply_filters()
     local pixelformat = mp.get_property("video-params/pixelformat", "")
 
     local want_hdr = autohdr_enabled and not is_hdr_source()
-    local want_vsr = autovsr_enabled
-
-    if not want_hdr and not want_vsr then
-        state.applying_filters = true
-        remove_managed_filters()
-        state.applying_filters = false
-        publish_state(false, false, false)
-        return false, "disabled"
-    end
 
     local raw_w = (osd_width and osd_width > 0) and osd_width or display_width
     local raw_h = (osd_height and osd_height > 0) and osd_height or display_height
@@ -67,14 +87,24 @@ local function apply_filters()
         return false, "missing-properties"
     end
 
-    local scale = math.max(target_width / video_width, target_height / video_height)
-    scale = math.floor(scale * 10) / 10
+    local vsr_scale = nil
+    if autovsr_enabled and is_vsr_resolution_supported(video_width, video_height) then
+        vsr_scale = compute_vsr_scale(video_width, video_height, target_width, target_height)
+    end
+    local want_vsr = vsr_scale ~= nil
+
+    if not want_hdr and not want_vsr then
+        state.applying_filters = true
+        remove_managed_filters()
+        state.applying_filters = false
+        publish_state(false, false, false)
+        return false, "disabled"
+    end
 
     local filter_parts = {}
     local need_nv12 = false
 
     if want_vsr then
-        local vsr_scale = math.max(scale, 2.0)
         table.insert(filter_parts, "scaling-mode=nvidia")
         table.insert(filter_parts, "scale=" .. vsr_scale)
 
@@ -123,9 +153,24 @@ local function toggle_rtx()
     autohdr_enabled = next_enabled
     publish_state(false, false, false)
 
-    local applied = apply_filters()
+    apply_filters()
     if next_enabled then
-        mp.osd_message(applied and "RTX HDR: ON | RTX VSR: ON" or "RTX HDR: ON | RTX VSR: ON (not active)", 2)
+        local hdr_active = mp.get_property_bool("user-data/rtx/hdr-active", false)
+        local vsr_active = mp.get_property_bool("user-data/rtx/vsr-active", false)
+        local video_width = mp.get_property_number("width")
+        local video_height = mp.get_property_number("height")
+        local blocked_suffix = ""
+
+        if autovsr_enabled and not is_vsr_resolution_supported(video_width, video_height) then
+            blocked_suffix = " (max 1440p)"
+        end
+
+        mp.osd_message(string.format(
+            "RTX HDR: %s | RTX VSR: %s%s",
+            hdr_active and "ON" or "OFF",
+            vsr_active and "ON" or "OFF",
+            blocked_suffix
+        ), 2)
     else
         mp.osd_message("RTX HDR: OFF | RTX VSR: OFF", 2)
     end
