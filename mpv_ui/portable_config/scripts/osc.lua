@@ -1651,13 +1651,8 @@ function osc_init()
     ne.visible = (osc_param.playresx >= 576)
     ne.tooltip_style = osc_styles.tooltip
     ne.tooltipF = function ()
-        local enabled = mp.get_property_bool("user-data/rtx/enabled", false)
-        local hdr_on = mp.get_property_bool("user-data/rtx/hdr-active", false)
         local vsr_on = mp.get_property_bool("user-data/rtx/vsr-active", false)
-        if not enabled then
-            return "RTX HDR: OFF | RTX VSR: OFF"
-        end
-        return string.format("RTX HDR: %s | RTX VSR: %s", hdr_on and "ON" or "OFF", vsr_on and "ON" or "OFF")
+        return "RTX VSR: " .. (vsr_on and "ON" or "OFF")
     end
     ne.content = function ()
         local enabled = mp.get_property_bool("user-data/rtx/enabled", false)
