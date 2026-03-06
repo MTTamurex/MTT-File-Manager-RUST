@@ -9,6 +9,20 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+/// Maximum number of concurrent GIF decode workers.
+/// Prevents unbounded thread creation when many GIFs are visible simultaneously.
+const GIF_DECODE_WORKERS: usize = 3;
+
+/// Job sent to a GIF decode worker thread.
+struct GifDecodeJob {
+    path: PathBuf,
+    data: Arc<Mutex<GifData>>,
+    generation: usize,
+    global_gen: Arc<AtomicUsize>,
+    ui_ctx: egui::Context,
+    running_total: Arc<AtomicUsize>,
+}
+
 /// A single decoded frame of a GIF
 #[derive(Clone)]
 pub struct DecodedFrame {
@@ -49,10 +63,36 @@ pub struct GifManager {
     /// PERFORMANCE: Running total of memory usage across all cached GIFs.
     /// Updated atomically when frames are added/removed, avoiding O(N) iteration.
     running_total_bytes: Arc<AtomicUsize>,
+    /// Bounded channel sender for GIF decode jobs.
+    /// Workers are spawned once in `new()` and loop on the receiver.
+    job_sender: crossbeam_channel::Sender<GifDecodeJob>,
 }
 
 impl GifManager {
     pub fn new(ui_ctx: egui::Context) -> Self {
+        let (job_sender, job_receiver) = crossbeam_channel::bounded::<GifDecodeJob>(16);
+
+        // Spawn fixed pool of decode workers
+        for worker_id in 0..GIF_DECODE_WORKERS {
+            let rx = job_receiver.clone();
+            let _ = std::thread::Builder::new()
+                .name(format!("gif-decode-{}", worker_id))
+                .spawn(move || {
+                    while let Ok(job) = rx.recv() {
+                        if let Err(e) = Self::decode_worker(
+                            job.path,
+                            job.data,
+                            job.generation,
+                            job.global_gen,
+                            job.ui_ctx,
+                            job.running_total,
+                        ) {
+                            log::error!("GifWorker-{}: {}", worker_id, e);
+                        }
+                    }
+                });
+        }
+
         Self {
             // Increase cache slots but use memory-based eviction logic
             cache: LruCache::new(NonZeroUsize::new(100).expect("gif cache size must be non-zero")),
@@ -60,6 +100,7 @@ impl GifManager {
             ui_ctx,
             max_memory_bytes: 150 * 1024 * 1024, // 150 MB
             running_total_bytes: Arc::new(AtomicUsize::new(0)),
+            job_sender,
         }
     }
 
@@ -87,17 +128,15 @@ impl GifManager {
         let ui_ctx = self.ui_ctx.clone();
         let running_total = self.running_total_bytes.clone();
 
-        thread::spawn(move || {
-            if let Err(e) = Self::decode_worker(
-                path_buf,
-                data_clone,
-                generation,
-                current_gen,
-                ui_ctx,
-                running_total,
-            ) {
-                log::error!("GifWorker: {}", e);
-            }
+        // Send to bounded worker pool instead of spawning unbounded threads.
+        // If the pool is full, the oldest pending job is implicitly throttled.
+        let _ = self.job_sender.try_send(GifDecodeJob {
+            path: path_buf,
+            data: data_clone,
+            generation,
+            global_gen: current_gen,
+            ui_ctx,
+            running_total,
         });
 
         data
