@@ -14,7 +14,7 @@ use std::process::{Child, Command};
 /// - scalewindowed/scalefullscreen: OSC element sizing (1.0 = default)
 /// - windowcontrols=yes: always show close/minimize/maximize in OSC
 const STANDALONE_OSC_SCRIPT_OPTS: &str =
-    "osc-scalewindowed=1,osc-scalefullscreen=1,osc-windowcontrols=yes";
+    "osc-scalewindowed=2,osc-scalefullscreen=2,osc-windowcontrols=yes";
 
 /// Spawn a standalone video player process for the given file.
 ///
@@ -188,9 +188,10 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
     // Window title (shown in taskbar for borderless window)
     let _ = mpv.set_property("title", format!("Video Player — {}", title_name).as_str());
 
-    // Initial window size
-    let _ = mpv.set_property("geometry", "960x540");
+    // Initial window size — use percentage to respect display scaling on HiDPI screens
+    let _ = mpv.set_property("autofit", "55%x55%");
     let _ = mpv.set_property("autofit-larger", "90%x90%");
+    let _ = mpv.set_property("hidpi-window-scale", true);
 
     // Load and play the file
     let path_str = mpv_path_string(&path);

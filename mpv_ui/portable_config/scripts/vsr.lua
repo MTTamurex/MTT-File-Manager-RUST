@@ -2,7 +2,7 @@ local mp = require 'mp'
 
 -- Configuration
 local autovsr_enabled = false -- Default to VSR disabled
-local autohdr_enabled = false -- Default to HDR disabled (controlled by shared RTX toggle)
+local autohdr_enabled = false -- Default to HDR disabled
 
 local state = {
     applying_filters = false,
@@ -24,8 +24,20 @@ local function is_hdr_source()
 end
 
 local function remove_managed_filters()
-    mp.commandv("vf", "remove", "@format-nv12")
-    mp.commandv("vf", "remove", "@rtx-video")
+    pcall(mp.commandv, "vf", "remove", "@format-nv12")
+    pcall(mp.commandv, "vf", "remove", "@rtx-video")
+end
+
+-- HDR uses mpv's native inverse-tone-mapping (NOT nvidia-true-hdr d3d11vpp).
+-- nvidia-true-hdr via d3d11vpp is incompatible with mpv's rendering pipeline:
+-- mpv always post-processes frames with its own color management shaders after
+-- the vf filter chain, causing double conversion (blown whites or dim output).
+-- mpv's inverse-tone-mapping works correctly within its own pipeline.
+local function apply_hdr_state()
+    local want_hdr = autohdr_enabled and not is_hdr_source()
+    mp.set_property("inverse-tone-mapping", want_hdr and "yes" or "no")
+    mp.set_property("target-colorspace-hint", want_hdr and "yes" or "no")
+    mp.set_property("target-peak", want_hdr and "1000" or "auto")
 end
 
 local function apply_filters()
@@ -33,27 +45,29 @@ local function apply_filters()
         return false, "busy"
     end
 
+    -- HDR is always managed via mpv properties (no d3d11vpp filter needed)
+    apply_hdr_state()
+    local hdr_active = autohdr_enabled and not is_hdr_source()
+
     local video_width = mp.get_property_number("width")
     local video_height = mp.get_property_number("height")
     local display_width = mp.get_property_number("display-width")
     local display_height = mp.get_property_number("display-height")
     local osd_width = mp.get_property_number("osd-width")
     local osd_height = mp.get_property_number("osd-height")
-    -- Account for Windows DPI scaling: osd-*/display-* are logical pixels,
-    -- multiply by hidpi scale to get physical pixels (e.g. 4K @ 225% = 1707 -> 3840)
     local hidpi = mp.get_property_number("display-hidpi-scale", 1.0)
     local codec = mp.get_property("video-codec", "")
     local pixelformat = mp.get_property("video-params/pixelformat", "")
 
-    local want_hdr = autohdr_enabled and not is_hdr_source()
     local want_vsr = autovsr_enabled
 
-    if not want_hdr and not want_vsr then
+    -- VSR needs d3d11vpp filter; HDR does not
+    if not want_vsr then
         state.applying_filters = true
         remove_managed_filters()
         state.applying_filters = false
-        publish_state(false, false, false)
-        return false, "disabled"
+        publish_state(hdr_active, hdr_active, false)
+        return hdr_active, hdr_active and "hdr-only" or "disabled"
     end
 
     local raw_w = (osd_width and osd_width > 0) and osd_width or display_width
@@ -63,7 +77,7 @@ local function apply_filters()
 
     if not (video_width and video_height and target_width and target_height and codec and pixelformat) then
         mp.osd_message("RTX: Missing video properties, retrying...", 1)
-        publish_state(false, false, false)
+        publish_state(hdr_active, hdr_active, false)
         return false, "missing-properties"
     end
 
@@ -73,20 +87,14 @@ local function apply_filters()
     local filter_parts = {}
     local need_nv12 = false
 
-    if want_vsr then
-        local vsr_scale = math.max(scale, 2.0)
-        table.insert(filter_parts, "scaling-mode=nvidia")
-        table.insert(filter_parts, "scale=" .. vsr_scale)
+    local vsr_scale = math.max(scale, 2.0)
+    table.insert(filter_parts, "scaling-mode=nvidia")
+    table.insert(filter_parts, "scale=" .. vsr_scale)
 
-        if codec:lower():match("hevc") or codec:lower():match("h%.265") then
-            if pixelformat:match("p10le$") or pixelformat == "p010" then
-                need_nv12 = true
-            end
+    if codec:lower():match("hevc") or codec:lower():match("h%.265") then
+        if pixelformat:match("p10le$") or pixelformat == "p010" then
+            need_nv12 = true
         end
-    end
-
-    if want_hdr then
-        table.insert(filter_parts, "nvidia-true-hdr")
     end
 
     state.applying_filters = true
@@ -102,18 +110,18 @@ local function apply_filters()
 
     if not ok then
         mp.msg.warn("RTX filter append failed: " .. tostring(err))
-        publish_state(false, false, false)
+        publish_state(hdr_active, hdr_active, false)
         return false, "append-failed"
     end
 
     local vf_chain = mp.get_property("vf", "")
     if vf_chain:find("@rtx%-video") then
-        publish_state(true, want_hdr, want_vsr)
+        publish_state(true, hdr_active, true)
         return true, "applied"
     end
 
     mp.msg.warn("RTX filter not in filter chain after append")
-    publish_state(false, false, false)
+    publish_state(hdr_active, hdr_active, false)
     return false, "not-in-chain"
 end
 
@@ -123,11 +131,12 @@ local function toggle_rtx()
     autohdr_enabled = next_enabled
     publish_state(false, false, false)
 
-    local applied = apply_filters()
+    apply_filters()
+    local vsr_on = mp.get_property_bool("user-data/rtx/vsr-active", false)
     if next_enabled then
-        mp.osd_message(applied and "RTX HDR: ON | RTX VSR: ON" or "RTX HDR: ON | RTX VSR: ON (not active)", 2)
+        mp.osd_message(string.format("RTX VSR: %s", vsr_on and "ON" or "OFF"), 2)
     else
-        mp.osd_message("RTX HDR: OFF | RTX VSR: OFF", 2)
+        mp.osd_message("RTX VSR: OFF", 2)
     end
 end
 
