@@ -1651,19 +1651,22 @@ function osc_init()
     ne.visible = (osc_param.playresx >= 576)
     ne.tooltip_style = osc_styles.tooltip
     ne.tooltipF = function ()
-        local on = mp.get_property_bool("user-data/vsr/vsr-enabled", true)
-        return "RTX VSR: " .. (on and "ON" or "OFF")
+        local enabled = mp.get_property_bool("user-data/rtx/enabled", false)
+        local hdr_on = mp.get_property_bool("user-data/rtx/hdr-active", false)
+        local vsr_on = mp.get_property_bool("user-data/rtx/vsr-active", false)
+        if not enabled then
+            return "RTX HDR: OFF | RTX VSR: OFF"
+        end
+        return string.format("RTX HDR: %s | RTX VSR: %s", hdr_on and "ON" or "OFF", vsr_on and "ON" or "OFF")
     end
     ne.content = function ()
-        local on = mp.get_property_bool("user-data/vsr/vsr-enabled", true)
-        if on then
-            return "{\\fs14\\1c&H00FF00}VSR{\\1c&HFFFFFF}"
-        else
-            return "{\\fs14\\1c&H808080}VSR{\\1c&HFFFFFF}"
-        end
+        local enabled = mp.get_property_bool("user-data/rtx/enabled", false)
+        local main_color = enabled and "00FF00" or "808080"
+
+        return string.format("{\\fs13\\1c&H%s}RTX{\\1c&HFFFFFF}", main_color)
     end
     ne.eventresponder["mbtn_left_up"] =
-        function () mp.commandv("script-message-to", "vsr", "toggle-vsr") end
+        function () mp.commandv("script-message-to", "vsr", "toggle-rtx") end
 
     --tog_norm
     ne = new_element("tog_norm", "button")
