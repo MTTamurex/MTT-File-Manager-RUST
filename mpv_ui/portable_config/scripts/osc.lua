@@ -1806,10 +1806,17 @@ function osc_init()
                 end
             end
         end
+    -- Keep mouse wheel behavior consistent: always adjust volume, never seek.
     ne.eventresponder["wheel_up_press"] =
-        function () mp.commandv("seek", 5, "relative-percent", "exact") end
+        function ()
+            mp.commandv("set", "mute", "no")
+            mp.commandv("osd-msg", "add", "volume", 5)
+        end
     ne.eventresponder["wheel_down_press"] =
-        function () mp.commandv("seek", -5, "relative-percent", "exact") end
+        function ()
+            mp.commandv("set", "mute", "no")
+            mp.commandv("osd-msg", "add", "volume", -5)
+        end
     ne.eventresponder["reset"] =
         function (element) element.state.lastseek = nil end
 
@@ -2245,6 +2252,15 @@ local function element_has_action(element, action)
 end
 
 function process_event(source, what)
+    -- Global mouse-wheel behavior: always control volume, regardless of cursor
+    -- position over the OSC (buttons, seekbar, background, etc.).
+    if what == "press" and (source == "wheel_up" or source == "wheel_down") then
+        mp.commandv("set", "mute", "no")
+        mp.commandv("osd-msg", "add", "volume", source == "wheel_up" and 5 or -5)
+        request_tick()
+        return
+    end
+
     local action = string.format("%s%s", source,
         what and ("_" .. what) or "")
 
