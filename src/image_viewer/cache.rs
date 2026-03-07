@@ -111,6 +111,7 @@ pub struct PrefetchEngine {
     jobs_tx: Sender<LoadJob>,
     bg_jobs_tx: Sender<LoadJob>,
     urgent_job: Arc<std::sync::Mutex<Option<LoadJob>>>,
+    urgent_notify_tx: Sender<()>,
     results_rx: Receiver<LoadOutput>,
     active_center: Arc<AtomicUsize>,
     repaint_ctx: Arc<OnceLock<egui::Context>>,
@@ -124,8 +125,9 @@ impl PrefetchEngine {
         let window_size = skip_radius * 2 + 1;
         let (jobs_tx, jobs_rx) = crossbeam_channel::bounded::<LoadJob>(window_size);
         let (bg_jobs_tx, bg_jobs_rx) = crossbeam_channel::bounded::<LoadJob>(window_size);
-        let (results_tx, results_rx) = crossbeam_channel::unbounded::<LoadOutput>();
+        let (results_tx, results_rx) = crossbeam_channel::bounded::<LoadOutput>(window_size * 4);
         let urgent_job = Arc::new(std::sync::Mutex::new(None));
+        let (urgent_notify_tx, urgent_notify_rx) = crossbeam_channel::bounded::<()>(1);
         let active_center = Arc::new(AtomicUsize::new(0));
         let repaint_ctx = Arc::new(OnceLock::<egui::Context>::new());
 
@@ -133,6 +135,7 @@ impl PrefetchEngine {
             let jobs_rx = jobs_rx.clone();
             let bg_jobs_rx = bg_jobs_rx.clone();
             let urgent_job = Arc::clone(&urgent_job);
+            let urgent_notify_rx = urgent_notify_rx.clone();
             let results_tx = results_tx.clone();
             let active_center = Arc::clone(&active_center);
             let repaint_ctx = Arc::clone(&repaint_ctx);
@@ -140,39 +143,38 @@ impl PrefetchEngine {
                 .name(format!("image-viewer-loader-{}", worker_id))
                 .spawn(move || {
                     loop {
-                        let job = if let Ok(mut slot) = urgent_job.lock() {
-                            if let Some(job) = slot.take() {
-                                job
-                            } else {
-                                match jobs_rx.try_recv() {
-                                    Ok(job) => job,
-                                    Err(crossbeam_channel::TryRecvError::Disconnected) => break,
-                                    Err(crossbeam_channel::TryRecvError::Empty) => {
-                                        crossbeam_channel::select! {
-                                            recv(jobs_rx) -> recv_res => match recv_res {
-                                                Ok(job) => job,
-                                                Err(_) => break,
-                                            },
-                                            recv(bg_jobs_rx) -> recv_res => match recv_res {
-                                                Ok(job) => job,
-                                                Err(_) => break,
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                        // Phase 1: Check urgent job (brief lock, released immediately).
+                        // CRITICAL: The mutex must NOT be held during the blocking
+                        // select! below — otherwise the UI thread deadlocks when
+                        // trying to post a new urgent job while a worker blocks
+                        // on empty channels.
+                        let urgent = urgent_job
+                            .lock()
+                            .ok()
+                            .and_then(|mut slot| slot.take());
+
+                        let job = if let Some(job) = urgent {
+                            Some(job)
                         } else {
+                            // Phase 2: Try non-blocking read from high-priority channel.
                             match jobs_rx.try_recv() {
-                                Ok(job) => job,
+                                Ok(job) => Some(job),
                                 Err(crossbeam_channel::TryRecvError::Disconnected) => break,
                                 Err(crossbeam_channel::TryRecvError::Empty) => {
+                                    // Phase 3: Block on channels (mutex NOT held!).
+                                    // Includes urgent_notify so workers wake up
+                                    // immediately when a new urgent job is posted.
                                     crossbeam_channel::select! {
+                                        recv(urgent_notify_rx) -> _ => {
+                                            // Urgent wake signal — re-check at top of loop.
+                                            None
+                                        },
                                         recv(jobs_rx) -> recv_res => match recv_res {
-                                            Ok(job) => job,
+                                            Ok(job) => Some(job),
                                             Err(_) => break,
                                         },
                                         recv(bg_jobs_rx) -> recv_res => match recv_res {
-                                            Ok(job) => job,
+                                            Ok(job) => Some(job),
                                             Err(_) => break,
                                         }
                                     }
@@ -180,12 +182,17 @@ impl PrefetchEngine {
                             }
                         };
 
+                        let Some(job) = job else {
+                            // Woke from urgent_notify — loop back to check mutex.
+                            continue;
+                        };
+
                         // Skip jobs for images too far from the current view.
                         let center = active_center.load(Ordering::Relaxed);
                         if job.index.abs_diff(center) > skip_radius + 2 {
                             // Notify the UI that this job was skipped so it can
                             // clear the entry from requested_jobs and retry later.
-                            let _ = results_tx.send(LoadOutput {
+                            let _ = results_tx.try_send(LoadOutput {
                                 index: job.index,
                                 frame: Err(io::Error::new(
                                     io::ErrorKind::Interrupted,
@@ -215,7 +222,7 @@ impl PrefetchEngine {
                             continue;
                         }
 
-                        let _ = results_tx.send(LoadOutput {
+                        let _ = results_tx.try_send(LoadOutput {
                             index: job.index,
                             frame,
                         });
@@ -238,6 +245,7 @@ impl PrefetchEngine {
             jobs_tx,
             bg_jobs_tx,
             urgent_job,
+            urgent_notify_tx,
             results_rx,
             active_center,
             repaint_ctx,
@@ -271,6 +279,9 @@ impl PrefetchEngine {
             LoadPriority::Urgent => {
                 if let Ok(mut slot) = self.urgent_job.lock() {
                     slot.replace(job);
+                    // Wake a worker blocked in select! so it picks up the
+                    // urgent job without waiting for a channel message.
+                    let _ = self.urgent_notify_tx.try_send(());
                     true
                 } else {
                     false

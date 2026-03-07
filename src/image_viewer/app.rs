@@ -1,5 +1,5 @@
 use crate::image_viewer::cache::{LoadPriority, PrefetchEngine, WindowCache};
-use crate::image_viewer::indexer::ImageSequence;
+use crate::image_viewer::indexer::{self, ImageSequence};
 use crate::image_viewer::loader;
 use eframe::egui;
 use eframe::egui::scroll_area::ScrollBarVisibility;
@@ -10,6 +10,10 @@ use std::time::Duration;
 const DEFAULT_CACHE_RADIUS: usize = 6;
 const MIN_ZOOM_FACTOR: f32 = 0.10;
 const MAX_ZOOM_FACTOR: f32 = 8.0;
+/// Minimum interval between navigation actions to prevent flooding workers
+/// during rapid key-repeat. 20 ms ≈ 50 navigations/sec — fast enough to feel
+/// responsive but slow enough for workers to keep up.
+const MIN_NAVIGATE_INTERVAL: Duration = Duration::from_millis(20);
 
 /// Holds pre-uploaded textures for each frame of an animated GIF along with
 /// display timing information.
@@ -23,8 +27,10 @@ struct GifAnimation {
 pub struct DedicatedImageViewerApp {
     sequence: ImageSequence,
     current_index: usize,
+    worker_count: usize,
     cache: WindowCache,
     prefetch: PrefetchEngine,
+    external_open_rx: std::sync::mpsc::Receiver<std::path::PathBuf>,
     requested_jobs: HashSet<usize>,
     texture_serial: u64,
     texture: Option<egui::TextureHandle>,
@@ -43,37 +49,30 @@ pub struct DedicatedImageViewerApp {
         usize,
         std::sync::mpsc::Receiver<Result<Vec<loader::GifAnimationFrame>, String>>,
     )>,
+    /// Timestamp of the last navigation action (for key-repeat throttling).
+    last_navigate_instant: std::time::Instant,
 }
 
 impl DedicatedImageViewerApp {
-    pub fn new(sequence: ImageSequence) -> Self {
+    pub fn new(
+        sequence: ImageSequence,
+        external_open_rx: std::sync::mpsc::Receiver<std::path::PathBuf>,
+    ) -> Self {
         let worker_count = std::thread::available_parallelism()
             .map(|v| v.get())
             .unwrap_or(2)
             .clamp(1, 4);
 
         let start_index = sequence.current_index.min(sequence.entries.len().saturating_sub(1));
-
-        // Sync-load the first image so the viewer opens instantly with content
-        // instead of a spinner (matches viewskater approach).
-        let mut cache = WindowCache::new(DEFAULT_CACHE_RADIUS);
-        if let Some(path) = sequence.entries.get(start_index) {
-            match loader::decode_full_frame_with_priority(path, loader::DecodePriority::Interactive)
-            {
-                Ok(frame) => {
-                    cache.put(start_index, Arc::new(frame));
-                }
-                Err(e) => {
-                    log::warn!("[IMAGE-VIEWER] failed to sync-load first image: {}", e);
-                }
-            }
-        }
+        let cache = Self::build_initial_cache(&sequence, start_index);
 
         let app = Self {
             current_index: start_index,
             sequence,
+            worker_count,
             cache,
             prefetch: PrefetchEngine::new(worker_count, DEFAULT_CACHE_RADIUS),
+            external_open_rx,
             requested_jobs: HashSet::new(),
             texture_serial: 0,
             texture: None,
@@ -85,10 +84,85 @@ impl DedicatedImageViewerApp {
             gif_animation: None,
             gif_loaded_index: None,
             gif_decode_rx: None,
+            last_navigate_instant: std::time::Instant::now(),
         };
 
         app.prefetch.set_center(start_index);
         app
+    }
+
+    fn build_initial_cache(sequence: &ImageSequence, index: usize) -> WindowCache {
+        let mut cache = WindowCache::new(DEFAULT_CACHE_RADIUS);
+        if let Some(path) = sequence.entries.get(index) {
+            match loader::decode_full_frame_with_priority(path, loader::DecodePriority::Interactive)
+            {
+                Ok(frame) => {
+                    cache.put(index, Arc::new(frame));
+                }
+                Err(err) => {
+                    log::warn!("[IMAGE-VIEWER] failed to sync-load image: {}", err);
+                }
+            }
+        }
+        cache
+    }
+
+    fn open_requested_path(&mut self, path: std::path::PathBuf, ctx: &egui::Context) {
+        let sequence = match indexer::build_sequence(&path) {
+            Ok(sequence) => sequence,
+            Err(err) => {
+                log::warn!(
+                    "[IMAGE-VIEWER] failed to build sequence for '{}': {}",
+                    path.display(),
+                    err
+                );
+                ImageSequence::single(path.clone())
+            }
+        };
+
+        let start_index = sequence.current_index.min(sequence.entries.len().saturating_sub(1));
+        let cache = Self::build_initial_cache(&sequence, start_index);
+
+        self.sequence = sequence;
+        self.current_index = start_index;
+        self.cache = cache;
+        self.prefetch = PrefetchEngine::new(self.worker_count, DEFAULT_CACHE_RADIUS);
+        if self.repaint_ctx_set {
+            self.prefetch.set_repaint_ctx(ctx.clone());
+        }
+        self.prefetch.set_center(start_index);
+        self.requested_jobs.clear();
+        self.texture = None;
+        self.last_error = None;
+        self.zoom_factor = 1.0;
+        self.zoom_percent_display = 100.0;
+        self.image_resolution = None;
+        self.gif_animation = None;
+        self.gif_loaded_index = None;
+        self.gif_decode_rx = None;
+        self.last_navigate_instant = std::time::Instant::now();
+
+        self.try_show_cached_current(ctx);
+        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        ctx.request_repaint();
+    }
+
+    fn handle_external_open_requests(&mut self, ctx: &egui::Context) {
+        let mut latest_path = None;
+
+        loop {
+            match self.external_open_rx.try_recv() {
+                Ok(path) => latest_path = Some(path),
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+            }
+        }
+
+        if let Some(path) = latest_path {
+            self.open_requested_path(path, ctx);
+        }
     }
 
     fn current_path(&self) -> Option<&std::path::PathBuf> {
@@ -198,7 +272,7 @@ impl DedicatedImageViewerApp {
     }
 
     fn handle_prefetch_results(&mut self, ctx: &egui::Context) {
-        for output in self.prefetch.drain_results(32) {
+        for output in self.prefetch.drain_results(256) {
             self.requested_jobs.remove(&output.index);
 
             match output.frame {
@@ -353,6 +427,13 @@ impl DedicatedImageViewerApp {
         if self.current_index == index {
             return;
         }
+
+        // Throttle rapid navigations (e.g. holding arrow key) so workers
+        // can keep up with decode requests.
+        if self.last_navigate_instant.elapsed() < MIN_NAVIGATE_INTERVAL {
+            return;
+        }
+        self.last_navigate_instant = std::time::Instant::now();
 
         let old_index = self.current_index;
         self.current_index = index;
@@ -628,6 +709,7 @@ impl eframe::App for DedicatedImageViewerApp {
             self.repaint_ctx_set = true;
         }
 
+        self.handle_external_open_requests(ctx);
         self.handle_shortcuts(ctx);
         self.sync_window_title(ctx);
 
@@ -645,10 +727,15 @@ impl eframe::App for DedicatedImageViewerApp {
             self.try_show_cached_current(ctx);
         }
 
-        // Fill any gaps in the cache window during idle frames.
-        // This is NOT called during navigate_to (which only requests the tail).
-        // Matches viewskater: neighbors are loaded asynchronously after render.
-        self.schedule_window_requests();
+        // Fill any gaps in the cache window only when the user is not rapidly
+        // navigating. During rapid navigation navigate_to() already requests
+        // the urgent current image + the new tail; flooding workers with the
+        // full window would waste time decoding images we'll skip past.
+        let navigating_fast =
+            self.last_navigate_instant.elapsed() < Duration::from_millis(80);
+        if !navigating_fast {
+            self.schedule_window_requests();
+        }
 
         // Decode and upload all GIF frames (once per image), then advance timer.
         self.load_gif_if_needed(ctx);
