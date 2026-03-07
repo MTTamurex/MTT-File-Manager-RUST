@@ -14,17 +14,14 @@ local function apply_filters()
     local display_height = mp.get_property_number("display-height")
     local osd_width = mp.get_property_number("osd-width")
     local osd_height = mp.get_property_number("osd-height")
-    -- Account for Windows DPI scaling: osd-*/display-* are logical pixels,
-    -- multiply by hidpi scale to get physical pixels (e.g. 4K @ 225% = 1707 -> 3840)
-    local hidpi = mp.get_property_number("display-hidpi-scale", 1.0)
     local codec = mp.get_property("video-codec", "")
     local pixelformat = mp.get_property("video-params/pixelformat", "")
     local hwdec_cur = mp.get_property("hwdec-current", "")
 
     local raw_w = (osd_width and osd_width > 0) and osd_width or display_width
     local raw_h = (osd_height and osd_height > 0) and osd_height or display_height
-    local target_width = raw_w and math.floor(raw_w * hidpi) or nil
-    local target_height = raw_h and math.floor(raw_h * hidpi) or nil
+    local target_width = raw_w and math.floor(raw_w) or nil
+    local target_height = raw_h and math.floor(raw_h) or nil
 
     if not (video_width and video_height and target_width and target_height and codec and pixelformat) then
         mp.osd_message("RTX: Missing video properties, retrying...", 1)
@@ -45,11 +42,9 @@ local function apply_filters()
         end
     end
 
-    -- Apply VSR if enabled (bypass scale guard: user may play high-res content in a
-    -- small window, but still wants VSR quality enhancement; enforce min scale=2)
     if autovsr_enabled then
-        local vsr_scale = math.max(scale, 2.0)
-        local filter_str = "@rtx-vsr:d3d11vpp=scaling-mode=nvidia:scale=" .. vsr_scale .. ":nvidia-true-hdr" 
+        local vsr_scale = math.max(scale, 1.0)
+        local filter_str = "@rtx-vsr:d3d11vpp=scaling-mode=nvidia:scale=" .. vsr_scale .. ":nvidia-true-hdr"
         local ok, err = pcall(mp.commandv, "vf", "append", filter_str)
         if not ok then
             mp.msg.warn("RTX VSR filter append failed: " .. tostring(err))
