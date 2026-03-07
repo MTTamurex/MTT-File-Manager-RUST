@@ -11,6 +11,41 @@ const REBUILD_PENDING_THRESHOLD: usize = 1200;
 const MAX_EAGER_FOLDER_PREVIEWS: usize = 80;
 
 impl ImageViewerApp {
+    fn hydrate_current_folder_modified_hint_after_load(&mut self) {
+        if self.navigation_state.is_computer_view || self.navigation_state.is_recycle_bin_view {
+            return;
+        }
+
+        if self
+            .current_folder_modified_hint
+            .as_ref()
+            .is_some_and(|(path, modified)| {
+                path == &PathBuf::from(&self.navigation_state.current_path) && *modified > 0
+            })
+        {
+            return;
+        }
+
+        let current_path = PathBuf::from(&self.navigation_state.current_path);
+        let Ok(meta) = std::fs::metadata(&current_path) else {
+            return;
+        };
+        let Ok(modified_time) = meta.modified() else {
+            return;
+        };
+        let Ok(duration) = modified_time.duration_since(std::time::UNIX_EPOCH) else {
+            return;
+        };
+
+        let secs = duration.as_secs();
+        if secs == 0 {
+            return;
+        }
+
+        self.current_folder_modified_hint = Some((current_path.clone(), secs));
+        self.folder_modified_hints.insert(current_path, secs);
+    }
+
     fn build_sorted_items_snapshot(&self) -> Vec<crate::domain::file_entry::FileEntry> {
         let mut result_items = match sorting::filter_items_opt(&self.all_items, &self.search_query)
         {
@@ -117,6 +152,7 @@ impl ImageViewerApp {
         self.file_operation_state.pending_deletions.clear();
         self.pending_items_rebuild = false;
         self.pending_items_count = 0;
+        self.hydrate_current_folder_modified_hint_after_load();
 
         // If the deferred clear was never consumed (e.g., empty folder),
         // apply it now so stale items don't leak into the final snapshot.
