@@ -163,7 +163,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
     // same sequencing as the embedded player (MpvPreview). Setting these in
     // mpv.conf or set_option causes the VO to initialize during mpv_initialize()
     // before the hwdec interop is ready, leaving hwdec-current empty.
-    let _ = mpv.set_property("vo", "gpu");
+    let _ = mpv.set_property("vo", "gpu-next");
     let _ = mpv.set_property("gpu-api", "d3d11");
     let _ = mpv.set_property("gpu-context", "d3d11");
     let _ = mpv.set_property("hwdec", "d3d11va");

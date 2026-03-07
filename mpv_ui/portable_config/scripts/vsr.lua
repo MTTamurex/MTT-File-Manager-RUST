@@ -49,7 +49,7 @@ local function apply_filters()
     -- small window, but still wants VSR quality enhancement; enforce min scale=2)
     if autovsr_enabled then
         local vsr_scale = math.max(scale, 2.0)
-        local filter_str = "@rtx-vsr:d3d11vpp=scaling-mode=nvidia:scale=" .. vsr_scale
+        local filter_str = "@rtx-vsr:d3d11vpp=scaling-mode=nvidia:scale=" .. vsr_scale .. ":nvidia-true-hdr" 
         local ok, err = pcall(mp.commandv, "vf", "append", filter_str)
         if not ok then
             mp.msg.warn("RTX VSR filter append failed: " .. tostring(err))
