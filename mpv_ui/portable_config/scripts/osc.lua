@@ -63,6 +63,12 @@ local language = {
         audio_tracks = "Audio tracks",
         subtitle = "Subtitle",
         subtitles = "Subtitles",
+        open_subtitle = "Open subtitle file",
+        open_subtitle_short = "SUB+",
+        subtitle_loaded = "Subtitle loaded",
+        subtitle_cancelled = "Subtitle selection cancelled",
+        subtitle_open_hint = "Shift+Right click: open subtitle file",
+        subtitle_open_failed = "Subtitle picker failed",
         playlist = "Playlist",
         chapter = "Chapter",
         chapters = "Chapters",
@@ -75,6 +81,12 @@ local language = {
         video = "视频",
         audio = "音频",
         subtitle = "字幕",
+        open_subtitle = "打开字幕文件",
+        open_subtitle_short = "字+",
+        subtitle_loaded = "字幕已加载",
+        subtitle_cancelled = "已取消字幕选择",
+        subtitle_open_hint = "Shift+右键：打开字幕文件",
+        subtitle_open_failed = "字幕选择器失败",
         available = "可选",
         track = "：",
         playlist = "播放列表",
@@ -1006,6 +1018,15 @@ function show_message(text, duration)
     request_tick()
 end
 
+function trim_text(text)
+    if not text then return "" end
+    return (text:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+function open_external_subtitle_file()
+    mp.commandv("script-message", "open-subtitle-picker")
+end
+
 function render_message(ass)
     if state.message_hide_timer and state.message_hide_timer:is_enabled() and
        state.message_text
@@ -1352,6 +1373,10 @@ function layouts()
     lo.geometry = {x = osc_geo.w - 228, y = btnY, an = 5, w = btnW, h = btnH}
     lo.style = osc_styles.button
 
+    lo = add_layout("open_sub")
+    lo.geometry = {x = osc_geo.w - 268, y = btnY, an = 5, w = btnW, h = btnH}
+    lo.style = osc_styles.button
+
     lo = add_layout("tog_norm")
     lo.geometry = {x = osc_geo.w - 188, y = btnY, an = 5, w = btnW, h = btnH}
     lo.style = osc_styles.button
@@ -1552,7 +1577,7 @@ function osc_init()
     --cy_sub
     ne = new_element("cy_sub", "button")
 
-    ne.enabled = (#tracks_osc.sub > 0)
+    ne.enabled = true
     ne.visible = (osc_param.playresx >= 496)
     ne.content = icons.cy_sub
     ne.tooltip_style = osc_styles.tooltip
@@ -1567,7 +1592,7 @@ function osc_init()
                 msg = "[" .. lang .. "]"
             end
         end
-        return texts.subtitle .. ": " .. msg
+        return texts.subtitle .. ": " .. msg .. "\n" .. texts.subtitle_open_hint
     end
     ne.eventresponder["mbtn_left_up"] =
         function () set_track("sub", 1) end
@@ -1575,10 +1600,25 @@ function osc_init()
         function () set_track("sub", -1) end
     ne.eventresponder["shift+mbtn_left_up"] =
         function () show_message(get_tracklist("sub"), 2) end
+    ne.eventresponder["shift+mbtn_right_up"] =
+        function () open_external_subtitle_file() end
     ne.eventresponder["wheel_up_press"] =
         function () set_track("sub", -1) end
     ne.eventresponder["wheel_down_press"] =
         function () set_track("sub", 1) end
+
+    --open_sub
+    ne = new_element("open_sub", "button")
+    ne.visible = (osc_param.playresx >= 616)
+    ne.tooltip_style = osc_styles.tooltip
+    ne.tooltipF = function ()
+        return texts.open_subtitle
+    end
+    ne.content = function ()
+        return "{\\fs10}" .. texts.open_subtitle_short
+    end
+    ne.eventresponder["mbtn_left_up"] =
+        function () open_external_subtitle_file() end
 
     -- volume
     ne = new_element("volume", "button")
