@@ -1232,10 +1232,13 @@ function window_controls()
     lo.geometry =
         { x = titlebox_left + left_pad, y = wc_geo.y, an = 1,
           w = titlebox_w, h = wc_geo.h }
-    lo.style = string.format("%s{\\clip(%f,%f,%f,%f)}",
+    lo.style = string.format("%s{\\q2}{\\clip(%f,%f,%f,%f)}",
         osc_styles.title,
         titlebox_left + left_pad, wc_geo.y - wc_geo.h,
         titlebox_right - right_pad , wc_geo.y + wc_geo.h)
+    -- Use a conservative per-character width so the trailing "..." remains visible
+    -- inside the clipped title area even with wider glyphs.
+    lo.button.maxchars = math.max(8, math.floor((titlebox_w - left_pad - right_pad - 24) / 13))
 
     add_area("window-controls-title",
              titlebox_left, 0, titlebox_right, wc_geo.h)
