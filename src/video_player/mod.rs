@@ -10,6 +10,8 @@
 use std::path::PathBuf;
 use std::process::{Child, Command};
 
+use rfd::FileDialog;
+
 /// OSC script-opts for the standalone player.
 /// - scalewindowed/scalefullscreen: OSC element sizing (1.0 = default)
 /// - windowcontrols=yes: always show close/minimize/maximize in OSC
@@ -84,6 +86,40 @@ fn resolve_mpv_ui_config_dir() -> Option<PathBuf> {
 /// Convert a Windows path to forward-slash form for mpv options.
 fn mpv_path_string(path: &std::path::Path) -> String {
     path.to_string_lossy().replace('\\', "/")
+}
+
+fn pick_subtitle_for_video(video_path: &std::path::Path) -> Option<PathBuf> {
+    let mut dialog = FileDialog::new().add_filter(
+        "Legendas",
+        &["srt", "ass", "ssa", "vtt", "sub", "sup", "idx", "mks"],
+    );
+
+    if let Some(parent) = video_path.parent() {
+        dialog = dialog.set_directory(parent);
+    }
+
+    dialog.pick_file()
+}
+
+fn load_external_subtitle_for_standalone(
+    mpv: &mut mpv::Mpv,
+    video_path: &std::path::Path,
+) -> Result<bool, String> {
+    let Some(subtitle_path) = pick_subtitle_for_video(video_path) else {
+        return Ok(false);
+    };
+
+    let subtitle_str = subtitle_path.to_string_lossy().to_string();
+    mpv.command("sub-add", &[&subtitle_str, "select"])
+        .map_err(|e| format!("Falha ao carregar legenda externa: {:?}", e))?;
+
+    let file_name = subtitle_path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or(subtitle_str);
+    let _ = mpv.command("show-text", &[&format!("Legenda carregada: {}", file_name), "2000"]);
+
+    Ok(true)
 }
 
 /// Load app icons from the current executable.
@@ -448,6 +484,22 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
                     let _ = mpv.set_property("time-pos", position);
                     seek_applied = true;
                     log::info!("[VIDEO-PLAYER] Seeked to {:.1}s", position);
+                }
+            }
+            Some(Ok(mpv::events::Event::ClientMessage(args))) => {
+                if args.first() == Some(&"open-subtitle-picker") {
+                    match load_external_subtitle_for_standalone(&mut mpv, &path) {
+                        Ok(true) => {
+                            log::info!("[VIDEO-PLAYER] External subtitle loaded from native picker");
+                        }
+                        Ok(false) => {
+                            let _ = mpv.command("show-text", &["Seleção de legenda cancelada", "1500"]);
+                        }
+                        Err(err) => {
+                            log::warn!("[VIDEO-PLAYER] Failed to load subtitle from native picker: {}", err);
+                            let _ = mpv.command("show-text", &[&err, "3000"]);
+                        }
+                    }
                 }
             }
             Some(Ok(mpv::events::Event::EndFile(reason))) => {
