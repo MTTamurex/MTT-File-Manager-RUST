@@ -262,6 +262,7 @@ pub struct ImageViewerApp {
 
     // NAVIGATION / ADDRESS BAR (Breadcrumbs vs Edit)
     pub is_address_editing: bool,
+    pub show_address_history_menu: bool,
 
     // SCROLL TO SELECTED (for keyboard navigation)
     pub scroll_to_selected: bool,

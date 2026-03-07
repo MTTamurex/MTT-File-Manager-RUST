@@ -38,6 +38,7 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                 &app.navigation_state.current_path,
                 &mut app.navigation_state.path_input,
                 &mut app.is_address_editing,
+                &mut app.show_address_history_menu,
                 &mut app.address_bar_focus_request,
                 &mut app.search_query,
                 &app.navigation_state.navigation,
@@ -52,6 +53,17 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
             );
 
             if let Some(act) = action {
+                if !matches!(
+                    act,
+                    ToolbarAction::Search(_)
+                        | ToolbarAction::ChangeSortMode(_)
+                        | ToolbarAction::ToggleSortDescending
+                        | ToolbarAction::ToggleViewMode
+                        | ToolbarAction::TogglePreviewPanel
+                ) {
+                    app.show_address_history_menu = false;
+                }
+
                 match act {
                     ToolbarAction::GoBack => app.go_back(),
                     ToolbarAction::GoForward => app.go_forward(),
@@ -102,6 +114,12 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                     ToolbarAction::StartAddressEdit => {
                         app.navigation_state.path_input = app.navigation_state.current_path.clone();
                         app.is_address_editing = true;
+                        app.show_address_history_menu = false;
+                    }
+                    ToolbarAction::StartAddressEditWithHistory => {
+                        app.navigation_state.path_input = app.navigation_state.current_path.clone();
+                        app.is_address_editing = true;
+                        app.show_address_history_menu = true;
                     }
                     ToolbarAction::CommitPathInput(path) => {
                         // Enter used to commit path input must not trigger "open selected"
@@ -125,6 +143,10 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                     ToolbarAction::CancelPathInput => {
                         app.is_address_editing = false;
                         app.navigation_state.path_input = app.navigation_state.current_path.clone();
+                    }
+                    ToolbarAction::SelectAddressHistoryPath(path) => {
+                        app.navigate_to(&path);
+                        app.is_address_editing = false;
                     }
                     _ => {}
                 }

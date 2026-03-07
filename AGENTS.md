@@ -42,6 +42,7 @@
 - Forneça informações técnicas objetivas
 - Discorde quando necessário
 - Investigue para encontrar a verdade antes de confirmar suposições
+- Sempre utilize o Context7 MCP quando precisar de documentação de biblioteca/API, geração de código, instalação ou etapas de configuração
 
 ### 2. Comunicação Direta e Concisa
 - Respostas curtas e focadas
