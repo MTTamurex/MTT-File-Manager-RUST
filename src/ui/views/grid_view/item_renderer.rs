@@ -80,6 +80,40 @@ fn resolve_tooltip_live_size(ui: &Ui, item: &FileEntry) -> u64 {
     resolved
 }
 
+fn render_drive_tooltip(ui: &mut Ui, item: &FileEntry) {
+    let Some(drive) = &item.drive_info else {
+        return;
+    };
+
+    let file_system = if drive.file_system.is_empty() {
+        "NTFS"
+    } else {
+        drive.file_system.as_str()
+    };
+    let used_space = drive.total_space.saturating_sub(drive.free_space);
+
+    ui.horizontal(|ui| {
+        ui.label("Tipo:");
+        ui.label(format!("{:?}", drive.drive_type));
+    });
+    ui.horizontal(|ui| {
+        ui.label("Espaço usado:");
+        ui.label(crate::infrastructure::windows::format_size(used_space));
+    });
+    ui.horizontal(|ui| {
+        ui.label("Espaço livre:");
+        ui.label(crate::infrastructure::windows::format_size(drive.free_space));
+    });
+    ui.horizontal(|ui| {
+        ui.label("Tamanho total:");
+        ui.label(crate::infrastructure::windows::format_size(drive.total_space));
+    });
+    ui.horizontal(|ui| {
+        ui.label("Sist. Arq:");
+        ui.label(file_system);
+    });
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_grid_item(
     ui: &mut Ui,
@@ -213,6 +247,10 @@ pub(super) fn render_grid_item(
                     ui.vertical(|ui| {
                         ui.label(egui::RichText::new(&item.name).strong());
                         ui.separator();
+                        if item.drive_info.is_some() {
+                            render_drive_tooltip(ui, item);
+                            return;
+                        }
                         ui.horizontal(|ui| {
                             ui.label("Tipo:");
                             ui.label(get_file_type_string(item));
