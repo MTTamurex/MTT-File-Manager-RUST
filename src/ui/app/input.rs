@@ -229,6 +229,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::L)) {
             app.navigation_state.path_input = app.navigation_state.current_path.clone();
             app.is_address_editing = true;
+            app.show_address_history_menu = false;
             app.address_bar_focus_request = true;
             user_active = true;
         }

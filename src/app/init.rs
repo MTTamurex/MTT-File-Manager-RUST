@@ -337,6 +337,7 @@ impl ImageViewerApp {
 
             // NAVIGATION / ADDRESS BAR
             is_address_editing: false,
+            show_address_history_menu: false,
 
             // SCROLL TO SELECTED (for keyboard navigation)
             scroll_to_selected: false,

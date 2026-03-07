@@ -72,9 +72,11 @@ pub enum ToolbarAction {
     Search(String),
     OpenSettings,
     StartAddressEdit,
+    StartAddressEditWithHistory,
     UpdatePathInput(String),
     CommitPathInput(String),
     CancelPathInput,
+    SelectAddressHistoryPath(String),
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -83,6 +85,7 @@ pub fn render_toolbar(
     current_path: &str,
     path_input: &mut String,
     is_editing_path: &mut bool,
+    show_address_history_menu: &mut bool,
     address_bar_focus_request: &mut bool,
     search_query: &mut String,
     navigation: &NavigationHistory,
@@ -96,6 +99,11 @@ pub fn render_toolbar(
     svg_manager: &mut SvgIconManager,
 ) -> Option<ToolbarAction> {
     let mut action = None;
+    let recent_paths: Vec<String> = navigation
+        .recent_paths(5)
+        .into_iter()
+        .filter(|path| !path.is_empty() && path != "Este Computador" && path != "Lixeira")
+        .collect();
 
     ui.horizontal(|ui| {
         ui.style_mut().spacing.item_spacing.x = 8.0;
@@ -271,8 +279,11 @@ pub fn render_toolbar(
             );
 
             if *is_editing_path {
+                let show_history_close_button = *show_address_history_menu && !recent_paths.is_empty();
+                let close_button_width = if show_history_close_button { 22.0 } else { 0.0 };
+                let text_width = (addr_ui.available_width() - close_button_width).max(40.0);
                 let edit_response = addr_ui.add_sized(
-                    addr_ui.available_size(),
+                    egui::vec2(text_width, addr_ui.available_height()),
                     egui::TextEdit::singleline(path_input)
                         .hint_text("Caminho...")
                         .id_source("address_edit")
@@ -280,9 +291,31 @@ pub fn render_toolbar(
                         .text_color(egui::Color32::BLACK),
                 );
 
-                if edit_response.clicked_elsewhere()
+                let mut close_history_clicked = false;
+
+                if show_history_close_button {
+                    let close_history_response = addr_ui
+                        .add(
+                            egui::Button::new("✕")
+                                .frame(false)
+                                .min_size(egui::vec2(18.0, 18.0)),
+                        )
+                        .on_hover_text("Fechar histórico recente");
+
+                    if close_history_response.clicked() {
+                        *show_address_history_menu = false;
+                        close_history_clicked = true;
+                    }
+                }
+
+                if edit_response.clicked() && !recent_paths.is_empty() {
+                    *show_address_history_menu = true;
+                }
+
+                if !close_history_clicked
+                    && (edit_response.clicked_elsewhere()
                     || (edit_response.lost_focus()
-                        && !addr_ui.input(|i| i.key_pressed(egui::Key::Enter)))
+                        && !addr_ui.input(|i| i.key_pressed(egui::Key::Enter))))
                 {
                     action = Some(ToolbarAction::CancelPathInput);
                 }
@@ -293,12 +326,74 @@ pub fn render_toolbar(
                     *address_bar_focus_request = false;
                 }
 
+                if close_history_clicked {
+                    edit_response.request_focus();
+                }
+
                 if addr_ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     action = Some(ToolbarAction::CommitPathInput(path_input.clone()));
                 }
 
                 if addr_ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     action = Some(ToolbarAction::CancelPathInput);
+                }
+
+                if *show_address_history_menu && !recent_paths.is_empty() {
+                    let popup_id = egui::Id::new("address_history_popup");
+                    let mut selected_path = None;
+
+                    let popup_response = egui::Area::new(popup_id)
+                        .order(egui::Order::Foreground)
+                        .fixed_pos(egui::pos2(addr_rect.left(), addr_rect.bottom() + 2.0))
+                        .show(ui.ctx(), |ui| {
+                            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                ui.set_min_width(addr_rect.width());
+                                ui.set_max_width(addr_rect.width());
+                                ui.spacing_mut().item_spacing.y = 0.0;
+
+                                for path in &recent_paths {
+                                    let item_size = egui::vec2(addr_rect.width() - 8.0, 28.0);
+                                    let (item_rect, response) =
+                                        ui.allocate_exact_size(item_size, egui::Sense::click());
+                                    let visuals = ui.style().interact(&response);
+
+                                    if response.hovered() || response.highlighted() {
+                                        ui.painter().rect_filled(
+                                            item_rect,
+                                            visuals.corner_radius,
+                                            visuals.weak_bg_fill,
+                                        );
+                                    }
+
+                                    let text_rect = item_rect.shrink2(egui::vec2(8.0, 0.0));
+                                    ui.painter().text(
+                                        egui::pos2(text_rect.left(), text_rect.center().y),
+                                        egui::Align2::LEFT_CENTER,
+                                        path,
+                                        egui::TextStyle::Button.resolve(ui.style()),
+                                        egui::Color32::BLACK,
+                                    );
+
+                                    if response.clicked() {
+                                        selected_path = Some(path.clone());
+                                    }
+                                }
+                            });
+                        });
+
+                    if let Some(path) = selected_path {
+                        *show_address_history_menu = false;
+                        action = Some(ToolbarAction::SelectAddressHistoryPath(path));
+                    } else if ui.ctx().input(|i| i.pointer.any_pressed()) {
+                        if let Some(pointer_pos) = ui.ctx().input(|i| i.pointer.press_origin()) {
+                            let clicked_address_bar = addr_rect.contains(pointer_pos);
+                            let clicked_popup = popup_response.response.rect.contains(pointer_pos);
+
+                            if !clicked_address_bar && !clicked_popup {
+                                *show_address_history_menu = false;
+                            }
+                        }
+                    }
                 }
             } else {
                 addr_ui.spacing_mut().item_spacing.x = 2.0;
@@ -358,11 +453,15 @@ pub fn render_toolbar(
 
                 // Click on empty area opens editing
                 if addr_resp.clicked() && action.is_none() {
-                    action = Some(ToolbarAction::StartAddressEdit);
+                    action = Some(ToolbarAction::StartAddressEditWithHistory);
                 }
             }
 
-            if matches!(action, Some(ToolbarAction::StartAddressEdit)) {
+            if matches!(
+                action,
+                Some(ToolbarAction::StartAddressEdit)
+                    | Some(ToolbarAction::StartAddressEditWithHistory)
+            ) {
                 ui.ctx().memory_mut(|m| {
                     m.request_focus(egui::Id::from("address_edit").with("text_edit"))
                 });
