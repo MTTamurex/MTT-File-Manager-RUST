@@ -86,6 +86,211 @@ fn mpv_path_string(path: &std::path::Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+/// Load app icons from the current executable.
+#[cfg(target_os = "windows")]
+fn load_app_icons() -> Option<(isize, isize)> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        LoadImageW, IMAGE_ICON, LR_SHARED,
+    };
+    use windows::core::PCWSTR;
+
+    // Load small icon (16x16) and big icon (32x32) from exe resource
+    let hmodule = unsafe {
+        windows::Win32::System::LibraryLoader::GetModuleHandleW(None).unwrap_or_default()
+    };
+
+    let hicon_small = unsafe {
+        LoadImageW(
+            Some(hmodule.into()),
+            PCWSTR(1 as *const u16),
+            IMAGE_ICON,
+            16,
+            16,
+            LR_SHARED,
+        )
+        .ok()
+    };
+
+    let hicon_big = unsafe {
+        LoadImageW(
+            Some(hmodule.into()),
+            PCWSTR(1 as *const u16),
+            IMAGE_ICON,
+            32,
+            32,
+            LR_SHARED,
+        )
+        .ok()
+    };
+
+    let small_raw = hicon_small.map(|h| h.0 as isize).unwrap_or(0);
+    let big_raw = hicon_big.map(|h| h.0 as isize).unwrap_or(0);
+
+    if small_raw != 0 || big_raw != 0 {
+        return Some((small_raw, big_raw));
+    }
+
+    let exe_path = std::env::current_exe().ok()?;
+    let wide: Vec<u16> = exe_path
+        .to_string_lossy()
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let mut h_large = [windows::Win32::UI::WindowsAndMessaging::HICON::default()];
+    let mut h_small = [windows::Win32::UI::WindowsAndMessaging::HICON::default()];
+
+    let count = unsafe {
+        windows::Win32::UI::Shell::ExtractIconExW(
+            PCWSTR(wide.as_ptr()),
+            0,
+            Some(h_large.as_mut_ptr()),
+            Some(h_small.as_mut_ptr()),
+            1,
+        )
+    };
+
+    if count > 0 {
+        let fallback_small = if !h_small[0].is_invalid() {
+            h_small[0].0 as isize
+        } else {
+            0isize
+        };
+        let fallback_big = if !h_large[0].is_invalid() {
+            h_large[0].0 as isize
+        } else {
+            0isize
+        };
+        if fallback_small != 0 || fallback_big != 0 {
+            return Some((fallback_small, fallback_big));
+        }
+    }
+
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn try_get_mpv_hwnd(mpv: &mpv::Mpv) -> Option<windows::Win32::Foundation::HWND> {
+    if let Ok(raw_hwnd) = mpv.get_property::<i64>("window-id") {
+        if raw_hwnd > 0 {
+            return Some(windows::Win32::Foundation::HWND(raw_hwnd as *mut std::ffi::c_void));
+        }
+    }
+
+    if let Ok(raw_hwnd) = mpv.get_property::<String>("window-id") {
+        let trimmed = raw_hwnd.trim();
+        if !trimmed.is_empty() {
+            if let Ok(parsed) = trimmed.parse::<isize>() {
+                if parsed > 0 {
+                    return Some(windows::Win32::Foundation::HWND(parsed as *mut std::ffi::c_void));
+                }
+            }
+            if let Some(hex) = trimmed.strip_prefix("0x") {
+                if let Ok(parsed) = isize::from_str_radix(hex, 16) {
+                    if parsed > 0 {
+                        return Some(windows::Win32::Foundation::HWND(parsed as *mut std::ffi::c_void));
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn apply_icon_to_hwnd(hwnd: windows::Win32::Foundation::HWND, small_raw: isize, big_raw: isize) {
+    use windows::Win32::Foundation::{LPARAM, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SendMessageW, SetClassLongPtrW, ICON_BIG, ICON_SMALL, GCLP_HICON, GCLP_HICONSM,
+        WM_SETICON,
+    };
+
+    unsafe {
+        if small_raw != 0 {
+            let _ = SendMessageW(
+                hwnd,
+                WM_SETICON,
+                Some(WPARAM(ICON_SMALL as usize)),
+                Some(LPARAM(small_raw)),
+            );
+            let _ = SetClassLongPtrW(hwnd, GCLP_HICONSM, small_raw);
+        }
+
+        if big_raw != 0 {
+            let _ = SendMessageW(
+                hwnd,
+                WM_SETICON,
+                Some(WPARAM(ICON_BIG as usize)),
+                Some(LPARAM(big_raw)),
+            );
+            let _ = SetClassLongPtrW(hwnd, GCLP_HICON, big_raw);
+        }
+    }
+}
+
+/// Set the mpv window icon to our app icon.
+#[cfg(target_os = "windows")]
+fn set_mpv_window_icon(mpv: &mpv::Mpv) {
+    use std::thread;
+    use std::time::Duration;
+    use windows::Win32::UI::WindowsAndMessaging::EnumWindows;
+
+    let Some((small_raw, big_raw)) = load_app_icons() else {
+        log::warn!("[VIDEO-PLAYER] Failed to load app icon from resources and exe");
+        return;
+    };
+
+    for attempt in 1..=10 {
+        if let Some(hwnd) = try_get_mpv_hwnd(mpv) {
+            apply_icon_to_hwnd(hwnd, small_raw, big_raw);
+            log::info!(
+                "[VIDEO-PLAYER] Applied app icon to mpv hwnd=0x{:x} attempt={}",
+                hwnd.0 as usize,
+                attempt
+            );
+            return;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+
+    let current_pid = unsafe { windows::Win32::System::Threading::GetCurrentProcessId() };
+    let data = (current_pid, small_raw, big_raw);
+
+    unsafe {
+        let _ = EnumWindows(
+            Some(enum_set_icon),
+            windows::Win32::Foundation::LPARAM(
+                &data as *const (u32, isize, isize) as isize,
+            ),
+        );
+    }
+
+    log::info!("[VIDEO-PLAYER] Applied app icon via pid enumeration fallback");
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn enum_set_icon(
+    hwnd: windows::Win32::Foundation::HWND,
+    lparam: windows::Win32::Foundation::LPARAM,
+) -> windows::core::BOOL {
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowThreadProcessId, IsWindowVisible};
+
+    let data = &*(lparam.0 as *const (u32, isize, isize));
+    let target_pid = data.0;
+    let hicon_small = data.1;
+    let hicon_big = data.2;
+
+    let mut window_pid: u32 = 0;
+    GetWindowThreadProcessId(hwnd, Some(&mut window_pid));
+
+    if window_pid == target_pid && IsWindowVisible(hwnd).as_bool() {
+        apply_icon_to_hwnd(hwnd, hicon_small, hicon_big);
+    }
+
+    true.into()
+}
+
 /// Entry point for the standalone video player process.
 ///
 /// Creates a native mpv window (borderless) with the custom OSC providing
@@ -223,6 +428,10 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
                 break;
             }
             Some(Ok(mpv::events::Event::FileLoaded)) => {
+                // Set our app icon on the mpv window (replaces default mpv icon)
+                #[cfg(target_os = "windows")]
+                set_mpv_window_icon(&mpv);
+
                 // Log effective GPU pipeline for VSR debugging
                 let vo = mpv.get_property::<String>("vo").unwrap_or_default();
                 let gpu_api = mpv.get_property::<String>("gpu-api").unwrap_or_default();
