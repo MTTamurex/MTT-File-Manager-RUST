@@ -1652,14 +1652,14 @@ function osc_init()
     ne.tooltip_style = osc_styles.tooltip
     ne.tooltipF = function ()
         local on = mp.get_property_bool("user-data/vsr/vsr-enabled", true)
-        return "RTX VSR: " .. (on and "ON" or "OFF")
+        return "RTX: " .. (on and "ON" or "OFF")
     end
     ne.content = function ()
         local on = mp.get_property_bool("user-data/vsr/vsr-enabled", true)
         if on then
-            return "{\\fs14\\1c&H00FF00}VSR{\\1c&HFFFFFF}"
+            return "{\\fs14\\1c&H00FF00}RTX{\\1c&HFFFFFF}"
         else
-            return "{\\fs14\\1c&H808080}VSR{\\1c&HFFFFFF}"
+            return "{\\fs14\\1c&H808080}RTX{\\1c&HFFFFFF}"
         end
     end
     ne.eventresponder["mbtn_left_up"] =

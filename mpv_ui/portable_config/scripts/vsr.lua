@@ -74,9 +74,9 @@ local function toggle_vsr()
     mp.set_property_bool("user-data/vsr/vsr-enabled", autovsr_enabled)
     local applied, reason = apply_filters()
     if autovsr_enabled then
-        mp.osd_message(applied and "RTX VSR: ON" or "RTX VSR: ON (not active)", 2)
+        mp.osd_message(applied and "RTX: ON" or "RTX: ON (not active)", 2)
     else
-        mp.osd_message("RTX VSR: OFF", 2)
+        mp.osd_message("RTX: OFF", 2)
     end
 end
 
