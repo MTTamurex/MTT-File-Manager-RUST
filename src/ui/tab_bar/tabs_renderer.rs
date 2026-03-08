@@ -1,14 +1,25 @@
 use crate::tabs::TabManager;
-use crate::domain::special_paths::RECYCLE_BIN_VIEW_ID;
+use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use crate::infrastructure::onedrive::special_folder_display_name;
 use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
 use eframe::egui::{self, Color32, CornerRadius, Stroke, Vec2};
+use rust_i18n::t;
 use std::path::Path;
 
 use super::{drag_dwell, TabBarAction};
 
 const TAB_CORNER_RADIUS: u8 = 8;
+
+fn display_title_for_tab_path(path: &str, fallback_title: &str) -> String {
+    if path == COMPUTER_VIEW_ID {
+        t!("nav.computer").to_string()
+    } else if path == RECYCLE_BIN_VIEW_ID {
+        t!("nav.recycle_bin").to_string()
+    } else {
+        special_folder_display_name(Path::new(path)).unwrap_or_else(|| fallback_title.to_string())
+    }
+}
 
 #[inline]
 fn paint_tab_background(ui: &mut egui::Ui, rect: egui::Rect, color: Color32) {
@@ -158,8 +169,7 @@ pub(super) fn render_tabs(
         let title_color = if is_active { text_color } else { inactive_text };
 
         // Translate special folder names (Desktop, Documents, etc.) for tab title
-        let translated_title = special_folder_display_name(Path::new(&tab.path))
-            .unwrap_or_else(|| tab.title.clone());
+        let translated_title = display_title_for_tab_path(&tab.path, &tab.title);
         let full_text: &str = &translated_title;
 
         let galley = ui
