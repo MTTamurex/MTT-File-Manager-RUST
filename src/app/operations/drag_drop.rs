@@ -205,8 +205,8 @@ impl ImageViewerApp {
         let total = self.drag_payload_paths.len();
         let op_label = self.drag_target_folder.as_ref().map(|dest| {
             match self.resolve_drag_operation(dest, ctrl_pressed, shift_pressed) {
-                DragDropOperation::Copy => "Copiar",
-                DragDropOperation::Move => "Mover",
+                DragDropOperation::Copy => rust_i18n::t!("drag_drop.copy"),
+                DragDropOperation::Move => rust_i18n::t!("drag_drop.move"),
             }
         });
 

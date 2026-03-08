@@ -1,4 +1,5 @@
 use crate::tabs::TabManager;
+use crate::domain::special_paths::RECYCLE_BIN_VIEW_ID;
 use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
 use eframe::egui::{self, Color32, CornerRadius, Stroke, Vec2};
@@ -114,7 +115,7 @@ pub(super) fn render_tabs(
 
         let native_icon = if tab.is_computer_view {
             computer_icon.cloned()
-        } else if tab.path == "Lixeira" {
+        } else if tab.path == RECYCLE_BIN_VIEW_ID {
             icon_loader.ensure_recycle_bin_icon(ui.ctx())
         } else {
             icon_loader.get_or_load_folder_path_icon(ui.ctx(), &tab.path)
@@ -249,9 +250,9 @@ pub(super) fn render_tabs(
             }
 
             speaker_response.on_hover_text(if is_muted {
-                "Ativar Áudio"
+                rust_i18n::t!("tab_bar.unmute")
             } else {
-                "Mutar Áudio"
+                rust_i18n::t!("tab_bar.mute")
             });
         }
 

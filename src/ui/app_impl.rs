@@ -177,6 +177,15 @@ impl eframe::App for ImageViewerApp {
                 );
         }
 
+        // 11b. Language settings modal
+        if self.navigation_state.show_language_settings {
+            self.navigation_state.show_language_settings =
+                crate::ui::components::language_settings::render_language_settings(
+                    ctx,
+                    self.navigation_state.show_language_settings,
+                );
+        }
+
         // 12. Notifications
         app::notifications::render_notifications(self, ctx);
 

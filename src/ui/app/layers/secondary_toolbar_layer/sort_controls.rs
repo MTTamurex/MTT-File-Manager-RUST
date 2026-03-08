@@ -2,6 +2,7 @@ use crate::app::ImageViewerApp;
 use crate::domain::file_entry::SortMode;
 use crate::ui::theme;
 use eframe::egui;
+use rust_i18n::t;
 
 pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     let locked = app.current_folder_locked;
@@ -34,7 +35,7 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
             .add(egui::Button::new(
                 egui::RichText::new(sort_symbol).color(egui::Color32::BLACK),
             ))
-            .on_hover_text("Inverter Ordem")
+            .on_hover_text(t!("secondary_toolbar.reverse_order"))
             .clicked()
         {
             app.sort_descending = !app.sort_descending;
@@ -78,16 +79,16 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
 
         egui::ComboBox::from_id_salt("sort_mode_secondary")
             .selected_text(match app.sort_mode {
-                SortMode::Name => "Nome",
-                SortMode::Date => "Data",
-                SortMode::Size => "Tamanho",
-                SortMode::Type => "Tipo",
-                SortMode::DriveTotalSpace => "Espaço Total",
-                SortMode::DriveFreeSpace => "Espaço Livre",
+                SortMode::Name => t!("secondary_toolbar.sort_name"),
+                SortMode::Date => t!("secondary_toolbar.sort_date"),
+                SortMode::Size => t!("secondary_toolbar.sort_size"),
+                SortMode::Type => t!("secondary_toolbar.sort_type"),
+                SortMode::DriveTotalSpace => t!("secondary_toolbar.sort_total_space"),
+                SortMode::DriveFreeSpace => t!("secondary_toolbar.sort_free_space"),
             })
             .show_ui(ui, |ui| {
                 if ui
-                    .selectable_value(&mut SortMode::Name, app.sort_mode, "Nome")
+                    .selectable_value(&mut SortMode::Name, app.sort_mode, t!("secondary_toolbar.sort_name"))
                     .clicked()
                 {
                     app.sort_mode = SortMode::Name;
@@ -105,7 +106,7 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
                         .selectable_value(
                             &mut SortMode::DriveTotalSpace,
                             app.sort_mode,
-                            "Espaço Total",
+                            t!("secondary_toolbar.sort_total_space"),
                         )
                         .clicked()
                     {
@@ -118,7 +119,7 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
                         .selectable_value(
                             &mut SortMode::DriveFreeSpace,
                             app.sort_mode,
-                            "Espaço Livre",
+                            t!("secondary_toolbar.sort_free_space"),
                         )
                         .clicked()
                     {
@@ -129,7 +130,7 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
                     }
                 } else {
                     if ui
-                        .selectable_value(&mut SortMode::Date, app.sort_mode, "Data")
+                        .selectable_value(&mut SortMode::Date, app.sort_mode, t!("secondary_toolbar.sort_date"))
                         .clicked()
                     {
                         app.sort_mode = SortMode::Date;
@@ -138,7 +139,7 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
                         app.save_preferences();
                     }
                     if ui
-                        .selectable_value(&mut SortMode::Size, app.sort_mode, "Tamanho")
+                        .selectable_value(&mut SortMode::Size, app.sort_mode, t!("secondary_toolbar.sort_size"))
                         .clicked()
                     {
                         app.sort_mode = SortMode::Size;
@@ -147,7 +148,7 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
                         app.save_preferences();
                     }
                     if ui
-                        .selectable_value(&mut SortMode::Type, app.sort_mode, "Tipo")
+                        .selectable_value(&mut SortMode::Type, app.sort_mode, t!("secondary_toolbar.sort_type"))
                         .clicked()
                     {
                         app.sort_mode = SortMode::Type;

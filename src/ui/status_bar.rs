@@ -11,6 +11,7 @@ use crate::ui::theme;
 use crate::ui::widgets;
 use eframe::egui;
 use lru::LruCache;
+use rust_i18n::t;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -361,6 +362,8 @@ pub enum StatusBarAction {
     ViewModeChanged,
     /// Open virtual drive settings
     OpenVirtualDriveSettings,
+    /// Open language settings
+    OpenLanguageSettings,
     /// Start bulk thumbnail extraction for current folder and subfolders
     BulkThumbnailScan,
     /// Show/hide hidden files toggled
@@ -427,7 +430,7 @@ pub fn render_status_bar(
                 svg_manager,
                 "settings",
                 false,
-                "Configurar otimização de drives virtuais",
+                &t!("status_bar.vdrive_settings"),
                 theme::ICON_SIZE_SM,
                 1.0,
                 0.75,
@@ -437,10 +440,26 @@ pub fn render_status_bar(
                 action = StatusBarAction::OpenVirtualDriveSettings;
             }
 
+            // === LANGUAGE SETTINGS button ===
+            if widgets::toggle_icon_button_sized(
+                ui,
+                svg_manager,
+                "languages",
+                false,
+                &t!("settings.language"),
+                theme::ICON_SIZE_SM,
+                1.0,
+                0.75,
+            )
+            .clicked()
+            {
+                action = StatusBarAction::OpenLanguageSettings;
+            }
+
             // === BULK THUMBNAIL SCAN button ===
             if let Some((done, total)) = bulk_progress {
                 ui.label(
-                    egui::RichText::new(format!("Processando {}/{}", done, total))
+                    egui::RichText::new(t!("status_bar.processing", done = done, total = total))
                         .color(egui::Color32::BLACK)
                         .small()
                 );
@@ -450,7 +469,7 @@ pub fn render_status_bar(
                     svg_manager,
                     "image",
                     false,
-                    "Gerar thumbnails para todas as subpastas",
+                    &t!("status_bar.bulk_thumbnails"),
                     theme::ICON_SIZE_SM,
                     1.0,
                     0.75,
@@ -466,9 +485,9 @@ pub fn render_status_bar(
             {
                 let should_disable_show_hidden = is_computer_view || is_recycle_bin_view;
                 let tooltip = if *show_hidden_files {
-                    "Esconder itens ocultos"
+                    t!("status_bar.hidden_hide")
                 } else {
-                    "Exibir itens ocultos"
+                    t!("status_bar.hidden_show")
                 };
                 ui.scope(|ui| {
                     if should_disable_show_hidden {
@@ -480,7 +499,7 @@ pub fn render_status_bar(
                         svg_manager,
                         "eye",
                         *show_hidden_files,
-                        tooltip,
+                        &tooltip,
                         theme::ICON_SIZE_MD - 2.0,
                         2.0,
                         -1.0,
@@ -506,12 +525,12 @@ pub fn render_status_bar(
 
             // === LEFT SIDE: Item count and loading status ===
             if *is_loading_folder {
-                ui.label("Carregando...");
+                ui.label(t!("status_bar.loading").to_string());
             } else {
                 let item_text = if total_items == 1 {
-                    "1 item".to_string()
+                    t!("status_bar.item_one").to_string()
                 } else {
-                    format!("{} itens", total_items)
+                    t!("status_bar.item_many", count = total_items).to_string()
                 };
                 ui.label(item_text);
             }
@@ -521,16 +540,16 @@ pub fn render_status_bar(
             // === CENTER: View mode (disabled when folder is locked) ===
             ui.scope(|ui| {
                 if folder_locked { ui.disable(); }
-                ui.label("Modo:");
+                ui.label(t!("status_bar.mode").to_string());
                 if ui
-                    .selectable_label(*view_mode == ViewMode::Grid, "Grade")
+                    .selectable_label(*view_mode == ViewMode::Grid, t!("status_bar.grid").to_string())
                     .clicked()
                 {
                     *view_mode = ViewMode::Grid;
                     action = StatusBarAction::ViewModeChanged;
                 }
                 if ui
-                    .selectable_label(*view_mode == ViewMode::List, "Lista")
+                    .selectable_label(*view_mode == ViewMode::List, t!("status_bar.list").to_string())
                     .clicked()
                 {
                     *view_mode = ViewMode::List;
@@ -543,29 +562,29 @@ pub fn render_status_bar(
             // === CENTER-RIGHT: Sort controls (disabled when folder is locked) ===
             ui.scope(|ui| {
                 if folder_locked { ui.disable(); }
-                ui.label("Ordenar:");
+                ui.label(t!("status_bar.sort").to_string());
 
-                // PERFORMANCE: Static arrays instead of Vec allocation per frame
-                let sort_modes: &[(SortMode, &str)] = if is_computer_view {
-                    &[
-                        (SortMode::Name, "Nome"),
-                        (SortMode::DriveTotalSpace, "Espaço Total"),
-                        (SortMode::DriveFreeSpace, "Espaço Livre"),
+                // PERFORMANCE: Build sort mode pairs per frame (i18n requires runtime lookup)
+                let sort_modes: Vec<(SortMode, String)> = if is_computer_view {
+                    vec![
+                        (SortMode::Name, t!("status_bar.sort_name").to_string()),
+                        (SortMode::DriveTotalSpace, t!("status_bar.sort_total_space").to_string()),
+                        (SortMode::DriveFreeSpace, t!("status_bar.sort_free_space").to_string()),
                     ]
                 } else {
-                    &[
-                        (SortMode::Name, "Nome"),
-                        (SortMode::Date, "Data"),
-                        (SortMode::Size, "Tamanho"),
+                    vec![
+                        (SortMode::Name, t!("status_bar.sort_name").to_string()),
+                        (SortMode::Date, t!("status_bar.sort_date").to_string()),
+                        (SortMode::Size, t!("status_bar.sort_size").to_string()),
                     ]
                 };
 
-                for &(mode, label) in sort_modes {
-                    if ui.selectable_label(*sort_mode == mode, label).clicked() {
-                        if *sort_mode == mode {
+                for (mode, label) in &sort_modes {
+                    if ui.selectable_label(*sort_mode == *mode, label.as_str()).clicked() {
+                        if *sort_mode == *mode {
                             *sort_descending = !*sort_descending;
                         } else {
-                            *sort_mode = mode;
+                            *sort_mode = *mode;
                             *sort_descending = false;
                         }
                         action = StatusBarAction::SortChanged;
@@ -581,26 +600,26 @@ pub fn render_status_bar(
 
             ui.scope(|ui| {
                 if folder_locked { ui.disable(); }
-                ui.label("Pastas:");
+                ui.label(t!("status_bar.folders").to_string());
                 if ui
-                    .selectable_label(*folders_position == FoldersPosition::First, "Início")
-                    .on_hover_text("Pastas sempre no topo")
+                    .selectable_label(*folders_position == FoldersPosition::First, t!("status_bar.folders_first").to_string())
+                    .on_hover_text(t!("status_bar.folders_first_hint"))
                     .clicked()
                 {
                     *folders_position = FoldersPosition::First;
                     action = StatusBarAction::SortChanged;
                 }
                 if ui
-                    .selectable_label(*folders_position == FoldersPosition::Last, "Fim")
-                    .on_hover_text("Pastas no final da lista")
+                    .selectable_label(*folders_position == FoldersPosition::Last, t!("status_bar.folders_last").to_string())
+                    .on_hover_text(t!("status_bar.folders_last_hint"))
                     .clicked()
                 {
                     *folders_position = FoldersPosition::Last;
                     action = StatusBarAction::SortChanged;
                 }
                 if ui
-                    .selectable_label(*folders_position == FoldersPosition::Mixed, "Misto")
-                    .on_hover_text("Pastas misturadas com arquivos")
+                    .selectable_label(*folders_position == FoldersPosition::Mixed, t!("status_bar.folders_mixed").to_string())
+                    .on_hover_text(t!("status_bar.folders_mixed_hint"))
                     .clicked()
                 {
                     *folders_position = FoldersPosition::Mixed;

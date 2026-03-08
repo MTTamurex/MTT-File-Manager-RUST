@@ -1,5 +1,6 @@
 use crate::app::ImageViewerApp;
 use crate::domain::file_entry::{FileEntry, SyncStatus, ViewMode};
+use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use crate::infrastructure::windows as windows_infra;
 use crate::ui::sidebar::SidebarAction;
 use eframe::egui;
@@ -160,13 +161,13 @@ fn handle_sidebar_action(app: &mut ImageViewerApp, action: SidebarAction) {
             let is_pinned = app.pinned_folders.iter().any(|pf| pf.path == path);
             if is_pinned && !std::path::Path::new(&path).exists() {
                 app.unpin_folder(&path);
-                app.notifications.warning(format!(
-                    "Pasta removida do Acesso Rápido (não encontrada): {}",
-                    std::path::Path::new(&path)
+                app.notifications.warning(rust_i18n::t!(
+                    "panels.folder_removed",
+                    name = std::path::Path::new(&path)
                         .file_name()
                         .and_then(|n| n.to_str())
                         .unwrap_or(&path)
-                ));
+                ).to_string());
             } else {
                 app.navigate_to(&path);
             }
@@ -323,7 +324,7 @@ fn render_preview_panel_layout(
                                             );
                                             app.notifications.push(
                                                 crate::application::AppNotification::info(
-                                                    "Recarregando preview da pasta...".to_string(),
+                                                    rust_i18n::t!("panels.refreshing_preview").to_string(),
                                                 ),
                                             );
                                         } else {
@@ -360,7 +361,7 @@ fn render_preview_panel_layout(
                                             );
                                             app.notifications.push(
                                                 crate::application::AppNotification::info(
-                                                    "Recarregando thumbnail...".to_string(),
+                                                    rust_i18n::t!("panels.refreshing_thumbnail").to_string(),
                                                 ),
                                             );
                                         }
@@ -383,8 +384,8 @@ fn render_preview_panel_layout(
                         } else {
                             ui.vertical_centered(|ui| {
                                 ui.add_space(100.0);
-                                ui.label("Nenhum item selecionado");
-                                ui.label("Selecione algo para ver detalhes");
+                                ui.label(rust_i18n::t!("panels.no_selection"));
+                                ui.label(rust_i18n::t!("panels.select_hint"));
                             });
                         }
                     });
@@ -474,8 +475,8 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
         Some(file.clone())
     } else if app.navigation_state.is_recycle_bin_view {
         Some(FileEntry {
-            path: PathBuf::from("Lixeira"),
-            name: "Lixeira".to_string(),
+            path: PathBuf::from(RECYCLE_BIN_VIEW_ID),
+            name: RECYCLE_BIN_VIEW_ID.to_string(),
             is_dir: true,
             size: 0,
             modified: 0,
@@ -489,8 +490,8 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
     } else if app.navigation_state.is_computer_view {
         // "Este Computador" - show drive count info
         Some(FileEntry {
-            path: PathBuf::from("Este Computador"),
-            name: "Este Computador".to_string(),
+            path: PathBuf::from(COMPUTER_VIEW_ID),
+            name: COMPUTER_VIEW_ID.to_string(),
             is_dir: true,
             size: app.drive_state.disks.len() as u64, // Store drive count in size field
             modified: 0,
@@ -618,7 +619,7 @@ fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
         .show(ctx, |ui| {
             if app.is_loading_folder && app.items.is_empty() {
                 ui.centered_and_justified(|ui| {
-                    ui.label("Carregando...");
+                    ui.label(rust_i18n::t!("panels.loading"));
                 });
 
                 // During loading, still update drag target so cursor feedback
@@ -639,7 +640,7 @@ fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
             } else if app.items.is_empty() {
                 let response = ui
                     .centered_and_justified(|ui| {
-                        ui.label("Pasta vazia");
+                        ui.label(rust_i18n::t!("panels.empty_folder"));
                     })
                     .response
                     .on_hover_cursor(egui::CursorIcon::Default);
@@ -731,7 +732,7 @@ fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     );
                     ui.allocate_new_ui(egui::UiBuilder::new().max_rect(status_rect), |ui| {
                         ui.label(
-                            egui::RichText::new("Atualizando...")
+                            egui::RichText::new(rust_i18n::t!("panels.updating").to_string())
                                 .size(11.0)
                                 .color(egui::Color32::from_gray(130)),
                         );

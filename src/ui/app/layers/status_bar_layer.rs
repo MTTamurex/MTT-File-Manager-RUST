@@ -81,6 +81,9 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                 StatusBarAction::OpenVirtualDriveSettings => {
                     app.navigation_state.show_virtual_drive_settings = true;
                 }
+                StatusBarAction::OpenLanguageSettings => {
+                    app.navigation_state.show_language_settings = true;
+                }
                 StatusBarAction::BulkThumbnailScan => {
                     let root = std::path::PathBuf::from(&app.navigation_state.current_path);
                     let queue = app.thumbnail_queue.clone();

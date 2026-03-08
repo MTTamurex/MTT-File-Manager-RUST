@@ -47,6 +47,7 @@ env_logger = "0.11" # Logger backend with level filtering
 mtt-search-protocol = { path = "crates/mtt-search-protocol" }
 bincode = { workspace = true }
 serde = { workspace = true }
+rust-i18n = "3"
 # video-rs = { version = "0.9", features = ["ndarray"] }
 # ndarray = "0.16"            # Required by video-rs for frames
 # rodio = "0.19"

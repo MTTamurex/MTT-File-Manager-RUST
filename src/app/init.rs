@@ -8,6 +8,7 @@ use lru::LruCache;
 use std::num::NonZeroUsize;
 // PERFORMANCE: FxHashSet uses faster hashing for PathBuf keys
 use crate::ui::cache::FxHashSet;
+use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID, is_virtual_path};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -59,7 +60,7 @@ fn determine_initial_path(disk_cache: &ThumbnailDiskCache) -> (String, bool) {
 
     // Default to "This PC" if no valid last folder
     log::info!("[INIT] No valid last folder found, starting at Este Computador");
-    ("Este Computador".to_string(), true)
+    (COMPUTER_VIEW_ID.to_string(), true)
 }
 
 // Helper function also present in main.rs - could be moved to infrastructure if needed
@@ -134,7 +135,11 @@ impl ImageViewerApp {
             sidebar_right_width,
             session_volume,
             show_hidden_files,
+            language,
         } = startup_preferences;
+
+        // Apply saved language preference
+        rust_i18n::set_locale(&language);
 
         // Load folder locks from database
         let folder_locks = disk_cache.get_all_folder_locks();
@@ -489,8 +494,7 @@ impl ImageViewerApp {
         // folder was never visited in the previous session (e.g. pinned shortcuts).
         // This runs once at startup (not in the render loop), so it is safe.
         if !is_computer_view_initial
-            && initial_path != "Este Computador"
-            && initial_path != "Lixeira"
+            && !is_virtual_path(&initial_path)
         {
             let dest = std::path::PathBuf::from(&initial_path);
             if let Ok(meta) = std::fs::metadata(&dest) {

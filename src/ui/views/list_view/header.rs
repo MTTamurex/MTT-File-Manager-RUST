@@ -1,6 +1,7 @@
 //! List view column header rendering with sortable, resizable columns
 
 use eframe::egui::{self, Color32, FontId, Sense, Ui};
+use rust_i18n::t;
 
 use super::{truncate_text_for_column, ListViewContext};
 use crate::domain::file_entry::SortMode;
@@ -137,7 +138,7 @@ pub(super) fn render_list_header(
 
             if draw_header_resizable(
                 ui,
-                "Nome",
+                &t!("list_view.name"),
                 ctx.col_name_width,
                 SortMode::Name,
                 100.0,
@@ -157,7 +158,7 @@ pub(super) fn render_list_header(
 
                 if draw_header_resizable(
                     ui,
-                    "Espaço Total",
+                    &t!("list_view.total_space"),
                     ctx.col_date_width,
                     SortMode::DriveTotalSpace,
                     80.0,
@@ -175,7 +176,7 @@ pub(super) fn render_list_header(
 
                 if draw_header_resizable(
                     ui,
-                    "Espaço Livre",
+                    &t!("list_view.free_space"),
                     ctx.col_size_width,
                     SortMode::DriveFreeSpace,
                     80.0,
@@ -194,13 +195,13 @@ pub(super) fn render_list_header(
                 let current_size = *ctx.col_size_width;
 
                 let date_label = if ctx.is_recycle_bin_view {
-                    "Data de Exclusão"
+                    t!("list_view.date_deleted").to_string()
                 } else {
-                    "Última modificação"
+                    t!("list_view.date_modified").to_string()
                 };
                 if draw_header_resizable(
                     ui,
-                    date_label,
+                    &date_label,
                     ctx.col_date_width,
                     SortMode::Date,
                     120.0,
@@ -219,7 +220,7 @@ pub(super) fn render_list_header(
 
                 if draw_header_resizable(
                     ui,
-                    "Tipo",
+                    &t!("list_view.type_col"),
                     ctx.col_type_width,
                     SortMode::Type,
                     80.0,
@@ -238,7 +239,7 @@ pub(super) fn render_list_header(
 
                 if draw_header_resizable(
                     ui,
-                    "Tamanho",
+                    &t!("list_view.size_col"),
                     ctx.col_size_width,
                     SortMode::Size,
                     80.0,

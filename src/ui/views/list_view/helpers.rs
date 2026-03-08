@@ -1,6 +1,7 @@
 //! Helper functions for list view: file type strings, status badges, section headers
 
 use eframe::egui::{self, Color32, FontId, Pos2, RichText, Ui};
+use rust_i18n::t;
 
 use crate::domain::file_entry::{FileEntry, SyncStatus};
 
@@ -16,61 +17,20 @@ pub(super) fn render_section_header(ui: &mut Ui, title: &str) {
     ui.add_space(4.0);
 }
 
-/// PERFORMANCE: Returns Cow<str> — static &str for common extensions, allocated only for rare ones.
-pub(super) fn get_file_type_string(item: &FileEntry) -> std::borrow::Cow<'static, str> {
-    use std::borrow::Cow;
-
+/// Returns translated file type string for display.
+pub(super) fn get_file_type_string(item: &FileEntry) -> String {
     if let Some(label) = crate::domain::file_entry::archive_type_label(&item.name) {
-        return Cow::Borrowed(label);
+        return label;
     }
     if item.is_dir {
-        return Cow::Borrowed("Pasta");
+        return t!("file_types.folder").to_string();
     }
 
     if let Some(ext) = item.path.extension() {
-        let ext_lower = ext.to_ascii_lowercase();
-        let ext_str = ext_lower.to_string_lossy();
-
-        // Static strings for common file types (zero allocation)
-        match ext_str.as_ref() {
-            "txt" => return Cow::Borrowed("Arquivo TXT"),
-            "pdf" => return Cow::Borrowed("Arquivo PDF"),
-            "doc" | "docx" => return Cow::Borrowed("Arquivo Word"),
-            "xls" | "xlsx" => return Cow::Borrowed("Arquivo Excel"),
-            "ppt" | "pptx" => return Cow::Borrowed("Arquivo PowerPoint"),
-            "jpg" | "jpeg" => return Cow::Borrowed("Arquivo JPEG"),
-            "png" => return Cow::Borrowed("Arquivo PNG"),
-            "gif" => return Cow::Borrowed("Arquivo GIF"),
-            "bmp" => return Cow::Borrowed("Arquivo BMP"),
-            "webp" => return Cow::Borrowed("Arquivo WebP"),
-            "mp4" => return Cow::Borrowed("Arquivo MP4"),
-            "mkv" => return Cow::Borrowed("Arquivo MKV"),
-            "avi" => return Cow::Borrowed("Arquivo AVI"),
-            "mov" => return Cow::Borrowed("Arquivo MOV"),
-            "wmv" => return Cow::Borrowed("Arquivo WMV"),
-            "mp3" => return Cow::Borrowed("Arquivo MP3"),
-            "wav" => return Cow::Borrowed("Arquivo WAV"),
-            "flac" => return Cow::Borrowed("Arquivo FLAC"),
-            "exe" => return Cow::Borrowed("Arquivo Executável"),
-            "dll" => return Cow::Borrowed("Biblioteca DLL"),
-            "html" | "htm" => return Cow::Borrowed("Arquivo HTML"),
-            "css" => return Cow::Borrowed("Arquivo CSS"),
-            "js" => return Cow::Borrowed("Arquivo JavaScript"),
-            "json" => return Cow::Borrowed("Arquivo JSON"),
-            "xml" => return Cow::Borrowed("Arquivo XML"),
-            "rs" => return Cow::Borrowed("Arquivo Rust"),
-            "py" => return Cow::Borrowed("Arquivo Python"),
-            "java" => return Cow::Borrowed("Arquivo Java"),
-            "c" | "cpp" | "h" | "hpp" => return Cow::Borrowed("Arquivo C/C++"),
-            "lnk" => return Cow::Borrowed("Atalho"),
-            "iso" => return Cow::Borrowed("Imagem de Disco"),
-            _ => {
-                return Cow::Owned(format!("Arquivo {}", ext.to_string_lossy().to_uppercase()));
-            }
-        }
+        return t!("file_info.file_generic", ext = ext.to_string_lossy().to_uppercase()).to_string();
     }
 
-    Cow::Borrowed("Arquivo")
+    t!("file_info.file_unknown").to_string()
 }
 
 /// Renders a sync status badge (OneDrive) in the status column

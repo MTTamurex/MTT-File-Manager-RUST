@@ -1,4 +1,5 @@
 use crate::domain::file_entry::{FileEntry, IconSize};
+use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use crate::ui::icon_loader::IconLoader;
 use crate::ui::preview_panel::actions::PreviewPanelAction;
 use crate::ui::svg_icons::SvgIconManager;
@@ -46,7 +47,7 @@ pub fn render_fallback(
     let max_w: f32 = ui.available_width() - 40.0;
     let icon_size: f32 = (120.0f32).min(max_w);
 
-    if file.name == "Este Computador" {
+    if file.name == COMPUTER_VIEW_ID {
         // THIS PC - uses the computer icon
         item_icon_loader.ensure_computer_icon(ui.ctx());
         if let Some(icon) = item_icon_loader.computer_icon() {
@@ -62,7 +63,7 @@ pub fn render_fallback(
         } else {
             ui.allocate_response(egui::vec2(icon_size, icon_size), egui::Sense::hover());
         }
-    } else if is_recycle_bin_view && file.name == "Lixeira" {
+    } else if is_recycle_bin_view && file.name == RECYCLE_BIN_VIEW_ID {
         // RECYCLE BIN
         if let Some(icon) = item_icon_loader.ensure_recycle_bin_icon(ui.ctx()) {
             ui.add(egui::Image::new(&icon).max_size(egui::vec2(icon_size, icon_size)));

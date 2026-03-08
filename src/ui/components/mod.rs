@@ -1,5 +1,6 @@
 pub mod gif_manager;
 pub mod item_slot;
+pub mod language_settings;
 pub mod media_preview;
 pub mod mpv;
 pub mod mpv_preview;
