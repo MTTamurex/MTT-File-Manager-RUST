@@ -8,7 +8,7 @@ use lru::LruCache;
 use std::num::NonZeroUsize;
 // PERFORMANCE: FxHashSet uses faster hashing for PathBuf keys
 use crate::ui::cache::FxHashSet;
-use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID, is_virtual_path};
+use crate::domain::special_paths::{COMPUTER_VIEW_ID, is_virtual_path};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;

@@ -1,8 +1,10 @@
 use crate::tabs::TabManager;
 use crate::domain::special_paths::RECYCLE_BIN_VIEW_ID;
+use crate::infrastructure::onedrive::special_folder_display_name;
 use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
 use eframe::egui::{self, Color32, CornerRadius, Stroke, Vec2};
+use std::path::Path;
 
 use super::{drag_dwell, TabBarAction};
 
@@ -155,8 +157,10 @@ pub(super) fn render_tabs(
         let font_id = egui::FontId::proportional(13.0);
         let title_color = if is_active { text_color } else { inactive_text };
 
-        // M-4: borrow tab.title — removes 3 String clones per tab per frame
-        let full_text: &str = &tab.title;
+        // Translate special folder names (Desktop, Documents, etc.) for tab title
+        let translated_title = special_folder_display_name(Path::new(&tab.path))
+            .unwrap_or_else(|| tab.title.clone());
+        let full_text: &str = &translated_title;
 
         let galley = ui
             .painter()

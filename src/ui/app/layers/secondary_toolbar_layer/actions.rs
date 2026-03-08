@@ -1,6 +1,7 @@
 use crate::app::ImageViewerApp;
 use crate::ui::theme;
 use eframe::egui;
+use rust_i18n::t;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum SecAction {
@@ -91,31 +92,31 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
             if enabled {
                 response.on_hover_text(tooltip).clicked()
             } else {
-                response.on_hover_text(format!("{} (Desabilitado)", tooltip));
+                response.on_hover_text(format!("{} {}", tooltip, t!("secondary_toolbar.disabled_suffix")));
                 false
             }
         };
 
-        if render_btn("cut", has_selection, "Recortar (Ctrl+X)") {
+        if render_btn("cut", has_selection, &t!("secondary_toolbar.cut")) {
             action = SecAction::Cut;
         }
-        if render_btn("copy", has_selection, "Copiar (Ctrl+C)") {
+        if render_btn("copy", has_selection, &t!("secondary_toolbar.copy")) {
             action = SecAction::Copy;
         }
-        if render_btn("paste", can_paste, "Colar (Ctrl+V)") {
+        if render_btn("paste", can_paste, &t!("secondary_toolbar.paste")) {
             action = SecAction::Paste;
         }
-        if render_btn("rename", can_rename, "Renomear (F2)") {
+        if render_btn("rename", can_rename, &t!("secondary_toolbar.rename")) {
             action = SecAction::Rename;
         }
         if render_btn(
             "folder_new",
             can_create_folder,
-            "Criar Nova Pasta (Ctrl+Shift+N)",
+            &t!("secondary_toolbar.create_folder"),
         ) {
             action = SecAction::CreateFolder;
         }
-        if render_btn("delete", has_selection, "Excluir (Del)") {
+        if render_btn("delete", has_selection, &t!("secondary_toolbar.delete")) {
             action = SecAction::Delete;
         }
     }

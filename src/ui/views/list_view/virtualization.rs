@@ -1,6 +1,7 @@
 //! Manual virtualization, scroll handling, scrollbar, and prefetch logic
 
 use eframe::egui::{self, Color32, Rect, Sense, Ui};
+use rust_i18n::t;
 
 use super::helpers::render_section_header;
 use super::item_renderer::render_list_item;
@@ -194,7 +195,7 @@ fn render_computer_view_grouped(
         );
         if child_ui.is_rect_visible(header_rect) {
             let mut header_ui = child_ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
-            render_section_header(&mut header_ui, "Discos locais");
+            render_section_header(&mut header_ui, &t!("sidebar.local_disks"));
         }
         current_y += header_h;
 
@@ -231,7 +232,7 @@ fn render_computer_view_grouped(
         );
         if child_ui.is_rect_visible(header_rect) {
             let mut header_ui = child_ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
-            render_section_header(&mut header_ui, "Unidades de rede");
+            render_section_header(&mut header_ui, &t!("sidebar.network_drives"));
         }
         current_y += header_h;
 

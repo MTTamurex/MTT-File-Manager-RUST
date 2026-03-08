@@ -90,7 +90,7 @@ fn mpv_path_string(path: &std::path::Path) -> String {
 
 fn pick_subtitle_for_video(video_path: &std::path::Path) -> Option<PathBuf> {
     let mut dialog = FileDialog::new().add_filter(
-        "Legendas",
+        rust_i18n::t!("video.subtitle_filter").to_string(),
         &["srt", "ass", "ssa", "vtt", "sub", "sup", "idx", "mks"],
     );
 
@@ -111,13 +111,14 @@ fn load_external_subtitle_for_standalone(
 
     let subtitle_str = subtitle_path.to_string_lossy().to_string();
     mpv.command("sub-add", &[&subtitle_str, "select"])
-        .map_err(|e| format!("Falha ao carregar legenda externa: {:?}", e))?;
+        .map_err(|e| format!("{}", rust_i18n::t!("video.subtitle_load_failed", error = format!("{:?}", e))))?;
 
     let file_name = subtitle_path
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or(subtitle_str);
-    let _ = mpv.command("show-text", &[&format!("Legenda carregada: {}", file_name), "2000"]);
+    let loaded_msg = rust_i18n::t!("video.subtitle_loaded", name = file_name).to_string();
+    let _ = mpv.command("show-text", &[&loaded_msg, "2000"]);
 
     Ok(true)
 }
@@ -493,7 +494,8 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
                             log::info!("[VIDEO-PLAYER] External subtitle loaded from native picker");
                         }
                         Ok(false) => {
-                            let _ = mpv.command("show-text", &["Seleção de legenda cancelada", "1500"]);
+                            let cancelled_msg = rust_i18n::t!("video.subtitle_cancelled").to_string();
+                            let _ = mpv.command("show-text", &[&cancelled_msg, "1500"]);
                         }
                         Err(err) => {
                             log::warn!("[VIDEO-PLAYER] Failed to load subtitle from native picker: {}", err);

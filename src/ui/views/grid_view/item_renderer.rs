@@ -1,6 +1,7 @@
 use super::{GridViewContext, PendingOperations, TOOLTIP_DELAY_SECS};
 use crate::domain::file_entry::FileEntry;
 use eframe::egui::{self, Color32, Rect, Sense, Ui};
+use rust_i18n::t;
 
 /// Max age (seconds) for probing live file size on the UI thread.
 /// Files modified longer ago than this are considered stable — `item.size`
@@ -93,23 +94,23 @@ fn render_drive_tooltip(ui: &mut Ui, item: &FileEntry) {
     let used_space = drive.total_space.saturating_sub(drive.free_space);
 
     ui.horizontal(|ui| {
-        ui.label("Tipo:");
+        ui.label(&*t!("file_info.type"));
         ui.label(format!("{:?}", drive.drive_type));
     });
     ui.horizontal(|ui| {
-        ui.label("Espaço usado:");
+        ui.label(&*t!("file_info.used_space"));
         ui.label(crate::infrastructure::windows::format_size(used_space));
     });
     ui.horizontal(|ui| {
-        ui.label("Espaço livre:");
+        ui.label(&*t!("file_info.free_space"));
         ui.label(crate::infrastructure::windows::format_size(drive.free_space));
     });
     ui.horizontal(|ui| {
-        ui.label("Tamanho total:");
+        ui.label(&*t!("file_info.total_space"));
         ui.label(crate::infrastructure::windows::format_size(drive.total_space));
     });
     ui.horizontal(|ui| {
-        ui.label("Sist. Arq:");
+        ui.label(&*t!("file_info.filesystem"));
         ui.label(file_system);
     });
 }
@@ -245,7 +246,7 @@ pub(super) fn render_grid_item(
                 |ui: &mut Ui| {
                     ui.set_max_width(300.0);
                     ui.vertical(|ui| {
-                        ui.label(egui::RichText::new(&item.name).strong());
+                        ui.label(egui::RichText::new(crate::ui::components::item_slot::display_name_for_item(item).as_ref()).strong());
                         ui.separator();
                         if item.drive_info.is_some() {
                             render_drive_tooltip(ui, item);

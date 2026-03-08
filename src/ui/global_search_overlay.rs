@@ -6,6 +6,7 @@ use crate::app::state::ImageViewerApp;
 use crate::ui::theme;
 use eframe::egui;
 use filters::{available_drives, category_label, format_number};
+use rust_i18n::t;
 
 mod filters;
 mod results_panel;
@@ -139,20 +140,17 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
 
                     // Header
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Busca Global").size(16.0).strong());
+                        ui.label(egui::RichText::new(&*t!("search.title")).size(16.0).strong());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if !app.global_search.available {
                                 ui.label(
-                                    egui::RichText::new("Servico offline")
+                                    egui::RichText::new(&*t!("search.service_offline"))
                                         .size(11.0)
                                         .color(egui::Color32::from_rgb(200, 80, 80)),
                                 );
                             } else {
                                 ui.label(
-                                    egui::RichText::new(format!(
-                                        "{} arquivos indexados",
-                                        format_number(app.global_search.total_indexed)
-                                    ))
+                                    egui::RichText::new(t!("search.indexed_files", count = format_number(app.global_search.total_indexed)))
                                     .size(11.0)
                                     .color(egui::Color32::from_gray(120)),
                                 );
@@ -166,7 +164,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                     let search_resp = ui.add_sized(
                         egui::vec2(ui.available_width(), 32.0),
                         egui::TextEdit::singleline(&mut app.global_search.query)
-                            .hint_text("Digite para buscar em todo o computador...")
+                            .hint_text(&*t!("search.placeholder"))
                             .font(egui::TextStyle::Body)
                             .id_source("global_search_input"),
                     );

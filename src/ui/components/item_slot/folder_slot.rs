@@ -204,7 +204,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
             ui.put(
                 text_rect,
                 egui::Label::new(
-                    egui::RichText::new(&item.name)
+                    egui::RichText::new(super::display_name_for_item(item).as_ref())
                         .size(11.0)
                         .color(egui::Color32::BLACK),
                 )

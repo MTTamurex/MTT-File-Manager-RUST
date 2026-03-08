@@ -36,14 +36,14 @@ impl DriveType {
     }
 
     /// Returns a user-friendly string representation
-    pub fn label(&self) -> &str {
+    pub fn label(&self) -> String {
         match self {
-            DriveType::Unknown => "Desconhecido",
-            DriveType::Removable => "Removível",
-            DriveType::Fixed => "Disco Local",
-            DriveType::Remote => "Unidade de Rede",
-            DriveType::Cdrom => "CD/DVD",
-            DriveType::RamDisk => "Disco de RAM",
+            DriveType::Unknown => rust_i18n::t!("drive_types.unknown").to_string(),
+            DriveType::Removable => rust_i18n::t!("drive_types.removable").to_string(),
+            DriveType::Fixed => rust_i18n::t!("drive_types.fixed").to_string(),
+            DriveType::Remote => rust_i18n::t!("drive_types.remote").to_string(),
+            DriveType::Cdrom => rust_i18n::t!("drive_types.cdrom").to_string(),
+            DriveType::RamDisk => rust_i18n::t!("drive_types.ramdisk").to_string(),
         }
     }
 

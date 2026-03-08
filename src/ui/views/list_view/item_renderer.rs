@@ -341,8 +341,9 @@ pub(super) fn render_list_item(
             // Name (truncated to fit column precisely)
             let font_id = FontId::proportional(12.0);
             let available_name_width = w_name - 30.0; // Space for icon + padding
+            let resolved_name = crate::ui::components::item_slot::display_name_for_item(item);
             let display_name =
-                truncate_text_for_column(&item.name, available_name_width, &font_id, ui);
+                truncate_text_for_column(&resolved_name, available_name_width, &font_id, ui);
 
             ui.painter().text(
                 rect.min + egui::vec2(24.0, 5.0),
@@ -434,7 +435,7 @@ fn render_item_tooltip(
                 |ui: &mut Ui| {
                     ui.set_max_width(300.0);
                     ui.vertical(|ui| {
-                        ui.label(RichText::new(&item.name).strong());
+                        ui.label(RichText::new(crate::ui::components::item_slot::display_name_for_item(item).as_ref()).strong());
                         ui.separator();
                         if item.drive_info.is_some() {
                             render_drive_tooltip(ui, item);

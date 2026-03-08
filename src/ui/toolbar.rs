@@ -1,12 +1,13 @@
 use crate::application::navigation::NavigationHistory;
 use crate::domain::file_entry::{SortMode, ViewMode};
-use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID, is_virtual_path};
+use crate::domain::special_paths::{COMPUTER_VIEW_ID, is_virtual_path};
 use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::theme;
 use crate::ui::widgets;
 use eframe::egui;
 use rust_i18n::t;
 use std::cell::RefCell;
+use std::path::Component;
 
 // M-3: Cache breadcrumb segments — recomputed only when current_path changes.
 // Each entry is (display_label, navigation_target).
@@ -21,7 +22,10 @@ thread_local! {
 fn breadcrumb_segments(current_path: &str) -> Vec<(String, String)> {
     BREADCRUMB_CACHE.with(|cache| {
         let mut c = cache.borrow_mut();
-        if c.0 == current_path {
+        // Include locale in cache key so breadcrumbs refresh on language change
+        let current_locale = rust_i18n::locale().to_string();
+        let cache_key = format!("{}|{}", current_path, current_locale);
+        if c.0 == cache_key {
             return c.1.clone();
         }
         // cache miss — recompute
@@ -30,12 +34,17 @@ fn breadcrumb_segments(current_path: &str) -> Vec<(String, String)> {
         let components: Vec<_> = path.components().collect();
         let mut segs = Vec::with_capacity(components.len());
         for (i, comp) in components.iter().enumerate() {
+            full.push(comp.as_os_str());
+
+            if matches!(comp, Component::RootDir) {
+                continue;
+            }
+
             let comp_str = comp.as_os_str().to_string_lossy();
             let display_name = comp_str.trim_end_matches('\\');
             if display_name.is_empty() && i > 0 {
                 continue;
             }
-            full.push(comp);
             let target = {
                 let mut p = full.to_string_lossy().into_owned();
                 if p.len() == 2 && p.ends_with(':') {
@@ -43,14 +52,18 @@ fn breadcrumb_segments(current_path: &str) -> Vec<(String, String)> {
                 }
                 p
             };
-            let display = if display_name.is_empty() {
-                comp_str.into_owned()
-            } else {
-                display_name.to_string()
-            };
+            // Use translated name for known special folders (Desktop, Documents, etc.)
+            let display = crate::infrastructure::onedrive::special_folder_display_name(&full)
+                .unwrap_or_else(|| {
+                    if display_name.is_empty() {
+                        comp_str.to_string()
+                    } else {
+                        display_name.to_string()
+                    }
+                });
             segs.push((display, target));
         }
-        c.0 = current_path.to_string();
+        c.0 = cache_key;
         c.1 = segs.clone();
         segs
     })

@@ -1,5 +1,6 @@
 use crate::app::ImageViewerApp;
 use eframe::egui;
+use rust_i18n::t;
 use std::path::{Path, PathBuf};
 
 fn is_onedrive_pin_text(text: &str) -> bool {
@@ -88,7 +89,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     if had_error {
                         app.notifications
                             .push(crate::application::AppNotification::error(
-                                "Falha ao aplicar comando do OneDrive em um ou mais itens".to_string(),
+                                t!("operations.onedrive_command_failed").to_string(),
                             ));
                     }
 
@@ -210,19 +211,18 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                             Ok(created) => {
                                 app.load_folder(false);
                                 app.notifications
-                                    .push(crate::application::AppNotification::info(format!(
-                                        "Atalho criado: {}",
-                                        created
+                                    .push(crate::application::AppNotification::info(
+                                        t!("operations.shortcut_created", name = created
                                             .file_name()
-                                            .map(|n| n.to_string_lossy())
-                                            .unwrap_or_default()
-                                    )));
+                                            .map(|n| n.to_string_lossy().to_string())
+                                            .unwrap_or_default()).to_string(),
+                                    ));
                             }
                             Err(e) => {
                                 app.notifications
-                                    .push(crate::application::AppNotification::error(format!(
-                                        "Falha ao criar atalho: {e}"
-                                    )));
+                                    .push(crate::application::AppNotification::error(
+                                        t!("operations.shortcut_create_failed", error = e.to_string()).to_string(),
+                                    ));
                             }
                         }
                     }
