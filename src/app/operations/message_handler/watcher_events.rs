@@ -195,6 +195,10 @@ impl ImageViewerApp {
                     let folder_path = current_path.join(&item.name);
                     if stale_set.contains(&folder_path) {
                         item.folder_cover = None;
+                        // Evict stale composed preview so it's re-composed with the
+                        // new cover once the cover_worker returns.
+                        self.cache_manager.invalidate_folder_preview(&folder_path);
+                        self.scanned_folders.pop(&folder_path);
                         // Invalidate disk cache cover in background (avoids Mutex on UI thread).
                         pending_disk_cache_invalidations.push(folder_path.clone());
                         // Re-request cover discovery for this subfolder.
@@ -273,6 +277,10 @@ impl ImageViewerApp {
         // thread while the disk is under heavy I/O.  A full folder reload is
         // triggered in handle_file_operation_finished() once all ops complete.
         if self.file_operation_state.file_ops_in_progress > 0 {
+            log::info!(
+                "[MTIME-SCHED] file_ops_in_progress={}, draining watcher events",
+                self.file_operation_state.file_ops_in_progress
+            );
             let (_drained, _dropped) = self
                 .drive_watcher
                 .poll_events_limited(max_batches, max_events);
@@ -298,7 +306,7 @@ impl ImageViewerApp {
         if dropped_drive_events > 0 && !self.layout.saved_is_minimized {
             if dropped_drive_events >= max_events.saturating_mul(4) {
                 log::warn!(
-                    "[FS-WATCH] Dropped {} queued drive events after inactivity burst (kept={} batches<= {}, events<= {}). Scheduling safety reload.",
+                    "[FS-WATCH] Dropped {} queued drive events (event burst overflow, kept={} batches<= {}, events<= {}). Scheduling safety reload.",
                     dropped_drive_events,
                     drive_event_count,
                     max_batches,
@@ -402,6 +410,9 @@ impl ImageViewerApp {
         self.process_consistency_probe_results(&mut pending_disk_cache_invalidations);
         // Send new probe request if interval elapsed (disk read happens in background)
         self.maybe_send_consistency_probe();
+
+        // Process deferred folder mtime rechecks (Windows lazy-write delay)
+        self.process_pending_folder_mtime_rechecks();
 
         self.enqueue_disk_cache_invalidations(pending_disk_cache_invalidations);
         self.apply_watcher_reload_policy();

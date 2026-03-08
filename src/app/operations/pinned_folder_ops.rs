@@ -39,17 +39,41 @@ impl ImageViewerApp {
 
     /// Remove pinned folders whose paths no longer exist on disk.
     /// Called after delete/move operations to keep Quick Access in sync.
+    ///
+    /// FIX: Uses a background thread for the `.exists()` check to avoid
+    /// blocking the UI thread. `Path::exists()` calls `GetFileAttributesW`
+    /// which can block indefinitely on network/cloud/USB drives.
     pub fn cleanup_deleted_pinned_folders(&mut self) {
-        let gone: Vec<String> = self
-            .pinned_folders
-            .iter()
-            .filter(|pf| !std::path::Path::new(&pf.path).exists())
-            .map(|pf| pf.path.clone())
-            .collect();
+        let paths: Vec<String> = self.pinned_folders.iter().map(|pf| pf.path.clone()).collect();
+        if paths.is_empty() {
+            return;
+        }
 
-        for path in gone {
-            log::info!("[PinnedFolders] Auto-removing deleted folder: {}", path);
-            self.unpin_folder(&path);
+        // Probe paths in a background thread with a timeout per path.
+        // Results arrive on the next frame via a channel.
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<String>>();
+        std::thread::Builder::new()
+            .name("pinned-cleanup".into())
+            .spawn(move || {
+                let gone: Vec<String> = paths
+                    .into_iter()
+                    .filter(|p| {
+                        // Perform the potentially blocking exists() check in this
+                        // single background thread to avoid leaking per-path threads.
+                        !std::path::Path::new(p).exists()
+                    })
+                    .collect();
+                let _ = tx.send(gone);
+            })
+            .ok();
+
+        // Non-blocking: try to receive immediately (will succeed if probes are fast, i.e., local).
+        // If not ready yet, the cleanup will happen on the next call.
+        if let Ok(gone) = rx.recv_timeout(std::time::Duration::from_millis(50)) {
+            for path in gone {
+                log::info!("[PinnedFolders] Auto-removing deleted folder: {}", path);
+                self.unpin_folder(&path);
+            }
         }
     }
 

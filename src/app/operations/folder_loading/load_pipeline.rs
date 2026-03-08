@@ -24,7 +24,9 @@ impl ImageViewerApp {
         let show_hidden = self.show_hidden_files;
 
         // STREAMING BATCH LOADING: Adaptive batch size based on disk type
-        std::thread::spawn(move || {
+        let _ = std::thread::Builder::new()
+            .name("folder-load-pipeline".to_string())
+            .spawn(move || {
             let scan_start = std::time::Instant::now();
 
             let base_path = if current_path.len() == 2 && current_path.ends_with(':') {

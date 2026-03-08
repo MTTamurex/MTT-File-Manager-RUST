@@ -1,4 +1,5 @@
 use crate::infrastructure::windows::system_info::DriveType;
+use rust_i18n::t;
 use std::path::{Path, PathBuf};
 
 /// Volume/drive information for the "This PC" view
@@ -148,26 +149,26 @@ pub fn path_contains_archive_segment(path_lower: &str) -> bool {
 
 /// Returns the type label for displaying an archive file.
 /// E.g.: "Arquivo ZIP", "Arquivo RAR". Returns None if not an archive file.
-pub fn archive_type_label(name: &str) -> Option<&'static str> {
+pub fn archive_type_label(name: &str) -> Option<String> {
     let lower = name.to_ascii_lowercase();
     if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
-        Some("Arquivo TAR.GZ")
+        Some(t!("file_types.archive_tar_gz").to_string())
     } else if lower.ends_with(".tar.bz2") || lower.ends_with(".tbz2") {
-        Some("Arquivo TAR.BZ2")
+        Some(t!("file_types.archive_tar_bz2").to_string())
     } else if lower.ends_with(".tar.zst") || lower.ends_with(".tzst") {
-        Some("Arquivo TAR.ZST")
+        Some(t!("file_types.archive_tar_zst").to_string())
     } else if lower.ends_with(".tar.xz") || lower.ends_with(".txz") {
-        Some("Arquivo TAR.XZ")
+        Some(t!("file_types.archive_tar_xz").to_string())
     } else if lower.ends_with(".tar") {
-        Some("Arquivo TAR")
+        Some(t!("file_types.archive_tar").to_string())
     } else if lower.ends_with(".zip") {
-        Some("Arquivo ZIP")
+        Some(t!("file_types.archive_zip").to_string())
     } else if lower.ends_with(".7z") {
-        Some("Arquivo 7Z")
+        Some(t!("file_types.archive_7z").to_string())
     } else if lower.ends_with(".rar") {
-        Some("Arquivo RAR")
+        Some(t!("file_types.archive_rar").to_string())
     } else if lower.ends_with(".gz") || lower.ends_with(".gzip") {
-        Some("Arquivo GZ")
+        Some(t!("file_types.archive_gz").to_string())
     } else {
         None
     }
@@ -176,15 +177,15 @@ pub fn archive_type_label(name: &str) -> Option<&'static str> {
 /// Helper to display file type in the List view
 pub fn get_file_type_string(entry: &FileEntry) -> String {
     if let Some(label) = archive_type_label(&entry.name) {
-        return label.to_string();
+        return label;
     }
     if entry.is_dir {
-        return "Pasta".to_string();
+        return t!("file_types.folder").to_string();
     }
     if let Some(ext) = entry.path.extension() {
-        return format!("Arquivo {}", ext.to_string_lossy().to_uppercase());
+        return t!("file_info.file_generic", ext = ext.to_string_lossy().to_uppercase()).to_string();
     }
-    "Arquivo".to_string()
+    t!("file_info.file_unknown").to_string()
 }
 
 /// Sort mode

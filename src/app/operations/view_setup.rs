@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::app::state::ImageViewerApp;
+use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::windows as windows_infra;
 
@@ -22,10 +23,10 @@ const DRIVE_BITMASK_CHECK_INTERVAL_MS: u64 = 3000;
 
 impl ImageViewerApp {
     pub fn setup_recycle_bin_view(&mut self) {
-        self.navigation_state.current_path = "Lixeira".to_string();
+        self.navigation_state.current_path = RECYCLE_BIN_VIEW_ID.to_string();
         self.navigation_state.is_computer_view = false;
         self.navigation_state.is_recycle_bin_view = true;
-        self.navigation_state.path_input = "Lixeira".to_string();
+        self.navigation_state.path_input = RECYCLE_BIN_VIEW_ID.to_string();
 
         // Restore unlocked defaults for settings that folder_lock may have overridden.
         // "Lixeira" cannot be locked, so always clear the locked state.
@@ -139,10 +140,10 @@ impl ImageViewerApp {
         self.pending_items_count = 0;
 
         // Set computer view
-        self.navigation_state.current_path = "Este Computador".to_string();
+        self.navigation_state.current_path = COMPUTER_VIEW_ID.to_string();
         self.navigation_state.is_computer_view = true;
         self.navigation_state.is_recycle_bin_view = false;
-        self.navigation_state.path_input = "Este Computador".to_string();
+        self.navigation_state.path_input = COMPUTER_VIEW_ID.to_string();
 
         // Load Computer View sort mode
         self.sort_mode = self.sort_mode_computer;

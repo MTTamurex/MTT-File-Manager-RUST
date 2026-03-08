@@ -1,4 +1,5 @@
 use crate::app::ImageViewerApp;
+use crate::domain::special_paths::COMPUTER_VIEW_ID;
 use eframe::egui;
 
 pub(crate) fn render_tab_bar_layer(
@@ -67,7 +68,7 @@ pub(crate) fn render_tab_bar_layer(
                     active.sort_descending = prev_sort_descending;
                     active.folders_position = prev_folders_position;
                     app.sync_from_tab();
-                    if current_path == "Este Computador" {
+                    if current_path == COMPUTER_VIEW_ID {
                         app.setup_computer_view();
                     }
                     app.sync_to_tab();

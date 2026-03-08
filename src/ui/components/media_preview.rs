@@ -36,9 +36,21 @@ impl GifPlayer {
         // PERF FIX (A-6): Single mutex lock instead of 3 separate locks.
         // Reads frame data by reference under the guard, avoiding clone of
         // the ~1MB RGBA Vec<u8> per frame advance.
-        let data = match self.data.lock() {
+        //
+        // CRITICAL FIX: Use try_lock() instead of lock() to avoid blocking
+        // the UI thread. The decode worker holds this lock while pushing
+        // decoded frames (which involves file I/O that can block on OneDrive).
+        // A blocking .lock() here causes priority inversion: the UI thread
+        // (high priority) waits on the decode thread (low priority, possibly
+        // blocked on cloud filter driver), stalling the Windows message pump.
+        let data = match self.data.try_lock() {
             Ok(d) => d,
-            Err(e) => {
+            Err(std::sync::TryLockError::WouldBlock) => {
+                // Decode worker holds the lock — skip this frame, retry next paint.
+                ctx.request_repaint_after(Duration::from_millis(16));
+                return;
+            }
+            Err(std::sync::TryLockError::Poisoned(e)) => {
                 log::error!("[GifPlayer] Erro ao lock dados - Mutex poisonado");
                 e.into_inner()
             }
@@ -268,7 +280,7 @@ impl MediaPreview {
         if let MediaPreview::Video(player) = self {
             player.load_external_subtitle(subtitle_path)
         } else {
-            Err("Preview atual não é vídeo".to_string())
+            Err(rust_i18n::t!("video.not_video").to_string())
         }
     }
 

@@ -2,6 +2,7 @@
 //! Follows .cursorrules: single responsibility, < 300 lines
 use windows::Win32::Foundation::{FILETIME, SYSTEMTIME};
 use windows::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime};
+use rust_i18n::t;
 
 /// Formats bytes into human-readable size (KB, MB, GB).
 pub fn format_size(bytes: u64) -> String {
@@ -23,7 +24,7 @@ pub fn format_size(bytes: u64) -> String {
 /// Formats Unix timestamp into DD/MM/YYYY HH:MM string.
 pub fn format_date(timestamp: u64) -> String {
     if timestamp == 0 {
-        return "Desconhecido".to_string();
+        return t!("file_info.unknown_date").to_string();
     }
 
     if let Some(local_time) = unix_timestamp_to_local_system_time(timestamp) {

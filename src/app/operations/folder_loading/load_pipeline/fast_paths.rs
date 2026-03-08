@@ -49,6 +49,10 @@ pub(super) fn try_handle_fast_paths(
         // both DirectoryCache and DirectoryIndex for ANY change on the drive.
         // No fs::metadata() mtime check needed — if the cache has data, it's valid.
         if let Some((cached_entries, cached_at_ms)) = directory_cache.get_with_meta(base_path_buf) {
+            log::info!(
+                "[FOLDER-LOADING] Phase 1: Cache HIT for {:?} ({} entries, cached_at_ms={})",
+                base_path_buf, cached_entries.len(), cached_at_ms
+            );
             // Fail-safe against missed watcher events: validate folder mtime.
             // Skip for OneDrive to avoid potential blocking metadata calls.
             if !is_onedrive_base {
@@ -143,8 +147,8 @@ pub(super) fn try_handle_fast_paths(
                 return true;
             }
         } else {
-            log::debug!(
-                "[FOLDER-LOADING] Phase 1: Cache miss for {:?}, proceeding to Phase 3 (disk load)",
+            log::info!(
+                "[FOLDER-LOADING] Phase 1: Cache MISS for {:?}, proceeding to disk load",
                 base_path_buf
             );
         }

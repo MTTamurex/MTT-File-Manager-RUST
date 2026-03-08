@@ -52,7 +52,7 @@ pub fn spawn_idle_warmup_worker(
     _prefetch_sender: std::sync::mpsc::Sender<PrefetchMessage>,
 ) {
     std::thread::spawn(move || {
-        io_priority::set_thread_priority(IOPriority::Background);
+        let _priority_guard = io_priority::ThreadPriorityGuard::new(IOPriority::Background);
 
         let mut worker = IdleWarmupWorker::new();
 

@@ -206,7 +206,10 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         }
 
         // Delete: Excluir para lixeira (somente sem Shift)
-        if ctx.input(|i| !i.modifiers.shift && i.key_pressed(egui::Key::Delete)) {
+        // Skip when a text input (search bar, address bar) has keyboard focus.
+        if !text_input_active
+            && ctx.input(|i| !i.modifiers.shift && i.key_pressed(egui::Key::Delete))
+        {
             app.delete_with_shell_for_idx(None);
             user_active = true;
         }
@@ -214,7 +217,10 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         // Shift+Delete: tratado via GetAsyncKeyState abaixo (egui não entrega confiavelmente)
 
         // Alt+Enter: Propriedades
-        if ctx.input(|i| i.modifiers.alt && i.key_pressed(egui::Key::Enter)) {
+        // Skip when a text input has keyboard focus.
+        if !text_input_active
+            && ctx.input(|i| i.modifiers.alt && i.key_pressed(egui::Key::Enter))
+        {
             app.show_properties_for_idx(None);
             user_active = true;
         }
@@ -223,6 +229,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::L)) {
             app.navigation_state.path_input = app.navigation_state.current_path.clone();
             app.is_address_editing = true;
+            app.show_address_history_menu = false;
             app.address_bar_focus_request = true;
             user_active = true;
         }

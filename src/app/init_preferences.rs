@@ -19,6 +19,7 @@ pub(super) struct StartupPreferences {
     pub(super) sidebar_right_width: f32,
     pub(super) session_volume: f32,
     pub(super) show_hidden_files: bool,
+    pub(super) language: String,
 }
 
 impl StartupPreferences {
@@ -139,6 +140,10 @@ impl StartupPreferences {
             .map(|s| s == "true")
             .unwrap_or(false);
 
+        let language = disk_cache
+            .get_preference("language")
+            .unwrap_or_else(|| "pt-BR".to_string());
+
         Self {
             sort_mode,
             sort_mode_computer,
@@ -156,6 +161,7 @@ impl StartupPreferences {
             sidebar_right_width,
             session_volume,
             show_hidden_files,
+            language,
         }
     }
 }

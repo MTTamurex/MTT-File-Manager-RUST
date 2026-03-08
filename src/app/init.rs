@@ -8,6 +8,7 @@ use lru::LruCache;
 use std::num::NonZeroUsize;
 // PERFORMANCE: FxHashSet uses faster hashing for PathBuf keys
 use crate::ui::cache::FxHashSet;
+use crate::domain::special_paths::{COMPUTER_VIEW_ID, is_virtual_path};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -59,7 +60,7 @@ fn determine_initial_path(disk_cache: &ThumbnailDiskCache) -> (String, bool) {
 
     // Default to "This PC" if no valid last folder
     log::info!("[INIT] No valid last folder found, starting at Este Computador");
-    ("Este Computador".to_string(), true)
+    (COMPUTER_VIEW_ID.to_string(), true)
 }
 
 // Helper function also present in main.rs - could be moved to infrastructure if needed
@@ -134,7 +135,11 @@ impl ImageViewerApp {
             sidebar_right_width,
             session_volume,
             show_hidden_files,
+            language,
         } = startup_preferences;
+
+        // Apply saved language preference
+        rust_i18n::set_locale(&language);
 
         // Load folder locks from database
         let folder_locks = disk_cache.get_all_folder_locks();
@@ -242,7 +247,7 @@ impl ImageViewerApp {
             renaming_state: None,
             focus_rename: false,
 
-            // Drive-wide file system watcher (File Pilot optimization)
+            // Drive-wide file system watcher
             drive_watcher:
                 crate::infrastructure::drive_watcher_integration::DriveWatcherManager::new(),
 
@@ -261,6 +266,8 @@ impl ImageViewerApp {
             watcher_fallback_last_probe: Instant::now(),
             watcher_fallback_signature: None,
             rdcw_unreliable_drives: std::collections::HashMap::new(),
+            pending_folder_mtime_recheck: Vec::new(),
+            last_folder_mtime_sort: Instant::now(),
             watcher_fs_probe_cache: std::collections::HashMap::new(),
             consistency_probe_tx,
             consistency_probe_rx,
@@ -276,7 +283,7 @@ impl ImageViewerApp {
 
             // PERSISTENT ICON LOADER
             item_icon_loader: {
-                let mut loader = IconLoader::new();
+                let mut loader = IconLoader::new(Some(disk_cache.clone()));
                 // Pre-populate extension_cache from disk cache → instant icons on first frame.
                 for (ext, (pixels, width, height)) in &preloaded_extension_icons {
                     // Use canonical extension so mapped types (sys→dll) share
@@ -304,6 +311,9 @@ impl ImageViewerApp {
                     let (ref pixels, width, height) = custom_folder_icon;
                     loader.set_folder_icon(&ctx, pixels, width, height);
                 }
+                // Pre-extract special folder icons (Documents, Pictures, etc.)
+                // in a single background thread so they're ready on first render.
+                loader.preload_special_folder_icons();
                 loader
             },
 
@@ -332,6 +342,7 @@ impl ImageViewerApp {
 
             // NAVIGATION / ADDRESS BAR
             is_address_editing: false,
+            show_address_history_menu: false,
 
             // SCROLL TO SELECTED (for keyboard navigation)
             scroll_to_selected: false,
@@ -483,8 +494,7 @@ impl ImageViewerApp {
         // folder was never visited in the previous session (e.g. pinned shortcuts).
         // This runs once at startup (not in the render loop), so it is safe.
         if !is_computer_view_initial
-            && initial_path != "Este Computador"
-            && initial_path != "Lixeira"
+            && !is_virtual_path(&initial_path)
         {
             let dest = std::path::PathBuf::from(&initial_path);
             if let Ok(meta) = std::fs::metadata(&dest) {

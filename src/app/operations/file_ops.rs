@@ -3,6 +3,7 @@
 //! This module handles basic file operations interacting with the shell.
 
 use crate::app::state::ImageViewerApp;
+use rust_i18n::t;
 use crate::application::file_operations;
 use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::security::classify_shell_namespace_path;
@@ -61,8 +62,7 @@ impl ImageViewerApp {
             if !confirmed {
                 self.pending_shell_open_confirmation = Some((path.to_path_buf(), now));
                 self.notifications.push(crate::application::AppNotification::warning(
-                    "Fonte de alto risco (UNC/Shell). Clique novamente para confirmar a abertura."
-                        .to_string(),
+                    t!("operations.high_risk_source").to_string(),
                 ));
                 return;
             }
@@ -79,7 +79,7 @@ impl ImageViewerApp {
                 e
             );
             self.notifications.push(crate::application::AppNotification::warning(
-                "Falha ao abrir item com o aplicativo padrão.".to_string(),
+                t!("operations.open_failed").to_string(),
             ));
         } else if is_onedrive_media_file(path) {
             // Hydration/open may not always emit a watcher path that triggers thumbnail retry.
@@ -125,9 +125,19 @@ impl ImageViewerApp {
         }
         self.thumbnail_queue.remove_paths(&paths);
 
+        // Clear ALL in-memory caches for these paths so a future file at
+        // the same path won't pick up the deleted file's stale thumbnail.
+        for path in &paths {
+            self.cache_manager.texture_cache.pop(path);
+            self.cache_manager.loading_set.remove(path);
+            self.cache_manager.pop_rgba_data(path);
+            self.cache_manager.failed_thumbnails.pop(path);
+        }
+
         // PERF FIX (C-1): Batch SQLite cache cleanup to background worker instead
         // of running 8-DELETE transactions per file on the UI thread.
-        self.enqueue_disk_cache_invalidations(paths.to_vec());
+        // FORCED: skip existence guard — Shell hasn't finished yet.
+        self.enqueue_disk_cache_invalidations_forced(paths.to_vec());
 
         for path in &paths {
             self.multi_selection.remove(path);
@@ -167,9 +177,19 @@ impl ImageViewerApp {
         }
         self.thumbnail_queue.remove_paths(paths);
 
+        // Clear ALL in-memory caches for these paths so a future file at
+        // the same path won't pick up the deleted file's stale thumbnail.
+        for path in paths {
+            self.cache_manager.texture_cache.pop(path);
+            self.cache_manager.loading_set.remove(path);
+            self.cache_manager.pop_rgba_data(path);
+            self.cache_manager.failed_thumbnails.pop(path);
+        }
+
         // PERF FIX (C-1): Batch SQLite cache cleanup to background worker instead
         // of running 8-DELETE transactions per file on the UI thread.
-        self.enqueue_disk_cache_invalidations(paths.to_vec());
+        // FORCED: skip existence guard — Shell hasn't finished yet.
+        self.enqueue_disk_cache_invalidations_forced(paths.to_vec());
 
         for path in paths {
             // Clear selection proactively
@@ -290,18 +310,18 @@ impl ImageViewerApp {
                 // Notify the start of the mount operation
                 self.notifications
                     .push(crate::application::AppNotification::info(format!(
-                        "Montando ISO: {}",
-                        path.file_name()
-                            .map(|n| n.to_string_lossy())
-                            .unwrap_or_default()
+                        "{}",
+                        t!("operations.mount_iso", name = path.file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default())
                     )));
             }
             Err(e) => {
                 self.file_operation_state.pending_iso_mount = None;
                 self.notifications
                     .push(crate::application::AppNotification::error(format!(
-                        "Falha ao montar ISO: {}",
-                        e
+                        "{}",
+                        t!("operations.mount_iso_failed", error = e.to_string())
                     )));
             }
         }

@@ -17,6 +17,19 @@ use drive_slot::render_drive_slot;
 use file_slot::render_file_slot;
 use folder_slot::render_directory_slot;
 
+use std::borrow::Cow;
+
+/// Returns a translated display name for special folders (OneDrive Desktop, Documents, etc.),
+/// or the original filesystem name if not a special folder.
+pub(crate) fn display_name_for_item(item: &FileEntry) -> Cow<'_, str> {
+    if item.is_dir {
+        if let Some(translated) = crate::infrastructure::onedrive::special_folder_display_name(&item.path) {
+            return Cow::Owned(translated);
+        }
+    }
+    Cow::Borrowed(&item.name)
+}
+
 /// Trait for operations needed to render an item slot
 pub trait ItemSlotOperations {
     /// Requests thumbnail loading

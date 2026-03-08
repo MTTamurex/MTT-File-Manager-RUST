@@ -3,6 +3,7 @@
 //! This module handles syncing state between the active tab and the main application state.
 
 use crate::app::state::ImageViewerApp;
+use crate::domain::special_paths::COMPUTER_VIEW_ID;
 use std::path::Path;
 
 impl ImageViewerApp {
@@ -33,9 +34,9 @@ impl ImageViewerApp {
         active.sort_descending = self.sort_descending;
         active.folders_position = self.folders_position;
 
-        // On Windows, Path::new("Este Computador").file_name() is None
+        // On Windows, Path::new(COMPUTER_VIEW_ID).file_name() is None
         if active.is_computer_view {
-            active.title = "Este Computador".to_string();
+            active.title = COMPUTER_VIEW_ID.to_string();
         } else {
             active.title = Path::new(&active.path)
                 .file_name()

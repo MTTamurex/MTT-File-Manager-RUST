@@ -1,4 +1,5 @@
 use clipboard_win::{formats, Clipboard, Setter};
+use rust_i18n::t;
 use std::path::{Path, PathBuf};
 use windows::core::{Interface, PCWSTR};
 use windows::Win32::Foundation::HWND;
@@ -112,7 +113,7 @@ pub fn delete_with_shell(path: &Path, hwnd: Option<HWND>) -> OpResult<bool> {
     if success {
         Ok(true)
     } else {
-        Err("Operacao cancelada ou falhou".to_string())
+        Err(t!("operations.error_cancelled").to_string())
     }
 }
 
@@ -136,7 +137,7 @@ pub fn rename_with_shell(path: &Path, new_name: &str, hwnd: Option<HWND>) -> OpR
         || new_name == "."
         || new_name == ".."
     {
-        return Err("Nome invalido para renomear".to_string());
+        return Err(t!("operations.error_invalid_name").to_string());
     }
 
     let valid_path = sanitize_operation_path(path)?;
@@ -145,14 +146,14 @@ pub fn rename_with_shell(path: &Path, new_name: &str, hwnd: Option<HWND>) -> OpR
     if success {
         Ok(true)
     } else {
-        Err("Operacao cancelada ou falhou".to_string())
+        Err(t!("operations.error_cancelled").to_string())
     }
 }
 
 /// Creates a new folder with a unique name "Nova Pasta (N)".
 pub fn create_new_folder(base_path: &Path) -> OpResult<PathBuf> {
     let base_path = sanitize_operation_path(base_path)?;
-    let mut new_folder_name = "Nova Pasta".to_string();
+    let mut new_folder_name = t!("operations.new_folder").to_string();
     let mut counter = 1;
 
     // Atomic create-and-retry: call create_dir() directly and handle AlreadyExists.
@@ -163,14 +164,14 @@ pub fn create_new_folder(base_path: &Path) -> OpResult<PathBuf> {
             Ok(_) => return Ok(full_path),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                 counter += 1;
-                new_folder_name = format!("Nova Pasta ({})", counter);
+                new_folder_name = t!("operations.new_folder_n", n = counter).to_string();
                 if counter > 1000 {
                     return Err(
-                        "Erro ao criar pasta: limite de tentativas excedido".to_string()
+                        t!("operations.error_folder_limit").to_string()
                     );
                 }
             }
-            Err(e) => return Err(format!("Erro ao criar pasta: {}", e)),
+            Err(e) => return Err(t!("operations.error_folder_create", error = e).to_string()),
         }
     }
 }
@@ -186,7 +187,7 @@ pub fn copy_path_to_clipboard(path: &Path) -> OpResult<()> {
             return Ok(());
         }
     }
-    Err("Falha ao abrir clipboard".to_string())
+    Err(t!("operations.error_clipboard").to_string())
 }
 
 /// Restores file from Recycle Bin.
@@ -228,7 +229,7 @@ pub fn create_shortcut(target: &Path, current_path: &str) -> OpResult<PathBuf> {
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| valid_target.to_string_lossy().to_string());
 
-    let mut candidate = dest_dir.join(format!("{} - Atalho.lnk", base_name));
+    let mut candidate = dest_dir.join(format!("{}.lnk", t!("operations.shortcut_suffix", name = base_name)));
     let mut counter = 2;
     // Atomic filename reservation: use create_new to atomically claim the name.
     // This eliminates the TOCTOU race between a prior existence check and the save.
@@ -244,13 +245,13 @@ pub fn create_shortcut(target: &Path, current_path: &str) -> OpResult<PathBuf> {
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                 candidate =
-                    dest_dir.join(format!("{} - Atalho ({}).lnk", base_name, counter));
+                    dest_dir.join(format!("{}.lnk", t!("operations.shortcut_suffix_n", name = base_name, n = counter)));
                 counter += 1;
                 if counter > 1000 {
-                    return Err("Muitas tentativas ao criar atalho".to_string());
+                    return Err(t!("operations.error_shortcut_limit").to_string());
                 }
             }
-            Err(e) => return Err(format!("Erro ao criar atalho: {}", e)),
+            Err(e) => return Err(t!("operations.error_shortcut_create", error = e).to_string()),
         }
     }
 

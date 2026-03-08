@@ -8,6 +8,7 @@
 
 use crate::application::navigation::NavigationHistory;
 use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
+use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use rustc_hash::FxHashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -72,9 +73,9 @@ impl TabState {
     pub fn new_at_computer(id: usize) -> Self {
         Self {
             id,
-            path: "Este Computador".to_string(),
-            title: "Este Computador".to_string(),
-            navigation: NavigationHistory::new("Este Computador".to_string()),
+            path: COMPUTER_VIEW_ID.to_string(),
+            title: COMPUTER_VIEW_ID.to_string(),
+            navigation: NavigationHistory::new(COMPUTER_VIEW_ID.to_string()),
             is_computer_view: true,
             items: Arc::new(Vec::new()),
             all_items: Vec::new(),
@@ -82,7 +83,7 @@ impl TabState {
             selected_file: None,
             search_query: String::new(),
             scroll_to_selected: false,
-            path_input: "Este Computador".to_string(),
+            path_input: COMPUTER_VIEW_ID.to_string(),
             is_recycle_bin_view: false,
             selected_thumbnail: None,
             selected_metadata: None,
@@ -119,7 +120,7 @@ impl TabState {
             search_query: String::new(),
             scroll_to_selected: false,
             path_input: path.to_string(),
-            is_recycle_bin_view: path == "Lixeira",
+            is_recycle_bin_view: path == RECYCLE_BIN_VIEW_ID,
             selected_thumbnail: None,
             selected_metadata: None,
             selected_gif: None,
@@ -147,13 +148,13 @@ impl TabState {
         // Update current path
         self.path = new_path.to_string();
         self.path_input = new_path.to_string();
-        self.is_computer_view = new_path == "Este Computador";
-        self.is_recycle_bin_view = new_path == "Lixeira";
+        self.is_computer_view = new_path == COMPUTER_VIEW_ID;
+        self.is_recycle_bin_view = new_path == RECYCLE_BIN_VIEW_ID;
         self.scroll_offset_y = 0.0;
 
         // Update title
         if self.is_computer_view {
-            self.title = "Este Computador".to_string();
+            self.title = COMPUTER_VIEW_ID.to_string();
         } else {
             self.title = PathBuf::from(new_path)
                 .file_name()
@@ -187,12 +188,12 @@ impl TabState {
     fn sync_from_history(&mut self) {
         if let Some(path) = self.navigation.current_path() {
             self.path_input = path.clone();
-            self.is_computer_view = path == "Este Computador";
-            self.is_recycle_bin_view = path == "Lixeira";
+            self.is_computer_view = path == COMPUTER_VIEW_ID;
+            self.is_recycle_bin_view = path == RECYCLE_BIN_VIEW_ID;
             self.scroll_offset_y = 0.0;
 
             if self.is_computer_view {
-                self.title = "Este Computador".to_string();
+                self.title = COMPUTER_VIEW_ID.to_string();
             } else {
                 self.title = PathBuf::from(path)
                     .file_name()

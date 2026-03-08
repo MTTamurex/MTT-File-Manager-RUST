@@ -39,6 +39,7 @@ impl ImageViewerApp {
         }
 
         let mut folder_updates = false;
+        let mut covers_changed: Vec<std::path::PathBuf> = Vec::new();
         // Build a path index for master items and apply only touched updates.
         let mut all_items_index =
             std::collections::HashMap::with_capacity(self.all_items.len());
@@ -49,8 +50,22 @@ impl ImageViewerApp {
             if let Some(idx) = all_items_index.get(folder_path) {
                 let item = &mut self.all_items[*idx];
                 if item.folder_cover != *cover_opt {
+                    // Only invalidate composed preview when cover PATH genuinely
+                    // changed (Some(old) → Some(new)  or  Some(_) → None).
+                    // The transition None → Some(path) is NOT a real change —
+                    // it just fills in a field that DirectoryCache didn't have.
+                    // The preview was already composed with this cover, so
+                    // invalidating it causes a visible flash for no reason.
+                    let cover_path_changed = match (&item.folder_cover, cover_opt) {
+                        (Some(old), Some(new)) => old != new,
+                        (Some(_), None) => true,
+                        _ => false, // None→Some or None→None: not a real change
+                    };
                     item.folder_cover = cover_opt.clone();
                     folder_updates = true;
+                    if cover_path_changed {
+                        covers_changed.push(folder_path.clone());
+                    }
                 }
             }
         }
@@ -71,6 +86,12 @@ impl ImageViewerApp {
                     folder_updates = true;
                 }
             }
+        }
+
+        // When a folder's cover changes, the composed preview is stale —
+        // invalidate it so the next frame triggers a fresh composition.
+        for folder_path in &covers_changed {
+            self.cache_manager.invalidate_folder_preview(folder_path);
         }
 
         let t_items = Instant::now();

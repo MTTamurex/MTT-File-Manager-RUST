@@ -100,6 +100,7 @@ impl ImageViewerApp {
         };
         let incoming_start = Instant::now();
         let mut not_found_failures: Vec<PathBuf> = Vec::new();
+        let mut successful_thumb_paths: Vec<PathBuf> = Vec::new();
         let eviction_visible: Option<HashSet<PathBuf>> = self.visible_index_range
             .and_then(|(min_vis, max_vis)| {
                 let items = &self.items;
@@ -181,6 +182,7 @@ impl ImageViewerApp {
 
             self.cache_manager
                 .start_pending_upload(thumbnail_data.path.clone());
+            successful_thumb_paths.push(thumbnail_data.path.clone());
             self.pending_thumbnails.push_back(thumbnail_data);
             received_any = true;
         }
@@ -191,6 +193,36 @@ impl ImageViewerApp {
 
         if self.handle_missing_cover_sources(not_found_failures) {
             received_any = true;
+        }
+
+        // When a successfully-loaded thumbnail belongs to a file that is
+        // currently set as a folder_cover AND the folder has no SQLite-cached
+        // preview, the visible preview is a stale compose_empty placeholder
+        // (our MediaUnsafe fix skips SQLite persistence for those).
+        //
+        // Re-queue the folder for composition WITHOUT invalidating the GPU
+        // cache — the old placeholder stays visible until the worker produces
+        // the new preview, avoiding any visible flicker.
+        if !successful_thumb_paths.is_empty() {
+            let successful_set: HashSet<&PathBuf> = successful_thumb_paths.iter().collect();
+            for item in &self.all_items {
+                if let Some(ref cover) = item.folder_cover {
+                    if item.is_dir && successful_set.contains(cover) {
+                        // SQLite miss ⇒ the current preview was a MediaUnsafe placeholder.
+                        // SQLite hit  ⇒ preview already composed with real media — skip.
+                        if self.disk_cache.get_folder_preview_cache(&item.path).is_none() {
+                            if self.cache_manager.start_folder_preview_loading(item.path.clone()) {
+                                let _ = self.folder_preview_sender.send(item.path.clone());
+                            }
+                            log::debug!(
+                                "[FOLDER PREVIEW] Re-composing {:?} (cover {:?} now available)",
+                                item.path.file_name().unwrap_or_default(),
+                                cover.file_name().unwrap_or_default(),
+                            );
+                        }
+                    }
+                }
+            }
         }
 
         let is_scrolling = self.last_scroll_time.elapsed() < Duration::from_millis(100);

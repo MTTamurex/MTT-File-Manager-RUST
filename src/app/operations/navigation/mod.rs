@@ -6,6 +6,7 @@ pub mod keyboard;
 pub mod selection;
 
 use crate::app::state::ImageViewerApp;
+use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use std::path::{Path, PathBuf};
 
 impl ImageViewerApp {
@@ -80,21 +81,10 @@ impl ImageViewerApp {
         // resolve_destination_folder_modified_hint only knows about folders already seen
         // in the current session. When clicking a pinned shortcut for the first time,
         // no hint exists → modified = 0 → "Desconhecido" in the preview panel.
-        // This call happens ONCE per navigation (user click), not in the render loop,
-        // so a single metadata() call here is safe.
-        if self.current_folder_modified_hint.is_none() {
-            if let Ok(meta) = std::fs::metadata(&destination_path) {
-                if let Ok(modified_time) = meta.modified() {
-                    if let Ok(duration) = modified_time.duration_since(std::time::UNIX_EPOCH) {
-                        let secs = duration.as_secs();
-                        if secs > 0 {
-                            self.current_folder_modified_hint =
-                                Some((destination_path.clone(), secs));
-                        }
-                    }
-                }
-            }
-        }
+        //
+        // We intentionally do NOT call std::fs::metadata() here because it blocks
+        // the UI thread. On a sleeping HDD this can stall for 500-2000ms (spin-up).
+        // The timestamp will resolve naturally when the folder items finish loading.
 
         // Clear loaded_path to allow reload if navigating to same path (for consistency)
         self.loaded_path.clear();
@@ -111,9 +101,6 @@ impl ImageViewerApp {
 
         // Restore normal folder sort mode
         self.sort_mode = self.sort_mode_normal;
-
-        // SYNC TAB STATE
-        self.sync_to_tab();
 
         self.reset_selection_and_search();
 
@@ -132,6 +119,12 @@ impl ImageViewerApp {
         self.items = std::sync::Arc::new(Vec::new());
         self.all_items.clear();
 
+        // Discard pending mtime rechecks for the old folder's subfolders.
+        self.pending_folder_mtime_recheck.clear();
+
+        // SYNC TAB STATE after clearing stale lists to avoid heavy cloning on navigation.
+        self.sync_to_tab();
+
         self.load_folder(false);
     }
 
@@ -142,7 +135,7 @@ impl ImageViewerApp {
             // Save current path before going back (to invalidate the preview)
             let previous_path = std::path::PathBuf::from(&self.navigation_state.current_path);
 
-            if path == "Este Computador" {
+            if path == COMPUTER_VIEW_ID {
                 // Invalidate preview of the folder we were in
                 self.cache_manager.invalidate_folder_preview(&previous_path);
 
@@ -151,7 +144,7 @@ impl ImageViewerApp {
 
                 self.reset_selection_and_search();
                 self.setup_computer_view();
-            } else if path == "Lixeira" {
+            } else if path == RECYCLE_BIN_VIEW_ID {
                 // Invalidate preview of the folder we were in
                 self.cache_manager.invalidate_folder_preview(&previous_path);
 
@@ -185,6 +178,9 @@ impl ImageViewerApp {
                 self.items = std::sync::Arc::new(Vec::new());
                 self.all_items.clear();
 
+                // SYNC TAB STATE after clearing stale lists to avoid heavy cloning on navigation.
+                self.sync_to_tab();
+
                 self.load_folder(false);
             }
         }
@@ -198,7 +194,7 @@ impl ImageViewerApp {
             // Save current path before going forward (to invalidate the preview)
             let previous_path = std::path::PathBuf::from(&self.navigation_state.current_path);
 
-            if path == "Este Computador" {
+            if path == COMPUTER_VIEW_ID {
                 // Invalidate preview of the folder we were in
                 self.cache_manager.invalidate_folder_preview(&previous_path);
 
@@ -207,7 +203,7 @@ impl ImageViewerApp {
 
                 self.reset_selection_and_search();
                 self.setup_computer_view();
-            } else if path == "Lixeira" {
+            } else if path == RECYCLE_BIN_VIEW_ID {
                 // Invalidate preview of the folder we were in
                 self.cache_manager.invalidate_folder_preview(&previous_path);
 
@@ -241,6 +237,9 @@ impl ImageViewerApp {
                 self.items = std::sync::Arc::new(Vec::new());
                 self.all_items.clear();
 
+                // SYNC TAB STATE after clearing stale lists to avoid heavy cloning on navigation.
+                self.sync_to_tab();
+
                 self.load_folder(false);
             }
         }
@@ -254,7 +253,7 @@ impl ImageViewerApp {
 
         self.navigation_state
             .navigation
-            .navigate_to("Este Computador".to_string());
+            .navigate_to(COMPUTER_VIEW_ID.to_string());
         // self.sync_to_tab(); // setup_computer_view calls sync_from_tab?? no, we sync afterward
 
         self.reset_selection_and_search();
@@ -270,10 +269,10 @@ impl ImageViewerApp {
 
         self.navigation_state
             .navigation
-            .navigate_to("Lixeira".to_string());
+            .navigate_to(RECYCLE_BIN_VIEW_ID.to_string());
         self.reset_selection_and_search();
         // NOTE: Do NOT call watch_current_folder() here.
-        // "Lixeira" is a virtual view, not a real filesystem path — notify would
+        // Recycle bin is a virtual view, not a real filesystem path — notify would
         // fail with "Input watch path is neither a file nor a directory".
         self.setup_recycle_bin_view();
         self.sync_to_tab();
@@ -325,22 +324,23 @@ impl ImageViewerApp {
             current
         );
 
-        let mut candidate = current.as_path().parent();
-        while let Some(parent) = candidate {
-            if parent.as_os_str().is_empty() {
-                break;
-            }
-            if parent.is_dir() {
-                log::info!("[NAV] Navigating to nearest valid ancestor: {:?}", parent);
+        // FIX: Avoid blocking is_dir() calls on the UI thread.
+        // GetFileAttributesW can block indefinitely on network/cloud/USB drives.
+        // Instead, navigate directly to the parent directory. If the parent
+        // doesn't exist either, the loading pipeline will detect the error
+        // and we'll handle it via the next watcher event / consistency probe.
+        // For root drives (e.g. "E:\"), go straight to computer view.
+        if let Some(parent) = current.as_path().parent() {
+            if !parent.as_os_str().is_empty() {
+                log::info!("[NAV] Navigating to parent: {:?} (no blocking I/O check)", parent);
                 let target = parent.to_string_lossy().to_string();
                 self.navigate_to(&target);
                 return;
             }
-            candidate = parent.parent();
         }
 
-        // No valid ancestor on disk → go to computer view
-        log::warn!("[NAV] No valid ancestor found — redirecting to Este Computador");
+        // No valid ancestor (root of drive or empty) → go to computer view
+        log::warn!("[NAV] No parent available — redirecting to Este Computador");
         self.navigate_to_computer();
     }
 }

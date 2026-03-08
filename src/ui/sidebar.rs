@@ -1,6 +1,7 @@
 use crate::domain::pinned_folder::PinnedFolder;
 use crate::infrastructure::windows::{detect_drive_type, DriveType};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense};
+use rust_i18n::t;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -106,7 +107,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
         ui.painter().text(
             Pos2::new(cursor_x, header_rect_full.center().y),
             egui::Align2::LEFT_CENTER,
-            "Este Computador",
+            t!("nav.computer"),
             egui::FontId::proportional(12.0),
             if is_selected {
                 crate::ui::theme::COLOR_SELECTION_TEXT
@@ -139,7 +140,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
         ui.painter().text(
             Pos2::new(qa_label_rect.min.x + 8.0, qa_label_rect.center().y),
             egui::Align2::LEFT_CENTER,
-            "Acesso Rápido",
+            t!("sidebar.quick_access"),
             egui::FontId::proportional(10.0),
             Color32::from_gray(120),
         );
@@ -257,7 +258,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
             ui.painter().text(
                 Pos2::new(cursor_x, rect.center().y),
                 egui::Align2::LEFT_CENTER,
-                "Lixeira",
+                t!("nav.recycle_bin"),
                 egui::FontId::proportional(11.5),
                 if is_selected {
                     crate::ui::theme::COLOR_SELECTION_TEXT
@@ -403,8 +404,8 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
         ui.add_space(6.0);
     };
 
-    render_drive_group("Discos locais", local_drives);
-    render_drive_group("Unidades de rede", network_drives);
+    render_drive_group(&t!("sidebar.local_disks"), local_drives);
+    render_drive_group(&t!("sidebar.network_drives"), network_drives);
 
     let total_ms = t_start.elapsed().as_millis();
     if total_ms > 50 {
@@ -528,7 +529,10 @@ fn render_pinned_folders(
             ui.painter().text(
                 Pos2::new(cursor_x, rect.center().y),
                 egui::Align2::LEFT_CENTER,
-                &pinned.display_name,
+                &crate::infrastructure::onedrive::special_folder_display_name(
+                    std::path::Path::new(&pinned.path),
+                )
+                .unwrap_or_else(|| pinned.display_name.clone()),
                 egui::FontId::proportional(11.5),
                 text_color,
             );

@@ -71,7 +71,8 @@ pub(in crate::app) struct AppBootstrap {
         mpsc::Sender<crate::workers::global_search_worker::GlobalSearchRequest>,
     pub(in crate::app) global_search_res_rx:
         mpsc::Receiver<crate::workers::global_search_worker::GlobalSearchResponse>,
-    pub(in crate::app) disk_cache_invalidation_tx: mpsc::Sender<Vec<PathBuf>>,
+    pub(in crate::app) disk_cache_invalidation_tx:
+        mpsc::Sender<Vec<crate::app::init_workers::CacheInvalidationEntry>>,
 
     pub(in crate::app) consistency_probe_tx:
         mpsc::Sender<super::init_workers::consistency_probe_worker::ConsistencyProbeRequest>,

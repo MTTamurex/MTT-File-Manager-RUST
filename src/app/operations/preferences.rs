@@ -9,6 +9,7 @@
 
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
+use crate::domain::special_paths::is_virtual_path;
 
 /// Minimum interval between actual disk writes
 const PREFERENCES_FLUSH_INTERVAL_MS: u64 = 1000;
@@ -135,10 +136,9 @@ impl ImageViewerApp {
 
         // Save last active folder from current tab
         let last_folder = self.tab_manager.active().path.clone();
-        // Only save if it's a real path (not "Este Computador" or "Lixeira")
+        // Only save if it's a real path (not a virtual view)
         if !last_folder.is_empty()
-            && last_folder != "Este Computador"
-            && last_folder != "Lixeira"
+            && !is_virtual_path(&last_folder)
             && !last_folder.starts_with("shell:")
         {
             prefs.push(("last_folder", last_folder));
@@ -152,6 +152,9 @@ impl ImageViewerApp {
             "show_hidden_files",
             (if self.show_hidden_files { "true" } else { "false" }).to_string(),
         ));
+
+        // Language preference
+        prefs.push(("language", rust_i18n::locale().to_string()));
 
         // Save list view column widths - Regular view
         prefs.push(("list_col_name_width", self.layout.list_col_name_width.to_string()));

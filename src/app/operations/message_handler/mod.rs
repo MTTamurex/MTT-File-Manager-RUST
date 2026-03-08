@@ -94,18 +94,59 @@ impl ImageViewerApp {
         }
     }
 
+    /// Enqueue paths for disk-cache invalidation (watcher / non-delete use).
+    /// The existence guard is applied: if the file still exists on disk the
+    /// thumbnail row is kept (protects against CryptoFS transient events).
     pub(crate) fn enqueue_disk_cache_invalidations(&self, paths: Vec<PathBuf>) {
         if paths.is_empty() {
             return;
         }
 
+        use crate::app::init_workers::CacheInvalidationEntry;
+        let entries: Vec<CacheInvalidationEntry> = paths
+            .into_iter()
+            .map(|path| CacheInvalidationEntry {
+                path,
+                force: false,
+            })
+            .collect();
+
         if let Err(_err) = self
             .file_operation_state
             .disk_cache_invalidation_sender
-            .send(paths)
+            .send(entries)
         {
             debug_log!(
                 "[CACHE] Failed to enqueue disk cache invalidations: {:?}",
+                _err
+            );
+        }
+    }
+
+    /// Enqueue paths for **forced** disk-cache invalidation.
+    /// Skips the existence guard — use for app-initiated deletes and
+    /// manual thumbnail refresh where the file may still exist briefly.
+    pub(crate) fn enqueue_disk_cache_invalidations_forced(&self, paths: Vec<PathBuf>) {
+        if paths.is_empty() {
+            return;
+        }
+
+        use crate::app::init_workers::CacheInvalidationEntry;
+        let entries: Vec<CacheInvalidationEntry> = paths
+            .into_iter()
+            .map(|path| CacheInvalidationEntry {
+                path,
+                force: true,
+            })
+            .collect();
+
+        if let Err(_err) = self
+            .file_operation_state
+            .disk_cache_invalidation_sender
+            .send(entries)
+        {
+            debug_log!(
+                "[CACHE] Failed to enqueue forced disk cache invalidations: {:?}",
                 _err
             );
         }

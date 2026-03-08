@@ -129,8 +129,25 @@ impl ImageViewerApp {
             self.destroy_media_preview();
         }
 
+        // Clear stale in-memory caches for both old and new paths.
+        // If a previously-deleted file lived at new_path, its thumbnail
+        // texture may still be cached in RAM — evict it so the renamed
+        // file gets a fresh extraction.
+        self.cache_manager.texture_cache.pop(&path);
+        self.cache_manager.loading_set.remove(&path);
+        self.cache_manager.pop_rgba_data(&path);
+        self.cache_manager.failed_thumbnails.pop(&path);
+        let new_path = parent_folder.join(&new_name);
+        self.cache_manager.texture_cache.pop(&new_path);
+        self.cache_manager.loading_set.remove(&new_path);
+        self.cache_manager.pop_rgba_data(&new_path);
+        self.cache_manager.failed_thumbnails.pop(&new_path);
+
+        // Also invalidate SQLite disk cache for the new path (forced) so
+        // get_latest won't return a stale row from a previous file.
+        self.enqueue_disk_cache_invalidations_forced(vec![new_path.clone()]);
+
         if parent_str == current_path_norm {
-            let new_path = parent_folder.join(&new_name);
             self.pending_select_path = Some(new_path);
             self.loaded_path.clear();
             self.load_folder(false);
@@ -287,6 +304,10 @@ impl ImageViewerApp {
             .file_operation_state
             .file_ops_in_progress
             .saturating_sub(1);
+        log::info!(
+            "[FILE-OP] handle_file_operation_finished: ops_remaining={}",
+            self.file_operation_state.file_ops_in_progress
+        );
         if self.file_operation_state.file_ops_in_progress == 0 {
             self.pending_auto_reload = false;
             // Keep pending_deletions until folder load completion to avoid stale thumbnail retries.
@@ -298,8 +319,36 @@ impl ImageViewerApp {
             if !self.navigation_state.is_computer_view
                 && !self.navigation_state.is_recycle_bin_view
             {
-                self.directory_cache
-                    .invalidate(&PathBuf::from(&self.navigation_state.current_path));
+                let current = PathBuf::from(&self.navigation_state.current_path);
+                log::info!(
+                    "[FILE-OP] Invalidating cache for current={:?}",
+                    current
+                );
+                self.directory_cache.invalidate(&current);
+                if let Some(ref di) = self.directory_index {
+                    let _ = di.invalidate(&current);
+                }
+
+                // Also invalidate the PARENT folder's caches (DirectoryCache +
+                // DirectoryIndex).  When a file operation happens inside folder B,
+                // Windows updates B's LastWriteTime.  But BOTH cache layers for the
+                // parent folder A still hold B's old `modified` timestamp.  The
+                // DirectoryIndex (SQLite) mtime validation compares A's own mtime
+                // (which did NOT change) against the index timestamp, so it passes
+                // and serves stale data.  Invalidating both layers forces a full
+                // disk re-read when navigating back to A.
+                if let Some(parent) = current.parent() {
+                    log::info!(
+                        "[FILE-OP] Invalidating cache for parent={:?}",
+                        parent
+                    );
+                    let parent_buf = parent.to_path_buf();
+                    self.directory_cache.invalidate(&parent_buf);
+                    if let Some(ref di) = self.directory_index {
+                        let _ = di.invalidate(&parent_buf);
+                    }
+                }
+
                 self.loaded_path.clear();
                 self.load_folder(false);
             }

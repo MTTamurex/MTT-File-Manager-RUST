@@ -1,12 +1,74 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use windows::core::PCWSTR;
+use windows::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, ERROR_ALREADY_EXISTS};
+use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex};
 
 mod app;
 mod cache;
+mod ipc;
 mod indexer;
 mod loader;
 
+fn apply_saved_locale() {
+    let cache_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("MTT-File-Manager")
+        .join("thumbnails");
+
+    if let Ok(cache) = crate::infrastructure::disk_cache::ThumbnailDiskCache::new(cache_dir) {
+        if let Some(language) = cache.get_preference("language") {
+            rust_i18n::set_locale(&language);
+        }
+    }
+}
+
+/// Named mutex used to guarantee only one image viewer instance runs at a time.
+const IMAGE_VIEWER_MUTEX_NAME: &str = "Global\\MTTFileManager_ImageViewer_SingleInstance\0";
+
+/// RAII guard that holds the named mutex for the viewer's lifetime.
+struct SingleInstanceGuard {
+    handle: HANDLE,
+}
+
+impl SingleInstanceGuard {
+    /// Returns `Some(guard)` if this is the first viewer instance.
+    /// Returns `None` if another viewer instance already owns the mutex.
+    fn try_acquire() -> Option<Self> {
+        let wide: Vec<u16> = IMAGE_VIEWER_MUTEX_NAME.encode_utf16().collect();
+        unsafe {
+            let handle = CreateMutexW(None, true, PCWSTR(wide.as_ptr())).ok()?;
+            if GetLastError() == ERROR_ALREADY_EXISTS {
+                let _ = CloseHandle(handle);
+                None
+            } else {
+                Some(Self { handle })
+            }
+        }
+    }
+}
+
+impl Drop for SingleInstanceGuard {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = ReleaseMutex(self.handle);
+            let _ = CloseHandle(self.handle);
+        }
+    }
+}
+
 pub fn open_image_viewer(path: PathBuf) {
+    match ipc::send_open_request(&path) {
+        Ok(true) => return,
+        Ok(false) => {}
+        Err(err) => {
+            log::warn!(
+                "[IMAGE-VIEWER] failed to forward open request to existing instance: {}",
+                err
+            );
+        }
+    }
+
     let exe = match std::env::current_exe() {
         Ok(v) => v,
         Err(err) => {
@@ -33,6 +95,35 @@ pub fn open_image_viewer(path: PathBuf) {
 }
 
 pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
+    apply_saved_locale();
+
+    let _guard = match SingleInstanceGuard::try_acquire() {
+        Some(g) => g,
+        None => {
+            match ipc::send_open_request(&path) {
+                Ok(true) => {
+                    log::info!(
+                        "[IMAGE-VIEWER] forwarded image to the existing viewer instance"
+                    );
+                }
+                Ok(false) => {
+                    log::warn!(
+                        "[IMAGE-VIEWER] another instance exists, but its IPC server was unavailable"
+                    );
+                }
+                Err(err) => {
+                    log::warn!(
+                        "[IMAGE-VIEWER] failed to forward image to the existing viewer: {}",
+                        err
+                    );
+                }
+            }
+            return Ok(());
+        }
+    };
+
+    let external_open_rx = ipc::start_open_request_server();
+
     let sequence = match indexer::build_sequence(&path) {
         Ok(sequence) => sequence,
         Err(err) => {
@@ -51,10 +142,10 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
         .get(start_index)
         .and_then(|p| p.file_name())
         .map(|v| v.to_string_lossy().to_string())
-        .unwrap_or_else(|| "Image Viewer".to_string());
+        .unwrap_or_else(|| rust_i18n::t!("imageviewer.title").to_string());
 
     let mut viewport = eframe::egui::ViewportBuilder::default()
-        .with_title(format!("Image Viewer - {}", title_name))
+        .with_title(rust_i18n::t!("imageviewer.title_with_file", name = title_name).to_string())
         .with_inner_size([1200.0, 850.0])
         .with_resizable(true)
         .with_decorations(true)
@@ -77,9 +168,14 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
     };
 
     eframe::run_native(
-        "Image Viewer",
+        &rust_i18n::t!("imageviewer.title"),
         options,
-        Box::new(move |_cc| Ok(Box::new(app::DedicatedImageViewerApp::new(sequence)))),
+        Box::new(move |_cc| {
+            Ok(Box::new(app::DedicatedImageViewerApp::new(
+                sequence,
+                external_open_rx,
+            )))
+        }),
     )
 }
 

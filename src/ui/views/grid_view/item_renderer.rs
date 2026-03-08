@@ -1,6 +1,119 @@
 use super::{GridViewContext, PendingOperations, TOOLTIP_DELAY_SECS};
 use crate::domain::file_entry::FileEntry;
 use eframe::egui::{self, Color32, Rect, Sense, Ui};
+use rust_i18n::t;
+
+/// Max age (seconds) for probing live file size on the UI thread.
+/// Files modified longer ago than this are considered stable — `item.size`
+/// (kept fresh by the filesystem watcher) is used directly, avoiding
+/// potentially slow `std::fs::metadata()` calls on cold cache / virtual drives.
+const LIVE_SIZE_PROBE_MAX_AGE_SECS: u64 = 300; // 5 minutes
+
+#[derive(Clone, Copy)]
+struct TooltipLiveFileStat {
+    checked_at: f64,
+    size: u64,
+}
+
+/// Probes current file size via `std::fs::metadata`.
+/// Only called for recently-modified files (age < LIVE_SIZE_PROBE_MAX_AGE_SECS)
+/// to avoid blocking the UI thread on cold filesystem cache.
+fn probe_file_size(path: &std::path::Path, modified_epoch: u64) -> Option<u64> {
+    // Skip old files — their size is already stable and correct in item.size.
+    if modified_epoch > 0 {
+        let now_epoch = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        if now_epoch.saturating_sub(modified_epoch) > LIVE_SIZE_PROBE_MAX_AGE_SECS {
+            return None;
+        }
+    }
+
+    if crate::infrastructure::onedrive::is_onedrive_path(path) {
+        return None;
+    }
+
+    // FIX: Skip blocking metadata() for network/virtual drives (can block indefinitely).
+    if crate::infrastructure::io_priority::is_network_or_virtual(path) {
+        return None;
+    }
+
+    let metadata = std::fs::metadata(path).ok()?;
+
+    if metadata.is_file() {
+        Some(metadata.len())
+    } else {
+        None
+    }
+}
+
+fn resolve_tooltip_live_size(ui: &Ui, item: &FileEntry) -> u64 {
+    if item.is_dir {
+        return item.size;
+    }
+
+    let now = ui.input(|i| i.time);
+    let cache_id = egui::Id::new("grid_tooltip_live_file_size").with(&item.path);
+    let mut resolved = item.size;
+
+    ui.ctx().data_mut(|d| {
+        let mut state = d
+            .get_temp::<TooltipLiveFileStat>(cache_id)
+            .unwrap_or(TooltipLiveFileStat {
+                checked_at: -10.0,
+                size: item.size,
+            });
+
+        if (now - state.checked_at) >= 1.0 {
+            if let Some(size) = probe_file_size(&item.path, item.modified) {
+                state.size = size;
+            } else {
+                state.size = item.size;
+            }
+            state.checked_at = now;
+            d.insert_temp(cache_id, state);
+        }
+
+        resolved = state.size;
+    });
+
+    resolved
+}
+
+fn render_drive_tooltip(ui: &mut Ui, item: &FileEntry) {
+    let Some(drive) = &item.drive_info else {
+        return;
+    };
+
+    let file_system = if drive.file_system.is_empty() {
+        "NTFS"
+    } else {
+        drive.file_system.as_str()
+    };
+    let used_space = drive.total_space.saturating_sub(drive.free_space);
+
+    ui.horizontal(|ui| {
+        ui.label(&*t!("file_info.type"));
+        ui.label(format!("{:?}", drive.drive_type));
+    });
+    ui.horizontal(|ui| {
+        ui.label(&*t!("file_info.used_space"));
+        ui.label(crate::infrastructure::windows::format_size(used_space));
+    });
+    ui.horizontal(|ui| {
+        ui.label(&*t!("file_info.free_space"));
+        ui.label(crate::infrastructure::windows::format_size(drive.free_space));
+    });
+    ui.horizontal(|ui| {
+        ui.label(&*t!("file_info.total_space"));
+        ui.label(crate::infrastructure::windows::format_size(drive.total_space));
+    });
+    ui.horizontal(|ui| {
+        ui.label(&*t!("file_info.filesystem"));
+        ui.label(file_system);
+    });
+}
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_grid_item(
@@ -90,7 +203,11 @@ pub(super) fn render_grid_item(
 
     if response.hovered() && !ctx.is_item_dragging {
         let current_time = ui.input(|i| i.time);
-        let hover_id = response.id.with("hover_start");
+        // PERF FIX: Use path-based hover ID so the tooltip timer resets when
+        // navigating to a different folder (prevents stale timer from the
+        // previous folder's item at the same index triggering an immediate
+        // tooltip with a blocking std::fs::metadata call on cold cache).
+        let hover_id = egui::Id::new("grid_hover_start").with(&item.path);
         let hover_start_time = ui
             .ctx()
             .data_mut(|d| *d.get_temp_mut_or_insert_with(hover_id, || current_time));
@@ -129,21 +246,27 @@ pub(super) fn render_grid_item(
                 |ui: &mut Ui| {
                     ui.set_max_width(300.0);
                     ui.vertical(|ui| {
-                        ui.label(egui::RichText::new(&item.name).strong());
+                        ui.label(egui::RichText::new(crate::ui::components::item_slot::display_name_for_item(item).as_ref()).strong());
                         ui.separator();
+                        if item.drive_info.is_some() {
+                            render_drive_tooltip(ui, item);
+                            return;
+                        }
                         ui.horizontal(|ui| {
-                            ui.label("Tipo:");
+                            ui.label(rust_i18n::t!("file_info.type").to_string());
                             ui.label(get_file_type_string(item));
                         });
                         if !item.is_dir || item.is_archive() {
                             ui.horizontal(|ui| {
-                                ui.label("Tamanho:");
-                                ui.label(crate::infrastructure::windows::format_size(item.size));
+                                ui.label(rust_i18n::t!("file_info.size").to_string());
+                                ui.label(crate::infrastructure::windows::format_size(
+                                    resolve_tooltip_live_size(ui, item),
+                                ));
                             });
                         }
                         let (date_lbl, date_val) = if is_recycle {
                             (
-                                "Data de Exclusão",
+                                rust_i18n::t!("list_view.date_deleted").to_string(),
                                 if item.modified > 0 {
                                     crate::infrastructure::windows::format_date(item.modified)
                                 } else {
@@ -154,7 +277,7 @@ pub(super) fn render_grid_item(
                             )
                         } else {
                             (
-                                "Última modificação",
+                                rust_i18n::t!("list_view.date_modified").to_string(),
                                 crate::infrastructure::windows::format_date(item.modified),
                             )
                         };
@@ -168,7 +291,7 @@ pub(super) fn render_grid_item(
             );
         }
     } else {
-        let hover_id = response.id.with("hover_start");
+        let hover_id = egui::Id::new("grid_hover_start").with(&item.path);
         ui.ctx().data_mut(|d| d.remove::<f64>(hover_id));
     }
 
@@ -286,55 +409,17 @@ fn render_item_slot_for_grid(
     }
 }
 
-fn get_file_type_string(item: &FileEntry) -> std::borrow::Cow<'static, str> {
-    use std::borrow::Cow;
-
+fn get_file_type_string(item: &FileEntry) -> String {
     if let Some(label) = crate::domain::file_entry::archive_type_label(&item.name) {
-        return Cow::Borrowed(label);
+        return label;
     }
     if item.is_dir {
-        return Cow::Borrowed("Pasta");
+        return rust_i18n::t!("file_types.folder").to_string();
     }
 
     if let Some(ext) = item.path.extension() {
-        let ext_lower = ext.to_ascii_lowercase();
-        let ext_str = ext_lower.to_string_lossy();
-
-        match ext_str.as_ref() {
-            "txt" => return Cow::Borrowed("Arquivo TXT"),
-            "pdf" => return Cow::Borrowed("Arquivo PDF"),
-            "doc" | "docx" => return Cow::Borrowed("Arquivo Word"),
-            "xls" | "xlsx" => return Cow::Borrowed("Arquivo Excel"),
-            "ppt" | "pptx" => return Cow::Borrowed("Arquivo PowerPoint"),
-            "jpg" | "jpeg" => return Cow::Borrowed("Arquivo JPEG"),
-            "png" => return Cow::Borrowed("Arquivo PNG"),
-            "gif" => return Cow::Borrowed("Arquivo GIF"),
-            "bmp" => return Cow::Borrowed("Arquivo BMP"),
-            "webp" => return Cow::Borrowed("Arquivo WebP"),
-            "mp4" => return Cow::Borrowed("Arquivo MP4"),
-            "mkv" => return Cow::Borrowed("Arquivo MKV"),
-            "avi" => return Cow::Borrowed("Arquivo AVI"),
-            "mov" => return Cow::Borrowed("Arquivo MOV"),
-            "wmv" => return Cow::Borrowed("Arquivo WMV"),
-            "mp3" => return Cow::Borrowed("Arquivo MP3"),
-            "wav" => return Cow::Borrowed("Arquivo WAV"),
-            "flac" => return Cow::Borrowed("Arquivo FLAC"),
-            "exe" => return Cow::Borrowed("Arquivo Executável"),
-            "dll" => return Cow::Borrowed("Biblioteca DLL"),
-            "html" | "htm" => return Cow::Borrowed("Arquivo HTML"),
-            "css" => return Cow::Borrowed("Arquivo CSS"),
-            "js" => return Cow::Borrowed("Arquivo JavaScript"),
-            "json" => return Cow::Borrowed("Arquivo JSON"),
-            "xml" => return Cow::Borrowed("Arquivo XML"),
-            "rs" => return Cow::Borrowed("Arquivo Rust"),
-            "py" => return Cow::Borrowed("Arquivo Python"),
-            "java" => return Cow::Borrowed("Arquivo Java"),
-            "c" | "cpp" | "h" | "hpp" => return Cow::Borrowed("Arquivo C/C++"),
-            "lnk" => return Cow::Borrowed("Atalho"),
-            "iso" => return Cow::Borrowed("Imagem de Disco"),
-            _ => return Cow::Owned(format!("Arquivo {}", ext.to_string_lossy().to_uppercase())),
-        }
+        return rust_i18n::t!("file_info.file_generic", ext = ext.to_string_lossy().to_uppercase()).to_string();
     }
 
-    Cow::Borrowed("Arquivo")
+    rust_i18n::t!("file_info.file_unknown").to_string()
 }
