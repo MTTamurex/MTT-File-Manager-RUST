@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use eframe::egui;
+use rust_i18n::t;
 
 use super::render_worker::{RenderRequest, RenderWorker};
 use super::renderer::PdfRenderer;
@@ -286,7 +287,7 @@ impl PdfViewerApp {
         painter.text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
-            format!("Page {}", idx + 1),
+            t!("pdfviewer.page", page = idx + 1).to_string(),
             egui::FontId::proportional(18.0),
             egui::Color32::GRAY,
         );

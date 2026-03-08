@@ -10,9 +10,10 @@ const LANGUAGES: &[(&str, &str)] = &[
 ];
 
 /// Render the language settings modal window.
-/// Returns whether the modal should remain open.
-pub fn render_language_settings(ctx: &egui::Context, show_modal: bool) -> bool {
+/// Returns `(keep_open, language_changed)`.
+pub fn render_language_settings(ctx: &egui::Context, show_modal: bool) -> (bool, bool) {
     let mut keep_open = show_modal;
+    let mut language_changed = false;
 
     let response = egui::Window::new(t!("settings.language_title"))
         .collapsible(false)
@@ -28,6 +29,7 @@ pub fn render_language_settings(ctx: &egui::Context, show_modal: bool) -> bool {
                     let is_selected = &*current_locale == code;
                     if ui.selectable_label(is_selected, display_name).clicked() && !is_selected {
                         rust_i18n::set_locale(code);
+                        language_changed = true;
                     }
                 }
 
@@ -44,8 +46,8 @@ pub fn render_language_settings(ctx: &egui::Context, show_modal: bool) -> bool {
         });
 
     if response.is_none() {
-        return false;
+        return (false, language_changed);
     }
 
-    keep_open
+    (keep_open, language_changed)
 }

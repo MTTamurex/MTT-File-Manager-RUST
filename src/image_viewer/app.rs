@@ -557,9 +557,9 @@ impl DedicatedImageViewerApp {
 
     fn sync_window_title(&self, ctx: &egui::Context) {
         let title = if self.sequence.entries.is_empty() {
-            "Image Viewer".to_string()
+            t!("imageviewer.title").to_string()
         } else {
-            format!("Image Viewer - {}", self.current_filename())
+            t!("imageviewer.title_with_file", name = self.current_filename()).to_string()
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
     }
@@ -686,7 +686,7 @@ impl DedicatedImageViewerApp {
                 ui.with_layout(
                     egui::Layout::centered_and_justified(egui::Direction::TopDown),
                     |ui| {
-                        ui.label("No image available");
+                        ui.label(t!("imageviewer.no_image"));
                     },
                 );
             } else {
