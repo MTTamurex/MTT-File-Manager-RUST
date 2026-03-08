@@ -214,7 +214,7 @@ impl ImageViewerApp {
         if let Some(parent) = cleaned.parent() {
             let parent_norm = Self::normalize_for_match(parent);
             if parent_norm == current_path_norm {
-                self.directory_cache.invalidate(&parent.to_path_buf());
+                self.invalidate_directory_caches(parent);
                 #[cfg(debug_assertions)]
                 log::trace!(
                     "[FS-WATCH] CREATE: {:?}",
@@ -267,7 +267,7 @@ impl ImageViewerApp {
                 "[FS-WATCH] Current folder (or ancestor) was DELETED externally: {:?}",
                 cleaned
             );
-            self.directory_cache.invalidate(&current_path_buf);
+            self.invalidate_directory_caches(&current_path_buf);
             self.navigate_to_nearest_valid_ancestor();
             return;
         }
@@ -275,7 +275,7 @@ impl ImageViewerApp {
         if let Some(parent) = cleaned.parent() {
             let parent_norm = Self::normalize_for_match(parent);
             if parent_norm == current_path_norm {
-                self.directory_cache.invalidate(&parent.to_path_buf());
+                self.invalidate_directory_caches(parent);
                 self.directory_cache.invalidate_children(&cleaned);
 
                 #[cfg(debug_assertions)]
@@ -457,7 +457,7 @@ impl ImageViewerApp {
                 "[FS-WATCH] Current folder was RENAMED externally: {:?} → {:?}",
                 cleaned_old, cleaned_new
             );
-            self.directory_cache.invalidate(&cleaned_old);
+            self.invalidate_directory_caches(&cleaned_old);
             let new_path_str = cleaned_new.to_string_lossy().to_string();
             self.navigate_to(&new_path_str);
             return;
@@ -476,14 +476,14 @@ impl ImageViewerApp {
         if let Some(parent) = cleaned_old.parent() {
             let parent_norm = Self::normalize_for_match(parent);
             if parent_norm == current_path_norm {
-                self.directory_cache.invalidate(&parent.to_path_buf());
+                self.invalidate_directory_caches(parent);
                 self.pending_auto_reload = true;
             }
         }
         if let Some(parent) = cleaned_new.parent() {
             let parent_norm = Self::normalize_for_match(parent);
             if parent_norm == current_path_norm {
-                self.directory_cache.invalidate(&parent.to_path_buf());
+                self.invalidate_directory_caches(parent);
                 self.pending_auto_reload = true;
             }
         }
@@ -545,15 +545,15 @@ impl ImageViewerApp {
                         "[FS-WATCH] Flood: current folder vanished: {:?} — navigating up",
                         current_path_pb
                     );
-                    self.directory_cache.invalidate(&current_path_pb);
+                    self.invalidate_directory_caches(&current_path_pb);
                     self.navigate_to_nearest_valid_ancestor();
                     return;
                 }
 
                 if self.last_auto_reload.elapsed() > Duration::from_millis(flood_reload_cooldown_ms)
                 {
-                    self.directory_cache
-                        .invalidate(&PathBuf::from(&self.navigation_state.current_path));
+                    let current_path = PathBuf::from(&self.navigation_state.current_path);
+                    self.invalidate_directory_caches(&current_path);
                     if !self.navigation_state.is_computer_view
                         && !self.navigation_state.is_recycle_bin_view
                     {
