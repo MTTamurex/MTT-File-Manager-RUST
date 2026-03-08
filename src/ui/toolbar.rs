@@ -1,6 +1,6 @@
 use crate::application::navigation::NavigationHistory;
 use crate::domain::file_entry::{SortMode, ViewMode};
-use crate::domain::special_paths::{COMPUTER_VIEW_ID, is_virtual_path};
+use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID, is_virtual_path};
 use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::theme;
 use crate::ui::widgets;
@@ -416,6 +416,12 @@ pub fn render_toolbar(
                 if current_path == COMPUTER_VIEW_ID {
                     addr_ui.label(
                         egui::RichText::new(t!("nav.computer"))
+                            .size(13.0)
+                            .color(egui::Color32::BLACK),
+                    );
+                } else if current_path == RECYCLE_BIN_VIEW_ID {
+                    addr_ui.label(
+                        egui::RichText::new(t!("nav.recycle_bin"))
                             .size(13.0)
                             .color(egui::Color32::BLACK),
                     );
