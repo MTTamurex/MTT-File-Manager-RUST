@@ -1,262 +1,176 @@
-# Stack de Dependências - MTT File Manager
+# Dependency Stack — MTT File Manager
 
-## Objetivo do Documento
-Este documento detalha todas as dependências do projeto, suas versões, propósitos e features utilizadas.
-
-## Dependências Principais
+## Main Crate: `mtt-file-manager`
 
 ### GUI Framework
-```toml
-eframe = { version = "0.31", features = ["persistence"] }
-```
-- **Propósito**: Framework de GUI multiplataforma baseado em egui
-- **Features usadas**: `persistence` - para salvar estado da janela
-- **Alternativas consideradas**: iced, druid
-- **Notas**: Immediate mode GUI, ideal para aplicações desktop
 
-### Processamento Paralelo
-```toml
-rayon = "1.10"
-```
-- **Propósito**: Paralelização de dados (data parallelism)
-- **Uso**: Processamento de thumbnails, leitura de diretórios, ordenação
-- **Exemplo**: `par_iter()` em coleções de arquivos
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| eframe | 0.31 | egui framework with windowing (feature: `persistence`) |
 
-### File System
-```toml
-walkdir = "2.5"
-```
-- **Propósito**: Iteração recursiva sobre diretórios
-- **Uso**: Cálculo de tamanho de pastas, varredura
+### Concurrency & Channels
 
-```toml
-notify = { version = "6.1.1", optional = true }
-```
-- **Propósito**: Monitoramento de mudanças no filesystem
-- **Feature**: `notify-watcher` (default, fallback para UNC/rede)
-- **Nota**: Monitoramento principal é feito por Drive Watcher nativo; `notify` cobre fallback
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| rayon | 1.10 | Data-parallel processing |
+| crossbeam-channel | 0.5.15 | High-performance MPSC channels |
+| once_cell | 1.19 | Lazy static initialization |
 
-### Cache e Performance
-```toml
-lru = "0.12"
-```
-- **Propósito**: Cache LRU em memória
-- **Uso**: Cache de metadados, thumbnails na memória
+### File I/O
 
-```toml
-dashmap = "5.5"
-```
-- **Propósito**: HashMap concorrente
-- **Uso**: Cache thread-safe de texturas (TextureCache)
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| walkdir | 2.5 | Recursive directory traversal |
+| notify | 6.1.1 | Filesystem event watcher (optional, `notify-watcher` feature) |
+| memmap2 | 0.9 | Memory-mapped file I/O for large images |
+| tempfile | 3.10 | Temporary file creation |
 
-```toml
-rustc-hash = "2.0"
-```
-- **Propósito**: Hash mais rápida para PathBuf (FxHashSet/FxHashMap)
-- **Uso**: Sets e maps com chaves de path
+### Caching & Data Structures
 
-```toml
-fxhash = "0.2.1"
-```
-- **Propósito**: Hash rápida (alternativa)
-- **Uso**: Conjuntos de paths em memória
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| lru | 0.12 | LRU cache |
+| dashmap | 5.5 | Concurrent hash map |
+| rustc-hash | 2.0 | Fast FxHashSet/FxHashMap |
+| fxhash | 0.2.1 | Fast hashing for PathBuf keys |
+| blake3 | 1.5 | 128-bit hash for cache keys |
 
-### Processamento de Imagem
-```toml
-image = { version = "0.25", features = ["webp", "gif"] }
-```
-- **Propósito**: Decodificação/encodificação de imagens
-- **Features**: Suporte a WebP e GIF animado
-- **Uso**: Geração de thumbnails (Stage 1), composição de folder covers, decodificação no visualizador de imagens dedicado
+### Image Processing
 
-```toml
-memmap2 = "0.9"
-```
-- **Propósito**: Memory-mapped file I/O
-- **Uso**: Decodificação de imagens >1MB no visualizador dedicado (evita cópia desnecessária)
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| image | 0.25 | Image decoding/encoding (features: `webp`, `gif`) |
+| webp | 0.3 | Lossy WebP compression for thumbnails |
+| resvg | 0.44 | SVG rendering |
+| usvg | 0.44 | SVG parsing |
+| tiny-skia | 0.11 | Rasterization backend for SVG |
+| kamadak-exif | 0.5 | EXIF metadata extraction from JPEG |
 
-```toml
-webp = "0.3"
-```
-- **Propósito**: Compressão WebP com controle de qualidade
-- **Uso**: Thumbnails com compressão lossy para cache em disco
+### Media
 
-```toml
-kamadak-exif = "0.5"
-```
-- **Propósito**: Leitura direta de EXIF de JPEGs
-- **Uso**: Metadados de imagens fotográficas (orientação, data, câmera)
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| libmpv2 | 5.0.3 | mpv video player bindings |
 
-### SVG e Vetores
-```toml
-resvg = "0.44"
-```
-- **Propósito**: Renderização de SVG
-- **Uso**: Ícones vetoriais, thumbnails de SVG
+### Serialization
 
-```toml
-usvg = "0.44"
-```
-- **Propósito**: Parsing de SVG
-- **Uso**: Preparação para renderização
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| serde | 1.0 | Serialization framework (workspace, feature: `derive`) |
+| serde_json | 1.0 | JSON serialization |
+| bincode | 1.3 | Binary serialization for IPC (workspace) |
 
-```toml
-tiny-skia = "0.11"
-```
-- **Propósito**: Backend de rasterização para resvg
-- **Uso**: Conversão SVG → bitmap
+### Database
 
-### Banco de Dados
-```toml
-rusqlite = { version = "0.32", features = ["bundled"] }
-```
-- **Propósito**: SQLite embutido
-- **Feature**: `bundled` - SQLite estático (sem dependência externa)
-- **Uso**: Cache persistente de thumbnails e preferências (app), índice de arquivos (serviço de busca)
-- **Nota**: Workspace dependency compartilhada (usado por `mtt-file-manager` e `mtt-search-service`)
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| rusqlite | 0.32 | SQLite bindings (workspace, feature: `bundled`) |
 
-### Vídeo e Mídia
-```toml
-mpv = { package = "libmpv2", version = "5.0.3" }
-```
-- **Propósito**: Bindings para libmpv
-- **Uso**: Reprodução de vídeo
-- **Runtime**: Requer `libmpv-2.dll` no PATH ou diretório do executável
+### System & Platform
 
-```toml
-raw-window-handle = "0.6"
-```
-- **Propósito**: Acesso raw a handles de janela
-- **Uso**: Integração com mpv (necessário para embedding do player)
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| dirs | 5.0 | Platform-specific directory paths |
+| clipboard-win | 5.4 | Windows clipboard (CF_HDROP format) |
+| rfd | 0.15 | Native file dialogs |
+| raw-window-handle | 0.6 | Raw window handle abstraction |
 
-### Serialização e IPC
-```toml
-serde_json = "1.0"
-```
-- **Propósito**: JSON parsing/serialization
-- **Uso**: Configurações, metadados, virtual_drive_config.json
+### Logging
 
-```toml
-serde = { version = "1.0", features = ["derive"] }
-```
-- **Propósito**: Framework de serialização/deserialização
-- **Uso**: Protocolo IPC (bincode), configurações
-- **Nota**: Workspace dependency compartilhada entre os 3 crates
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| log | 0.4 | Logging facade |
+| env_logger | 0.11 | Level-filtered logging output |
 
-```toml
-bincode = "1.3"
-```
-- **Propósito**: Serialização binária compacta e rápida
-- **Uso**: Protocolo IPC entre app e serviço de busca (Named Pipes)
-- **Nota**: Workspace dependency compartilhada
+### Internationalization
 
-### Comunicação entre Threads
-```toml
-crossbeam-channel = "0.5.15"
-```
-- **Propósito**: Canais MPSC de alta performance
-- **Uso**: Comunicação UI ↔ Workers (thumbnails, ícones, metadados, operações); canais bounded no PrefetchEngine do visualizador de imagens dedicado
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| rust-i18n | 3 | Compile-time i18n with YAML locale files |
 
-### Diretórios e Paths
-```toml
-dirs = "5.0"
-```
-- **Propósito**: Diretórios padrão do sistema
-- **Uso**: Cache em `%LOCALAPPDATA%\MTT-File-Manager`
+### Sorting
 
-### Área de Transferência
-```toml
-clipboard-win = "5.4"
-```
-- **Propósito**: Integração com clipboard Windows
-- **Formato**: CF_HDROP para arquivos
-- **Uso**: Copiar/colar arquivos nativamente
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| natord | 1.0 | Natural (human-friendly) sort ordering |
 
-### Diálogos de Arquivo
-```toml
-rfd = "0.15"
-```
-- **Propósito**: File dialogs multiplataforma
-- **Uso**: Diálogos de seleção de arquivo/pasta
+### Error Handling
 
-### Ordenação Natural
-```toml
-natord = "1.0"
-```
-- **Propósito**: Ordenação natural de strings
-- **Uso**: Ordenação de nomes de arquivo (File1, File2, File10 em vez de File1, File10, File2)
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| thiserror | 2.0 | Derive macro for error types |
 
-### Temporários
-```toml
-tempfile = "3.10"
-```
-- **Propósito**: Arquivos temporários seguros
-- **Uso**: Operações de arquivo, cache temporário
+### Windows API
 
-### Tratamento de Erros
-```toml
-thiserror = "2.0"
-```
-- **Propósito**: Derivação de tipos de erro
-- **Uso**: `AppError` e tipos de erro customizados com `#[derive(Error)]`
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| windows | 0.61.0 | Windows API bindings (51 feature flags) |
 
-## Windows API Dependencies
+**Windows feature flags used:**
+- **Shell**: `Win32_UI_Shell`, `Win32_UI_Shell_Common`, `Win32_UI_Shell_PropertiesSystem`
+- **COM**: `Win32_System_Com`, `Win32_System_Com_StructuredStorage`
+- **Clipboard**: `Win32_System_DataExchange`
+- **Memory**: `Win32_System_Memory`
+- **Registry**: `Win32_System_Registry`
+- **Graphics**: `Win32_Graphics_Gdi`, `Win32_Graphics_Imaging`, `Win32_Graphics_Imaging_D2D`, `Win32_Graphics_Dwm`
+- **File System**: `Win32_Storage_FileSystem`, `Win32_Storage_Vhd`
+- **Process/Threading**: `Win32_System_ProcessStatus`, `Win32_System_Threading`, `Win32_System_LibraryLoader`
+- **Input**: `Win32_UI_Input_KeyboardAndMouse`
+- **Media**: `Win32_Media_MediaFoundation`
+- **Devices**: `Win32_Devices_DeviceAndDriverInstallation`
+- **I/O**: `Win32_System_Ioctl`, `Win32_System_IO`, `Win32_System_Pipes`
+- **Windows**: `Win32_Foundation`, `Win32_UI_WindowsAndMessaging`, `Win32_System_WindowsProgramming`, `Win32_System_Time`
+- **Network**: `Win32_NetworkManagement_WNet`
+- **Globalization**: `Win32_Globalization`
+- **Security**: `Win32_Security`
+- **Search**: `Win32_System_Search_Common`
+- **Variant**: `Win32_System_Variant`
+- **UWP/WinRT**: `Foundation`, `Data_Pdf`, `Storage`, `Storage_Streams`
 
-```toml
-[dependencies.windows]
-version = "0.61.0"
-features = [
-    "Win32_UI_Shell",                    # Shell API (explorer integration)
-    "Win32_UI_Shell_Common",             # Tipos comuns do shell
-    "Win32_UI_Shell_PropertiesSystem",  # Propriedades de arquivos
-    "Win32_System_Com",                  # COM (Component Object Model)
-    "Win32_System_Com_StructuredStorage", # Storage estruturado
-    "Win32_System_DataExchange",         # Clipboard, etc
-    "Win32_System_Memory",               # Gerenciamento de memória
-    "Win32_System_Registry",             # Registry access
-    "Win32_Graphics_Gdi",                # GDI (Graphics Device Interface)
-    "Win32_Foundation",                   # Tipos básicos (HANDLE, HWND, etc)
-    "Win32_Storage_FileSystem",          # File system APIs
-    "Win32_UI_WindowsAndMessaging",     # Janelas e mensagens
-    "Win32_System_ProcessStatus",        # Informações de processo
-    "Win32_System_Threading",            # Threads
-    "Win32_Graphics_Imaging",            # WIC (Windows Imaging Component)
-    "Win32_Graphics_Dwm",                # Desktop Window Manager
-    "Win32_Media_MediaFoundation",       # Media Foundation
-    "Win32_Devices_DeviceAndDriverInstallation", # Dispositivos
-    "Win32_System_LibraryLoader",        # Carregamento de DLLs
-    "Win32_System_Ioctl",                # I/O control
-    "Win32_UI_Input_KeyboardAndMouse",   # Input
-    "Win32_System_Variant",              # VARIANT para COM
-    "Win32_System_Search_Common",        # Search
-    "Win32_Storage_Vhd",                 # Virtual Hard Disk (ISO)
-    "Win32_Security",                    # Segurança
-    "Win32_System_IO",                   # I/O APIs
-    "Win32_System_Pipes",               # Named Pipes (IPC com serviço de busca)
-    "Win32_System_WindowsProgramming",   # APIs gerais do Windows
-]
-```
+### Local Dependencies
 
-### Features Windows Detalhadas
+| Crate | Source | Purpose |
+|-------|--------|---------|
+| mtt-search-protocol | path: `crates/mtt-search-protocol` | Shared IPC types |
 
-| Feature | Propósito |
-|---------|-----------|
-| `Win32_UI_Shell` | Integração com Explorer (IShellItem, IFileOperation) |
-| `Win32_UI_Shell_PropertiesSystem` | Propriedades de arquivos (metadados) |
-| `Win32_System_Com` | COM para APIs Windows |
-| `Win32_Graphics_Gdi` | Bitmaps, device contexts |
-| `Win32_Graphics_Imaging` | WIC para thumbnails |
-| `Win32_Media_MediaFoundation` | Extração de frames de vídeo |
-| `Win32_Storage_FileSystem` | Operações de arquivo nativas |
-| `Win32_UI_WindowsAndMessaging` | Janelas, mensagens, subclassing |
-| `Win32_Storage_Vhd` | Montagem de ISOs |
-| `Win32_System_Pipes` | Named Pipes para IPC com serviço de busca |
-| `Foundation` | Tipos base WinRT (IAsyncAction, Uri, etc.) |
-| `Data_Pdf` | Windows.Data.Pdf — renderização nativa de PDF |
-| `Storage` | StorageFile para abrir PDFs via WinRT |
-| `Storage_Streams` | InMemoryRandomAccessStream, DataReader para streams de renderização |
+## Crate: `mtt-search-protocol`
 
-## Features do Cargo
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| serde | workspace | Serialization |
+| bincode | workspace | Binary IPC encoding |
+
+## Crate: `mtt-search-service`
+
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| mtt-search-protocol | local path | Shared IPC types |
+| windows-service | 0.7 | Windows Service Control Manager integration |
+| rusqlite | workspace (bundled) | SQLite persistence for file index |
+| serde | workspace | Serialization |
+| bincode | workspace | Binary IPC encoding |
+| windows | 0.61.0 | Windows API (8 features: Foundation, FileSystem, Console, Ioctl, IO, Pipes, Security, Threading) |
+
+## Build Dependencies
+
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| winresource | 0.1 | Embed Windows icon and metadata in executable |
+
+## Dev Dependencies
+
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| criterion | 0.5 | Benchmarking framework |
+
+## Runtime Dependencies
+
+| Dependency | Required | Purpose |
+|-----------|----------|---------|
+| libmpv-2.dll | For video playback | mpv shared library |
+| Windows 10+ | Always | Windows.Data.Pdf API for PDF viewer |
+
+## Feature Flags
 
 ```toml
 [features]
@@ -264,162 +178,29 @@ default = ["notify-watcher"]
 notify-watcher = ["notify"]
 ```
 
-### `notify-watcher` (Default)
-- Habilita fallback de monitoramento para UNC/rede via `notify` crate
-- Complementa o Drive Watcher nativo usado em drives locais
-- Não requer privilégios de administrador
-- Pode ser desabilitado com: `cargo build --no-default-features` (desativa apenas o fallback notify)
+- **`notify-watcher`** (default) — Enables the `notify` crate as a fallback filesystem watcher for UNC/network paths. The primary monitoring uses the native Drive Watcher (`ReadDirectoryChangesW`).
 
-## Dependências do Serviço de Busca (mtt-search-service)
-
-O serviço de busca é um binário separado com suas próprias dependências:
-
-### Windows Service
-```toml
-windows-service = "0.7"
-```
-- **Propósito**: Integração com Windows Service Control Manager (SCM)
-- **Uso**: Registro, controle de ciclo de vida e dispatch do serviço
-
-### Windows API (serviço)
-```toml
-[dependencies.windows]
-version = "0.61.0"
-features = [
-    "Win32_Foundation",          # Tipos básicos
-    "Win32_Storage_FileSystem",  # CreateFileW, GetVolumeInformationW
-    "Win32_System_Ioctl",        # DeviceIoControl (USN Journal)
-    "Win32_System_IO",           # Overlapped I/O
-    "Win32_System_Pipes",        # CreateNamedPipeW, ConnectNamedPipe
-    "Win32_Security",            # SECURITY_ATTRIBUTES (NULL DACL)
-    "Win32_System_Threading",    # CreateEventW, WaitForSingleObject
-]
-```
-
-### Protocolo IPC (mtt-search-protocol)
-```toml
-mtt-search-protocol = { path = "../mtt-search-protocol" }
-```
-- **Propósito**: Tipos compartilhados para comunicação via Named Pipes
-- **Dependências**: `serde`, `bincode`
-
-## Build Dependencies
-
-```toml
-[build-dependencies]
-winresource = "0.1"
-```
-- **Propósito**: Incluir recursos Windows no executável
-- **Uso**: Ícone do aplicativo, manifest
-
-## Dev Dependencies
-
-```toml
-[dev-dependencies]
-criterion = "0.5"
-```
-- **Propósito**: Framework de benchmarks
-- **Uso**: Benchmarks de performance (`cargo bench`)
-
-## Profile de Release
+## Build Profiles
 
 ```toml
 [profile.release]
-opt-level = 3      # Otimização máxima
-lto = true         # Link Time Optimization
-codegen-units = 1  # Single codegen unit (melhor otimização)
+opt-level = 3       # Maximum optimization
+lto = true          # Link-Time Optimization
+codegen-units = 1   # Single codegen unit for best optimization
 ```
 
-### Impacto no Build
-- **Build time**: Mais lento (LTO + single codegen unit)
-- **Binary size**: Menor (LTO remove código não usado)
-- **Performance**: Máxima (opt-level 3)
+## Dependency Auditing
 
-## Dependências de Runtime
-
-### Obrigatórias
-| Dependência | Versão | Onde Obter |
-|-------------|--------|------------|
-| libmpv-2.dll | Latest | https://sourceforge.net/projects/mpv-player-windows/files/libmpv/ |
-
-### Notas
-- O visualizador de PDF usa a API nativa **Windows.Data.Pdf** (WinRT), incluída no Windows 10+. Não requer runtime adicional.
-
-## Árvore de Dependências Simplificada
-
-```
-[workspace]
-├── mtt-file-manager (app GUI)
-│   ├── eframe 0.31
-│   │   ├── egui
-│   │   ├── winit
-│   │   └── ...
-│   ├── windows 0.61.0
-│   ├── rusqlite 0.32 (workspace)
-│   ├── mtt-search-protocol (workspace)
-│   ├── serde + bincode (workspace)
-│   ├── image 0.25
-│   ├── libmpv2 5.0.3
-│   ├── rayon 1.10
-│   ├── crossbeam-channel 0.5.15
-│   ├── memmap2 0.9
-│   └── ... (outras)
-├── mtt-search-protocol (lib IPC)
-│   ├── serde 1.0 (workspace)
-│   └── bincode 1.3 (workspace)
-└── mtt-search-service (Windows Service)
-    ├── mtt-search-protocol
-    ├── windows 0.61.0 (features mínimas)
-    ├── windows-service 0.7
-    ├── rusqlite 0.32 (workspace)
-    ├── serde + bincode (workspace)
-    └── ...
-```
-
-## Atualização de Dependências
-
-### Verificar Updates
 ```bash
-# Instalar cargo-outdated
-cargo install cargo-outdated
+# View dependency tree
+cargo tree
 
-# Verificar updates disponíveis
+# Check for vulnerabilities
+cargo install cargo-audit
+cargo audit
+
+# Check for outdated dependencies
+cargo install cargo-outdated
 cargo outdated
 ```
 
-### Atualizar
-```bash
-# Atualizar todas as dependências
-cargo update
-
-# Atualizar crate específico
-cargo update -p eframe
-```
-
-### Segurança
-```bash
-# Verificar vulnerabilidades
-cargo install cargo-audit
-cargo audit
-```
-
-## Notas de Compatibilidade
-
-### Windows-rs 0.61
-- Crate estável com bindings atualizados
-- Requer Windows 10/11 SDK durante build
-- Features selecionadas manualmente para reduzir tempo de compilação
-
-### Eframe/Egui 0.31
-- Versão estáclia com API consistente
-- Persistence feature para salvar estado da janela
-- Suporte a wgpu/opengl backends
-
-### Libmpv2
-- Requer DLL no runtime
-- Versão da DLL deve ser compatível com bindings
-- Testar reprodução de vídeo após atualização
-
----
-
-*Última atualização: 2026-02-24 (adicionado memmap2 e atualizado uso de image/crossbeam para visualizador de imagens dedicado)*
