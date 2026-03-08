@@ -58,20 +58,9 @@ impl ImageViewerApp {
                 let gone: Vec<String> = paths
                     .into_iter()
                     .filter(|p| {
-                        // Use a short timeout: if the path doesn't respond
-                        // within 500ms, consider it still valid (don't remove).
-                        let (done_tx, done_rx) = std::sync::mpsc::channel();
-                        let path_clone = p.clone();
-                        let _ = std::thread::Builder::new()
-                            .name("pinned-probe".into())
-                            .spawn(move || {
-                                let exists = std::path::Path::new(&path_clone).exists();
-                                let _ = done_tx.send(exists);
-                            });
-                        match done_rx.recv_timeout(std::time::Duration::from_millis(500)) {
-                            Ok(exists) => !exists,
-                            Err(_) => false, // Timeout → assume still valid
-                        }
+                        // Perform the potentially blocking exists() check in this
+                        // single background thread to avoid leaking per-path threads.
+                        !std::path::Path::new(p).exists()
                     })
                     .collect();
                 let _ = tx.send(gone);

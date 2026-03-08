@@ -222,10 +222,12 @@ impl PrefetchEngine {
                             continue;
                         }
 
-                        let _ = results_tx.try_send(LoadOutput {
+                        if results_tx.send(LoadOutput {
                             index: job.index,
                             frame,
-                        });
+                        }).is_err() {
+                            break; // Receiver dropped; exit worker loop.
+                        }
                         if let Some(ctx) = repaint_ctx.get() {
                             ctx.request_repaint();
                         }

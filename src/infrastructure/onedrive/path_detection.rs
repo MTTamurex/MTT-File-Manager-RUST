@@ -2,9 +2,6 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::OnceLock;
 
-/// Cached user profile path (e.g. `C:\Users\mtamu`), lowercased.
-static USER_PROFILE_ROOT: OnceLock<Option<String>> = OnceLock::new();
-
 /// Cached set of known Windows special folder paths (lowercased, no trailing `\`).
 /// Populated once at startup via `SHGetKnownFolderPath`.
 static SPECIAL_FOLDER_PATHS: OnceLock<HashSet<String>> = OnceLock::new();
@@ -21,14 +18,6 @@ pub(super) fn init_onedrive_paths() {
         }
         log::info!("[OneDrive] Detected roots: {:?}", roots);
         roots
-    });
-
-    // Also cache the user profile root for special folder detection.
-    USER_PROFILE_ROOT.get_or_init(|| {
-        std::env::var("USERPROFILE")
-            .ok()
-            .filter(|p| !p.is_empty())
-            .map(|p| p.to_lowercase())
     });
 
     // Resolve actual special folder paths via Windows Shell API (locale-independent).

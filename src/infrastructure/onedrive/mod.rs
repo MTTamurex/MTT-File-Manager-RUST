@@ -292,8 +292,9 @@ pub fn get_active_timeout_threads() -> u64 {
     ACTIVE_TIMEOUT_THREADS.load(Ordering::SeqCst)
 }
 
-/// Get the cumulative count of stalled I/O pool workers (job > 10s).
-/// A growing count over time indicates cloud filter driver congestion.
+/// Get the current congestion score of stalled I/O pool workers (job > 10s).
+/// The counter increments on stalls and decays on fast completions,
+/// so it reflects active congestion rather than a cumulative total.
 pub fn get_stalled_io_workers() -> usize {
     STALLED_IO_WORKERS.load(Ordering::SeqCst)
 }
