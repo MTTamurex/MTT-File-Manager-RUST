@@ -110,7 +110,8 @@ impl ImageViewerApp {
             items.push(
                 ContextMenuItem::primary(-5, t!("context_menu.rename"))
                     .with_command("rename")
-                    .with_shortcut("F2"),
+                    .with_shortcut("F2")
+                    .enabled(!is_drive),
             );
             items.push(
                 ContextMenuItem::primary(-6, t!("context_menu.delete"))
@@ -163,7 +164,8 @@ impl ImageViewerApp {
             items.push(
                 ContextMenuItem::new(-33, t!("context_menu.rename"))
                     .with_command("rename")
-                    .with_shortcut("F2"),
+                    .with_shortcut("F2")
+                    .enabled(!is_drive),
             );
             items.push(
                 ContextMenuItem::new(-34, t!("context_menu.delete"))

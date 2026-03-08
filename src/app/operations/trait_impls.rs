@@ -59,10 +59,7 @@ impl ContextMenuOperations for ImageViewerApp {
     }
 
     fn rename_item(&mut self, idx: usize) {
-        if let Some(item) = self.items.get(idx) {
-            self.renaming_state = Some((idx, item.name.clone()));
-            self.focus_rename = true;
-        }
+        self.begin_rename_item(idx);
     }
 
     fn delete_with_shell(&mut self, idx: Option<usize>) {
