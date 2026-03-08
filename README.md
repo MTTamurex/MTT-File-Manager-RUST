@@ -19,14 +19,6 @@
 
 MTT File Manager is a desktop file manager that combines Rust's performance and safety with a modern interface and native Windows integration. It offers tabbed navigation, integrated file preview, and advanced management features.
 
-### Problems It Solves
-- **Slow media browsing** in traditional file explorers
-- **No integrated preview** for multiple file formats
-- **Inefficient navigation** without tabs and history
-- **Slow file search** across large volumes
-- **Poor caching** that doesn't leverage system resources
-- **Limited integration** with native Windows features
-
 ## Key Features
 
 ### Interface & Navigation
