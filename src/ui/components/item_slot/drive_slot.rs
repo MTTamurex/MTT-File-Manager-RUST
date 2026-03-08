@@ -1,4 +1,5 @@
 use super::*;
+use rust_i18n::t;
 
 /// Renders a drive slot (This PC)
 pub(super) fn render_drive_slot(
@@ -93,7 +94,7 @@ pub(super) fn render_drive_slot(
 
     ui.put(
         name_rect,
-        egui::Label::new(egui::RichText::new(&item.name).size(11.0).strong()).truncate(),
+        egui::Label::new(egui::RichText::new(super::display_name_for_item(item).as_ref()).size(11.0).strong()).truncate(),
     );
 
     current_y += 18.0;
@@ -122,10 +123,12 @@ pub(super) fn render_drive_slot(
         ui.put(
             details_rect,
             egui::Label::new(
-                egui::RichText::new(format!(
-                    "{:.1} {} livres de {:.1} {}",
-                    free_val, unit, total_val, total_unit
-                ))
+                egui::RichText::new(t!("drive_slot.free_of",
+                    free_val = format!("{:.1}", free_val),
+                    free_unit = unit,
+                    total_val = format!("{:.1}", total_val),
+                    total_unit = total_unit
+                ).to_string())
                 .size(9.0)
                 .color(egui::Color32::from_gray(100)),
             )

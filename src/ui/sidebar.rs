@@ -404,8 +404,8 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
         ui.add_space(6.0);
     };
 
-    render_drive_group("Discos locais", local_drives);
-    render_drive_group("Unidades de rede", network_drives);
+    render_drive_group(&t!("sidebar.local_disks"), local_drives);
+    render_drive_group(&t!("sidebar.network_drives"), network_drives);
 
     let total_ms = t_start.elapsed().as_millis();
     if total_ms > 50 {
@@ -529,7 +529,10 @@ fn render_pinned_folders(
             ui.painter().text(
                 Pos2::new(cursor_x, rect.center().y),
                 egui::Align2::LEFT_CENTER,
-                &pinned.display_name,
+                &crate::infrastructure::onedrive::special_folder_display_name(
+                    std::path::Path::new(&pinned.path),
+                )
+                .unwrap_or_else(|| pinned.display_name.clone()),
                 egui::FontId::proportional(11.5),
                 text_color,
             );

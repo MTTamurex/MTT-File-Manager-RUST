@@ -115,8 +115,15 @@ pub fn render_file_info_table(
                     egui::vec2(available_width, 0.0), // width=available, height=auto
                     egui::Layout::top_down(egui::Align::Center),
                     |ui| {
+                        let display_name = if file.name == COMPUTER_VIEW_ID {
+                            t!("nav.computer").to_string()
+                        } else if file.name == crate::domain::special_paths::RECYCLE_BIN_VIEW_ID {
+                            t!("nav.recycle_bin").to_string()
+                        } else {
+                            crate::ui::components::item_slot::display_name_for_item(file).to_string()
+                        };
                         ui.add(
-                            egui::Label::new(egui::RichText::new(&file.name).strong().size(15.0))
+                            egui::Label::new(egui::RichText::new(&display_name).strong().size(15.0))
                                 .wrap(),
                         );
                     },

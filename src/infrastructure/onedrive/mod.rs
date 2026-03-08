@@ -344,6 +344,11 @@ pub fn is_special_icon_folder(path: &Path) -> bool {
     path_detection::is_special_icon_folder(path)
 }
 
+/// Returns a translated display name for a known special folder, or `None`.
+pub fn special_folder_display_name(path: &Path) -> Option<String> {
+    path_detection::special_folder_display_name(path)
+}
+
 /// Returns the resolved paths of known special folders (Documents, Pictures, etc.).
 /// Used to pre-extract their icons at startup.
 pub fn special_folder_paths() -> Vec<String> {

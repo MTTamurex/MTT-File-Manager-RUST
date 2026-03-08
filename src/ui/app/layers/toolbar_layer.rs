@@ -1,5 +1,6 @@
 use crate::app::ImageViewerApp;
 use eframe::egui;
+use rust_i18n::t;
 
 #[cfg(debug_assertions)]
 macro_rules! debug_log {
@@ -133,8 +134,8 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                             app.is_address_editing = false;
                         } else {
                             app.notifications.error(format!(
-                                "O caminho não existe: {}",
-                                path
+                                "{}",
+                                t!("operations.path_not_found", path = path)
                             ));
                             app.navigation_state.path_input = app.navigation_state.current_path.clone();
                             app.is_address_editing = false;

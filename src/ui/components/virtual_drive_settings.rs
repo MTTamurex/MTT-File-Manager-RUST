@@ -239,7 +239,7 @@ fn render_drive_row(ui: &mut egui::Ui, drive_info: &VirtualDriveInfo) {
                 }
             }
         } else {
-            ui.label("(padrão)");
+            ui.label(&*t!("vdrive_settings.default_label"));
         }
     });
 

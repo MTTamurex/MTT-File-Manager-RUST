@@ -4,6 +4,7 @@ use crate::ui::preview_panel::utils::truncate_text_to_fit;
 use crate::ui::svg_icons::SvgIconManager;
 use eframe::egui;
 use rfd::FileDialog;
+use rust_i18n::t;
 
 /// Draw audio track wheel picker
 pub(super) fn draw_audio_track_picker(ui: &mut egui::Ui, preview: &mut MediaPreview) {
@@ -53,7 +54,8 @@ pub(super) fn draw_subtitle_track_picker(
     // Build options: [Off, Sub1, Sub2, ...]
     let mut sub_options: Vec<(Option<i64>, String)> = vec![(None, "CC: Off".to_string())];
     for track in &subtitle_tracks {
-        let title = track.title.as_deref().unwrap_or("Legenda");
+        let fallback = t!("video.subtitle_fallback_label");
+        let title = track.title.as_deref().unwrap_or(&fallback);
         let lang = track.lang.as_deref().unwrap_or("unk");
         sub_options.push((Some(track.id), format!("CC: {} ({})", title, lang)));
     }
@@ -87,11 +89,11 @@ pub(super) fn draw_subtitle_track_picker(
             ui,
             &tex,
             18.0,
-            "Carregar legenda externa (.srt/.ass/.vtt/.sub)",
+            &t!("video.load_external_subtitle"),
             ui.visuals().dark_mode,
         ) {
             let mut file_dialog =
-                FileDialog::new().add_filter("Legendas", &["srt", "ass", "ssa", "vtt", "sub"]);
+                FileDialog::new().add_filter(t!("video.subtitle_filter").to_string(), &["srt", "ass", "ssa", "vtt", "sub"]);
 
             if let Some(current_video_path) = preview.path() {
                 if let Some(parent) = current_video_path.parent() {

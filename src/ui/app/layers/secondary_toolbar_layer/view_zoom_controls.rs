@@ -3,6 +3,7 @@ use crate::domain::file_entry::ViewMode;
 use crate::ui::theme;
 use crate::ui::widgets;
 use eframe::egui;
+use rust_i18n::t;
 
 pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     let locked = app.current_folder_locked;
@@ -17,7 +18,7 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
             svg_manager,
             theme::ICON_LIST,
             matches!(app.view_mode, ViewMode::List),
-            "Lista",
+            &t!("secondary_toolbar.list"),
         )
         .clicked()
             && !matches!(app.view_mode, ViewMode::List)
@@ -33,7 +34,7 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
             svg_manager,
             theme::ICON_GRID,
             matches!(app.view_mode, ViewMode::Grid),
-            "Grade",
+            &t!("secondary_toolbar.grid"),
         )
         .clicked()
             && !matches!(app.view_mode, ViewMode::Grid)
@@ -55,6 +56,6 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
             egui::vec2(80.0, 20.0),
             egui::Slider::new(&mut app.thumbnail_size, 64.0..=256.0).show_value(false),
         );
-        ui.label("Zoom");
+        ui.label(&*t!("secondary_toolbar.zoom"));
     });
 }

@@ -3,6 +3,7 @@ use crate::image_viewer::indexer::{self, ImageSequence};
 use crate::image_viewer::loader;
 use eframe::egui;
 use eframe::egui::scroll_area::ScrollBarVisibility;
+use rust_i18n::t;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -526,14 +527,14 @@ impl DedicatedImageViewerApp {
                 let next_enabled = self.current_index + 1 < total;
 
                 if ui
-                    .add_enabled(prev_enabled, egui::Button::new("◀ Anterior"))
+                    .add_enabled(prev_enabled, egui::Button::new(&*t!("imageviewer.previous")))
                     .clicked()
                 {
                     self.navigate_prev(ctx);
                 }
 
                 if ui
-                    .add_enabled(next_enabled, egui::Button::new("Próximo ▶"))
+                    .add_enabled(next_enabled, egui::Button::new(&*t!("imageviewer.next")))
                     .clicked()
                 {
                     self.navigate_next(ctx);
@@ -566,7 +567,7 @@ impl DedicatedImageViewerApp {
     fn render_bottom_bar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("image_viewer_bottom_bar").show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label("Zoom");
+                ui.label(&*t!("imageviewer.zoom"));
 
                 let mut slider_zoom = self.zoom_factor;
                 let slider = egui::Slider::new(&mut slider_zoom, MIN_ZOOM_FACTOR..=MAX_ZOOM_FACTOR)
@@ -580,9 +581,9 @@ impl DedicatedImageViewerApp {
 
                 ui.separator();
                 if let Some((w, h)) = self.image_resolution {
-                    ui.label(format!("Resolução: {} × {}", w, h));
+                    ui.label(&*t!("imageviewer.resolution", w = w, h = h));
                 } else {
-                    ui.label("Resolução: —");
+                    ui.label(&*t!("imageviewer.resolution_none"));
                 }
             });
         });

@@ -640,10 +640,10 @@ pub fn render_status_bar(
                 // Kernel resource monitoring (cached with 1s TTL)
                 // These metrics expose handle/GDI/USER leaks at runtime.
                 let km = get_kernel_resources_cached(allow_system_refresh, video_preview_active);
-                ui.label(format!("Threads: {} (pico: {})", km.thread_count, km.peak_thread_count));
-                ui.label(format!("Handles: {}", km.handle_count));
-                ui.label(format!("GDI: {}", km.gdi_objects));
-                ui.label(format!("USER: {}", km.user_objects));
+                ui.label(&*t!("status_bar_system.threads", count = km.thread_count, peak = km.peak_thread_count));
+                ui.label(&*t!("status_bar_system.handles", count = km.handle_count));
+                ui.label(&*t!("status_bar_system.gdi", count = km.gdi_objects));
+                ui.label(&*t!("status_bar_system.user", count = km.user_objects));
                 ui.separator();
 
                 // RAM usage (cached with 1s TTL — avoids kernel syscall every frame)

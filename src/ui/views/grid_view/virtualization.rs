@@ -1,6 +1,7 @@
 use super::{item_renderer, GridViewContext};
 use crate::ui::cache::FxHashSet;
 use eframe::egui::{self, Rect, Ui};
+use rust_i18n::t;
 use std::path::PathBuf;
 
 #[allow(clippy::too_many_arguments)]
@@ -170,7 +171,7 @@ fn render_computer_view_sections(
     render_section_indices(
         ui,
         ctx,
-        "Discos locais",
+        &t!("sidebar.local_disks"),
         local_indices,
         &mut current_y,
         content_min,
@@ -189,7 +190,7 @@ fn render_computer_view_sections(
     render_section_indices(
         ui,
         ctx,
-        "Unidades de rede",
+        &t!("sidebar.network_drives"),
         network_indices,
         &mut current_y,
         content_min,
