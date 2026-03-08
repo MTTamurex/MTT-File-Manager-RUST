@@ -1,9 +1,11 @@
 use crate::application::navigation::NavigationHistory;
 use crate::domain::file_entry::{SortMode, ViewMode};
+use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID, is_virtual_path};
 use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::theme;
 use crate::ui::widgets;
 use eframe::egui;
+use rust_i18n::t;
 use std::cell::RefCell;
 
 // M-3: Cache breadcrumb segments — recomputed only when current_path changes.
@@ -102,7 +104,7 @@ pub fn render_toolbar(
     let recent_paths: Vec<String> = navigation
         .recent_paths(5)
         .into_iter()
-        .filter(|path| !path.is_empty() && path != "Este Computador" && path != "Lixeira")
+        .filter(|path| !path.is_empty() && !is_virtual_path(path))
         .collect();
 
     ui.horizontal(|ui| {
@@ -110,14 +112,14 @@ pub fn render_toolbar(
 
         // 1. NAVIGATION (LEFT) - Blocked during renaming
         let can_back = navigation.can_go_back() && !_is_renaming;
-        if widgets::icon_button(ui, svg_manager, theme::ICON_ARROW_LEFT, "Voltar", None).clicked()
+        if widgets::icon_button(ui, svg_manager, theme::ICON_ARROW_LEFT, &t!("toolbar.back"), None).clicked()
             && can_back
         {
             action = Some(ToolbarAction::GoBack);
         }
 
         let can_forward = navigation.can_go_forward() && !_is_renaming;
-        if widgets::icon_button(ui, svg_manager, theme::ICON_ARROW_RIGHT, "Avançar", None).clicked()
+        if widgets::icon_button(ui, svg_manager, theme::ICON_ARROW_RIGHT, &t!("toolbar.forward"), None).clicked()
             && can_forward
         {
             action = Some(ToolbarAction::GoForward);
@@ -127,7 +129,7 @@ pub fn render_toolbar(
             ui,
             svg_manager,
             theme::ICON_ARROW_UP,
-            "Subir um nível",
+            &t!("toolbar.up"),
             None,
         )
         .clicked()
@@ -136,7 +138,7 @@ pub fn render_toolbar(
             action = Some(ToolbarAction::GoUp);
         }
 
-        if widgets::icon_button(ui, svg_manager, theme::ICON_REFRESH, "Recarregar", None).clicked()
+        if widgets::icon_button(ui, svg_manager, theme::ICON_REFRESH, &t!("toolbar.reload"), None).clicked()
             && !_is_renaming
         {
             action = Some(ToolbarAction::Refresh);
@@ -149,7 +151,7 @@ pub fn render_toolbar(
             ui,
             svg_manager,
             theme::ICON_HOME,
-            "Este Computador",
+            &t!("toolbar.home"),
             computer_icon,
         )
         .clicked()
@@ -168,7 +170,7 @@ pub fn render_toolbar(
                 svg_manager,
                 theme::ICON_DETAILS,
                 show_preview_panel,
-                "Detalhes",
+                &t!("toolbar.details"),
             )
             .clicked()
             {
@@ -217,7 +219,7 @@ pub fn render_toolbar(
             let text_available_w =
                 search_ui.available_width() - if has_text { 22.0 + 4.0 } else { 4.0 };
 
-            let hint = egui::RichText::new("Buscar...").color(egui::Color32::from_gray(120));
+            let hint = egui::RichText::new(t!("toolbar.search_placeholder")).color(egui::Color32::from_gray(120));
             let text_resp = search_ui.add_sized(
                 egui::vec2(text_available_w, input_height - 2.0),
                 egui::TextEdit::singleline(search_query)
@@ -239,7 +241,7 @@ pub fn render_toolbar(
                             .frame(false)
                             .min_size(egui::vec2(18.0, 18.0)),
                     )
-                    .on_hover_text("Limpar busca")
+                    .on_hover_text(t!("toolbar.clear_search"))
                     .clicked()
                 {
                     search_query.clear();
@@ -285,7 +287,7 @@ pub fn render_toolbar(
                 let edit_response = addr_ui.add_sized(
                     egui::vec2(text_width, addr_ui.available_height()),
                     egui::TextEdit::singleline(path_input)
-                        .hint_text("Caminho...")
+                        .hint_text(t!("toolbar.path_placeholder"))
                         .id_source("address_edit")
                         .frame(false)
                         .text_color(egui::Color32::BLACK),
@@ -300,7 +302,7 @@ pub fn render_toolbar(
                                 .frame(false)
                                 .min_size(egui::vec2(18.0, 18.0)),
                         )
-                        .on_hover_text("Fechar histórico recente");
+                        .on_hover_text(t!("toolbar.close_history"));
 
                     if close_history_response.clicked() {
                         *show_address_history_menu = false;
@@ -398,9 +400,9 @@ pub fn render_toolbar(
             } else {
                 addr_ui.spacing_mut().item_spacing.x = 2.0;
 
-                if current_path == "Este Computador" {
+                if current_path == COMPUTER_VIEW_ID {
                     addr_ui.label(
-                        egui::RichText::new("Este Computador")
+                        egui::RichText::new(t!("nav.computer"))
                             .size(13.0)
                             .color(egui::Color32::BLACK),
                     );

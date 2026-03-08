@@ -252,12 +252,12 @@ pub(super) fn render_grid_item(
                             return;
                         }
                         ui.horizontal(|ui| {
-                            ui.label("Tipo:");
+                            ui.label(rust_i18n::t!("file_info.type").to_string());
                             ui.label(get_file_type_string(item));
                         });
                         if !item.is_dir || item.is_archive() {
                             ui.horizontal(|ui| {
-                                ui.label("Tamanho:");
+                                ui.label(rust_i18n::t!("file_info.size").to_string());
                                 ui.label(crate::infrastructure::windows::format_size(
                                     resolve_tooltip_live_size(ui, item),
                                 ));
@@ -265,7 +265,7 @@ pub(super) fn render_grid_item(
                         }
                         let (date_lbl, date_val) = if is_recycle {
                             (
-                                "Data de Exclusão",
+                                rust_i18n::t!("list_view.date_deleted").to_string(),
                                 if item.modified > 0 {
                                     crate::infrastructure::windows::format_date(item.modified)
                                 } else {
@@ -276,7 +276,7 @@ pub(super) fn render_grid_item(
                             )
                         } else {
                             (
-                                "Última modificação",
+                                rust_i18n::t!("list_view.date_modified").to_string(),
                                 crate::infrastructure::windows::format_date(item.modified),
                             )
                         };
@@ -408,55 +408,17 @@ fn render_item_slot_for_grid(
     }
 }
 
-fn get_file_type_string(item: &FileEntry) -> std::borrow::Cow<'static, str> {
-    use std::borrow::Cow;
-
+fn get_file_type_string(item: &FileEntry) -> String {
     if let Some(label) = crate::domain::file_entry::archive_type_label(&item.name) {
-        return Cow::Borrowed(label);
+        return label;
     }
     if item.is_dir {
-        return Cow::Borrowed("Pasta");
+        return rust_i18n::t!("file_types.folder").to_string();
     }
 
     if let Some(ext) = item.path.extension() {
-        let ext_lower = ext.to_ascii_lowercase();
-        let ext_str = ext_lower.to_string_lossy();
-
-        match ext_str.as_ref() {
-            "txt" => return Cow::Borrowed("Arquivo TXT"),
-            "pdf" => return Cow::Borrowed("Arquivo PDF"),
-            "doc" | "docx" => return Cow::Borrowed("Arquivo Word"),
-            "xls" | "xlsx" => return Cow::Borrowed("Arquivo Excel"),
-            "ppt" | "pptx" => return Cow::Borrowed("Arquivo PowerPoint"),
-            "jpg" | "jpeg" => return Cow::Borrowed("Arquivo JPEG"),
-            "png" => return Cow::Borrowed("Arquivo PNG"),
-            "gif" => return Cow::Borrowed("Arquivo GIF"),
-            "bmp" => return Cow::Borrowed("Arquivo BMP"),
-            "webp" => return Cow::Borrowed("Arquivo WebP"),
-            "mp4" => return Cow::Borrowed("Arquivo MP4"),
-            "mkv" => return Cow::Borrowed("Arquivo MKV"),
-            "avi" => return Cow::Borrowed("Arquivo AVI"),
-            "mov" => return Cow::Borrowed("Arquivo MOV"),
-            "wmv" => return Cow::Borrowed("Arquivo WMV"),
-            "mp3" => return Cow::Borrowed("Arquivo MP3"),
-            "wav" => return Cow::Borrowed("Arquivo WAV"),
-            "flac" => return Cow::Borrowed("Arquivo FLAC"),
-            "exe" => return Cow::Borrowed("Arquivo Executável"),
-            "dll" => return Cow::Borrowed("Biblioteca DLL"),
-            "html" | "htm" => return Cow::Borrowed("Arquivo HTML"),
-            "css" => return Cow::Borrowed("Arquivo CSS"),
-            "js" => return Cow::Borrowed("Arquivo JavaScript"),
-            "json" => return Cow::Borrowed("Arquivo JSON"),
-            "xml" => return Cow::Borrowed("Arquivo XML"),
-            "rs" => return Cow::Borrowed("Arquivo Rust"),
-            "py" => return Cow::Borrowed("Arquivo Python"),
-            "java" => return Cow::Borrowed("Arquivo Java"),
-            "c" | "cpp" | "h" | "hpp" => return Cow::Borrowed("Arquivo C/C++"),
-            "lnk" => return Cow::Borrowed("Atalho"),
-            "iso" => return Cow::Borrowed("Imagem de Disco"),
-            _ => return Cow::Owned(format!("Arquivo {}", ext.to_string_lossy().to_uppercase())),
-        }
+        return rust_i18n::t!("file_info.file_generic", ext = ext.to_string_lossy().to_uppercase()).to_string();
     }
 
-    Cow::Borrowed("Arquivo")
+    rust_i18n::t!("file_info.file_unknown").to_string()
 }

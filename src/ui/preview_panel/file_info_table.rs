@@ -1,8 +1,10 @@
 use crate::domain::file_entry::FileEntry;
+use crate::domain::special_paths::COMPUTER_VIEW_ID;
 use crate::infrastructure::windows::MediaMetadata;
 use crate::ui::preview_panel::actions::PreviewPanelAction;
 use crate::ui::svg_icons::SvgIconManager;
 use eframe::egui;
+use rust_i18n::t;
 
 /// Max age (seconds) for probing live file size on the UI thread.
 const LIVE_SIZE_PROBE_MAX_AGE_SECS: u64 = 300; // 5 minutes
@@ -140,7 +142,7 @@ pub fn render_file_info_table(
                                     ))
                                     .frame(false),
                                 )
-                                .on_hover_text("Recarregar Thumbnail")
+                                .on_hover_text(t!("status_bar.reload_thumbnail"))
                                 .clicked()
                             {
                                 action = Some(PreviewPanelAction::RefreshThumbnail(
@@ -170,34 +172,34 @@ pub fn render_file_info_table(
             };
 
             // 2. Type (General)
-            if file.name == "Este Computador" {
-                add_detail(ui, "Tipo:", "Visão do Sistema".to_string());
-                let drive_count = file.size as usize; // drive count stored in size field
+            if file.name == COMPUTER_VIEW_ID {
+                add_detail(ui, &t!("file_info.type"), t!("file_info.type_system_view").to_string());
+                let drive_count = file.size as usize;
                 let drive_text = if drive_count == 1 {
-                    "1 unidade disponível".to_string()
+                    t!("file_info.drives_one").to_string()
                 } else {
-                    format!("{} unidades disponíveis", drive_count)
+                    t!("file_info.drives_many", count = drive_count).to_string()
                 };
-                add_detail(ui, "Unidades:", drive_text);
+                add_detail(ui, &t!("file_info.drives_label"), drive_text);
             } else if let Some(drive) = &file.drive_info {
-                add_detail(ui, "Tipo:", format!("{:?}", drive.drive_type));
+                add_detail(ui, &t!("file_info.type"), format!("{:?}", drive.drive_type));
             } else if file.is_dir {
                 if let Some(label) = crate::domain::file_entry::archive_type_label(&file.name) {
-                    add_detail(ui, "Tipo:", label.to_string());
+                    add_detail(ui, &t!("file_info.type"), label);
                 } else {
-                    add_detail(ui, "Tipo:", "Pasta de Arquivos".to_string());
+                    add_detail(ui, &t!("file_info.type"), t!("file_info.folder").to_string());
                 }
             } else {
                 let ext = file
                     .path
                     .extension()
                     .map(|e| e.to_string_lossy().to_string().to_uppercase())
-                    .unwrap_or_else(|| "Arquivo".to_string());
-                add_detail(ui, "Tipo:", format!("Arquivo {}", ext));
+                    .unwrap_or_else(|| t!("file_info.file_unknown").to_string());
+                add_detail(ui, &t!("file_info.type"), t!("file_info.file_generic", ext = ext).to_string());
             }
 
             // 3. File Metadata (Date/Size)
-            if file.drive_info.is_none() && file.name != "Este Computador" {
+            if file.drive_info.is_none() && file.name != COMPUTER_VIEW_ID {
                 let is_recycle_item =
                     file.recycle_original_path.is_some() || file.deletion_date.is_some();
                 let (date_label, date_value) = if is_recycle_item {
@@ -208,32 +210,32 @@ pub fn render_file_info_table(
                             .clone()
                             .unwrap_or_else(|| "-".to_string())
                     };
-                    ("Data de exclusão:", value)
+                    (t!("file_info.date_deleted").to_string(), value)
                 } else {
                     (
-                        "Data modificada:",
+                        t!("file_info.date_modified").to_string(),
                         crate::infrastructure::windows::format_date(file.modified),
                     )
                 };
-                add_detail(ui, date_label, date_value);
+                add_detail(ui, &date_label, date_value);
 
                 let size_str = if file.is_dir && !file.is_archive() {
                     if let Some(size) = folder_size {
                         let formatted = crate::infrastructure::windows::format_size(size);
                         if is_folder_size_loading {
-                            format!("{formatted} (calculando...)")
+                            format!("{formatted} ({})", t!("file_info.calculating"))
                         } else {
                             formatted
                         }
                     } else {
-                        "Calculando...".to_string()
+                        t!("file_info.calculating").to_string()
                     }
                 } else {
                     let live_size = resolve_live_file_size(ui, file, is_metadata_loading);
                     crate::infrastructure::windows::format_size(live_size)
                 };
 
-                add_detail(ui, "Tamanho:", size_str);
+                add_detail(ui, &t!("file_info.size"), size_str);
 
                 if file.is_dir
                     && !file.is_archive()
@@ -246,53 +248,53 @@ pub fn render_file_info_table(
 
             // 4. Media Metadata (Images/Videos)
             if is_metadata_loading {
-                add_detail(ui, "Metadados:", "Carregando...".to_string());
+                add_detail(ui, &t!("file_info.metadata"), t!("file_info.metadata_loading").to_string());
             } else if let Some(meta) = metadata {
                 if let (Some(w), Some(h)) = (meta.width, meta.height) {
-                    add_detail(ui, "Resolução:", format!("{} x {} px", w, h));
+                    add_detail(ui, &t!("file_info.resolution"), format!("{} x {} px", w, h));
                 }
 
                 if let Some(fmt) = &meta.format {
-                    add_detail(ui, "Formato:", fmt.clone());
+                    add_detail(ui, &t!("file_info.format"), fmt.clone());
                 }
 
                 if let Some(codec) = &meta.video_codec {
-                    add_detail(ui, "Video Codec:", codec.clone());
+                    add_detail(ui, &t!("file_info.video_codec"), codec.clone());
                 }
 
                 if let Some(codec) = &meta.audio_codec {
-                    add_detail(ui, "Audio Codec:", codec.clone());
+                    add_detail(ui, &t!("file_info.audio_codec"), codec.clone());
                 }
 
                 if let Some(br) = meta.audio_bitrate {
                     add_detail(
                         ui,
-                        "Audio BR:",
+                        &t!("file_info.audio_bitrate"),
                         crate::infrastructure::windows::format_bitrate(br),
                     );
                 }
 
                 if let Some(channels) = meta.audio_channels {
                     let channel_name = match channels {
-                        1 => "Mono",
-                        2 => "Estéreo",
-                        6 => "5.1",
-                        8 => "7.1",
-                        _ => "Outro",
+                        1 => t!("file_info.channel_mono").to_string(),
+                        2 => t!("file_info.channel_stereo").to_string(),
+                        6 => "5.1".to_string(),
+                        8 => "7.1".to_string(),
+                        _ => t!("file_info.channel_other").to_string(),
                     };
-                    add_detail(ui, "Canais:", format!("{} ({})", channels, channel_name));
+                    add_detail(ui, &t!("file_info.channels"), format!("{} ({})", channels, channel_name));
                 }
 
                 if let Some(d) = meta.duration_100ns {
                     add_detail(
                         ui,
-                        "Duração:",
+                        &t!("file_info.duration"),
                         crate::infrastructure::windows::format_media_duration(d),
                     );
                 }
 
                 if let Some(fps) = meta.frame_rate {
-                    add_detail(ui, "Frame rate:", format!("{:.2} fps", fps));
+                    add_detail(ui, &t!("file_info.frame_rate"), format!("{:.2} fps", fps));
                 }
 
                 let mut bitrate_to_show = meta.bitrate;
@@ -305,46 +307,46 @@ pub fn render_file_info_table(
                 if let Some(bps) = bitrate_to_show.filter(|&b| b > 0) {
                     add_detail(
                         ui,
-                        "Bitrate:",
+                        &t!("file_info.bitrate"),
                         crate::infrastructure::windows::format_bitrate(bps),
                     );
                 }
 
                 if let Some(maker) = &meta.camera_maker {
-                    add_detail(ui, "Fabricante:", maker.clone());
+                    add_detail(ui, &t!("file_info.camera_maker"), maker.clone());
                 }
                 if let Some(model) = &meta.camera_model {
-                    add_detail(ui, "Modelo:", model.clone());
+                    add_detail(ui, &t!("file_info.camera_model"), model.clone());
                 }
                 if let Some(date) = &meta.date_taken {
-                    add_detail(ui, "Captura:", date.clone());
+                    add_detail(ui, &t!("file_info.capture_date"), date.clone());
                 }
                 if let Some(f) = &meta.f_stop {
-                    add_detail(ui, "F-stop:", f.clone());
+                    add_detail(ui, &t!("file_info.fstop"), f.clone());
                 }
                 if let Some(e) = &meta.exposure_time {
-                    add_detail(ui, "Exposição:", e.clone());
+                    add_detail(ui, &t!("file_info.exposure"), e.clone());
                 }
                 if let Some(iso) = meta.iso_speed {
-                    add_detail(ui, "ISO:", format!("ISO-{}", iso));
+                    add_detail(ui, &t!("file_info.iso"), format!("ISO-{}", iso));
                 }
                 if let Some(f) = &meta.focal_length {
-                    add_detail(ui, "Dist. Focal:", f.clone());
+                    add_detail(ui, &t!("file_info.focal_length"), f.clone());
                 }
                 if let Some(a) = &meta.max_aperture {
-                    add_detail(ui, "Abertura:", a.clone());
+                    add_detail(ui, &t!("file_info.aperture"), a.clone());
                 }
                 if let Some(m) = &meta.metering_mode {
-                    add_detail(ui, "Medição:", m.clone());
+                    add_detail(ui, &t!("file_info.metering"), m.clone());
                 }
                 if let Some(f) = &meta.flash_mode {
-                    add_detail(ui, "Flash:", f.clone());
+                    add_detail(ui, &t!("file_info.flash"), f.clone());
                 }
                 if let Some(s) = &meta.subject {
-                    add_detail(ui, "Assunto:", s.clone());
+                    add_detail(ui, &t!("file_info.subject"), s.clone());
                 }
                 if let Some(depth) = meta.color_depth {
-                    add_detail(ui, "Profundidade:", format!("{} bits", depth));
+                    add_detail(ui, &t!("file_info.bit_depth"), format!("{} bits", depth));
                 }
             }
 
@@ -354,22 +356,22 @@ pub fn render_file_info_table(
 
                 add_detail(
                     ui,
-                    "Espaço usado:",
+                    &t!("file_info.used_space"),
                     crate::infrastructure::windows::format_size(used_space),
                 );
                 add_detail(
                     ui,
-                    "Espaço livre:",
+                    &t!("file_info.free_space"),
                     crate::infrastructure::windows::format_size(drive.free_space),
                 );
                 add_detail(
                     ui,
-                    "Tamanho total:",
+                    &t!("file_info.total_space"),
                     crate::infrastructure::windows::format_size(drive.total_space),
                 );
                 add_detail(
                     ui,
-                    "Sist. Arq:",
+                    &t!("file_info.filesystem"),
                     if drive.file_system.is_empty() {
                         "NTFS".to_string()
                     } else {

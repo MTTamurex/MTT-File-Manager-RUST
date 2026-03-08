@@ -6,6 +6,7 @@ pub mod keyboard;
 pub mod selection;
 
 use crate::app::state::ImageViewerApp;
+use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use std::path::{Path, PathBuf};
 
 impl ImageViewerApp {
@@ -134,7 +135,7 @@ impl ImageViewerApp {
             // Save current path before going back (to invalidate the preview)
             let previous_path = std::path::PathBuf::from(&self.navigation_state.current_path);
 
-            if path == "Este Computador" {
+            if path == COMPUTER_VIEW_ID {
                 // Invalidate preview of the folder we were in
                 self.cache_manager.invalidate_folder_preview(&previous_path);
 
@@ -143,7 +144,7 @@ impl ImageViewerApp {
 
                 self.reset_selection_and_search();
                 self.setup_computer_view();
-            } else if path == "Lixeira" {
+            } else if path == RECYCLE_BIN_VIEW_ID {
                 // Invalidate preview of the folder we were in
                 self.cache_manager.invalidate_folder_preview(&previous_path);
 
@@ -193,7 +194,7 @@ impl ImageViewerApp {
             // Save current path before going forward (to invalidate the preview)
             let previous_path = std::path::PathBuf::from(&self.navigation_state.current_path);
 
-            if path == "Este Computador" {
+            if path == COMPUTER_VIEW_ID {
                 // Invalidate preview of the folder we were in
                 self.cache_manager.invalidate_folder_preview(&previous_path);
 
@@ -202,7 +203,7 @@ impl ImageViewerApp {
 
                 self.reset_selection_and_search();
                 self.setup_computer_view();
-            } else if path == "Lixeira" {
+            } else if path == RECYCLE_BIN_VIEW_ID {
                 // Invalidate preview of the folder we were in
                 self.cache_manager.invalidate_folder_preview(&previous_path);
 
@@ -252,7 +253,7 @@ impl ImageViewerApp {
 
         self.navigation_state
             .navigation
-            .navigate_to("Este Computador".to_string());
+            .navigate_to(COMPUTER_VIEW_ID.to_string());
         // self.sync_to_tab(); // setup_computer_view calls sync_from_tab?? no, we sync afterward
 
         self.reset_selection_and_search();
@@ -268,10 +269,10 @@ impl ImageViewerApp {
 
         self.navigation_state
             .navigation
-            .navigate_to("Lixeira".to_string());
+            .navigate_to(RECYCLE_BIN_VIEW_ID.to_string());
         self.reset_selection_and_search();
         // NOTE: Do NOT call watch_current_folder() here.
-        // "Lixeira" is a virtual view, not a real filesystem path — notify would
+        // Recycle bin is a virtual view, not a real filesystem path — notify would
         // fail with "Input watch path is neither a file nor a directory".
         self.setup_recycle_bin_view();
         self.sync_to_tab();

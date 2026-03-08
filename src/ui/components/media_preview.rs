@@ -280,7 +280,7 @@ impl MediaPreview {
         if let MediaPreview::Video(player) = self {
             player.load_external_subtitle(subtitle_path)
         } else {
-            Err("Preview atual não é vídeo".to_string())
+            Err(rust_i18n::t!("video.not_video").to_string())
         }
     }
 

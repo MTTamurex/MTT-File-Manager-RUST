@@ -76,7 +76,7 @@ fn render_lock_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                 &mut app.svg_icon_manager,
                 "lock_open",
                 false,
-                "Bloqueio indisponível nesta vista",
+                &rust_i18n::t!("secondary_toolbar.lock_unavailable"),
             );
         });
         return;
@@ -84,12 +84,12 @@ fn render_lock_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
 
     let icon_name = if is_locked { "lock" } else { "lock_open" };
     let tooltip = if is_locked {
-        "Vista bloqueada — clique para desbloquear"
+        rust_i18n::t!("secondary_toolbar.locked")
     } else {
-        "Bloquear vista desta pasta"
+        rust_i18n::t!("secondary_toolbar.lock_folder")
     };
 
-    if widgets::toggle_icon_button(ui, &mut app.svg_icon_manager, icon_name, is_locked, tooltip)
+    if widgets::toggle_icon_button(ui, &mut app.svg_icon_manager, icon_name, is_locked, &tooltip)
         .clicked()
     {
         app.toggle_folder_lock();

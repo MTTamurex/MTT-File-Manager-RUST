@@ -4,6 +4,7 @@
 
 use crate::app::state::ImageViewerApp;
 use eframe::egui;
+use rust_i18n::t;
 use std::path::PathBuf;
 
 impl ImageViewerApp {
@@ -49,14 +50,14 @@ impl ImageViewerApp {
         // Special menu for Recycle Bin items
         if self.navigation_state.is_recycle_bin_view && !is_empty_area {
             // Menu items for recycle bin (no primary icons)
-            items.push(ContextMenuItem::new(-52, "Restaurar").with_command("restore"));
+            items.push(ContextMenuItem::new(-52, t!("context_menu.restore")).with_command("restore"));
             items.push(
-                ContextMenuItem::new(-53, "Excluir permanentemente")
+                ContextMenuItem::new(-53, t!("context_menu.delete_permanent"))
                     .with_command("delete_permanent"),
             );
             items.push(ContextMenuItem::separator());
             items.push(
-                ContextMenuItem::new(-28, "Propriedades")
+                ContextMenuItem::new(-28, t!("context_menu.properties"))
                     .with_command("properties")
                     .with_shortcut("Alt+Enter"),
             );
@@ -69,7 +70,7 @@ impl ImageViewerApp {
         // Special menu for empty area in Recycle Bin
         if self.navigation_state.is_recycle_bin_view && is_empty_area {
             items.push(
-                ContextMenuItem::new(-54, "Esvaziar Lixeira").with_command("empty_recycle_bin"),
+                ContextMenuItem::new(-54, t!("context_menu.empty_recycle_bin")).with_command("empty_recycle_bin"),
             );
             self.context_menu.items = items;
             self.context_menu.partition_items(); // M-5
@@ -85,13 +86,13 @@ impl ImageViewerApp {
         // ========== PRIMARY ITEMS (Header bar) - matching Files ==========
         // These appear as icon buttons in the header
         items.push(
-            ContextMenuItem::primary(-3, "Recortar")
+            ContextMenuItem::primary(-3, t!("context_menu.cut"))
                 .with_command("cut")
                 .with_shortcut("Ctrl+X")
                 .enabled(!is_drive),
         );
         items.push(
-            ContextMenuItem::primary(-2, "Copiar")
+            ContextMenuItem::primary(-2, t!("context_menu.copy"))
                 .with_command("copy")
                 .with_shortcut("Ctrl+C")
                 .enabled(!is_drive),
@@ -99,7 +100,7 @@ impl ImageViewerApp {
 
         let can_paste = self.clipboard.has_content();
         items.push(
-            ContextMenuItem::primary(-4, "Colar")
+            ContextMenuItem::primary(-4, t!("context_menu.paste"))
                 .with_command("paste")
                 .with_shortcut("Ctrl+V")
                 .enabled(can_paste && !is_drive),
@@ -107,12 +108,12 @@ impl ImageViewerApp {
 
         if !is_empty_area {
             items.push(
-                ContextMenuItem::primary(-5, "Renomear")
+                ContextMenuItem::primary(-5, t!("context_menu.rename"))
                     .with_command("rename")
                     .with_shortcut("F2"),
             );
             items.push(
-                ContextMenuItem::primary(-6, "Excluir")
+                ContextMenuItem::primary(-6, t!("context_menu.delete"))
                     .with_command("delete")
                     .with_shortcut("Del")
                     .enabled(!is_drive),
@@ -126,54 +127,53 @@ impl ImageViewerApp {
         if is_empty_area {
             items.push(ContextMenuItem::separator());
             items.push(
-                ContextMenuItem::new(-32, "Colar")
+                ContextMenuItem::new(-32, t!("context_menu.paste"))
                     .with_command("paste")
                     .with_shortcut("Ctrl+V")
                     .enabled(can_paste),
             );
             items.push(
-                ContextMenuItem::new(-1, "Criar pasta")
+                ContextMenuItem::new(-1, t!("context_menu.create_folder"))
                     .with_shortcut("Ctrl+Shift+N")
                     .enabled(can_create_folder),
             );
         } else {
             items.push(ContextMenuItem::separator());
-            items.push(ContextMenuItem::new(-20, "Abrir"));
-            items.push(ContextMenuItem::new(-21, "Abrir em nova guia"));
+            items.push(ContextMenuItem::new(-20, t!("context_menu.open")));
+            items.push(ContextMenuItem::new(-21, t!("context_menu.open_new_tab")));
             items.push(ContextMenuItem::separator());
-            // Basic file operations as text items (in addition to header icons)
             items.push(
-                ContextMenuItem::new(-30, "Recortar")
+                ContextMenuItem::new(-30, t!("context_menu.cut"))
                     .with_command("cut")
                     .with_shortcut("Ctrl+X")
                     .enabled(!is_drive),
             );
             items.push(
-                ContextMenuItem::new(-31, "Copiar")
+                ContextMenuItem::new(-31, t!("context_menu.copy"))
                     .with_command("copy")
                     .with_shortcut("Ctrl+C")
                     .enabled(!is_drive),
             );
             items.push(
-                ContextMenuItem::new(-32, "Colar")
+                ContextMenuItem::new(-32, t!("context_menu.paste"))
                     .with_command("paste")
                     .with_shortcut("Ctrl+V")
                     .enabled(can_paste && !is_drive),
             );
             items.push(
-                ContextMenuItem::new(-33, "Renomear")
+                ContextMenuItem::new(-33, t!("context_menu.rename"))
                     .with_command("rename")
                     .with_shortcut("F2"),
             );
             items.push(
-                ContextMenuItem::new(-34, "Excluir")
+                ContextMenuItem::new(-34, t!("context_menu.delete"))
                     .with_command("delete")
                     .with_shortcut("Del")
                     .enabled(!is_drive),
             );
             items.push(ContextMenuItem::separator());
-            items.push(ContextMenuItem::new(-24, "Copiar caminho").with_shortcut("Ctrl+Shift+C"));
-            items.push(ContextMenuItem::new(-26, "Criar atalho"));
+            items.push(ContextMenuItem::new(-24, t!("context_menu.copy_path")).with_shortcut("Ctrl+Shift+C"));
+            items.push(ContextMenuItem::new(-26, t!("context_menu.create_shortcut")));
             // Quick Access pin/unpin — only for folders (not drives)
             if !is_drive {
                 if let Some(target_path) = paths.first().and_then(|p| p.to_str()) {
@@ -196,9 +196,9 @@ impl ImageViewerApp {
                             .any(|pf| pf.path == target_path);
                         items.push(ContextMenuItem::separator());
                         if is_pinned {
-                            items.push(ContextMenuItem::new(-61, "Remover do Acesso Rápido"));
+                            items.push(ContextMenuItem::new(-61, t!("context_menu.unpin_quick_access")));
                         } else {
-                            items.push(ContextMenuItem::new(-60, "Fixar no Acesso Rápido"));
+                            items.push(ContextMenuItem::new(-60, t!("context_menu.pin_quick_access")));
                         }
                     }
                 }
@@ -206,7 +206,7 @@ impl ImageViewerApp {
 
             items.push(ContextMenuItem::separator());
             items.push(
-                ContextMenuItem::new(-28, "Propriedades")
+                ContextMenuItem::new(-28, t!("context_menu.properties"))
                     .with_command("properties")
                     .with_shortcut("Alt+Enter"),
             );
@@ -313,7 +313,7 @@ impl ImageViewerApp {
         }
         if !overflow.is_empty() {
             items.push(ContextMenuItem::separator());
-            items.push(ContextMenuItem::new(-99, "Mostrar mais opções").with_subitems(overflow));
+            items.push(ContextMenuItem::new(-99, t!("context_menu.show_more")).with_subitems(overflow));
         }
 
         self.context_menu.partition_items(); // M-5: re-partition after shell items are merged

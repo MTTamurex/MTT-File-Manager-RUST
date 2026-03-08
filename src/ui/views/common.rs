@@ -2,23 +2,24 @@
 //! Follows .cursorrules: single responsibility, < 300 lines
 
 use crate::domain::file_entry::{archive_type_label, FileEntry};
+use rust_i18n::t;
 
 /// Gets file type string for display
 pub fn get_file_type_string(item: &FileEntry) -> String {
     if let Some(label) = archive_type_label(&item.name) {
-        return label.to_string();
+        return label;
     }
     if item.is_dir {
-        "Pasta".to_string()
+        t!("file_types.folder").to_string()
     } else if let Some(ext) = item.path.extension() {
         let ext_str = ext.to_string_lossy().to_uppercase();
         if !ext_str.is_empty() {
-            format!("Arquivo {}", ext_str)
+            t!("file_info.file_generic", ext = ext_str).to_string()
         } else {
-            "Arquivo".to_string()
+            t!("file_info.file_unknown").to_string()
         }
     } else {
-        "Arquivo".to_string()
+        t!("file_info.file_unknown").to_string()
     }
 }
 

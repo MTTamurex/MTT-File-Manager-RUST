@@ -65,13 +65,13 @@ pub fn render_preview_panel(
 
             ui.add_space(20.0);
             ui.label(
-                egui::RichText::new(format!("{} itens selecionados", multi_selection_count))
+                egui::RichText::new(rust_i18n::t!("preview.items_selected", count = multi_selection_count).to_string())
                     .strong()
                     .size(18.0),
             );
             ui.add_space(10.0);
             ui.label(
-                egui::RichText::new("Selecione um único item para ver detalhes")
+                egui::RichText::new(rust_i18n::t!("preview.select_item").to_string())
                     .color(egui::Color32::GRAY),
             );
         });

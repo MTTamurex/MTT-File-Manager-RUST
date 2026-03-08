@@ -1,6 +1,7 @@
 //! Individual list item rendering: icons, columns, selection, tooltips, rename
 
 use eframe::egui::{self, Color32, FontId, Pos2, Rect, RichText, Sense, Ui};
+use rust_i18n::t;
 
 use super::helpers::{get_file_type_string, render_status_badge};
 use super::{truncate_text_for_column, ColumnWidths, ListViewContext, ListViewOperations};
@@ -93,23 +94,23 @@ fn render_drive_tooltip(ui: &mut Ui, item: &FileEntry) {
     let used_space = drive.total_space.saturating_sub(drive.free_space);
 
     ui.horizontal(|ui| {
-        ui.label("Tipo:");
+        ui.label(t!("file_info.type"));
         ui.label(format!("{:?}", drive.drive_type));
     });
     ui.horizontal(|ui| {
-        ui.label("Espaço usado:");
+        ui.label(t!("file_info.used_space"));
         ui.label(format_size(used_space));
     });
     ui.horizontal(|ui| {
-        ui.label("Espaço livre:");
+        ui.label(t!("file_info.free_space"));
         ui.label(format_size(drive.free_space));
     });
     ui.horizontal(|ui| {
-        ui.label("Tamanho total:");
+        ui.label(t!("file_info.total_space"));
         ui.label(format_size(drive.total_space));
     });
     ui.horizontal(|ui| {
-        ui.label("Sist. Arq:");
+        ui.label(t!("file_info.filesystem"));
         ui.label(file_system);
     });
 }
@@ -440,19 +441,19 @@ fn render_item_tooltip(
                             return;
                         }
                         ui.horizontal(|ui| {
-                            ui.label("Tipo:");
+                            ui.label(t!("file_info.type"));
                             ui.label(get_file_type_string(item));
                         });
                         if !item.is_dir || item.is_archive() {
                             ui.horizontal(|ui| {
-                                ui.label("Tamanho:");
+                                ui.label(t!("file_info.size"));
                                 ui.label(format_size(resolve_tooltip_live_size(ui, item)));
                             });
                         }
                         let date_lbl = if is_recycle_bin {
-                            "Data de Exclusão"
+                            t!("list_view.date_deleted")
                         } else {
-                            "Última modificação"
+                            t!("list_view.date_modified")
                         };
                         let date_val = if is_recycle_bin {
                             if item.modified > 0 {

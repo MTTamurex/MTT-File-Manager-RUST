@@ -3,6 +3,7 @@ use crate::domain::file_entry::IconSize;
 use crate::ui::global_search_overlay::filters::build_filtered_indices;
 use crate::ui::theme;
 use eframe::egui;
+use rust_i18n::t;
 
 const RESULT_ROW_HEIGHT: f32 = 46.0;
 const ICON_SIZE: f32 = 18.0;
@@ -60,7 +61,7 @@ pub(super) fn render_results_panel(
             egui::Layout::top_down(egui::Align::Center),
             |ui| {
                 ui.add_space(20.0);
-                ui.label("Buscando...");
+                ui.label(t!("search.searching").to_string());
             },
         );
         return;
@@ -76,7 +77,7 @@ pub(super) fn render_results_panel(
             |ui| {
                 ui.add_space(20.0);
                 ui.label(
-                    egui::RichText::new("Nenhum resultado encontrado")
+                    egui::RichText::new(t!("search.no_results").to_string())
                         .color(egui::Color32::from_gray(120)),
                 );
             },
@@ -91,7 +92,7 @@ pub(super) fn render_results_panel(
             |ui| {
                 ui.add_space(20.0);
                 ui.label(
-                    egui::RichText::new("Nenhum resultado com os filtros atuais")
+                    egui::RichText::new(t!("search.no_results_filtered").to_string())
                         .color(egui::Color32::from_gray(120)),
                 );
             },
@@ -106,7 +107,7 @@ pub(super) fn render_results_panel(
             |ui| {
                 ui.add_space(20.0);
                 ui.label(
-                    egui::RichText::new("ESC para fechar")
+                    egui::RichText::new(t!("search.esc_to_close").to_string())
                         .size(11.0)
                         .color(egui::Color32::from_gray(100)),
                 );
@@ -131,17 +132,13 @@ pub(super) fn render_results_panel(
     // Header with count.
     ui.horizontal(|ui| {
         ui.label(
-            egui::RichText::new(format!(
-                "{} resultados (de {})",
-                filtered_indices.len(),
-                app.global_search.results.len()
-            ))
-            .size(11.0)
-            .color(egui::Color32::from_gray(120)),
+            egui::RichText::new(t!("search.results_count", shown = filtered_indices.len(), total = app.global_search.results.len()).to_string())
+                .size(11.0)
+                .color(egui::Color32::from_gray(120)),
         );
         if app.global_search.loading {
             ui.label(
-                egui::RichText::new("Buscando...")
+                egui::RichText::new(t!("search.searching").to_string())
                     .size(11.0)
                     .color(egui::Color32::from_gray(120)),
             );
@@ -278,13 +275,13 @@ pub(super) fn render_results_panel(
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new(format!("{} resultados carregados", current_loaded))
+                    egui::RichText::new(t!("search.results_loaded", count = current_loaded).to_string())
                         .size(10.0)
                         .color(egui::Color32::from_gray(120)),
                 );
                 if ui
-                    .button(format!("Carregar mais (+{})", next_limit))
-                    .on_hover_text("Busca a próxima página de resultados")
+                    .button(t!("search.load_more", count = next_limit).to_string())
+                    .on_hover_text(t!("search.load_more_hint"))
                     .clicked()
                 {
                     app.global_search.loading = true;
@@ -309,12 +306,9 @@ pub(super) fn render_results_panel(
         {
             ui.add_space(6.0);
             ui.label(
-                egui::RichText::new(format!(
-                    "Limite máximo atingido ({} resultados). Refine a busca para mais precisão.",
-                    MAX_RESULTS_CAP
-                ))
-                .size(10.0)
-                .color(egui::Color32::from_gray(120)),
+                egui::RichText::new(t!("search.max_reached", count = MAX_RESULTS_CAP).to_string())
+                    .size(10.0)
+                    .color(egui::Color32::from_gray(120)),
             );
         }
     }
@@ -393,17 +387,17 @@ fn activate_search_result(app: &mut ImageViewerApp, full_path: &str, is_dir: boo
 
 fn file_type_label(full_path: &str, is_dir: bool) -> String {
     if is_dir {
-        return "Pasta".to_string();
+        return rust_i18n::t!("search_results.folder").to_string();
     }
 
     let path = std::path::Path::new(full_path);
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         if !ext.is_empty() {
-            return format!("Arquivo {}", ext.to_uppercase());
+            return rust_i18n::t!("search_results.file_ext", ext = ext.to_uppercase()).to_string();
         }
     }
 
-    "Arquivo".to_string()
+    rust_i18n::t!("search_results.file_generic").to_string()
 }
 
 fn resolve_result_size(
