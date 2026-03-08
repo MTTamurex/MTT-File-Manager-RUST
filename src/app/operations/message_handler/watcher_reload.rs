@@ -10,9 +10,15 @@ impl ImageViewerApp {
         // Skip auto-reload if smart delete already updated the UI
         if self.skip_next_auto_reload {
             self.skip_next_auto_reload = false;
-            self.pending_auto_reload = false;
-            #[cfg(debug_assertions)]
-            log::debug!("[DEBUG] Skipping auto-reload - UI already updated by smart delete");
+            if !self.pending_auto_reload {
+                #[cfg(debug_assertions)]
+                log::debug!("[DEBUG] Skipping auto-reload - UI already updated by smart delete");
+            } else {
+                #[cfg(debug_assertions)]
+                log::debug!(
+                    "[DEBUG] Smart delete skip ignored because another watcher event already scheduled a reload"
+                );
+            }
         }
 
         // NOTE: Inactivity recovery cooldown removed - no longer needed.
