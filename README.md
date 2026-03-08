@@ -1,390 +1,293 @@
 # MTT File Manager
 
-**Gerenciador de arquivos nativo para Windows** desenvolvido em Rust com interface moderna, recursos avançados de visualização de mídia e integração profunda com o sistema Windows.
+**Native Windows file manager** built in Rust with a modern UI, advanced media preview, and deep Windows integration.
 
-## 📋 Índice
+## Table of Contents
 
-- [O que é](#o-que-é)
-- [Principais Recursos](#principais-recursos)
-- [Tecnologias](#tecnologias)
-- [Requisitos](#requisitos)
-- [Instalação](#instalação)
-- [Como Usar](#como-usar)
-- [Documentação](#documentação)
-- [Desenvolvimento](#desenvolvimento)
-- [Solução de Problemas](#solução-de-problemas)
-- [Contribuição](#contribuição)
-- [Licença](#licença)
+- [About](#about)
+- [Key Features](#key-features)
+- [Technologies](#technologies)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Documentation](#documentation)
+- [Development](#development)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
 
-## 🎯 O que é
+## About
 
-O MTT File Manager é um gerenciador de arquivos desktop que combina a performance e segurança de Rust com uma interface moderna e integração nativa com o Windows. Ele oferece uma experiência de usuário fluída com navegação em abas, preview integrado de arquivos e recursos avançados de gerenciamento.
+MTT File Manager is a desktop file manager that combines Rust's performance and safety with a modern interface and native Windows integration. It offers tabbed navigation, integrated file preview, and advanced management features.
 
-### Problemas que Resolve
-- **Visualização lenta** de imagens e vídeos em exploradores tradicionais
-- **Falta de preview integrado** para múltiplos formatos de arquivo
-- **Navegação ineficiente** sem suporte a abas e histórico
-- **Busca lenta de arquivos** em grandes volumes de dados
-- **Cache inadequado** que não aproveita recursos do sistema
-- **Integração limitada** com funcionalidades nativas do Windows
+### Problems It Solves
+- **Slow media browsing** in traditional file explorers
+- **No integrated preview** for multiple file formats
+- **Inefficient navigation** without tabs and history
+- **Slow file search** across large volumes
+- **Poor caching** that doesn't leverage system resources
+- **Limited integration** with native Windows features
 
-## ✨ Principais Recursos
+## Key Features
 
-### 🖥️ Interface e Navegação
-- **Interface borderless customizada** - Janela moderna sem bordas tradicionais
-- **Navegação em abas** - Múltiplas abas com histórico independente
-- **Visualizações flexíveis** - Modo grade e lista com thumbnails ajustáveis
-- **Barra de endereços inteligente** - Navegação direta com autocomplete
-- **Sidebar com atalhos** - Acesso rápido a drives, bibliotecas, OneDrive e Lixeira; **Acesso Rápido** com pastas fixadas pelo usuário (fixar via clique direito ou drag-and-drop, reordenar via drag, ícone 📌 para desafixar)
+### Interface & Navigation
+- **Custom borderless window** — Modern frameless UI with native resize support
+- **Tabbed navigation** — Multiple tabs with independent history
+- **Grid and List views** — Adjustable thumbnail sizes
+- **Smart address bar** — Direct path input with breadcrumbs
+- **Sidebar** — Quick access to drives, libraries, OneDrive, and Recycle Bin
+- **Quick Access** — Pin folders via right-click or drag-and-drop; reorder via drag; persistent storage
 
-### 🎬 Preview e Mídia
-- **Preview integrado** - Visualização sem sair do aplicativo
-- **Visualizador de imagens dedicado** - Processo separado com cache sliding-window, navegação instantânea e prefetch inteligente
-- **Reprodução de vídeo** - Player baseado em libmpv para formatos diversos
-- **Visualizador de PDF** - Integração com WebView2 (Edge)
-- **Thumbnails inteligentes** - Cache multi-nível com geração otimizada
-- **Suporte a GIFs animados** - Reprodução otimizada e fluída
+### Media Preview
+- **Integrated preview** — View files without leaving the app
+- **Dedicated image viewer** — Separate process with sliding-window cache, instant navigation, and multi-threaded decoding
+- **Video player** — Standalone mpv-based player with D3D11 GPU pipeline
+- **PDF viewer** — Native viewer using Windows.Data.Pdf API (WinRT)
+- **Smart thumbnails** — Multi-stage generation: image crate → WIC → Shell API → Media Foundation
+- **Animated GIF playback** — Optimized rendering with play/pause controls
 
-### 🔍 Busca Global
-- **Busca instantânea** - Consulta em índice in-memory com suporte a milhões de arquivos
-- **Indexação híbrida por volume** - NTFS/ReFS via USN Journal; volumes sem USN (exFAT/FAT32/FUSE/CryptoFS) via varredura completa
-- **Serviço em background** - Windows Service dedicado para indexação contínua
-- **Overlay tipo Spotlight** - Interface modal ativada por Ctrl+Shift+F
-- **Paginação real de resultados** - Busca por páginas (`offset/limit`) com carregamento incremental
-- **Atualização adaptativa** - NTFS/ReFS com loop incremental de 2s; sem USN com re-scan periódico (30s/120s)
-- **Cache persistente** - Índice salvo em SQLite para restart rápido do serviço
+### Global Search
+- **Instant search** — Query an in-memory index supporting millions of files
+- **Hybrid volume indexing** — NTFS/ReFS via USN Journal; non-USN volumes via full-tree scan
+- **Background service** — Dedicated Windows Service for continuous indexing
+- **Spotlight-style overlay** — Activated by Ctrl+Shift+F
+- **Paginated results** — Offset/limit pagination with incremental loading
 
-### 📁 Operações de Arquivo
-- **Operações completas** - Copiar, cortar, colar, renomear, deletar
-- **Menu de contexto nativo** - Integração completa com Windows Shell
-- **Lixeira integrada** - Operações com lixeira do Windows
-- **Suporte a OneDrive** - Detecção de status de sincronização
-- **Montagem de ISO** - Suporte para arquivos ISO como drives virtuais
+### File Operations
+- **Core operations** — Copy, cut, paste, rename, delete
+- **Native context menu** — Full Windows Shell context menu integration
+- **Recycle Bin** — Browse, restore, and permanently delete
+- **OneDrive support** — Sync status detection
+- **ISO mounting** — Mount ISO files as virtual drives
 
-### ⚡ Performance e Cache
-- **Cache multi-nível** - Memória, disco e GPU para performance máxima
-- **Workers assíncronos** - Processamento em background sem travar UI
-- **Pré-carregamento inteligente** - Prefetch preditivo de pastas e arquivos
-- **Virtualização de UI** - Renderização eficiente de listas grandes
-- **Monitoramento de mudanças** - Drive Watcher nativo (ReadDirectoryChangesW) com fallback `notify` para caminhos UNC
+### Performance & Cache
+- **Multi-level cache** — Memory, disk (SQLite), and GPU textures
+- **Async workers** — Background processing keeps UI responsive
+- **Smart prefetch** — Predictive preloading of folders and files
+- **UI virtualization** — Efficient rendering of large directories
+- **Drive-wide monitoring** — Native `ReadDirectoryChangesW` with `notify` fallback for UNC paths
 
-## 🛠️ Tecnologias
+## Technologies
 
-| Categoria | Tecnologia | Versão | Propósito |
-|-----------|------------|---------|-----------|
-| **Linguagem** | Rust | 2021 Edition | Performance e segurança |
-| **GUI** | eframe/egui | 0.31 | Interface gráfica moderna |
-| **Windows API** | windows-rs | 0.61 | Integração nativa com Windows |
-| **Vídeo** | libmpv2 | 5.0.3 | Reprodução de vídeo de alta performance |
-| **PDF** | WebView2 | - | Visualização de PDFs nativa |
-| **Cache** | SQLite (rusqlite) | 0.32 | Persistência confiável |
-| **Imagens** | image crate | 0.25 | Processamento de imagens |
-| **Paralelismo** | rayon | 1.10 | Processamento paralelo |
-| **IPC** | Named Pipes + bincode | 1.3 | Comunicação app ↔ serviço de busca |
-| **Serviço Windows** | windows-service | 0.7 | Serviço de indexação em background |
+| Category | Technology | Version | Purpose |
+|----------|-----------|---------|---------|
+| **Language** | Rust | 2021 Edition | Performance and safety |
+| **GUI** | eframe/egui | 0.31 | Modern immediate-mode GUI |
+| **Windows API** | windows-rs | 0.61.0 | Native Windows integration |
+| **Video** | libmpv2 | 5.0.3 | High-performance video playback |
+| **PDF** | Windows.Data.Pdf | Built-in | Native PDF rendering (WinRT) |
+| **Database** | SQLite (rusqlite) | 0.32 | Reliable persistence |
+| **Images** | image crate | 0.25 | Image processing |
+| **Parallelism** | rayon | 1.10 | Parallel processing |
+| **IPC** | Named Pipes + bincode | 1.3 | App ↔ search service communication |
+| **Service** | windows-service | 0.7 | Background indexing service |
+| **i18n** | rust-i18n | 3 | Multi-language support (en, pt-BR) |
 
-## 📋 Requisitos
+## Requirements
 
-### Mínimos
-- **Sistema**: Windows 10 (Build 1903+) ou Windows 11
-- **Processador**: x64, 2 cores ou mais
-- **Memória**: 4GB RAM
-- **Espaço**: 100MB para instalação + espaço para cache
-- **GPU**: DirectX 11 compatível
+### Minimum
+- **OS**: Windows 10 (Build 1903+) or Windows 11
+- **CPU**: x64, 2+ cores
+- **RAM**: 4 GB
+- **Disk**: 100 MB + cache storage
+- **GPU**: DirectX 11 compatible
 
-### Recomendados
-- **Sistema**: Windows 11 (última atualização)
-- **Processador**: x64, 4+ cores
-- **Memória**: 8GB RAM ou mais
-- **Armazenamento**: SSD para melhor performance de cache
-- **GPU**: Placa dedicada para preview de vídeos
+### Recommended
+- **OS**: Windows 11 (latest update)
+- **CPU**: x64, 4+ cores
+- **RAM**: 8 GB or more
+- **Storage**: SSD for cache performance
+- **GPU**: Dedicated GPU for video preview
 
-### Dependências Externas
-- **libmpv-2.dll** - Para reprodução de vídeo
-- **Microsoft Edge WebView2 Runtime** - Para visualização de PDFs
+### Runtime Dependencies
+- **libmpv-2.dll** — Required for video playback
 
-## 🚀 Instalação
+## Installation
 
-### Opção 1: Download Direto (Recomendado)
-1. Baixe a última release em [GitHub Releases](https://github.com/mtamu/MTT-File-Manager-RUST/releases)
-2. Extraia o arquivo ZIP
-3. Execute `mtt-file-manager.exe`
-
-### Opção 2: Build do Código Fonte
+### Option 1: Build from Source
 ```bash
-# Clone o repositório
-git clone <url-do-repositorio>
+# Clone the repository
+git clone <repository-url>
 cd MTT-File-Manager-RUST
 
-# Build de produção
-cargo build --release
+# Release build
+cargo build --release --workspace
 
-# Execute
+# Run
 .\target\release\mtt-file-manager.exe
 ```
 
-### Instalação de Dependências
+### libmpv Setup
 ```powershell
-# WebView2 Runtime (se necessário)
-winget install Microsoft.EdgeWebView2Runtime
-
-# libmpv (se não incluído na release)
-# Baixe de: https://sourceforge.net/projects/mpv-player-windows/files/libmpv/
-# Coloque libmpv-2.dll no mesmo diretório do executável
+# Download from: https://sourceforge.net/projects/mpv-player-windows/files/libmpv/
+# Place libmpv-2.dll in the same directory as the executable
 ```
 
-## 🎮 Como Usar
+## Usage
 
-### Atalhos de Teclado Principais
-- **Ctrl+T** - Nova aba
-- **Ctrl+W** - Fechar aba
-- **Ctrl+C/V** - Copiar/Colar
-- **Delete** - Mover para lixeira
-- **Shift+Delete** - Deletar permanentemente
-- **F2** - Renomear
-- **F5** - Recarregar pasta
-- **Alt+Enter** - Propriedades
-- **Ctrl+Shift+F** - Busca global (todos os volumes)
-- **Ctrl+L** - Focar barra de endereços
+### Keyboard Shortcuts
+| Shortcut | Action |
+|----------|--------|
+| Ctrl+T | New tab |
+| Ctrl+W | Close tab |
+| Ctrl+C / Ctrl+V | Copy / Paste |
+| Ctrl+X | Cut |
+| Delete | Move to Recycle Bin |
+| Shift+Delete | Permanent delete |
+| F2 | Rename |
+| F5 | Reload folder |
+| Ctrl+Shift+F | Global search |
+| Ctrl+L | Focus address bar |
+| Ctrl+Mouse Wheel | Adjust thumbnail size |
+| Alt+Enter | Properties |
 
-### Dicas de Uso
-1. **Thumbnail Size**: Use Ctrl+Roda do mouse para ajustar tamanho dos thumbnails
-2. **Multi-seleção**: Segure Ctrl para selecionar múltiplos arquivos
-3. **Busca**: Comece a digitar para buscar arquivos na pasta atual
+### Supported Formats
+- **Images**: JPG, PNG, GIF, WebP, BMP, TIFF, SVG — double-click opens the dedicated viewer
+- **Videos**: MP4, MKV, AVI, MOV, WebM (requires libmpv)
+- **PDFs**: Native viewer via Windows.Data.Pdf API
+- **GIFs**: Animated playback with speed controls
 
-### Visualização de Mídia
-- **Imagens**: JPG, PNG, GIF, WebP, BMP, TIFF, SVG — duplo clique abre o visualizador dedicado com navegação rápida pela pasta
-- **Vídeos**: MP4, MKV, AVI, MOV, WebM (requer libmpv)
-- **PDFs**: Visualização completa com WebView2
-- **GIFs**: Reprodução automática com controle de velocidade
+## Documentation
 
-## 📚 Documentação
+Access the [`docs/`](docs/) folder for complete technical documentation:
 
-### 📖 Documentos Técnicos
-Acesse a pasta [`docs/`](docs/) para documentação completa:
+- **[Overview](docs/01_overview.md)** — Introduction and high-level architecture
+- **[Build & Debug](docs/02_build_run_debug.md)** — Build, run, and debug instructions
+- **[Architecture](docs/03_architecture.md)** — Detailed architecture and layers
+- **[Module Map](docs/04_module_map.md)** — File structure and module responsibilities
+- **[Dependencies](docs/05_dependencies_stack.md)** — Full technology stack
+- **[Key Flows](docs/06_key_flows.md)** — How major features work
+- **[Storage & Config](docs/07_storage_config.md)** — Data storage and configuration
+- **[Logging & Errors](docs/08_logging_errors_telemetry.md)** — Logging and debugging
+- **[Performance](docs/09_performance_optimizations.md)** — Performance optimizations
 
-- **[Visão Geral](docs/01_overview.md)** - Introdução e arquitetura de alto nível
-- **[Build e Debug](docs/02_build_run_debug.md)** - Como compilar, executar e debugar
-- **[Arquitetura](docs/03_architecture.md)** - Detalhes da arquitetura e camadas
-- **[Mapa do Repositório](docs/04_module_map.md)** - Estrutura de arquivos e módulos
-- **[Dependências](docs/05_dependencies_stack.md)** - Stack tecnológico completo
-- **[Fluxos Principais](docs/06_key_flows.md)** - Como os principais fluxos funcionam
-- **[Storage e Config](docs/07_storage_config.md)** - Onde e como dados são armazenados
-- **[Logs e Erros](docs/08_logging_errors_telemetry.md)** - Sistema de logs e debugging
-- **[Playbook de Suporte](docs/09_support_playbook.md)** - Guia para suporte e troubleshooting
-- **[Otimizações File Pilot](docs/10_file_pilot_optimizations.md)** - Drive watcher e otimizações de I/O
+**Documentation index**: [docs/INDEX.md](docs/INDEX.md)
 
-### 🔗 Links Rápidos
-- [Documentação Principal](docs/INDEX.md) - Índice completo da documentação
-- [Fluxo de Navegação](docs/06_key_flows.md#1-navegação-para-pasta) - Como navegação funciona
-- [Sistema de Preview](docs/06_key_flows.md#2-preview-de-arquivo) - Como preview de arquivos funciona
-- [Cache e Performance](docs/07_storage_config.md#cache-de-thumbnails) - Otimizações de cache
+## Development
 
-## 🔧 Desenvolvimento
-
-### Configuração do Ambiente
+### Environment Setup
 ```bash
-# Instalar Rust
+# Install Rust
 rustup toolchain install stable
 rustup default stable-msvc
 
-# Verificar instalação
+# Verify
 rustc --version
 cargo --version
 ```
 
-### Build e Testes
+### Build & Run
 ```bash
-# Build de desenvolvimento (workspace completo)
+# Development (entire workspace)
 cargo build --workspace
+cargo run
 
-# Build otimizado
+# Release build
 cargo build --release --workspace
 
-# Build apenas o app principal
-cargo build -p mtt-file-manager
-
-# Build apenas o serviço de busca
-cargo build --release -p mtt-search-service
-
-# Executar com logs
+# Run with logs
 cargo run 2>&1 | Tee-Object "debug.log"
 
-# Executar benchmarks
+# Benchmarks
 cargo bench
 ```
 
-### Serviço de Busca Global
-O serviço de busca (`mtt-search-service`) roda como Windows Service e usa dois modos de indexação por volume:
-- **USN (NTFS/ReFS)**: indexação por journal com catch-up incremental (2s)
-- **Fallback sem USN (exFAT/FAT32/FUSE/CryptoFS etc.)**: snapshot SQLite no startup + full scan periódico (30s para FUSE/CryptoFS/WinFsp/Dokan, 120s para físicos)
-
-**Nota**: privilégios de administrador e runtime em `LocalSystem` são necessários para o caminho USN (`FSCTL_*`).
-
+### Global Search Service
 ```powershell
-# Instalar o serviço (requer PowerShell como Administrador)
-# Runtime suportado: LocalSystem (necessário para USN)
+# Install as service (requires Administrator)
 .\target\release\mtt-search-service.exe install
 
-# Iniciar o serviço
+# Start
 sc.exe start MTTFileManagerSearch
 
-# Verificar status
+# Check status
 sc.exe query MTTFileManagerSearch
 
-# Parar o serviço
-sc.exe stop MTTFileManagerSearch
-
-# Remover o serviço
-.\target\release\mtt-search-service.exe uninstall
-
-# Modo debug (sem instalar como serviço)
+# Console mode (debug, no install needed)
 .\target\release\mtt-search-service.exe run-console
+
+# Uninstall
+.\target\release\mtt-search-service.exe uninstall
 ```
 
-### Hardening opcional do IPC (sem impacto por padrão)
-
-Para reduzir exposição de metadados de status em ambientes mais restritivos, habilite redacão de métricas do `GetStatus` no serviço:
-
-```powershell
-$env:MTT_SEARCH_REDACT_STATUS_METRICS = "1"
-sc.exe stop MTTFileManagerSearch
-sc.exe start MTTFileManagerSearch
-```
-
-Com essa flag ativa, o serviço mantém busca/paginação e retorna estados de volume como `redacted` e contagens zeradas no `GetStatus`.
-
-### Estrutura do Projeto
+### Project Structure
 ```
 MTT-File-Manager-RUST/
-├── Cargo.toml                        # Workspace root + app principal
-├── src/                              # App principal (mtt-file-manager)
-│   ├── app/                          # Estado e lógica principal
-│   ├── application/                  # Serviços de negócio
-│   ├── domain/                       # Modelos de dados
-│   ├── infrastructure/               # Integrações com sistema
-│   │   └── global_search.rs          # Cliente IPC para serviço de busca
-│   ├── pdf_viewer/                   # Visualizador PDF
-│   ├── tabs/                         # Sistema de abas
-│   ├── ui/                           # Interface do usuário
-│   │   └── global_search_overlay.rs  # Overlay de busca global
-│   └── workers/                      # Processamento em background
-│       └── global_search_worker.rs   # Worker de busca global
+├── Cargo.toml                        # Workspace root
+├── src/                              # Main application
+│   ├── app/                          # State and core logic
+│   ├── application/                  # Business services
+│   ├── domain/                       # Data models
+│   ├── infrastructure/               # System integration
+│   ├── ui/                           # User interface
+│   ├── workers/                      # Background processing
+│   ├── image_viewer/                 # Dedicated image viewer
+│   ├── video_player/                 # Standalone video player
+│   ├── pdf_viewer/                   # Native PDF viewer
+│   └── tabs/                         # Tab management
 ├── crates/
-│   ├── mtt-search-protocol/          # Tipos IPC compartilhados (bincode)
-│   └── mtt-search-service/           # Windows Service de indexação híbrida
-│       └── src/
-│           ├── main.rs               # Entry point + SCM
-│           ├── usn_journal.rs        # Descoberta de volumes + API USN (NTFS/ReFS)
-│           ├── fs_walker.rs          # Scanner full-tree para volumes sem USN
-│           ├── file_index.rs         # Índice in-memory (HashMap)
-│           ├── path_resolver.rs      # Reconstrução de paths
-│           ├── index_db.rs           # Persistência SQLite
-│           ├── ipc_server.rs         # Named Pipe server
-│           └── service_control.rs    # Install/uninstall do serviço
-└── docs/                             # Documentação técnica
+│   ├── mtt-search-protocol/          # Shared IPC types (bincode)
+│   └── mtt-search-service/           # Windows Service for file indexing
+├── locales/                          # i18n (en.yml, pt-BR.yml)
+├── docs/                             # Technical documentation
+└── benches/                          # Benchmarks
 ```
 
-### Debug e Profiling
-```bash
-# Executar com debugger
-cargo run
+## Troubleshooting
 
-# Profile com flamegraph
-cargo install flamegraph
-cargo flamegraph --bin mtt-file-manager
-
-# Verificar performance
-.\target\release\mtt-file-manager.exe 2>&1 | Select-String "frame_time|fps"
-```
-
-## 🔧 Solução de Problemas
-
-### Problemas Comuns
-
-#### Aplicativo não inicia
+### App won't start
 ```powershell
-# Verificar dependências
+# Check for libmpv
 Get-Item "libmpv-2.dll" -ErrorAction SilentlyContinue
-winget install Microsoft.EdgeWebView2Runtime
 ```
 
-#### Busca global não funciona / "Serviço offline"
+### Global search not working / "Service offline"
 ```powershell
-# Verificar se o serviço está rodando
+# Check service status
 sc.exe query MTTFileManagerSearch
 
-# Reinstalar e iniciar
+# Reinstall and start
 .\target\release\mtt-search-service.exe install
 sc.exe start MTTFileManagerSearch
 
-# Verificar logs do serviço (modo console)
+# Debug with console mode
 .\target\release\mtt-search-service.exe run-console
-
-# Em volumes sem USN, acompanhe logs [SCAN] e aguarde o próximo ciclo (30s/120s)
 ```
 
-#### Performance lenta
+### Slow performance
 ```powershell
-# Verificar uso de recursos
+# Check resource usage
 Get-Process mtt-file-manager | Select-Object CPU, WorkingSet
 
-# Limpar cache se necessário
+# Clear cache if needed
 Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager" -Recurse -Force
 ```
 
-#### Thumbnails não aparecem
+### Thumbnails not appearing
 ```powershell
-# Capturar logs de debug
 .\target\release\mtt-file-manager.exe 2>&1 | Select-String "THUMB|ERROR" | Tee-Object "thumb_debug.log"
 ```
 
-### Logs e Debugging
+### Full logging
 ```powershell
-# Executar com logging completo
 .\target\release\mtt-file-manager.exe 2>&1 | Tee-Object "full_debug.log"
-
-# Filtrar por categoria
-.\target\release\mtt-file-manager.exe 2>&1 | Select-String "ERROR|WARN"
-
-# Ver Event Viewer se crashou
-Get-EventLog -LogName Application -Source "Application Error" | Where-Object { $_.Message -match "mtt-file-manager" }
 ```
 
-### Reportando Bugs
-Use o [playbook de suporte](docs/09_support_playbook.md) para reportar issues:
+## Contributing
 
-1. **Colete logs**: Execute com redirecionamento de stderr
-2. **Documente passos**: Como reproduzir o problema
-3. **Informe sistema**: Windows versão, hardware
-4. **Anexe arquivos**: Logs, screenshots se relevante
+### Code Standards
+- Follow Rust conventions: `cargo fmt`
+- Resolve warnings: `cargo clippy`
+- Add tests for new features
+- Document public APIs
 
-## 🤝 Contribuição
+### Process
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/my-feature`)
+3. Commit changes (`git commit -m 'Add my feature'`)
+4. Push to branch (`git push origin feature/my-feature`)
+5. Open a Pull Request
 
-### Padrões de Código
-- Siga o estilo Rust padrão: `cargo fmt`
-- Resolva warnings: `cargo clippy`
-- Adicione testes para novas funcionalidades
-- Documente APIs públicas
+---
 
-### Processo de Contribuição
-1. Fork o repositório
-2. Crie branch para sua feature (`git checkout -b feature/amazing-feature`)
-3. Commit suas mudanças (`git commit -m 'Add amazing feature'`)
-4. Push para branch (`git push origin feature/amazing-feature`)
-5. Abra um Pull Request
+**MTT File Manager** — A modern, fast, native Windows file manager.
 
-### Áreas de Contribuição
-- **Performance**: Otimizações de algoritmos
-- **UI/UX**: Melhorias de interface
-- **Features**: Novas funcionalidades
-- **Bug fixes**: Correções de problemas
-- **Documentação**: Melhorias nos docs
-
-## 📄 Licença
-
-⚠️ **Licença não especificada no código atual**
-
-Este projeto atualmente não tem uma licença definida. Por favor, entre em contato com os mantenedores para informações sobre licenciamento.
-
-**MTT File Manager** - Um gerenciador de arquivos moderno, rápido e nativo para Windows.

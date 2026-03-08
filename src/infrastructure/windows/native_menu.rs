@@ -35,6 +35,13 @@ pub struct ShellMenuContext {
     pub context_menu: IContextMenu,
     /// Keep the root menu handle alive for on-demand submenu loading
     hmenu: HMENU,
+    /// GDI bitmap handles extracted from menu items. Shell extensions create
+    /// these during QueryContextMenu and many don't clean up on Release().
+    /// We collect them here and delete AFTER DestroyMenu in Drop, because
+    /// DeleteObject fails silently while the bitmap is still referenced by
+    /// the live HMENU.
+    /// RefCell for interior mutability (load_pending_submenu uses &self).
+    owned_bitmaps: std::cell::RefCell<Vec<isize>>,
 }
 
 struct ComApartmentGuard {
@@ -89,7 +96,17 @@ impl Drop for PidlCleanupGuard {
 impl Drop for ShellMenuContext {
     fn drop(&mut self) {
         unsafe {
+            // 1. Destroy the menu first — releases Windows' internal references
+            //    to the bitmaps set as hbmpItem.
             let _ = DestroyMenu(self.hmenu);
+
+            // 2. NOW delete the orphaned GDI bitmaps. This must happen AFTER
+            //    DestroyMenu; calling DeleteObject while the bitmap is still
+            //    associated with a live HMENU fails silently (returns FALSE).
+            for handle in self.owned_bitmaps.borrow().iter() {
+                let hbmp = windows::Win32::Graphics::Gdi::HBITMAP(*handle as *mut _);
+                let _ = windows::Win32::Graphics::Gdi::DeleteObject(hbmp.into());
+            }
         }
     }
 }
@@ -211,10 +228,20 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
             pending_count
         );
 
+        // Collect all GDI bitmap handles from menu items. They will be
+        // deleted AFTER DestroyMenu in ShellMenuContext::Drop. Deleting
+        // them while the HMENU is still alive fails silently.
+        let owned_bitmaps = collect_menu_bitmaps(hmenu);
+        log::debug!(
+            "[ShellMenu] Collected {} GDI bitmap handles for deferred cleanup",
+            owned_bitmaps.len()
+        );
+
         Ok(ShellMenuContext {
             items: std::cell::RefCell::new(items),
             context_menu,
             hmenu,
+            owned_bitmaps: std::cell::RefCell::new(owned_bitmaps),
         })
     }
 }
@@ -282,6 +309,43 @@ unsafe fn get_command_string(context_menu: &IContextMenu, cmd_id: u32) -> Option
         }
     }
     None
+}
+
+/// Recursively walk an HMENU and collect all real HBITMAP handles (as `isize`).
+///
+/// Windows' `DestroyMenu` does NOT free bitmaps set via `MENUITEMINFOW::hbmpItem`.
+/// Shell extensions create these during `QueryContextMenu` and many do not clean
+/// them up in their `IContextMenu::Release()` handler.
+///
+/// We collect them here so they can be deleted AFTER `DestroyMenu` in
+/// `ShellMenuContext::Drop`. Deleting while the HMENU is alive fails silently.
+///
+/// Special system-defined bitmap constants (HBMMENU_*: values -1 through 11) are
+/// skipped because they are not real GDI objects.
+unsafe fn collect_menu_bitmaps(hmenu: HMENU) -> Vec<isize> {
+    let mut handles = Vec::new();
+    collect_menu_bitmaps_recursive(hmenu, &mut handles);
+    handles
+}
+
+unsafe fn collect_menu_bitmaps_recursive(hmenu: HMENU, handles: &mut Vec<isize>) {
+    let count = GetMenuItemCount(Some(hmenu));
+    for i in 0..count {
+        let mut info = MENUITEMINFOW {
+            cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
+            fMask: MIIM_BITMAP | MIIM_SUBMENU,
+            ..Default::default()
+        };
+        if GetMenuItemInfoW(hmenu, i as u32, true, &mut info).is_ok() {
+            let ptr = info.hbmpItem.0 as isize;
+            if !info.hbmpItem.0.is_null() && !((-1..=11).contains(&ptr)) {
+                handles.push(ptr);
+            }
+            if !info.hSubMenu.0.is_null() {
+                collect_menu_bitmaps_recursive(info.hSubMenu, handles);
+            }
+        }
+    }
 }
 
 unsafe fn extract_item_info(
@@ -407,6 +471,11 @@ impl ShellMenuContext {
                         item.sub_items.push(sub_item);
                     }
                 }
+
+                // Collect new bitmaps from the lazy-loaded submenu for
+                // deferred deletion in Drop (same rationale as initial extraction).
+                let new_bitmaps = collect_menu_bitmaps(hsubmenu);
+                self.owned_bitmaps.borrow_mut().extend(new_bitmaps);
 
                 return !item.sub_items.is_empty();
             }

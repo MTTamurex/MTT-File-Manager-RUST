@@ -1,3 +1,5 @@
+rust_i18n::i18n!("locales", fallback = "pt-BR");
+
 pub mod app; // NEW - Application state and initialization
 pub mod application;
 pub mod domain;

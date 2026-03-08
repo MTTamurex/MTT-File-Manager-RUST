@@ -220,7 +220,7 @@ unsafe fn process_shell_item(shell_item: &IShellItem) -> Option<RecycleBinItem> 
     // Get date deleted as both UNIX timestamp and formatted string.
     let (date_deleted_unix, date_deleted) =
         get_shell_item_filetime_property(&shell_item2, &PKEY_RECYCLE_DATE_DELETED)
-            .unwrap_or_else(|_| (0, "Desconhecido".to_string()));
+            .unwrap_or_else(|_| (0, rust_i18n::t!("file_info.unknown_date").to_string()));
 
     // Get size.
     let size = get_shell_item_u64_property(&shell_item2, &PKEY_SIZE).unwrap_or(0);
@@ -446,5 +446,5 @@ unsafe fn get_date_deleted_from_pidl(folder: &IShellFolder, pidl: *const ITEMIDL
         }
     }
 
-    "Desconhecido".to_string()
+    rust_i18n::t!("file_info.unknown_date").to_string()
 }

@@ -1,11 +1,121 @@
 //! Individual list item rendering: icons, columns, selection, tooltips, rename
 
 use eframe::egui::{self, Color32, FontId, Pos2, Rect, RichText, Sense, Ui};
+use rust_i18n::t;
 
 use super::helpers::{get_file_type_string, render_status_badge};
 use super::{truncate_text_for_column, ColumnWidths, ListViewContext, ListViewOperations};
 use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::windows::{format_date, format_size};
+
+/// Max age (seconds) for probing live file size on the UI thread.
+const LIVE_SIZE_PROBE_MAX_AGE_SECS: u64 = 300; // 5 minutes
+
+#[derive(Clone, Copy)]
+struct TooltipLiveFileStat {
+    checked_at: f64,
+    size: u64,
+}
+
+/// Probes current file size via `std::fs::metadata`.
+/// Only called for recently-modified files to avoid blocking on cold cache.
+fn probe_file_size(path: &std::path::Path, modified_epoch: u64) -> Option<u64> {
+    if modified_epoch > 0 {
+        let now_epoch = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        if now_epoch.saturating_sub(modified_epoch) > LIVE_SIZE_PROBE_MAX_AGE_SECS {
+            return None;
+        }
+    }
+
+    if crate::infrastructure::onedrive::is_onedrive_path(path) {
+        return None;
+    }
+
+    // FIX: Skip blocking metadata() for network/virtual drives (can block indefinitely).
+    if crate::infrastructure::io_priority::is_network_or_virtual(path) {
+        return None;
+    }
+
+    let metadata = std::fs::metadata(path).ok()?;
+
+    if metadata.is_file() {
+        Some(metadata.len())
+    } else {
+        None
+    }
+}
+
+fn resolve_tooltip_live_size(ui: &egui::Ui, item: &FileEntry) -> u64 {
+    if item.is_dir {
+        return item.size;
+    }
+
+    let now = ui.input(|i| i.time);
+    let cache_id = egui::Id::new("tooltip_live_file_size").with(&item.path);
+    let mut resolved = item.size;
+
+    ui.ctx().data_mut(|d| {
+        let mut state = d
+            .get_temp::<TooltipLiveFileStat>(cache_id)
+            .unwrap_or(TooltipLiveFileStat {
+                checked_at: -10.0,
+                size: item.size,
+            });
+
+        if (now - state.checked_at) >= 1.0 {
+            if let Some(size) = probe_file_size(&item.path, item.modified) {
+                state.size = size;
+            } else {
+                state.size = item.size;
+            }
+            state.checked_at = now;
+            d.insert_temp(cache_id, state);
+        }
+
+        resolved = state.size;
+    });
+
+    resolved
+}
+
+fn render_drive_tooltip(ui: &mut Ui, item: &FileEntry) {
+    let Some(drive) = &item.drive_info else {
+        return;
+    };
+
+    let file_system = if drive.file_system.is_empty() {
+        "NTFS"
+    } else {
+        drive.file_system.as_str()
+    };
+    let used_space = drive.total_space.saturating_sub(drive.free_space);
+
+    ui.horizontal(|ui| {
+        ui.label(t!("file_info.type"));
+        ui.label(format!("{:?}", drive.drive_type));
+    });
+    ui.horizontal(|ui| {
+        ui.label(t!("file_info.used_space"));
+        ui.label(format_size(used_space));
+    });
+    ui.horizontal(|ui| {
+        ui.label(t!("file_info.free_space"));
+        ui.label(format_size(drive.free_space));
+    });
+    ui.horizontal(|ui| {
+        ui.label(t!("file_info.total_space"));
+        ui.label(format_size(drive.total_space));
+    });
+    ui.horizontal(|ui| {
+        ui.label(t!("file_info.filesystem"));
+        ui.label(file_system);
+    });
+}
+
+
 
 // PERFORMANCE: Tooltip debounce to avoid creation/destruction during scroll
 const TOOLTIP_DELAY_SECS: f32 = 0.3;
@@ -231,8 +341,9 @@ pub(super) fn render_list_item(
             // Name (truncated to fit column precisely)
             let font_id = FontId::proportional(12.0);
             let available_name_width = w_name - 30.0; // Space for icon + padding
+            let resolved_name = crate::ui::components::item_slot::display_name_for_item(item);
             let display_name =
-                truncate_text_for_column(&item.name, available_name_width, &font_id, ui);
+                truncate_text_for_column(&resolved_name, available_name_width, &font_id, ui);
 
             ui.painter().text(
                 rect.min + egui::vec2(24.0, 5.0),
@@ -273,7 +384,10 @@ fn render_item_tooltip(
 ) {
     if response.hovered() {
         let current_time = ui.input(|i| i.time);
-        let hover_id = response.id.with("hover_start");
+        // PERF FIX: Use path-based hover ID so the tooltip timer resets when
+        // navigating to a different folder (prevents stale timer triggering
+        // immediate tooltip with blocking metadata call on cold cache).
+        let hover_id = egui::Id::new("list_hover_start").with(&item.path);
 
         // Track hover start time using egui's memory
         let hover_start_time = ui
@@ -321,22 +435,26 @@ fn render_item_tooltip(
                 |ui: &mut Ui| {
                     ui.set_max_width(300.0);
                     ui.vertical(|ui| {
-                        ui.label(RichText::new(&item.name).strong());
+                        ui.label(RichText::new(crate::ui::components::item_slot::display_name_for_item(item).as_ref()).strong());
                         ui.separator();
+                        if item.drive_info.is_some() {
+                            render_drive_tooltip(ui, item);
+                            return;
+                        }
                         ui.horizontal(|ui| {
-                            ui.label("Tipo:");
+                            ui.label(t!("file_info.type"));
                             ui.label(get_file_type_string(item));
                         });
                         if !item.is_dir || item.is_archive() {
                             ui.horizontal(|ui| {
-                                ui.label("Tamanho:");
-                                ui.label(format_size(item.size));
+                                ui.label(t!("file_info.size"));
+                                ui.label(format_size(resolve_tooltip_live_size(ui, item)));
                             });
                         }
                         let date_lbl = if is_recycle_bin {
-                            "Data de Exclusão"
+                            t!("list_view.date_deleted")
                         } else {
-                            "Última modificação"
+                            t!("list_view.date_modified")
                         };
                         let date_val = if is_recycle_bin {
                             if item.modified > 0 {
@@ -360,7 +478,7 @@ fn render_item_tooltip(
         }
     } else {
         // Clear hover time when not hovering
-        let hover_id = response.id.with("hover_start");
+        let hover_id = egui::Id::new("list_hover_start").with(&item.path);
         ui.ctx().data_mut(|d| d.remove::<f64>(hover_id));
     }
 }
@@ -407,6 +525,22 @@ fn render_item_icon(
             {
                 ui.painter().image(
                     folder_icon.id(),
+                    icon_rect,
+                    Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
+                    tint,
+                );
+                return;
+            }
+        }
+
+        // Special folders (Documents, Pictures, Desktop, etc.) get their native
+        // Windows icon via async extraction; regular folders get the generic icon.
+        if crate::infrastructure::onedrive::is_special_icon_folder(&item.path) {
+            if let Some(special_icon) = ctx.item_icon_loader
+                .get_or_load_folder_path_icon(ui.ctx(), &item.path.to_string_lossy())
+            {
+                ui.painter().image(
+                    special_icon.id(),
                     icon_rect,
                     Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
                     tint,

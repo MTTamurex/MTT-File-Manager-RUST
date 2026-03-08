@@ -87,12 +87,33 @@ pub fn show_shell_context_menu(
         .chain(std::iter::once(0))
         .collect();
 
+    // RAII guard to ensure PIDL is always freed, even on early `?` returns.
+    struct PidlGuard(*mut ITEMIDLIST);
+    impl Drop for PidlGuard {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe { CoTaskMemFree(Some(self.0 as _)); }
+            }
+        }
+    }
+
+    // RAII guard to ensure HMENU is always destroyed, even on early `?` returns.
+    struct MenuGuard(HMENU);
+    impl Drop for MenuGuard {
+        fn drop(&mut self) {
+            if !self.0.0.is_null() {
+                unsafe { let _ = DestroyMenu(self.0); }
+            }
+        }
+    }
+
     unsafe {
         let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
-        // SAFETY: wide_path is null-terminated and remains alive for the duration of the call.
         SHParseDisplayName(PCWSTR(wide_path.as_ptr()), None, &mut pidl, 0, None)?;
 
-        if pidl.is_null() {
+        let pidl_guard = PidlGuard(pidl);
+
+        if pidl_guard.0.is_null() {
             return Ok(ContextMenuResult {
                 was_cancelled: true,
                 cursor_x: screen_x,
@@ -102,17 +123,15 @@ pub fn show_shell_context_menu(
         }
 
         let mut child: *mut ITEMIDLIST = std::ptr::null_mut();
-        // SAFETY: pidl is valid and owned; SHBindToParent returns the parent folder and child PIDL.
-        let parent_folder: IShellFolder = SHBindToParent(pidl, Some(&mut child))?;
+        let parent_folder: IShellFolder = SHBindToParent(pidl_guard.0, Some(&mut child))?;
 
         let items: [*const ITEMIDLIST; 1] = [child as *const ITEMIDLIST];
-
-        // SAFETY: child references the item within parent_folder; hwnd is our window handle.
         let context_menu: IContextMenu = parent_folder.GetUIObjectOf(hwnd, &items, None)?;
 
         let hmenu = CreatePopupMenu()?;
-        if hmenu.0.is_null() {
-            CoTaskMemFree(Some(pidl as _));
+        let menu_guard = MenuGuard(hmenu);
+
+        if menu_guard.0.0.is_null() {
             return Ok(ContextMenuResult {
                 was_cancelled: true,
                 cursor_x: screen_x,
@@ -121,13 +140,12 @@ pub fn show_shell_context_menu(
             });
         }
 
-        // SAFETY: hmenu is a valid menu handle; command ids start at 1.
         context_menu
-            .QueryContextMenu(hmenu, 0, 1, 0x7FFF, windows::Win32::UI::Shell::CMF_NORMAL)
+            .QueryContextMenu(menu_guard.0, 0, 1, 0x7FFF, windows::Win32::UI::Shell::CMF_NORMAL)
             .ok()?;
 
         let command_id = TrackPopupMenuEx(
-            hmenu,
+            menu_guard.0,
             (TPM_RETURNCMD | TPM_RIGHTBUTTON).0,
             screen_x,
             screen_y,
@@ -136,12 +154,10 @@ pub fn show_shell_context_menu(
         )
         .0 as u32;
 
-        // Get cursor position after menu closes.
         let mut cursor = POINT::default();
         let _ = GetCursorPos(&mut cursor);
 
-        // Check if any mouse button is pressed.
-        let right_down = windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x02) < 0; // VK_RBUTTON = 0x02
+        let right_down = windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x02) < 0;
 
         let was_cancelled = command_id == 0;
 
@@ -159,14 +175,13 @@ pub fn show_shell_context_menu(
                 ..Default::default()
             };
 
-            // SAFETY: invoke contains valid fields; lpVerb uses command offset from QueryContextMenu base.
             context_menu.InvokeCommand(
                 &invoke as *const CMINVOKECOMMANDINFOEX as *const CMINVOKECOMMANDINFO,
             )?;
         }
 
-        DestroyMenu(hmenu)?;
-        CoTaskMemFree(Some(pidl as _));
+        // pidl_guard and menu_guard are dropped here, cleaning up PIDL and HMENU
+        // regardless of which path we took.
 
         Ok(ContextMenuResult {
             was_cancelled,

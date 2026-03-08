@@ -136,19 +136,16 @@ pub fn load_external_subtitle(
     subtitle_path: &Path,
 ) -> Result<(), String> {
     if !subtitle_path.is_file() {
-        return Err(format!(
-            "Arquivo de legenda não encontrado: {}",
-            subtitle_path.display()
-        ));
+        return Err(rust_i18n::t!("video.subtitle_not_found", path = subtitle_path.display().to_string()).to_string());
     }
 
     let m = mpv
         .as_ref()
-        .ok_or_else(|| "Player MPV não inicializado".to_string())?;
+        .ok_or_else(|| rust_i18n::t!("video.player_not_init").to_string())?;
 
     let subtitle_str = subtitle_path.to_string_lossy().to_string();
     m.command("sub-add", &[&subtitle_str, "select"])
-        .map_err(|e| format!("Falha ao carregar legenda externa: {:?}", e))?;
+        .map_err(|e| rust_i18n::t!("video.subtitle_load_failed", error = format!("{:?}", e)).to_string())?;
 
     // Force refresh of subtitle track list after sub-add.
     *cached_tracks = None;

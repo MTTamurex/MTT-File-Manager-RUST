@@ -4,6 +4,7 @@
 //! buttons. Methods are defined as `impl PdfViewerApp` extensions.
 
 use eframe::egui;
+use rust_i18n::t;
 
 use super::viewer_app::{PdfViewerApp, ZoomMode};
 
@@ -33,7 +34,7 @@ impl PdfViewerApp {
     fn toolbar_navigation(&mut self, ui: &mut egui::Ui) {
         if ui
             .button("⏮")
-            .on_hover_text("First page  (Ctrl+Home)")
+            .on_hover_text(t!("pdfviewer.first_page"))
             .clicked()
         {
             self.go_to_page(0);
@@ -41,7 +42,7 @@ impl PdfViewerApp {
 
         if ui
             .button("◀")
-            .on_hover_text("Previous page  (PgUp)")
+            .on_hover_text(t!("pdfviewer.previous_page"))
             .clicked()
         {
             self.prev_page();
@@ -63,7 +64,7 @@ impl PdfViewerApp {
 
         if ui
             .button("▶")
-            .on_hover_text("Next page  (PgDn)")
+            .on_hover_text(t!("pdfviewer.next_page"))
             .clicked()
         {
             self.next_page();
@@ -71,7 +72,7 @@ impl PdfViewerApp {
 
         if ui
             .button("⏭")
-            .on_hover_text("Last page  (Ctrl+End)")
+            .on_hover_text(t!("pdfviewer.last_page"))
             .clicked()
         {
             self.go_to_page(self.total_pages.saturating_sub(1));
@@ -81,7 +82,7 @@ impl PdfViewerApp {
     fn toolbar_zoom(&mut self, ui: &mut egui::Ui) {
         if ui
             .button("➖")
-            .on_hover_text("Zoom out  (Ctrl+−)")
+            .on_hover_text(t!("pdfviewer.zoom_out"))
             .clicked()
         {
             self.zoom_out();
@@ -94,18 +95,18 @@ impl PdfViewerApp {
                 .strong()
                 .size(13.0),
         )
-        .on_hover_text("Current zoom level");
+        .on_hover_text(t!("pdfviewer.current_zoom"));
 
         if ui
             .button("➕")
-            .on_hover_text("Zoom in  (Ctrl++)")
+            .on_hover_text(t!("pdfviewer.zoom_in"))
             .clicked()
         {
             self.zoom_in();
         }
 
         if ui
-            .selectable_label(self.zoom_mode == ZoomMode::FitWidth, "Fit Width")
+            .selectable_label(self.zoom_mode == ZoomMode::FitWidth, t!("pdfviewer.fit_width"))
             .clicked()
         {
             self.zoom_mode = ZoomMode::FitWidth;
@@ -113,7 +114,7 @@ impl PdfViewerApp {
         }
 
         if ui
-            .selectable_label(self.zoom_mode == ZoomMode::FitPage, "Fit Page")
+            .selectable_label(self.zoom_mode == ZoomMode::FitPage, t!("pdfviewer.fit_page"))
             .clicked()
         {
             self.zoom_mode = ZoomMode::FitPage;
@@ -124,7 +125,7 @@ impl PdfViewerApp {
     fn toolbar_rotation(&mut self, ui: &mut egui::Ui) {
         if ui
             .button("↺")
-            .on_hover_text("Rotate counter-clockwise  (Shift+R)")
+            .on_hover_text(t!("pdfviewer.rotate_ccw"))
             .clicked()
         {
             self.rotate_ccw();
@@ -138,7 +139,7 @@ impl PdfViewerApp {
 
         if ui
             .button("↻")
-            .on_hover_text("Rotate clockwise  (R)")
+            .on_hover_text(t!("pdfviewer.rotate_cw"))
             .clicked()
         {
             self.rotate_cw();

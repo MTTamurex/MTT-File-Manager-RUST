@@ -26,6 +26,7 @@ use std::time::{Duration, Instant};
 // --- Capacity constants for failure caches ---
 const FAILED_PATHS_CAP: usize = 2048;
 const FAILURE_BACKOFF_CAP: usize = 4096;
+const ACTIVE_WRITE_BLOCK_MS: u64 = 2500;
 
 /// Global cache of paths that failed thumbnail extraction (shared across workers)
 /// Uses LRU eviction so oldest failures are dropped instead of clearing everything.
@@ -116,6 +117,19 @@ pub fn mark_as_transient_failure(path: PathBuf) {
                 retry_after,
             },
         );
+    }
+}
+
+/// Register a short-lived block when the file is actively being written
+/// (download/encode in progress). This should never escalate to permanent
+/// failure because the condition is expected to recover shortly.
+pub fn mark_as_temporarily_blocked(path: PathBuf) {
+    if let Ok(mut map) = get_failure_backoff().lock() {
+        let retry_after = Instant::now() + Duration::from_millis(ACTIVE_WRITE_BLOCK_MS);
+        map.put(path, FailureBackoffState {
+            attempts: 0,
+            retry_after,
+        });
     }
 }
 

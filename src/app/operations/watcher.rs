@@ -9,7 +9,7 @@ use notify::{RecursiveMode, Watcher};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-const WATCHER_FS_PROBE_CACHE_TTL: Duration = Duration::from_secs(20);
+const WATCHER_FS_PROBE_CACHE_TTL: Duration = Duration::from_secs(600);
 
 impl ImageViewerApp {
     fn configure_watcher_fallback_mode(&mut self, path: &Path) -> (u128, bool, Option<char>) {
@@ -121,7 +121,7 @@ impl ImageViewerApp {
 
         log::debug!("[WATCHER] Setting up for: {}", current_path);
 
-        // Try using drive-wide watcher first (File Pilot optimization)
+        // Try using drive-wide watcher first
         let path_buf = PathBuf::from(&current_path);
         let (fs_probe_ms, fs_probe_cache_hit, fs_probe_drive) =
             self.configure_watcher_fallback_mode(path_buf.as_path());

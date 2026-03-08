@@ -6,6 +6,7 @@ use crate::infrastructure::virtual_drive_config::{
 };
 use crate::infrastructure::windows::drives::get_all_drives;
 use eframe::egui;
+use rust_i18n::t;
 
 /// Info about a detected virtual drive
 #[derive(Clone)]
@@ -20,7 +21,7 @@ struct VirtualDriveInfo {
 pub fn render_virtual_drive_settings(ctx: &egui::Context, show_modal: bool) -> bool {
     let mut keep_open = show_modal;
 
-    let response = egui::Window::new("⚙ Configuração de Drives Virtuais")
+    let response = egui::Window::new(t!("vdrive_settings.window_title"))
         .collapsible(false)
         .resizable(true)
         .default_width(600.0)
@@ -28,11 +29,11 @@ pub fn render_virtual_drive_settings(ctx: &egui::Context, show_modal: bool) -> b
         .show(ctx, |ui| {
             ui.vertical(|ui| {
                 // Header explanation
-                ui.heading("Otimização de Drives Virtuais");
+                ui.heading(t!("vdrive_settings.title"));
                 ui.add_space(8.0);
-                ui.label("Configure como drives virtuais (Cryptomator, etc.) devem ser otimizados:");
-                ui.label("• SSD: Acesso aleatório rápido (padrão para drives desconhecidos)");
-                ui.label("• HDD: Agrupamento por diretório para minimizar seeks");
+                ui.label(t!("vdrive_settings.description"));
+                ui.label(t!("vdrive_settings.ssd_desc"));
+                ui.label(t!("vdrive_settings.hdd_desc"));
                 ui.add_space(16.0);
 
                 // Detect virtual drives
@@ -41,10 +42,10 @@ pub fn render_virtual_drive_settings(ctx: &egui::Context, show_modal: bool) -> b
                 if virtual_drives.is_empty() {
                     ui.colored_label(
                         egui::Color32::from_rgb(200, 200, 0),
-                        "⚠ Nenhum drive virtual detectado no sistema"
+                        t!("vdrive_settings.no_drives")
                     );
                     ui.add_space(8.0);
-                    ui.label("Drives virtuais típicos incluem:");
+                    ui.label(t!("vdrive_settings.typical_drives"));
                     ui.label("• Cryptomator (CryptoFS)");
                     ui.label("• Dokan");
                     ui.label("• WinFsp");
@@ -54,11 +55,11 @@ pub fn render_virtual_drive_settings(ctx: &egui::Context, show_modal: bool) -> b
                         .striped(true)
                         .min_col_width(60.0)
                         .show(ui, |ui| {
-                            ui.strong("Drive");
-                            ui.strong("Label");
-                            ui.strong("Sistema");
-                            ui.strong("Otimização");
-                            ui.strong("Ações");
+                            ui.strong(t!("vdrive_settings.col_drive"));
+                            ui.strong(t!("vdrive_settings.col_label"));
+                            ui.strong(t!("vdrive_settings.col_system"));
+                            ui.strong(t!("vdrive_settings.col_optimization"));
+                            ui.strong(t!("vdrive_settings.col_actions"));
                             ui.end_row();
 
                             for drive_info in &virtual_drives {
@@ -74,14 +75,14 @@ pub fn render_virtual_drive_settings(ctx: &egui::Context, show_modal: bool) -> b
                 // Info footer
                 ui.horizontal(|ui| {
                     ui.label("💡");
-                    ui.label("As configurações são salvas em virtual_drive_config.json e aplicadas imediatamente");
+                    ui.label(t!("vdrive_settings.config_info"));
                 });
 
                 ui.add_space(8.0);
 
                 // Close button
                 ui.horizontal(|ui| {
-                    if ui.button("Fechar").clicked() {
+                    if ui.button(t!("vdrive_settings.close")).clicked() {
                         keep_open = false;
                     }
                 });
@@ -200,7 +201,7 @@ fn render_drive_row(ui: &mut egui::Ui, drive_info: &VirtualDriveInfo) {
     ui.horizontal(|ui| {
         if ui
             .selectable_label(is_ssd, "SSD")
-            .on_hover_text("Acesso aleatório rápido")
+            .on_hover_text(t!("vdrive_settings.ssd_hint"))
             .clicked()
         {
             if let Err(e) = set_drive_override(drive_info.letter, DiskTypeOverride::SSD) {
@@ -212,7 +213,7 @@ fn render_drive_row(ui: &mut egui::Ui, drive_info: &VirtualDriveInfo) {
 
         if ui
             .selectable_label(!is_ssd, "HDD")
-            .on_hover_text("Agrupamento por diretório")
+            .on_hover_text(t!("vdrive_settings.hdd_hint"))
             .clicked()
         {
             if let Err(e) = set_drive_override(drive_info.letter, DiskTypeOverride::HDD) {
@@ -228,7 +229,7 @@ fn render_drive_row(ui: &mut egui::Ui, drive_info: &VirtualDriveInfo) {
         if drive_info.current_override.is_some() {
             if ui
                 .button("🗑")
-                .on_hover_text("Remover configuração")
+                .on_hover_text(t!("vdrive_settings.remove"))
                 .clicked()
             {
                 if let Err(e) = remove_drive_override(drive_info.letter) {
@@ -238,7 +239,7 @@ fn render_drive_row(ui: &mut egui::Ui, drive_info: &VirtualDriveInfo) {
                 }
             }
         } else {
-            ui.label("(padrão)");
+            ui.label(&*t!("vdrive_settings.default_label"));
         }
     });
 

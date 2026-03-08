@@ -1,10 +1,13 @@
 use crate::application::navigation::NavigationHistory;
 use crate::domain::file_entry::{SortMode, ViewMode};
+use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID, is_virtual_path};
 use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::theme;
 use crate::ui::widgets;
 use eframe::egui;
+use rust_i18n::t;
 use std::cell::RefCell;
+use std::path::Component;
 
 // M-3: Cache breadcrumb segments — recomputed only when current_path changes.
 // Each entry is (display_label, navigation_target).
@@ -19,7 +22,10 @@ thread_local! {
 fn breadcrumb_segments(current_path: &str) -> Vec<(String, String)> {
     BREADCRUMB_CACHE.with(|cache| {
         let mut c = cache.borrow_mut();
-        if c.0 == current_path {
+        // Include locale in cache key so breadcrumbs refresh on language change
+        let current_locale = rust_i18n::locale().to_string();
+        let cache_key = format!("{}|{}", current_path, current_locale);
+        if c.0 == cache_key {
             return c.1.clone();
         }
         // cache miss — recompute
@@ -28,12 +34,17 @@ fn breadcrumb_segments(current_path: &str) -> Vec<(String, String)> {
         let components: Vec<_> = path.components().collect();
         let mut segs = Vec::with_capacity(components.len());
         for (i, comp) in components.iter().enumerate() {
+            full.push(comp.as_os_str());
+
+            if matches!(comp, Component::RootDir) {
+                continue;
+            }
+
             let comp_str = comp.as_os_str().to_string_lossy();
             let display_name = comp_str.trim_end_matches('\\');
             if display_name.is_empty() && i > 0 {
                 continue;
             }
-            full.push(comp);
             let target = {
                 let mut p = full.to_string_lossy().into_owned();
                 if p.len() == 2 && p.ends_with(':') {
@@ -41,14 +52,18 @@ fn breadcrumb_segments(current_path: &str) -> Vec<(String, String)> {
                 }
                 p
             };
-            let display = if display_name.is_empty() {
-                comp_str.into_owned()
-            } else {
-                display_name.to_string()
-            };
+            // Use translated name for known special folders (Desktop, Documents, etc.)
+            let display = crate::infrastructure::onedrive::special_folder_display_name(&full)
+                .unwrap_or_else(|| {
+                    if display_name.is_empty() {
+                        comp_str.to_string()
+                    } else {
+                        display_name.to_string()
+                    }
+                });
             segs.push((display, target));
         }
-        c.0 = current_path.to_string();
+        c.0 = cache_key;
         c.1 = segs.clone();
         segs
     })
@@ -72,9 +87,11 @@ pub enum ToolbarAction {
     Search(String),
     OpenSettings,
     StartAddressEdit,
+    StartAddressEditWithHistory,
     UpdatePathInput(String),
     CommitPathInput(String),
     CancelPathInput,
+    SelectAddressHistoryPath(String),
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -83,6 +100,7 @@ pub fn render_toolbar(
     current_path: &str,
     path_input: &mut String,
     is_editing_path: &mut bool,
+    show_address_history_menu: &mut bool,
     address_bar_focus_request: &mut bool,
     search_query: &mut String,
     navigation: &NavigationHistory,
@@ -96,20 +114,25 @@ pub fn render_toolbar(
     svg_manager: &mut SvgIconManager,
 ) -> Option<ToolbarAction> {
     let mut action = None;
+    let recent_paths: Vec<String> = navigation
+        .recent_paths(5)
+        .into_iter()
+        .filter(|path| !path.is_empty() && !is_virtual_path(path))
+        .collect();
 
     ui.horizontal(|ui| {
         ui.style_mut().spacing.item_spacing.x = 8.0;
 
         // 1. NAVIGATION (LEFT) - Blocked during renaming
         let can_back = navigation.can_go_back() && !_is_renaming;
-        if widgets::icon_button(ui, svg_manager, theme::ICON_ARROW_LEFT, "Voltar", None).clicked()
+        if widgets::icon_button(ui, svg_manager, theme::ICON_ARROW_LEFT, &t!("toolbar.back"), None).clicked()
             && can_back
         {
             action = Some(ToolbarAction::GoBack);
         }
 
         let can_forward = navigation.can_go_forward() && !_is_renaming;
-        if widgets::icon_button(ui, svg_manager, theme::ICON_ARROW_RIGHT, "Avançar", None).clicked()
+        if widgets::icon_button(ui, svg_manager, theme::ICON_ARROW_RIGHT, &t!("toolbar.forward"), None).clicked()
             && can_forward
         {
             action = Some(ToolbarAction::GoForward);
@@ -119,7 +142,7 @@ pub fn render_toolbar(
             ui,
             svg_manager,
             theme::ICON_ARROW_UP,
-            "Subir um nível",
+            &t!("toolbar.up"),
             None,
         )
         .clicked()
@@ -128,7 +151,7 @@ pub fn render_toolbar(
             action = Some(ToolbarAction::GoUp);
         }
 
-        if widgets::icon_button(ui, svg_manager, theme::ICON_REFRESH, "Recarregar", None).clicked()
+        if widgets::icon_button(ui, svg_manager, theme::ICON_REFRESH, &t!("toolbar.reload"), None).clicked()
             && !_is_renaming
         {
             action = Some(ToolbarAction::Refresh);
@@ -141,7 +164,7 @@ pub fn render_toolbar(
             ui,
             svg_manager,
             theme::ICON_HOME,
-            "Este Computador",
+            &t!("toolbar.home"),
             computer_icon,
         )
         .clicked()
@@ -160,7 +183,7 @@ pub fn render_toolbar(
                 svg_manager,
                 theme::ICON_DETAILS,
                 show_preview_panel,
-                "Detalhes",
+                &t!("toolbar.details"),
             )
             .clicked()
             {
@@ -209,7 +232,7 @@ pub fn render_toolbar(
             let text_available_w =
                 search_ui.available_width() - if has_text { 22.0 + 4.0 } else { 4.0 };
 
-            let hint = egui::RichText::new("Buscar...").color(egui::Color32::from_gray(120));
+            let hint = egui::RichText::new(t!("toolbar.search_placeholder")).color(egui::Color32::from_gray(120));
             let text_resp = search_ui.add_sized(
                 egui::vec2(text_available_w, input_height - 2.0),
                 egui::TextEdit::singleline(search_query)
@@ -231,7 +254,7 @@ pub fn render_toolbar(
                             .frame(false)
                             .min_size(egui::vec2(18.0, 18.0)),
                     )
-                    .on_hover_text("Limpar busca")
+                    .on_hover_text(t!("toolbar.clear_search"))
                     .clicked()
                 {
                     search_query.clear();
@@ -271,18 +294,43 @@ pub fn render_toolbar(
             );
 
             if *is_editing_path {
+                let show_history_close_button = *show_address_history_menu && !recent_paths.is_empty();
+                let close_button_width = if show_history_close_button { 22.0 } else { 0.0 };
+                let text_width = (addr_ui.available_width() - close_button_width).max(40.0);
                 let edit_response = addr_ui.add_sized(
-                    addr_ui.available_size(),
+                    egui::vec2(text_width, addr_ui.available_height()),
                     egui::TextEdit::singleline(path_input)
-                        .hint_text("Caminho...")
+                        .hint_text(t!("toolbar.path_placeholder"))
                         .id_source("address_edit")
                         .frame(false)
                         .text_color(egui::Color32::BLACK),
                 );
 
-                if edit_response.clicked_elsewhere()
+                let mut close_history_clicked = false;
+
+                if show_history_close_button {
+                    let close_history_response = addr_ui
+                        .add(
+                            egui::Button::new("✕")
+                                .frame(false)
+                                .min_size(egui::vec2(18.0, 18.0)),
+                        )
+                        .on_hover_text(t!("toolbar.close_history"));
+
+                    if close_history_response.clicked() {
+                        *show_address_history_menu = false;
+                        close_history_clicked = true;
+                    }
+                }
+
+                if edit_response.clicked() && !recent_paths.is_empty() {
+                    *show_address_history_menu = true;
+                }
+
+                if !close_history_clicked
+                    && (edit_response.clicked_elsewhere()
                     || (edit_response.lost_focus()
-                        && !addr_ui.input(|i| i.key_pressed(egui::Key::Enter)))
+                        && !addr_ui.input(|i| i.key_pressed(egui::Key::Enter))))
                 {
                     action = Some(ToolbarAction::CancelPathInput);
                 }
@@ -293,6 +341,10 @@ pub fn render_toolbar(
                     *address_bar_focus_request = false;
                 }
 
+                if close_history_clicked {
+                    edit_response.request_focus();
+                }
+
                 if addr_ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     action = Some(ToolbarAction::CommitPathInput(path_input.clone()));
                 }
@@ -300,12 +352,76 @@ pub fn render_toolbar(
                 if addr_ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     action = Some(ToolbarAction::CancelPathInput);
                 }
+
+                if *show_address_history_menu && !recent_paths.is_empty() {
+                    let popup_id = egui::Id::new("address_history_popup");
+                    let mut selected_path = None;
+
+                    let popup_response = egui::Area::new(popup_id)
+                        .order(egui::Order::Foreground)
+                        .fixed_pos(egui::pos2(addr_rect.left(), addr_rect.bottom() + 2.0))
+                        .show(ui.ctx(), |ui| {
+                            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                ui.set_min_width(addr_rect.width());
+                                ui.set_max_width(addr_rect.width());
+                                ui.spacing_mut().item_spacing.y = 0.0;
+
+                                for path in &recent_paths {
+                                    let item_size = egui::vec2(addr_rect.width() - 8.0, 28.0);
+                                    let (item_rect, response) =
+                                        ui.allocate_exact_size(item_size, egui::Sense::click());
+                                    let visuals = ui.style().interact(&response);
+
+                                    if response.hovered() || response.highlighted() {
+                                        ui.painter().rect_filled(
+                                            item_rect,
+                                            visuals.corner_radius,
+                                            visuals.weak_bg_fill,
+                                        );
+                                    }
+
+                                    let text_rect = item_rect.shrink2(egui::vec2(8.0, 0.0));
+                                    ui.painter().text(
+                                        egui::pos2(text_rect.left(), text_rect.center().y),
+                                        egui::Align2::LEFT_CENTER,
+                                        path,
+                                        egui::TextStyle::Button.resolve(ui.style()),
+                                        egui::Color32::BLACK,
+                                    );
+
+                                    if response.clicked() {
+                                        selected_path = Some(path.clone());
+                                    }
+                                }
+                            });
+                        });
+
+                    if let Some(path) = selected_path {
+                        *show_address_history_menu = false;
+                        action = Some(ToolbarAction::SelectAddressHistoryPath(path));
+                    } else if ui.ctx().input(|i| i.pointer.any_pressed()) {
+                        if let Some(pointer_pos) = ui.ctx().input(|i| i.pointer.press_origin()) {
+                            let clicked_address_bar = addr_rect.contains(pointer_pos);
+                            let clicked_popup = popup_response.response.rect.contains(pointer_pos);
+
+                            if !clicked_address_bar && !clicked_popup {
+                                *show_address_history_menu = false;
+                            }
+                        }
+                    }
+                }
             } else {
                 addr_ui.spacing_mut().item_spacing.x = 2.0;
 
-                if current_path == "Este Computador" {
+                if current_path == COMPUTER_VIEW_ID {
                     addr_ui.label(
-                        egui::RichText::new("Este Computador")
+                        egui::RichText::new(t!("nav.computer"))
+                            .size(13.0)
+                            .color(egui::Color32::BLACK),
+                    );
+                } else if current_path == RECYCLE_BIN_VIEW_ID {
+                    addr_ui.label(
+                        egui::RichText::new(t!("nav.recycle_bin"))
                             .size(13.0)
                             .color(egui::Color32::BLACK),
                     );
@@ -358,11 +474,15 @@ pub fn render_toolbar(
 
                 // Click on empty area opens editing
                 if addr_resp.clicked() && action.is_none() {
-                    action = Some(ToolbarAction::StartAddressEdit);
+                    action = Some(ToolbarAction::StartAddressEditWithHistory);
                 }
             }
 
-            if matches!(action, Some(ToolbarAction::StartAddressEdit)) {
+            if matches!(
+                action,
+                Some(ToolbarAction::StartAddressEdit)
+                    | Some(ToolbarAction::StartAddressEditWithHistory)
+            ) {
                 ui.ctx().memory_mut(|m| {
                     m.request_focus(egui::Id::from("address_edit").with("text_edit"))
                 });

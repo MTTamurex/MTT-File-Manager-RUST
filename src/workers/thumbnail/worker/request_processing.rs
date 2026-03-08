@@ -3,7 +3,9 @@ use crate::infrastructure::disk_cache::{ThumbnailCacheEntry, ThumbnailDiskCache}
 use crate::infrastructure::io_priority::IOPriority;
 use crate::infrastructure::onedrive::{self, IoTimeoutResult};
 use crate::infrastructure::windows::is_mpeg_ts_file;
-use crate::workers::thumbnail::extraction::generate_thumbnail_hybrid;
+use crate::workers::thumbnail::extraction::{
+    generate_thumbnail_hybrid_detailed, ThumbnailExtractionOutcome,
+};
 use crate::workers::thumbnail::processing::resize::{get_bucket_size, resize_to_bucket};
 use crossbeam_channel::Sender;
 use eframe::egui;
@@ -29,7 +31,7 @@ pub(super) fn process_thumbnail_request(
 ) {
     use crate::workers::thumbnail::{
         clear_failure_cache, clear_transient_failure, is_known_failure, is_permanent_failure,
-        mark_as_failed, mark_as_transient_failure,
+        mark_as_failed, mark_as_temporarily_blocked, mark_as_transient_failure,
     };
 
     // Block .ts files that are NOT real MPEG-TS video (e.g. TypeScript sources).
@@ -101,12 +103,27 @@ pub(super) fn process_thumbnail_request(
     }
 
     // Fallback: try get_latest (ignores mtime) when exact match missed.
+    // SAFETY: reject the cached entry when our request carries a valid
+    // modified-time that differs from the DB row.  This prevents showing
+    // a stale thumbnail from a *different* file that previously lived at
+    // the same path (e.g., delete A, rename B → A).
     if final_result.is_none() {
         if let Some(entry) = disk_cache.get_latest(path) {
             let w = entry.width;
             let h = entry.height;
             let rs = entry.requested_size;
-            if let Some(decoded) = decode_cache_entry(entry, req_size) {
+            let cached_mod = entry.modified_at;
+
+            let mtime_mismatch = req_modified > 0
+                && cached_mod > 0
+                && req_modified != cached_mod;
+
+            if mtime_mismatch {
+                log::debug!(
+                    "[Thumbnail-CACHE] LATEST match REJECTED (mtime mismatch): path={:?}, cached_mod={}, req_mod={}",
+                    path.file_name(), cached_mod, req_modified
+                );
+            } else if let Some(decoded) = decode_cache_entry(entry, req_size) {
                 final_result = Some(decoded);
             } else {
                 log::debug!(
@@ -244,28 +261,40 @@ pub(super) fn process_thumbnail_request(
         }
 
         if final_result.is_none() {
-            if let Some((raw_data, w, h)) =
-                generate_thumbnail_hybrid(path, req_priority, pending_deletions)
-            {
-                // Resize to bucket (frees RAM and optimizes GPU upload).
-                let bucket_size = get_bucket_size(req_size);
-                let resized = resize_to_bucket(raw_data, w, h, bucket_size);
+            match generate_thumbnail_hybrid_detailed(path, req_priority, pending_deletions) {
+                ThumbnailExtractionOutcome::Success((raw_data, w, h)) => {
+                    // Resize to bucket (frees RAM and optimizes GPU upload).
+                    let bucket_size = get_bucket_size(req_size);
+                    let resized = resize_to_bucket(raw_data, w, h, bucket_size);
 
-                // Save optimized version to SQLite.
-                if let Err(e) = disk_cache.put(path, modified, req_size, &resized.0, resized.1, resized.2)
-                {
-                    log::error!(
-                        "[Thumbnail-CACHE] PUT FAILED for {:?}: {:?}",
-                        path.file_name(),
-                        e
-                    );
+                    // Save optimized version to SQLite.
+                    if let Err(e) =
+                        disk_cache.put(path, modified, req_size, &resized.0, resized.1, resized.2)
+                    {
+                        log::error!(
+                            "[Thumbnail-CACHE] PUT FAILED for {:?}: {:?}",
+                            path.file_name(),
+                            e
+                        );
+                    }
+
+                    final_result = Some(resized);
+                    clear_transient_failure(path);
                 }
-
-                final_result = Some(resized);
-                clear_transient_failure(path);
-            } else {
-                // Extraction failed: mark as failed to skip future attempts.
-                mark_as_transient_failure(path.clone());
+                ThumbnailExtractionOutcome::UnsafeToRead(reason) => {
+                    // Active writes/downloads are transient by nature; do not
+                    // escalate to permanent failure due to repeated retries.
+                    log::debug!(
+                        "[THUMB WORKER] Deferring thumbnail for {:?} (unsafe-to-read: {:?})",
+                        path.file_name(),
+                        reason
+                    );
+                    mark_as_temporarily_blocked(path.clone());
+                }
+                ThumbnailExtractionOutcome::Failed => {
+                    // Real extraction pipeline failure (decoder/COM/MF/etc.).
+                    mark_as_transient_failure(path.clone());
+                }
             }
         }
 

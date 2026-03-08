@@ -563,7 +563,7 @@ fn render_overflow_submenu(
     lazy_load: &mut Option<i32>,
     right_bound: f32,
 ) {
-    let overflow_item = ContextMenuItem::new(-100, "Mostrar mais opções")
+    let overflow_item = ContextMenuItem::new(-100, rust_i18n::t!("context_menu.show_more"))
         .with_subitems(items.iter().map(|i| (*i).clone()).collect());
 
     render_single_item(ui, &overflow_item, action, 0, lazy_load, right_bound); // Overflow is top-level

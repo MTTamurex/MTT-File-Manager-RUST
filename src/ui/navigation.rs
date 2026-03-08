@@ -5,6 +5,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use crate::domain::special_paths::COMPUTER_VIEW_ID;
 
 // Note: ImageViewerApp is defined in main.rs, not in a module.
 // These methods will be implemented in main.rs using this module.
@@ -128,9 +129,9 @@ pub mod helpers {
         *history_index = navigation_history.len();
 
         // Set computer view
-        *current_path = "Este Computador".to_string();
+        *current_path = COMPUTER_VIEW_ID.to_string();
         *is_computer_view = true;
-        *path_input = "Este Computador".to_string();
+        *path_input = COMPUTER_VIEW_ID.to_string();
 
         // Clear items for computer view
         *items = Arc::new(Vec::new());

@@ -11,6 +11,7 @@ use crate::ui::theme;
 use crate::ui::widgets;
 use eframe::egui;
 use lru::LruCache;
+use rust_i18n::t;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -23,17 +24,91 @@ static CACHED_VRAM_BYTES: AtomicU64 = AtomicU64::new(0);
 /// Last time VRAM was calculated
 static CACHED_VRAM_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
 
+// --- Kernel resource monitoring (GDI Objects, USER Objects, Handle Count) ---
+// These metrics make resource leaks visible at runtime.
+// Previously, COM refcount leaks and thread-pool accumulation were invisible
+// because Task Manager doesn't show per-process GDI/USER/handle counts by default.
+static CACHED_GDI_OBJECTS: AtomicU64 = AtomicU64::new(0);
+static CACHED_USER_OBJECTS: AtomicU64 = AtomicU64::new(0);
+static CACHED_HANDLE_COUNT: AtomicU64 = AtomicU64::new(0);
+static CACHED_THREAD_COUNT: AtomicU64 = AtomicU64::new(0);
+static CACHED_PEAK_THREAD_COUNT: AtomicU64 = AtomicU64::new(0);
+static CACHED_KERNEL_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
+static LAST_THREAD_WARN_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
+static LAST_THREAD_WARN_COUNT: AtomicU64 = AtomicU64::new(0);
+static LAST_THREAD_CRITICAL_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
+static THREAD_CRITICAL_STREAK: AtomicU64 = AtomicU64::new(0);
+
 /// TTL for RAM/VRAM cache (1 second)
 const STATUS_CACHE_TTL_MS: u64 = 1000;
+/// Minimum interval between repeated HIGH thread warnings for stable counts.
+const THREAD_WARN_COOLDOWN_MS: u64 = 30_000;
+/// Number of consecutive 1s samples above critical threshold before escalating.
+const THREAD_CRITICAL_STREAK_MIN: u64 = 6;
+
+fn should_emit_thread_critical(
+    now_ms: u64,
+    thread_count: u32,
+    critical_threshold: u32,
+    stalled_onedrive_workers: usize,
+) -> bool {
+    // If OneDrive workers are stalled, escalate immediately.
+    if stalled_onedrive_workers > 0 {
+        LAST_THREAD_CRITICAL_TIMESTAMP.store(now_ms, Ordering::Relaxed);
+        THREAD_CRITICAL_STREAK.store(1, Ordering::Relaxed);
+        return true;
+    }
+
+    // Very large overshoot is suspicious even if transient.
+    if thread_count >= critical_threshold.saturating_add(25) {
+        LAST_THREAD_CRITICAL_TIMESTAMP.store(now_ms, Ordering::Relaxed);
+        THREAD_CRITICAL_STREAK.store(1, Ordering::Relaxed);
+        return true;
+    }
+
+    let last_ts = LAST_THREAD_CRITICAL_TIMESTAMP.load(Ordering::Relaxed);
+    let streak = if now_ms.saturating_sub(last_ts) <= STATUS_CACHE_TTL_MS + 500 {
+        THREAD_CRITICAL_STREAK
+            .load(Ordering::Relaxed)
+            .saturating_add(1)
+    } else {
+        1
+    };
+
+    LAST_THREAD_CRITICAL_TIMESTAMP.store(now_ms, Ordering::Relaxed);
+    THREAD_CRITICAL_STREAK.store(streak, Ordering::Relaxed);
+    streak >= THREAD_CRITICAL_STREAK_MIN
+}
+
+fn should_emit_thread_warning(now_ms: u64, thread_count: u32) -> bool {
+    let last_ts = LAST_THREAD_WARN_TIMESTAMP.load(Ordering::Relaxed);
+    let last_count = LAST_THREAD_WARN_COUNT.load(Ordering::Relaxed) as u32;
+
+    // Always emit when count grows meaningfully (>= +4 threads).
+    if thread_count >= last_count.saturating_add(4) {
+        LAST_THREAD_WARN_TIMESTAMP.store(now_ms, Ordering::Relaxed);
+        LAST_THREAD_WARN_COUNT.store(thread_count as u64, Ordering::Relaxed);
+        return true;
+    }
+
+    // For stable/slightly changing counts, rate-limit warning spam.
+    if now_ms.saturating_sub(last_ts) >= THREAD_WARN_COOLDOWN_MS {
+        LAST_THREAD_WARN_TIMESTAMP.store(now_ms, Ordering::Relaxed);
+        LAST_THREAD_WARN_COUNT.store(thread_count as u64, Ordering::Relaxed);
+        return true;
+    }
+
+    false
+}
 
 /// Returns cached RAM usage, refreshing only after TTL expires.
-fn get_ram_usage_cached() -> Option<u64> {
+fn get_ram_usage_cached(allow_refresh: bool) -> Option<u64> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64;
     let last = CACHED_RAM_TIMESTAMP.load(Ordering::Relaxed);
-    if now.saturating_sub(last) > STATUS_CACHE_TTL_MS {
+    if allow_refresh && now.saturating_sub(last) > STATUS_CACHE_TTL_MS {
         if let Some(ram) = get_ram_usage() {
             CACHED_RAM_BYTES.store(ram, Ordering::Relaxed);
             CACHED_RAM_TIMESTAMP.store(now, Ordering::Relaxed);
@@ -49,13 +124,16 @@ fn get_ram_usage_cached() -> Option<u64> {
 }
 
 /// Returns cached VRAM estimation, refreshing only after TTL expires.
-fn get_vram_usage_cached(texture_cache: &LruCache<PathBuf, egui::TextureHandle>) -> usize {
+fn get_vram_usage_cached(
+    texture_cache: &LruCache<PathBuf, egui::TextureHandle>,
+    allow_refresh: bool,
+) -> usize {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64;
     let last = CACHED_VRAM_TIMESTAMP.load(Ordering::Relaxed);
-    if now.saturating_sub(last) > STATUS_CACHE_TTL_MS {
+    if allow_refresh && now.saturating_sub(last) > STATUS_CACHE_TTL_MS {
         let vram: usize = texture_cache
             .iter()
             .map(|(_, tex)| {
@@ -71,6 +149,210 @@ fn get_vram_usage_cached(texture_cache: &LruCache<PathBuf, egui::TextureHandle>)
     }
 }
 
+/// Kernel resource metrics for runtime leak detection.
+struct KernelResourceMetrics {
+    gdi_objects: u32,
+    user_objects: u32,
+    handle_count: u32,
+    thread_count: u32,
+    peak_thread_count: u32,
+}
+
+/// Returns cached kernel resource metrics (GDI Objects, USER Objects, Handle Count).
+/// Refreshes only after TTL expires. These metrics reveal COM/handle leaks that are
+/// invisible in Task Manager's default view.
+fn get_kernel_resources_cached(allow_refresh: bool, video_preview_active: bool) -> KernelResourceMetrics {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let last = CACHED_KERNEL_TIMESTAMP.load(Ordering::Relaxed);
+    if allow_refresh && now.saturating_sub(last) > STATUS_CACHE_TTL_MS {
+        let metrics = get_kernel_resources();
+        CACHED_GDI_OBJECTS.store(metrics.gdi_objects as u64, Ordering::Relaxed);
+        CACHED_USER_OBJECTS.store(metrics.user_objects as u64, Ordering::Relaxed);
+        CACHED_HANDLE_COUNT.store(metrics.handle_count as u64, Ordering::Relaxed);
+        CACHED_THREAD_COUNT.store(metrics.thread_count as u64, Ordering::Relaxed);
+        // Track peak thread count across the entire session for leak detection.
+        // A monotonically growing peak strongly suggests thread leak.
+        let prev_peak = CACHED_PEAK_THREAD_COUNT.load(Ordering::Relaxed) as u32;
+        if metrics.thread_count > prev_peak {
+            CACHED_PEAK_THREAD_COUNT.store(metrics.thread_count as u64, Ordering::Relaxed);
+        }
+
+        // Dynamic thresholds based on CPU count.
+        // Expected baseline threads ≈ cpu*3 + workers + egui overhead.
+        // Only warn on GROWTH above baseline — it's leak detection, not absolute count.
+        let cpu_count = std::thread::available_parallelism()
+            .map(|n| n.get() as u32)
+            .unwrap_or(4);
+        // Baseline: rayon global (cpu) + folder-size pool (cpu) + icon workers (min(cpu,16))
+        //         + thumbnail (min(cpu,8)) + folder preview (min(cpu,6)) + OneDrive(4)
+        //         + ~20 single-purpose workers + egui (~4)
+        let expected_baseline = cpu_count * 2 + cpu_count.min(16) + cpu_count.min(8) + cpu_count.min(6) + 28;
+        let warn_threshold = expected_baseline + 20;
+        let critical_threshold = expected_baseline + 50;
+        let stalled = crate::infrastructure::onedrive::get_stalled_io_workers();
+        if metrics.thread_count >= critical_threshold {
+            if is_video_preview_thread_spike_expected(video_preview_active, stalled) {
+                // In-panel video playback can legitimately keep thread count high
+                // for long periods. Avoid false-positive CRITICAL/HIGH spam.
+                THREAD_CRITICAL_STREAK.store(0, Ordering::Relaxed);
+            } else if should_emit_thread_critical(now, metrics.thread_count, critical_threshold, stalled)
+            {
+                log::error!(
+                    "[THREAD MONITOR] CRITICAL: {} threads (baseline: ~{}, peak: {}, stalled OneDrive I/O: {}). \
+                     Possible sustained thread leak causing system-wide stalls.",
+                    metrics.thread_count,
+                    expected_baseline,
+                    prev_peak.max(metrics.thread_count),
+                    stalled
+                );
+                LAST_THREAD_WARN_TIMESTAMP.store(now, Ordering::Relaxed);
+                LAST_THREAD_WARN_COUNT.store(metrics.thread_count as u64, Ordering::Relaxed);
+            } else if should_emit_thread_warning(now, metrics.thread_count) {
+                log::warn!(
+                    "[THREAD MONITOR] HIGH transient thread count: {} (baseline: ~{}, peak: {}, stalled OneDrive I/O: {})",
+                    metrics.thread_count,
+                    expected_baseline,
+                    prev_peak.max(metrics.thread_count),
+                    stalled
+                );
+            }
+        } else if metrics.thread_count >= warn_threshold {
+            THREAD_CRITICAL_STREAK.store(0, Ordering::Relaxed);
+            if !is_video_preview_thread_spike_expected(video_preview_active, stalled)
+                && should_emit_thread_warning(now, metrics.thread_count)
+            {
+                log::warn!(
+                    "[THREAD MONITOR] HIGH thread count: {} (baseline: ~{}, peak: {}, stalled OneDrive I/O: {})",
+                    metrics.thread_count, expected_baseline,
+                    prev_peak.max(metrics.thread_count), stalled
+                );
+            }
+        } else {
+            THREAD_CRITICAL_STREAK.store(0, Ordering::Relaxed);
+        }
+
+        CACHED_KERNEL_TIMESTAMP.store(now, Ordering::Relaxed);
+        KernelResourceMetrics {
+            peak_thread_count: CACHED_PEAK_THREAD_COUNT.load(Ordering::Relaxed) as u32,
+            ..metrics
+        }
+    } else {
+        KernelResourceMetrics {
+            gdi_objects: CACHED_GDI_OBJECTS.load(Ordering::Relaxed) as u32,
+            user_objects: CACHED_USER_OBJECTS.load(Ordering::Relaxed) as u32,
+            handle_count: CACHED_HANDLE_COUNT.load(Ordering::Relaxed) as u32,
+            thread_count: CACHED_THREAD_COUNT.load(Ordering::Relaxed) as u32,
+            peak_thread_count: CACHED_PEAK_THREAD_COUNT.load(Ordering::Relaxed) as u32,
+        }
+    }
+}
+
+fn is_video_preview_thread_spike_expected(video_preview_active: bool, stalled_onedrive_workers: usize) -> bool {
+    video_preview_active && stalled_onedrive_workers == 0
+}
+
+/// Queries GDI Objects, USER Objects, and Handle Count for the current process.
+fn get_kernel_resources() -> KernelResourceMetrics {
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::Threading::GetCurrentProcess;
+
+    // GetGuiResources is not exposed in windows 0.61 via WindowsAndMessaging,
+    // so we link directly against user32.dll.
+    const GR_GDIOBJECTS: u32 = 0;
+    const GR_USEROBJECTS: u32 = 1;
+
+    extern "system" {
+        fn GetGuiResources(hprocess: *mut core::ffi::c_void, uiflags: u32) -> u32;
+    }
+
+    unsafe {
+        let process = GetCurrentProcess();
+        let handle_ptr = process.0 as *mut core::ffi::c_void;
+        let gdi = GetGuiResources(handle_ptr, GR_GDIOBJECTS);
+        let user = GetGuiResources(handle_ptr, GR_USEROBJECTS);
+
+        let mut handles: u32 = 0;
+        let process_handle = HANDLE(process.0);
+        let _ = windows::Win32::System::Threading::GetProcessHandleCount(
+            process_handle,
+            &mut handles,
+        );
+
+        // Thread count via CreateToolhelp32Snapshot — the only reliable way
+        // to count OS threads, since detached Rust threads (JoinHandle dropped)
+        // are invisible to GetProcessHandleCount but still consume kernel
+        // thread objects and can block the cloud filter driver.
+        let thread_count = count_process_threads();
+
+        KernelResourceMetrics {
+            gdi_objects: gdi,
+            user_objects: user,
+            handle_count: handles,
+            thread_count,
+            peak_thread_count: 0, // filled by caller
+        }
+    }
+}
+
+/// Counts live OS threads for the current process using Toolhelp32Snapshot.
+/// This is the only reliable way to detect detached/leaked threads that are
+/// invisible to Rust's `JoinHandle` tracking and `GetProcessHandleCount`.
+fn count_process_threads() -> u32 {
+    // The `Win32_System_Diagnostics` feature is not enabled in our windows crate,
+    // so we link directly against kernel32 for the Toolhelp32 API.
+    #[repr(C)]
+    #[allow(non_snake_case)]
+    struct THREADENTRY32 {
+        dwSize: u32,
+        cntUsage: u32,
+        th32ThreadID: u32,
+        th32OwnerProcessID: u32,
+        tpBasePri: i32,
+        tpDeltaPri: i32,
+        dwFlags: u32,
+    }
+
+    const TH32CS_SNAPTHREAD: u32 = 0x00000004;
+
+    extern "system" {
+        fn CreateToolhelp32Snapshot(dwflags: u32, th32processid: u32) -> isize;
+        fn Thread32First(hsnapshot: isize, lpte: *mut THREADENTRY32) -> i32;
+        fn Thread32Next(hsnapshot: isize, lpte: *mut THREADENTRY32) -> i32;
+    }
+
+    unsafe {
+        let pid = std::process::id();
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if snapshot == -1 {
+            return 0;
+        }
+
+        let mut entry = std::mem::zeroed::<THREADENTRY32>();
+        entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+
+        let mut count: u32 = 0;
+        if Thread32First(snapshot, &mut entry) != 0 {
+            loop {
+                if entry.th32OwnerProcessID == pid {
+                    count += 1;
+                }
+                entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+                if Thread32Next(snapshot, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+
+        windows::Win32::Foundation::CloseHandle(
+            windows::Win32::Foundation::HANDLE(snapshot as *mut core::ffi::c_void),
+        ).ok();
+        count
+    }
+}
+
 /// Status bar action that needs to be handled by the caller
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StatusBarAction {
@@ -80,6 +362,8 @@ pub enum StatusBarAction {
     ViewModeChanged,
     /// Open virtual drive settings
     OpenVirtualDriveSettings,
+    /// Open language settings
+    OpenLanguageSettings,
     /// Start bulk thumbnail extraction for current folder and subfolders
     BulkThumbnailScan,
     /// Show/hide hidden files toggled
@@ -110,6 +394,8 @@ pub fn render_status_bar(
     bulk_progress: Option<(usize, usize)>,
     folder_locked: bool,
     show_hidden_files: &mut bool,
+    allow_system_refresh: bool,
+    video_preview_active: bool,
 ) -> StatusBarAction {
     let mut action = StatusBarAction::None;
 
@@ -144,7 +430,7 @@ pub fn render_status_bar(
                 svg_manager,
                 "settings",
                 false,
-                "Configurar otimização de drives virtuais",
+                &t!("status_bar.vdrive_settings"),
                 theme::ICON_SIZE_SM,
                 1.0,
                 0.75,
@@ -154,10 +440,26 @@ pub fn render_status_bar(
                 action = StatusBarAction::OpenVirtualDriveSettings;
             }
 
+            // === LANGUAGE SETTINGS button ===
+            if widgets::toggle_icon_button_sized(
+                ui,
+                svg_manager,
+                "languages",
+                false,
+                &t!("settings.language"),
+                theme::ICON_SIZE_SM,
+                1.0,
+                0.75,
+            )
+            .clicked()
+            {
+                action = StatusBarAction::OpenLanguageSettings;
+            }
+
             // === BULK THUMBNAIL SCAN button ===
             if let Some((done, total)) = bulk_progress {
                 ui.label(
-                    egui::RichText::new(format!("Processando {}/{}", done, total))
+                    egui::RichText::new(t!("status_bar.processing", done = done, total = total))
                         .color(egui::Color32::BLACK)
                         .small()
                 );
@@ -167,7 +469,7 @@ pub fn render_status_bar(
                     svg_manager,
                     "image",
                     false,
-                    "Gerar thumbnails para todas as subpastas",
+                    &t!("status_bar.bulk_thumbnails"),
                     theme::ICON_SIZE_SM,
                     1.0,
                     0.75,
@@ -183,9 +485,9 @@ pub fn render_status_bar(
             {
                 let should_disable_show_hidden = is_computer_view || is_recycle_bin_view;
                 let tooltip = if *show_hidden_files {
-                    "Esconder itens ocultos"
+                    t!("status_bar.hidden_hide")
                 } else {
-                    "Exibir itens ocultos"
+                    t!("status_bar.hidden_show")
                 };
                 ui.scope(|ui| {
                     if should_disable_show_hidden {
@@ -197,7 +499,7 @@ pub fn render_status_bar(
                         svg_manager,
                         "eye",
                         *show_hidden_files,
-                        tooltip,
+                        &tooltip,
                         theme::ICON_SIZE_MD - 2.0,
                         2.0,
                         -1.0,
@@ -223,12 +525,12 @@ pub fn render_status_bar(
 
             // === LEFT SIDE: Item count and loading status ===
             if *is_loading_folder {
-                ui.label("Carregando...");
+                ui.label(t!("status_bar.loading").to_string());
             } else {
                 let item_text = if total_items == 1 {
-                    "1 item".to_string()
+                    t!("status_bar.item_one").to_string()
                 } else {
-                    format!("{} itens", total_items)
+                    t!("status_bar.item_many", count = total_items).to_string()
                 };
                 ui.label(item_text);
             }
@@ -238,16 +540,16 @@ pub fn render_status_bar(
             // === CENTER: View mode (disabled when folder is locked) ===
             ui.scope(|ui| {
                 if folder_locked { ui.disable(); }
-                ui.label("Modo:");
+                ui.label(t!("status_bar.mode").to_string());
                 if ui
-                    .selectable_label(*view_mode == ViewMode::Grid, "Grade")
+                    .selectable_label(*view_mode == ViewMode::Grid, t!("status_bar.grid").to_string())
                     .clicked()
                 {
                     *view_mode = ViewMode::Grid;
                     action = StatusBarAction::ViewModeChanged;
                 }
                 if ui
-                    .selectable_label(*view_mode == ViewMode::List, "Lista")
+                    .selectable_label(*view_mode == ViewMode::List, t!("status_bar.list").to_string())
                     .clicked()
                 {
                     *view_mode = ViewMode::List;
@@ -260,29 +562,29 @@ pub fn render_status_bar(
             // === CENTER-RIGHT: Sort controls (disabled when folder is locked) ===
             ui.scope(|ui| {
                 if folder_locked { ui.disable(); }
-                ui.label("Ordenar:");
+                ui.label(t!("status_bar.sort").to_string());
 
-                // PERFORMANCE: Static arrays instead of Vec allocation per frame
-                let sort_modes: &[(SortMode, &str)] = if is_computer_view {
-                    &[
-                        (SortMode::Name, "Nome"),
-                        (SortMode::DriveTotalSpace, "Espaço Total"),
-                        (SortMode::DriveFreeSpace, "Espaço Livre"),
+                // PERFORMANCE: Build sort mode pairs per frame (i18n requires runtime lookup)
+                let sort_modes: Vec<(SortMode, String)> = if is_computer_view {
+                    vec![
+                        (SortMode::Name, t!("status_bar.sort_name").to_string()),
+                        (SortMode::DriveTotalSpace, t!("status_bar.sort_total_space").to_string()),
+                        (SortMode::DriveFreeSpace, t!("status_bar.sort_free_space").to_string()),
                     ]
                 } else {
-                    &[
-                        (SortMode::Name, "Nome"),
-                        (SortMode::Date, "Data"),
-                        (SortMode::Size, "Tamanho"),
+                    vec![
+                        (SortMode::Name, t!("status_bar.sort_name").to_string()),
+                        (SortMode::Date, t!("status_bar.sort_date").to_string()),
+                        (SortMode::Size, t!("status_bar.sort_size").to_string()),
                     ]
                 };
 
-                for &(mode, label) in sort_modes {
-                    if ui.selectable_label(*sort_mode == mode, label).clicked() {
-                        if *sort_mode == mode {
+                for (mode, label) in &sort_modes {
+                    if ui.selectable_label(*sort_mode == *mode, label.as_str()).clicked() {
+                        if *sort_mode == *mode {
                             *sort_descending = !*sort_descending;
                         } else {
-                            *sort_mode = mode;
+                            *sort_mode = *mode;
                             *sort_descending = false;
                         }
                         action = StatusBarAction::SortChanged;
@@ -298,26 +600,26 @@ pub fn render_status_bar(
 
             ui.scope(|ui| {
                 if folder_locked { ui.disable(); }
-                ui.label("Pastas:");
+                ui.label(t!("status_bar.folders").to_string());
                 if ui
-                    .selectable_label(*folders_position == FoldersPosition::First, "Início")
-                    .on_hover_text("Pastas sempre no topo")
+                    .selectable_label(*folders_position == FoldersPosition::First, t!("status_bar.folders_first").to_string())
+                    .on_hover_text(t!("status_bar.folders_first_hint"))
                     .clicked()
                 {
                     *folders_position = FoldersPosition::First;
                     action = StatusBarAction::SortChanged;
                 }
                 if ui
-                    .selectable_label(*folders_position == FoldersPosition::Last, "Fim")
-                    .on_hover_text("Pastas no final da lista")
+                    .selectable_label(*folders_position == FoldersPosition::Last, t!("status_bar.folders_last").to_string())
+                    .on_hover_text(t!("status_bar.folders_last_hint"))
                     .clicked()
                 {
                     *folders_position = FoldersPosition::Last;
                     action = StatusBarAction::SortChanged;
                 }
                 if ui
-                    .selectable_label(*folders_position == FoldersPosition::Mixed, "Misto")
-                    .on_hover_text("Pastas misturadas com arquivos")
+                    .selectable_label(*folders_position == FoldersPosition::Mixed, t!("status_bar.folders_mixed").to_string())
+                    .on_hover_text(t!("status_bar.folders_mixed_hint"))
                     .clicked()
                 {
                     *folders_position = FoldersPosition::Mixed;
@@ -335,13 +637,22 @@ pub fn render_status_bar(
                 ui.label("MTT File Manager");
                 ui.separator();
 
+                // Kernel resource monitoring (cached with 1s TTL)
+                // These metrics expose handle/GDI/USER leaks at runtime.
+                let km = get_kernel_resources_cached(allow_system_refresh, video_preview_active);
+                ui.label(&*t!("status_bar_system.threads", count = km.thread_count, peak = km.peak_thread_count));
+                ui.label(&*t!("status_bar_system.handles", count = km.handle_count));
+                ui.label(&*t!("status_bar_system.gdi", count = km.gdi_objects));
+                ui.label(&*t!("status_bar_system.user", count = km.user_objects));
+                ui.separator();
+
                 // RAM usage (cached with 1s TTL — avoids kernel syscall every frame)
-                if let Some(ram_usage) = get_ram_usage_cached() {
+                if let Some(ram_usage) = get_ram_usage_cached(allow_system_refresh) {
                     ui.label(format!("RAM: {}", format_size(ram_usage)));
                 }
 
                 // VRAM estimation (cached with 1s TTL — avoids O(n) texture iteration every frame)
-                let vram_usage = get_vram_usage_cached(texture_cache);
+                let vram_usage = get_vram_usage_cached(texture_cache, allow_system_refresh);
 
                 ui.label(format!(
                     "VRAM: {:.1} MB",

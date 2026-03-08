@@ -25,8 +25,22 @@ const ONEDRIVE_IO_MAX_OVERFLOW_WORKERS: usize = 24;
 // Maximum concurrent timeout requests waiting on results.
 const MAX_CONCURRENT_TIMEOUT_THREADS: u64 = 32;
 
+// Threshold (seconds) after which a worker job is considered "stalled".
+// Cloud filter driver I/O for OneDrive cloud-only files can block 30-60s.
+const STALL_THRESHOLD_SECS: u64 = 10;
+
+// When this many stall events have been recorded, stop spawning overflow workers
+// and reject new jobs that would require overflow. This prevents escalation when
+// the cloud filter driver is congested (common cause of system-wide freezes).
+const STALL_OVERFLOW_CUTOFF: usize = 4;
+
 // Counter of active timeout threads for monitoring and limiting
 static ACTIVE_TIMEOUT_THREADS: AtomicU64 = AtomicU64::new(0);
+
+// Counter of stalled I/O pool workers (job taking > STALL_THRESHOLD).
+// A growing count indicates cloud filter driver congestion that can cause
+// system-wide unresponsiveness.
+static STALLED_IO_WORKERS: AtomicUsize = AtomicUsize::new(0);
 
 // Global flag indicating if app is minimized (for operation cancellation)
 static APP_MINIMIZED: AtomicBool = AtomicBool::new(false);
@@ -71,8 +85,25 @@ impl OneDriveIoPool {
                     match recv_result {
                         Ok(job) => {
                             active_workers_clone.fetch_add(1, Ordering::SeqCst);
+                            let job_start = std::time::Instant::now();
                             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+                            let elapsed = job_start.elapsed();
                             active_workers_clone.fetch_sub(1, Ordering::SeqCst);
+                            if elapsed.as_secs() >= STALL_THRESHOLD_SECS {
+                                STALLED_IO_WORKERS.fetch_add(1, Ordering::SeqCst);
+                                log::warn!(
+                                    "[ONEDRIVE IO-POOL] Base worker {} job took {:.1}s (stall threshold: {}s)",
+                                    worker_id, elapsed.as_secs_f64(), STALL_THRESHOLD_SECS
+                                );
+                            } else {
+                                // Successful fast completion: decay the stall counter so the
+                                // pool can recover after a transient congestion episode.
+                                let _ = STALLED_IO_WORKERS.fetch_update(
+                                    Ordering::AcqRel,
+                                    Ordering::Acquire,
+                                    |v| if v > 0 { Some(v - 1) } else { None },
+                                );
+                            }
                         }
                         Err(_) => break,
                     }
@@ -92,9 +123,21 @@ impl OneDriveIoPool {
     where
         F: FnOnce() + Send + 'static,
     {
+        // RATE LIMITING: When too many stall events have accumulated,
+        // the cloud filter driver is likely congested. Reject overflow
+        // requests to avoid piling more threads into the blocked driver.
+        let stalled = STALLED_IO_WORKERS.load(Ordering::Acquire);
+
         let queued = match self.sender.try_send(Box::new(job)) {
             Ok(()) => true,
             Err(mpsc::TrySendError::Full(job)) => {
+                if stalled >= STALL_OVERFLOW_CUTOFF {
+                    log::warn!(
+                        "[ONEDRIVE IO-POOL] Rejecting overflow job: {} stall events (cutoff: {})",
+                        stalled, STALL_OVERFLOW_CUTOFF
+                    );
+                    return false;
+                }
                 // Queue is full while workers are likely blocked.
                 // Run job directly on an overflow worker to keep progress.
                 return self.try_spawn_overflow_worker_with_job(job);
@@ -105,7 +148,7 @@ impl OneDriveIoPool {
         if queued {
             let base_saturated =
                 self.active_workers.load(Ordering::Acquire) >= ONEDRIVE_IO_BASE_WORKERS;
-            if base_saturated {
+            if base_saturated && stalled < STALL_OVERFLOW_CUTOFF {
                 let _ = self.try_spawn_overflow_worker();
             }
         }
@@ -144,8 +187,17 @@ impl OneDriveIoPool {
 
                 if let Ok(job) = recv_result {
                     active_workers.fetch_add(1, Ordering::SeqCst);
+                    let job_start = std::time::Instant::now();
                     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+                    let elapsed = job_start.elapsed();
                     active_workers.fetch_sub(1, Ordering::SeqCst);
+                    if elapsed.as_secs() >= STALL_THRESHOLD_SECS {
+                        STALLED_IO_WORKERS.fetch_add(1, Ordering::SeqCst);
+                        log::warn!(
+                            "[ONEDRIVE IO-POOL] Overflow worker job took {:.1}s — possible cloud filter stall",
+                            elapsed.as_secs_f64()
+                        );
+                    }
                 }
 
                 overflow_workers.fetch_sub(1, Ordering::SeqCst);
@@ -171,9 +223,18 @@ impl OneDriveIoPool {
             .name("onedrive-io-overflow-direct".to_string())
             .spawn(move || {
                 active_workers.fetch_add(1, Ordering::SeqCst);
+                let job_start = std::time::Instant::now();
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
+                let elapsed = job_start.elapsed();
                 active_workers.fetch_sub(1, Ordering::SeqCst);
                 overflow_workers.fetch_sub(1, Ordering::SeqCst);
+                if elapsed.as_secs() >= STALL_THRESHOLD_SECS {
+                    STALLED_IO_WORKERS.fetch_add(1, Ordering::SeqCst);
+                    log::warn!(
+                        "[ONEDRIVE IO-POOL] Overflow-direct worker job took {:.1}s — possible cloud filter stall",
+                        elapsed.as_secs_f64()
+                    );
+                }
             });
 
         if spawn_result.is_err() {
@@ -189,6 +250,20 @@ fn onedrive_io_pool() -> &'static OneDriveIoPool {
     ONEDRIVE_IO_POOL.get_or_init(|| {
         OneDriveIoPool::new(ONEDRIVE_IO_BASE_WORKERS, ONEDRIVE_IO_MAX_OVERFLOW_WORKERS)
     })
+}
+
+/// Execute a job on the OneDrive I/O pool.
+///
+/// This is the safe entry point for any I/O operation that might block on the
+/// cloud filter driver. The pool has a bounded number of workers (4 base + 24 overflow),
+/// preventing unbounded thread creation.
+///
+/// Returns `true` if the job was accepted, `false` if the pool is saturated.
+pub fn onedrive_io_pool_execute<F>(job: F) -> bool
+where
+    F: FnOnce() + Send + 'static,
+{
+    onedrive_io_pool().execute(job)
 }
 
 /// Set the minimized state of the application.
@@ -215,6 +290,13 @@ pub fn is_app_minimized() -> bool {
 /// Get the current count of active timeout threads (for monitoring)
 pub fn get_active_timeout_threads() -> u64 {
     ACTIVE_TIMEOUT_THREADS.load(Ordering::SeqCst)
+}
+
+/// Get the current congestion score of stalled I/O pool workers (job > 10s).
+/// The counter increments on stalls and decays on fast completions,
+/// so it reflects active congestion rather than a cumulative total.
+pub fn get_stalled_io_workers() -> usize {
+    STALLED_IO_WORKERS.load(Ordering::SeqCst)
 }
 
 // NOTE: Cloud attribute detection is NOT cached per drive letter.
@@ -253,6 +335,24 @@ pub fn init_onedrive_paths() {
 /// Uses cached roots from environment variables.
 pub fn is_onedrive_path(path: &Path) -> bool {
     path_detection::is_onedrive_path(path)
+}
+
+/// Returns true if `path` is a direct child of a OneDrive root or the user
+/// profile directory (Documents, Pictures, Desktop, Downloads, etc.).
+/// Pure string comparison — no I/O.
+pub fn is_special_icon_folder(path: &Path) -> bool {
+    path_detection::is_special_icon_folder(path)
+}
+
+/// Returns a translated display name for a known special folder, or `None`.
+pub fn special_folder_display_name(path: &Path) -> Option<String> {
+    path_detection::special_folder_display_name(path)
+}
+
+/// Returns the resolved paths of known special folders (Documents, Pictures, etc.).
+/// Used to pre-extract their icons at startup.
+pub fn special_folder_paths() -> Vec<String> {
+    path_detection::special_folder_paths()
 }
 
 /// Fallback detection using file attributes for cases where the OneDrive root

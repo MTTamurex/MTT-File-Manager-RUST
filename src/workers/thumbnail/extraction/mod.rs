@@ -18,6 +18,13 @@ use crate::infrastructure::io_priority::IOPriority;
 use crate::infrastructure::onedrive;
 use std::path::Path;
 
+#[derive(Debug)]
+pub enum ThumbnailExtractionOutcome {
+    Success((Vec<u8>, u32, u32)),
+    UnsafeToRead(crate::infrastructure::windows::file_flags::FileReadSafety),
+    Failed,
+}
+
 /// The 5-Step Hybrid Pipeline
 ///
 /// Attempts extraction in order of speed/reliability:
@@ -33,6 +40,17 @@ pub fn generate_thumbnail_hybrid(
     priority: IOPriority,
     pending_deletions: &dashmap::DashMap<std::path::PathBuf, ()>,
 ) -> Option<(Vec<u8>, u32, u32)> {
+    match generate_thumbnail_hybrid_detailed(path, priority, pending_deletions) {
+        ThumbnailExtractionOutcome::Success(data) => Some(data),
+        ThumbnailExtractionOutcome::UnsafeToRead(_) | ThumbnailExtractionOutcome::Failed => None,
+    }
+}
+
+pub fn generate_thumbnail_hybrid_detailed(
+    path: &Path,
+    priority: IOPriority,
+    pending_deletions: &dashmap::DashMap<std::path::PathBuf, ()>,
+) -> ThumbnailExtractionOutcome {
     // DEFENSE IN DEPTH: Early exit for non-media files
     // This catches any requests that slipped through UI-level filtering (e.g., .exe, .dll)
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
@@ -41,11 +59,11 @@ pub fn generate_thumbnail_hybrid(
                 "[Thumbnail] Skipping non-media file: {:?}",
                 path.file_name()
             );
-            return None;
+            return ThumbnailExtractionOutcome::Failed;
         }
     } else {
         // No extension = skip
-        return None;
+        return ThumbnailExtractionOutcome::Failed;
     }
 
     log::trace!(
@@ -57,40 +75,41 @@ pub fn generate_thumbnail_hybrid(
     // Use fast_path_exists (GetFileAttributesW) instead of path.exists() (CreateFileW)
     // to avoid triggering OneDrive downloads and reduce HDD seek overhead
     if pending_deletions.contains_key(path) || !onedrive::fast_path_exists(path) {
-        return None;
+        return ThumbnailExtractionOutcome::Failed;
     }
 
     // DEFENSE: Skip files that are still being downloaded or written to.
     // Reading them can interrupt active downloads (sharing violation) or
     // produce corrupt/partial thumbnails from incomplete data.
-    if crate::infrastructure::windows::file_flags::is_file_unsafe_to_read(path) {
-        return None;
+    let read_safety = crate::infrastructure::windows::file_flags::classify_file_read_safety(path);
+    if read_safety != crate::infrastructure::windows::file_flags::FileReadSafety::Safe {
+        return ThumbnailExtractionOutcome::UnsafeToRead(read_safety);
     }
 
     // Stage 1: image crate (Fast Path)
     log::trace!("[Thumbnail] Trying Stage 1 (image crate)...");
     if let Some(result) = stage1_image_crate::extract(path, priority) {
         log::trace!("[Thumbnail] Stage 1 SUCCESS for: {:?}", path.file_name());
-        return Some(result);
+        return ThumbnailExtractionOutcome::Success(result);
     }
     log::trace!("[Thumbnail] Stage 1 failed, trying Stage 2...");
 
     // Abort if file was deleted or marked for deletion during Stage 1
     if pending_deletions.contains_key(path) || !onedrive::fast_path_exists(path) {
-        return None;
+        return ThumbnailExtractionOutcome::Failed;
     }
 
     // Stage 2: WIC (Robust Fallback for JPEGs/CMYK)
     log::trace!("[Thumbnail] Trying Stage 2 (WIC)...");
     if let Some(result) = stage2_wic::extract(path) {
         log::trace!("[Thumbnail] Stage 2 SUCCESS for: {:?}", path.file_name());
-        return Some(result);
+        return ThumbnailExtractionOutcome::Success(result);
     }
     log::trace!("[Thumbnail] Stage 2 failed, trying Stage 3...");
 
     // Abort if file was deleted or marked for deletion during Stage 2
     if pending_deletions.contains_key(path) || !onedrive::fast_path_exists(path) {
-        return None;
+        return ThumbnailExtractionOutcome::Failed;
     }
 
     // Stage 3: Shell API (Universal/Video)
@@ -98,7 +117,7 @@ pub fn generate_thumbnail_hybrid(
     match stage3_shell_api::extract(path) {
         Ok(result) => {
             log::trace!("[Thumbnail] Stage 3 SUCCESS for: {:?}", path.file_name());
-            return Some(result);
+            return ThumbnailExtractionOutcome::Success(result);
         }
         Err(e) => {
             let err_str = e.to_string();
@@ -120,7 +139,7 @@ pub fn generate_thumbnail_hybrid(
     match stage4_force_extract::extract(path) {
         Ok(result) => {
             log::trace!("[Thumbnail] Stage 4 SUCCESS for: {:?}", path.file_name());
-            return Some(result);
+            return ThumbnailExtractionOutcome::Success(result);
         }
         Err(e) => {
             let err_str = e.to_string();
@@ -138,11 +157,11 @@ pub fn generate_thumbnail_hybrid(
     // Stage 5: Media Foundation direct frame extraction (bypasses Windows thumbnail service)
     // This is the nuclear option - extracts a raw video frame when all else fails
     log::trace!("[Thumbnail] Trying Stage 5 (Media Foundation)...");
-    let result = stage5_media_foundation::extract(path);
-    if result.is_some() {
+    if let Some(result) = stage5_media_foundation::extract(path) {
         log::trace!("[Thumbnail] Stage 5 SUCCESS for: {:?}", path.file_name());
+        return ThumbnailExtractionOutcome::Success(result);
     } else {
         log::warn!("[Thumbnail] ALL STAGES FAILED for: {:?}", path.file_name());
     }
-    result
+    ThumbnailExtractionOutcome::Failed
 }

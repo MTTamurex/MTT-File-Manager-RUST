@@ -1,14 +1,15 @@
 use crate::app::global_search_state::GlobalSearchCategory;
+use rust_i18n::t;
 
-pub(super) fn category_label(category: GlobalSearchCategory) -> &'static str {
+pub(super) fn category_label(category: GlobalSearchCategory) -> String {
     match category {
-        GlobalSearchCategory::All => "Tudo",
-        GlobalSearchCategory::Files => "Arquivos",
-        GlobalSearchCategory::Folders => "Pastas",
-        GlobalSearchCategory::Images => "Imagens",
-        GlobalSearchCategory::Videos => "Videos",
-        GlobalSearchCategory::Audio => "Audio",
-        GlobalSearchCategory::Documents => "Documentos",
+        GlobalSearchCategory::All => t!("search.category_all").to_string(),
+        GlobalSearchCategory::Files => t!("search.category_files").to_string(),
+        GlobalSearchCategory::Folders => t!("search.category_folders").to_string(),
+        GlobalSearchCategory::Images => t!("search.category_images").to_string(),
+        GlobalSearchCategory::Videos => t!("search.category_videos").to_string(),
+        GlobalSearchCategory::Audio => t!("search.category_audio").to_string(),
+        GlobalSearchCategory::Documents => t!("search.category_documents").to_string(),
     }
 }
 

@@ -19,7 +19,7 @@ pub fn spawn_prefetch_worker(
     directory_cache: Arc<DirectoryCache>,
 ) {
     std::thread::spawn(move || {
-        io_priority::set_thread_priority(IOPriority::Background);
+        let _priority_guard = io_priority::ThreadPriorityGuard::new(IOPriority::Background);
 
         while let Ok(msg) = receiver.recv() {
             match msg {
@@ -64,7 +64,6 @@ pub fn spawn_prefetch_worker(
                 PrefetchMessage::Shutdown => break,
             }
         }
-
-        io_priority::reset_thread_priority();
+        // _priority_guard dropped here — reset_thread_priority() guaranteed by RAII
     });
 }

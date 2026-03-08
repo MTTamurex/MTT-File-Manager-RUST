@@ -63,6 +63,12 @@ local language = {
         audio_tracks = "Audio tracks",
         subtitle = "Subtitle",
         subtitles = "Subtitles",
+        open_subtitle = "Open subtitle file",
+        open_subtitle_short = "SUB+",
+        subtitle_loaded = "Subtitle loaded",
+        subtitle_cancelled = "Subtitle selection cancelled",
+        subtitle_open_hint = "Shift+Right click: open subtitle file",
+        subtitle_open_failed = "Subtitle picker failed",
         playlist = "Playlist",
         chapter = "Chapter",
         chapters = "Chapters",
@@ -75,6 +81,12 @@ local language = {
         video = "视频",
         audio = "音频",
         subtitle = "字幕",
+        open_subtitle = "打开字幕文件",
+        open_subtitle_short = "字+",
+        subtitle_loaded = "字幕已加载",
+        subtitle_cancelled = "已取消字幕选择",
+        subtitle_open_hint = "Shift+右键：打开字幕文件",
+        subtitle_open_failed = "字幕选择器失败",
         available = "可选",
         track = "：",
         playlist = "播放列表",
@@ -1006,6 +1018,15 @@ function show_message(text, duration)
     request_tick()
 end
 
+function trim_text(text)
+    if not text then return "" end
+    return (text:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+function open_external_subtitle_file()
+    mp.commandv("script-message", "open-subtitle-picker")
+end
+
 function render_message(ass)
     if state.message_hide_timer and state.message_hide_timer:is_enabled() and
        state.message_text
@@ -1211,10 +1232,13 @@ function window_controls()
     lo.geometry =
         { x = titlebox_left + left_pad, y = wc_geo.y, an = 1,
           w = titlebox_w, h = wc_geo.h }
-    lo.style = string.format("%s{\\clip(%f,%f,%f,%f)}",
+    lo.style = string.format("%s{\\q2}{\\clip(%f,%f,%f,%f)}",
         osc_styles.title,
         titlebox_left + left_pad, wc_geo.y - wc_geo.h,
         titlebox_right - right_pad , wc_geo.y + wc_geo.h)
+    -- Use a conservative per-character width so the trailing "..." remains visible
+    -- inside the clipped title area even with wider glyphs.
+    lo.button.maxchars = math.max(8, math.floor((titlebox_w - left_pad - right_pad - 24) / 13))
 
     add_area("window-controls-title",
              titlebox_left, 0, titlebox_right, wc_geo.h)
@@ -1350,6 +1374,10 @@ function layouts()
 
     lo = add_layout("tog_vsr")
     lo.geometry = {x = osc_geo.w - 228, y = btnY, an = 5, w = btnW, h = btnH}
+    lo.style = osc_styles.button
+
+    lo = add_layout("open_sub")
+    lo.geometry = {x = osc_geo.w - 268, y = btnY, an = 5, w = btnW, h = btnH}
     lo.style = osc_styles.button
 
     lo = add_layout("tog_norm")
@@ -1552,7 +1580,7 @@ function osc_init()
     --cy_sub
     ne = new_element("cy_sub", "button")
 
-    ne.enabled = (#tracks_osc.sub > 0)
+    ne.enabled = true
     ne.visible = (osc_param.playresx >= 496)
     ne.content = icons.cy_sub
     ne.tooltip_style = osc_styles.tooltip
@@ -1567,7 +1595,7 @@ function osc_init()
                 msg = "[" .. lang .. "]"
             end
         end
-        return texts.subtitle .. ": " .. msg
+        return texts.subtitle .. ": " .. msg .. "\n" .. texts.subtitle_open_hint
     end
     ne.eventresponder["mbtn_left_up"] =
         function () set_track("sub", 1) end
@@ -1575,10 +1603,25 @@ function osc_init()
         function () set_track("sub", -1) end
     ne.eventresponder["shift+mbtn_left_up"] =
         function () show_message(get_tracklist("sub"), 2) end
+    ne.eventresponder["shift+mbtn_right_up"] =
+        function () open_external_subtitle_file() end
     ne.eventresponder["wheel_up_press"] =
         function () set_track("sub", -1) end
     ne.eventresponder["wheel_down_press"] =
         function () set_track("sub", 1) end
+
+    --open_sub
+    ne = new_element("open_sub", "button")
+    ne.visible = (osc_param.playresx >= 616)
+    ne.tooltip_style = osc_styles.tooltip
+    ne.tooltipF = function ()
+        return texts.open_subtitle
+    end
+    ne.content = function ()
+        return "{\\fs10}" .. texts.open_subtitle_short
+    end
+    ne.eventresponder["mbtn_left_up"] =
+        function () open_external_subtitle_file() end
 
     -- volume
     ne = new_element("volume", "button")
@@ -1652,14 +1695,14 @@ function osc_init()
     ne.tooltip_style = osc_styles.tooltip
     ne.tooltipF = function ()
         local on = mp.get_property_bool("user-data/vsr/vsr-enabled", true)
-        return "RTX VSR: " .. (on and "ON" or "OFF")
+        return "RTX: " .. (on and "ON" or "OFF")
     end
     ne.content = function ()
         local on = mp.get_property_bool("user-data/vsr/vsr-enabled", true)
         if on then
-            return "{\\fs14\\1c&H00FF00}VSR{\\1c&HFFFFFF}"
+            return "{\\fs14\\1c&H00FF00}RTX{\\1c&HFFFFFF}"
         else
-            return "{\\fs14\\1c&H808080}VSR{\\1c&HFFFFFF}"
+            return "{\\fs14\\1c&H808080}RTX{\\1c&HFFFFFF}"
         end
     end
     ne.eventresponder["mbtn_left_up"] =

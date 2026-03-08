@@ -1,5 +1,4 @@
 use eframe::egui::{self, Color32, Rect, Sense, Ui};
-use std::time::Duration;
 
 #[derive(Clone, Copy, Debug)]
 struct ScrollState {
@@ -25,7 +24,11 @@ pub(super) fn apply_scroll_input(
 
 pub(super) fn compute_visual_scroll(ui: &Ui, target_scroll: f32, viewport_h: f32) -> (f32, f32) {
     let scroll_state_id = ui.id().with("scroll_state");
-    let dt = ui.input(|i| i.stable_dt).min(0.05);
+    // Use predicted_dt (fixo, ~16.67ms) em vez de stable_dt (variável).
+    // stable_dt herda picos de latência do eframe/wgpu (tessellation+present),
+    // causando o lerp a "pular" nos frames lentos e "voltar" nos seguintes.
+    // predicted_dt é constante e garante movimento visual uniforme.
+    let dt = ui.input(|i| i.predicted_dt).min(0.05);
 
     let visual_scroll = ui.ctx().data_mut(|d| {
         let state = d.get_temp_mut_or_insert_with::<ScrollState>(scroll_state_id, || ScrollState {
@@ -50,7 +53,18 @@ pub(super) fn compute_visual_scroll(ui: &Ui, target_scroll: f32, viewport_h: f32
 
     let scroll_delta = (visual_scroll - target_scroll).abs();
     if scroll_delta > 0.5 {
-        ui.ctx().request_repaint_after(Duration::from_millis(16));
+        // FIX: request_repaint() (imediato) em vez de request_repaint_after(16ms).
+        //
+        // O timer de 16ms não é sincronizado com o vsync do wgpu/driver. Quando
+        // o timer dispara no meio de um ciclo de vsync (ex: 3ms antes do próximo
+        // present), o eframe agenda o update() tarde demais → perde a janela do
+        // vsync → o present() espera mais um ciclo (~16.7ms extra) → dt efetivo
+        // de ~33-42ms em vez de ~16.7ms. Isso acontece a cada ~1 segundo,
+        // criando o padrão rítmico de micro stutter observado nos logs.
+        //
+        // request_repaint() pede "o mais cedo possível", e o eframe sincroniza
+        // naturalmente com o vsync, eliminando o conflito de timing.
+        ui.ctx().request_repaint();
     }
 
     (visual_scroll, scroll_delta)

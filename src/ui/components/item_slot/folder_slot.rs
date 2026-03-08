@@ -74,70 +74,82 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
 
     // === FOLDER DRAWING ===
 
-    // All normal folders use our custom composed preview (with or without media content).
-    // We never prematurely clear loading state — the worker always returns a result.
-    // For system folders (C:\Windows tree) and Recycle Bin, skip the preview cache
-    // to avoid size jumps when the preview panel triggers an async compose.
-    let native_preview = if ctx.is_recycle_bin_view || ctx.skip_folder_media_reads {
-        None
-    } else {
-        ctx.folder_preview_cache.get(&item.path)
-    };
-    let is_loading = !ctx.is_recycle_bin_view && ctx.folder_preview_loading.contains(&item.path);
+    // Special folders (Documents, Pictures, Desktop, etc.) always use their native
+    // Windows icon — skip the composed preview entirely so it doesn't replace them.
+    let is_special = crate::infrastructure::onedrive::is_special_icon_folder(&item.path);
 
-    if let Some(tex) = native_preview {
-        // If we have the native preview, draw maintaining aspect ratio and centering
-        paint_texture_centered(ui, tex.id(), tex.size_vec2(), folder_rect);
-    } else {
-        // If no native preview
-        let is_virtual_path = ctx.is_recycle_bin_view
-            || crate::infrastructure::windows::shell_folder::is_shell_navigation_path(
-                &item.path,
-                item.is_dir,
-            );
+    if is_special {
+        // Special icons are square (256x256). Use a larger, square-ish rect so they
+        // match the visual weight of composed folder previews.
+        let special_side = folder_w;
+        let special_rect = egui::Rect::from_center_size(
+            folder_rect.center(),
+            egui::vec2(special_side, special_side),
+        );
 
-        if is_virtual_path || ctx.skip_folder_media_reads {
-            // Virtual paths (recycle bin, ZIP) or system folders (C:\Windows tree):
-            // Use system folder icon directly, no preview composition.
-            if let Some(sys_icon) = ctx.icon_loader.folder_icon() {
-                paint_texture_centered(ui, sys_icon.id(), sys_icon.size_vec2(), folder_rect);
-            } else if is_virtual_path {
-                // Extra fallback for virtual paths: try item-specific icon
-                if let Some(icon) =
-                    ctx.icon_loader
-                        .get_or_load_icon(ui.ctx(), &item.path, true, false)
-                {
-                    let icon_size = folder_w.min(folder_h);
-                    let icon_rect = egui::Rect::from_center_size(
-                        folder_rect.center(),
-                        egui::vec2(icon_size, icon_size),
-                    );
-                    ui.painter().image(
-                        icon.id(),
-                        icon_rect,
-                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                        egui::Color32::WHITE,
-                    );
-                } else {
-                    // No system icon available — leave space empty (no placeholder)
+        // Icons are pre-loaded at startup — no placeholder needed.
+        if let Some(icon) = ctx.icon_loader.get_or_load_folder_path_icon(ui.ctx(), &item.path.to_string_lossy()) {
+            paint_texture_centered(ui, icon.id(), icon.size_vec2(), special_rect);
+        }
+    } else {
+        // All normal folders use our custom composed preview (with or without media content).
+        // We never prematurely clear loading state — the worker always returns a result.
+        // For system folders (C:\Windows tree) and Recycle Bin, skip the preview cache
+        // to avoid size jumps when the preview panel triggers an async compose.
+        let native_preview = if ctx.is_recycle_bin_view || ctx.skip_folder_media_reads {
+            None
+        } else {
+            ctx.folder_preview_cache.get(&item.path)
+        };
+        let is_loading = !ctx.is_recycle_bin_view && ctx.folder_preview_loading.contains(&item.path);
+
+        if let Some(tex) = native_preview {
+            // If we have the native preview, draw maintaining aspect ratio and centering
+            paint_texture_centered(ui, tex.id(), tex.size_vec2(), folder_rect);
+        } else {
+            // If no native preview
+            let is_virtual_path = ctx.is_recycle_bin_view
+                || crate::infrastructure::windows::shell_folder::is_shell_navigation_path(
+                    &item.path,
+                    item.is_dir,
+                );
+
+            if is_virtual_path || ctx.skip_folder_media_reads {
+                // Virtual paths (recycle bin, ZIP) or system folders (C:\Windows tree):
+                // Use system folder icon directly, no preview composition.
+                if let Some(sys_icon) = ctx.icon_loader.folder_icon() {
+                    paint_texture_centered(ui, sys_icon.id(), sys_icon.size_vec2(), folder_rect);
+                } else if is_virtual_path {
+                    // Extra fallback for virtual paths: try item-specific icon
+                    if let Some(icon) =
+                        ctx.icon_loader
+                            .get_or_load_icon(ui.ctx(), &item.path, true, false)
+                    {
+                        let icon_size = folder_w.min(folder_h);
+                        let icon_rect = egui::Rect::from_center_size(
+                            folder_rect.center(),
+                            egui::vec2(icon_size, icon_size),
+                        );
+                        ui.painter().image(
+                            icon.id(),
+                            icon_rect,
+                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    }
                 }
             } else {
-                // No system icon available — leave space empty (no placeholder)
-            }
-        } else {
-            // NORMAL FOLDER: Always request our custom composed preview.
-            // Worker produces back+front+thumbnail (or back+front only if no media).
-            if !is_loading {
-                ops.request_folder_preview_load(item.path.clone());
-            }
+                // NORMAL FOLDER: Always request our custom composed preview.
+                // Worker produces back+front+thumbnail (or back+front only if no media).
+                if !is_loading {
+                    ops.request_folder_preview_load(item.path.clone());
+                }
 
-            // While preview is loading: show system folder icon (the final content for
-            // folders without media). When the composed preview arrives it replaces this
-            // directly — no spinner, no grey rect placeholder.
-            if let Some(sys_icon) = ctx.icon_loader.folder_icon() {
-                paint_texture_centered(ui, sys_icon.id(), sys_icon.size_vec2(), folder_rect);
+                // While preview is loading: show generic folder icon as placeholder.
+                if let Some(sys_icon) = ctx.icon_loader.folder_icon() {
+                    paint_texture_centered(ui, sys_icon.id(), sys_icon.size_vec2(), folder_rect);
+                }
             }
-            // If no system icon cached yet: leave space empty — no placeholder
         }
     }
 
@@ -192,7 +204,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
             ui.put(
                 text_rect,
                 egui::Label::new(
-                    egui::RichText::new(&item.name)
+                    egui::RichText::new(super::display_name_for_item(item).as_ref())
                         .size(11.0)
                         .color(egui::Color32::BLACK),
                 )

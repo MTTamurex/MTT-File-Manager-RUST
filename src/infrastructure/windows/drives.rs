@@ -69,7 +69,7 @@ pub fn get_volume_label(drive_path: &str) -> String {
             }
         }
 
-        "Disco Local".to_string()
+        rust_i18n::t!("drive_types.default_label").to_string()
     }
 }
 

@@ -35,6 +35,13 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
         .exact_height(24.0)
         .show(ctx, |ui| {
             use crate::ui::status_bar::{render_status_bar, StatusBarAction};
+            let allow_system_refresh =
+                app.last_scroll_time.elapsed() >= std::time::Duration::from_millis(400);
+            let video_preview_active = app
+                .media_preview
+                .as_ref()
+                .map(|preview| preview.is_video() && preview.is_player_visible() && preview.is_visible())
+                .unwrap_or(false);
             let action = render_status_bar(
                 ui,
                 &mut app.svg_icon_manager,
@@ -54,6 +61,8 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                 bulk_progress,
                 app.current_folder_locked,
                 &mut app.show_hidden_files,
+                allow_system_refresh,
+                video_preview_active,
             );
             match action {
                 StatusBarAction::SortChanged => {
@@ -71,6 +80,9 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                 }
                 StatusBarAction::OpenVirtualDriveSettings => {
                     app.navigation_state.show_virtual_drive_settings = true;
+                }
+                StatusBarAction::OpenLanguageSettings => {
+                    app.navigation_state.show_language_settings = true;
                 }
                 StatusBarAction::BulkThumbnailScan => {
                     let root = std::path::PathBuf::from(&app.navigation_state.current_path);

@@ -1,166 +1,163 @@
-# Build, Run e Debug - MTT File Manager
+# Build, Run & Debug — MTT File Manager
 
-## Objetivo do Documento
-Este documento descreve como compilar, executar e debugar o MTT File Manager, incluindo pré-requisitos, configurações e solução de problemas comuns.
-
-## Pré-requisitos
+## Prerequisites
 
 ### Rust Toolchain
-```bash
-# Instalar via rustup (recomendado no Linux/Mac)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Ou no Windows (PowerShell como Admin)
+```powershell
+# Install via rustup (Windows)
 winget install Rustlang.Rustup
 ```
 
 ### MSVC Build Tools
-- **Visual Studio Build Tools** ou **Visual Studio Community**
-- Componentes necessários:
-  - MSVC v143 - VS 2022 C++ x64/x86 build tools
+- **Visual Studio Build Tools** or **Visual Studio Community**
+- Required components:
+  - MSVC v143 — VS 2022 C++ x64/x86 build tools
   - Windows 10/11 SDK
 
-### Dependências do Sistema
-- **Windows 10** ou **Windows 11**
-- **libmpv-2.dll** (para reprodução de vídeo)
-- **Microsoft Edge WebView2 Runtime** (para visualização de PDFs)
+### System Dependencies
+- **Windows 10** or **Windows 11**
+- **libmpv-2.dll** — Required for video playback
 
-### Instalação de Dependências Opcionais
+### Optional Dependencies
 ```powershell
-# Download libmpv (exemplo - ajustar versão conforme necessário)
-# Baixar de: https://sourceforge.net/projects/mpv-player-windows/files/libmpv/
-# Colocar libmpv-2.dll no mesmo diretório do executável ou no PATH
-
-# WebView2 Runtime (geralmente já vem com Windows 11)
-winget install Microsoft.EdgeWebView2Runtime
+# libmpv (for video playback)
+# Download from: https://sourceforge.net/projects/mpv-player-windows/files/libmpv/
+# Place libmpv-2.dll in the same directory as the executable or in PATH
 ```
 
-## Como Compilar
+## Building
 
-### Build de Desenvolvimento
+### Development Build
 ```bash
-# Clone o repositório
-git clone <url-do-repositorio>
+# Clone the repository
+git clone <repository-url>
 cd MTT-File-Manager-RUST
 
-# Build debug do workspace completo (app + serviço de busca)
+# Build entire workspace (app + search service)
 cargo build --workspace
 
-# Build debug apenas do app
+# Build only the main app
 cargo build -p mtt-file-manager
 
-# Executar em modo debug
+# Run in debug mode
 cargo run
 ```
 
-### Build de Produção
+### Release Build
 ```bash
-# Build release do workspace completo
+# Release build of entire workspace
 cargo build --release --workspace
 
-# Build release apenas do app
+# Release build — app only
 cargo build --release -p mtt-file-manager
 
-# Build release apenas do serviço de busca
+# Release build — search service only
 cargo build --release -p mtt-search-service
 
-# Executar app
+# Run the app
 .\target\release\mtt-file-manager.exe
 
-# Executar serviço em modo console (debug)
+# Run the search service in console mode (debug)
 .\target\release\mtt-search-service.exe run-console
 ```
 
-### Build com Features Específicas
+### Feature Flags
 ```bash
-# Build padrão (Drive Watcher + fallback notify-watcher)
+# Default build (Drive Watcher + fallback notify-watcher)
 cargo build
 
-# Build sem features opcionais
-# (sem fallback notify para UNC/rede; Drive Watcher local continua ativo)
+# Build without optional features
+# (disables notify fallback for UNC/network paths; native Drive Watcher remains active)
 cargo build --no-default-features
 ```
 
-### Serviço de Busca Global
-O serviço (`mtt-search-service`) roda como Windows Service e usa indexação híbrida por volume:
-- **NTFS/ReFS**: USN Journal (full scan inicial + loop incremental)
-- **Sem USN (exFAT/FAT32/FUSE/CryptoFS etc.)**: full scan com cache SQLite + re-scan periódico
+Available features:
+- **`notify-watcher`** (default) — Enables `notify` crate as fallback watcher for UNC/network paths
+- Primary filesystem monitoring uses the native Drive Watcher (`ReadDirectoryChangesW` on the drive root)
 
-```powershell
-# Instalar como serviço (requer PowerShell como Administrador)
-.\target\release\mtt-search-service.exe install
+### Build Profiles
 
-# Iniciar o serviço
-sc.exe start MTTFileManagerSearch
-
-# Verificar status
-sc.exe query MTTFileManagerSearch
-
-# Parar o serviço
-sc.exe stop MTTFileManagerSearch
-
-# Remover o serviço
-.\target\release\mtt-search-service.exe uninstall
-```
-
-**Cadência de atualização sem USN**:
-- 30s para volumes virtuais (`fuse`, `cryptofs`, `dokan`, `winfsp`)
-- 120s para volumes físicos sem USN (ex.: exFAT/FAT32)
-
-## Flags e Features do Cargo
-
-### Features Disponíveis
-- **`notify-watcher`** - Habilita fallback via notify para paths UNC/rede
-- **`default = ["notify-watcher"]`** - Feature padrão
-
-**Nota**: O monitoramento principal usa Drive Watcher nativo (`ReadDirectoryChangesW` no drive raiz). A feature `notify-watcher` mantém o fallback para UNC/rede.
-
-### Profiles de Build
-
-#### Profile Dev (padrão)
+**Dev** (default):
 ```toml
 [profile.dev]
-opt-level = 0      # Sem otimizações
-debug = true       # Inclui informações de debug
+opt-level = 0
+debug = true
 debug-assertions = true
 overflow-checks = true
 ```
 
-#### Profile Release (configurado no Cargo.toml)
+**Release** (configured in Cargo.toml):
 ```toml
 [profile.release]
-opt-level = 3      # Otimização máxima
-lto = true         # Link Time Optimization
-codegen-units = 1  # Compilação single-threaded (melhor otimização)
+opt-level = 3       # Maximum optimization
+lto = true          # Link-Time Optimization
+codegen-units = 1   # Single codegen unit for best optimization
 ```
 
-**Nota**: O profile release é otimizado para performance e tamanho de binário, mas aumenta significativamente o tempo de compilação.
+## Global Search Service
 
-## Como Executar com Logs
+The search service (`mtt-search-service`) runs as a Windows Service with hybrid per-volume indexing:
+- **NTFS/ReFS**: USN Journal (full MFT scan on first run + incremental loop)
+- **Non-USN (exFAT/FAT32/FUSE/CryptoFS)**: Full-tree scan with SQLite cache + periodic re-scan
 
-### Método 1: PowerShell Script (Recomendado)
 ```powershell
-# Executar script que captura logs
+# Install as service (requires Administrator PowerShell)
+.\target\release\mtt-search-service.exe install
+
+# Start the service
+sc.exe start MTTFileManagerSearch
+
+# Check status
+sc.exe query MTTFileManagerSearch
+
+# Stop the service
+sc.exe stop MTTFileManagerSearch
+
+# Uninstall the service
+.\target\release\mtt-search-service.exe uninstall
+```
+
+**Non-USN update cadence**:
+- 30s for virtual filesystems (`fuse`, `cryptofs`, `dokan`, `winfsp`)
+- 120s for physical volumes without USN (e.g., exFAT/FAT32)
+
+**Note**: Administrator privileges and `LocalSystem` runtime are required for USN access (`FSCTL_*`).
+
+### IPC Hardening (Optional)
+
+To reduce status metadata exposure in restricted environments:
+
+```powershell
+$env:MTT_SEARCH_REDACT_STATUS_METRICS = "1"
+sc.exe stop MTTFileManagerSearch
+sc.exe start MTTFileManagerSearch
+```
+
+With this flag, the service returns `redacted` volume states and zeroed counts in `GetStatus` responses while search/pagination remains functional.
+
+## Running with Logs
+
+### Method 1: PowerShell Script (Recommended)
+```powershell
 .\run_with_logs.ps1
-
-# Logs serão salvos em: debug_metadata_<timestamp>.log
+# Logs are saved to: debug_metadata.log
 ```
 
-### Método 2: Redirecionamento Manual
+### Method 2: Manual Redirection
 ```powershell
-# Executar com redirecionamento de stderr
+# Redirect stderr to file and console
 .\target\release\mtt-file-manager.exe 2>&1 | Tee-Object -FilePath "app_debug.log"
 
-# Ou simplesmente mostrar no console
+# Display in console only
 .\target\release\mtt-file-manager.exe 2>&1
 
-# Apenas erros
+# Errors only
 .\target\release\mtt-file-manager.exe 2> "errors.log"
 ```
 
-### Método 3: Filtragem em Tempo Real
+### Method 3: Filtered Output
 ```powershell
-# Com cores por categoria
+# Color-coded by category
 .\target\release\mtt-file-manager.exe 2>&1 | ForEach-Object {
     if ($_ -match "ERROR") { Write-Host $_ -ForegroundColor Red }
     elseif ($_ -match "WARN") { Write-Host $_ -ForegroundColor Yellow }
@@ -168,15 +165,15 @@ codegen-units = 1  # Compilação single-threaded (melhor otimização)
     else { Write-Host $_ -ForegroundColor Gray }
 }
 
-# Filtrar por categoria específica
+# Filter by category
 .\target\release\mtt-file-manager.exe 2>&1 | Select-String "THUMB|PERF"
 ```
 
-## Debug e Profiling
+## Debug & Profiling
 
-### Debug com VS Code
-1. Instalar extensão "rust-analyzer"
-2. Criar `.vscode/launch.json`:
+### VS Code Debugging
+1. Install the `rust-analyzer` extension
+2. Create `.vscode/launch.json`:
 ```json
 {
     "version": "0.2.0",
@@ -199,161 +196,86 @@ codegen-units = 1  # Compilação single-threaded (melhor otimização)
 }
 ```
 
-### Profiling com Flamegraph
+### Flamegraph Profiling
 ```bash
-# Instalar cargo-flamegraph
 cargo install flamegraph
-
-# Gerar flamegraph (requere admin no Windows)
 cargo flamegraph --bin mtt-file-manager
-
-# Resultado: flamegraph.svg
+# Output: flamegraph.svg
 ```
 
 ### Benchmarks
 ```bash
-# Executar benchmarks
+# Run all benchmarks
 cargo bench
 
-# Benchmark específico
+# Specific benchmark
 cargo bench --bench shell_ops_blocking
+cargo bench --bench image_viewer_decode
 ```
 
-### Verificar Dependências
+### Dependency Auditing
 ```bash
-# Árvore de dependências
-cargo tree
-
-# Verificar por vulnerabilidades
+cargo tree                    # Dependency tree
 cargo install cargo-audit
-cargo audit
-
-# Verificar updates disponíveis
+cargo audit                   # Vulnerability check
 cargo install cargo-outdated
-cargo outdated
+cargo outdated                # Available updates
 ```
 
-## Solução de Problemas Comuns
+## Troubleshooting
 
-### Erro: "libmpv-2.dll not found"
+### "libmpv-2.dll not found"
 ```powershell
-# Solução: Copiar DLL para o diretório do executável
-Copy-Item "caminho\para\libmpv-2.dll" -Destination ".\target\release\"
-
-# Ou adicionar ao PATH
+Copy-Item "path\to\libmpv-2.dll" -Destination ".\target\release\"
+# Or add to PATH
 $env:PATH += ";C:\Path\To\libmpv"
 ```
 
-### Erro: "WebView2 not available"
-```powershell
-# Instalar WebView2 Runtime
-winget install Microsoft.EdgeWebView2Runtime
-
-# Ou baixar manualmente: https://developer.microsoft.com/microsoft-edge/webview2/
+### Slow Build
+```bash
+cargo build --release -j 8    # Parallel compilation
 ```
 
-### Build Lento
+### Windows API Compilation Error
+Ensure Windows SDK is installed via Visual Studio Installer:
+- MSVC v143
+- Windows 10/11 SDK
+
+## Useful Commands
+
 ```bash
-# Usar múltiplas threads para compilação
-cargo build --release -j 8
+# Development
+cargo build --workspace       # Build all crates
+cargo run                     # Run app (debug)
+cargo check                   # Fast type-check without building
+cargo check -p mtt-file-manager  # Check specific package
 
-# Ou setar permanentemente no .cargo/config.toml
-[build]
-jobs = 8
-```
+# Quality
+cargo fmt                     # Format code
+cargo clippy                  # Lint
 
-### Erro de Compilação: Windows API
-```bash
-# Verificar se Windows SDK está instalado
-# Reinstalar componentes do Visual Studio:
-# - MSVC v143
-# - Windows 10/11 SDK
-```
-
-### Erro: "cannot find -lmpv"
-```bash
-# Verificar se libmpv está instalado
-# No Windows, precisa da DLL no PATH ou no diretório do projeto
-# mpv.lib deve estar no diretório raiz do projeto (já incluído)
-```
-
-## Comandos Úteis
-
-### Build e Execução
-```bash
-# Desenvolvimento (workspace completo)
-cargo build --workspace
-cargo run
-
-# Produção
+# Production
 cargo build --release --workspace
-
-# App com logs
 .\target\release\mtt-file-manager.exe 2>&1 | Tee-Object "debug.log"
-
-# Serviço em modo console
 .\target\release\mtt-search-service.exe run-console
-```
 
-### Debug e Testes
-```bash
-# Executar benchmarks
-cargo bench
-
-# Verificar dependências
-cargo tree
-cargo audit
-
-# Formatar código
-cargo fmt
-
-# Lint
-cargo clippy
-
-# Verificar (sem build)
-cargo check
-```
-
-### Limpeza e Reset
-```powershell
-# Limpar cache da aplicação
-Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager" -Recurse -Force
-
-# Limpar build
-cargo clean
-
-# Limpar tudo
+# Cleanup
 cargo clean
 Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager" -Recurse -Force
 ```
 
-## Variáveis de Ambiente
+## Environment Variables
 
 ```powershell
-# Backtrace em panics
-$env:RUST_BACKTRACE=1           # ou "full" para completo
-
-# Logging (se implementado com env_logger/tracing)
-$env:RUST_LOG="debug"
-$env:RUST_LOG="mtt_file_manager=debug"
-
-# Configuração de desenvolvimento
-$env:CARGO_INCREMENTAL=1        # Compilação incremental
+$env:RUST_BACKTRACE=1                    # Enable backtraces on panic
+$env:RUST_BACKTRACE="full"               # Full backtraces
+$env:RUST_LOG="debug"                    # Debug logging
+$env:RUST_LOG="mtt_file_manager=debug"   # Module-specific logging
+$env:CARGO_INCREMENTAL=1                 # Incremental compilation
 ```
 
-## Configuração do Ambiente de Desenvolvimento
+## VS Code Settings
 
-### .cargo/config.toml (opcional)
-```toml
-[build]
-jobs = 8                        # Número de threads de compilação
-rustflags = ["-C", "target-cpu=native"]
-
-[target.x86_64-pc-windows-msvc]
-linker = "rust-lld"             # Linker mais rápido (se disponível)
-```
-
-### VS Code Settings
 ```json
 {
     "rust-analyzer.cargo.features": ["notify-watcher"],
@@ -362,26 +284,3 @@ linker = "rust-lld"             # Linker mais rápido (se disponível)
 }
 ```
 
-## Dicas de Performance
-
-### Build mais rápido
-```bash
-# Usar mold linker (Linux) ou lld (Windows)
-# Instalar: cargo install -f cargo-binutils
-
-# Compilação em paralelo
-cargo build --release -j $(nproc)  # Linux
-```
-
-### Debug mais rápido
-```bash
-# Usar cargo check em vez de build
-cargo check
-
-# Verificar apenas pacote específico
-cargo check -p mtt-file-manager
-```
-
----
-
-*Última atualização: 2026-02-14 (documentado fallback de indexação sem USN)*
