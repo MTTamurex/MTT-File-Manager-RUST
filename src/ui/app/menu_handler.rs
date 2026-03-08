@@ -149,10 +149,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 -4 | -32 => app.command_paste(item_idx),
                 -5 | -33 => {
                     if let Some(idx) = item_idx.or(app.selected_item) {
-                        if let Some(item) = app.items.get(idx) {
-                            app.renaming_state = Some((idx, item.name.clone()));
-                            app.focus_rename = true;
-                        }
+                        app.begin_rename_item(idx);
                     }
                 }
                 -6 | -34 => {

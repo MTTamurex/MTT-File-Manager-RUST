@@ -273,8 +273,36 @@ impl ImageViewerApp {
         }
     }
 
+    pub fn can_rename_item(&self, idx: usize) -> bool {
+        self.items
+            .get(idx)
+            .is_some_and(|item| item.drive_info.is_none())
+    }
+
+    pub fn begin_rename_item(&mut self, idx: usize) -> bool {
+        if !self.can_rename_item(idx) {
+            self.renaming_state = None;
+            self.focus_rename = false;
+            return false;
+        }
+
+        let Some(item_name) = self.items.get(idx).map(|item| item.name.clone()) else {
+            return false;
+        };
+
+        self.renaming_state = Some((idx, item_name));
+        self.focus_rename = true;
+        true
+    }
+
     /// Renomeia arquivo usando Shell API via Background Worker
     pub fn rename_with_shell(&mut self, idx: usize) {
+        if !self.can_rename_item(idx) {
+            self.renaming_state = None;
+            self.focus_rename = false;
+            return;
+        }
+
         if let Some((_, new_name)) = self.renaming_state.take() {
             if let Some(item) = self.items.get(idx) {
                 // Send request to background worker

@@ -717,10 +717,7 @@ fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     && ui.input(|i| i.key_pressed(egui::Key::F2))
                 {
                     if let Some(idx) = app.selected_item {
-                        if let Some(item) = app.items.get(idx) {
-                            app.renaming_state = Some((idx, item.name.clone()));
-                            app.focus_rename = true;
-                        }
+                        app.begin_rename_item(idx);
                     }
                 }
 

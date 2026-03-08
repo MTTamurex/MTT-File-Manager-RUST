@@ -23,8 +23,8 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
     let has_selection =
         (app.selected_file.is_some() || !app.multi_selection.is_empty()) && !is_drive_selected;
     let can_rename = app.multi_selection.len() <= 1
-        && (app.multi_selection.len() == 1 || app.selected_file.is_some());
-    let can_paste = app.clipboard.has_content() && !is_drive_selected;
+        && app.selected_item.is_some_and(|idx| app.can_rename_item(idx));
+    let can_paste = app.can_paste_into_current_location() && !is_drive_selected;
     let can_create_folder = !app.navigation_state.is_computer_view && !app.navigation_state.is_recycle_bin_view;
 
     let icon_color = if ui.visuals().dark_mode {
@@ -131,10 +131,7 @@ pub(super) fn execute_action(action: SecAction, app: &mut ImageViewerApp) {
         SecAction::Paste => app.command_paste(None),
         SecAction::Rename => {
             if let Some(idx) = app.selected_item {
-                if let Some(item) = app.items.get(idx) {
-                    app.renaming_state = Some((idx, item.name.clone()));
-                    app.focus_rename = true;
-                }
+                app.begin_rename_item(idx);
             }
         }
         SecAction::CreateFolder => app.create_new_folder(),

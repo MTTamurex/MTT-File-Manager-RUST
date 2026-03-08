@@ -7,6 +7,12 @@ use crate::application::file_operations;
 use std::path::{Path, PathBuf};
 
 impl ImageViewerApp {
+    pub fn can_paste_into_current_location(&self) -> bool {
+        self.clipboard.has_content()
+            && !self.navigation_state.is_computer_view
+            && !self.navigation_state.is_recycle_bin_view
+    }
+
     pub fn command_copy(&mut self, idx: Option<usize>) {
         let mut files = Vec::new();
 
@@ -63,6 +69,11 @@ impl ImageViewerApp {
     /// Paste: Reads from clipboard using ClipboardManager via Background Worker
     pub fn command_paste(&mut self, idx: Option<usize>) {
         log::debug!("[DEBUG] command_paste called with idx: {:?}", idx);
+
+        if !self.can_paste_into_current_location() {
+            self.context_menu.target_paths.clear();
+            return;
+        }
 
         // Destination folder
         let dest_folder = if let Some(idx) = idx {
