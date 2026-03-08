@@ -1,364 +1,323 @@
-# Arquitetura - MTT File Manager
+# Architecture — MTT File Manager
 
-## Objetivo do Documento
-Este documento descreve a arquitetura de alto nível do MTT File Manager, incluindo camadas, boundaries e ciclo de vida da aplicação.
+## Workspace Structure
 
-## Estrutura do Workspace
-
-O projeto é organizado como um Cargo Workspace com 3 crates:
+The project is organized as a Cargo Workspace with 3 crates:
 
 ```
 MTT-File-Manager-RUST/
-├── Cargo.toml                    # Workspace root + pacote mtt-file-manager
-├── src/                          # App principal (GUI)
+├── Cargo.toml                    # Workspace root + mtt-file-manager package
+├── src/                          # Main app (GUI)
 ├── crates/
-│   ├── mtt-search-protocol/     # Tipos IPC compartilhados (SearchRequest, SearchResponse)
-│   └── mtt-search-service/      # Windows Service de indexação (USN + fallback full scan + Named Pipes)
+│   ├── mtt-search-protocol/     # Shared IPC types (SearchRequest, SearchResponse)
+│   └── mtt-search-service/      # Windows Service for hybrid indexing + Named Pipe IPC
 ```
 
-| Crate | Tipo | Descrição |
-|-------|------|-----------|
-| `mtt-file-manager` | bin (GUI) | App principal com eframe/egui |
-| `mtt-search-protocol` | lib | Tipos e serialização bincode para IPC |
-| `mtt-search-service` | bin (service) | Windows Service com indexação híbrida por volume (USN + full scan fallback) e IPC via Named Pipes |
+| Crate | Type | Description |
+|-------|------|-------------|
+| `mtt-file-manager` | bin (GUI) | Main application with eframe/egui |
+| `mtt-search-protocol` | lib | IPC types and bincode serialization |
+| `mtt-search-service` | bin (service) | Windows Service with hybrid per-volume indexing (USN + full scan fallback) and Named Pipe IPC |
 
-## Visão Geral da Arquitetura
+## Architecture Overview
 
-O MTT File Manager segue uma arquitetura em camadas com separação clara de responsabilidades:
+The application follows a layered architecture with clear separation of responsibilities:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           Presentation Layer                                 │
-│  ┌─────────────────────────────────────────────────────────────────────┐  │
-│  │                           UI Layer                                     │  │
-│  │  ┌────────────┬────────────┬────────────┬────────────┬──────────┐  │  │
-│  │  │  Toolbar   │  Tab Bar   │ File List  │   Sidebar  │ Preview  │  │  │
-│  │  │  (Rust)    │  (Rust)    │  (Rust)    │  (Rust)    │ (Rust)   │  │  │
-│  │  └────────────┴────────────┴────────────┴────────────┴──────────┘  │  │
-│  └─────────────────────────────────────────────────────────────────────┘  │
-│  ┌─────────────────────────────────────────────────────────────────────┐  │
-│  │                    eframe/egui Framework                              │  │
-│  │                    (Immediate Mode GUI)                              │  │
-│  └─────────────────────────────────────────────────────────────────────┘  │
+│                           Presentation Layer                                │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                           UI Layer                                  │    │
+│  │  ┌────────────┬────────────┬────────────┬────────────┬──────────┐  │    │
+│  │  │  Toolbar   │  Tab Bar   │ File List  │  Sidebar   │ Preview  │  │    │
+│  │  └────────────┴────────────┴────────────┴────────────┴──────────┘  │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                    eframe/egui Framework                             │    │
+│  │                    (Immediate Mode GUI)                             │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────────────────┘
                                 │
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         Application Layer                                  │
-│  ┌─────────────────────────────────────────────────────────────────────┐  │
-│  │                    Application Services                                 │  │
-│  │  ┌────────────┬────────────┬────────────┬────────────┬──────────┐  │  │
-│  │  │Navigation  │File Ops    │Clipboard   │Sorting     │Watcher   │  │  │
-│  │  │History     │Manager     │Manager     │Engine      │Service   │  │  │
-│  │  └────────────┴────────────┴────────────┴────────────┴──────────┘  │  │
-│  └─────────────────────────────────────────────────────────────────────┘  │
-│  ┌─────────────────────────────────────────────────────────────────────┐  │
-│  │                      Domain Logic                                     │  │
-│  │  ┌────────────┬────────────┬────────────┬────────────┬──────────┐  │  │
-│  │  │FileEntry   │Thumbnail   │SortMode    │ViewMode    │Errors    │  │  │
-│  │  │Model       │Data        │Enum        │Enum        │Types     │  │  │
-│  │  └────────────┴────────────┴────────────┴────────────┴──────────┘  │  │
-│  └─────────────────────────────────────────────────────────────────────┘  │
+│                         Application Layer                                   │
+│  ┌────────────┬────────────┬────────────┬────────────┬──────────────────┐  │
+│  │ Navigation │ File Ops   │ Clipboard  │ Sorting    │ Watcher Service  │  │
+│  │ History    │ Manager    │ Manager    │ Engine     │ & Notifications  │  │
+│  └────────────┴────────────┴────────────┴────────────┴──────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────┘
                                 │
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                       Infrastructure Layer                                 │
-│  ┌─────────────────────────────────────────────────────────────────────┐  │
-│  │                    Windows Integration                                │  │
-│  │  ┌────────────┬────────────┬────────────┬────────────┬──────────┐  │  │
-│  │  │Shell API   │File System │Media Found.│Thumbnail   │COM API   │  │  │
-│  │  │Integration │Operations  │Integration │Extraction  │Wrapper   │  │  │
-│  │  └────────────┴────────────┴────────────┴────────────┴──────────┘  │  │
-│  └─────────────────────────────────────────────────────────────────────┘  │
-│  ┌─────────────────────────────────────────────────────────────────────┐  │
-│  │                     Data Layer                                        │  │
-│  │  ┌────────────┬────────────┬────────────┬────────────┬──────────┐  │  │
-│  │  │SQLite      │File System │Memory      │Directory   │Config    │  │  │
-│  │  │Cache       │Access      │Cache       │Index       │Storage   │  │  │
-│  │  └────────────┴────────────┴────────────┴────────────┴──────────┘  │  │
-│  └─────────────────────────────────────────────────────────────────────┘  │
-│  ┌─────────────────────────────────────────────────────────────────────┐  │
-│  │                   Worker Threads                                      │  │
-│  │  ┌────────────┬────────────┬────────────┬────────────┬──────────┐  │  │
-│  │  │Thumbnail   │File Ops    │Prefetch    │Folder      │Icon      │  │  │
-│  │  │Workers     │Worker      │Worker      │Scanner   │Worker    │  │  │
-│  │  └────────────┴────────────┴────────────┴────────────┴──────────┘  │  │
-│  │  ┌────────────────────────────────────────────────────────────────┐ │  │
-│  │  │Global Search Worker (Named Pipe client → mtt-search-service)  │ │  │
-│  │  └────────────────────────────────────────────────────────────────┘ │  │
-│  └─────────────────────────────────────────────────────────────────────┘  │
+│                           Domain Layer                                      │
+│  ┌────────────┬────────────┬────────────┬────────────┬──────────────────┐  │
+│  │ FileEntry  │ Thumbnail  │ SortMode   │ ViewMode   │ Error Types      │  │
+│  │ DriveInfo  │ Data       │ Enum       │ Enum       │ (AppError)       │  │
+│  └────────────┴────────────┴────────────┴────────────┴──────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────┘
                                 │
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                  External: Search Service (separate process)               │
-│  ┌─────────────────────────────────────────────────────────────────────┐  │
-│  │                    mtt-search-service.exe                            │  │
-│  │  ┌────────────┬────────────┬────────────┬────────────┬──────────┐  │  │
-│  │  │USN/FS Scan │File Index  │Path        │SQLite      │Named     │  │  │
-│  │  │Indexer     │(HashMap)   │Resolver    │Persistence │Pipe IPC  │  │  │
-│  │  └────────────┴────────────┴────────────┴────────────┴──────────┘  │  │
-│  └─────────────────────────────────────────────────────────────────────┘  │
+│                       Infrastructure Layer                                  │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                    Windows Integration                              │    │
+│  │  ┌────────────┬────────────┬────────────┬────────────┬──────────┐  │    │
+│  │  │ Shell API  │ Filesystem │ Media      │ Thumbnail  │ COM API  │  │    │
+│  │  │ Integ.     │ Operations │ Foundation │ Extraction │ Wrapper  │  │    │
+│  │  └────────────┴────────────┴────────────┴────────────┴──────────┘  │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                     Data Layer                                      │    │
+│  │  ┌────────────┬────────────┬────────────┬────────────┬──────────┐  │    │
+│  │  │ SQLite     │ Filesystem │ Memory     │ Directory  │ Config   │  │    │
+│  │  │ Cache      │ Access     │ Cache      │ Index      │ Storage  │  │    │
+│  │  └────────────┴────────────┴────────────┴────────────┴──────────┘  │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                   Worker Threads                                    │    │
+│  │  ┌────────────┬────────────┬────────────┬────────────┬──────────┐  │    │
+│  │  │ Thumbnail  │ File Ops   │ Prefetch   │ Folder     │ Icon     │  │    │
+│  │  │ Workers    │ Worker     │ Worker     │ Preview    │ Worker   │  │    │
+│  │  └────────────┴────────────┴────────────┴────────────┴──────────┘  │    │
+│  │  ┌────────────────────────────────────────────────────────────────┐ │    │
+│  │  │Global Search Worker (Named Pipe client → mtt-search-service)  │ │    │
+│  │  └────────────────────────────────────────────────────────────────┘ │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────────────────┘
                                 │
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│              External: Image Viewer (separate process, same binary)        │
-│  ┌─────────────────────────────────────────────────────────────────────┐  │
-│  │              mtt-file-manager.exe --image-viewer <path>              │  │
-│  │  ┌────────────┬────────────┬────────────┬────────────┬──────────┐  │  │
-│  │  │Dedicated   │Window      │Prefetch    │Image       │Directory │  │  │
-│  │  │ViewerApp   │Cache       │Engine      │Loader      │Indexer   │  │  │
-│  │  │(eframe)    │(512MB)     │(workers)   │(mmap+WIC)  │(sort)    │  │  │
-│  │  └────────────┴────────────┴────────────┴────────────┴──────────┘  │  │
-│  └─────────────────────────────────────────────────────────────────────┘  │
+│                  External: Search Service (separate process)                │
+│  ┌────────────┬────────────┬────────────┬────────────┬──────────────────┐  │
+│  │ USN/FS     │ File Index │ Path       │ SQLite     │ Named Pipe IPC   │  │
+│  │ Scan       │ (HashMap)  │ Resolver   │ Persist.   │ Server           │  │
+│  └────────────┴────────────┴────────────┴────────────┴──────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                │
+┌─────────────────────────────────────────────────────────────────────────────┐
+│              External: Image Viewer (separate process, same binary)         │
+│  ┌────────────┬────────────┬────────────┬────────────┬──────────────────┐  │
+│  │ Dedicated  │ Window     │ Prefetch   │ Image      │ Directory        │  │
+│  │ ViewerApp  │ Cache      │ Engine     │ Loader     │ Indexer          │  │
+│  │ (eframe)   │ (512MB)    │ (workers)  │ (mmap+WIC) │ (sort)           │  │
+│  └────────────┴────────────┴────────────┴────────────┴──────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Camadas e Responsabilidades
+## Layers & Responsibilities
 
-### 1. Presentation Layer (UI Layer)
-**Localização**: `src/ui/`
+### 1. Presentation Layer (UI)
+**Location**: `src/ui/`
 
-Responsável pela interface com o usuário usando eframe/egui (immediate mode GUI).
+Renders the user interface using eframe/egui (immediate-mode GUI).
 
-**Componentes principais**:
-- **Toolbar**: Barra de ferramentas superior com botões de ação (`src/ui/toolbar.rs`)
-- **Tab Bar**: Sistema de abas para navegação múltipla (`src/ui/tab_bar/mod.rs`)
-- **File List/Grid**: Visualização de arquivos em grade ou lista (`src/ui/views/`)
-- **Sidebar**: Painel lateral com atalhos e drives (`src/ui/sidebar.rs`)
-- **Preview Panel**: Painel de preview de arquivos (`src/ui/preview_panel/`)
-- **Status Bar**: Barra de status inferior (`src/ui/status_bar.rs`)
-
-**Sub-módulos**:
-- `src/ui/app/` - Ciclo de vida, input e notificações da aplicação
-- `src/ui/components/` - Componentes reutilizáveis (media_preview, gif_manager, etc.)
-- `src/ui/components/item_slot/` - Renderização de slots separada por tipo (drive/folder/file)
-- `src/ui/components/mpv_preview/` - Bridge MPV modular (lifecycle, playback_state, docked_filters, osc_input, update_loop, window_embed)
-- `src/ui/tab_bar/` - Sistema de abas separado por renderer/controles/drag dwell
-- `src/ui/views/` - Views principais (grid, list, computer)
-- `src/ui/preview_panel/` - Sub-sistema de preview com suporte a vídeo
-
-**Arquivos principais**:
-- `src/ui/app_impl.rs` - Implementação principal do eframe::App
-- `src/ui/app/input.rs` - Handler de input do usuário
-- `src/ui/app/lifecycle.rs` - Ciclo de vida da aplicação
-- `src/ui/tab_bar/mod.rs` - Sistema de abas (módulo coordenador)
-- `src/ui/views/grid_view/mod.rs` - Visualização em grade
-- `src/ui/views/list_view/` - Visualização em lista (com submódulos)
-- `src/ui/views/computer_view.rs` - View "Este Computador"
+**Components**:
+- `src/ui/toolbar.rs` — Top toolbar with action buttons
+- `src/ui/tab_bar/` — Tab system (renderer, controls, drag-dwell)
+- `src/ui/views/` — File views (grid_view, list_view, computer_view)
+- `src/ui/sidebar.rs` — Side panel with drives and shortcuts
+- `src/ui/preview_panel/` — File preview panel with video support
+- `src/ui/status_bar.rs` — Bottom status bar
+- `src/ui/app/` — App lifecycle, input handling, and notifications
+- `src/ui/app_impl.rs` — Main `eframe::App` implementation
+- `src/ui/components/` — Reusable widgets (media_preview, gif_manager, item_slot, mpv_preview)
+- `src/ui/global_search_overlay/` — Global search overlay UI
+- `src/ui/icon_loader/` — Icon extraction and loading
+- `src/ui/cache.rs` — Texture/icon cache manager (CacheManager)
+- `src/ui/theme.rs` — UI theming
+- `src/ui/widgets.rs` — Custom egui widgets
+- `src/ui/svg_icons.rs` — SVG icon renderer
+- `src/ui/navigation.rs` — Navigation UI
+- `src/ui/context_menu.rs` — Context menu rendering
 
 ### 2. Application Layer
-**Localização**: `src/application/`
+**Location**: `src/application/`
 
-Contém a lógica de negócios e serviços da aplicação.
+Business logic and application services.
 
-**Serviços principais**:
-- **Navigation**: Gerenciamento de histórico de navegação (`src/application/navigation.rs`)
-- **File Operations**: Operações de arquivo (copiar, mover, deletar) (`src/application/file_operations.rs`)
-- **Clipboard Manager**: Gerenciamento da área de transferência (`src/application/clipboard.rs`)
-- **Sorting Engine**: Motor de ordenação de arquivos (`src/application/sorting.rs` + `src/application/sorting/`)
-- **Watcher Service**: Monitoramento de mudanças no filesystem (`src/application/watcher.rs`)
-- **Notification System**: Sistema de notificações/toasts (`src/application/notification.rs`)
-- **Renaming Service**: Lógica de renomeação (`src/application/renaming.rs`)
-- **Context Menu**: Lógica do menu de contexto (`src/application/context_menu.rs`)
-
-**Arquivos principais**:
-- `src/application/navigation.rs` - Histórico de navegação
-- `src/application/file_operations.rs` - Operações de arquivo
-- `src/application/clipboard.rs` - Gerenciamento de clipboard
-- `src/application/sorting.rs` - Fachada da API de ordenação/filtro (`sort_items`, `filter_items`)
-- `src/application/sorting/sort_impl.rs` - Implementação de ordenação
-- `src/application/sorting/filtering.rs` - Implementação de filtros
-- `src/application/notification.rs` - Sistema de notificações
+- `navigation.rs` — Navigation history management
+- `file_operations.rs` — File copy/move/delete operations
+- `clipboard.rs` — Clipboard management
+- `sorting.rs` — Sorting facade (`sort_items`, `filter_items`)
+- `sorting/sort_impl.rs` — Sort implementation
+- `sorting/filtering.rs` — Filter implementation
+- `watcher.rs` — Filesystem change monitoring integration
+- `notification.rs` — Toast notification system
+- `renaming.rs` — File rename logic
+- `context_menu.rs` — Context menu logic
 
 ### 3. Domain Layer
-**Localização**: `src/domain/`
+**Location**: `src/domain/`
 
-Define os modelos de dados e regras de negócio centrais.
+Core data models and business rules.
 
-**Modelos principais**:
-- **FileEntry**: Representação de um arquivo/diretório (`src/domain/file_entry.rs`)
-- **ThumbnailData**: Dados de thumbnail (`src/domain/thumbnail.rs`)
-- **Error Types**: Tipos de erro da aplicação (`src/domain/errors.rs`)
-
-**Enums importantes**:
-- `SortMode { Name, Date, Size, Type, DriveTotalSpace, DriveFreeSpace }`
-- `ViewMode { Grid, List }`
-- `FoldersPosition { First, Last, Mixed }`
-- `SyncStatus { None, CloudOnly, Syncing, Pinned, LocallyAvailable }`
-- `IconSize { Small, Large, Jumbo }`
-
-**Arquivos principais**:
-- `src/domain/file_entry.rs` - Modelo FileEntry com DriveInfo
-- `src/domain/thumbnail.rs` - Modelo de thumbnail
-- `src/domain/errors.rs` - AppError enum e helpers
+- **`file_entry.rs`** — `FileEntry`, `DriveInfo`, `SortMode`, `ViewMode`, `FoldersPosition`, `SyncStatus`, `IconSize`
+- **`thumbnail.rs`** — `ThumbnailData` struct
+- **`errors.rs`** — `AppError` enum with variants: Security, WindowsApi, Io, ThumbnailExtraction, FileOperation, InvalidState, Config, Worker, UiRendering
+- **`folder_lock.rs`** — `FolderLock` struct (per-folder view preferences)
+- **`pinned_folder.rs`** — `PinnedFolder` struct (Quick Access items)
+- **`special_paths.rs`** — System paths (Computer view, Recycle Bin)
 
 ### 4. Infrastructure Layer
-**Localização**: `src/infrastructure/`
+**Location**: `src/infrastructure/`
 
-Fornece acesso a recursos externos e serviços de sistema.
+System access, Windows integration, and data persistence.
 
-**Cache e Storage**:
-- **`adaptive_batch.rs`** - Batch adaptativo para operações
-- **`cache.rs`** - Cache genérico em memória
-- **`cache_first.rs`** - Estratégia cache-first
-- **`directory_cache.rs`** - Cache de diretórios
-- **`directory_index.rs`** - Índice de diretórios para busca rápida
-- **`disk_cache.rs`** - Cache em disco (SQLite) para thumbnails
-- **`filesystem_cache.rs`** - Cache de filesystem
-- **`io_priority.rs`** - Controle de prioridade de I/O
-- **`ntfs_reader.rs`** - Leitor otimizado para NTFS
-- **`virtual_drive_config.rs`** - Configuração de drives virtuais
-- **`watcher.rs`** - Watcher genérico de filesystem
-- **`windows_clipboard.rs`** - Integração nativa com clipboard Windows
-- **`onedrive/mod.rs`** - Detecção de status OneDrive (path_detection, attributes, timeout_ops, directory_enum)
-- **`folder_compose.rs`** - Composição customizada de covers de pasta (back + thumbnail + front layers via `image` crate)
-- **`security.rs`** - Validações de segurança
+**Cache & Storage**:
+- `disk_cache.rs` + `disk_cache/` — SQLite-backed cache (thumbnails, preferences, folder_locks, pinned_folders, folder_previews, shell_icons, cleanup, gc)
+- `directory_cache.rs` — In-memory directory cache
+- `directory_index.rs` — Directory index for fast lookup
+- `icon_disk_cache.rs` — Icon disk cache layer
+- `adaptive_batch.rs` — Adaptive batch configuration for folder loading
 
-**Integrações Windows** (`src/infrastructure/windows/`):
-- **`bitmap_conversion.rs`** - Conversão de bitmaps Windows
-- **`codec_registry.rs`** - Registro de codecs de mídia
-- **`device_change.rs`** - Monitoramento de mudanças de dispositivo
+**Filesystem**:
+- `ntfs_reader.rs` — NTFS raw directory reading (NtQueryDirectoryFile)
+- `drive_watcher.rs` + `drive_watcher/` — Drive-wide filesystem watcher (ReadDirectoryChangesW, buffer_parser, thread_loop)
+- `drive_watcher_integration.rs` — Multi-drive watcher manager with fallback to notify for UNC paths
+- `folder_compose.rs` — Custom folder cover composition (3-layer PNG)
+- `virtual_drive_config.rs` — Virtual drive and disk type configuration
+- `io_priority.rs` + `io_priority/` — I/O priority management (detection, grouped_queue, threading)
 
-**Drive Watcher** (`src/infrastructure/`):
-- **`drive_watcher.rs`** - Drive-wide file system watcher (ReadDirectoryChangesW)
-  - Monitora drive inteiro (ex: `C:\`) ao invés de pasta individual
-  - Async I/O com OVERLAPPED para não bloquear
-  - Filtro de eventos por prefixo de pasta
-- **`drive_watcher_integration.rs`** - Manager para múltiplos drives
-  - Um watcher por drive (C:\, D:\, etc.)
-  - Fallback para notify-watcher em UNC paths
-- **`drives.rs`** - Gerenciamento de drives
-- **`file_flags.rs`** - Flags de arquivo Windows
-- **`file_system.rs`** - Operações de sistema de arquivos
-- **`file_type.rs`** - Detecção de tipos de arquivo
-- **`formatting.rs`** - Formatação de strings/números
-- **`hdd_directory_reader.rs`** - Leitor otimizado de diretórios
-- **`icons.rs`** - Extração de ícones do Windows
-- **`iso_mount.rs`** - Montagem de arquivos ISO
-- **`media_foundation.rs`** - Integração com Media Foundation
-- **`native_menu.rs`** - Menu de contexto nativo
-- **`recycle_bin.rs`** - Operações da lixeira
-- **`shell_folder.rs`** - Pastas especiais do Shell
-- **`shell_operations.rs`** - Operações do Shell (copiar, mover, deletar)
-- **`system_info.rs`** - Informações do sistema
-- **`window_subclass.rs`** - Subclasse de janela para customização
-- **`metadata/`** - Metadados de imagem, vídeo e áudio
+**Windows Integration** (`src/infrastructure/windows/`):
+- `shell_operations.rs` + `shell_operations/` — File operations via Shell API (IFileOperation)
+- `icons.rs` + `icons/` — Windows icon extraction
+- `recycle_bin.rs` + `recycle_bin/` — Recycle Bin operations
+- `native_menu.rs` — Native Windows context menu
+- `media_foundation.rs` — Media Foundation for video thumbnails
+- `metadata/` — Image, video, and audio metadata extraction
+- `drives.rs` — Drive enumeration
+- `file_system.rs` — Filesystem operations
+- `file_type.rs` — File type detection
+- `file_flags.rs` — Windows file flags
+- `folder_size.rs` — Folder size calculation
+- `formatting.rs` — String/number formatting
+- `hdd_directory_reader.rs` — Optimized HDD directory reader
+- `iso_mount.rs` — ISO mounting
+- `bitmap_conversion.rs` — Windows bitmap conversion
+- `codec_registry.rs` + `codec_registry/` — Media codec name cache
+- `device_change.rs` — Device change monitoring
+- `shell_folder.rs` — Shell special folders
+- `system_info.rs` — System information
+- `window_corners.rs` — Window corner styling
+- `window_subclass.rs` — Window subclassing for customization
 
-**Media** (`src/infrastructure/media/`):
-- **`ffmpeg_session.rs`** - Sessão FFmpeg para extração de frames
-- **`hardware_acceleration.rs`** - Detecção de aceleração por hardware
-- **`tests_hw.rs`** - Testes de hardware
-
-**Arquivos principais**:
-- `src/infrastructure/windows/shell_operations.rs` - Operações de arquivo via Shell API
-- `src/infrastructure/disk_cache.rs` - Cache SQLite
-- `src/infrastructure/windows/icons.rs` - Extração de ícones
+**Other Infrastructure**:
+- `global_search.rs` — Named Pipe client for search service IPC
+- `shell_menu_worker.rs` — Shell context menu extraction worker
+- `user_session_search.rs` — User session search index
+- `security.rs` + `security/` — Security validation (components, drive, shell_namespace, symlink, unc)
+- `windows_clipboard.rs` — Windows clipboard (CF_HDROP)
+- `onedrive/` — OneDrive integration (path_detection, attributes, timeout_ops, directory_enum, pin_state)
+- `media/` — Media infrastructure (hardware_acceleration)
 
 ### 5. Workers Layer
-**Localização**: `src/workers/`
+**Location**: `src/workers/`
 
-Threads de background para processamento assíncrono.
+Background threads for asynchronous processing.
 
-**Workers disponíveis**:
-- **`thumbnail/`** - Sistema de thumbnails multi-estágio
-  - `extraction/stage1_image_crate.rs` - Stage 1: image crate
-  - `extraction/stage2_wic.rs` - Stage 2: Windows Imaging Component
-  - `extraction/stage3_shell_api.rs` - Stage 3: Shell API
-  - `extraction/stage4_force_extract.rs` - Stage 4: Extração forçada
-  - `extraction/stage5_media_foundation.rs` - Stage 5: Media Foundation
-- **`thumbnail_loader.rs`** - Loader de thumbnails
-- **`folder_scanner.rs`** - Scanner de pastas em background
-- **`folder_preview_worker.rs`** - Geração de previews de pastas (composição customizada com layers PNG embutidos)
-- **`file_operation_worker.rs`** - Operações de arquivo assíncronas
-- **`prefetch_worker.rs`** - Pré-carregamento de dados
-- **`predictive_prefetch.rs`** - Prefetch preditivo
-- **`idle_warmup.rs`** - Warmup de cache em idle
+- `thumbnail/` — Multi-stage thumbnail system
+  - `extraction/stage1_image_crate.rs` — Stage 1: image crate (PNG, JPG, GIF, WebP)
+  - `extraction/stage2_wic.rs` — Stage 2: Windows Imaging Component
+  - `extraction/stage3_shell_api.rs` — Stage 3: Shell API (IShellItemImageFactory)
+  - `extraction/stage4_force_extract.rs` — Stage 4: Forced extraction
+  - `extraction/stage5_media_foundation.rs` — Stage 5: Media Foundation (videos)
+  - `queue.rs`, `types.rs`, `worker.rs`, `processing/` — Queue, types, worker loop, and post-processing
+- `folder_preview_worker.rs` — Folder cover composition worker
+- `file_operation_worker.rs` + `file_operation_worker/` — Async file operations
+- `prefetch_worker.rs` — Directory prefetching
+- `idle_warmup.rs` — Idle-time cache warmup
+- `global_search_worker.rs` — Global search IPC worker with query coalescing
 
-### 6. Search Service (Processo Externo)
-**Localização**: `crates/mtt-search-service/`
+### 6. Search Service (External Process)
+**Location**: `crates/mtt-search-service/`
 
-Serviço Windows separado que indexa todos os arquivos do sistema com estratégia híbrida por volume e serve buscas via Named Pipes. Roda como `LocalSystem`; privilégios de administrador são necessários para o caminho USN (`FSCTL_*`).
+Separate Windows Service that indexes all files with a hybrid per-volume strategy and serves searches via Named Pipes. Runs as `LocalSystem`.
 
-**Componentes**:
-- **`usn_journal.rs`** - Descoberta de volumes (`discover_volumes`) e API USN (NTFS/ReFS)
-- **`fs_walker.rs`** - Scanner full-tree para volumes sem USN (exFAT/FAT32/FUSE/CryptoFS)
-- **`file_index.rs`** - Índice in-memory: `HashMap<u64, FileRecord>` (FRN → registro)
-- **`path_resolver.rs`** - Reconstrução de path completo via cadeia de parent references (FRN real ou sintético)
-- **`index_db.rs`** - Persistência SQLite em `%PROGRAMDATA%\MTT-File-Manager\search_index.db`
-- **`ipc_server.rs`** - Named Pipe server com NULL DACL (permite conexões de não-admin)
-- **`service_control.rs`** - Install/uninstall do serviço via `windows-service`
+**Modules**:
+- `usn_journal.rs` — Volume discovery (`discover_volumes`) and USN API (NTFS/ReFS)
+- `fs_walker.rs` — Full-tree scanner for non-USN volumes
+- `file_index.rs` — In-memory index: `HashMap<u64, FileRecord>` (FRN → record)
+- `path_resolver.rs` — Full path reconstruction via parent FRN chain
+- `index_db.rs` — SQLite persistence (`%PROGRAMDATA%\MTT-File-Manager\search_index.db`)
+- `ipc_server.rs` — Named Pipe server
+- `ipc_authorization.rs` — IPC authorization handling
+- `security_policy.rs` — Security policy configuration
+- `service_control.rs` — Service install/uninstall via `windows-service`
+- `name_arena.rs` — String arena for name storage
+- `volume_indexers.rs` — Per-volume indexer management
 
-**Protocolo IPC** (`crates/mtt-search-protocol/`):
-- Serialização via **bincode** com framing de 4 bytes (length prefix LE)
+**IPC Protocol** (`crates/mtt-search-protocol/`):
+- Serialization via **bincode** with 4-byte length-prefix framing (LE)
 - Pipe: `\\.\pipe\MTTFileManagerSearch`
 - Requests: `Query`, `GetStatus`, `Ping`, `WarmIndex`
 - Responses: `Results`, `Status`, `Pong`, `WarmStarted`, `Error`
 
-**Fluxo de indexação**:
-1. Detecta volumes montados via `GetVolumeInformationW` e marca `usn_supported` para `NTFS`/`ReFS`
-2. Spawna 1 thread de indexação por volume descoberto
-3. Volumes com USN (`NTFS`/`ReFS`):
-   - Carrega cache SQLite, valida `journal_id` e faz catch-up incremental
-   - Se cache inválido/ausente, executa full MFT scan (`FSCTL_ENUM_USN_DATA`)
-   - Entra em loop incremental de 2s (`FSCTL_READ_USN_JOURNAL`) e persiste a cada 5 min
-4. Volumes sem USN:
-   - Reusa snapshot SQLite no startup para resposta rápida
-   - Executa full scan com `fs_walker::scan_volume()` e persiste o resultado
-   - Reexecuta scan periodicamente: 30s (`fuse`/`cryptofs`/`dokan`/`winfsp`) ou 120s (demais)
-5. Um discovery loop roda a cada 20s para capturar novos volumes montados
+**Indexing flow**:
+1. Detect mounted volumes via `GetVolumeInformationW` and mark `usn_supported` for NTFS/ReFS
+2. Spawn 1 indexer thread per discovered volume
+3. USN volumes (NTFS/ReFS): load SQLite cache → validate journal_id → incremental catch-up; if cache invalid, full MFT scan via `FSCTL_ENUM_USN_DATA`; then incremental loop (2s) persisting every 5 min
+4. Non-USN volumes: reuse SQLite snapshot on startup → full scan → persist; periodic re-scan (30s virtual, 120s physical)
+5. Discovery loop runs every 20s to detect newly mounted volumes
 
-**Integração no app** (`src/infrastructure/global_search.rs`):
-- Cliente Named Pipe que conecta ao serviço
-- Fail-fast em `FILE_NOT_FOUND` (serviço não rodando)
-- Retry apenas em `PIPE_BUSY` (serviço sobrecarregado)
-- Worker dedicado (`src/workers/global_search_worker.rs`) com coalescing de queries
+### 7. Image Viewer (Separate Process)
+**Location**: `src/image_viewer/`
 
-### 7. Image Viewer (Processo Separado)
-**Localização**: `src/image_viewer/`
+Dedicated image viewer running as a **separate process** (same binary, `--image-viewer` flag). Memory and GPU textures are released by the OS when the process closes.
 
-Visualizador de imagens dedicado executado como **processo separado** (mesmo binário, flag `--image-viewer`). Toda memória e texturas são liberadas pelo SO ao fechar o processo — sem risco de leak no app principal.
+**Modules**:
+- `mod.rs` — `open_image_viewer()` spawns the process, `run_standalone()` initializes eframe
+- `app.rs` — `DedicatedImageViewerApp`: navigation, zoom, keyboard shortcuts, rendering
+- `cache.rs` — `WindowCache` (HashMap sliding-window, 512MB budget, eviction by distance) + `PrefetchEngine` (crossbeam bounded channel workers, atomic center tracking)
+- `indexer.rs` — `build_sequence()`: reads directory, filters images, natural sort
+- `loader.rs` — Decoding: memory-mapped files for >1MB, EXIF orientation, WIC fallback
+- `metrics.rs` — Performance metrics
+- `ipc.rs` — Inter-process communication
 
-**Componentes**:
-- **`mod.rs`** - `open_image_viewer()` spawna o processo, `run_standalone()` configura e inicia a janela eframe
-- **`app.rs`** - `DedicatedImageViewerApp`: struct principal, navegação, zoom, atalhos de teclado, renderização
-- **`cache.rs`** - `WindowCache` (HashMap sliding-window, 512MB budget, evição por distância) + `PrefetchEngine` (pool de workers com canais crossbeam bounded, center atômico)
-- **`indexer.rs`** - `build_sequence()`: lê diretório, filtra imagens, ordenação natural
-- **`loader.rs`** - Decodificação: `mmap` para arquivos >1MB, orientação EXIF, fallback WIC
+**Cache architecture**:
+- Sliding-window with radius=6 (up to 13 images in cache)
+- Workers check `AtomicUsize` center before decoding — obsolete jobs are skipped
+- Bounded channels sized at `2*radius+1` to prevent infinite job accumulation
+- Navigation requests only the new edge image (tail-only), not the full window
+- Previous image remains visible until the new one is ready (no spinner during fast navigation)
+- First image loaded synchronously on startup (no spinner on open)
 
-**Arquitetura de cache e prefetch**:
-- Sliding-window com radius=6 (até 13 imagens em cache)
-- Workers verificam `AtomicUsize` center antes de decodificar — jobs obsoletos são pulados e notificados
-- Canais bounded dimensionados para `2*radius+1` (evita acúmulo infinito de jobs)
-- Navegação solicita apenas a nova imagem da borda (tail-only), não a janela inteira
-- Imagem anterior permanece visível até a nova estar pronta (sem spinner durante navegação rápida)
-- Primeira imagem carregada sincronamente no startup (sem spinner ao abrir)
+### 8. Video Player (Separate Process)
+**Location**: `src/video_player/`
 
-**Repaint event-driven**:
-- Workers chamam `ctx.request_repaint()` ao completar decodificação
-- Fallback de 200ms apenas como safety net
+Standalone mpv-based video player launched as a separate process (`--video-player <path>`).
 
-## Principais Boundaries
+- Borderless native mpv window with custom OSC controls
+- D3D11 GPU pipeline (`vo=gpu-next`, `gpu-api=d3d11`, `hwdec=d3d11va`)
+- Subtitle picker via native file dialog (rfd)
+- Playback position and volume passed via CLI args
+- Event loop handles `Shutdown`, `FileLoaded`, `EndFile`, `ClientMessage`
 
-### UI ↔ Application Boundary
-- **Interface**: Traits e structs definidos em `src/app/`
-- **Comunicação**: Channels MPSC para comunicação assíncrona
-- **Estado**: Compartilhado via Arc<Mutex<>> e canais
+### 9. PDF Viewer (Separate Process)
+**Location**: `src/pdf_viewer/`
 
-### Application ↔ Infrastructure Boundary
-- **Interface**: Funções públicas em módulos de infrastructure
-- **Erros**: Conversão de erros via `thiserror` e `AppError`
-- **Async**: Workers threads para operações de I/O
+Native PDF viewer using **Windows.Data.Pdf API** (WinRT, built-in to Windows 10+). Launched as a separate process (`--pdf-viewer` flag).
 
-### Windows Integration Boundary
-- **API**: windows-rs crate para bindings seguros
-- **COM**: Inicialização e gerenciamento adequado de COM
-- **Resources**: RAII para gerenciamento de recursos Windows
+- Path validation: blocks UNC paths, null bytes, path traversal, and non-`.pdf` extensions
+- File size limit: 512 MB
+- Texture cache with memory budget and LRU eviction
+- Render worker for asynchronous page rendering
+- Toolbar for navigation controls
 
-### App Principal ↔ Image Viewer Boundary
-- **Interface**: Processo separado via `Command::new(exe).arg("--image-viewer").arg(path)`
-- **Isolamento**: Memória e texturas GPU completamente isoladas
-- **Cleanup**: SO libera tudo automaticamente ao fechar o processo
+## Key Boundaries
 
-## Ciclo de Vida do App
+### UI ↔ Application
+- Communication via MPSC channels (`crossbeam-channel`)
+- State shared via `Arc<>` and channels
+
+### Application ↔ Infrastructure
+- Error conversion via `thiserror` and `AppError`
+- Worker threads for I/O operations
+
+### Windows Integration
+- `windows-rs` crate for safe bindings
+- COM initialization and resource management via RAII
+
+### App ↔ Image Viewer
+- Separate process via `Command::new(exe).arg("--image-viewer").arg(path)`
+- Full memory isolation; OS reclaims everything on close
+
+## Application Lifecycle
 
 ```
 main.rs
@@ -368,219 +327,86 @@ ImageViewerApp::new() [app/init.rs]
 eframe::run_native()
     ↓
 ImageViewerApp::update() [ui/app_impl.rs] ←──┐
-    ↓                                      │
-Process Input ──→ Update State ──→ Render UI │ (60 FPS loop)
-    ↑                                      │
-    └──────────────────────────────────────┘
+    ↓                                          │
+Process Input → Update State → Render UI       │ (60 FPS loop)
+    ↑                                          │
+    └──────────────────────────────────────────┘
 ```
 
-### Fases Detalhadas
+### Startup (main.rs → app/init.rs)
+1. Load app icon, configure viewport (borderless)
+2. Initialize codec registry
+3. Call `eframe::run_native()`
+4. In `ImageViewerApp::new()`:
+   - Create communication channels (multiple workers)
+   - Initialize worker threads (thumbnails, files, icons, metadata, covers, folder previews)
+   - Load preferences from SQLite
+   - Configure caches and indices
+   - Initialize watchers (if `notify-watcher` feature enabled)
+   - Load initial state
+   - Configure custom fonts
 
-#### 1. Startup (main.rs → app/init.rs)
+### Main Loop (ui/app_impl.rs)
+1. Process worker messages (thumbnails, files, icons, metadata)
+2. Process filesystem events (watcher)
+3. Update UI state
+4. Process user input (keyboard, mouse)
+5. Render components
+6. Update cache and thumbnails
+7. Manage animations (GIFs, videos)
+
+### Shutdown
+- Workers finalize when channels are dropped
+- Cache is persisted automatically
+- COM resources released via RAII
+
+## Communication Patterns
+
+### MPSC Channels
 ```rust
-// main.rs
-fn main() {
-    // 1. Carrega ícone do app
-    // 2. Configura viewport (borderless)
-    // 3. Inicializa codec registry
-    // 4. Chama eframe::run_native()
-}
-
-// app/init.rs - ImageViewerApp::new()
-fn new(cc: &eframe::CreationContext) {
-    // 1. Cria canais de comunicação (múltiplos workers)
-    // 2. Inicializa workers threads (thumbnails, arquivos, ícones)
-    // 3. Carrega preferências do SQLite
-    // 4. Configura cache e índices
-    // 5. Inicializa watchers (se feature notify-watcher habilitada)
-    // 6. Carrega estado inicial
-    // 7. Configura fontes customizadas
-}
-```
-
-#### 2. Main Loop (ui/app_impl.rs)
-```rust
-fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-    // 1. Processa mensagens dos workers (thumbnails, arquivos, ícones, metadados)
-    // 2. Processa eventos de filesystem (watcher)
-    // 3. Atualiza estado da UI
-    // 4. Processa input do usuário (teclado, mouse)
-    // 5. Renderiza componentes
-    // 6. Atualiza cache e thumbnails
-    // 7. Gerencia animações (GIFs, vídeos)
-}
-```
-
-#### 3. Shutdown
-- Workers são finalizados quando canais são dropados
-- Cache é persistido automaticamente
-- Recursos COM são liberados via RAII
-
-## Estado Global e Gerenciamento
-
-### Estado Principal (ImageViewerApp)
-**Localização**: `src/app/state.rs`
-
-```rust
-pub struct ImageViewerApp {
-    // Navegação
-    pub current_path: String,
-    pub loaded_path: String,
-    pub navigation: NavigationHistory,
-    pub path_input: String,
-    
-    // Arquivos e seleção
-    pub items: Arc<Vec<FileEntry>>,
-    pub all_items: Vec<FileEntry>, // Cache mestre para busca
-    pub selected_item: Option<usize>,
-    pub selected_file: Option<FileEntry>,
-    pub multi_selection: FxHashSet<PathBuf>,
-    
-    // Thumbnails e cache
-    pub thumbnail_queue: Arc<PriorityThumbnailQueue>,
-    pub image_receiver: Receiver<ThumbnailData>,
-    pub pending_thumbnails: VecDeque<ThumbnailData>,
-    pub disk_cache: Arc<ThumbnailDiskCache>,
-    pub cache_manager: crate::ui::cache::CacheManager,
-    
-    // Async loading
-    pub file_entry_receiver: Receiver<(usize, Vec<FileEntry>)>,
-    pub is_loading_folder: bool,
-    
-    // Workers
-    pub cover_worker_sender: Sender<PathBuf>,
-    pub folder_preview_sender: Sender<PathBuf>,
-    pub icon_req_sender: Sender<PathBuf>,
-    pub metadata_req_sender: Sender<(PathBuf, u64)>,
-    
-    // UI State
-    pub view_mode: ViewMode,
-    pub thumbnail_size: f32,
-    pub show_preview_panel: bool,
-    pub is_computer_view: bool,
-    pub is_recycle_bin_view: bool,
-    
-    // ... mais campos
-}
-```
-
-### Sub-estados organizados
-- **Cache State** (`src/app/cache_state.rs`) - Estado do cache
-- **Navigation State** (`src/app/navigation_state.rs`) - Estado de navegação
-- **UI State** (`src/app/ui_state.rs`) - Estado da interface
-- **Worker State** (`src/app/worker_state.rs`) - Estado dos workers
-
-### Roteamento de Telas
-- **Computer View**: `src/ui/views/computer_view.rs`
-- **Grid View**: `src/ui/views/grid_view/mod.rs`
-- **List View**: `src/ui/views/list_view/mod.rs`
-- **Recycle Bin View**: Renderização especial em `computer_view.rs`
-
-### Comandos e Ações
-- **Input Handler**: `src/ui/app/input.rs` e `src/app/operations/navigation/keyboard.rs`
-- **Context Menu**: `src/ui/context_menu.rs` e `src/app/operations/context_menu.rs`
-- **Keyboard Shortcuts**: Definidos em `input.rs` e `keyboard.rs`
-
-## Comunicação entre Camadas
-
-### Padrão MPSC (Multiple Producer, Single Consumer)
-```rust
-// UI → Worker (envia trabalho)
-let (sender, receiver) = mpsc::channel();
+// UI → Worker (send work)
 worker_sender.send(work_item);
 
-// Worker → UI (envia resultado)
+// Worker → UI (send result)
 ui_sender.send(result);
 
-// UI recebe no update loop
+// UI receives in update loop
 while let Ok(result) = receiver.try_recv() {
-    // Atualiza estado
+    // Update state
 }
 ```
 
-### Workers e Canais
-- **Thumbnail Worker**: `image_receiver` recebe `ThumbnailData`
-- **File Entry Worker**: `file_entry_receiver` recebe `(generation, Vec<FileEntry>)`
-- **Icon Worker**: `icon_res_receiver` recebe `(PathBuf, Vec<u8>, u32, u32)`
-- **Metadata Worker**: `metadata_res_receiver` recebe `(PathBuf, u64, MediaMetadata)`
-- **Cover Worker**: `cover_worker_receiver` recebe `(PathBuf, Option<PathBuf>)`
-- **Folder Preview Worker**: `folder_preview_receiver` recebe `FolderPreviewData`
-- **Global Search Worker**: `global_search_receiver` recebe `GlobalSearchResponse` (Results, Status, Error)
+### Active Worker Channels
+| Worker | Sender | Receiver | Data Type |
+|--------|--------|----------|-----------|
+| Thumbnail | `thumbnail_queue` | `image_receiver` | `ThumbnailData` |
+| File Entry | — | `file_entry_receiver` | `(generation, Vec<FileEntry>)` |
+| Icon | `icon_req_sender` | `icon_res_receiver` | `(PathBuf, Vec<u8>, u32, u32)` |
+| Metadata | `metadata_req_sender` | `metadata_res_receiver` | `(PathBuf, u64, MediaMetadata)` |
+| Cover | `cover_worker_sender` | `cover_worker_receiver` | `(PathBuf, Option<PathBuf>)` |
+| Folder Preview | `folder_preview_sender` | `folder_preview_receiver` | `FolderPreviewData` |
+| Global Search | — | `global_search_receiver` | `GlobalSearchResponse` |
 
-### Shared State
-```rust
-// Estado compartilhado com Arc
-pub struct SharedState {
-    pub cache: Arc<ThumbnailDiskCache>,
-    pub directory_cache: Arc<DirectoryCache>,
-    pub thumbnail_queue: Arc<PriorityThumbnailQueue>,
-}
-```
+## Extension Points
 
-## Performance e Otimizações
+### New Preview Types
+1. Implement in `src/ui/preview_panel/`
+2. Add component in `src/ui/components/`
+3. Register in `src/app/operations/view_setup.rs`
 
-### Workers Assíncronos
-- **Thumbnail Workers**: Pool de threads com prioridade
-- **File Operation Worker**: Thread dedicada para operações de arquivo
-- **Prefetch Workers**: Pré-carregamento inteligente de pastas
-- **Icon Worker**: Extração de ícones em background
-- **Metadata Worker**: Extração de metadados em background
+### New File Operations
+1. Add to `src/application/file_operations.rs`
+2. Implement handler in `src/app/operations/file_ops.rs`
+3. Add UI in toolbar/context menu
 
-### Cache Multi-nível
-1. **Texture Cache**: GPU textures no egui (mais rápido)
-2. **Memory Cache**: LRU para acesso rápido (DashMap)
-3. **Disk Cache**: SQLite para persistência (`disk_cache.rs`)
-4. **Directory Cache**: Cache de estrutura de diretórios
+### New Windows Integrations
+1. Add module in `src/infrastructure/windows/`
+2. Export in `src/infrastructure/windows/mod.rs`
+3. Use `AppError` for error handling
 
-### Virtualização
-- **Grid Virtualization**: Renderização de itens visíveis apenas
-- **List Virtualization**: Virtualização em list view
-- **Scroll Prediction**: Predição de scroll para pré-carregamento
-- **Adaptive Upload**: Throttling baseado em performance
-
-### Thumbnails Multi-Estágio
-1. Stage 1: image crate (PNG, JPG, GIF, WebP)
-2. Stage 2: Windows Imaging Component (WIC)
-3. Stage 3: Shell API (IShellItemImageFactory)
-4. Stage 4: Extração forçada de frames
-5. Stage 5: Media Foundation para vídeos
-
-### Folder Cover Customizado
-Substitui completamente a geração de covers de pasta via Windows Shell API.
-Composição em 3 camadas usando `image` crate:
-1. **folder_back_512.png** — fundo da pasta (silhueta)
-2. **Thumbnail do conteúdo** — primeira imagem/vídeo encontrada dentro da pasta (extraída pelo pipeline de 5 estágios)
-3. **folder_front_512.png** — frente da pasta (aba sobreposta)
-
-PNGs embutidos no binário via `include_bytes!`, decodificados uma vez no startup (~2ms).
-Cada composição leva ~1-2ms (vs 20-200ms da Shell API via COM).
-Pastas sem mídia recebem cover "vazio" (back + front sem thumbnail).
-Resultados são cacheados em SQLite (`folder_previews`) com invalidação por mtime.
-
-## Pontos de Extensão
-
-### Novos Tipos de Preview
-- Implementar em `src/ui/preview_panel/`
-- Adicionar componente em `src/ui/components/`
-- Registrar em `src/app/operations/view_setup.rs`
-
-### Novas Operações de Arquivo
-- Adicionar em `src/application/file_operations.rs`
-- Implementar handler em `src/app/operations/file_ops.rs`
-- Adicionar UI em toolbar/context menu
-
-### Novas Integrações Windows
-- Adicionar módulo em `src/infrastructure/windows/`
-- Exportar em `src/infrastructure/windows/mod.rs`
-- Seguir padrões de erro com `AppError`
-
-### Novos Workers
-- Criar em `src/workers/`
-- Adicionar canais em `ImageViewerApp`
-- Inicializar em `app/init.rs`
-- Processar mensagens em `ui/app_impl.rs`
-
----
-
-*Última atualização: 2026-02-24 (documentado visualizador de imagens dedicado como processo separado com cache sliding-window)*
+### New Workers
+1. Create in `src/workers/`
+2. Add channels to `ImageViewerApp` state
+3. Initialize in `app/init.rs`
+4. Process messages in `ui/app_impl.rs`
 

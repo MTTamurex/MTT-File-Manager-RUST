@@ -121,7 +121,7 @@ impl ImageViewerApp {
 
         log::debug!("[WATCHER] Setting up for: {}", current_path);
 
-        // Try using drive-wide watcher first (File Pilot optimization)
+        // Try using drive-wide watcher first
         let path_buf = PathBuf::from(&current_path);
         let (fs_probe_ms, fs_probe_cache_hit, fs_probe_drive) =
             self.configure_watcher_fallback_mode(path_buf.as_path());

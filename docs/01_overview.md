@@ -1,153 +1,157 @@
-# MTT File Manager - Visão Geral
+# MTT File Manager — Overview
 
-## Objetivo do Documento
-Este documento fornece uma visão geral do MTT File Manager, suas capacidades principais e arquitetura de alto nível.
+## Purpose
 
-## O que é o MTT File Manager
+This document provides a high-level overview of MTT File Manager, its core capabilities, architecture, and technology stack.
 
-O MTT File Manager é um gerenciador de arquivos nativo para Windows desenvolvido em Rust, com interface moderna e recursos avançados de visualização de mídia. O aplicativo oferece uma experiência de usuário fluída com navegação em abas, preview integrado de arquivos e integração profunda com o Windows.
+## What is MTT File Manager
 
-## Principais Recursos
+MTT File Manager is a native Windows file manager built in Rust with a modern borderless UI, tabbed navigation, integrated media preview, and deep Windows integration. It uses eframe/egui for rendering and communicates with a companion Windows Service for system-wide file search.
 
-### Navegação e Interface
-- **Interface borderless customizada** - Janela sem bordas tradicionais com suporte nativo para redimensionamento
-- **Navegação em abas** - Sistema de abas com histórico independente por aba
-- **Visualizações múltiplas** - Modo grade e lista com thumbnails ajustáveis
-- **Barra de endereços editável** - Navegação direta por caminhos com breadcrumbs
-- **Sidebar com atalhos** - Acesso rápido a drives, bibliotecas, OneDrive e Lixeira; sidebar com scroll automático quando há overflow
-- **Acesso Rápido (pastas fixadas)** - Fixar qualquer pasta via clique direito ("Fixar no Acesso Rápido") ou arrастando para a seção na sidebar; ícone 📌 persistente para desafixar; reordenação por drag-and-drop; persistência em SQLite
-- **Suporte a navegação por teclado** - Atalhos completos para navegação sem mouse
-- **Busca em tempo real** - Filtro de arquivos por nome
+## Key Features
 
-### Preview e Mídia
-- **Preview integrado** - Visualização de imagens, vídeos, GIFs e PDFs sem sair do aplicativo
-- **Visualizador de imagens dedicado** - Processo separado com cache sliding-window, decodificação multi-thread e navegação instantânea entre imagens da pasta
-- **Reprodução de vídeo** - Player baseado em libmpv para formatos de vídeo diversos com suporte a controles, tela cheia e janela destacada
-- **Visualizador de PDF** - Integração com WebView2 (Edge) para PDFs
-- **Thumbnails inteligentes** - Geração e cache de thumbnails com múltiplos backends (image crate, WIC, Shell API, Media Foundation)
-- **Folder covers customizados** - Composição própria de previews de pastas com layers PNG (substitui Shell API)
-- **Suporte a GIFs animados** - Reprodução otimizada de GIFs com controles de play/pause
-- **Extração de metadados** - EXIF de imagens, metadados de vídeo e áudio
+### Navigation & Interface
+- **Custom borderless window** — No traditional title bar; native resize/move support
+- **Tabbed navigation** — Multiple tabs with independent history per tab
+- **Grid and List views** — Adjustable thumbnail sizes (64–512px)
+- **Editable address bar** — Direct path input with breadcrumb navigation
+- **Sidebar** — Quick access to drives, libraries, OneDrive, and Recycle Bin with auto-scroll on overflow
+- **Quick Access (pinned folders)** — Pin folders via right-click or drag-and-drop; reorder via drag; persistent in SQLite
+- **Keyboard navigation** — Full keyboard shortcuts for mouse-free operation
+- **Live search** — Type-to-filter files in the current folder
+- **Internationalization** — English and Brazilian Portuguese via `rust-i18n`
 
-### Operações de Arquivo
-- **Operações básicas** - Copiar, cortar, colar, renomear, deletar
-- **Menu de contexto nativo** - Integração com o menu de contexto do Windows Shell
-- **Lixeira do Windows** - Integração completa com a lixeira do sistema (navegação, restauração, exclusão permanente)
-- **Suporte a OneDrive** - Detecção de status de sincronização (cloud-only, syncing, pinned, locally available)
-- **Montagem de ISO** - Suporte para montar arquivos ISO como drives virtuais
-- **Renomeação inline** - Renomeação de arquivos diretamente na lista
+### Preview & Media
+- **Integrated preview panel** — View images, videos, GIFs, and PDFs without leaving the app
+- **Dedicated image viewer** — Separate process with sliding-window cache, multi-threaded decoding, and instant navigation between images
+- **Video player** — Standalone mpv-based player with D3D11 GPU pipeline, borderless window, and subtitle support
+- **PDF viewer** — Native viewer using Windows.Data.Pdf API (WinRT), with texture memory budgeting and page caching
+- **Smart thumbnails** — Multi-stage generation pipeline: image crate → WIC → Shell API → force extract → Media Foundation
+- **Custom folder covers** — Folder previews composed from 3 PNG layers (back/thumbnail/front) via `image` crate, replacing Shell API
+- **Animated GIF playback** — Optimized GIF rendering with play/pause controls
+- **Metadata extraction** — EXIF data from images, video/audio metadata via Media Foundation
 
-### Busca Global
-- **Overlay dedicado** - Busca global via Ctrl+Shift+F
-- **Serviço externo** - `mtt-search-service` com IPC por Named Pipe
-- **Indexação híbrida por volume** - NTFS/ReFS com USN Journal; volumes sem USN com varredura full-tree
-- **Atualização por tipo de filesystem** - USN incremental (2s), sem USN por re-scan periódico (30s/120s)
+### File Operations
+- **Core operations** — Copy, cut, paste, rename, delete
+- **Native context menu** — Full Windows Shell context menu integration
+- **Recycle Bin** — Browse, restore, and permanently delete items
+- **OneDrive support** — Sync status detection (cloud-only, syncing, pinned, locally available)
+- **ISO mounting** — Mount ISO files as virtual drives
+- **Inline renaming** — Rename files directly in the file list
+- **Drag-and-drop** — Move/copy files via drag-and-drop
 
-### Sistema de Cache e Performance
-- **Cache em disco** - SQLite para thumbnails e metadados
-- **Cache em memória** - LRU cache para acesso rápido
-- **Workers assíncronos** - Processamento em background para manter UI responsiva
-- **Pré-carregamento inteligente** - Prefetch de pastas e thumbnails
-- **Indexação de diretórios** - Cache de estrutura de diretórios para navegação rápida
-- **Virtualização de listas** - Renderização eficiente para pastas com muitos arquivos
-- **Geração de thumbnails em estágios** - Fallback progressivo: image crate → WIC → Shell API → Media Foundation
-- **Folder covers customizados** - Composição com 3 layers PNG via `image` crate (substitui Shell API completamente)
+### Global Search
+- **Dedicated overlay** — Activated via Ctrl+Shift+F
+- **External service** — `mtt-search-service` communicating over Named Pipes (bincode serialization)
+- **Hybrid volume indexing** — NTFS/ReFS via USN Journal; non-USN volumes (exFAT/FAT32/FUSE/CryptoFS) via full-tree scan
+- **Adaptive update cadence** — USN incremental loop (2s); non-USN re-scan (30s for virtual filesystems, 120s for physical)
+- **Paginated results** — Offset/limit pagination with incremental loading
 
-## Arquitetura de Alto Nível
+### Cache & Performance
+- **SQLite disk cache** — Persistent thumbnail and metadata storage
+- **In-memory LRU cache** — Fast access via DashMap and LRU eviction
+- **Async workers** — Background threads for thumbnails, icons, metadata, folder previews, file operations, and prefetch
+- **Directory caching** — In-memory cache of directory structures for fast navigation
+- **UI virtualization** — Only visible items are rendered in grid/list views
+- **Adaptive batching** — Dynamic batch sizes for folder loading based on system performance
+- **I/O prioritization** — Thread priority adjustment based on workload type
+
+## High-Level Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        UI Layer                            │
-│  ┌─────────────┬──────────────┬───────────────────────┐   │
-│  │   Toolbar   │   Tab Bar     │    Preview Panel    │   │
-│  │  Sidebar    │   File List   │    Status Bar       │   │
-│  └─────────────┴──────────────┴───────────────────────┘   │
+│                        UI Layer                             │
+│  ┌─────────────┬──────────────┬───────────────────────┐    │
+│  │   Toolbar   │   Tab Bar    │    Preview Panel      │    │
+│  │   Sidebar   │   File List  │    Status Bar         │    │
+│  └─────────────┴──────────────┴───────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
                                │
 ┌─────────────────────────────────────────────────────────────┐
-│                    Application Layer                       │
-│  ┌─────────────┬──────────────┬───────────────────────┐   │
-│  │Navigation   │ File Ops     │  Clipboard Manager   │   │
-│  │History      │ Sorting      │  Notification System │   │
-│  └─────────────┴──────────────┴───────────────────────┘   │
+│                    Application Layer                        │
+│  ┌─────────────┬──────────────┬───────────────────────┐    │
+│  │ Navigation  │ File Ops     │  Clipboard Manager    │    │
+│  │ History     │ Sorting      │  Notification System  │    │
+│  └─────────────┴──────────────┴───────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
                                │
 ┌─────────────────────────────────────────────────────────────┐
-│                   Domain Layer                             │
-│  ┌─────────────┬──────────────┬───────────────────────┐   │
-│  │FileEntry    │ Thumbnail    │  Error Types         │   │
-│  │Enums        │ Metadata     │  App State           │   │
-│  └─────────────┴──────────────┴───────────────────────┘   │
+│                     Domain Layer                            │
+│  ┌─────────────┬──────────────┬───────────────────────┐    │
+│  │ FileEntry   │ Thumbnail    │  Error Types          │    │
+│  │ Enums       │ Metadata     │  App State            │    │
+│  └─────────────┴──────────────┴───────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
                                │
 ┌─────────────────────────────────────────────────────────────┐
-│                 Infrastructure Layer                         │
-│  ┌─────────────┬──────────────┬───────────────────────┐   │
-│  │Windows API  │ Disk Cache   │  Media Foundation    │   │
-│  │Shell Integ. │ SQLite       │  Thumbnail Workers   │   │
-│  └─────────────┴──────────────┴───────────────────────┘   │
+│                  Infrastructure Layer                       │
+│  ┌─────────────┬──────────────┬───────────────────────┐    │
+│  │ Windows API │ Disk Cache   │  Media Foundation     │    │
+│  │ Shell Integ.│ SQLite       │  Drive Watcher        │    │
+│  └─────────────┴──────────────┴───────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Tecnologias Principais
+## Core Technologies
 
-| Categoria | Tecnologia | Versão | Propósito |
-|-----------|------------|---------|-----------|
-| Linguagem | Rust | 2021 Edition | Core language |
-| GUI Framework | eframe/egui | 0.31 | Interface gráfica (immediate mode) |
-| Windows API | windows-rs | 0.61.0 | Integração Windows |
-| Cache | SQLite (rusqlite) | 0.32 | Persistência de thumbnails |
-| Vídeo | libmpv2 | 5.0.3 | Reprodução de vídeo |
-| PDF | WebView2 | - | Visualização de PDFs |
-| Imagens | image crate | 0.25 | Processamento de imagens (WebP, GIF), decodificação no visualizador dedicado |
-| SVG | resvg/usvg | 0.44 | Renderização de SVG |
-| Paralelismo | rayon | 1.10 | Processamento paralelo |
-| Comunicação | crossbeam-channel | 0.5.15 | Canais MPSC de alta performance (app principal + image viewer workers) |
-| Hashing | rustc-hash/fxhash | 2.0/0.2.1 | Hash rápida para PathBuf |
-| Memory Mapping | memmap2 | 0.9 | Leitura eficiente de imagens grandes no image viewer |
-| EXIF | kamadak-exif | 0.5 | Leitura de metadados JPEG |
-| Compressão | webp | 0.3 | Compressão WebP para thumbnails |
-| Clipboard | clipboard-win | 5.4 | Integração clipboard Windows |
-| File Dialogs | rfd | 0.15 | Diálogos de arquivo nativos |
-| Watcher | Drive Watcher nativo + notify (fallback) | nativo/6.1.1 | Monitoramento de filesystem (local + UNC) |
+| Category | Technology | Version | Purpose |
+|----------|-----------|---------|---------|
+| Language | Rust | 2021 Edition | Core language |
+| GUI Framework | eframe/egui | 0.31 | Immediate-mode GUI |
+| Windows API | windows-rs | 0.61.0 | Native Windows integration |
+| Database | SQLite (rusqlite) | 0.32 | Thumbnail/preference persistence |
+| Video | libmpv2 | 5.0.3 | Video playback |
+| PDF | Windows.Data.Pdf | Built-in | Native PDF rendering (WinRT) |
+| Images | image crate | 0.25 | Image processing (WebP, GIF) |
+| SVG | resvg/usvg | 0.44 | SVG icon rendering |
+| Parallelism | rayon | 1.10 | Parallel processing |
+| Channels | crossbeam-channel | 0.5.15 | High-performance MPSC channels |
+| Hashing | rustc-hash/fxhash | 2.0/0.2.1 | Fast hashing for PathBuf keys |
+| Memory Mapping | memmap2 | 0.9 | Efficient large image reading |
+| EXIF | kamadak-exif | 0.5 | JPEG metadata extraction |
+| Compression | webp | 0.3 | WebP compression for thumbnails |
+| Clipboard | clipboard-win | 5.4 | Windows clipboard (CF_HDROP) |
+| File Dialogs | rfd | 0.15 | Native file dialogs |
+| Watcher | Native Drive Watcher + notify (fallback) | native/6.1.1 | Filesystem monitoring (local + UNC) |
+| i18n | rust-i18n | 3 | Multi-language support |
+| IPC | Named Pipes + bincode | 1.3 | App ↔ search service communication |
+| Windows Service | windows-service | 0.7 | Background indexing service |
 
-## Dependências de Runtime
+## Runtime Dependencies
 
-- **libmpv-2.dll** - Necessária para reprodução de vídeo
-- **Microsoft Edge WebView2 Runtime** - Necessário para visualização de PDFs
+- **libmpv-2.dll** — Required for video playback (place in executable directory or PATH)
+- **Windows 10+** — Required for Windows.Data.Pdf API used by the PDF viewer
 
-## Limitações Conhecidas
+## Known Limitations
 
-1. **Windows Only** - Não há suporte para Linux/macOS devido às dependências de Windows API
-2. **Dependência de mpv** - Requer `libmpv-2.dll` para reprodução de vídeo
-3. **Dependência de WebView2** - Requer Microsoft Edge WebView2 Runtime para PDFs
-4. **Idioma** - Interface em Português (BR) hardcoded
-5. **Testes** - Cobertura mínima de testes automatizados
+1. **Windows only** — Depends heavily on Windows APIs (Shell, COM, NTFS, WinRT)
+2. **mpv dependency** — Video playback requires `libmpv-2.dll`
+3. **Minimal test coverage** — Automated tests are sparse
 
-## Requisitos do Sistema
+## System Requirements
 
-### Mínimos
-- Windows 10 ou superior
-- 4GB RAM
-- 100MB espaço em disco
+### Minimum
+- Windows 10 (Build 1903+) or Windows 11
+- x64 processor, 2+ cores
+- 4 GB RAM
+- 100 MB disk space + cache storage
+- DirectX 11 compatible GPU
 
-### Recomendados
-- Windows 11
-- 8GB RAM ou mais
-- SSD para melhor performance de cache
-- Placa de vídeo dedicada para preview de vídeos
+### Recommended
+- Windows 11 (latest update)
+- x64 processor, 4+ cores
+- 8 GB RAM or more
+- SSD for cache performance
+- Dedicated GPU for video preview
 
-## Onde Encontrar Mais Informações
+## Further Reading
 
-- [02_build_run_debug.md](02_build_run_debug.md) - Como compilar e executar
-- [03_architecture.md](03_architecture.md) - Arquitetura detalhada
-- [04_module_map.md](04_module_map.md) - Mapa dos módulos
-- [05_dependencies_stack.md](05_dependencies_stack.md) - Stack de dependências
-- [06_key_flows.md](06_key_flows.md) - Fluxos principais
-- [07_storage_config.md](07_storage_config.md) - Configurações e storage
-- [08_logging_errors_telemetry.md](08_logging_errors_telemetry.md) - Logs e erros
-- [09_support_playbook.md](09_support_playbook.md) - Playbook de suporte
+- [02_build_run_debug.md](02_build_run_debug.md) — Build, run, and debug instructions
+- [03_architecture.md](03_architecture.md) — Detailed architecture
+- [04_module_map.md](04_module_map.md) — Module map
+- [05_dependencies_stack.md](05_dependencies_stack.md) — Full dependency stack
+- [06_key_flows.md](06_key_flows.md) — Key application flows
+- [07_storage_config.md](07_storage_config.md) — Storage and configuration
+- [08_logging_errors_telemetry.md](08_logging_errors_telemetry.md) — Logging and error handling
+- [09_performance_optimizations.md](09_performance_optimizations.md) — Performance optimizations
 
----
-
-*Última atualização: 2026-02-24 (documentado visualizador de imagens dedicado com cache sliding-window)*

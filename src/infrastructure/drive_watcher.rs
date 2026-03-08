@@ -7,8 +7,7 @@
 //! - Reduces handle usage (one handle per drive vs one per folder)
 //! - Provides faster navigation with guaranteed change detection
 //!
-//! Based on File Pilot's approach: "Stabilized directory change tracking by using
-//! ReadDirectoryChanges on the entire drive instead of per folder."
+//! Uses ReadDirectoryChangesW on the entire drive instead of per folder.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
