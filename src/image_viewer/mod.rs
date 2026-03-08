@@ -10,6 +10,19 @@ mod ipc;
 mod indexer;
 mod loader;
 
+fn apply_saved_locale() {
+    let cache_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("MTT-File-Manager")
+        .join("thumbnails");
+
+    if let Ok(cache) = crate::infrastructure::disk_cache::ThumbnailDiskCache::new(cache_dir) {
+        if let Some(language) = cache.get_preference("language") {
+            rust_i18n::set_locale(&language);
+        }
+    }
+}
+
 /// Named mutex used to guarantee only one image viewer instance runs at a time.
 const IMAGE_VIEWER_MUTEX_NAME: &str = "Global\\MTTFileManager_ImageViewer_SingleInstance\0";
 
@@ -82,6 +95,8 @@ pub fn open_image_viewer(path: PathBuf) {
 }
 
 pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
+    apply_saved_locale();
+
     let _guard = match SingleInstanceGuard::try_acquire() {
         Some(g) => g,
         None => {
@@ -127,10 +142,10 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
         .get(start_index)
         .and_then(|p| p.file_name())
         .map(|v| v.to_string_lossy().to_string())
-        .unwrap_or_else(|| "Image Viewer".to_string());
+        .unwrap_or_else(|| rust_i18n::t!("imageviewer.title").to_string());
 
     let mut viewport = eframe::egui::ViewportBuilder::default()
-        .with_title(format!("Image Viewer - {}", title_name))
+        .with_title(rust_i18n::t!("imageviewer.title_with_file", name = title_name).to_string())
         .with_inner_size([1200.0, 850.0])
         .with_resizable(true)
         .with_decorations(true)
@@ -153,7 +168,7 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
     };
 
     eframe::run_native(
-        "Image Viewer",
+        &rust_i18n::t!("imageviewer.title"),
         options,
         Box::new(move |_cc| {
             Ok(Box::new(app::DedicatedImageViewerApp::new(

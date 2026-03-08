@@ -19,6 +19,19 @@ mod renderer;
 mod toolbar;
 mod viewer_app;
 
+fn apply_saved_locale() {
+    let cache_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("MTT-File-Manager")
+        .join("thumbnails");
+
+    if let Ok(cache) = crate::infrastructure::disk_cache::ThumbnailDiskCache::new(cache_dir) {
+        if let Some(language) = cache.get_preference("language") {
+            rust_i18n::set_locale(&language);
+        }
+    }
+}
+
 /// Maximum PDF file size accepted by the viewer (512 MB).
 const MAX_PDF_FILE_SIZE: u64 = 512 * 1024 * 1024;
 
@@ -38,7 +51,7 @@ fn validate_pdf_path(path: &Path) -> Result<(), String> {
 
     // 1. Null bytes
     if path_str.contains('\0') {
-        return Err("Path contains null bytes".into());
+        return Err(rust_i18n::t!("pdfviewer.invalid_null").to_string());
     }
 
     // 2. Path traversal
@@ -47,10 +60,13 @@ fn validate_pdf_path(path: &Path) -> Result<(), String> {
             component,
             std::path::Component::ParentDir | std::path::Component::CurDir
         ) {
-            return Err(format!(
-                "Path traversal component detected: {}",
-                component.as_os_str().to_string_lossy()
-            ));
+            return Err(
+                rust_i18n::t!(
+                    "pdfviewer.invalid_traversal",
+                    component = component.as_os_str().to_string_lossy().to_string()
+                )
+                .to_string(),
+            );
         }
     }
 
@@ -59,7 +75,7 @@ fn validate_pdf_path(path: &Path) -> Result<(), String> {
         || path_str.starts_with("//")
         || path_str.starts_with("\\\\?\\UNC\\")
     {
-        return Err("Network/UNC paths are not allowed for security".into());
+        return Err(rust_i18n::t!("pdfviewer.network_path").to_string());
     }
 
     // 4. Extension check
@@ -68,29 +84,37 @@ fn validate_pdf_path(path: &Path) -> Result<(), String> {
         .and_then(|e| e.to_str())
         .unwrap_or("");
     if !ext.eq_ignore_ascii_case("pdf") {
-        return Err(format!(
-            "Only .pdf files are accepted (got .{})",
-            ext
-        ));
+        return Err(rust_i18n::t!("pdfviewer.invalid_extension", ext = ext).to_string());
     }
 
     // 5. File existence
     if !path.is_file() {
-        return Err(format!("File not found: {}", path.display()));
+        return Err(
+            rust_i18n::t!("pdfviewer.file_not_found", path = path.display().to_string())
+                .to_string(),
+        );
     }
 
     // 6. File size
     match std::fs::metadata(path) {
         Ok(meta) => {
             if meta.len() > MAX_PDF_FILE_SIZE {
-                return Err(format!(
-                    "File too large ({:.1} MB). Maximum allowed: {} MB",
-                    meta.len() as f64 / (1024.0 * 1024.0),
-                    MAX_PDF_FILE_SIZE / (1024 * 1024)
-                ));
+                return Err(
+                    rust_i18n::t!(
+                        "pdfviewer.file_too_large",
+                        size_mb = format!("{:.1}", meta.len() as f64 / (1024.0 * 1024.0)),
+                        max_mb = (MAX_PDF_FILE_SIZE / (1024 * 1024)).to_string()
+                    )
+                    .to_string(),
+                );
             }
         }
-        Err(e) => return Err(format!("Cannot read file metadata: {e}")),
+        Err(e) => {
+            return Err(
+                rust_i18n::t!("pdfviewer.metadata_read_failed", error = e.to_string())
+                    .to_string(),
+            )
+        }
     }
 
     Ok(())
@@ -126,6 +150,8 @@ pub fn open_pdf_viewer(path: PathBuf) {
 
 /// Entry-point called when the process is started with `--pdf-viewer <path>`.
 pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
+    apply_saved_locale();
+
     // Validate path again in the child process (defense in depth — the child
     // receives the path from the command line which could be tampered with).
     if let Err(e) = validate_pdf_path(&path) {
@@ -137,10 +163,10 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
     let file_name = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "PDF".to_string());
+        .unwrap_or_else(|| rust_i18n::t!("pdfviewer.title").to_string());
 
     let mut viewport = eframe::egui::ViewportBuilder::default()
-        .with_title(format!("PDF Viewer - {}", file_name))
+        .with_title(rust_i18n::t!("pdfviewer.title_with_file", name = file_name).to_string())
         .with_inner_size([1024.0, 768.0])
         .with_resizable(true)
         .with_decorations(true)
@@ -163,7 +189,7 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
     };
 
     eframe::run_native(
-        "PDF Viewer",
+        &rust_i18n::t!("pdfviewer.title"),
         options,
         Box::new(move |_cc| match viewer_app::PdfViewerApp::new(path) {
             Ok(app) => Ok(Box::new(app)),
@@ -183,13 +209,13 @@ fn show_error_window(message: &str) -> eframe::Result<()> {
     let msg = message.to_string();
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
-            .with_title("PDF Viewer - Error")
+            .with_title(rust_i18n::t!("pdfviewer.title_error").to_string())
             .with_inner_size([500.0, 200.0]),
         persist_window: false,
         ..Default::default()
     };
     eframe::run_native(
-        "PDF Viewer Error",
+        &rust_i18n::t!("pdfviewer.app_error"),
         options,
         Box::new(move |_cc| Ok(Box::new(viewer_app::ErrorApp { message: msg }))),
     )

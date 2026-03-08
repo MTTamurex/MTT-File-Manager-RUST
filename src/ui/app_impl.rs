@@ -179,11 +179,16 @@ impl eframe::App for ImageViewerApp {
 
         // 11b. Language settings modal
         if self.navigation_state.show_language_settings {
-            self.navigation_state.show_language_settings =
+            let (keep_open, language_changed) =
                 crate::ui::components::language_settings::render_language_settings(
                     ctx,
                     self.navigation_state.show_language_settings,
                 );
+            self.navigation_state.show_language_settings = keep_open;
+            if language_changed {
+                self.save_preferences();
+                self.force_save_preferences();
+            }
         }
 
         // 12. Notifications

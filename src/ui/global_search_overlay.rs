@@ -243,7 +243,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
                 ui.label(
-                    egui::RichText::new("Filtros:")
+                    egui::RichText::new(t!("search.filters"))
                         .size(10.0)
                         .color(egui::Color32::from_gray(140)),
                 );
@@ -274,11 +274,14 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                     .height(800.0)
                     .selected_text(match app.global_search.drive_filter {
                         Some(drive) => format!("{}:\\", drive),
-                        None => "Todos".to_string(),
+                        None => t!("search.all_drives").to_string(),
                     })
                     .show_ui(ui, |ui| {
                         if ui
-                            .selectable_label(app.global_search.drive_filter.is_none(), "Todos")
+                            .selectable_label(
+                                app.global_search.drive_filter.is_none(),
+                                t!("search.all_drives"),
+                            )
                             .clicked()
                         {
                             app.global_search.drive_filter = None;
@@ -299,7 +302,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
 
                 ui.add_space(6.0);
                 ui.label(
-                    egui::RichText::new("Drive:")
+                    egui::RichText::new(t!("search.drive_filter"))
                         .size(10.0)
                         .color(egui::Color32::from_gray(140)),
                 );
