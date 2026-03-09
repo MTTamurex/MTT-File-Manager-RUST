@@ -204,11 +204,6 @@ impl ContextMenuState {
         self.item_index = item_index;
         self.target_paths = target_paths;
         self.is_empty_area = is_empty_area;
-        self.items.clear();
-        self.partition_dirty = true;
-        self.primary_indices.clear();
-        self.secondary_indices.clear();
-        self.overflow_indices.clear();
         self.selected_command_id = None;
         self.native_context = None;
         self.pending_load_item = None;
