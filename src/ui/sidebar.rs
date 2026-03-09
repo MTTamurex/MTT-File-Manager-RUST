@@ -233,11 +233,8 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
 
             let mut cursor_x = rect.min.x + 12.0;
 
-            // Recycle Bin icon
-            let recycle_bin_path = "shell:RecycleBinFolder";
-            let recycle_icon = ctx
-                .icon_loader
-                .get_or_load_folder_path_icon(ui.ctx(), recycle_bin_path);
+            // Recycle Bin has a dedicated shell extraction path to match Explorer.
+            let recycle_icon = ctx.icon_loader.ensure_recycle_bin_icon(ui.ctx());
 
             if let Some(icon) = recycle_icon {
                 let icon_rect = Rect::from_center_size(

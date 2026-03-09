@@ -1,5 +1,7 @@
 use super::*;
 
+const RECYCLE_BIN_CACHE_KEY: &str = "shell:recyclebin:v2";
+
 impl IconLoader {
     /// Ensures the computer icon texture is loaded.
     ///
@@ -68,7 +70,7 @@ impl IconLoader {
 
         // Try SQLite cache first.
         if let Some(dc) = &self.disk_cache {
-            if let Some((data, width, height)) = dc.get_shell_icon("shell:recyclebin") {
+            if let Some((data, width, height)) = dc.get_shell_icon(RECYCLE_BIN_CACHE_KEY) {
                 let image = egui::ColorImage::from_rgba_unmultiplied(
                     [width as usize, height as usize],
                     &data,
@@ -85,7 +87,7 @@ impl IconLoader {
                     unsafe { let _ = ::windows::Win32::System::Com::CoInitializeEx(None, ::windows::Win32::System::Com::COINIT_APARTMENTTHREADED); }
                     if let Ok((fresh, w, h)) = windows::extract_recycle_bin_icon(IconSize::Jumbo) {
                         if fresh != cached_pixels || w != width || h != height {
-                            dc.put_shell_icon("shell:recyclebin", &fresh, w, h);
+                            dc.put_shell_icon(RECYCLE_BIN_CACHE_KEY, &fresh, w, h);
                             let _ = tx.send(AsyncIconResult {
                                 key: "__recyclebin__".to_string(),
                                 data: Some((fresh, w, h)),
@@ -101,7 +103,7 @@ impl IconLoader {
         // Cache miss — extract synchronously.
         if let Ok((data, width, height)) = windows::extract_recycle_bin_icon(IconSize::Jumbo) {
             if let Some(dc) = &self.disk_cache {
-                dc.put_shell_icon("shell:recyclebin", &data, width, height);
+                dc.put_shell_icon(RECYCLE_BIN_CACHE_KEY, &data, width, height);
             }
             let image =
                 egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &data);
