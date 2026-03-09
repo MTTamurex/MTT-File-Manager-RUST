@@ -7,6 +7,10 @@ use crate::application::file_operations;
 use std::path::{Path, PathBuf};
 
 impl ImageViewerApp {
+    pub fn can_copy_from_current_location(&self) -> bool {
+        !self.navigation_state.is_recycle_bin_view
+    }
+
     pub fn can_paste_into_current_location(&self) -> bool {
         self.clipboard.has_content()
             && !self.navigation_state.is_computer_view
@@ -14,6 +18,11 @@ impl ImageViewerApp {
     }
 
     pub fn command_copy(&mut self, idx: Option<usize>) {
+        if !self.can_copy_from_current_location() {
+            self.context_menu.target_paths.clear();
+            return;
+        }
+
         let mut files = Vec::new();
 
         let use_multi_selection = if let Some(i) = idx {

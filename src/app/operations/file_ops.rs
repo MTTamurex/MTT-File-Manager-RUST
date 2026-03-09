@@ -274,6 +274,10 @@ impl ImageViewerApp {
     }
 
     pub fn can_rename_item(&self, idx: usize) -> bool {
+        if self.navigation_state.is_recycle_bin_view {
+            return false;
+        }
+
         self.items.get(idx).is_some_and(|item| {
             item.drive_info.as_ref().map_or(true, |drive| {
                 crate::infrastructure::windows::drive_supports_volume_label_rename(
