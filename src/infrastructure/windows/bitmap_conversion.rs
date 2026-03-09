@@ -1,6 +1,7 @@
 //! Bitmap and icon conversion functions
 //! Follows .cursorrules: single responsibility, < 300 lines
 
+use std::ffi::c_void;
 use windows::{Win32::Graphics::Gdi::*, Win32::UI::WindowsAndMessaging::*};
 
 /// Converts HBITMAP to RGBA buffer.
@@ -73,32 +74,39 @@ pub fn hicon_to_rgba(
             return Err("GetIconInfo failed".into());
         }
 
-        let hbm_color = icon_info.hbmColor;
+        let source_bitmap = if !icon_info.hbmColor.is_invalid() {
+            icon_info.hbmColor
+        } else {
+            icon_info.hbmMask
+        };
 
         let mut bm = BITMAP::default();
         GetObjectW(
-            hbm_color.into(),
+            source_bitmap.into(),
             std::mem::size_of::<BITMAP>() as i32,
             Some(&mut bm as *mut _ as *mut _),
         );
 
         let width = bm.bmWidth as usize;
-        let height = bm.bmHeight.unsigned_abs() as usize;
+        let mut height = bm.bmHeight.unsigned_abs() as usize;
+        if icon_info.hbmColor.is_invalid() {
+            height /= 2;
+        }
 
         // Validate size (icons are usually small, but be defensive)
         if width > 256 || height > 256 {
-            let _ = DeleteObject(hbm_color.into());
+            if !icon_info.hbmColor.is_invalid() {
+                let _ = DeleteObject(icon_info.hbmColor.into());
+            }
             let _ = DeleteObject(icon_info.hbmMask.into());
             return Err("Icon too large".into());
         }
 
-        let mut buffer = vec![0u8; width * height * 4];
-
-        let mut bi = BITMAPINFO {
+        let bi = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
                 biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
                 biWidth: width as i32,
-                biHeight: -(height as i32), // Top-down
+                biHeight: -(height as i32),
                 biPlanes: 1,
                 biBitCount: 32,
                 biCompression: BI_RGB.0,
@@ -107,30 +115,70 @@ pub fn hicon_to_rgba(
             ..Default::default()
         };
 
-        let hdc = GetDC(None);
-        let result = GetDIBits(
-            hdc,
-            hbm_color,
-            0,
-            height as u32,
-            Some(buffer.as_mut_ptr() as *mut _),
-            &mut bi,
-            DIB_RGB_COLORS,
-        );
-
-        ReleaseDC(None, hdc);
-
-        if result == 0 {
-            let _ = DeleteObject(hbm_color.into());
+        let screen_dc = GetDC(None);
+        let mem_dc = CreateCompatibleDC(Some(screen_dc));
+        if mem_dc.is_invalid() {
+            ReleaseDC(None, screen_dc);
+            if !icon_info.hbmColor.is_invalid() {
+                let _ = DeleteObject(icon_info.hbmColor.into());
+            }
             let _ = DeleteObject(icon_info.hbmMask.into());
-            return Err("GetDIBits failed".into());
+            return Err("CreateCompatibleDC failed".into());
         }
 
-        // Cleanup bitmaps (but NOT the HICON - caller is responsible)
-        let _ = DeleteObject(hbm_color.into());
+        let mut dib_bits: *mut c_void = std::ptr::null_mut();
+        let dib = CreateDIBSection(
+            Some(screen_dc),
+            &bi,
+            DIB_RGB_COLORS,
+            &mut dib_bits,
+            None,
+            0,
+        )?;
+
+        if dib.is_invalid() || dib_bits.is_null() {
+            let _ = DeleteDC(mem_dc);
+            ReleaseDC(None, screen_dc);
+            if !icon_info.hbmColor.is_invalid() {
+                let _ = DeleteObject(icon_info.hbmColor.into());
+            }
+            let _ = DeleteObject(icon_info.hbmMask.into());
+            return Err("CreateDIBSection failed".into());
+        }
+
+        let previous_bitmap = SelectObject(mem_dc, dib.into());
+        std::ptr::write_bytes(dib_bits, 0, width * height * 4);
+
+        let draw_result = DrawIconEx(
+            mem_dc,
+            0,
+            0,
+            hicon,
+            width as i32,
+            height as i32,
+            0,
+            Some(HBRUSH::default()),
+            DI_NORMAL,
+        );
+
+        let buffer = std::slice::from_raw_parts(dib_bits as *const u8, width * height * 4).to_vec();
+
+        let _ = SelectObject(mem_dc, previous_bitmap);
+        let _ = DeleteObject(dib.into());
+        let _ = DeleteDC(mem_dc);
+        ReleaseDC(None, screen_dc);
+
+        if !icon_info.hbmColor.is_invalid() {
+            let _ = DeleteObject(icon_info.hbmColor.into());
+        }
         let _ = DeleteObject(icon_info.hbmMask.into());
 
+        if draw_result.is_err() {
+            return Err("DrawIconEx failed".into());
+        }
+
         // BGRA → RGBA conversion
+        let mut buffer = buffer;
         for pixel in buffer.chunks_exact_mut(4) {
             pixel.swap(0, 2);
         }
