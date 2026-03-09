@@ -82,6 +82,7 @@ impl ImageViewerApp {
             .and_then(|idx| self.items.get(idx))
             .map(|item| item.drive_info.is_some())
             .unwrap_or(false);
+        let can_copy_target = !is_drive && self.can_copy_from_current_location();
         let can_rename_target = _item_index.is_some_and(|idx| self.can_rename_item(idx));
 
         // ========== PRIMARY ITEMS (Header bar) - matching Files ==========
@@ -96,7 +97,7 @@ impl ImageViewerApp {
             ContextMenuItem::primary(-2, t!("context_menu.copy"))
                 .with_command("copy")
                 .with_shortcut("Ctrl+C")
-                .enabled(!is_drive),
+                .enabled(can_copy_target),
         );
 
         let can_paste = self.clipboard.has_content();
@@ -154,7 +155,7 @@ impl ImageViewerApp {
                 ContextMenuItem::new(-31, t!("context_menu.copy"))
                     .with_command("copy")
                     .with_shortcut("Ctrl+C")
-                    .enabled(!is_drive),
+                    .enabled(can_copy_target),
             );
             items.push(
                 ContextMenuItem::new(-32, t!("context_menu.paste"))

@@ -22,6 +22,7 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
         .is_some_and(|f| f.drive_info.is_some());
     let has_selection =
         (app.selected_file.is_some() || !app.multi_selection.is_empty()) && !is_drive_selected;
+    let can_copy = has_selection && app.can_copy_from_current_location();
     let can_rename = app.multi_selection.len() <= 1
         && app.selected_item.is_some_and(|idx| app.can_rename_item(idx));
     let can_paste = app.can_paste_into_current_location() && !is_drive_selected;
@@ -100,7 +101,7 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
         if render_btn("cut", has_selection, &t!("secondary_toolbar.cut")) {
             action = SecAction::Cut;
         }
-        if render_btn("copy", has_selection, &t!("secondary_toolbar.copy")) {
+        if render_btn("copy", can_copy, &t!("secondary_toolbar.copy")) {
             action = SecAction::Copy;
         }
         if render_btn("paste", can_paste, &t!("secondary_toolbar.paste")) {
