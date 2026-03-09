@@ -131,6 +131,9 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                 None
             };
 
+            let sidebar_renaming_ref = app.sidebar_renaming.as_ref()
+                .map(|(p, t)| (p.as_str(), t.as_str()));
+
             let mut sidebar_ctx = SidebarContext {
                 disks: &app.drive_state.disks,
                 current_path: &app.navigation_state.current_path,
@@ -138,7 +141,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                 is_computer_view,
                 is_recycle_bin_view: app.navigation_state.is_recycle_bin_view,
                 computer_icon: app.cache_manager.computer_icon.as_ref(),
-                is_renaming: app.renaming_state.is_some(),
+                is_renaming: app.renaming_state.is_some() || app.sidebar_renaming.is_some(),
                 icon_loader: &mut app.item_icon_loader,
                 onedrive_path: app.onedrive_path.as_deref(),
                 onedrive_icon: app.onedrive_icon.as_ref(),
@@ -146,6 +149,8 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                 is_item_dragging: app.is_item_dragging,
                 is_folder_dragging,
                 dragging_path,
+                sidebar_renaming: sidebar_renaming_ref,
+                sidebar_rename_focus: app.sidebar_rename_focus,
             };
 
             egui::ScrollArea::vertical()
@@ -154,6 +159,9 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                 .show(ui, |ui| render_sidebar(ui, &mut sidebar_ctx))
                 .inner
         });
+
+    // Consume focus flag after rendering so it only fires once
+    app.sidebar_rename_focus = false;
 
     let sidebar_action = match sidebar_response.inner {
         Some(SidebarAction::OpenDriveContextMenu(path)) => {
@@ -206,6 +214,36 @@ fn handle_sidebar_action(app: &mut ImageViewerApp, action: SidebarAction) {
         SidebarAction::PinFolder(path) => app.pin_folder(&path),
         SidebarAction::UnpinFolder(path) => app.unpin_folder(&path),
         SidebarAction::ReorderPinnedFolder { from, to } => app.reorder_pinned_folder(from, to),
+        SidebarAction::CommitDriveRename { drive_path, new_label } => {
+            if drive_path.is_empty() {
+                // Text update only — update the editable buffer
+                if let Some((_, ref mut text)) = app.sidebar_renaming {
+                    *text = new_label;
+                }
+            } else {
+                // Actual commit
+                let path = std::path::PathBuf::from(&drive_path);
+                app.sidebar_renaming = None;
+                app.sidebar_rename_focus = false;
+                // Dispatch rename to background worker
+                app.file_operation_state.file_ops_in_progress += 1;
+                if app.file_operation_state.file_op_sender.send(
+                    crate::workers::file_operation_worker::FileOperationRequest::rename(
+                        path,
+                        new_label,
+                        app.native_hwnd.unwrap_or_default(),
+                    ),
+                ).is_err() {
+                    app.file_operation_state.file_ops_in_progress =
+                        app.file_operation_state.file_ops_in_progress.saturating_sub(1);
+                    log::warn!("[FileOps] worker channel closed on sidebar drive rename");
+                }
+            }
+        }
+        SidebarAction::CancelDriveRename => {
+            app.sidebar_renaming = None;
+            app.sidebar_rename_focus = false;
+        }
     }
 }
 

@@ -246,6 +246,8 @@ impl ImageViewerApp {
             pending_all_items_clear: false,
             renaming_state: None,
             focus_rename: false,
+            sidebar_renaming: None,
+            sidebar_rename_focus: false,
 
             // Drive-wide file system watcher
             drive_watcher:
