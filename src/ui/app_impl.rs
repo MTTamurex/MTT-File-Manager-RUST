@@ -115,20 +115,33 @@ impl eframe::App for ImageViewerApp {
             use crate::infrastructure::shell_menu_worker::ShellMenuResponse;
             while let Ok(response) = self.shell_menu_res_rx.try_recv() {
                 match response {
-                    ShellMenuResponse::Ready(items) => {
-                        if self.context_menu.is_open {
+                    ShellMenuResponse::Ready { request_id, items } => {
+                        if self.context_menu.is_open && request_id == self.shell_menu_request_id {
                             let ctx_clone = ctx.clone();
                             self.apply_async_shell_items(items, &ctx_clone);
                         }
-                        self.shell_menu_loading = false;
+                        if request_id == self.shell_menu_request_id {
+                            self.shell_menu_loading = false;
+                        }
                     }
-                    ShellMenuResponse::Error(e) => {
-                        log::debug!("[ShellMenu] Extraction error: {}", e);
-                        self.shell_menu_loading = false;
+                    ShellMenuResponse::Error {
+                        request_id,
+                        message,
+                    } => {
+                        if request_id == self.shell_menu_request_id {
+                            log::debug!("[ShellMenu] Extraction error: {}", message);
+                            self.shell_menu_loading = false;
+                        }
                     }
-                    ShellMenuResponse::SubmenuLoaded { item_id, sub_items } => {
-                        let ctx_clone = ctx.clone();
-                        self.apply_async_submenu_items(item_id, sub_items, &ctx_clone);
+                    ShellMenuResponse::SubmenuLoaded {
+                        request_id,
+                        item_id,
+                        sub_items,
+                    } => {
+                        if request_id == self.shell_menu_request_id {
+                            let ctx_clone = ctx.clone();
+                            self.apply_async_submenu_items(item_id, sub_items, &ctx_clone);
+                        }
                     }
                     ShellMenuResponse::Invoked => {}
                 }

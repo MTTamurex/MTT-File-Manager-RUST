@@ -23,6 +23,12 @@ impl ImageViewerApp {
             return;
         }
 
+        if idx.is_none() && !self.context_menu.target_paths.is_empty() {
+            self.clipboard
+                .copy(&self.context_menu.target_paths.clone());
+            return;
+        }
+
         let mut files = Vec::new();
 
         let use_multi_selection = if let Some(i) = idx {
@@ -50,6 +56,11 @@ impl ImageViewerApp {
 
     /// Recortar: Coloca o arquivo no clipboard do Windows com flag de MOVE
     pub fn command_cut(&mut self, idx: Option<usize>) {
+        if idx.is_none() && !self.context_menu.target_paths.is_empty() {
+            self.clipboard.cut(&self.context_menu.target_paths.clone());
+            return;
+        }
+
         let mut files = Vec::new();
 
         let use_multi_selection = if let Some(i) = idx {
@@ -85,7 +96,14 @@ impl ImageViewerApp {
         }
 
         // Destination folder
-        let dest_folder = if let Some(idx) = idx {
+        let dest_folder = if idx.is_none() && !self.context_menu.target_paths.is_empty() {
+            self.context_menu
+                .target_paths
+                .first()
+                .filter(|path| path.is_dir())
+                .cloned()
+                .unwrap_or_else(|| PathBuf::from(&self.navigation_state.current_path))
+        } else if let Some(idx) = idx {
             if let Some(item) = self.items.get(idx) {
                 if item.is_dir {
                     item.path.clone()

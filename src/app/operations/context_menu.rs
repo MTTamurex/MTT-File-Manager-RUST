@@ -45,6 +45,17 @@ impl ImageViewerApp {
     ) {
         use crate::application::context_menu::ContextMenuItem;
 
+        let drive_target_path = if !is_empty_area && paths.len() == 1 {
+            let target = &paths[0];
+            if crate::infrastructure::windows::is_drive_root_path(target) {
+                Some(target.as_path())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let mut items = Vec::new();
 
         // Special menu for Recycle Bin items
@@ -81,9 +92,19 @@ impl ImageViewerApp {
         let is_drive = _item_index
             .and_then(|idx| self.items.get(idx))
             .map(|item| item.drive_info.is_some())
-            .unwrap_or(false);
+            .unwrap_or_else(|| drive_target_path.is_some());
         let can_copy_target = !is_drive && self.can_copy_from_current_location();
-        let can_rename_target = _item_index.is_some_and(|idx| self.can_rename_item(idx));
+        let can_rename_target = if let Some(idx) = _item_index {
+            self.can_rename_item(idx)
+        } else if let Some(path) = drive_target_path {
+            path.to_str().is_some_and(|drive_path| {
+                crate::infrastructure::windows::drive_supports_volume_label_rename(
+                    crate::infrastructure::windows::detect_drive_type(drive_path),
+                )
+            })
+        } else {
+            false
+        };
 
         // ========== PRIMARY ITEMS (Header bar) - matching Files ==========
         // These appear as icon buttons in the header
@@ -221,8 +242,10 @@ impl ImageViewerApp {
         // Results arrive via `shell_menu_res_rx`; the app polls them in its update loop
         // and calls `apply_async_shell_items` to merge them into `self.context_menu.items`.
         if let Some(hwnd) = self.native_hwnd {
+            self.shell_menu_request_id = self.shell_menu_request_id.wrapping_add(1);
             let _ = self.shell_menu_req_tx.send(
                 crate::infrastructure::shell_menu_worker::ShellMenuRequest::Extract {
+                    request_id: self.shell_menu_request_id,
                     hwnd_isize: hwnd.0 as isize,
                     paths: paths.to_vec(),
                 },
@@ -330,6 +353,7 @@ impl ImageViewerApp {
         // the update-loop polling code which calls `apply_async_submenu_items`.
         let _ = self.shell_menu_req_tx.send(
             crate::infrastructure::shell_menu_worker::ShellMenuRequest::LoadSubmenu {
+                request_id: self.shell_menu_request_id,
                 item_id: item_id as u32,
             },
         );

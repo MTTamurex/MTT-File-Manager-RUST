@@ -117,10 +117,24 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
             } else {
                 None
             };
+            let highlighted_drive_path = if app.context_menu.is_open
+                && app.context_menu.target_paths.len() == 1
+            {
+                app.context_menu.target_paths[0]
+                    .to_str()
+                    .filter(|path| {
+                        crate::infrastructure::windows::is_drive_root_path(
+                            std::path::Path::new(path),
+                        )
+                    })
+            } else {
+                None
+            };
 
             let mut sidebar_ctx = SidebarContext {
                 disks: &app.drive_state.disks,
                 current_path: &app.navigation_state.current_path,
+                highlighted_drive_path,
                 is_computer_view,
                 is_recycle_bin_view: app.navigation_state.is_recycle_bin_view,
                 computer_icon: app.cache_manager.computer_icon.as_ref(),
@@ -141,6 +155,20 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                 .inner
         });
 
+    let sidebar_action = match sidebar_response.inner {
+        Some(SidebarAction::OpenDriveContextMenu(path)) => {
+            let path_buf = std::path::PathBuf::from(&path);
+            let pos = ctx.input(|i| i.pointer.hover_pos().unwrap_or_default());
+            let right_bound = sidebar_response.response.rect.right();
+
+            app.context_menu
+                .open(pos, right_bound, None, vec![path_buf.clone()], false);
+            app.populate_context_menu(ctx, &[path_buf], false, None);
+            None
+        }
+        other => other,
+    };
+
     let show_ms = t_sidebar_fn.elapsed().as_millis();
     if show_ms > 50 {
         log::warn!(
@@ -149,7 +177,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
         );
     }
 
-    sidebar_response.inner
+    sidebar_action
 }
 
 /// Handle sidebar actions separately from sidebar rendering to avoid
@@ -174,6 +202,7 @@ fn handle_sidebar_action(app: &mut ImageViewerApp, action: SidebarAction) {
         }
         SidebarAction::NavigateToComputer => app.navigate_to_computer(),
         SidebarAction::NavigateToRecycleBin => app.navigate_to_recycle_bin(),
+        SidebarAction::OpenDriveContextMenu(_) => {}
         SidebarAction::PinFolder(path) => app.pin_folder(&path),
         SidebarAction::UnpinFolder(path) => app.unpin_folder(&path),
         SidebarAction::ReorderPinnedFolder { from, to } => app.reorder_pinned_folder(from, to),

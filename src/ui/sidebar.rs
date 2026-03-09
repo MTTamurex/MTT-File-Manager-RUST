@@ -33,6 +33,7 @@ pub fn invalidate_drive_type_cache() {
 pub struct SidebarContext<'a> {
     pub disks: &'a [(String, String)], // (path, label)
     pub current_path: &'a str,
+    pub highlighted_drive_path: Option<&'a str>,
     pub is_computer_view: bool,
     pub is_recycle_bin_view: bool,
     pub computer_icon: Option<&'a egui::TextureHandle>,
@@ -51,6 +52,7 @@ pub enum SidebarAction {
     NavigateTo(String),
     NavigateToComputer,
     NavigateToRecycleBin,
+    OpenDriveContextMenu(String),
     PinFolder(String),
     UnpinFolder(String),
     ReorderPinnedFolder { from: usize, to: usize },
@@ -340,8 +342,8 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
                 .onedrive_path
                 .map(|od| ctx.current_path.starts_with(od))
                 .unwrap_or(false);
-            let is_selected =
-                !ctx.is_computer_view && !in_onedrive && ctx.current_path.starts_with(disk_path);
+            let is_selected = ctx.highlighted_drive_path == Some(disk_path.as_str())
+                || (!ctx.is_computer_view && !in_onedrive && ctx.current_path.starts_with(disk_path));
 
             let (mut rect, response) =
                 ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), Sense::click());
@@ -394,6 +396,8 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
 
             if response.clicked() && !ctx.is_renaming {
                 action = Some(SidebarAction::NavigateTo(disk_path.to_string()));
+            } else if response.secondary_clicked() && !ctx.is_renaming {
+                action = Some(SidebarAction::OpenDriveContextMenu(disk_path.to_string()));
             }
             ui.add_space(2.0);
         }
