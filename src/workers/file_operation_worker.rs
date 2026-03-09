@@ -42,6 +42,15 @@ pub enum FileOperationResult {
         new_name: String,
         parent_folder: PathBuf,
     },
+    DriveRenameCompleted {
+        drive_path: PathBuf,
+        new_label: String,
+    },
+    DriveRenameFailed {
+        drive_path: PathBuf,
+        error: String,
+        cancelled: bool,
+    },
 }
 
 /// Transparent wrapper for HWND to make it Send.

@@ -82,6 +82,7 @@ impl ImageViewerApp {
             .and_then(|idx| self.items.get(idx))
             .map(|item| item.drive_info.is_some())
             .unwrap_or(false);
+        let can_rename_target = _item_index.is_some_and(|idx| self.can_rename_item(idx));
 
         // ========== PRIMARY ITEMS (Header bar) - matching Files ==========
         // These appear as icon buttons in the header
@@ -111,7 +112,7 @@ impl ImageViewerApp {
                 ContextMenuItem::primary(-5, t!("context_menu.rename"))
                     .with_command("rename")
                     .with_shortcut("F2")
-                    .enabled(!is_drive),
+                    .enabled(can_rename_target),
             );
             items.push(
                 ContextMenuItem::primary(-6, t!("context_menu.delete"))
@@ -165,7 +166,7 @@ impl ImageViewerApp {
                 ContextMenuItem::new(-33, t!("context_menu.rename"))
                     .with_command("rename")
                     .with_shortcut("F2")
-                    .enabled(!is_drive),
+                    .enabled(can_rename_target),
             );
             items.push(
                 ContextMenuItem::new(-34, t!("context_menu.delete"))

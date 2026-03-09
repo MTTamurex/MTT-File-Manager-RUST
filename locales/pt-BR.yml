@@ -127,6 +127,11 @@ operations:
   shortcut_create_failed: "Falha ao criar atalho: %{error}"
   onedrive_command_failed: "Falha ao aplicar comando do OneDrive em um ou mais itens"
   path_not_found: "O caminho não existe: %{path}"
+  rename_drive_success: "Nome do drive atualizado: %{name}"
+  rename_drive_error: "Falha ao renomear %{drive}: %{error}"
+  rename_drive_cancelled: "Renomeacao do drive cancelada no prompt de administrador"
+  rename_drive_invalid_target: "O destino selecionado nao e um drive renomeavel"
+  rename_drive_helper_failed: "A operacao elevada falhou (codigo %{code})"
 context_menu:
   open: "Abrir"
   open_new_tab: "Abrir em nova guia"

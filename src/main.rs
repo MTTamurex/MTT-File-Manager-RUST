@@ -36,6 +36,22 @@ fn main() -> eframe::Result<()> {
     let _exe = args.next();
     if let Some(flag) = args.next() {
         let flag_str = flag.to_string_lossy();
+        if flag_str.eq_ignore_ascii_case("--set-volume-label") {
+            let Some(drive_path) = args.next() else {
+                log::error!("[VOLUME-RENAME] missing drive path argument");
+                std::process::exit(2);
+            };
+            let Some(new_label) = args.next() else {
+                log::error!("[VOLUME-RENAME] missing label argument");
+                std::process::exit(2);
+            };
+
+            let exit_code = mtt_file_manager::infrastructure::windows::run_elevated_volume_rename_helper(
+                &PathBuf::from(drive_path),
+                &new_label.to_string_lossy(),
+            );
+            std::process::exit(exit_code);
+        }
         if flag_str.eq_ignore_ascii_case("--image-viewer") {
             if let Some(path_arg) = args.next() {
                 return mtt_file_manager::image_viewer::run_standalone(PathBuf::from(path_arg));

@@ -127,6 +127,11 @@ operations:
   shortcut_create_failed: "Failed to create shortcut: %{error}"
   onedrive_command_failed: "Failed to apply OneDrive command to one or more items"
   path_not_found: "Path does not exist: %{path}"
+  rename_drive_success: "Drive label updated: %{name}"
+  rename_drive_error: "Failed to rename %{drive}: %{error}"
+  rename_drive_cancelled: "Drive rename cancelled in the administrator prompt"
+  rename_drive_invalid_target: "The selected target is not a renameable drive"
+  rename_drive_helper_failed: "The elevated operation failed (code %{code})"
 context_menu:
   open: "Open"
   open_new_tab: "Open in new tab"
