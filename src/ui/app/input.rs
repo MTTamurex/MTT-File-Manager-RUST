@@ -7,6 +7,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 fn handle_space_preview_action(app: &mut ImageViewerApp, ctx: &egui::Context) -> bool {
     // Ignore while typing/editing any text input context
     if app.renaming_state.is_some()
+        || app.sidebar_renaming.is_some()
         || app.is_address_editing
         || app.global_search.active
         || ctx.wants_keyboard_input()
@@ -32,7 +33,7 @@ fn handle_space_preview_action(app: &mut ImageViewerApp, ctx: &egui::Context) ->
 
 pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
     let mut user_active = false;
-    if app.renaming_state.is_none() && !app.is_address_editing {
+    if app.renaming_state.is_none() && app.sidebar_renaming.is_none() && !app.is_address_editing {
         // Handle media hardware input first (overrides normal navigation when player focused)
         if handle_media_hardware_input(app, ctx) {
             return;

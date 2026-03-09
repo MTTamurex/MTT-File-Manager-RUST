@@ -174,6 +174,11 @@ pub struct ImageViewerApp {
     pub renaming_state: Option<(usize, String)>, // (Index, Editable Text)
     pub focus_rename: bool,                      // Trigger to focus the input
 
+    // SIDEBAR DRIVE RENAME (inline in sidebar, not in main view)
+    /// (drive_path, editable_label) — active inline rename in the sidebar
+    pub sidebar_renaming: Option<(String, String)>,
+    pub sidebar_rename_focus: bool,
+
     // WATCHER SYSTEM (AUTO-REFRESH)
     // Drive-wide watcher (new - monitors entire drive)
     pub drive_watcher: crate::infrastructure::drive_watcher_integration::DriveWatcherManager,

@@ -45,6 +45,9 @@ pub struct SidebarContext<'a> {
     pub is_item_dragging: bool,   // ANY item (file or folder) is being dragged
     pub is_folder_dragging: bool,  // A folder is being dragged from the main content area
     pub dragging_path: Option<&'a str>, // Path of the folder being dragged
+    /// Inline drive rename: (drive_path, editable_text)
+    pub sidebar_renaming: Option<(&'a str, &'a str)>,
+    pub sidebar_rename_focus: bool,
 }
 
 /// Actions that can be triggered by the sidebar
@@ -56,6 +59,10 @@ pub enum SidebarAction {
     PinFolder(String),
     UnpinFolder(String),
     ReorderPinnedFolder { from: usize, to: usize },
+    /// User confirmed inline drive rename
+    CommitDriveRename { drive_path: String, new_label: String },
+    /// User cancelled inline drive rename
+    CancelDriveRename,
 }
 
 /// Renders the sidebar with drives and computer view
@@ -381,20 +388,80 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
                     cursor_x += 24.0;
                 }
 
-                ui.painter().text(
-                    Pos2::new(cursor_x, rect.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    disk_label,
-                    egui::FontId::proportional(11.5),
-                    if is_selected {
-                        crate::ui::theme::COLOR_SELECTION_TEXT
-                    } else {
-                        ui.visuals().text_color()
-                    },
-                );
+                // Check if this drive is being renamed inline
+                let is_inline_renaming = ctx.sidebar_renaming
+                    .map(|(rp, _)| rp == disk_path.as_str())
+                    .unwrap_or(false);
+
+                if !is_inline_renaming {
+                    ui.painter().text(
+                        Pos2::new(cursor_x, rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        disk_label,
+                        egui::FontId::proportional(11.5),
+                        if is_selected {
+                            crate::ui::theme::COLOR_SELECTION_TEXT
+                        } else {
+                            ui.visuals().text_color()
+                        },
+                    );
+                }
             }
 
-            if response.clicked() && !ctx.is_renaming {
+            // Inline rename TextEdit (rendered outside the visibility guard so it always works)
+            let is_inline_renaming = ctx.sidebar_renaming
+                .map(|(rp, _)| rp == disk_path.as_str())
+                .unwrap_or(false);
+
+            if is_inline_renaming {
+                let edit_text = ctx.sidebar_renaming.unwrap().1;
+                let text_edit_id = egui::Id::new("sidebar_drive_rename");
+                let mut buf = edit_text.to_string();
+                let text_rect = Rect::from_min_size(
+                    Pos2::new(rect.min.x + 36.0, rect.min.y + 2.0),
+                    egui::vec2(rect.width() - 44.0, rect.height() - 4.0),
+                );
+                let te = ui.put(
+                    text_rect,
+                    egui::TextEdit::singleline(&mut buf)
+                        .id(text_edit_id)
+                        .font(egui::FontId::proportional(11.5))
+                        .desired_width(text_rect.width())
+                        .margin(egui::Margin::symmetric(4, 2)),
+                );
+
+                if ctx.sidebar_rename_focus {
+                    te.request_focus();
+                    // Select all text on first frame
+                    if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), text_edit_id) {
+                        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                            egui::text::CCursor::new(0),
+                            egui::text::CCursor::new(buf.len()),
+                        )));
+                        state.store(ui.ctx(), text_edit_id);
+                    }
+                }
+
+                let committed = te.lost_focus()
+                    && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let cancelled = te.lost_focus()
+                    && !ui.input(|i| i.key_pressed(egui::Key::Enter));
+
+                if committed {
+                    action = Some(SidebarAction::CommitDriveRename {
+                        drive_path: disk_path.to_string(),
+                        new_label: buf,
+                    });
+                } else if cancelled {
+                    action = Some(SidebarAction::CancelDriveRename);
+                } else if te.changed() {
+                    // Propagate text change — the panels handler will update sidebar_renaming
+                    action = Some(SidebarAction::CommitDriveRename {
+                        drive_path: String::new(), // sentinel: empty path = text update only
+                        new_label: buf,
+                    });
+                }
+            } else if response.clicked() && !ctx.is_renaming {
                 action = Some(SidebarAction::NavigateTo(disk_path.to_string()));
             } else if response.secondary_clicked() && !ctx.is_renaming {
                 action = Some(SidebarAction::OpenDriveContextMenu(disk_path.to_string()));

@@ -154,7 +154,16 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 -4 | -32 => app.command_paste(item_idx),
                 -5 | -33 => {
                     if let Some(path) = context_menu.target_paths.first().cloned() {
-                        app.begin_rename_path(&path);
+                        if crate::infrastructure::windows::is_drive_root_path(&path) {
+                            // Inline rename in sidebar — don't navigate to Este Computador
+                            let drive_path_str = path.to_string_lossy().to_string();
+                            let current_label = crate::infrastructure::windows::get_volume_label_raw(&drive_path_str)
+                                .unwrap_or_default();
+                            app.sidebar_renaming = Some((drive_path_str, current_label));
+                            app.sidebar_rename_focus = true;
+                        } else {
+                            app.begin_rename_path(&path);
+                        }
                     } else if let Some(idx) = item_idx.or(app.selected_item) {
                         app.begin_rename_item(idx);
                     }
