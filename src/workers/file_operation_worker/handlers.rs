@@ -30,6 +30,7 @@ pub(super) fn handle_delete(
             if !parents.is_empty() {
                 let _ = result_sender.send(FileOperationResult::DeleteCompleted {
                     parent_folders: parents.into_iter().collect(),
+                    deleted_paths: valid_paths.clone(),
                 });
             }
             let _ = result_sender.send(FileOperationResult::RecycleBinChanged);
@@ -296,6 +297,7 @@ pub(super) fn handle_delete_permanently(
             if !parents.is_empty() {
                 let _ = result_sender.send(FileOperationResult::DeleteCompleted {
                     parent_folders: parents.into_iter().collect(),
+                    deleted_paths: valid_paths.clone(),
                 });
             }
             let _ = result_sender.send(FileOperationResult::RecycleBinChanged);

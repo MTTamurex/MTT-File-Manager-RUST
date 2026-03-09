@@ -22,7 +22,10 @@ pub enum FileOperationResult {
     /// Restore operation completed - original folders need refresh
     RestoreCompleted { parent_folders: Vec<PathBuf> },
     /// Delete operation completed - parent folders need refresh
-    DeleteCompleted { parent_folders: Vec<PathBuf> },
+    DeleteCompleted {
+        parent_folders: Vec<PathBuf>,
+        deleted_paths: Vec<PathBuf>,
+    },
     /// Move operation completed - source folder needs refresh in all tabs, dest needs reload if active
     MoveCompleted {
         source_folder: PathBuf,

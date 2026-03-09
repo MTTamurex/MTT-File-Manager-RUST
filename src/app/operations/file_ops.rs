@@ -124,31 +124,6 @@ impl ImageViewerApp {
                 .insert(path.clone(), ());
         }
         self.thumbnail_queue.remove_paths(&paths);
-
-        // Clear ALL in-memory caches for these paths so a future file at
-        // the same path won't pick up the deleted file's stale thumbnail.
-        for path in &paths {
-            self.cache_manager.texture_cache.pop(path);
-            self.cache_manager.loading_set.remove(path);
-            self.cache_manager.pop_rgba_data(path);
-            self.cache_manager.failed_thumbnails.pop(path);
-        }
-
-        // PERF FIX (C-1): Batch SQLite cache cleanup to background worker instead
-        // of running 8-DELETE transactions per file on the UI thread.
-        // FORCED: skip existence guard — Shell hasn't finished yet.
-        self.enqueue_disk_cache_invalidations_forced(paths.to_vec());
-
-        for path in &paths {
-            self.multi_selection.remove(path);
-        }
-
-        if let Some(selected) = &self.selected_file {
-            if paths.contains(&selected.path) {
-                self.selected_item = None;
-                self.selected_file = None;
-            }
-        }
     }
 
     pub fn delete_with_shell_for_paths(&mut self, paths: &[PathBuf]) {
@@ -176,33 +151,6 @@ impl ImageViewerApp {
                 .insert(path.clone(), ());
         }
         self.thumbnail_queue.remove_paths(paths);
-
-        // Clear ALL in-memory caches for these paths so a future file at
-        // the same path won't pick up the deleted file's stale thumbnail.
-        for path in paths {
-            self.cache_manager.texture_cache.pop(path);
-            self.cache_manager.loading_set.remove(path);
-            self.cache_manager.pop_rgba_data(path);
-            self.cache_manager.failed_thumbnails.pop(path);
-        }
-
-        // PERF FIX (C-1): Batch SQLite cache cleanup to background worker instead
-        // of running 8-DELETE transactions per file on the UI thread.
-        // FORCED: skip existence guard — Shell hasn't finished yet.
-        self.enqueue_disk_cache_invalidations_forced(paths.to_vec());
-
-        for path in paths {
-            // Clear selection proactively
-            self.multi_selection.remove(path);
-        }
-
-        // Reset primary selection if it was deleted
-        if let Some(selected) = &self.selected_file {
-            if paths.contains(&selected.path) {
-                self.selected_item = None;
-                self.selected_file = None;
-            }
-        }
     }
 
     pub fn show_properties_for_idx(&mut self, idx: Option<usize>) {

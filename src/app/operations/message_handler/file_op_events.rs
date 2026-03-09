@@ -55,8 +55,15 @@ impl ImageViewerApp {
                         FileOperationResult::RestoreCompleted { parent_folders } => {
                             self.handle_parent_folder_updates(parent_folders, current_path_norm)
                         }
-                        FileOperationResult::DeleteCompleted { parent_folders } => {
-                            self.handle_parent_folder_updates(parent_folders, current_path_norm);
+                        FileOperationResult::DeleteCompleted {
+                            parent_folders,
+                            deleted_paths,
+                        } => {
+                            self.handle_delete_completed(
+                                parent_folders,
+                                deleted_paths,
+                                current_path_norm,
+                            );
                             self.cleanup_deleted_pinned_folders();
                         }
                         FileOperationResult::CopyCompleted { dest_folder } => {
@@ -190,6 +197,31 @@ impl ImageViewerApp {
             self.loaded_path.clear();
             self.load_folder(false);
         }
+    }
+
+    fn handle_delete_completed(
+        &mut self,
+        parent_folders: Vec<PathBuf>,
+        deleted_paths: Vec<PathBuf>,
+        current_path_norm: &str,
+    ) {
+        for path in &deleted_paths {
+            self.cache_manager.texture_cache.pop(path);
+            self.cache_manager.loading_set.remove(path);
+            self.cache_manager.pop_rgba_data(path);
+            self.cache_manager.failed_thumbnails.pop(path);
+            self.multi_selection.remove(path);
+        }
+
+        if let Some(selected) = &self.selected_file {
+            if deleted_paths.contains(&selected.path) {
+                self.selected_item = None;
+                self.selected_file = None;
+            }
+        }
+
+        self.enqueue_disk_cache_invalidations_forced(deleted_paths);
+        self.handle_parent_folder_updates(parent_folders, current_path_norm);
     }
 
     fn restore_app_focus(&self) {
