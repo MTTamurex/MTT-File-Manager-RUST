@@ -232,6 +232,8 @@ pub struct ImageViewerApp {
     pub shell_menu_res_rx: std::sync::mpsc::Receiver<crate::infrastructure::shell_menu_worker::ShellMenuResponse>,
     /// True while the background thread is extracting shell items for the active menu.
     pub shell_menu_loading: bool,
+    /// Monotonic id used to discard stale async shell-menu responses.
+    pub shell_menu_request_id: u64,
 
     // PERSISTENT ICON LOADER (avoids creating a new one each frame)
     pub item_icon_loader: IconLoader,

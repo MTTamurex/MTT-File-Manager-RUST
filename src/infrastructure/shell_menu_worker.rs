@@ -25,6 +25,7 @@ use crate::infrastructure::windows::native_menu::{
 pub enum ShellMenuRequest {
     /// Extract the context menu for `paths`. The worker replies with `Ready` or `Error`.
     Extract {
+        request_id: u64,
         hwnd_isize: isize,
         paths: Vec<PathBuf>,
     },
@@ -39,6 +40,7 @@ pub enum ShellMenuRequest {
     Cancel,
     /// Expand a pending submenu for `item_id` (triggered by hover on a lazy item).
     LoadSubmenu {
+        request_id: u64,
         item_id: u32,
     },
 }
@@ -76,13 +78,20 @@ impl ShellMenuItemData {
 /// Responses sent back from the worker to the UI thread.
 pub enum ShellMenuResponse {
     /// Extraction complete; these items can be merged into the context menu.
-    Ready(Vec<ShellMenuItemData>),
+    Ready {
+        request_id: u64,
+        items: Vec<ShellMenuItemData>,
+    },
     /// Extraction failed (e.g. no shell extensions registered).
-    Error(String),
+    Error {
+        request_id: u64,
+        message: String,
+    },
     /// A shell command was invoked (informational only; no result needed).
     Invoked,
     /// Submenu for `item_id` was lazily loaded; replace its sub_items in the UI.
     SubmenuLoaded {
+        request_id: u64,
         item_id: u32,
         sub_items: Vec<ShellMenuItemData>,
     },
@@ -125,12 +134,18 @@ fn shell_menu_loop(rx: Receiver<ShellMenuRequest>, tx: Sender<ShellMenuResponse>
     // Active shell context — kept alive between Extract and Invoke/Cancel.
     let mut active_ctx: Option<crate::infrastructure::windows::native_menu::ShellMenuContext> =
         None;
+    let mut active_request_id: Option<u64> = None;
 
     while let Ok(req) = rx.recv() {
         match req {
-            ShellMenuRequest::Extract { hwnd_isize, paths } => {
+            ShellMenuRequest::Extract {
+                request_id,
+                hwnd_isize,
+                paths,
+            } => {
                 // Drop any previous context before starting a new extraction.
                 active_ctx = None;
+                active_request_id = None;
 
                 let hwnd = HWND(hwnd_isize as *mut _);
                 match extract_shell_menu(hwnd, &paths) {
@@ -152,10 +167,14 @@ fn shell_menu_loop(rx: Receiver<ShellMenuRequest>, tx: Sender<ShellMenuResponse>
                             .collect();
 
                         active_ctx = Some(ctx);
-                        let _ = tx.send(ShellMenuResponse::Ready(items));
+                        active_request_id = Some(request_id);
+                        let _ = tx.send(ShellMenuResponse::Ready { request_id, items });
                     }
                     Err(e) => {
-                        let _ = tx.send(ShellMenuResponse::Error(e.to_string()));
+                        let _ = tx.send(ShellMenuResponse::Error {
+                            request_id,
+                            message: e.to_string(),
+                        });
                     }
                 }
             }
@@ -184,10 +203,18 @@ fn shell_menu_loop(rx: Receiver<ShellMenuRequest>, tx: Sender<ShellMenuResponse>
 
             ShellMenuRequest::Cancel => {
                 active_ctx = None;
+                active_request_id = None;
                 // No response needed.
             }
 
-            ShellMenuRequest::LoadSubmenu { item_id } => {
+            ShellMenuRequest::LoadSubmenu {
+                request_id,
+                item_id,
+            } => {
+                if active_request_id != Some(request_id) {
+                    continue;
+                }
+
                 if let Some(ref ctx) = active_ctx {
                     fn find_item_mut(
                         items: &mut Vec<crate::infrastructure::windows::native_menu::ShellMenuItem>,
@@ -213,7 +240,11 @@ fn shell_menu_loop(rx: Receiver<ShellMenuRequest>, tx: Sender<ShellMenuResponse>
                                 .iter()
                                 .map(ShellMenuItemData::from_shell_item)
                                 .collect();
-                            let _ = tx.send(ShellMenuResponse::SubmenuLoaded { item_id, sub_items });
+                            let _ = tx.send(ShellMenuResponse::SubmenuLoaded {
+                                request_id,
+                                item_id,
+                                sub_items,
+                            });
                         }
                     }
                 } else {

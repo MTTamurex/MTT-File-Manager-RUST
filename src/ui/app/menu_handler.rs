@@ -58,6 +58,11 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
     }
 
     // 3. Handle selected command before putting state back
+    // CRITICAL: std::mem::take cleared app.context_menu, so internal commands
+    // that call app.context_target_paths() would find empty target_paths and
+    // fall back to selected_item/selected_file (wrong target). Restore them.
+    app.context_menu.target_paths.clone_from(&context_menu.target_paths);
+
     if let Some(id) = context_menu.selected_command_id.take() {
         if id > 0 {
             // Shell command
@@ -148,7 +153,9 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 -3 | -30 => app.command_cut(item_idx),
                 -4 | -32 => app.command_paste(item_idx),
                 -5 | -33 => {
-                    if let Some(idx) = item_idx.or(app.selected_item) {
+                    if let Some(path) = context_menu.target_paths.first().cloned() {
+                        app.begin_rename_path(&path);
+                    } else if let Some(idx) = item_idx.or(app.selected_item) {
                         app.begin_rename_item(idx);
                     }
                 }

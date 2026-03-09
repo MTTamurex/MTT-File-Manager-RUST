@@ -280,6 +280,7 @@ impl ImageViewerApp {
             shell_menu_req_tx,
             shell_menu_res_rx,
             shell_menu_loading: false,
+            shell_menu_request_id: 0,
 
             // PERSISTENT ICON LOADER
             item_icon_loader: {

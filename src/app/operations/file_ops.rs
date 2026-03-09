@@ -258,6 +258,24 @@ impl ImageViewerApp {
         true
     }
 
+    pub fn begin_rename_path(&mut self, target_path: &Path) -> bool {
+        if let Some(idx) = self.items.iter().position(|item| item.path == target_path) {
+            self.select_item_by_path(target_path);
+            return self.begin_rename_item(idx);
+        }
+
+        if crate::infrastructure::windows::is_drive_root_path(target_path) {
+            self.navigate_to_computer();
+            if self.select_item_by_path(target_path) {
+                if let Some(idx) = self.selected_item {
+                    return self.begin_rename_item(idx);
+                }
+            }
+        }
+
+        false
+    }
+
     /// Renomeia arquivo usando Shell API via Background Worker
     pub fn rename_with_shell(&mut self, idx: usize) {
         if !self.can_rename_item(idx) {
