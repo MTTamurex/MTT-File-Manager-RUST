@@ -274,9 +274,13 @@ impl ImageViewerApp {
     }
 
     pub fn can_rename_item(&self, idx: usize) -> bool {
-        self.items
-            .get(idx)
-            .is_some_and(|item| item.drive_info.is_none())
+        self.items.get(idx).is_some_and(|item| {
+            item.drive_info.as_ref().map_or(true, |drive| {
+                crate::infrastructure::windows::drive_supports_volume_label_rename(
+                    drive.drive_type,
+                )
+            })
+        })
     }
 
     pub fn begin_rename_item(&mut self, idx: usize) -> bool {
@@ -286,7 +290,14 @@ impl ImageViewerApp {
             return false;
         }
 
-        let Some(item_name) = self.items.get(idx).map(|item| item.name.clone()) else {
+        let Some(item_name) = self.items.get(idx).map(|item| {
+            if item.drive_info.is_some() {
+                crate::infrastructure::windows::get_volume_label_raw(&item.path.to_string_lossy())
+                    .unwrap_or_default()
+            } else {
+                item.name.clone()
+            }
+        }) else {
             return false;
         };
 

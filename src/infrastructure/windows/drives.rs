@@ -1,8 +1,341 @@
 //! Windows drive and volume information functions
 //! Follows .cursorrules: single responsibility, < 300 lines
 
+use crate::infrastructure::windows::DriveType;
 use std::path::Path;
-use windows::{core::*, Win32::Storage::FileSystem::*, Win32::UI::Shell::*};
+use windows::{
+    core::*,
+    Win32::{
+        Foundation::{
+            CloseHandle, ERROR_ACCESS_DENIED, ERROR_CANCELLED, GetLastError, HWND,
+            WAIT_OBJECT_0,
+        },
+        Storage::FileSystem::*,
+        System::Threading::{GetExitCodeProcess, WaitForSingleObject, INFINITE},
+        UI::{
+            Shell::*,
+            WindowsAndMessaging::{
+                BringWindowToTop, IsIconic, SetForegroundWindow, ShowWindow, SW_HIDE,
+                SW_RESTORE,
+            },
+        },
+    },
+};
+
+const ELEVATED_VOLUME_RENAME_FLAG: &str = "--set-volume-label";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VolumeLabelRenameOutcome {
+    Renamed,
+    RenamedElevated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VolumeLabelRenameError {
+    Cancelled,
+    InvalidDrivePath,
+    InvalidLabel,
+    AccessDenied,
+    OsError(String),
+}
+
+impl std::fmt::Display for VolumeLabelRenameError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Cancelled => write!(f, "{}", rust_i18n::t!("operations.rename_drive_cancelled")),
+            Self::InvalidDrivePath => write!(f, "{}", rust_i18n::t!("operations.rename_drive_invalid_target")),
+            Self::InvalidLabel => write!(f, "{}", rust_i18n::t!("operations.error_invalid_name")),
+            Self::AccessDenied => write!(f, "access denied"),
+            Self::OsError(message) => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for VolumeLabelRenameError {}
+
+fn drive_root_from_str(path: &str) -> Option<String> {
+    let trimmed = path.trim();
+    let mut chars = trimmed.chars();
+    let letter = chars.next()?;
+    let colon = chars.next()?;
+    if !letter.is_ascii_alphabetic() || colon != ':' {
+        return None;
+    }
+
+    let remainder = chars.as_str();
+    if !remainder.is_empty() && remainder != "\\" && remainder != "/" {
+        return None;
+    }
+
+    Some(format!("{}:\\", letter.to_ascii_uppercase()))
+}
+
+pub fn normalize_drive_root_path(path: &Path) -> Option<String> {
+    drive_root_from_str(&path.to_string_lossy())
+}
+
+pub fn is_drive_root_path(path: &Path) -> bool {
+    normalize_drive_root_path(path).is_some()
+}
+
+pub fn drive_supports_volume_label_rename(drive_type: DriveType) -> bool {
+    matches!(drive_type, DriveType::Fixed | DriveType::Removable | DriveType::RamDisk)
+}
+
+pub fn is_valid_volume_label(new_label: &str) -> bool {
+    !new_label.contains('\0')
+        && !new_label.contains('\\')
+        && !new_label.contains('/')
+        && !new_label.contains(':')
+        && !new_label.contains('*')
+        && !new_label.contains('?')
+        && !new_label.contains('"')
+        && !new_label.contains('<')
+        && !new_label.contains('>')
+        && !new_label.contains('|')
+}
+
+pub fn format_drive_display_name(drive_path: &str, label: &str) -> String {
+    let display_label = if label.trim().is_empty() {
+        rust_i18n::t!("drive_types.default_label").to_string()
+    } else {
+        label.to_string()
+    };
+    let drive_letter = drive_path.trim_end_matches(['\\', '/']);
+    format!("{} ({})", display_label, drive_letter)
+}
+
+fn quote_windows_arg(arg: &str) -> String {
+    if arg.is_empty() {
+        return "\"\"".to_string();
+    }
+
+    let needs_quotes = arg.chars().any(|ch| ch.is_whitespace() || ch == '"');
+    if !needs_quotes {
+        return arg.to_string();
+    }
+
+    let mut quoted = String::from("\"");
+    let mut backslashes = 0usize;
+
+    for ch in arg.chars() {
+        if ch == '\\' {
+            backslashes += 1;
+            continue;
+        }
+
+        if ch == '"' {
+            quoted.push_str(&"\\".repeat(backslashes * 2 + 1));
+            quoted.push('"');
+            backslashes = 0;
+            continue;
+        }
+
+        if backslashes > 0 {
+            quoted.push_str(&"\\".repeat(backslashes));
+            backslashes = 0;
+        }
+
+        quoted.push(ch);
+    }
+
+    if backslashes > 0 {
+        quoted.push_str(&"\\".repeat(backslashes * 2));
+    }
+
+    quoted.push('"');
+    quoted
+}
+
+pub fn restore_window_foreground(hwnd: HWND) {
+    if hwnd.is_invalid() {
+        return;
+    }
+
+    unsafe {
+        if IsIconic(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        }
+        let _ = BringWindowToTop(hwnd);
+        let _ = SetForegroundWindow(hwnd);
+    }
+}
+
+unsafe fn set_volume_label_raw(
+    drive_root: &str,
+    new_label: &str,
+) -> std::result::Result<(), VolumeLabelRenameError> {
+    let drive_wide: Vec<u16> = drive_root.encode_utf16().chain(std::iter::once(0)).collect();
+    let label_wide: Vec<u16> = new_label.encode_utf16().chain(std::iter::once(0)).collect();
+    let label_ptr = if new_label.is_empty() {
+        PCWSTR::null()
+    } else {
+        PCWSTR(label_wide.as_ptr())
+    };
+
+    match SetVolumeLabelW(PCWSTR(drive_wide.as_ptr()), label_ptr) {
+        Ok(_) => Ok(()),
+        Err(err) => {
+            let win32 = GetLastError();
+            if win32 == ERROR_ACCESS_DENIED {
+                Err(VolumeLabelRenameError::AccessDenied)
+            } else {
+                Err(VolumeLabelRenameError::OsError(err.to_string()))
+            }
+        }
+    }
+}
+
+fn launch_elevated_volume_rename_helper(
+    drive_root: &str,
+    new_label: &str,
+    hwnd: HWND,
+) -> std::result::Result<(), VolumeLabelRenameError> {
+    let exe = std::env::current_exe()
+        .map_err(|err| VolumeLabelRenameError::OsError(err.to_string()))?;
+    let exe_wide: Vec<u16> = exe
+        .as_os_str()
+        .to_string_lossy()
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let verb_wide: Vec<u16> = "runas".encode_utf16().chain(std::iter::once(0)).collect();
+    let params = format!(
+        "{} {} {}",
+        ELEVATED_VOLUME_RENAME_FLAG,
+        quote_windows_arg(drive_root),
+        quote_windows_arg(new_label)
+    );
+    let params_wide: Vec<u16> = params.encode_utf16().chain(std::iter::once(0)).collect();
+
+    let mut exec_info = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI,
+        hwnd,
+        lpVerb: PCWSTR(verb_wide.as_ptr()),
+        lpFile: PCWSTR(exe_wide.as_ptr()),
+        lpParameters: PCWSTR(params_wide.as_ptr()),
+        nShow: SW_HIDE.0,
+        ..Default::default()
+    };
+
+    unsafe {
+        if ShellExecuteExW(&mut exec_info).is_err() {
+            let win32 = GetLastError();
+            if win32 == ERROR_CANCELLED {
+                return Err(VolumeLabelRenameError::Cancelled);
+            }
+
+            return Err(VolumeLabelRenameError::OsError(
+                windows::core::Error::from_win32().to_string(),
+            ));
+        }
+
+        let process = exec_info.hProcess;
+        if process.is_invalid() {
+            return Err(VolumeLabelRenameError::OsError(
+                "Missing elevated helper handle".to_string(),
+            ));
+        }
+
+        let wait = WaitForSingleObject(process, INFINITE);
+        if wait != WAIT_OBJECT_0 {
+            let _ = CloseHandle(process);
+            return Err(VolumeLabelRenameError::OsError(
+                windows::core::Error::from_win32().to_string(),
+            ));
+        }
+
+        let mut exit_code = 1u32;
+        if GetExitCodeProcess(process, &mut exit_code).is_err() {
+            let _ = CloseHandle(process);
+            return Err(VolumeLabelRenameError::OsError(
+                windows::core::Error::from_win32().to_string(),
+            ));
+        }
+
+        let _ = CloseHandle(process);
+        restore_window_foreground(hwnd);
+
+        if exit_code == 0 {
+            Ok(())
+        } else {
+            Err(VolumeLabelRenameError::OsError(
+                rust_i18n::t!("operations.rename_drive_helper_failed", code = exit_code).to_string(),
+            ))
+        }
+    }
+}
+
+pub fn rename_volume_label(
+    drive_path: &Path,
+    new_label: &str,
+    hwnd: HWND,
+) -> std::result::Result<VolumeLabelRenameOutcome, VolumeLabelRenameError> {
+    let Some(drive_root) = normalize_drive_root_path(drive_path) else {
+        return Err(VolumeLabelRenameError::InvalidDrivePath);
+    };
+    if !is_valid_volume_label(new_label) {
+        return Err(VolumeLabelRenameError::InvalidLabel);
+    }
+
+    unsafe {
+        match set_volume_label_raw(&drive_root, new_label) {
+            Ok(()) => Ok(VolumeLabelRenameOutcome::Renamed),
+            Err(VolumeLabelRenameError::AccessDenied) => {
+                launch_elevated_volume_rename_helper(&drive_root, new_label, hwnd)?;
+                Ok(VolumeLabelRenameOutcome::RenamedElevated)
+            }
+            Err(err) => Err(err),
+        }
+    }
+}
+
+pub fn run_elevated_volume_rename_helper(drive_path: &Path, new_label: &str) -> i32 {
+    let Some(drive_root) = normalize_drive_root_path(drive_path) else {
+        return 2;
+    };
+    if !is_valid_volume_label(new_label) {
+        return 3;
+    }
+
+    unsafe {
+        match set_volume_label_raw(&drive_root, new_label) {
+            Ok(()) => 0,
+            Err(VolumeLabelRenameError::AccessDenied) => 5,
+            Err(_) => 1,
+        }
+    }
+}
+
+pub fn get_volume_label_raw(drive_path: &str) -> Option<String> {
+    let drive_root = drive_root_from_str(drive_path)?;
+    unsafe {
+        let path_wide: Vec<u16> = drive_root
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let mut volume_name_buffer = vec![0u16; 256];
+        let vol_result = GetVolumeInformationW(
+            PCWSTR(path_wide.as_ptr()),
+            Some(&mut volume_name_buffer),
+            None,
+            None,
+            None,
+            None,
+        );
+
+        if vol_result.is_ok() {
+            Some(
+                String::from_utf16_lossy(&volume_name_buffer)
+                    .trim_end_matches('\0')
+                    .to_string(),
+            )
+        } else {
+            None
+        }
+    }
+}
 
 /// Volume information structure.
 pub struct VolumeInfo {
@@ -49,21 +382,7 @@ pub fn get_volume_label(drive_path: &str) -> String {
         }
 
         // Fallback: GetVolumeInformationW (real volume label)
-        let mut volume_name_buffer = vec![0u16; 256];
-        let vol_result = GetVolumeInformationW(
-            PCWSTR(path_wide.as_ptr()),
-            Some(&mut volume_name_buffer),
-            None,
-            None,
-            None,
-            None,
-        );
-
-        if vol_result.is_ok() {
-            let volume_name = String::from_utf16_lossy(&volume_name_buffer)
-                .trim_end_matches('\0')
-                .to_string();
-
+        if let Some(volume_name) = get_volume_label_raw(drive_path) {
             if !volume_name.is_empty() {
                 return volume_name;
             }
@@ -101,8 +420,7 @@ pub fn get_all_drives() -> Vec<(String, String)> {
             .filter(|s| !s.is_empty())
             .map(|path| {
                 let label = get_volume_label(path);
-                let drive_letter = path.trim_end_matches('\\');
-                (path.to_string(), format!("{} ({})", label, drive_letter))
+                (path.to_string(), format_drive_display_name(path, &label))
             })
             .collect()
     }

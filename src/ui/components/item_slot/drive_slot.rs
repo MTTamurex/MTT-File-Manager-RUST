@@ -2,10 +2,11 @@ use super::*;
 use rust_i18n::t;
 
 /// Renders a drive slot (This PC)
-pub(super) fn render_drive_slot(
+pub(super) fn render_drive_slot<O: ItemSlotOperations>(
     ui: &mut egui::Ui,
     rect: egui::Rect,
     ctx: &mut ItemSlotContext,
+    ops: &mut O,
     drive_info: &crate::domain::file_entry::DriveInfo,
 ) {
     let item = ctx.item;
@@ -92,10 +93,47 @@ pub(super) fn render_drive_slot(
         egui::vec2(progress_w, 18.0),
     );
 
-    ui.put(
-        name_rect,
-        egui::Label::new(egui::RichText::new(super::display_name_for_item(item).as_ref()).size(11.0).strong()).truncate(),
-    );
+    if ctx.is_renaming {
+        if let Some(text) = &mut ctx.renaming_text {
+            let response = ui.put(
+                name_rect,
+                egui::TextEdit::singleline(&mut **text)
+                    .frame(true)
+                    .horizontal_align(egui::Align::Center)
+                    .id_source("rename_input_drive"),
+            );
+            response.request_focus();
+
+            if ctx.focus_rename {
+                if let Some(mut state) =
+                    egui::widgets::text_edit::TextEditState::load(ui.ctx(), response.id)
+                {
+                    let char_count = text.chars().count();
+                    state
+                        .cursor
+                        .set_char_range(Some(egui::text::CCursorRange::two(
+                            egui::text::CCursor::new(0),
+                            egui::text::CCursor::new(char_count),
+                        )));
+                    state.store(ui.ctx(), response.id);
+                }
+            }
+
+            if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                ops.rename_item(ctx.idx);
+            }
+        }
+    } else {
+        ui.put(
+            name_rect,
+            egui::Label::new(
+                egui::RichText::new(super::display_name_for_item(item).as_ref())
+                    .size(11.0)
+                    .strong(),
+            )
+            .truncate(),
+        );
+    }
 
     current_y += 18.0;
 

@@ -43,6 +43,14 @@ impl ImageViewerApp {
                             parent_folder,
                             current_path_norm,
                         ),
+                        FileOperationResult::DriveRenameCompleted { drive_path, new_label } => {
+                            self.handle_drive_rename_completed(drive_path, new_label)
+                        }
+                        FileOperationResult::DriveRenameFailed {
+                            drive_path,
+                            error,
+                            cancelled,
+                        } => self.handle_drive_rename_failed(drive_path, error, cancelled),
                         FileOperationResult::RecycleBinChanged => self.handle_recycle_bin_changed(),
                         FileOperationResult::RestoreCompleted { parent_folders } => {
                             self.handle_parent_folder_updates(parent_folders, current_path_norm)
@@ -182,6 +190,68 @@ impl ImageViewerApp {
             self.loaded_path.clear();
             self.load_folder(false);
         }
+    }
+
+    fn restore_app_focus(&self) {
+        if let Some(hwnd) = self.native_hwnd {
+            crate::infrastructure::windows::restore_window_foreground(hwnd);
+        }
+        self.ui_ctx
+            .send_viewport_cmd(eframe::egui::ViewportCommand::Focus);
+        self.ui_ctx.request_repaint();
+    }
+
+    fn handle_drive_rename_completed(&mut self, drive_path: PathBuf, new_label: String) {
+        let drive_path_str = drive_path.to_string_lossy().to_string();
+        let display_name = crate::infrastructure::windows::format_drive_display_name(
+            &drive_path_str,
+            &new_label,
+        );
+        if let Some((_, label)) = self
+            .drive_state
+            .disks
+            .iter_mut()
+            .find(|(path, _)| *path == drive_path_str)
+        {
+            *label = display_name.clone();
+        }
+        self.drive_state.drive_info_cache.remove(&drive_path_str);
+
+        if self.navigation_state.is_computer_view {
+            self.setup_computer_view();
+            let _ = self.select_item_by_path(&drive_path);
+            self.sync_to_tab();
+        }
+
+        self.notifications.success(rust_i18n::t!(
+            "operations.rename_drive_success",
+            drive = drive_path_str,
+            name = if new_label.is_empty() {
+                rust_i18n::t!("drive_types.default_label").to_string()
+            } else {
+                new_label
+            }
+        ));
+        self.restore_app_focus();
+    }
+
+    fn handle_drive_rename_failed(&mut self, drive_path: PathBuf, error: String, cancelled: bool) {
+        let drive_path_str = drive_path.to_string_lossy().to_string();
+        if cancelled {
+            self.notifications.warning(rust_i18n::t!(
+                "operations.rename_drive_cancelled",
+                drive = drive_path_str
+            ));
+            self.restore_app_focus();
+            return;
+        }
+
+        self.notifications.error(rust_i18n::t!(
+            "operations.rename_drive_error",
+            drive = drive_path_str,
+            error = error
+        ));
+        self.restore_app_focus();
     }
 
     fn handle_copy_completed(&mut self, dest_folder: PathBuf, current_path_norm: &str) {

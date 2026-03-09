@@ -67,16 +67,35 @@ pub(super) fn handle_rename(
     hwnd: SendHwnd,
     result_sender: &Sender<FileOperationResult>,
 ) {
-    if is_invalid_rename_target(&new_name) {
-        log::warn!(
-            "[SECURITY] Rename blocked: invalid target name '{}'",
-            new_name
-        );
-        return;
-    }
-
     match sanitize_operation_path(&path) {
         Ok(valid_path) => {
+            if crate::infrastructure::windows::is_drive_root_path(&valid_path) {
+                match crate::infrastructure::windows::rename_volume_label(&valid_path, &new_name, hwnd.0) {
+                    Ok(_) => {
+                        let _ = result_sender.send(FileOperationResult::DriveRenameCompleted {
+                            drive_path: valid_path,
+                            new_label: new_name,
+                        });
+                    }
+                    Err(err) => {
+                        let _ = result_sender.send(FileOperationResult::DriveRenameFailed {
+                            drive_path: valid_path,
+                            error: err.to_string(),
+                            cancelled: matches!(err, crate::infrastructure::windows::VolumeLabelRenameError::Cancelled),
+                        });
+                    }
+                }
+                return;
+            }
+
+            if is_invalid_rename_target(&new_name) {
+                log::warn!(
+                    "[SECURITY] Rename blocked: invalid target name '{}'",
+                    new_name
+                );
+                return;
+            }
+
             let success = shell_operations::rename_item_with_shell(&valid_path, &new_name, hwnd.0);
             if success {
                 if let Some(parent) = valid_path.parent().map(|p| p.to_path_buf()) {
