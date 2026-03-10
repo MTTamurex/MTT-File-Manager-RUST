@@ -15,5 +15,6 @@ pub(super) use pipeline_workers::{
     PrefetchWorkerHandles,
 };
 pub(super) use visual_workers::{
-    spawn_async_font_loader, spawn_cover_worker, spawn_icon_worker, spawn_metadata_worker,
+    spawn_async_font_loader, spawn_cover_worker, spawn_icon_worker,
+    spawn_live_file_size_worker, spawn_metadata_worker,
 };

@@ -3,6 +3,40 @@ use eframe::egui;
 use rust_i18n::t;
 use std::path::{Path, PathBuf};
 
+fn resolve_context_target_is_dir(
+    app: &ImageViewerApp,
+    item_idx: Option<usize>,
+    path: &Path,
+) -> bool {
+    if crate::infrastructure::windows::is_drive_root_path(path) {
+        return true;
+    }
+
+    if let Some(idx) = item_idx {
+        if let Some(item) = app.items.get(idx) {
+            if item.path == path {
+                return item.is_dir || item.drive_info.is_some();
+            }
+        }
+    }
+
+    if let Some(selected) = app.selected_file.as_ref() {
+        if selected.path == path {
+            return selected.is_dir || selected.drive_info.is_some();
+        }
+    }
+
+    if let Some(item) = app.items.iter().find(|item| item.path == path) {
+        return item.is_dir || item.drive_info.is_some();
+    }
+
+    if app.pinned_folders.iter().any(|pinned| Path::new(&pinned.path) == path) {
+        return true;
+    }
+
+    path == Path::new(&app.navigation_state.current_path)
+}
+
 fn is_onedrive_pin_text(text: &str) -> bool {
     let lower = text.trim().to_lowercase();
     lower.contains("always keep on this device") || lower.contains("sempre manter neste dispositivo")
@@ -175,7 +209,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 }
                 -20 => {
                     if let Some(path) = app.context_target_paths(item_idx).first().cloned() {
-                        if path.is_dir() {
+                        if resolve_context_target_is_dir(app, item_idx, &path) {
                             app.navigate_to(&path.to_string_lossy());
                         } else {
                             app.open_with_shell_guarded(&path);
@@ -184,7 +218,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 }
                 -21 => {
                     if let Some(path) = app.context_target_paths(item_idx).first().cloned() {
-                        let target = if path.is_dir() {
+                        let target = if resolve_context_target_is_dir(app, item_idx, &path) {
                             path
                         } else {
                             path.parent()

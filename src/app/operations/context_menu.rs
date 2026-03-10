@@ -143,9 +143,7 @@ impl ImageViewerApp {
                     .enabled(!is_drive),
             );
         }
-
         // ========== SECONDARY ITEMS (App-specific) ==========
-        let can_paste = self.clipboard.has_content();
         let can_create_folder =
             !self.navigation_state.is_computer_view && !self.navigation_state.is_recycle_bin_view;
         if is_empty_area {

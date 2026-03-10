@@ -9,6 +9,7 @@ const INLINE_REBUILD_THRESHOLD: usize = 256;
 const REBUILD_THROTTLE_MS: u64 = 80;
 const REBUILD_PENDING_THRESHOLD: usize = 1200;
 const MAX_EAGER_FOLDER_PREVIEWS: usize = 80;
+const MAX_EAGER_NON_USN_FOLDER_COVER_REVALIDATIONS: usize = 96;
 
 impl ImageViewerApp {
     fn hydrate_current_folder_modified_hint_after_load(&mut self) {
@@ -147,6 +148,35 @@ impl ImageViewerApp {
         }
     }
 
+    fn enqueue_non_usn_eager_folder_cover_revalidation(&mut self) {
+        if !self.watcher_fallback_polling
+            || self.navigation_state.is_computer_view
+            || self.navigation_state.is_recycle_bin_view
+        {
+            return;
+        }
+
+        let mut queued = 0usize;
+
+        for folder_path in self
+            .all_items
+            .iter()
+            .filter(|item| item.is_dir && !item.is_archive())
+            .map(|item| item.path.clone())
+            .take(MAX_EAGER_NON_USN_FOLDER_COVER_REVALIDATIONS)
+        {
+            let _ = self.cover_worker_sender.send(folder_path);
+            queued += 1;
+        }
+
+        if queued > 0 {
+            log::debug!(
+                "[PERF] Non-USN eager folder cover revalidation queued: {} folders",
+                queued
+            );
+        }
+    }
+
     pub(super) fn handle_items_after_end_of_load(&mut self, ctx: &egui::Context) {
         self.is_loading_folder = false;
         self.file_operation_state.pending_deletions.clear();
@@ -159,6 +189,32 @@ impl ImageViewerApp {
         if self.pending_all_items_clear {
             self.all_items.clear();
             self.pending_all_items_clear = false;
+        }
+
+        // Reconcile old vs new items to evict stale textures.
+        // Without this, watcher-triggered reloads (force_refresh=false) preserve
+        // old GPU textures for items whose content changed on disk, causing the
+        // UI to show the wrong thumbnail until the texture is LRU-evicted.
+        if let Some(old_snapshot) = self.stale_items_snapshot.take() {
+            let new_paths: std::collections::HashSet<&std::path::PathBuf> =
+                self.all_items.iter().map(|i| &i.path).collect();
+
+            for item in &self.all_items {
+                if let Some(&(old_modified, old_size)) = old_snapshot.get(&item.path) {
+                    if item.modified != old_modified || item.size != old_size {
+                        self.cache_manager.texture_cache.pop(&item.path);
+                        self.cache_manager.pop_rgba_data(&item.path);
+                        self.cache_manager.failed_thumbnails.pop(&item.path);
+                    }
+                }
+            }
+
+            // Evict textures for items that no longer exist in the folder.
+            for (old_path, _) in &old_snapshot {
+                if !new_paths.contains(old_path) {
+                    self.cache_manager.texture_cache.pop(old_path);
+                }
+            }
         }
 
         if self.all_items.len() <= INLINE_REBUILD_THRESHOLD {
@@ -179,6 +235,7 @@ impl ImageViewerApp {
         }
 
         self.enqueue_onedrive_eager_folder_previews();
+        self.enqueue_non_usn_eager_folder_cover_revalidation();
         self.last_items_rebuild = Instant::now();
         ctx.request_repaint();
     }

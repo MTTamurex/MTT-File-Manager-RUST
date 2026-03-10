@@ -33,13 +33,13 @@ impl ImageViewerApp {
 
         if known_bad {
             if is_non_usn_fs {
-                // Probe runs in background thread — safe to use shorter intervals.
+                // Non-USN known-bad: aggressive polling since RDCW is confirmed broken.
                 if item_count <= 500 {
-                    Duration::from_secs(10)
+                    Duration::from_secs(2)
                 } else if item_count <= 2_000 {
-                    Duration::from_secs(15)
+                    Duration::from_secs(3)
                 } else {
-                    Duration::from_secs(25)
+                    Duration::from_secs(5)
                 }
             } else if item_count <= 300 {
                 Duration::from_secs(3)
@@ -51,8 +51,8 @@ impl ImageViewerApp {
                 Duration::from_secs(15)
             }
         } else if is_non_usn_fs {
-            // Unverified non-USN: probe in background, moderate interval.
-            Duration::from_secs(20)
+            // Unverified non-USN: keep interval low so first drift is caught fast.
+            Duration::from_secs(3)
         } else {
             Duration::from_secs(30)
         }
@@ -131,15 +131,14 @@ impl ImageViewerApp {
         let ui_signature = Self::compute_entries_signature(&self.all_items);
         self.watcher_fallback_signature = Some(ui_signature);
 
-        // Collect cover paths from subfolder entries for staleness verification.
-        let cover_paths: Vec<(PathBuf, PathBuf)> = self
+        // Collect visible subfolder cover state so the non-USN consistency probe can
+        // detect cover changes even when the directory listing itself is unchanged.
+        let folder_cover_states: Vec<(PathBuf, Option<PathBuf>)> = self
             .all_items
             .iter()
             .filter_map(|entry| {
                 if entry.is_dir {
-                    entry.folder_cover.as_ref().map(|cover| {
-                        (current_path.join(&entry.name), cover.clone())
-                    })
+                    Some((entry.path.clone(), entry.folder_cover.clone()))
                 } else {
                     None
                 }
@@ -152,7 +151,8 @@ impl ImageViewerApp {
                 path: current_path,
                 is_onedrive,
                 ui_signature,
-                cover_paths,
+                show_hidden_files: self.show_hidden_files,
+                folder_cover_states,
             },
         );
     }
@@ -180,30 +180,17 @@ impl ImageViewerApp {
                 return;
             }
 
-            // Handle stale subfolder covers: clear in-memory cover and re-request discovery.
-            if !result.stale_covers.is_empty() {
+            // Handle visible subfolder cover changes detected by the non-USN probe.
+            if !result.changed_folder_covers.is_empty() {
                 log::debug!(
-                    "[FS-WATCH-FALLBACK] {} stale cover(s) detected in {:?}",
-                    result.stale_covers.len(),
+                    "[FS-WATCH-FALLBACK] {} folder cover change(s) detected in {:?}",
+                    result.changed_folder_covers.len(),
                     result.path.file_name().unwrap_or_default()
                 );
-                let stale_set: HashSet<PathBuf> = result.stale_covers.into_iter().collect();
-                for item in &mut self.all_items {
-                    if !item.is_dir || item.folder_cover.is_none() {
-                        continue;
-                    }
-                    let folder_path = current_path.join(&item.name);
-                    if stale_set.contains(&folder_path) {
-                        item.folder_cover = None;
-                        // Evict stale composed preview so it's re-composed with the
-                        // new cover once the cover_worker returns.
-                        self.cache_manager.invalidate_folder_preview(&folder_path);
-                        self.scanned_folders.pop(&folder_path);
-                        // Invalidate disk cache cover in background (avoids Mutex on UI thread).
-                        pending_disk_cache_invalidations.push(folder_path.clone());
-                        // Re-request cover discovery for this subfolder.
-                        let _ = self.cover_worker_sender.send(folder_path);
-                    }
+                let changed_set: HashSet<PathBuf> =
+                    result.changed_folder_covers.into_iter().collect();
+                for folder_path in changed_set {
+                    self.invalidate_folder_cover_state(&folder_path);
                 }
                 self.pending_items_rebuild = true;
             }
@@ -234,13 +221,35 @@ impl ImageViewerApp {
                 self.watcher_fallback_fs
             );
 
+            self.directory_dirty_registry.mark_dirty(&result.path);
             self.directory_cache.invalidate(&result.path);
             if let Some(di) = &self.directory_index {
                 let _ = di.invalidate(&result.path);
             }
             pending_disk_cache_invalidations.push(result.path);
             self.watcher_fallback_signature = Some(result.disk_signature);
-            self.pending_auto_reload = true;
+
+            // Consistency probe already confirmed disk != UI.
+            // Reload IMMEDIATELY — skip the debounce timer so the user
+            // sees the updated listing within one frame instead of
+            // waiting for the next scheduled repaint.
+            if !self.is_loading_folder
+                && self.file_operation_state.file_ops_in_progress == 0
+                && !self.navigation_state.is_computer_view
+                && !self.navigation_state.is_recycle_bin_view
+            {
+                log::info!(
+                    "[FS-WATCH] IMMEDIATE RELOAD from consistency probe for {:?}",
+                    self.navigation_state.current_path
+                );
+                self.loaded_path.clear();
+                self.load_folder(false);
+                self.last_auto_reload = Instant::now();
+                self.pending_auto_reload = false;
+            } else {
+                self.request_watcher_auto_reload();
+            }
+            self.ui_ctx.request_repaint();
         }
     }
 
@@ -287,7 +296,7 @@ impl ImageViewerApp {
             if !self.navigation_state.is_computer_view
                 && !self.navigation_state.is_recycle_bin_view
             {
-                self.pending_auto_reload = true;
+                self.request_watcher_auto_reload();
             }
             let now = Instant::now();
             return WatcherPerfMarks {
@@ -323,9 +332,10 @@ impl ImageViewerApp {
             }
             if !self.navigation_state.is_computer_view && !self.navigation_state.is_recycle_bin_view
             {
-                self.directory_cache
-                    .invalidate(&PathBuf::from(&self.navigation_state.current_path));
-                self.pending_auto_reload = true;
+                let current_path = PathBuf::from(&self.navigation_state.current_path);
+                self.directory_dirty_registry.mark_dirty(&current_path);
+                self.directory_cache.invalidate(&current_path);
+                self.request_watcher_auto_reload();
             }
         }
 

@@ -1,6 +1,7 @@
 use crate::domain::file_entry::{is_archive_extension, FileEntry, SyncStatus};
 use crate::infrastructure::adaptive_batch::AdaptiveBatchTracker;
 use crate::infrastructure::directory_cache::DirectoryCache;
+use crate::infrastructure::directory_dirty_registry::DirectoryDirtyRegistry;
 use crate::infrastructure::directory_index::DirectoryIndex;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::windows::{is_shell_navigation_path, list_shell_folder};
@@ -28,6 +29,7 @@ pub(super) fn try_handle_fast_paths(
     ctx: &egui::Context,
     disk_cache: &Arc<ThumbnailDiskCache>,
     directory_cache: &Arc<DirectoryCache>,
+    directory_dirty_registry: &Arc<DirectoryDirtyRegistry>,
     directory_index_opt: &Option<Arc<DirectoryIndex>>,
     _show_hidden: bool,
 ) -> bool {
@@ -42,13 +44,22 @@ pub(super) fn try_handle_fast_paths(
     let can_trust_persistent_index =
         crate::infrastructure::windows::path_is_usn_filesystem(base_path_buf.as_path())
             .unwrap_or(true);
+    let can_trust_directory_cache = can_trust_persistent_index || is_onedrive_base;
+    let cache_marked_dirty = directory_dirty_registry.is_dirty(base_path_buf.as_path());
 
     // Phase 1: Instant feedback from DirectoryCache (all local disks).
     {
+        if cache_marked_dirty {
+            log::debug!(
+                "[FOLDER-LOADING] DirectoryCache bypassed for {:?} (marked dirty)",
+                base_path_buf
+            );
+        }
         // DriveWatcher monitors the ENTIRE drive and proactively invalidates
         // both DirectoryCache and DirectoryIndex for ANY change on the drive.
         // No fs::metadata() mtime check needed — if the cache has data, it's valid.
-        if let Some((cached_entries, cached_at_ms)) = directory_cache.get_with_meta(base_path_buf) {
+        if !cache_marked_dirty && can_trust_directory_cache {
+            if let Some((cached_entries, cached_at_ms)) = directory_cache.get_with_meta(base_path_buf) {
             log::info!(
                 "[FOLDER-LOADING] Phase 1: Cache HIT for {:?} ({} entries, cached_at_ms={})",
                 base_path_buf, cached_entries.len(), cached_at_ms
@@ -147,10 +158,23 @@ pub(super) fn try_handle_fast_paths(
                 return true;
             }
         } else {
-            log::info!(
-                "[FOLDER-LOADING] Phase 1: Cache MISS for {:?}, proceeding to disk load",
-                base_path_buf
-            );
+            if cache_marked_dirty {
+                log::info!(
+                    "[FOLDER-LOADING] Phase 1: Cache BYPASS for {:?} (marked dirty), proceeding to disk load",
+                    base_path_buf
+                );
+            } else if !can_trust_directory_cache {
+                log::info!(
+                    "[FOLDER-LOADING] Phase 1: Cache BYPASS for {:?} (non-USN filesystem), proceeding to disk load",
+                    base_path_buf
+                );
+            } else {
+                log::info!(
+                    "[FOLDER-LOADING] Phase 1: Cache MISS for {:?}, proceeding to disk load",
+                    base_path_buf
+                );
+            }
+        }
         }
     }
 
@@ -196,7 +220,7 @@ pub(super) fn try_handle_fast_paths(
         );
     }
 
-    if !force_refresh && !is_onedrive_base && can_trust_persistent_index && !_show_hidden {
+    if !force_refresh && !cache_marked_dirty && !is_onedrive_base && can_trust_persistent_index && !_show_hidden {
         if let Some(di) = directory_index_opt {
             let base = PathBuf::from(base_path);
             // SAFETY CHECK: Verify directory mtime before trusting cached index
@@ -270,6 +294,7 @@ pub(super) fn try_handle_fast_paths(
                     }
 
                     directory_cache.put(base.clone(), entries.clone());
+                    directory_dirty_registry.clear_dirty(&base);
 
                     let mut offset = 0;
                     while offset < entries.len() {
@@ -301,61 +326,63 @@ pub(super) fn try_handle_fast_paths(
     if !force_refresh {
         // DriveWatcher pre-invalidates cache — no mtime check needed
         let base_path_buf_owned = PathBuf::from(base_path);
-        if let Some((mut cached_entries, cached_at_ms)) =
-            directory_cache.get_with_meta(&base_path_buf_owned)
-        {
-            if !is_onedrive_base {
-                let dir_mtime_ms = directory_mtime_ms(&base_path_buf_owned);
-                if dir_mtime_ms > cached_at_ms {
-                    log::debug!(
-                        "[FOLDER-LOADING] Secondary DirectoryCache stale for {:?} (dir_mtime_ms={} > cached_at_ms={}), invalidating",
-                        base_path_buf_owned, dir_mtime_ms, cached_at_ms
-                    );
-                    directory_cache.invalidate(&base_path_buf_owned);
-                    if let Some(di) = directory_index_opt {
-                        let _ = di.invalidate(&base_path_buf_owned);
+        if !directory_dirty_registry.is_dirty(&base_path_buf_owned) {
+            if let Some((mut cached_entries, cached_at_ms)) =
+                directory_cache.get_with_meta(&base_path_buf_owned)
+            {
+                if !is_onedrive_base {
+                    let dir_mtime_ms = directory_mtime_ms(&base_path_buf_owned);
+                    if dir_mtime_ms > cached_at_ms {
+                        log::debug!(
+                            "[FOLDER-LOADING] Secondary DirectoryCache stale for {:?} (dir_mtime_ms={} > cached_at_ms={}), invalidating",
+                            base_path_buf_owned, dir_mtime_ms, cached_at_ms
+                        );
+                        directory_cache.invalidate(&base_path_buf_owned);
+                        if let Some(di) = directory_index_opt {
+                            let _ = di.invalidate(&base_path_buf_owned);
+                        }
+                        return false;
                     }
-                    return false;
                 }
-            }
 
-            log::debug!(
-                "[FOLDER-LOADING] Using secondary DirectoryCache for {:?}",
-                base_path
-            );
-            let mut changed = false;
-            for entry in cached_entries.iter_mut() {
-                if !entry.is_dir && is_archive_extension(&entry.name) {
-                    entry.is_dir = true;
-                    changed = true;
+                log::debug!(
+                    "[FOLDER-LOADING] Using secondary DirectoryCache for {:?}",
+                    base_path
+                );
+                let mut changed = false;
+                for entry in cached_entries.iter_mut() {
+                    if !entry.is_dir && is_archive_extension(&entry.name) {
+                        entry.is_dir = true;
+                        changed = true;
+                    }
                 }
-            }
 
-            if changed {
-                directory_cache.put(PathBuf::from(base_path), cached_entries.clone());
-            }
-            let mut offset = 0;
-            while offset < cached_entries.len() {
-                if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
-                    return true;
+                if changed {
+                    directory_cache.put(PathBuf::from(base_path), cached_entries.clone());
                 }
-                *batch_start = std::time::Instant::now();
-                let end = (offset + *batch_size).min(cached_entries.len());
-                let chunk = cached_entries[offset..end].to_vec();
-                let _ = file_entry_sender.send((my_gen, chunk));
+                let mut offset = 0;
+                while offset < cached_entries.len() {
+                    if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
+                        return true;
+                    }
+                    *batch_start = std::time::Instant::now();
+                    let end = (offset + *batch_size).min(cached_entries.len());
+                    let chunk = cached_entries[offset..end].to_vec();
+                    let _ = file_entry_sender.send((my_gen, chunk));
+                    ctx.request_repaint();
+                    batch_tracker.record_batch(batch_start.elapsed(), end - offset);
+                    *batch_size = batch_tracker.batch_size();
+                    offset = end;
+                }
+                let _ = file_entry_sender.send((my_gen, Vec::new()));
                 ctx.request_repaint();
-                batch_tracker.record_batch(batch_start.elapsed(), end - offset);
-                *batch_size = batch_tracker.batch_size();
-                offset = end;
-            }
-            let _ = file_entry_sender.send((my_gen, Vec::new()));
-            ctx.request_repaint();
 
-            // PERFORMANCE: Don't prefetch when serving from cache.
-            // Prefetch only runs after actual disk enumeration (first visit).
-            // Subdirectories are likely already cached from previous visits.
-            // This eliminates 5x background directory enumerations on HDD.
-            return true;
+                // PERFORMANCE: Don't prefetch when serving from cache.
+                // Prefetch only runs after actual disk enumeration (first visit).
+                // Subdirectories are likely already cached from previous visits.
+                // This eliminates 5x background directory enumerations on HDD.
+                return true;
+            }
         }
     }
 

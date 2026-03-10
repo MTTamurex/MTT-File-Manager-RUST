@@ -8,47 +8,13 @@ use super::{truncate_text_for_column, ColumnWidths, ListViewContext, ListViewOpe
 use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::windows::{format_date, format_size};
 
-/// Max age (seconds) for probing live file size on the UI thread.
-const LIVE_SIZE_PROBE_MAX_AGE_SECS: u64 = 300; // 5 minutes
-
 #[derive(Clone, Copy)]
 struct TooltipLiveFileStat {
     checked_at: f64,
     size: u64,
 }
 
-/// Probes current file size via `std::fs::metadata`.
-/// Only called for recently-modified files to avoid blocking on cold cache.
-fn probe_file_size(path: &std::path::Path, modified_epoch: u64) -> Option<u64> {
-    if modified_epoch > 0 {
-        let now_epoch = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        if now_epoch.saturating_sub(modified_epoch) > LIVE_SIZE_PROBE_MAX_AGE_SECS {
-            return None;
-        }
-    }
-
-    if crate::infrastructure::onedrive::is_onedrive_path(path) {
-        return None;
-    }
-
-    // FIX: Skip blocking metadata() for network/virtual drives (can block indefinitely).
-    if crate::infrastructure::io_priority::is_network_or_virtual(path) {
-        return None;
-    }
-
-    let metadata = std::fs::metadata(path).ok()?;
-
-    if metadata.is_file() {
-        Some(metadata.len())
-    } else {
-        None
-    }
-}
-
-fn resolve_tooltip_live_size(ui: &egui::Ui, item: &FileEntry) -> u64 {
+fn resolve_tooltip_live_size(ui: &egui::Ui, item: &FileEntry, ctx: &mut ListViewContext) -> u64 {
     if item.is_dir {
         return item.size;
     }
@@ -66,11 +32,14 @@ fn resolve_tooltip_live_size(ui: &egui::Ui, item: &FileEntry) -> u64 {
             });
 
         if (now - state.checked_at) >= 1.0 {
-            if let Some(size) = probe_file_size(&item.path, item.modified) {
-                state.size = size;
-            } else {
-                state.size = item.size;
-            }
+            state.size = crate::app::live_file_size::resolve_cached_or_enqueue_live_file_size(
+                &item.path,
+                item.modified,
+                item.size,
+                ctx.live_file_size_cache,
+                ctx.live_file_size_loading,
+                ctx.live_file_size_req_sender,
+            );
             state.checked_at = now;
             d.insert_temp(cache_id, state);
         }
@@ -379,7 +348,7 @@ fn render_item_tooltip(
     ui: &mut Ui,
     response: &egui::Response,
     item: &FileEntry,
-    ctx: &ListViewContext,
+    ctx: &mut ListViewContext,
     is_recycle_bin: bool,
 ) {
     if response.hovered() {
@@ -448,7 +417,7 @@ fn render_item_tooltip(
                         if !item.is_dir || item.is_archive() {
                             ui.horizontal(|ui| {
                                 ui.label(t!("file_info.size"));
-                                ui.label(format_size(resolve_tooltip_live_size(ui, item)));
+                                ui.label(format_size(resolve_tooltip_live_size(ui, item, ctx)));
                             });
                         }
                         let date_lbl = if is_recycle_bin {

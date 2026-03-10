@@ -1,6 +1,7 @@
 use crate::domain::file_entry::{is_archive_extension, FileEntry};
 use crate::infrastructure::adaptive_batch::AdaptiveBatchTracker;
 use crate::infrastructure::directory_cache::DirectoryCache;
+use crate::infrastructure::directory_dirty_registry::DirectoryDirtyRegistry;
 use crate::infrastructure::directory_index::{DirectoryIndex, IndexedFile};
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::ntfs_reader;
@@ -20,6 +21,7 @@ pub(super) fn try_handle_optimized_tiers(
     base_path: &str,
     is_ssd: bool,
     is_onedrive_base: bool,
+    prefer_reliable_scan: bool,
     batch_size: &mut usize,
     batch_tracker: &mut AdaptiveBatchTracker,
     batch_start: &mut Instant,
@@ -29,9 +31,18 @@ pub(super) fn try_handle_optimized_tiers(
     ctx: &egui::Context,
     disk_cache: &Arc<ThumbnailDiskCache>,
     directory_cache: &Arc<DirectoryCache>,
+    directory_dirty_registry: &Arc<DirectoryDirtyRegistry>,
     directory_index_opt: &Option<Arc<DirectoryIndex>>,
     show_hidden: bool,
 ) -> bool {
+    if prefer_reliable_scan {
+        log::debug!(
+            "[FOLDER-LOADING] Reliable scan mode for {:?}: skipping optimized tiers and using standard enumeration",
+            base_path
+        );
+        return false;
+    }
+
     // OPTIMIZATION: Tiered disk reading strategy
     // Priority: 1) NTFS native API, 2) HDD-optimized FindFirstFileExW, 3) Standard FindFirstFileW
     let is_hdd = !is_ssd;
@@ -138,6 +149,7 @@ pub(super) fn try_handle_optimized_tiers(
             }
             if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                 directory_cache.put(PathBuf::from(base_path), all_entries_disk.clone());
+                directory_dirty_registry.clear_dirty(PathBuf::from(base_path).as_path());
                 if !show_hidden {
                     if let Some(di) = directory_index_opt {
                         let indexed: Vec<IndexedFile> = all_entries_disk
@@ -231,6 +243,7 @@ pub(super) fn try_handle_optimized_tiers(
                 // Cache results for future navigations
                 if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                     directory_cache.put(PathBuf::from(base_path), all_entries_disk.clone());
+                    directory_dirty_registry.clear_dirty(PathBuf::from(base_path).as_path());
 
                     if !show_hidden {
                         if let Some(di) = directory_index_opt {

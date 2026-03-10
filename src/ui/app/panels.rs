@@ -108,9 +108,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
             use crate::ui::sidebar::{render_sidebar, SidebarContext};
 
             let is_computer_view = app.navigation_state.is_computer_view;
-            let is_folder_dragging = app.is_item_dragging
-                && app.drag_payload_paths.iter().all(|p| p.is_dir())
-                && app.drag_payload_paths.len() == 1;
+            let is_folder_dragging = app.is_item_dragging && app.drag_payload_is_single_directory;
             // H-1: borrow directly — no String/Vec/TextureHandle clone per frame
             let dragging_path: Option<&str> = if is_folder_dragging {
                 app.drag_payload_paths.first().and_then(|p| p.to_str())
@@ -195,20 +193,9 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
 fn handle_sidebar_action(app: &mut ImageViewerApp, action: SidebarAction) {
     match action {
         SidebarAction::NavigateTo(path) => {
-            // If this path is a pinned folder that no longer exists, auto-unpin + notify
-            let is_pinned = app.pinned_folders.iter().any(|pf| pf.path == path);
-            if is_pinned && !std::path::Path::new(&path).exists() {
-                app.unpin_folder(&path);
-                app.notifications.warning(rust_i18n::t!(
-                    "panels.folder_removed",
-                    name = std::path::Path::new(&path)
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or(&path)
-                ).to_string());
-            } else {
-                app.navigate_to(&path);
-            }
+            // Avoid synchronous existence probes on the UI thread. Deleted pinned folders
+            // are pruned by the existing async cleanup path.
+            app.navigate_to(&path);
         }
         SidebarAction::NavigateToComputer => app.navigate_to_computer(),
         SidebarAction::NavigateToRecycleBin => app.navigate_to_recycle_bin(),
@@ -343,6 +330,9 @@ fn render_preview_panel_layout(
                                 app.metadata_loading.contains(&file.path),
                                 folder_size,
                                 is_folder_size_loading,
+                                &mut app.live_file_size_cache,
+                                &mut app.live_file_size_loading,
+                                &app.live_file_size_req_sender,
                                 app.navigation_state.is_recycle_bin_view,
                                 &mut app.item_icon_loader,
                                 &mut app.svg_icon_manager,

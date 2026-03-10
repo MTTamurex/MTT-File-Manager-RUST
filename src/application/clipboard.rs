@@ -1,4 +1,5 @@
 use crate::application::file_operations;
+use std::cell::Cell;
 use crate::infrastructure::windows_clipboard;
 use std::path::PathBuf;
 
@@ -17,6 +18,9 @@ pub struct ClipboardManager {
     internal_op: Option<ClipboardOp>,
     /// Clipboard sequence when internal file state was last synced to system clipboard.
     internal_sync_sequence: Option<u32>,
+    /// Cached answer for whether the current clipboard sequence contains file payloads.
+    cached_system_has_files: Cell<Option<bool>>,
+    cached_system_has_files_sequence: Cell<Option<u32>>,
 }
 
 impl ClipboardManager {
@@ -31,11 +35,20 @@ impl ClipboardManager {
 
     /// Checks if there is content to paste (System or Internal)
     pub fn has_content(&self) -> bool {
-        if windows_clipboard::has_files_in_clipboard() {
+        let current_sequence = windows_clipboard::clipboard_sequence_number();
+
+        if self.cached_system_has_files_for_sequence(current_sequence) {
             return true;
         }
 
-        self.has_internal_content_for_sequence(windows_clipboard::clipboard_sequence_number())
+        let has_system_files = windows_clipboard::has_files_in_clipboard();
+        self.update_system_files_cache(current_sequence, has_system_files);
+
+        if has_system_files {
+            return true;
+        }
+
+        self.has_internal_content_for_sequence(current_sequence)
     }
 
     /// Clears the internal clipboard state
@@ -52,13 +65,15 @@ impl ClipboardManager {
         }
 
         // 1. System Clipboard (prefer native file payload; fallback to text path)
-        if windows_clipboard::copy_files_to_clipboard(paths).is_err() {
+        let system_file_payload_written = windows_clipboard::copy_files_to_clipboard(paths).is_ok();
+        if !system_file_payload_written {
             if let Some(first) = paths.first() {
                 let _ = file_operations::copy_path_to_clipboard(first);
             }
         }
 
         self.internal_sync_sequence = windows_clipboard::clipboard_sequence_number();
+        self.update_system_files_cache(self.internal_sync_sequence, system_file_payload_written);
 
         // 2. Internal State
         self.internal_files = paths.to_vec();
@@ -72,13 +87,15 @@ impl ClipboardManager {
         }
 
         // 1. System Clipboard (prefer native file payload; fallback to text path)
-        if windows_clipboard::cut_files_to_clipboard(paths).is_err() {
+        let system_file_payload_written = windows_clipboard::cut_files_to_clipboard(paths).is_ok();
+        if !system_file_payload_written {
             if let Some(first) = paths.first() {
                 let _ = file_operations::copy_path_to_clipboard(first);
             }
         }
 
         self.internal_sync_sequence = windows_clipboard::clipboard_sequence_number();
+        self.update_system_files_cache(self.internal_sync_sequence, system_file_payload_written);
 
         // 2. Internal State
         self.internal_files = paths.to_vec();
@@ -102,6 +119,22 @@ impl ClipboardManager {
     fn has_internal_content_for_sequence(&self, current_sequence: Option<u32>) -> bool {
         self.internal_files_to_paste_for_sequence(current_sequence)
             .is_some_and(|(files, _)| !files.is_empty())
+    }
+
+    fn cached_system_has_files_for_sequence(&self, current_sequence: Option<u32>) -> bool {
+        match current_sequence {
+            Some(sequence)
+                if self.cached_system_has_files_sequence.get() == Some(sequence) =>
+            {
+                self.cached_system_has_files.get().unwrap_or(false)
+            }
+            _ => false,
+        }
+    }
+
+    fn update_system_files_cache(&self, current_sequence: Option<u32>, has_files: bool) {
+        self.cached_system_has_files.set(Some(has_files));
+        self.cached_system_has_files_sequence.set(current_sequence);
     }
 
     fn internal_files_to_paste_for_sequence(

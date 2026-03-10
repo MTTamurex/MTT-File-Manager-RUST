@@ -290,3 +290,39 @@ pub(in crate::app) fn spawn_metadata_worker(
 
     (meta_req_tx, meta_res_rx)
 }
+
+pub(in crate::app) fn spawn_live_file_size_worker(
+    ctx: &egui::Context,
+) -> (
+    mpsc::Sender<crate::app::live_file_size::LiveFileSizeRequest>,
+    mpsc::Receiver<crate::app::live_file_size::LiveFileSizeResponse>,
+) {
+    let (size_req_tx, size_req_rx) =
+        mpsc::channel::<crate::app::live_file_size::LiveFileSizeRequest>();
+    let (size_res_tx, size_res_rx) =
+        mpsc::channel::<crate::app::live_file_size::LiveFileSizeResponse>();
+    let size_ctx = ctx.clone();
+
+    std::thread::spawn(move || {
+        crate::infrastructure::io_priority::set_thread_priority(
+            crate::infrastructure::io_priority::IOPriority::Background,
+        );
+
+        while let Ok((path, mtime)) = size_req_rx.recv() {
+            let live_size = if crate::app::live_file_size::should_probe_live_file_size(&path, mtime)
+            {
+                std::fs::metadata(&path)
+                    .ok()
+                    .filter(|meta| meta.is_file())
+                    .map(|meta| meta.len())
+            } else {
+                None
+            };
+
+            let _ = size_res_tx.send((path, mtime, live_size));
+            size_ctx.request_repaint();
+        }
+    });
+
+    (size_req_tx, size_res_rx)
+}

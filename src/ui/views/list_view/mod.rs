@@ -239,6 +239,10 @@ pub struct ListViewContext<'a> {
     pub drag_started_item: &'a mut Option<usize>,
     /// Output: currently hovered folder item during drag
     pub drag_hovered_item: &'a mut Option<usize>,
+    pub live_file_size_cache: &'a mut lru::LruCache<PathBuf, (u64, u64)>,
+    pub live_file_size_loading: &'a mut FxHashSet<PathBuf>,
+    pub live_file_size_req_sender:
+        &'a std::sync::mpsc::Sender<crate::app::live_file_size::LiveFileSizeRequest>,
     // Resizable column widths
     pub col_name_width: &'a mut f32,
     pub col_date_width: &'a mut f32,

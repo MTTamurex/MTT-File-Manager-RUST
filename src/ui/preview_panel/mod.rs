@@ -33,6 +33,9 @@ pub fn render_preview_panel(
     is_metadata_loading: bool,
     folder_size: Option<u64>,
     is_folder_size_loading: bool,
+    live_file_size_cache: &mut lru::LruCache<std::path::PathBuf, (u64, u64)>,
+    live_file_size_loading: &mut crate::ui::cache::FxHashSet<std::path::PathBuf>,
+    live_file_size_req_sender: &std::sync::mpsc::Sender<crate::app::live_file_size::LiveFileSizeRequest>,
     is_recycle_bin_view: bool,
     item_icon_loader: &mut IconLoader,
     svg_manager: &mut SvgIconManager,
@@ -214,6 +217,9 @@ pub fn render_preview_panel(
         folder_size,
         is_folder_size_loading,
         is_metadata_loading,
+        live_file_size_cache,
+        live_file_size_loading,
+        live_file_size_req_sender,
         svg_manager,
     ) {
         action = Some(act);

@@ -9,16 +9,18 @@ pub struct ConsistencyProbeRequest {
     pub path: PathBuf,
     pub is_onedrive: bool,
     pub ui_signature: u64,
-    /// (folder_path, cover_file_path) pairs for subfolders whose covers should be verified.
-    pub cover_paths: Vec<(PathBuf, PathBuf)>,
+    pub show_hidden_files: bool,
+    /// (folder_path, current_cover_file_path) pairs for visible subfolders whose
+    /// folder cover state should be verified.
+    pub folder_cover_states: Vec<(PathBuf, Option<PathBuf>)>,
 }
 
 pub struct ConsistencyProbeResult {
     pub path: PathBuf,
     pub disk_signature: u64,
     pub path_vanished: bool,
-    /// Folder paths whose cover file no longer exists on disk.
-    pub stale_covers: Vec<PathBuf>,
+    /// Folder paths whose effective folder cover changed (None->Some, Some->None, Some->Some(new)).
+    pub changed_folder_covers: Vec<PathBuf>,
 }
 
 /// Spawns a background thread that performs directory consistency probes
@@ -57,7 +59,7 @@ pub fn spawn_consistency_probe_worker(
                 let disk_entries = match crate::infrastructure::windows::hdd_directory_reader::read_directory_hdd_optimized(
                     path.as_path(),
                     is_onedrive,
-                    false, // consistency probe never shows hidden files
+                    latest.show_hidden_files,
                 ) {
                     Ok(entries) => entries,
                     Err(_) => {
@@ -67,7 +69,7 @@ pub fn spawn_consistency_probe_worker(
                                 path,
                                 disk_signature: 0,
                                 path_vanished: true,
-                                stale_covers: Vec::new(),
+                                changed_folder_covers: Vec::new(),
                             });
                             ctx.request_repaint();
                         }
@@ -77,33 +79,39 @@ pub fn spawn_consistency_probe_worker(
 
                 let disk_signature = compute_entries_signature(&disk_entries);
 
-                // Check which subfolder covers have been deleted from disk.
-                let stale_covers: Vec<PathBuf> = latest
-                    .cover_paths
+                // Re-resolve folder covers for currently visible subfolders so non-USN
+                // filesystems can detect cover changes even when folder listings themselves
+                // did not change.
+                let changed_folder_covers: Vec<PathBuf> = latest
+                    .folder_cover_states
                     .iter()
-                    .filter(|(_, cover_file)| {
-                        !crate::infrastructure::onedrive::fast_path_exists(cover_file)
+                    .filter_map(|(folder_path, current_cover)| {
+                        let discovered_cover = crate::infrastructure::windows::find_folder_preview_item(folder_path);
+                        if discovered_cover != *current_cover {
+                            Some(folder_path.clone())
+                        } else {
+                            None
+                        }
                     })
-                    .map(|(folder_path, _)| folder_path.clone())
                     .collect();
 
                 let signature_changed = disk_signature != ui_signature;
-                let has_stale_covers = !stale_covers.is_empty();
+                let has_cover_changes = !changed_folder_covers.is_empty();
 
                 log::debug!(
-                    "[PROBE-WORKER] path={:?} entries={} sig_match={} stale_covers={}",
+                    "[PROBE-WORKER] path={:?} entries={} sig_match={} changed_folder_covers={}",
                     path.file_name().unwrap_or_default(),
                     disk_entries.len(),
                     !signature_changed,
-                    stale_covers.len()
+                    changed_folder_covers.len()
                 );
 
-                if signature_changed || has_stale_covers {
+                if signature_changed || has_cover_changes {
                     let _ = res_tx.send(ConsistencyProbeResult {
                         path,
                         disk_signature,
                         path_vanished: false,
-                        stale_covers,
+                        changed_folder_covers,
                     });
                     ctx.request_repaint();
                 }

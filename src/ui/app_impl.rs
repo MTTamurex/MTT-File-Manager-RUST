@@ -4,7 +4,7 @@ use crate::ui::app;
 use eframe::egui;
 
 /// Periodic repaint interval to ensure drive bitmask checks run even when idle.
-const DRIVE_BITMASK_REPAINT_MS: u64 = 3000;
+const DRIVE_BITMASK_REPAINT_MS: u64 = 1000;
 
 impl eframe::App for ImageViewerApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {

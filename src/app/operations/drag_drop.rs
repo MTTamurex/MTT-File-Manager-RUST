@@ -43,6 +43,13 @@ impl ImageViewerApp {
             payload.push(item.path.clone());
         }
 
+        let payload_is_single_directory = payload.len() == 1
+            && self
+                .items
+                .iter()
+                .find(|candidate| candidate.path == payload[0])
+                .is_some_and(|candidate| candidate.is_dir);
+
         // Explorer-like behavior: dragging a non-selected item turns it into single selection.
         if !self.multi_selection.contains(&item.path) {
             self.multi_selection.clear();
@@ -55,6 +62,7 @@ impl ImageViewerApp {
 
         self.is_item_dragging = true;
         self.drag_payload_paths = payload;
+        self.drag_payload_is_single_directory = payload_is_single_directory;
         self.drag_source_folder = Some(PathBuf::from(&self.navigation_state.current_path));
         self.drag_target_folder = None;
         self.drag_hovered_folder = None;
@@ -359,6 +367,7 @@ impl ImageViewerApp {
 
         // Clear drag state
         self.is_item_dragging = false;
+        self.drag_payload_is_single_directory = false;
         self.drag_target_folder = None;
         self.drag_hovered_folder = None;
         self.drag_icon_cache = None;
@@ -398,6 +407,7 @@ impl ImageViewerApp {
     pub fn cancel_item_drag(&mut self) {
         self.is_item_dragging = false;
         self.drag_payload_paths.clear();
+        self.drag_payload_is_single_directory = false;
         self.drag_source_folder = None;
         self.drag_target_folder = None;
         self.drag_hovered_folder = None;

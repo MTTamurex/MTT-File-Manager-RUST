@@ -7,6 +7,36 @@ use crate::application::file_operations;
 use std::path::{Path, PathBuf};
 
 impl ImageViewerApp {
+    fn context_target_is_directory(&self, idx: Option<usize>, path: &Path) -> bool {
+        if crate::infrastructure::windows::is_drive_root_path(path) {
+            return true;
+        }
+
+        if let Some(index) = idx {
+            if let Some(item) = self.items.get(index) {
+                if item.path == path {
+                    return item.is_dir || item.drive_info.is_some();
+                }
+            }
+        }
+
+        if let Some(selected) = self.selected_file.as_ref() {
+            if selected.path == path {
+                return selected.is_dir || selected.drive_info.is_some();
+            }
+        }
+
+        if let Some(item) = self.items.iter().find(|item| item.path == path) {
+            return item.is_dir || item.drive_info.is_some();
+        }
+
+        if self.pinned_folders.iter().any(|pinned| Path::new(&pinned.path) == path) {
+            return true;
+        }
+
+        path == Path::new(&self.navigation_state.current_path)
+    }
+
     pub fn can_copy_from_current_location(&self) -> bool {
         !self.navigation_state.is_recycle_bin_view
     }
@@ -100,7 +130,7 @@ impl ImageViewerApp {
             self.context_menu
                 .target_paths
                 .first()
-                .filter(|path| path.is_dir())
+                .filter(|path| self.context_target_is_directory(idx, path))
                 .cloned()
                 .unwrap_or_else(|| PathBuf::from(&self.navigation_state.current_path))
         } else if let Some(idx) = idx {

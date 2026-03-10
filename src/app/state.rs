@@ -75,6 +75,14 @@ pub struct ImageViewerApp {
     pub thumbnail_queue: Arc<PriorityThumbnailQueue>, // UI -> Worker Pool (Priority Queue)
     pub image_receiver: crossbeam_channel::Receiver<ThumbnailData>, // Worker Pool -> UI
     pub pending_thumbnails: VecDeque<ThumbnailData>,  // PERFORMANCE: Buffer for throttled uploads
+    /// Per-path counter of stale in-flight thumbnail results to skip.
+    /// Incremented on cache eviction, decremented when a stale result is drained.
+    pub thumbnail_eviction_skips: std::collections::HashMap<PathBuf, u32>,
+    /// Snapshot of old items' metadata (path → (modified, size)) taken before
+    /// a watcher-triggered reload clears `all_items`. Used after end-of-load to
+    /// detect and evict stale `texture_cache` entries for items whose content
+    /// changed on disk.
+    pub stale_items_snapshot: Option<std::collections::HashMap<PathBuf, (u64, u64)>>,
 
     // File system
     pub items: Arc<Vec<FileEntry>>, // Arc for cheap clone in render loops (60 FPS)
@@ -119,6 +127,8 @@ pub struct ImageViewerApp {
     // Persistence Layer
     pub disk_cache: Arc<ThumbnailDiskCache>,
     pub directory_cache: Arc<DirectoryCache>,
+    pub directory_dirty_registry:
+        Arc<crate::infrastructure::directory_dirty_registry::DirectoryDirtyRegistry>,
     pub directory_index: Option<Arc<DirectoryIndex>>,
 
     // View Mode
@@ -133,6 +143,7 @@ pub struct ImageViewerApp {
     // Internal drag-and-drop state (Explorer-like item move/copy inside file list views)
     pub is_item_dragging: bool,
     pub drag_payload_paths: Vec<PathBuf>,
+    pub drag_payload_is_single_directory: bool,
     pub drag_source_folder: Option<PathBuf>,
     pub drag_target_folder: Option<PathBuf>,
     pub drag_hovered_folder: Option<PathBuf>,
@@ -148,6 +159,11 @@ pub struct ImageViewerApp {
     pub metadata_res_receiver: Receiver<(PathBuf, u64, windows_infra::MediaMetadata)>,
     pub metadata_cache: LruCache<PathBuf, (u64, windows_infra::MediaMetadata)>,
     pub metadata_loading: FxHashSet<PathBuf>,
+    pub live_file_size_req_sender: Sender<crate::app::live_file_size::LiveFileSizeRequest>,
+    pub live_file_size_res_receiver:
+        Receiver<crate::app::live_file_size::LiveFileSizeResponse>,
+    pub live_file_size_cache: LruCache<PathBuf, (u64, u64)>,
+    pub live_file_size_loading: FxHashSet<PathBuf>,
     pub last_metadata_refresh: Instant,
     pub last_metadata_path: Option<PathBuf>,
     pub show_preview_panel: bool,
@@ -180,6 +196,9 @@ pub struct ImageViewerApp {
     pub sidebar_rename_focus: bool,
 
     // WATCHER SYSTEM (AUTO-REFRESH)
+    /// Experimental runtime switch: when false, skip the drive-wide recursive
+    /// watcher and use only per-folder watcher strategies.
+    pub drive_watcher_enabled: bool,
     // Drive-wide watcher (new - monitors entire drive)
     pub drive_watcher: crate::infrastructure::drive_watcher_integration::DriveWatcherManager,
 

@@ -95,6 +95,8 @@ impl ImageViewerApp {
             icon_res_rx,
             meta_req_tx,
             meta_res_rx,
+            live_size_req_tx,
+            live_size_res_rx,
             folder_preview_tx,
             folder_preview_res_rx,
             folder_size_req_tx,
@@ -171,6 +173,8 @@ impl ImageViewerApp {
             thumbnail_queue,
             image_receiver: img_rx,
             pending_thumbnails: std::collections::VecDeque::new(),
+            thumbnail_eviction_skips: std::collections::HashMap::new(),
+            stale_items_snapshot: None,
             items: Arc::new(Vec::new()),
             // Async loading
             file_entry_receiver,
@@ -204,6 +208,9 @@ impl ImageViewerApp {
             view_mode_normal: view_mode,
             disk_cache: disk_cache.clone(),
             directory_cache: directory_cache.clone(),
+            directory_dirty_registry: Arc::new(
+                crate::infrastructure::directory_dirty_registry::DirectoryDirtyRegistry::new(),
+            ),
             directory_index: directory_index.clone(),
             // View mode: loaded from SQLite
             view_mode,
@@ -228,6 +235,7 @@ impl ImageViewerApp {
             multi_selection: FxHashSet::default(),
             is_item_dragging: false,
             drag_payload_paths: Vec::new(),
+            drag_payload_is_single_directory: false,
             drag_source_folder: None,
             drag_target_folder: None,
             drag_hovered_folder: None,
@@ -250,6 +258,15 @@ impl ImageViewerApp {
             sidebar_rename_focus: false,
 
             // Drive-wide file system watcher
+            drive_watcher_enabled: std::env::var("MTT_DISABLE_DRIVE_WATCHER")
+                .map(|value| {
+                    let normalized = value.trim().to_ascii_lowercase();
+                    !(normalized == "1"
+                        || normalized == "true"
+                        || normalized == "yes"
+                        || normalized == "on")
+                })
+                .unwrap_or(true),
             drive_watcher:
                 crate::infrastructure::drive_watcher_integration::DriveWatcherManager::new(),
 
@@ -394,6 +411,12 @@ impl ImageViewerApp {
                     .expect("METADATA_CACHE_SIZE.max(1) must be non-zero"),
             ),
             metadata_loading: FxHashSet::default(),
+            live_file_size_req_sender: live_size_req_tx,
+            live_file_size_res_receiver: live_size_res_rx,
+            live_file_size_cache: LruCache::new(
+                NonZeroUsize::new(2048).expect("live file size cache size must be non-zero"),
+            ),
+            live_file_size_loading: FxHashSet::default(),
             last_metadata_refresh: Instant::now(),
             last_metadata_path: None,
 
