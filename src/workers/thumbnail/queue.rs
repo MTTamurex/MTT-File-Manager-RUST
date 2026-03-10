@@ -3,7 +3,7 @@
 //! Groups requests by directory on HDDs to minimize seek times.
 
 use crate::infrastructure::io_priority::{self, IOPriority};
-use crate::workers::thumbnail::types::ThumbnailRequest;
+use crate::workers::thumbnail::types::{ThumbnailRequest, ThumbnailRequestSource};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Condvar, Mutex};
@@ -87,6 +87,46 @@ impl PriorityThumbnailQueue {
         directory_index: Option<usize>,
         modified: u64,
     ) {
+        self.push_with_index_and_source(
+            path,
+            gen,
+            request_size,
+            priority,
+            directory_index,
+            modified,
+            ThumbnailRequestSource::Normal,
+        );
+    }
+
+    pub fn push_bulk_scan(
+        &self,
+        path: PathBuf,
+        gen: usize,
+        request_size: u32,
+        priority: IOPriority,
+        modified: u64,
+    ) {
+        self.push_with_index_and_source(
+            path,
+            gen,
+            request_size,
+            priority,
+            None,
+            modified,
+            ThumbnailRequestSource::BulkScan,
+        );
+    }
+
+    fn push_with_index_and_source(
+        &self,
+        path: PathBuf,
+        gen: usize,
+        request_size: u32,
+        priority: IOPriority,
+        directory_index: Option<usize>,
+        modified: u64,
+        source: ThumbnailRequestSource,
+    ) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 
         // Group by parent directory (for HDD seek optimization)
@@ -99,6 +139,7 @@ impl PriorityThumbnailQueue {
             priority,
             directory_index,
             modified,
+            source,
         };
 
         // Deduplication with merge: upgrade existing request instead of dropping.
@@ -215,6 +256,15 @@ impl PriorityThumbnailQueue {
                     updated = true;
                 }
 
+                // If a path becomes visible to the user, treat it as a normal request
+                // even if it was originally queued by the bulk scan.
+                if existing.source != incoming.source
+                    && matches!(incoming.source, ThumbnailRequestSource::Normal)
+                {
+                    existing.source = ThumbnailRequestSource::Normal;
+                    updated = true;
+                }
+
                 if updated && !is_ssd {
                     items.sort_by(|a, b| match a.priority.cmp(&b.priority) {
                         std::cmp::Ordering::Equal => a.directory_index.cmp(&b.directory_index),
@@ -251,7 +301,7 @@ impl PriorityThumbnailQueue {
     }
 
     /// Pop the next request, optimizing for disk locality on HDDs
-    pub fn pop(&self) -> Option<(PathBuf, usize, u32, IOPriority, u64)> {
+    pub fn pop(&self) -> Option<(PathBuf, usize, u32, IOPriority, u64, ThumbnailRequestSource)> {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 
         loop {
@@ -272,6 +322,7 @@ impl PriorityThumbnailQueue {
                     request.size,
                     request.priority,
                     request.modified,
+                    request.source,
                 ));
             }
 
@@ -446,7 +497,7 @@ mod tests {
         queue.push_with_index(path_a.clone(), 1, 64, IOPriority::Prefetch, Some(2), 0);
         queue.push_with_index(path_b.clone(), 1, 64, IOPriority::Prefetch, Some(1), 0);
 
-        let (path, _, _, _, _) = queue.pop().unwrap();
+        let (path, _, _, _, _, _) = queue.pop().unwrap();
         assert_eq!(path, path_b);
     }
 
@@ -464,12 +515,13 @@ mod tests {
         // Should only get one back, with merged/upgraded fields
         let result = queue.pop();
         assert!(result.is_some());
-        let (p, g, size, priority, modified) = result.unwrap();
+        let (p, g, size, priority, modified, source) = result.unwrap();
         assert_eq!(p, path);
         assert_eq!(g, 2);
         assert_eq!(size, 256);
         assert_eq!(priority, IOPriority::Interactive);
         assert_eq!(modified, 123);
+        assert_eq!(source, ThumbnailRequestSource::Normal);
     }
 
     #[test]
@@ -487,11 +539,12 @@ mod tests {
 
         let result = queue.pop();
         assert!(result.is_some());
-        let (p, g, size, priority, modified) = result.unwrap();
+        let (p, g, size, priority, modified, source) = result.unwrap();
         assert_eq!(p, path);
         assert_eq!(g, 3);
         assert_eq!(size, 128);
         assert_eq!(priority, IOPriority::Interactive);
         assert_eq!(modified, 321);
+        assert_eq!(source, ThumbnailRequestSource::Normal);
     }
 }

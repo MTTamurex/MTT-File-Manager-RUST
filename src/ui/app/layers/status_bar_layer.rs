@@ -135,7 +135,7 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                                 if disk_cache.get(path, modified).is_some() {
                                     continue;
                                 }
-                                queue.push(
+                                queue.push_bulk_scan(
                                     path.to_path_buf(),
                                     generation,
                                     512,

@@ -9,6 +9,12 @@ use std::path::PathBuf;
 /// High -> Interactive, Low -> Prefetch
 pub type ThumbnailPriority = IOPriority;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThumbnailRequestSource {
+    Normal,
+    BulkScan,
+}
+
 /// Thumbnail request with priority and metadata
 #[derive(Debug, Clone)]
 pub struct ThumbnailRequest {
@@ -21,4 +27,5 @@ pub struct ThumbnailRequest {
     /// When > 0, avoids redundant std::fs::metadata() syscalls on HDD.
     /// When 0, falls back to reading metadata from disk.
     pub modified: u64,
+    pub source: ThumbnailRequestSource,
 }
