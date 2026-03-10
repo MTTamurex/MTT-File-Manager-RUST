@@ -7,11 +7,11 @@
 ```
 User Input
     ↓
-navigate_to_path() [application/navigation.rs]
+navigate_to() [application/navigation.rs]
     ↓
-load_folder_contents() [app/operations/folder_loading/]
+load_folder() [app/operations/folder_loading/]
     ↓
-read_directory (scan folder entries) [infrastructure/windows/file_system.rs]
+read_directory_fast / read_directory_hdd_batched [infrastructure/ntfs_reader.rs, infrastructure/windows/hdd_directory_reader.rs]
     ↓
 Sort & filter entries [application/sorting.rs]
     ↓
@@ -22,7 +22,7 @@ Request thumbnails for visible items [app/operations/thumbnails.rs]
 Render file list [ui/views/grid_view/ or list_view/]
 ```
 
-**Key files**: `application/navigation.rs`, `app/operations/folder_loading/`, `infrastructure/windows/file_system.rs`, `application/sorting.rs`
+**Key files**: `application/navigation.rs`, `app/operations/folder_loading/`, `infrastructure/ntfs_reader.rs`, `infrastructure/windows/hdd_directory_reader.rs`, `application/sorting.rs`
 
 ## 2. File Preview
 
@@ -120,12 +120,12 @@ Navigate to Recycle Bin (special path)
     ↓
 Enumerate deleted items [infrastructure/windows/recycle_bin.rs]
     ↓
-Render in computer_view.rs with restore/delete options
+Render in grid_view or list_view (with is_recycle_bin_view flag) with restore/delete options
     ↓
 User action: Restore or Permanent Delete → Shell API
 ```
 
-**Key files**: `app/operations/recycle_bin_ops.rs`, `infrastructure/windows/recycle_bin.rs`, `ui/views/computer_view.rs`
+**Key files**: `app/operations/recycle_bin_ops.rs`, `infrastructure/windows/recycle_bin.rs`, `ui/views/grid_view/`, `ui/views/list_view/`
 
 ## 7. Keyboard Navigation
 
@@ -205,7 +205,7 @@ Query sent to global_search_worker [workers/global_search_worker.rs]
     ↓
 Worker connects via Named Pipe to mtt-search-service
     ↓
-Service searches in-memory index (substring match, 5s deadline)
+Service searches in-memory index (substring match, 3s deadline)
     ↓
 Results returned: FRN → path_resolver → full paths
     ↓

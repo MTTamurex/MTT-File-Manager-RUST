@@ -8,13 +8,14 @@ This document describes the key performance optimizations implemented in MTT Fil
 
 **Location**: `src/infrastructure/ntfs_reader.rs`
 
-For HDD drives, standard directory enumeration is slow due to seek times. The app uses `NtQueryDirectoryFile` to read directory entries in bulk (64KB per syscall), significantly reducing the number of I/O operations.
+The app uses `NtQueryDirectoryFile` to read directory entries in bulk (64KB per syscall), significantly reducing the number of I/O operations compared to standard enumeration.
 
 **How it works**:
-- Detects storage type (SSD vs HDD) via I/O priority detection (`infrastructure/io_priority/detection.rs`)
-- For HDDs, uses `NtQueryDirectoryFile` with `FileDirectoryInformation` class
+- Detects storage type (SSD vs HDD) via `infrastructure/io_priority/detection.rs` (`is_ssd()` function)
+- Uses `NtQueryDirectoryFile` with `FileDirectoryInformation` class for directory reading
 - Reads 64KB of entries in a single system call
 - Returns `DirectoryEntry` structs with name, size, timestamps, and attributes
+- A separate `hdd_directory_reader.rs` provides `read_directory_hdd_batched()` for optimized HDD reads
 
 **Virtual drive overrides**: The `virtual_drive_config.json` file allows manually marking drives as HDD/SSD to control which reading strategy is used.
 
@@ -86,8 +87,9 @@ Results are cached in SQLite (`folder_previews` table) with invalidation based o
 **Location**: `src/infrastructure/io_priority.rs`, `src/infrastructure/io_priority/`
 
 Worker threads adjust their I/O priority based on workload type:
-- **High priority**: Visible thumbnail generation, current folder loading
-- **Low priority**: Prefetch, background warmup, folder size calculation
+- **Interactive** (priority 0): Visible thumbnail generation, current folder loading — user is waiting
+- **Prefetch** (priority 1, default): Thumbnails that will be visible soon
+- **Background** (priority 2): Folder covers, metadata discovery, warmup
 
 Uses `ThreadPriorityGuard` for RAII-based priority restoration.
 

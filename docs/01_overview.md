@@ -79,7 +79,7 @@ MTT File Manager is a native Windows file manager built in Rust with a modern bo
 │                     Domain Layer                            │
 │  ┌─────────────┬──────────────┬───────────────────────┐    │
 │  │ FileEntry   │ Thumbnail    │  Error Types          │    │
-│  │ Enums       │ Metadata     │  App State            │    │
+│  │ Enums       │ FolderLock   │  PinnedFolder         │    │
 │  └─────────────┴──────────────┴───────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
                                │

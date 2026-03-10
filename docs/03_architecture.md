@@ -116,7 +116,7 @@ Renders the user interface using eframe/egui (immediate-mode GUI).
 - `src/ui/status_bar.rs` — Bottom status bar
 - `src/ui/app/` — App lifecycle, input handling, and notifications
 - `src/ui/app_impl.rs` — Main `eframe::App` implementation
-- `src/ui/components/` — Reusable widgets (media_preview, gif_manager, item_slot, mpv_preview)
+- `src/ui/components/` — Reusable widgets (media_preview, gif_manager, item_slot, mpv, mpv_preview, language_settings, video_controls_state, virtual_drive_settings)
 - `src/ui/global_search_overlay/` — Global search overlay UI
 - `src/ui/icon_loader/` — Icon extraction and loading
 - `src/ui/cache.rs` — Texture/icon cache manager (CacheManager)
@@ -160,7 +160,7 @@ Core data models and business rules.
 System access, Windows integration, and data persistence.
 
 **Cache & Storage**:
-- `disk_cache.rs` + `disk_cache/` — SQLite-backed cache (thumbnails, preferences, folder_locks, pinned_folders, folder_previews, shell_icons, cleanup, gc)
+- `disk_cache.rs` + `disk_cache/` — SQLite-backed cache (thumbnails_repo, preferences, folder_locks, pinned_folders, folder_covers, folder_previews, shell_icons, cleanup, gc)
 - `directory_cache.rs` — In-memory directory cache
 - `directory_index.rs` — Directory index for fast lookup
 - `icon_disk_cache.rs` — Icon disk cache layer
@@ -322,9 +322,9 @@ Native PDF viewer using **Windows.Data.Pdf API** (WinRT, built-in to Windows 10+
 ```
 main.rs
     ↓
-ImageViewerApp::new() [app/init.rs]
-    ↓
 eframe::run_native()
+    ↓ (creation callback)
+ImageViewerApp::new() [app/init.rs]
     ↓
 ImageViewerApp::update() [ui/app_impl.rs] ←──┐
     ↓                                          │
@@ -334,8 +334,8 @@ Process Input → Update State → Render UI       │ (60 FPS loop)
 ```
 
 ### Startup (main.rs → app/init.rs)
-1. Load app icon, configure viewport (borderless)
-2. Initialize codec registry
+1. Initialize codec registry
+2. Load app icon, configure viewport (borderless)
 3. Call `eframe::run_native()`
 4. In `ImageViewerApp::new()`:
    - Create communication channels (multiple workers)

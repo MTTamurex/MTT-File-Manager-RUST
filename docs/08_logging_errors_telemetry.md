@@ -4,14 +4,13 @@
 
 ### Log Categories
 
-The application uses `eprintln!` with category prefixes for structured logging:
+The application uses the `log` crate (`log::info!`, `log::warn!`, `log::error!`, `log::debug!`) with `env_logger` as the backend for structured logging with category prefixes:
 
 | Prefix | Category | Description |
 |--------|----------|-------------|
 | `[INIT]` | Initialization | App startup events |
 | `[CACHE]` | Cache | Cache hits, misses, evictions |
 | `[THUMB]` | Thumbnails | Thumbnail generation events |
-| `[THUMB_STAGE1]`–`[THUMB_STAGE5]` | Thumbnail stages | Per-stage extraction results |
 | `[FILE_OP]` | File operations | Copy, move, delete operations |
 | `[NAV]` | Navigation | Path navigation events |
 | `[WORKER]` | Workers | Worker thread lifecycle |
@@ -63,7 +62,7 @@ pub enum AppError {
     Security(SecurityError),
     WindowsApi(String),
     Io(std::io::Error),
-    ThumbnailExtraction { path: PathBuf, source: String },
+    ThumbnailExtraction { path: PathBuf, #[source] source: Box<dyn std::error::Error + Send + Sync> },
     FileOperation(String),
     InvalidState(String),
     Config(String),
@@ -89,15 +88,16 @@ pub type AppResult<T> = Result<T, AppError>;
 
 | Macro | Purpose |
 |-------|---------|
-| `safe_unwrap!(expr, fallback)` | Unwrap with fallback value instead of panic |
-| `safe_expect!(expr, msg, fallback)` | Expect with fallback value instead of panic |
+| `safe_unwrap!(expr, context)` | Unwrap `Result` with error propagation (returns `Err`) |
+| `safe_unwrap!(expr, context, default)` | Unwrap `Result` with fallback value on failure |
+| `safe_expect!(expr, message)` | Unwrap `Option` or return `Err(AppError::InvalidState)` |
 
 ### Extension Traits
 
 | Trait | Method | Purpose |
 |-------|--------|---------|
-| `OptionExt` | `ok_or_app_error(kind, msg)` | Convert `Option` to `AppResult` |
-| `ResultExt` | `map_to_app_error(kind, msg)` | Convert `Result<T, E>` to `AppResult<T>` |
+| `OptionExt` | `ok_or_app_error(context)` | Convert `Option` to `AppResult` |
+| `ResultExt` | `map_to_app_error(context)` | Convert `Result<T, E>` to `AppResult<T>` |
 
 ## Stack Traces
 
@@ -111,9 +111,8 @@ $env:RUST_BACKTRACE = "full"  # Full backtrace with all frames
 ## Performance Metrics
 
 The image viewer tracks performance metrics in `src/image_viewer/metrics.rs` for:
-- Image decode time
-- Cache hit/miss rates
-- Prefetch worker utilization
+- Image decode time (count + average)
+- GPU texture upload time (count + average)
 
 ## Debugging Specific Issues
 

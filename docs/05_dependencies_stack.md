@@ -104,7 +104,7 @@
 
 | Crate | Version | Purpose |
 |-------|---------|---------|
-| windows | 0.61.0 | Windows API bindings (51 feature flags) |
+| windows | 0.61.0 | Windows API bindings (35 feature flags) |
 
 **Windows feature flags used:**
 - **Shell**: `Win32_UI_Shell`, `Win32_UI_Shell_Common`, `Win32_UI_Shell_PropertiesSystem`
@@ -112,7 +112,7 @@
 - **Clipboard**: `Win32_System_DataExchange`
 - **Memory**: `Win32_System_Memory`
 - **Registry**: `Win32_System_Registry`
-- **Graphics**: `Win32_Graphics_Gdi`, `Win32_Graphics_Imaging`, `Win32_Graphics_Imaging_D2D`, `Win32_Graphics_Dwm`
+- **Graphics**: `Win32_Graphics_Gdi`, `Win32_Graphics_Imaging`, `Win32_Graphics_Dwm`
 - **File System**: `Win32_Storage_FileSystem`, `Win32_Storage_Vhd`
 - **Process/Threading**: `Win32_System_ProcessStatus`, `Win32_System_Threading`, `Win32_System_LibraryLoader`
 - **Input**: `Win32_UI_Input_KeyboardAndMouse`

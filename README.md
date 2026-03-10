@@ -62,7 +62,7 @@ MTT File Manager is a desktop file manager that combines Rust's performance and 
 
 | Category | Technology | Version | Purpose |
 |----------|-----------|---------|---------|
-| **Language** | Rust | 2021 Edition | Performance and safety |
+| **Language** | Rust | Edition 2021 | Performance and safety |
 | **GUI** | eframe/egui | 0.31 | Modern immediate-mode GUI |
 | **Windows API** | windows-rs | 0.61.0 | Native Windows integration |
 | **Video** | libmpv2 | 5.0.3 | High-performance video playback |
@@ -136,7 +136,7 @@ cargo build --release --workspace
 - **Images**: JPG, PNG, GIF, WebP, BMP, TIFF, SVG — double-click opens the dedicated viewer
 - **Videos**: MP4, MKV, AVI, MOV, WebM (requires libmpv)
 - **PDFs**: Native viewer via Windows.Data.Pdf API
-- **GIFs**: Animated playback with speed controls
+- **GIFs**: Animated playback with play/pause controls
 
 ## Documentation
 

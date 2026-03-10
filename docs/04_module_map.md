@@ -256,7 +256,7 @@ src/
 crates/
 ├── mtt-search-protocol/             # Shared IPC types
 │   └── src/
-│       └── lib.rs                    # SearchRequest, SearchResponse, bincode serialization
+│       └── lib.rs                    # SearchRequest/SearchResponse enums, SearchResultItem, IndexStatusInfo, VolumeStatus, bincode serialization
 │
 └── mtt-search-service/              # Windows Service for file indexing
     └── src/
@@ -285,6 +285,7 @@ locales/
 └── pt-BR.yml                        # Brazilian Portuguese translations
 assets/icons/gen/                    # Generated icon assets
 mpv_ui/portable_config/              # mpv configuration
+├── cache/
 ├── mpv.conf
 ├── script-opts/
 └── scripts/
