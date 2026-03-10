@@ -92,6 +92,7 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                     let total_flag = app.bulk_thumbnail_total.clone();
                     let ctx_clone = app.ui_ctx.clone();
                     let disk_cache = app.disk_cache.clone();
+                    let is_virtual_drive = crate::infrastructure::io_priority::is_virtual_drive_path(&root);
 
                     scanning_flag.store(true, std::sync::atomic::Ordering::Relaxed);
                     total_flag.store(0, std::sync::atomic::Ordering::Relaxed);
@@ -145,6 +146,11 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                                         .as_secs(),
                                 );
                                 total_flag.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                // Throttle traversal on virtual drives (Cryptomator/WinFsp)
+                                // to reduce metadata I/O pressure on the FUSE driver.
+                                if is_virtual_drive {
+                                    std::thread::sleep(std::time::Duration::from_millis(2));
+                                }
                             }
                             scanning_flag.store(false, std::sync::atomic::Ordering::Relaxed);
                             let final_total = total_flag.load(std::sync::atomic::Ordering::Relaxed);

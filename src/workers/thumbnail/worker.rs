@@ -110,6 +110,10 @@ pub fn spawn_thumbnail_workers(
     // Semaphore for RAM limiter
     let semaphore = Arc::new(Semaphore::new(decode_limit));
 
+    // Virtual drives (Cryptomator/WinFsp/Dokany): limit to 1 concurrent extraction
+    // to avoid overwhelming the FUSE driver, which crashes under sustained parallel I/O.
+    let virtual_drive_semaphore = Arc::new(Semaphore::new(1));
+
     log::info!(
         "[THUMB-PIPELINE] workers={} decode_limit={} cpu_count={}",
         worker_count,
@@ -125,6 +129,7 @@ pub fn spawn_thumbnail_workers(
         let ctx = ctx.clone();
         let disk_cache = disk_cache.clone();
         let semaphore = semaphore.clone();
+        let virtual_drive_semaphore = virtual_drive_semaphore.clone();
         let pending_deletions = pending_deletions.clone();
 
         let spawn_result = std::thread::Builder::new()
@@ -137,6 +142,7 @@ pub fn spawn_thumbnail_workers(
                     gen_tracker,
                     disk_cache,
                     semaphore,
+                    virtual_drive_semaphore,
                     pending_deletions,
                 );
             });
@@ -179,6 +185,7 @@ fn thumbnail_worker_loop(
     gen_tracker: Arc<AtomicUsize>,
     disk_cache: Arc<ThumbnailDiskCache>,
     semaphore: Arc<Semaphore>,
+    virtual_drive_semaphore: Arc<Semaphore>,
     pending_deletions: Arc<dashmap::DashMap<std::path::PathBuf, ()>>,
 ) {
     let mut last_repaint = Instant::now();
@@ -225,6 +232,7 @@ fn thumbnail_worker_loop(
             &ctx,
             &disk_cache,
             &semaphore,
+            &virtual_drive_semaphore,
             &pending_deletions,
             &mut last_repaint,
         );
