@@ -31,10 +31,18 @@ impl DirectoryCache {
     /// Returns cached entries immediately if available.
     /// Cache validity is guaranteed by DriveWatcher: it monitors the entire drive
     /// and proactively invalidates entries on any filesystem change.
+    ///
+    /// NOTE: `folder_cover` is stripped on read — it is resolved separately
+    /// via the cover pipeline (SQLite + existence check + cover worker) to
+    /// avoid returning stale covers from a previous visit.
     pub fn get(&self, path: &PathBuf) -> Option<Vec<FileEntry>> {
         let mut cache = self.inner.lock().ok()?;
         if let Some(cached) = cache.get_mut(path) {
-            return Some(cached.entries.clone());
+            let mut entries = cached.entries.clone();
+            for entry in &mut entries {
+                entry.folder_cover = None;
+            }
+            return Some(entries);
         }
         None
     }
@@ -43,7 +51,11 @@ impl DirectoryCache {
     pub fn get_with_meta(&self, path: &PathBuf) -> Option<(Vec<FileEntry>, u64)> {
         let mut cache = self.inner.lock().ok()?;
         if let Some(cached) = cache.get_mut(path) {
-            return Some((cached.entries.clone(), cached.cached_at_ms));
+            let mut entries = cached.entries.clone();
+            for entry in &mut entries {
+                entry.folder_cover = None;
+            }
+            return Some((entries, cached.cached_at_ms));
         }
         None
     }

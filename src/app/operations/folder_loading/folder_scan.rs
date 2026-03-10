@@ -133,9 +133,21 @@ impl ImageViewerApp {
         // 2. Resolve covers: DB hit → DirectoryIndex fallback → worker fallback
         let mut resolved: Vec<(PathBuf, PathBuf)> = Vec::new();
         let mut worker_fallbacks: Vec<PathBuf> = Vec::new();
+        // Folders whose DB-cached cover is used for immediate display but needs
+        // background re-validation (network/virtual drives where fast_path_exists
+        // could block 100-150ms on the UI thread).
+        let mut worker_revalidations: Vec<PathBuf> = Vec::new();
         let resolve_start = Instant::now();
         let mut resolve_budget_exhausted = false;
         let mut worker_fallback_due_to_budget = 0usize;
+
+        // On local drives (not network/virtual), validate that DB-cached cover
+        // files still exist on disk.  GetFileAttributesW is ~0.01ms on NTFS but
+        // can take 100-150ms on Cryptomator/VeraCrypt, so only enable when safe.
+        let can_validate_cover_exists = unique_paths
+            .first()
+            .map(|p| !crate::infrastructure::io_priority::is_network_or_virtual(p))
+            .unwrap_or(false);
 
         let mut unique_paths_iter = unique_paths.into_iter();
         while let Some(folder_path) = unique_paths_iter.next() {
@@ -152,7 +164,22 @@ impl ImageViewerApp {
                 if is_invalid_cached_cover_path(cover) {
                     self.disk_cache.remove_folder_cover(&folder_path);
                     None
+                } else if can_validate_cover_exists
+                    && !crate::infrastructure::onedrive::fast_path_exists(cover)
+                {
+                    // Cover file was deleted externally — evict stale entry
+                    // and let the cover worker re-discover.
+                    self.disk_cache.remove_folder_cover(&folder_path);
+                    self.cache_manager.texture_cache.pop(cover);
+                    self.cache_manager.loading_set.remove(cover);
+                    self.cache_manager.invalidate_folder_preview(&folder_path);
+                    None
                 } else {
+                    // On network/virtual drives, queue for background re-validation
+                    // so stale covers get corrected without blocking the UI thread.
+                    if !can_validate_cover_exists {
+                        worker_revalidations.push(folder_path.clone());
+                    }
                     Some(cover.clone())
                 }
             } else {
@@ -246,6 +273,12 @@ impl ImageViewerApp {
 
         // 5. Send remaining folders to worker for HDD scan
         for path in worker_fallbacks {
+            let _ = self.cover_worker_sender.send(path);
+        }
+
+        // 6. Queue background re-validation for network/virtual drive covers
+        //    that were shown from DB cache without existence check.
+        for path in worker_revalidations {
             let _ = self.cover_worker_sender.send(path);
         }
 
