@@ -18,6 +18,7 @@ impl ImageViewerApp {
         let ctx = self.ui_ctx.clone();
         let disk_cache = self.disk_cache.clone();
         let directory_cache = self.directory_cache.clone();
+        let directory_dirty_registry = self.directory_dirty_registry.clone();
         // Use existing directory_cache for cache-first strategy
         let directory_index_opt = self.directory_index.clone();
         let _prefetch_sender = self.file_operation_state.prefetch_sender.clone();
@@ -52,6 +53,12 @@ impl ImageViewerApp {
             // path_has_cloud_attributes() was removed because GetFileAttributesW can BLOCK
             // indefinitely on cloud-only OneDrive folders
             let is_onedrive_base = onedrive::is_onedrive_path(&base_path_buf);
+            let prefer_reliable_scan = directory_dirty_registry.is_dirty(base_path_buf.as_path())
+                || (!is_onedrive_base
+                    && !crate::infrastructure::windows::path_is_usn_filesystem(
+                        base_path_buf.as_path(),
+                    )
+                    .unwrap_or(true));
             let mut batch = Vec::with_capacity(batch_size);
             let mut all_entries_disk: Vec<FileEntry> = Vec::new();
             let mut batch_start = std::time::Instant::now();
@@ -71,6 +78,7 @@ impl ImageViewerApp {
                 &ctx,
                 &disk_cache,
                 &directory_cache,
+                &directory_dirty_registry,
                 &directory_index_opt,
                 show_hidden,
             ) {
@@ -84,6 +92,7 @@ impl ImageViewerApp {
                 &base_path,
                 is_ssd,
                 is_onedrive_base,
+                prefer_reliable_scan,
                 &mut batch_size,
                 &mut batch_tracker,
                 &mut batch_start,
@@ -93,6 +102,7 @@ impl ImageViewerApp {
                 &ctx,
                 &disk_cache,
                 &directory_cache,
+                &directory_dirty_registry,
                 &directory_index_opt,
                 show_hidden,
             ) {
@@ -115,6 +125,7 @@ impl ImageViewerApp {
                 &ctx,
                 &disk_cache,
                 &directory_cache,
+                &directory_dirty_registry,
                 &directory_index_opt,
                 show_hidden,
             );

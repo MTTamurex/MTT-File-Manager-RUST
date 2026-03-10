@@ -207,6 +207,7 @@ impl ImageViewerApp {
                 }
 
                 if let Some(parent) = full_path.parent() {
+                    self.directory_dirty_registry.mark_dirty(parent);
                     self.directory_cache.invalidate(&parent.to_path_buf());
                     if let Some(directory_index) = &self.directory_index {
                         let _ = directory_index.invalidate(parent);

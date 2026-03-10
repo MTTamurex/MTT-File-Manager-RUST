@@ -40,6 +40,12 @@ impl ImageViewerApp {
         // Async metadata worker
         disconnect!(self.metadata_req_sender, (std::path::PathBuf, u64));
 
+        // Async live-file-size worker
+        disconnect!(
+            self.live_file_size_req_sender,
+            crate::app::live_file_size::LiveFileSizeRequest
+        );
+
         // File-operation worker (type is pub(crate), accessible here)
         disconnect!(
             self.file_operation_state.file_op_sender,

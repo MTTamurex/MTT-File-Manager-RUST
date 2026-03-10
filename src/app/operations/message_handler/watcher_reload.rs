@@ -60,6 +60,11 @@ impl ImageViewerApp {
                     // so fresh data is loaded from disk, but texture/thumbnail caches are preserved.
                     // force_refresh=true is reserved for manual refresh (F5) only.
                     self.loaded_path.clear();
+                    log::info!(
+                        "[FS-WATCH] AUTO-RELOAD triggered for {:?} (elapsed={}ms)",
+                        self.navigation_state.current_path,
+                        elapsed.as_millis()
+                    );
                     self.load_folder(false);
                 }
                 self.last_auto_reload = Instant::now();

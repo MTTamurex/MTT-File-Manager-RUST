@@ -42,7 +42,7 @@ pub fn color_dark_hover() -> Color32 {
 // === TIMING ===
 pub const DEBOUNCE_MS: u64 = 50;
 pub const DRIVE_REFRESH_MS: u64 = 350;
-pub const AUTO_RELOAD_MS: u64 = 500;
+pub const AUTO_RELOAD_MS: u64 = 200;
 
 // === CACHE SIZES ===
 pub const TEXTURE_CACHE_SIZE: usize = 200;

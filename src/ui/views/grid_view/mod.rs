@@ -176,6 +176,10 @@ pub struct GridViewContext<'a> {
     pub drag_started_item: &'a mut Option<usize>,
     /// Output: currently hovered folder item during drag
     pub drag_hovered_item: &'a mut Option<usize>,
+    pub live_file_size_cache: &'a mut lru::LruCache<PathBuf, (u64, u64)>,
+    pub live_file_size_loading: &'a mut FxHashSet<PathBuf>,
+    pub live_file_size_req_sender:
+        &'a std::sync::mpsc::Sender<crate::app::live_file_size::LiveFileSizeRequest>,
     /// PERFORMANCE: Pre-computed local drive indices for computer view (avoids per-frame allocation)
     pub computer_local_indices: &'a [usize],
     /// PERFORMANCE: Pre-computed network drive indices for computer view

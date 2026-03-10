@@ -1,6 +1,7 @@
 use crate::domain::file_entry::{is_archive_extension, FileEntry};
 use crate::infrastructure::adaptive_batch::AdaptiveBatchTracker;
 use crate::infrastructure::directory_cache::DirectoryCache;
+use crate::infrastructure::directory_dirty_registry::DirectoryDirtyRegistry;
 use crate::infrastructure::directory_index::{DirectoryIndex, IndexedFile};
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::onedrive;
@@ -31,6 +32,7 @@ pub(super) fn run_tier3_fallback(
     ctx: &egui::Context,
     disk_cache: &Arc<ThumbnailDiskCache>,
     directory_cache: &Arc<DirectoryCache>,
+    directory_dirty_registry: &Arc<DirectoryDirtyRegistry>,
     directory_index_opt: &Option<Arc<DirectoryIndex>>,
     show_hidden: bool,
 ) {
@@ -125,6 +127,7 @@ pub(super) fn run_tier3_fallback(
                 // Populate caches so subsequent OneDrive navigations are instant.
                 if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                     directory_cache.put(PathBuf::from(base_path), all_entries_disk.clone());
+                    directory_dirty_registry.clear_dirty(PathBuf::from(base_path).as_path());
 
                     if !show_hidden {
                         if let Some(di) = directory_index_opt {
@@ -339,6 +342,7 @@ pub(super) fn run_tier3_fallback(
     if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
         // Cache storage for instant future navigation.
         directory_cache.put(PathBuf::from(base_path), all_entries_disk.clone());
+        directory_dirty_registry.clear_dirty(PathBuf::from(base_path).as_path());
 
         if !show_hidden {
             if let Some(di) = directory_index_opt {

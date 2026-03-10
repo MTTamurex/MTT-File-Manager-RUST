@@ -215,12 +215,16 @@ impl ImageViewerApp {
             let parent_norm = Self::normalize_for_match(parent);
             if parent_norm == current_path_norm {
                 self.invalidate_directory_caches(parent);
-                #[cfg(debug_assertions)]
-                log::trace!(
-                    "[FS-WATCH] CREATE: {:?}",
-                    path.file_name().unwrap_or_default()
+
+                let ok = self.try_add_created_path_to_ui(&cleaned);
+                log::info!(
+                    "[FS-WATCH] CREATE: {:?} → smart_add={}",
+                    path.file_name().unwrap_or_default(),
+                    ok
                 );
-                self.pending_auto_reload = true;
+                if !ok {
+                    self.request_watcher_auto_reload();
+                }
             }
         }
     }
@@ -284,44 +288,18 @@ impl ImageViewerApp {
                     path.file_name().unwrap_or_default()
                 );
 
-                let path_to_remove = cleaned.clone();
-                let removed_from_all = self
-                    .all_items
-                    .iter()
-                    .position(|item| item.path == path_to_remove)
-                    .map(|idx| {
-                        self.all_items.remove(idx);
-                        true
-                    })
-                    .unwrap_or(false);
-
-                if removed_from_all {
-                    // Avoid cloning the entire visible list on each delete event.
-                    // Arc::make_mut mutates in place when uniquely owned, and only
-                    // falls back to cloning when another Arc reference exists.
-                    let items = Arc::make_mut(&mut self.items);
-                    if let Some(idx) = items.iter().position(|item| item.path == path_to_remove) {
-                        items.remove(idx);
-                    }
-                    self.total_items = self.items.len();
-                    #[cfg(debug_assertions)]
-                    log::debug!("[FS-WATCH] SMART DELETE: Removed from UI without reload");
-
-                    if let Some(selected) = self.selected_item {
-                        if selected >= self.items.len() && !self.items.is_empty() {
-                            self.selected_item = Some(self.items.len() - 1);
-                        } else if self.items.is_empty() {
-                            self.selected_item = None;
-                            self.selected_file = None;
-                        }
-                    }
-
+                if self.try_remove_deleted_path_from_ui(&cleaned) {
+                    log::info!(
+                        "[FS-WATCH] SMART DELETE OK: {:?}",
+                        path.file_name().unwrap_or_default()
+                    );
                     self.skip_next_auto_reload = true;
                 } else {
-                    // Path mismatch can happen on some filesystems/watchers
-                    // (case/prefix differences). Fall back to a debounced reload
-                    // to guarantee correctness.
-                    self.pending_auto_reload = true;
+                    log::info!(
+                        "[FS-WATCH] SMART DELETE MISS → reload: {:?}",
+                        path.file_name().unwrap_or_default()
+                    );
+                    self.request_watcher_auto_reload();
                 }
             }
         }
@@ -477,14 +455,31 @@ impl ImageViewerApp {
             let parent_norm = Self::normalize_for_match(parent);
             if parent_norm == current_path_norm {
                 self.invalidate_directory_caches(parent);
-                self.pending_auto_reload = true;
+
+                let ok = self.try_apply_rename_to_ui(&cleaned_old, &cleaned_new);
+                log::info!(
+                    "[FS-WATCH] RENAME: {:?} → {:?} smart={}",
+                    cleaned_old.file_name().unwrap_or_default(),
+                    cleaned_new.file_name().unwrap_or_default(),
+                    ok
+                );
+                if !ok {
+                    self.request_watcher_auto_reload();
+                }
             }
         }
         if let Some(parent) = cleaned_new.parent() {
             let parent_norm = Self::normalize_for_match(parent);
             if parent_norm == current_path_norm {
                 self.invalidate_directory_caches(parent);
-                self.pending_auto_reload = true;
+                if Self::normalize_for_match(&cleaned_old)
+                    != Self::normalize_for_match(&cleaned_new)
+                    && Self::normalize_for_match(cleaned_old.parent().unwrap_or(&cleaned_old))
+                        != current_path_norm
+                    && !self.try_add_created_path_to_ui(&cleaned_new)
+                {
+                    self.request_watcher_auto_reload();
+                }
             }
         }
     }
@@ -557,7 +552,7 @@ impl ImageViewerApp {
                     if !self.navigation_state.is_computer_view
                         && !self.navigation_state.is_recycle_bin_view
                     {
-                        self.pending_auto_reload = true;
+                        self.request_watcher_auto_reload();
                     }
                 } else {
                     #[cfg(debug_assertions)]

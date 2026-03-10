@@ -426,6 +426,7 @@ impl ImageViewerApp {
                     "[FILE-OP] Invalidating cache for current={:?}",
                     current
                 );
+                self.directory_dirty_registry.mark_dirty(&current);
                 self.directory_cache.invalidate(&current);
                 if let Some(ref di) = self.directory_index {
                     let _ = di.invalidate(&current);
@@ -445,6 +446,7 @@ impl ImageViewerApp {
                         parent
                     );
                     let parent_buf = parent.to_path_buf();
+                    self.directory_dirty_registry.mark_dirty(&parent_buf);
                     self.directory_cache.invalidate(&parent_buf);
                     if let Some(ref di) = self.directory_index {
                         let _ = di.invalidate(&parent_buf);

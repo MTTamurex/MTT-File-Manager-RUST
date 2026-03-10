@@ -368,6 +368,49 @@ impl ImageViewerApp {
         }
     }
 
+    pub(super) fn process_live_file_size_worker_results(&mut self, ctx: &egui::Context) {
+        const MAX_LIVE_SIZE_MSGS_PER_FRAME: usize = 64;
+        let live_size_budget = if self.frame_time_peak_ms > 33.33 {
+            Duration::from_millis(2)
+        } else if self.frame_time_peak_ms > 25.0 {
+            Duration::from_millis(3)
+        } else {
+            Duration::from_millis(4)
+        };
+
+        let start = Instant::now();
+        let mut processed = 0usize;
+        let mut updated = false;
+        let mut has_more = false;
+
+        while processed < MAX_LIVE_SIZE_MSGS_PER_FRAME {
+            if start.elapsed() >= live_size_budget {
+                has_more = true;
+                break;
+            }
+
+            let Ok((path, mtime, live_size)) = self.live_file_size_res_receiver.try_recv() else {
+                break;
+            };
+
+            processed += 1;
+            self.live_file_size_loading.remove(&path);
+
+            if let Some(size) = live_size {
+                self.live_file_size_cache.put(path, (mtime, size));
+                updated = true;
+            }
+        }
+
+        if processed >= MAX_LIVE_SIZE_MSGS_PER_FRAME {
+            has_more = true;
+        }
+
+        if updated || has_more {
+            ctx.request_repaint();
+        }
+    }
+
     pub(super) fn process_folder_size_results(&mut self) -> bool {
         const MAX_FOLDER_SIZE_MSGS_PER_FRAME: usize = 96;
 

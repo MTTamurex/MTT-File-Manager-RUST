@@ -20,7 +20,8 @@ use super::init_workers::{
     spawn_async_font_loader, spawn_consistency_probe_worker, spawn_cover_worker,
     spawn_disk_cache_invalidation_worker, spawn_file_operation_worker,
     spawn_folder_preview_workers, spawn_folder_size_worker, spawn_global_search_worker,
-    spawn_icon_worker, spawn_metadata_worker, spawn_prefetching_workers, PrefetchWorkerHandles,
+    spawn_icon_worker, spawn_live_file_size_worker, spawn_metadata_worker,
+    spawn_prefetching_workers, PrefetchWorkerHandles,
 };
 use super::state::ItemsRebuildResult;
 
@@ -53,6 +54,9 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) icon_res_rx: mpsc::Receiver<(PathBuf, usize, Vec<u8>, u32, u32)>,
     pub(in crate::app) meta_req_tx: mpsc::Sender<(PathBuf, u64)>,
     pub(in crate::app) meta_res_rx: mpsc::Receiver<(PathBuf, u64, windows_infra::MediaMetadata)>,
+    pub(in crate::app) live_size_req_tx: mpsc::Sender<super::live_file_size::LiveFileSizeRequest>,
+    pub(in crate::app) live_size_res_rx:
+        mpsc::Receiver<super::live_file_size::LiveFileSizeResponse>,
     pub(in crate::app) folder_preview_tx: crossbeam_channel::Sender<PathBuf>,
     pub(in crate::app) folder_preview_res_rx:
         mpsc::Receiver<crate::workers::folder_preview_worker::FolderPreviewData>,
@@ -198,6 +202,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     }
 
     let (meta_req_tx, meta_res_rx) = spawn_metadata_worker(ctx);
+    let (live_size_req_tx, live_size_res_rx) = spawn_live_file_size_worker(ctx);
     let folder_composer = Arc::new(FolderComposer::new());
     // Compose the custom empty folder icon ONCE before sharing the composer.
     let custom_folder_icon = folder_composer.compose_empty();
@@ -249,6 +254,8 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         icon_res_rx,
         meta_req_tx,
         meta_res_rx,
+        live_size_req_tx,
+        live_size_res_rx,
         folder_preview_tx,
         folder_preview_res_rx,
         folder_size_req_tx,

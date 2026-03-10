@@ -130,7 +130,7 @@ impl ImageViewerApp {
         // Does NOT work for UNC paths (\\server\share) or network drives
         let is_local_drive = path_buf.to_string_lossy().chars().nth(1) == Some(':');
 
-        if is_local_drive {
+        if self.drive_watcher_enabled && is_local_drive {
             log::debug!(
                 "[WATCHER] Using DRIVE-WATCHER for local drive: {:?}",
                 path_buf
@@ -169,6 +169,10 @@ impl ImageViewerApp {
                     "[WATCHER] Drive watcher active + non-USN fallback enabled - keeping notify backup"
                 );
             }
+        } else if !self.drive_watcher_enabled {
+            log::info!(
+                "[WATCHER] Drive-wide watcher disabled by MTT_DISABLE_DRIVE_WATCHER; using per-folder watcher strategy"
+            );
         } else {
             log::debug!("[WATCHER] UNC/Network path detected - using notify-watcher only");
         }

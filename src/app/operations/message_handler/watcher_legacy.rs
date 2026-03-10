@@ -1,4 +1,5 @@
 use crate::app::state::ImageViewerApp;
+use notify::event::{ModifyKind, RenameMode};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -77,6 +78,7 @@ impl ImageViewerApp {
             match event {
                 Ok(evt) => {
                     let mut meaningful_change = false;
+                    let mut needs_reload = false;
 
                     if matches!(evt.kind, notify::EventKind::Remove(_)) {
                         for path in &evt.paths {
@@ -92,7 +94,18 @@ impl ImageViewerApp {
                             let cleaned = Self::clean_path(path);
                             register_changed_folder(&cleaned, &mut folders_with_changed_contents);
                             if let Some(parent) = cleaned.parent() {
-                                self.directory_cache.invalidate(&parent.to_path_buf());
+                                self.invalidate_directory_caches(parent);
+
+                                let parent_norm = Self::normalize_for_match(parent);
+                                if parent_norm == current_path_norm {
+                                    if self.try_remove_deleted_path_from_ui(&cleaned) {
+                                        #[cfg(debug_assertions)]
+                                        log::debug!(
+                                            "[FS-WATCH-LEGACY] SMART DELETE: Removed from UI without reload"
+                                        );
+                                        self.skip_next_auto_reload = true;
+                                    }
+                                }
                             }
                             self.directory_cache.invalidate_children(&cleaned);
                             #[cfg(debug_assertions)]
@@ -101,6 +114,91 @@ impl ImageViewerApp {
                                 path.file_name().unwrap_or_default()
                             );
                             pending_disk_cache_invalidations.push(cleaned.clone());
+                        }
+                    }
+
+                    if matches!(evt.kind, notify::EventKind::Create(_)) {
+                        for path in &evt.paths {
+                            if self.should_ignore_watcher_path(
+                                path,
+                                internal_cache_root_norm,
+                                internal_cache_root_prefix,
+                            ) {
+                                continue;
+                            }
+
+                            meaningful_change = true;
+                            let cleaned = Self::clean_path(path);
+                            register_changed_folder(&cleaned, &mut folders_with_changed_contents);
+
+                            if let Some(parent) = cleaned.parent() {
+                                self.invalidate_directory_caches(parent);
+
+                                let parent_norm = Self::normalize_for_match(parent);
+                                if parent_norm == current_path_norm {
+                                    if !self.try_add_created_path_to_ui(&cleaned) {
+                                        needs_reload = true;
+                                    }
+                                }
+                            }
+
+                            pending_disk_cache_invalidations.push(cleaned.clone());
+                        }
+                    }
+
+                    if matches!(
+                        evt.kind,
+                        notify::EventKind::Modify(ModifyKind::Name(
+                            RenameMode::Any | RenameMode::Both | RenameMode::From | RenameMode::To
+                        ))
+                    ) && evt.paths.len() >= 2
+                    {
+                        let old_path = &evt.paths[0];
+                        let new_path = &evt.paths[1];
+
+                        let ignore_old = self.should_ignore_watcher_path(
+                            old_path,
+                            internal_cache_root_norm,
+                            internal_cache_root_prefix,
+                        );
+                        let ignore_new = self.should_ignore_watcher_path(
+                            new_path,
+                            internal_cache_root_norm,
+                            internal_cache_root_prefix,
+                        );
+
+                        if !(ignore_old && ignore_new) {
+                            meaningful_change = true;
+
+                            let cleaned_old = Self::clean_path(old_path);
+                            let cleaned_new = Self::clean_path(new_path);
+                            register_changed_folder(&cleaned_old, &mut folders_with_changed_contents);
+                            register_changed_folder(&cleaned_new, &mut folders_with_changed_contents);
+
+                            pending_disk_cache_invalidations.push(cleaned_old.clone());
+                            pending_disk_cache_invalidations.push(cleaned_new.clone());
+
+                            if let Some(parent) = cleaned_old.parent() {
+                                self.invalidate_directory_caches(parent);
+                            }
+                            if let Some(parent) = cleaned_new.parent() {
+                                self.invalidate_directory_caches(parent);
+                            }
+
+                            let old_in_current = cleaned_old
+                                .parent()
+                                .map(|parent| Self::normalize_for_match(parent) == current_path_norm)
+                                .unwrap_or(false);
+                            let new_in_current = cleaned_new
+                                .parent()
+                                .map(|parent| Self::normalize_for_match(parent) == current_path_norm)
+                                .unwrap_or(false);
+
+                            if old_in_current || new_in_current {
+                                if !self.try_apply_rename_to_ui(&cleaned_old, &cleaned_new) {
+                                    needs_reload = true;
+                                }
+                            }
                         }
                     }
 
@@ -113,6 +211,18 @@ impl ImageViewerApp {
                             continue;
                         }
                         meaningful_change = true;
+
+                        if matches!(evt.kind, notify::EventKind::Create(_)) {
+                            continue;
+                        }
+                        if matches!(
+                            evt.kind,
+                            notify::EventKind::Modify(ModifyKind::Name(
+                                RenameMode::Any | RenameMode::Both | RenameMode::From | RenameMode::To
+                            ))
+                        ) {
+                            continue;
+                        }
 
                         if let Some(parent) = path.parent() {
                             let parent_norm = Self::normalize_for_match(parent);
@@ -169,7 +279,9 @@ impl ImageViewerApp {
                     }
 
                     if meaningful_change {
-                        self.pending_auto_reload = true;
+                        if needs_reload {
+                            self.request_watcher_auto_reload();
+                        }
                     }
                 }
                 Err(_err) => {
@@ -190,7 +302,7 @@ impl ImageViewerApp {
             {
                 let current_path = PathBuf::from(&self.navigation_state.current_path);
                 self.invalidate_folder_size_cache(current_path.as_path());
-                self.pending_auto_reload = true;
+                self.request_watcher_auto_reload();
             }
         }
 

@@ -14,6 +14,39 @@ use std::time::{Instant, SystemTime};
 
 use super::Semaphore;
 
+fn try_decode_latest_cache_entry(
+    disk_cache: &ThumbnailDiskCache,
+    path: &std::path::Path,
+    req_modified: u64,
+    req_size: u32,
+) -> Option<(Vec<u8>, u32, u32)> {
+    let entry = disk_cache.get_latest(path)?;
+    let w = entry.width;
+    let h = entry.height;
+    let rs = entry.requested_size;
+    let cached_mod = entry.modified_at;
+
+    let mtime_mismatch = req_modified > 0 && cached_mod > 0 && req_modified != cached_mod;
+
+    if mtime_mismatch {
+        log::debug!(
+            "[Thumbnail-CACHE] LATEST match REJECTED (mtime mismatch): path={:?}, cached_mod={}, req_mod={}",
+            path.file_name(), cached_mod, req_modified
+        );
+        return None;
+    }
+
+    if let Some(decoded) = decode_cache_entry(entry, req_size) {
+        return Some(decoded);
+    }
+
+    log::debug!(
+        "[Thumbnail-CACHE] LATEST match found but decode_cache_entry rejected! path={:?}, cached={}x{}, requested_size_in_db={}, req_size={}",
+        path.file_name(), w, h, rs, req_size
+    );
+    None
+}
+
 /// Process a single thumbnail request.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn process_thumbnail_request(
@@ -108,29 +141,8 @@ pub(super) fn process_thumbnail_request(
     // a stale thumbnail from a *different* file that previously lived at
     // the same path (e.g., delete A, rename B → A).
     if final_result.is_none() {
-        if let Some(entry) = disk_cache.get_latest(path) {
-            let w = entry.width;
-            let h = entry.height;
-            let rs = entry.requested_size;
-            let cached_mod = entry.modified_at;
-
-            let mtime_mismatch = req_modified > 0
-                && cached_mod > 0
-                && req_modified != cached_mod;
-
-            if mtime_mismatch {
-                log::debug!(
-                    "[Thumbnail-CACHE] LATEST match REJECTED (mtime mismatch): path={:?}, cached_mod={}, req_mod={}",
-                    path.file_name(), cached_mod, req_modified
-                );
-            } else if let Some(decoded) = decode_cache_entry(entry, req_size) {
-                final_result = Some(decoded);
-            } else {
-                log::debug!(
-                    "[Thumbnail-CACHE] LATEST match found but decode_cache_entry rejected! path={:?}, cached={}x{}, requested_size_in_db={}, req_size={}",
-                    path.file_name(), w, h, rs, req_size
-                );
-            }
+        if let Some(decoded) = try_decode_latest_cache_entry(disk_cache, path, req_modified, req_size) {
+            final_result = Some(decoded);
         } else {
             log::debug!(
                 "[Thumbnail-CACHE] NO entry in DB at all for path={:?}, req_modified={}, req_size={}",
@@ -256,8 +268,10 @@ pub(super) fn process_thumbnail_request(
         // while we waited, avoiding redundant extraction).
         if let Some(entry) = disk_cache.get(path, modified) {
             final_result = decode_cache_entry(entry, req_size);
-        } else if let Some(entry) = disk_cache.get_latest(path) {
-            final_result = decode_cache_entry(entry, req_size);
+        } else if let Some(decoded) =
+            try_decode_latest_cache_entry(disk_cache, path, req_modified, req_size)
+        {
+            final_result = Some(decoded);
         }
 
         if final_result.is_none() {

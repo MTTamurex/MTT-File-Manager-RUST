@@ -132,6 +132,21 @@ impl ImageViewerApp {
                 continue;
             }
 
+            // Reject stale results that were in-flight when the path was evicted
+            // (rename/delete via watcher).  The counter was incremented by
+            // evict_stale_path_caches; decrement here and skip the data.
+            if let Some(skip_count) = self.thumbnail_eviction_skips.get_mut(&thumbnail_data.path) {
+                if *skip_count > 0 {
+                    *skip_count -= 1;
+                    self.cache_manager.finish_loading(&thumbnail_data.path);
+                    log::debug!(
+                        "[THUMB-UPLOAD] Rejected stale in-flight thumbnail for {:?} (eviction skip)",
+                        thumbnail_data.path.file_name().unwrap_or_default()
+                    );
+                    continue;
+                }
+            }
+
             self.cache_manager.finish_loading(&thumbnail_data.path);
 
             if thumbnail_data.image_data.is_empty() {
@@ -254,7 +269,7 @@ impl ImageViewerApp {
                     .retune_texture_cache_capacity(target_texture_items);
 
                 if applied_texture_items != current_texture_items {
-                    log::info!(
+                    log::debug!(
                         "[PERF-TEXTURE-CACHE] old={} new={} target={} frame_pressure_ms={:.1} tabs={} queue_pending={} upload_pending={} scrolling={} video={}",
                         current_texture_items,
                         applied_texture_items,
@@ -453,6 +468,14 @@ impl ImageViewerApp {
                 let width = thumbnail_data.width;
                 let height = thumbnail_data.height;
                 let rgba_data = thumbnail_data.image_data;
+
+                // Skip upload for paths pending deletion — the item was removed
+                // externally and the texture would be immediately stale.
+                if self.file_operation_state.pending_deletions.contains_key(&path) {
+                    self.cache_manager.finish_pending_upload(&path);
+                    continue;
+                }
+
                 let is_selected = self
                     .selected_file
                     .as_ref()

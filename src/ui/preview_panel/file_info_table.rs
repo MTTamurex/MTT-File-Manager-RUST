@@ -1,13 +1,12 @@
 use crate::domain::file_entry::FileEntry;
 use crate::domain::special_paths::COMPUTER_VIEW_ID;
 use crate::infrastructure::windows::MediaMetadata;
+use crate::ui::cache::FxHashSet;
 use crate::ui::preview_panel::actions::PreviewPanelAction;
 use crate::ui::svg_icons::SvgIconManager;
 use eframe::egui;
+use lru::LruCache;
 use rust_i18n::t;
-
-/// Max age (seconds) for probing live file size on the UI thread.
-const LIVE_SIZE_PROBE_MAX_AGE_SECS: u64 = 300; // 5 minutes
 
 #[derive(Clone, Copy)]
 struct LiveFileStat {
@@ -15,38 +14,14 @@ struct LiveFileStat {
     size: u64,
 }
 
-/// Probes current file size via `std::fs::metadata`.
-/// Only called for recently-modified files to avoid blocking on cold cache.
-fn probe_file_size(path: &std::path::Path, modified_epoch: u64) -> Option<u64> {
-    if modified_epoch > 0 {
-        let now_epoch = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        if now_epoch.saturating_sub(modified_epoch) > LIVE_SIZE_PROBE_MAX_AGE_SECS {
-            return None;
-        }
-    }
-
-    if crate::infrastructure::onedrive::is_onedrive_path(path) {
-        return None;
-    }
-
-    // FIX: Skip blocking metadata() for network/virtual drives (can block indefinitely).
-    if crate::infrastructure::io_priority::is_network_or_virtual(path) {
-        return None;
-    }
-
-    let metadata = std::fs::metadata(path).ok()?;
-
-    if metadata.is_file() {
-        Some(metadata.len())
-    } else {
-        None
-    }
-}
-
-fn resolve_live_file_size(ui: &egui::Ui, file: &FileEntry, is_metadata_loading: bool) -> u64 {
+fn resolve_live_file_size(
+    ui: &egui::Ui,
+    file: &FileEntry,
+    is_metadata_loading: bool,
+    live_file_size_cache: &mut LruCache<std::path::PathBuf, (u64, u64)>,
+    live_file_size_loading: &mut FxHashSet<std::path::PathBuf>,
+    live_file_size_req_sender: &std::sync::mpsc::Sender<crate::app::live_file_size::LiveFileSizeRequest>,
+) -> u64 {
     if file.is_dir {
         return file.size;
     }
@@ -66,11 +41,14 @@ fn resolve_live_file_size(ui: &egui::Ui, file: &FileEntry, is_metadata_loading: 
         });
 
         if (now - state.checked_at) >= 1.0 {
-            if let Some(size) = probe_file_size(&file.path, file.modified) {
-                state.size = size;
-            } else {
-                state.size = file.size;
-            }
+            state.size = crate::app::live_file_size::resolve_cached_or_enqueue_live_file_size(
+                &file.path,
+                file.modified,
+                file.size,
+                live_file_size_cache,
+                live_file_size_loading,
+                live_file_size_req_sender,
+            );
             state.checked_at = now;
             d.insert_temp(cache_id, state);
         }
@@ -88,6 +66,9 @@ pub fn render_file_info_table(
     folder_size: Option<u64>,
     is_folder_size_loading: bool,
     is_metadata_loading: bool,
+    live_file_size_cache: &mut LruCache<std::path::PathBuf, (u64, u64)>,
+    live_file_size_loading: &mut FxHashSet<std::path::PathBuf>,
+    live_file_size_req_sender: &std::sync::mpsc::Sender<crate::app::live_file_size::LiveFileSizeRequest>,
     svg_manager: &mut SvgIconManager,
 ) -> Option<PreviewPanelAction> {
     let mut action = None;
@@ -238,7 +219,14 @@ pub fn render_file_info_table(
                         t!("file_info.calculating").to_string()
                     }
                 } else {
-                    let live_size = resolve_live_file_size(ui, file, is_metadata_loading);
+                    let live_size = resolve_live_file_size(
+                        ui,
+                        file,
+                        is_metadata_loading,
+                        live_file_size_cache,
+                        live_file_size_loading,
+                        live_file_size_req_sender,
+                    );
                     crate::infrastructure::windows::format_size(live_size)
                 };
 

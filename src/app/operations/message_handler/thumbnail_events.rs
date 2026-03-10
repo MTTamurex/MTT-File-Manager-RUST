@@ -45,6 +45,16 @@ impl ImageViewerApp {
                         // Deferred clear: replace stale items on first real batch
                         // so the UI never shows an empty list during watcher reloads.
                         if self.pending_all_items_clear {
+                            // Snapshot old items so we can detect stale textures
+                            // after the new items arrive (mtime/size comparison).
+                            self.stale_items_snapshot = Some(
+                                self.all_items
+                                    .iter()
+                                    .map(|item| {
+                                        (item.path.clone(), (item.modified, item.size))
+                                    })
+                                    .collect(),
+                            );
                             self.all_items.clear();
                             self.pending_all_items_clear = false;
                         }
@@ -103,6 +113,7 @@ impl ImageViewerApp {
         // 5. Metadata worker results (lower priority than visible media uploads)
         if !should_defer_low_priority {
             self.process_metadata_worker_results(ctx);
+            self.process_live_file_size_worker_results(ctx);
         }
         let t_meta = Instant::now();
 
