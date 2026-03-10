@@ -1,6 +1,6 @@
 use crate::domain::thumbnail::ThumbnailData;
 use crate::infrastructure::disk_cache::{ThumbnailCacheEntry, ThumbnailDiskCache};
-use crate::infrastructure::io_priority::{self, IOPriority};
+use crate::infrastructure::io_priority::IOPriority;
 use crate::infrastructure::onedrive::{self, IoTimeoutResult};
 use crate::infrastructure::windows::is_mpeg_ts_file;
 use crate::workers::thumbnail::extraction::{
@@ -26,7 +26,6 @@ pub(super) fn process_thumbnail_request(
     ctx: &egui::Context,
     disk_cache: &ThumbnailDiskCache,
     semaphore: &Semaphore,
-    virtual_drive_semaphore: &Semaphore,
     pending_deletions: &dashmap::DashMap<std::path::PathBuf, ()>,
     last_repaint: &mut Instant,
 ) {
@@ -250,16 +249,6 @@ pub(super) fn process_thumbnail_request(
             return;
         }
 
-        // Virtual drives (Cryptomator/WinFsp): serialize extractions to prevent
-        // FUSE driver overload. Must be acquired before the decode semaphore to
-        // avoid deadlock (consistent acquisition order across all workers).
-        let is_virtual_drive = io_priority::is_virtual_drive_path(path);
-        let _vd_permit = if is_virtual_drive {
-            Some(virtual_drive_semaphore.acquire_guard())
-        } else {
-            None
-        };
-
         // Wait until a slot is available.
         let _permit = semaphore.acquire_guard();
 
@@ -307,12 +296,6 @@ pub(super) fn process_thumbnail_request(
                     mark_as_transient_failure(path.clone());
                 }
             }
-        }
-
-        // Throttle virtual drive I/O: space out extractions to give the
-        // FUSE driver time to release resources between requests.
-        if is_virtual_drive {
-            std::thread::sleep(std::time::Duration::from_millis(50));
         }
     }
 

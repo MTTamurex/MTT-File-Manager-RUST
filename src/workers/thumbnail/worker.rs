@@ -9,6 +9,7 @@ use crate::domain::thumbnail::ThumbnailData;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::io_priority::{self, IOPriority};
 use crate::workers::thumbnail::queue::PriorityThumbnailQueue;
+use crate::workers::thumbnail::types::ThumbnailRequestSource;
 use crossbeam_channel::Sender;
 use eframe::egui;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -216,11 +217,19 @@ fn thumbnail_worker_loop(
     // RAII guard ensures THREAD_MODE_BACKGROUND_END is called even on panic.
     let _priority_guard = io_priority::ThreadPriorityGuard::new(IOPriority::Background);
 
-    while let Some((path, req_gen, req_size, req_priority, req_modified)) = queue.pop() {
+    while let Some((path, req_gen, req_size, req_priority, req_modified, req_source)) = queue.pop() {
         // Check generation match - skip stale requests
         if req_gen != gen_tracker.load(Ordering::Relaxed) {
             continue;
         }
+
+        let is_virtual_bulk_scan = matches!(req_source, ThumbnailRequestSource::BulkScan)
+            && io_priority::is_virtual_drive_path(&path);
+        let _virtual_drive_permit = if is_virtual_bulk_scan {
+            Some(virtual_drive_semaphore.acquire_guard())
+        } else {
+            None
+        };
 
         request_processing::process_thumbnail_request(
             &path,
@@ -232,10 +241,13 @@ fn thumbnail_worker_loop(
             &ctx,
             &disk_cache,
             &semaphore,
-            &virtual_drive_semaphore,
             &pending_deletions,
             &mut last_repaint,
         );
+
+        if is_virtual_bulk_scan {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
     }
     // _mf and _com dropped here — MFShutdown() then CoUninitialize() guaranteed
 }
