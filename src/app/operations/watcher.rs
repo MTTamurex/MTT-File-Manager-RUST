@@ -171,7 +171,7 @@ impl ImageViewerApp {
             }
         } else if !self.drive_watcher_enabled {
             log::info!(
-                "[WATCHER] Drive-wide watcher disabled by MTT_DISABLE_DRIVE_WATCHER; using per-folder watcher strategy"
+                "[WATCHER] Drive-wide watcher disabled (default). Set MTT_ENABLE_DRIVE_WATCHER=1 to enable. Using per-folder watcher strategy"
             );
         } else {
             log::debug!("[WATCHER] UNC/Network path detected - using notify-watcher only");
