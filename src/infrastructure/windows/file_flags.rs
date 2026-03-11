@@ -126,25 +126,34 @@ const INCOMPLETE_DOWNLOAD_EXTENSIONS: &[&str] = &[
     "crswap",     // Chrome swap file
 ];
 
-/// Dynamic write-activity window for media files.
+/// Fallback write-activity window for media files when no watcher event exists.
 ///
-/// If a media file changed recently, we require a continuous stability window
-/// (size + mtime unchanged across multiple extraction attempts) before allowing
-/// COM-based thumbnail/metadata extraction.
-const RECENT_WRITE_ACTIVITY_SECS: u64 = 300;
+/// The preferred signal is a real CREATE/MODIFY/RENAME event from the watcher.
+/// This metadata-based fallback only covers cases where the app enters a folder
+/// after the write finished and therefore did not observe the live events.
+const RECENT_WRITE_ACTIVITY_FALLBACK_SECS: u64 = 20;
 
 /// UI-thread fast guard window.
 ///
 /// Keeps short-term protection right after MODIFY events, while avoiding long
 /// post-download delays from fixed multi-minute cooldowns.
-const FAST_RECENT_GUARD_SECS: u64 = 5;
+const FAST_RECENT_GUARD_SECS: u64 = 2;
+
+/// Worker-thread quarantine after the last observed write event.
+///
+/// This covers piece-based writers that may briefly release the write handle
+/// between bursts. Combined with the write-lock probe, it prevents Shell/MF
+/// thumbnail extraction from touching files that just stopped changing.
+const RECENT_WRITE_EVENT_GUARD_SECS: u64 = 8;
 
 /// Minimum continuous stability time required before treating a recently
 /// changing media file as safe to read.
-const MIN_STABLE_MEDIA_DURATION: Duration = Duration::from_secs(12);
+const MIN_STABLE_MEDIA_DURATION: Duration = Duration::from_secs(3);
 
 const STABILITY_STATE_CAP: usize = 8192;
 const STABILITY_STATE_TTL: Duration = Duration::from_secs(15 * 60);
+const WRITE_ACTIVITY_STATE_CAP: usize = 8192;
+const WRITE_ACTIVITY_STATE_TTL: Duration = Duration::from_secs(2 * 60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileReadSafety {
@@ -170,9 +179,32 @@ struct FileStabilityState {
 
 static FILE_STABILITY_CACHE: OnceLock<Mutex<std::collections::HashMap<PathBuf, FileStabilityState>>> =
     OnceLock::new();
+static FILE_WRITE_ACTIVITY_CACHE: OnceLock<Mutex<std::collections::HashMap<PathBuf, Instant>>> =
+    OnceLock::new();
 
 fn get_file_stability_cache() -> &'static Mutex<std::collections::HashMap<PathBuf, FileStabilityState>> {
     FILE_STABILITY_CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+fn get_file_write_activity_cache() -> &'static Mutex<std::collections::HashMap<PathBuf, Instant>> {
+    FILE_WRITE_ACTIVITY_CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+pub fn mark_recent_write_activity(path: &Path) {
+    if !is_media_file(path) {
+        return;
+    }
+
+    let now = Instant::now();
+    let Ok(mut cache) = get_file_write_activity_cache().lock() else {
+        return;
+    };
+
+    if cache.len() > WRITE_ACTIVITY_STATE_CAP {
+        cache.retain(|_, seen_at| now.duration_since(*seen_at) <= WRITE_ACTIVITY_STATE_TTL);
+    }
+
+    cache.insert(path.to_path_buf(), now);
 }
 
 /// Returns `true` if the file extension indicates an incomplete download.
@@ -245,17 +277,62 @@ fn is_media_file(path: &Path) -> bool {
         || crate::infrastructure::windows::file_type::is_image_extension(&lower)
 }
 
-fn is_recently_modified_within(path: &Path, max_age_secs: u64) -> bool {
+fn recent_modified_baseline(path: &Path, max_age_secs: u64) -> Option<Instant> {
     if !is_media_file(path) {
-        return false;
+        return None;
     }
 
     match std::fs::metadata(path).and_then(|m| m.modified()) {
-        Ok(mtime) => mtime
-            .elapsed()
-            .map_or(false, |elapsed| elapsed.as_secs() < max_age_secs),
-        Err(_) => false,
+        Ok(mtime) => match mtime.elapsed() {
+            Ok(elapsed) if elapsed.as_secs() < max_age_secs => now_minus_elapsed(elapsed),
+            _ => None,
+        },
+        Err(_) => None,
     }
+}
+
+fn now_minus_elapsed(elapsed: Duration) -> Option<Instant> {
+    Instant::now().checked_sub(elapsed)
+}
+
+fn recent_write_activity_baseline(path: &Path) -> Option<Instant> {
+    if !is_media_file(path) {
+        return None;
+    }
+
+    let now = Instant::now();
+    let event_baseline = get_file_write_activity_cache()
+        .lock()
+        .ok()
+        .and_then(|mut cache| {
+            if cache.len() > WRITE_ACTIVITY_STATE_CAP {
+                cache.retain(|_, seen_at| now.duration_since(*seen_at) <= WRITE_ACTIVITY_STATE_TTL);
+            }
+
+            match cache.get(path).copied() {
+                Some(seen_at) if now.duration_since(seen_at) <= WRITE_ACTIVITY_STATE_TTL => Some(seen_at),
+                Some(_) => {
+                    cache.remove(path);
+                    None
+                }
+                None => None,
+            }
+        });
+
+    match (
+        event_baseline,
+        recent_modified_baseline(path, RECENT_WRITE_ACTIVITY_FALLBACK_SECS),
+    ) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
+}
+
+fn has_recent_write_activity(path: &Path, max_age: Duration) -> bool {
+    recent_write_activity_baseline(path)
+        .is_some_and(|baseline| Instant::now().duration_since(baseline) < max_age)
 }
 
 fn read_stability_snapshot(path: &Path) -> Option<FileStabilitySnapshot> {
@@ -267,7 +344,11 @@ fn read_stability_snapshot(path: &Path) -> Option<FileStabilitySnapshot> {
     })
 }
 
-fn is_stable_enough_across_attempts(path: &Path, snapshot: FileStabilitySnapshot) -> bool {
+fn is_stable_enough_across_attempts(
+    path: &Path,
+    snapshot: FileStabilitySnapshot,
+    recent_write_baseline: Option<Instant>,
+) -> bool {
     let now = Instant::now();
 
     let Ok(mut cache) = get_file_stability_cache().lock() else {
@@ -281,6 +362,12 @@ fn is_stable_enough_across_attempts(path: &Path, snapshot: FileStabilitySnapshot
     let key = path.to_path_buf();
     let is_stable = match cache.get_mut(&key) {
         Some(state) => {
+            if let Some(baseline) = recent_write_baseline {
+                if baseline > state.stable_since {
+                    state.stable_since = baseline;
+                }
+            }
+
             if state.last_len != snapshot.len || state.last_modified != snapshot.modified {
                 state.last_len = snapshot.len;
                 state.last_modified = snapshot.modified;
@@ -293,16 +380,17 @@ fn is_stable_enough_across_attempts(path: &Path, snapshot: FileStabilitySnapshot
             }
         }
         None => {
+            let stable_since = recent_write_baseline.unwrap_or(now);
             cache.insert(
                 key,
                 FileStabilityState {
                     last_len: snapshot.len,
                     last_modified: snapshot.modified,
-                    stable_since: now,
+                    stable_since,
                     last_seen: now,
                 },
             );
-            false
+            now.duration_since(stable_since) >= MIN_STABLE_MEDIA_DURATION
         }
     };
 
@@ -323,13 +411,16 @@ pub fn classify_file_read_safety(path: &Path) -> FileReadSafety {
         return FileReadSafety::WriteLocked;
     }
 
-    if is_recently_modified_within(path, RECENT_WRITE_ACTIVITY_SECS) {
+    let recent_write_baseline = recent_write_activity_baseline(path);
+    if recent_write_baseline.is_some()
+        && has_recent_write_activity(path, Duration::from_secs(RECENT_WRITE_EVENT_GUARD_SECS))
+    {
         let snapshot = match read_stability_snapshot(path) {
             Some(v) => v,
             None => return FileReadSafety::RecentlyChanging,
         };
 
-        if !is_stable_enough_across_attempts(path, snapshot) {
+        if !is_stable_enough_across_attempts(path, snapshot, recent_write_baseline) {
             return FileReadSafety::RecentlyChanging;
         }
     }
@@ -392,7 +483,7 @@ pub fn is_file_unsafe_to_read_fast(path: &Path) -> bool {
         return true;
     }
 
-    if is_recently_modified_within(path, FAST_RECENT_GUARD_SECS) {
+    if has_recent_write_activity(path, Duration::from_secs(FAST_RECENT_GUARD_SECS)) {
         return true;
     }
 

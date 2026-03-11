@@ -210,6 +210,7 @@ impl ImageViewerApp {
         }
 
         let cleaned = Self::clean_path(path);
+        crate::infrastructure::windows::file_flags::mark_recent_write_activity(&cleaned);
         Self::register_changed_folder(&cleaned, folders_with_changed_contents);
         if let Some(parent) = cleaned.parent() {
             let parent_norm = Self::normalize_for_match(parent);
@@ -322,6 +323,7 @@ impl ImageViewerApp {
         }
 
         let cleaned = Self::clean_path(path);
+    crate::infrastructure::windows::file_flags::mark_recent_write_activity(&cleaned);
         let is_onedrive = is_onedrive_file(&cleaned);
 
         self.try_refresh_modified_file_entry_inline(&cleaned, _current_path_norm);
@@ -426,6 +428,7 @@ impl ImageViewerApp {
 
         let cleaned_old = Self::clean_path(old_path);
         let cleaned_new = Self::clean_path(new_path);
+        crate::infrastructure::windows::file_flags::mark_recent_write_activity(&cleaned_new);
 
         // Check if the CURRENT FOLDER was renamed.
         // If so, follow the rename to the new path instead of stranding the user.
