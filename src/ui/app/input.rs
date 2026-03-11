@@ -172,26 +172,35 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             }
         });
 
-        // Fallback: use Windows GetAsyncKeyState for hardware-level detection
-        let ctrl_down = unsafe { GetAsyncKeyState(0x11) < 0 };
-        let v_down = unsafe { GetAsyncKeyState(0x56) < 0 };
-        let shift_down = unsafe { GetAsyncKeyState(0x10) < 0 };
-        let del_down = unsafe { GetAsyncKeyState(0x2E) < 0 };
+        // Fallback: use Windows GetAsyncKeyState for hardware-level detection.
+        // CRITICAL: Only process when our window has OS focus — GetAsyncKeyState
+        // reads global hardware state and would capture keystrokes from other apps.
+        let app_has_focus = ctx.input(|i| i.viewport().focused.unwrap_or(false));
+        if app_has_focus {
+            let ctrl_down = unsafe { GetAsyncKeyState(0x11) < 0 };
+            let v_down = unsafe { GetAsyncKeyState(0x56) < 0 };
+            let shift_down = unsafe { GetAsyncKeyState(0x10) < 0 };
+            let del_down = unsafe { GetAsyncKeyState(0x2E) < 0 };
 
-        // Debounced paste detection
-        if ctrl_down && v_down && !app.paste_key_debounce && !text_input_active {
-            do_paste = true;
-            app.paste_key_debounce = true;
-        } else if !v_down {
+            // Debounced paste detection
+            if ctrl_down && v_down && !app.paste_key_debounce && !text_input_active {
+                do_paste = true;
+                app.paste_key_debounce = true;
+            } else if !v_down {
+                app.paste_key_debounce = false;
+            }
+
+            // Debounced Shift+Delete detection (permanente)
+            if shift_down && del_down && !app.delete_key_debounce && !text_input_active {
+                app.delete_permanently_for_idx(None);
+                app.delete_key_debounce = true;
+                user_active = true;
+            } else if !del_down {
+                app.delete_key_debounce = false;
+            }
+        } else {
+            // Reset debounce state when unfocused to avoid stale triggers on refocus.
             app.paste_key_debounce = false;
-        }
-
-        // Debounced Shift+Delete detection (permanente)
-        if shift_down && del_down && !app.delete_key_debounce && !text_input_active {
-            app.delete_permanently_for_idx(None);
-            app.delete_key_debounce = true;
-            user_active = true;
-        } else if !del_down {
             app.delete_key_debounce = false;
         }
 
@@ -333,8 +342,13 @@ fn handle_media_hardware_input(app: &mut ImageViewerApp, ctx: &egui::Context) ->
         return false;
     }
 
-    // Detect keys via hardware-level check (AsyncKeyState)
-    // We check bits to ensure the key WAS pressed since last check
+    // Detect keys via hardware-level check (AsyncKeyState).
+    // Only when our window has OS focus — GetAsyncKeyState reads global state.
+    let app_has_focus = ctx.input(|i| i.viewport().focused.unwrap_or(false));
+    if !app_has_focus {
+        return false;
+    }
+
     let mut consumed = false;
     let mut new_session_vol: Option<f32> = None;
     unsafe {
