@@ -71,7 +71,7 @@ impl UserSessionSearchIndex {
         if !volumes.is_empty() {
             let total: usize = volumes.values().map(|v| v.items.len()).sum();
             let drives: Vec<char> = volumes.keys().copied().collect();
-            log::info!(
+            log::debug!(
                 "[SESSION-SEARCH] Loaded {} cached entries from {} volume(s) {:?}",
                 total,
                 drives.len(),
@@ -165,7 +165,7 @@ impl UserSessionSearchIndex {
                             live_paths: scan.live_paths,
                         },
                     );
-                    log::info!(
+                    log::debug!(
                         "[SESSION-SEARCH] {}:\\ indexed {} entries in {:.2}s (dirs: {}, errors: {})",
                         candidate.drive_letter,
                         count,
@@ -719,7 +719,7 @@ fn save_volume(conn: &rusqlite::Connection, drive_letter: char, items: &[Indexed
         let _ = conn.execute("COMMIT", []);
     }
 
-    log::info!(
+    log::debug!(
         "[SESSION-SEARCH] Persisted {} items for {}:\\",
         items.len(),
         drive_letter
