@@ -234,7 +234,7 @@ impl eframe::App for ImageViewerApp {
         // PERF: Log total frame time when slow (helps diagnose post-inactivity freezes)
         let frame_total_ms = t_frame_start.elapsed().as_millis();
         self.last_actual_frame_ms = frame_total_ms as f32;
-        if frame_total_ms > 100 {
+        if !self.layout.saved_is_minimized && frame_total_ms > 100 {
             log::warn!(
                 "[PERF] SLOW FRAME: {}ms total (stable_dt={:.0}ms)",
                 frame_total_ms, frame_ms
