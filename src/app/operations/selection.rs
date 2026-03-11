@@ -12,7 +12,7 @@ impl ImageViewerApp {
     /// Kill the standalone video player process if one is running.
     pub fn kill_video_player_process(&mut self) {
         if let Some(mut child) = self.video_player_process.take() {
-            log::info!("[VIDEO-PLAYER] Killing standalone video player process");
+            log::debug!("[VIDEO-PLAYER] Killing standalone video player process");
             let _ = child.kill();
             let _ = child.wait();
         }
@@ -24,7 +24,7 @@ impl ImageViewerApp {
         if let Some(child) = &mut self.video_player_process {
             match child.try_wait() {
                 Ok(Some(_status)) => {
-                    log::info!("[VIDEO-PLAYER] Standalone player exited");
+                    log::debug!("[VIDEO-PLAYER] Standalone player exited");
                     self.video_player_process = None;
                 }
                 Ok(None) => {} // Still running

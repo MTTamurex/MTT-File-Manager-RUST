@@ -286,7 +286,7 @@ impl ImageViewerApp {
         // thread while the disk is under heavy I/O.  A full folder reload is
         // triggered in handle_file_operation_finished() once all ops complete.
         if self.file_operation_state.file_ops_in_progress > 0 {
-            log::info!(
+            log::debug!(
                 "[MTIME-SCHED] file_ops_in_progress={}, draining watcher events",
                 self.file_operation_state.file_ops_in_progress
             );

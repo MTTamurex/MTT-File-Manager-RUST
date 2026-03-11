@@ -674,13 +674,13 @@ impl ImageViewerApp {
             return;
         }
 
-        log::info!(
+        log::debug!(
             "[MTIME-SCHED] apply_folder_content_change_invalidations: {} folders changed, current_path={}",
             folders_with_changed_contents.len(),
             self.navigation_state.current_path
         );
         for fp in &folders_with_changed_contents {
-            log::info!("[MTIME-SCHED]   changed folder: {:?}", fp);
+            log::debug!("[MTIME-SCHED]   changed folder: {:?}", fp);
         }
 
         let current_path_norm =
@@ -768,14 +768,14 @@ impl ImageViewerApp {
         for folder_path in &folders_with_changed_contents {
             // Skip metadata() calls on OneDrive and network/virtual drives.
             if is_onedrive_file(folder_path) {
-                log::info!(
+                log::debug!(
                     "[MTIME-SCHED] Skipping OneDrive folder: {:?}",
                     folder_path
                 );
                 continue;
             }
             if crate::infrastructure::io_priority::is_network_or_virtual(folder_path) {
-                log::info!(
+                log::debug!(
                     "[MTIME-SCHED] Skipping network/virtual folder: {:?}",
                     folder_path
                 );
@@ -790,7 +790,7 @@ impl ImageViewerApp {
                         || Self::normalize_for_match(&item.path) == folder_norm)
             });
             if !is_visible {
-                log::info!(
+                log::debug!(
                     "[MTIME-SCHED] Folder NOT visible in listing, skipping: {:?} (norm={:?})",
                     folder_path,
                     folder_norm
@@ -808,12 +808,12 @@ impl ImageViewerApp {
                 .find(|(p, _)| p == folder_path)
             {
                 existing.1 = recheck_at;
-                log::info!(
+                log::debug!(
                     "[MTIME-SCHED] Debounce push for folder: {:?}",
                     folder_path.file_name().unwrap_or_default()
                 );
             } else {
-                log::info!(
+                log::debug!(
                     "[MTIME-SCHED] Scheduled mtime recheck for folder: {:?} (due in 2s)",
                     folder_path.file_name().unwrap_or_default()
                 );
