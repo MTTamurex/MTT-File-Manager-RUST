@@ -122,24 +122,6 @@ impl ImageViewerApp {
             || name == "thumbs.db"
     }
 
-    fn register_changed_folder(changed_path: &Path, out: &mut HashSet<PathBuf>) {
-        // Avoid per-event GetFileAttributesW syscalls during watcher bursts.
-        // Use a fast heuristic: paths with a file extension are almost certainly
-        // files, so register their parent.  Paths without an extension could be
-        // directories OR extensionless files, so register both the path itself
-        // and its parent to cover both cases.
-        if changed_path.extension().is_some() {
-            if let Some(parent) = changed_path.parent() {
-                out.insert(parent.to_path_buf());
-            }
-        } else {
-            out.insert(changed_path.to_path_buf());
-            if let Some(parent) = changed_path.parent() {
-                out.insert(parent.to_path_buf());
-            }
-        }
-    }
-
     fn path_affects_current_listing(current_path_norm: &str, path: &Path) -> bool {
         let cleaned = Self::clean_path(path);
         let cleaned_norm = Self::normalize_for_match(&cleaned);
@@ -211,7 +193,7 @@ impl ImageViewerApp {
 
         let cleaned = Self::clean_path(path);
         crate::infrastructure::windows::file_flags::mark_recent_write_activity(&cleaned);
-        Self::register_changed_folder(&cleaned, folders_with_changed_contents);
+        self.register_changed_folder_for_path(&cleaned, folders_with_changed_contents);
         if let Some(parent) = cleaned.parent() {
             let parent_norm = Self::normalize_for_match(parent);
             if parent_norm == current_path_norm {
@@ -249,7 +231,7 @@ impl ImageViewerApp {
 
         let cleaned = Self::clean_path(path);
         pending_disk_cache_invalidations.push(cleaned.clone());
-        Self::register_changed_folder(&cleaned, folders_with_changed_contents);
+        self.register_changed_folder_for_path(&cleaned, folders_with_changed_contents);
 
         // Evict in-memory caches so a future file at the same path
         // won't inherit the deleted file's stale thumbnail texture.
@@ -367,7 +349,7 @@ impl ImageViewerApp {
         // Actual content changes from other devices arrive as CREATE/DELETE pairs
         // or are caught by the consistency probe.
         if !is_onedrive {
-            Self::register_changed_folder(&cleaned, folders_with_changed_contents);
+            self.register_changed_folder_for_path(&cleaned, folders_with_changed_contents);
         }
 
         if let Some(ref selected) = self.selected_file {
@@ -446,8 +428,8 @@ impl ImageViewerApp {
 
         pending_disk_cache_invalidations.push(cleaned_old.clone());
         pending_disk_cache_invalidations.push(cleaned_new.clone());
-        Self::register_changed_folder(&cleaned_old, folders_with_changed_contents);
-        Self::register_changed_folder(&cleaned_new, folders_with_changed_contents);
+        self.register_changed_folder_for_path(&cleaned_old, folders_with_changed_contents);
+        self.register_changed_folder_for_path(&cleaned_new, folders_with_changed_contents);
 
         self.cache_manager.texture_cache.pop(&cleaned_old);
         self.cache_manager.texture_cache.pop(&cleaned_new);
@@ -585,7 +567,7 @@ impl ImageViewerApp {
                             internal_cache_root_prefix,
                         ) {
                             let cleaned = Self::clean_path(path);
-                            Self::register_changed_folder(&cleaned, folders_with_changed_contents);
+                            self.register_changed_folder_for_path(&cleaned, folders_with_changed_contents);
                         }
                     }
                     DriveWatcherEvent::Deleted(path) => {
@@ -596,7 +578,7 @@ impl ImageViewerApp {
                         ) {
                             let cleaned = Self::clean_path(path);
                             pending_disk_cache_invalidations.push(cleaned.clone());
-                            Self::register_changed_folder(&cleaned, folders_with_changed_contents);
+                            self.register_changed_folder_for_path(&cleaned, folders_with_changed_contents);
                         }
                     }
                     DriveWatcherEvent::Renamed(old_path, new_path) => {
@@ -607,7 +589,7 @@ impl ImageViewerApp {
                         ) {
                             let cleaned_old = Self::clean_path(old_path);
                             pending_disk_cache_invalidations.push(cleaned_old.clone());
-                            Self::register_changed_folder(
+                            self.register_changed_folder_for_path(
                                 &cleaned_old,
                                 folders_with_changed_contents,
                             );
@@ -618,7 +600,7 @@ impl ImageViewerApp {
                             internal_cache_root_prefix,
                         ) {
                             let cleaned_new = Self::clean_path(new_path);
-                            Self::register_changed_folder(
+                            self.register_changed_folder_for_path(
                                 &cleaned_new,
                                 folders_with_changed_contents,
                             );
