@@ -129,6 +129,7 @@ impl ImageViewerApp {
 
                             meaningful_change = true;
                             let cleaned = Self::clean_path(path);
+                            crate::infrastructure::windows::file_flags::mark_recent_write_activity(&cleaned);
                             register_changed_folder(&cleaned, &mut folders_with_changed_contents);
 
                             if let Some(parent) = cleaned.parent() {
@@ -172,6 +173,7 @@ impl ImageViewerApp {
 
                             let cleaned_old = Self::clean_path(old_path);
                             let cleaned_new = Self::clean_path(new_path);
+                            crate::infrastructure::windows::file_flags::mark_recent_write_activity(&cleaned_new);
                             register_changed_folder(&cleaned_old, &mut folders_with_changed_contents);
                             register_changed_folder(&cleaned_new, &mut folders_with_changed_contents);
 
@@ -263,6 +265,7 @@ impl ImageViewerApp {
                         }
 
                         let cleaned = Self::clean_path(path);
+                        crate::infrastructure::windows::file_flags::mark_recent_write_activity(&cleaned);
                         register_changed_folder(&cleaned, &mut folders_with_changed_contents);
                         let preserve_media_thumb = should_preserve_onedrive_media_thumbnail(&cleaned);
                         if !preserve_media_thumb {
