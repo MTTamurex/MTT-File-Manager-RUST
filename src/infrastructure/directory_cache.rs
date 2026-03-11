@@ -29,8 +29,8 @@ impl DirectoryCache {
     }
 
     /// Returns cached entries immediately if available.
-    /// Cache validity is guaranteed by DriveWatcher: it monitors the entire drive
-    /// and proactively invalidates entries on any filesystem change.
+    /// Cache is invalidated by: DriveWatcher (when enabled), per-folder
+    /// notify-watcher, consistency probe, and mtime validation in fast_paths.
     ///
     /// NOTE: `folder_cover` is stripped on read — it is resolved separately
     /// via the cover pipeline (SQLite + existence check + cover worker) to

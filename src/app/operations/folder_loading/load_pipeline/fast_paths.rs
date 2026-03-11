@@ -158,22 +158,12 @@ pub(super) fn try_handle_fast_paths(
                 return true;
             }
         } else {
-            if cache_marked_dirty {
-                log::info!(
-                    "[FOLDER-LOADING] Phase 1: Cache BYPASS for {:?} (marked dirty), proceeding to disk load",
-                    base_path_buf
-                );
-            } else if !can_trust_directory_cache {
-                log::info!(
-                    "[FOLDER-LOADING] Phase 1: Cache BYPASS for {:?} (non-USN filesystem), proceeding to disk load",
-                    base_path_buf
-                );
-            } else {
-                log::info!(
-                    "[FOLDER-LOADING] Phase 1: Cache MISS for {:?}, proceeding to disk load",
-                    base_path_buf
-                );
-            }
+            let reason = if cache_marked_dirty { "marked dirty" } else { "non-USN filesystem" };
+            log::info!(
+                "[FOLDER-LOADING] Phase 1: Cache BYPASS for {:?} ({}), proceeding to disk load",
+                base_path_buf,
+                reason
+            );
         }
         }
     }

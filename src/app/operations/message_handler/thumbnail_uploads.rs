@@ -138,6 +138,9 @@ impl ImageViewerApp {
             if let Some(skip_count) = self.thumbnail_eviction_skips.get_mut(&thumbnail_data.path) {
                 if *skip_count > 0 {
                     *skip_count -= 1;
+                    if *skip_count == 0 {
+                        self.thumbnail_eviction_skips.remove(&thumbnail_data.path);
+                    }
                     self.cache_manager.finish_loading(&thumbnail_data.path);
                     log::debug!(
                         "[THUMB-UPLOAD] Rejected stale in-flight thumbnail for {:?} (eviction skip)",
