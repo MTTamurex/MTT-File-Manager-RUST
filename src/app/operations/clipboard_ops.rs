@@ -7,7 +7,7 @@ use crate::application::file_operations;
 use std::path::{Path, PathBuf};
 
 impl ImageViewerApp {
-    fn context_target_is_directory(&self, idx: Option<usize>, path: &Path) -> bool {
+    pub(crate) fn context_target_is_directory(&self, idx: Option<usize>, path: &Path) -> bool {
         if crate::infrastructure::windows::is_drive_root_path(path) {
             return true;
         }

@@ -16,7 +16,7 @@ impl DirectoryDirtyRegistry {
         self.inner
             .lock()
             .map(|entries| entries.contains_key(path))
-            .unwrap_or(false)
+            .unwrap_or(true)
     }
 
     pub fn mark_dirty(&self, path: &Path) -> u64 {
