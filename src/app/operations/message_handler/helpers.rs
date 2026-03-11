@@ -10,6 +10,46 @@ impl ImageViewerApp {
         Self::normalize_for_match(candidate) == target_norm
     }
 
+    pub(super) fn is_known_directory_path(&self, path: &Path) -> bool {
+        if crate::infrastructure::windows::is_drive_root_path(path) {
+            return true;
+        }
+
+        let path_norm = Self::normalize_for_match(path);
+
+        self.all_items
+            .iter()
+            .any(|item| item.is_dir && Self::path_matches_normalized(&item.path, &path_norm))
+            || self
+                .items
+                .iter()
+                .any(|item| item.is_dir && Self::path_matches_normalized(&item.path, &path_norm))
+            || self
+                .selected_file
+                .as_ref()
+                .is_some_and(|item| {
+                    item.is_dir && Self::path_matches_normalized(&item.path, &path_norm)
+                })
+    }
+
+    pub(super) fn register_changed_folder_for_path(
+        &self,
+        changed_path: &Path,
+        out: &mut std::collections::HashSet<PathBuf>,
+    ) {
+        let cleaned = Self::clean_path(changed_path);
+        let is_known_dir = self.is_known_directory_path(&cleaned);
+
+        if is_known_dir || cleaned.extension().is_none() {
+            out.insert(cleaned.clone());
+            if let Some(parent) = cleaned.parent() {
+                out.insert(parent.to_path_buf());
+            }
+        } else if let Some(parent) = cleaned.parent() {
+            out.insert(parent.to_path_buf());
+        }
+    }
+
     pub(super) fn evict_stale_path_caches(&mut self, path: &Path) {
         let cleaned = Self::clean_path(path);
         let remove_paths = vec![cleaned.clone()];
@@ -206,6 +246,9 @@ impl ImageViewerApp {
 
         self.filter_items();
         self.sort_items();
+        if is_dir {
+            self.request_folder_scan(cleaned.clone());
+        }
         self.ui_ctx.request_repaint();
         true
     }

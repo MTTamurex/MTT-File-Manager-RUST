@@ -1,21 +1,8 @@
 use crate::app::state::ImageViewerApp;
 use notify::event::{ModifyKind, RenameMode};
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
-
-fn register_changed_folder(changed_path: &Path, out: &mut HashSet<PathBuf>) {
-    if changed_path.extension().is_some() {
-        if let Some(parent) = changed_path.parent() {
-            out.insert(parent.to_path_buf());
-        }
-    } else {
-        out.insert(changed_path.to_path_buf());
-        if let Some(parent) = changed_path.parent() {
-            out.insert(parent.to_path_buf());
-        }
-    }
-}
 
 fn should_preserve_onedrive_media_thumbnail(path: &std::path::Path) -> bool {
     if !crate::infrastructure::onedrive::is_onedrive_path(path)
@@ -92,7 +79,7 @@ impl ImageViewerApp {
                             meaningful_change = true;
 
                             let cleaned = Self::clean_path(path);
-                            register_changed_folder(&cleaned, &mut folders_with_changed_contents);
+                            self.register_changed_folder_for_path(&cleaned, &mut folders_with_changed_contents);
                             if let Some(parent) = cleaned.parent() {
                                 self.invalidate_directory_caches(parent);
 
@@ -130,7 +117,7 @@ impl ImageViewerApp {
                             meaningful_change = true;
                             let cleaned = Self::clean_path(path);
                             crate::infrastructure::windows::file_flags::mark_recent_write_activity(&cleaned);
-                            register_changed_folder(&cleaned, &mut folders_with_changed_contents);
+                            self.register_changed_folder_for_path(&cleaned, &mut folders_with_changed_contents);
 
                             if let Some(parent) = cleaned.parent() {
                                 self.invalidate_directory_caches(parent);
@@ -174,8 +161,8 @@ impl ImageViewerApp {
                             let cleaned_old = Self::clean_path(old_path);
                             let cleaned_new = Self::clean_path(new_path);
                             crate::infrastructure::windows::file_flags::mark_recent_write_activity(&cleaned_new);
-                            register_changed_folder(&cleaned_old, &mut folders_with_changed_contents);
-                            register_changed_folder(&cleaned_new, &mut folders_with_changed_contents);
+                            self.register_changed_folder_for_path(&cleaned_old, &mut folders_with_changed_contents);
+                            self.register_changed_folder_for_path(&cleaned_new, &mut folders_with_changed_contents);
 
                             pending_disk_cache_invalidations.push(cleaned_old.clone());
                             pending_disk_cache_invalidations.push(cleaned_new.clone());
@@ -266,7 +253,7 @@ impl ImageViewerApp {
 
                         let cleaned = Self::clean_path(path);
                         crate::infrastructure::windows::file_flags::mark_recent_write_activity(&cleaned);
-                        register_changed_folder(&cleaned, &mut folders_with_changed_contents);
+                        self.register_changed_folder_for_path(&cleaned, &mut folders_with_changed_contents);
                         let preserve_media_thumb = should_preserve_onedrive_media_thumbnail(&cleaned);
                         if !preserve_media_thumb {
                             self.cache_manager.texture_cache.pop(&cleaned);

@@ -223,6 +223,26 @@ impl ImageViewerApp {
         // the new preview, avoiding any visible flicker.
         if !successful_thumb_paths.is_empty() {
             let successful_set: HashSet<&PathBuf> = successful_thumb_paths.iter().collect();
+            let mut parent_folders_needing_scan = HashSet::new();
+
+            for thumb_path in &successful_thumb_paths {
+                let Some(parent) = thumb_path.parent() else {
+                    continue;
+                };
+
+                if self.all_items.iter().any(|item| {
+                    item.is_dir
+                        && item.folder_cover.is_none()
+                        && item.path == parent
+                }) {
+                    parent_folders_needing_scan.insert(parent.to_path_buf());
+                }
+            }
+
+            if !parent_folders_needing_scan.is_empty() {
+                self.request_folder_scans_batch(parent_folders_needing_scan.into_iter().collect());
+            }
+
             for item in &self.all_items {
                 if let Some(ref cover) = item.folder_cover {
                     if item.is_dir && successful_set.contains(cover) {
