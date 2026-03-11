@@ -1,4 +1,4 @@
-//! Standalone dedicated video player mode (separate process).
+﻿//! Standalone dedicated video player mode (separate process).
 //!
 //! When the user clicks "detach" on the docked video player, the main app
 //! spawns a new process (`--video-player <path> [--position <secs>] [--volume <vol>]`)
@@ -303,7 +303,7 @@ fn set_mpv_window_icon(mpv: &mpv::Mpv) {
         );
     }
 
-    log::info!("[VIDEO-PLAYER] Applied app icon via pid enumeration fallback");
+    log::debug!("[VIDEO-PLAYER] Applied app icon via pid enumeration fallback");
 }
 
 #[cfg(target_os = "windows")]
@@ -360,7 +360,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
             let _ = init.set_option("config-dir", dir_str.as_str());
         }
 
-        // Borderless window — OSC provides the window controls
+        // Borderless window â€” OSC provides the window controls
         if let Err(e) = init.set_option("border", false) {
             log::warn!("[VIDEO-PLAYER] Failed to set border=no: {:?}", e);
         }
@@ -401,7 +401,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
 
     // --- Runtime properties (after mpv_initialize, before loadfile) ---
 
-    // D3D11 pipeline for NVIDIA RTX VSR — must be set via set_property after init,
+    // D3D11 pipeline for NVIDIA RTX VSR â€” must be set via set_property after init,
     // same sequencing as the embedded player (MpvPreview). Setting these in
     // mpv.conf or set_option causes the VO to initialize during mpv_initialize()
     // before the hwdec interop is ready, leaving hwdec-current empty.
@@ -428,9 +428,9 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
     let _ = mpv.set_property("volume", ((volume * 100.0) as i64).clamp(0, 100));
 
     // Window title (shown in taskbar for borderless window)
-    let _ = mpv.set_property("title", format!("Video Player — {}", title_name).as_str());
+    let _ = mpv.set_property("title", format!("Video Player â€” {}", title_name).as_str());
 
-    // Initial window size — use percentage to respect display scaling on HiDPI screens
+    // Initial window size â€” use percentage to respect display scaling on HiDPI screens
     let _ = mpv.set_property("autofit", "55%x55%");
     let _ = mpv.set_property("autofit-larger", "90%x90%");
     let _ = mpv.set_property("hidpi-window-scale", true);
@@ -449,7 +449,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
         volume * 100.0
     );
 
-    // Event loop — blocks until mpv shuts down (user closes window or presses 'q')
+    // Event loop â€” blocks until mpv shuts down (user closes window or presses 'q')
     let mut seek_applied = false;
     let mut eof_reached = false;
     loop {
@@ -461,7 +461,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
         }
         match event {
             Some(Ok(mpv::events::Event::Shutdown)) => {
-                log::info!("[VIDEO-PLAYER] mpv shutdown event received");
+                log::debug!("[VIDEO-PLAYER] mpv shutdown event received");
                 break;
             }
             Some(Ok(mpv::events::Event::FileLoaded)) => {
@@ -484,14 +484,14 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
                 if !seek_applied && position > 0.5 {
                     let _ = mpv.set_property("time-pos", position);
                     seek_applied = true;
-                    log::info!("[VIDEO-PLAYER] Seeked to {:.1}s", position);
+                    log::debug!("[VIDEO-PLAYER] Seeked to {:.1}s", position);
                 }
             }
             Some(Ok(mpv::events::Event::ClientMessage(args))) => {
                 if args.first() == Some(&"open-subtitle-picker") {
                     match load_external_subtitle_for_standalone(&mut mpv, &path) {
                         Ok(true) => {
-                            log::info!("[VIDEO-PLAYER] External subtitle loaded from native picker");
+                            log::debug!("[VIDEO-PLAYER] External subtitle loaded from native picker");
                         }
                         Ok(false) => {
                             let cancelled_msg = rust_i18n::t!("video.subtitle_cancelled").to_string();
@@ -505,7 +505,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
                 }
             }
             Some(Ok(mpv::events::Event::EndFile(reason))) => {
-                log::info!("[VIDEO-PLAYER] EndFile reason={}", reason);
+                log::debug!("[VIDEO-PLAYER] EndFile reason={}", reason);
 
                 // MPV_END_FILE_REASON constants: EOF=0, STOP=2, QUIT=3, ERROR=4, REDIRECT=5
                 const REASON_EOF:  u32 = mpv::mpv_end_file_reason::Eof;
@@ -517,12 +517,12 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
                         // keep-open=yes: video reached end, player stays open showing
                         // last frame. Mark flag so we know we're in paused-at-EOF state.
                         eof_reached = true;
-                        log::info!("[VIDEO-PLAYER] EOF reached — keep-open holds player open");
+                        log::debug!("[VIDEO-PLAYER] EOF reached â€” keep-open holds player open");
                     }
                     REASON_QUIT | REASON_STOP => {
                         // User explicitly closed the player (OSC close button, 'q' key,
                         // or equivalent). Exit the event loop.
-                        log::info!("[VIDEO-PLAYER] EndFile Stop/Quit — exiting");
+                        log::debug!("[VIDEO-PLAYER] EndFile Stop/Quit â€” exiting");
                         break;
                     }
                     _ => {
@@ -530,7 +530,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
                         // (i.e., the player had finished and something triggered close).
                         if eof_reached {
                             log::info!(
-                                "[VIDEO-PLAYER] EndFile reason={} after EOF — exiting",
+                                "[VIDEO-PLAYER] EndFile reason={} after EOF â€” exiting",
                                 reason
                             );
                             break;
@@ -545,6 +545,6 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
         }
     }
 
-    log::info!("[VIDEO-PLAYER] Exiting standalone player");
+    log::debug!("[VIDEO-PLAYER] Exiting standalone player");
     Ok(())
 }
