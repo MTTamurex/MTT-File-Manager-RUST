@@ -60,22 +60,54 @@ pub(super) fn try_handle_fast_paths(
         // No fs::metadata() mtime check needed — if the cache has data, it's valid.
         if !cache_marked_dirty && can_trust_directory_cache {
             if let Some((cached_entries, cached_at_ms)) = directory_cache.get_with_meta(base_path_buf) {
-            log::info!(
-                "[FOLDER-LOADING] Phase 1: Cache HIT for {:?} ({} entries, cached_at_ms={})",
-                base_path_buf, cached_entries.len(), cached_at_ms
-            );
-            // Fail-safe against missed watcher events: validate folder mtime.
-            // Skip for OneDrive to avoid potential blocking metadata calls.
-            if !is_onedrive_base {
-                let dir_mtime_ms = directory_mtime_ms(base_path_buf);
-                if dir_mtime_ms > cached_at_ms {
-                    log::debug!(
-                        "[FOLDER-LOADING] DirectoryCache stale for {:?} (dir_mtime_ms={} > cached_at_ms={}), invalidating",
-                        base_path_buf, dir_mtime_ms, cached_at_ms
-                    );
-                    directory_cache.invalidate(base_path_buf);
-                    if let Some(di) = directory_index_opt {
-                        let _ = di.invalidate(base_path_buf);
+                log::info!(
+                    "[FOLDER-LOADING] Phase 1: Cache HIT for {:?} ({} entries, cached_at_ms={})",
+                    base_path_buf, cached_entries.len(), cached_at_ms
+                );
+                // Fail-safe against missed watcher events: validate folder mtime.
+                // Skip for OneDrive to avoid potential blocking metadata calls.
+                if !is_onedrive_base {
+                    let dir_mtime_ms = directory_mtime_ms(base_path_buf);
+                    if dir_mtime_ms > cached_at_ms {
+                        log::debug!(
+                            "[FOLDER-LOADING] DirectoryCache stale for {:?} (dir_mtime_ms={} > cached_at_ms={}), invalidating",
+                            base_path_buf, dir_mtime_ms, cached_at_ms
+                        );
+                        directory_cache.invalidate(base_path_buf);
+                        if let Some(di) = directory_index_opt {
+                            let _ = di.invalidate(base_path_buf);
+                        }
+                    } else {
+                        log::debug!(
+                            "[FOLDER-LOADING] Phase 1: Cache hit for {:?} - {} entries, sending to UI immediately",
+                            base_path_buf,
+                            cached_entries.len()
+                        );
+
+                        let entries_to_send = cached_entries;
+
+                        let mut offset = 0;
+                        while offset < entries_to_send.len() {
+                            if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
+                                return true;
+                            }
+                            *batch_start = std::time::Instant::now();
+                            let end = (offset + *batch_size).min(entries_to_send.len());
+                            let chunk = entries_to_send[offset..end].to_vec();
+                            let _ = file_entry_sender.send((my_gen, chunk));
+                            ctx.request_repaint();
+                            batch_tracker.record_batch(batch_start.elapsed(), end - offset);
+                            *batch_size = batch_tracker.batch_size();
+                            offset = end;
+                        }
+                        let _ = file_entry_sender.send((my_gen, Vec::new()));
+                        ctx.request_repaint();
+
+                        log::debug!(
+                            "[FOLDER-LOADING] Phase 2: Cache valid, trusting watcher for {:?} - HDD silence maintained",
+                            base_path_buf
+                        );
+                        return true;
                     }
                 } else {
                     log::debug!(
@@ -84,11 +116,8 @@ pub(super) fn try_handle_fast_paths(
                         cached_entries.len()
                     );
 
-                    // For cached OneDrive entries, keep SyncStatus::None (unknown)
-                    // until fresh disk enumeration provides authoritative status.
                     let entries_to_send = cached_entries;
 
-                    // INSTANT RETURN: Send cached entries immediately (0ms navigation)
                     let mut offset = 0;
                     while offset < entries_to_send.len() {
                         if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
@@ -106,11 +135,6 @@ pub(super) fn try_handle_fast_paths(
                     let _ = file_entry_sender.send((my_gen, Vec::new()));
                     ctx.request_repaint();
 
-                    // Phase 2: HDD SILENCE - Trust cache + file watcher
-                    // The file watcher (ReadDirectoryChangesW) passively monitors the current
-                    // directory and invalidates the cache on changes. We don't need to poll
-                    // the filesystem to check for modifications — the watcher handles this.
-                    // This eliminates std::fs::metadata() syscalls on HDD per navigation.
                     log::debug!(
                         "[FOLDER-LOADING] Phase 2: Cache valid, trusting watcher for {:?} - HDD silence maintained",
                         base_path_buf
@@ -118,44 +142,10 @@ pub(super) fn try_handle_fast_paths(
                     return true;
                 }
             } else {
-                log::debug!(
-                    "[FOLDER-LOADING] Phase 1: Cache hit for {:?} - {} entries, sending to UI immediately",
-                    base_path_buf,
-                    cached_entries.len()
-                );
-
-                // For cached OneDrive entries, keep SyncStatus::None (unknown)
-                // until fresh disk enumeration provides authoritative status.
-                let entries_to_send = cached_entries;
-
-                // INSTANT RETURN: Send cached entries immediately (0ms navigation)
-                let mut offset = 0;
-                while offset < entries_to_send.len() {
-                    if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
-                        return true;
-                    }
-                    *batch_start = std::time::Instant::now();
-                    let end = (offset + *batch_size).min(entries_to_send.len());
-                    let chunk = entries_to_send[offset..end].to_vec();
-                    let _ = file_entry_sender.send((my_gen, chunk));
-                    ctx.request_repaint();
-                    batch_tracker.record_batch(batch_start.elapsed(), end - offset);
-                    *batch_size = batch_tracker.batch_size();
-                    offset = end;
-                }
-                let _ = file_entry_sender.send((my_gen, Vec::new()));
-                ctx.request_repaint();
-
-                // Phase 2: HDD SILENCE - Trust cache + file watcher
-                // The file watcher (ReadDirectoryChangesW) passively monitors the current
-                // directory and invalidates the cache on changes. We don't need to poll
-                // the filesystem to check for modifications — the watcher handles this.
-                // This eliminates std::fs::metadata() syscalls on HDD per navigation.
-                log::debug!(
-                    "[FOLDER-LOADING] Phase 2: Cache valid, trusting watcher for {:?} - HDD silence maintained",
+                log::info!(
+                    "[FOLDER-LOADING] Phase 1: Cache MISS for {:?}, proceeding to disk load",
                     base_path_buf
                 );
-                return true;
             }
         } else {
             let reason = if cache_marked_dirty { "marked dirty" } else { "non-USN filesystem" };
@@ -164,7 +154,6 @@ pub(super) fn try_handle_fast_paths(
                 base_path_buf,
                 reason
             );
-        }
         }
     }
 
