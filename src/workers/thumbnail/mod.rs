@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 // --- Capacity constants for failure caches ---
 const FAILED_PATHS_CAP: usize = 2048;
 const FAILURE_BACKOFF_CAP: usize = 4096;
-const ACTIVE_WRITE_BLOCK_MS: u64 = 1000;
+const ACTIVE_WRITE_BLOCK_MS: u64 = 2500;
 
 /// Global cache of paths that failed thumbnail extraction (shared across workers)
 /// Uses LRU eviction so oldest failures are dropped instead of clearing everything.
