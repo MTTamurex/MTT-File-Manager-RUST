@@ -131,24 +131,17 @@ const INCOMPLETE_DOWNLOAD_EXTENSIONS: &[&str] = &[
 /// The preferred signal is a real CREATE/MODIFY/RENAME event from the watcher.
 /// This metadata-based fallback only covers cases where the app enters a folder
 /// after the write finished and therefore did not observe the live events.
-const RECENT_WRITE_ACTIVITY_FALLBACK_SECS: u64 = 20;
+const RECENT_WRITE_ACTIVITY_FALLBACK_SECS: u64 = 300;
 
 /// UI-thread fast guard window.
 ///
 /// Keeps short-term protection right after MODIFY events, while avoiding long
 /// post-download delays from fixed multi-minute cooldowns.
-const FAST_RECENT_GUARD_SECS: u64 = 2;
-
-/// Worker-thread quarantine after the last observed write event.
-///
-/// This covers piece-based writers that may briefly release the write handle
-/// between bursts. Combined with the write-lock probe, it prevents Shell/MF
-/// thumbnail extraction from touching files that just stopped changing.
-const RECENT_WRITE_EVENT_GUARD_SECS: u64 = 8;
+const FAST_RECENT_GUARD_SECS: u64 = 5;
 
 /// Minimum continuous stability time required before treating a recently
 /// changing media file as safe to read.
-const MIN_STABLE_MEDIA_DURATION: Duration = Duration::from_secs(3);
+const MIN_STABLE_MEDIA_DURATION: Duration = Duration::from_secs(12);
 
 const STABILITY_STATE_CAP: usize = 8192;
 const STABILITY_STATE_TTL: Duration = Duration::from_secs(15 * 60);
@@ -412,9 +405,7 @@ pub fn classify_file_read_safety(path: &Path) -> FileReadSafety {
     }
 
     let recent_write_baseline = recent_write_activity_baseline(path);
-    if recent_write_baseline.is_some()
-        && has_recent_write_activity(path, Duration::from_secs(RECENT_WRITE_EVENT_GUARD_SECS))
-    {
+    if recent_write_baseline.is_some() {
         let snapshot = match read_stability_snapshot(path) {
             Some(v) => v,
             None => return FileReadSafety::RecentlyChanging,
