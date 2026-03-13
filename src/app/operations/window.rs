@@ -4,6 +4,7 @@
 //! and performs initialization tasks that require it.
 
 use crate::app::state::ImageViewerApp;
+use crate::infrastructure::shell_menu_worker::ShellMenuRequest;
 use crate::infrastructure::windows::window_corners::apply_window_corner_preference;
 use crate::infrastructure::windows::window_subclass::install_borderless_subclass;
 use windows::core::PCWSTR;
@@ -43,9 +44,14 @@ impl ImageViewerApp {
                     // Keep rounded corners in windowed mode (Windows 11 DWM).
                     apply_window_corner_preference(hwnd, self.layout.saved_is_maximized);
 
-                    // Shell extension warmup is intentionally disabled.
-                    // Detached shell/COM warmup threads can remain blocked inside
-                    // third-party extensions and keep the process alive after exit.
+                    // Warm shell extensions on the managed STA worker thread.
+                    // This restores first-open context menu UX without spawning
+                    // an unmanaged background thread.
+                    let _ = self
+                        .shell_menu_req_tx
+                        .send(ShellMenuRequest::Warmup {
+                            hwnd_isize: hwnd.0 as isize,
+                        });
                 }
             }
         }
