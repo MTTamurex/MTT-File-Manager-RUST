@@ -16,13 +16,17 @@ use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
 
 use crate::infrastructure::windows::native_menu::{
-    extract_shell_menu, invoke_menu_command, is_known_verb, ShellMenuItem,
+    extract_shell_menu, invoke_menu_command, is_known_verb, warmup_shell_extensions, ShellMenuItem,
 };
 
 // ── Public request / response types ────────────────────────────────────────
 
 /// Commands sent to the shell menu worker thread.
 pub enum ShellMenuRequest {
+    /// Pre-initialize shell extensions on the worker STA thread.
+    Warmup {
+        hwnd_isize: isize,
+    },
     /// Extract the context menu for `paths`. The worker replies with `Ready` or `Error`.
     Extract {
         request_id: u64,
@@ -135,9 +139,20 @@ fn shell_menu_loop(rx: Receiver<ShellMenuRequest>, tx: Sender<ShellMenuResponse>
     let mut active_ctx: Option<crate::infrastructure::windows::native_menu::ShellMenuContext> =
         None;
     let mut active_request_id: Option<u64> = None;
+    let mut warmup_done = false;
 
     while let Ok(req) = rx.recv() {
         match req {
+            ShellMenuRequest::Warmup { hwnd_isize } => {
+                if warmup_done {
+                    continue;
+                }
+
+                let hwnd = HWND(hwnd_isize as *mut _);
+                warmup_shell_extensions(hwnd);
+                warmup_done = true;
+            }
+
             ShellMenuRequest::Extract {
                 request_id,
                 hwnd_isize,
