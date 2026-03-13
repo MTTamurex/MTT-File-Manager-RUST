@@ -182,6 +182,14 @@ impl DriveWatcherManager {
                 || self.current_drive.as_ref() == Some(drive)
         });
     }
+
+    /// Stop all watcher threads and clear pending watcher state.
+    pub fn shutdown(&mut self) {
+        self.pending_watch = None;
+        self.current_prefix.clear();
+        self.current_drive = None;
+        self.watchers.clear();
+    }
 }
 
 impl Default for DriveWatcherManager {

@@ -4,7 +4,6 @@
 //! and performs initialization tasks that require it.
 
 use crate::app::state::ImageViewerApp;
-use crate::infrastructure::windows::native_menu::warmup_shell_extensions;
 use crate::infrastructure::windows::window_corners::apply_window_corner_preference;
 use crate::infrastructure::windows::window_subclass::install_borderless_subclass;
 use windows::core::PCWSTR;
@@ -44,14 +43,9 @@ impl ImageViewerApp {
                     // Keep rounded corners in windowed mode (Windows 11 DWM).
                     apply_window_corner_preference(hwnd, self.layout.saved_is_maximized);
 
-                    // Warmup shell extensions on a background thread to avoid
-                    // blocking the UI for ~2-3s while DLLs load.
-                    let hwnd_raw = hwnd.0 as usize;
-                    std::thread::spawn(move || {
-                        use windows::Win32::Foundation::HWND;
-                        let hwnd = HWND(hwnd_raw as *mut _);
-                        warmup_shell_extensions(hwnd);
-                    });
+                    // Shell extension warmup is intentionally disabled.
+                    // Detached shell/COM warmup threads can remain blocked inside
+                    // third-party extensions and keep the process alive after exit.
                 }
             }
         }

@@ -5,6 +5,7 @@
 //! the loop and lets the thread run its Drop impls (CoUninitialize, handles, …).
 
 use crate::app::state::ImageViewerApp;
+use std::sync::atomic::Ordering;
 
 impl ImageViewerApp {
     /// Drop every persistent worker Sender so threads can exit cleanly.
@@ -23,6 +24,12 @@ impl ImageViewerApp {
         disconnect!(
             self.shell_menu_req_tx,
             crate::infrastructure::shell_menu_worker::ShellMenuRequest
+        );
+
+        // Disk-cache invalidation worker
+        disconnect!(
+            self.file_operation_state.disk_cache_invalidation_sender,
+            Vec<crate::app::init_workers::CacheInvalidationEntry>
         );
 
         // Cover-image worker
@@ -44,6 +51,35 @@ impl ImageViewerApp {
         disconnect!(
             self.live_file_size_req_sender,
             crate::app::live_file_size::LiveFileSizeRequest
+        );
+
+        // Folder-size worker can stay busy in a long recursive scan, so cancel it first.
+        self.folder_size_state.cancel.store(true, Ordering::Release);
+        disconnect!(self.folder_size_state.req_sender, std::path::PathBuf);
+
+        // Background prefetch pipeline.
+        let _ = self
+            .file_operation_state
+            .prefetch_sender
+            .send(crate::workers::prefetch_worker::PrefetchMessage::Shutdown);
+        disconnect!(
+            self.file_operation_state.prefetch_sender,
+            crate::workers::prefetch_worker::PrefetchMessage
+        );
+
+        let _ = self
+            .file_operation_state
+            .idle_warmup_sender
+            .send(crate::workers::idle_warmup::IdleWarmupMessage::Shutdown);
+        disconnect!(
+            self.file_operation_state.idle_warmup_sender,
+            crate::workers::idle_warmup::IdleWarmupMessage
+        );
+
+        // Global search worker
+        disconnect!(
+            self.global_search.sender,
+            crate::workers::global_search_worker::GlobalSearchRequest
         );
 
         // File-operation worker (type is pub(crate), accessible here)

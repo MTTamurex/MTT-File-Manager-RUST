@@ -8,11 +8,13 @@ use windows::{
     Win32::Foundation::{HANDLE, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM},
     Win32::System::Ioctl::GUID_DEVINTERFACE_VOLUME,
     Win32::System::LibraryLoader::GetModuleHandleW,
+    Win32::System::Threading::GetCurrentThreadId,
     Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, RegisterClassW,
-        RegisterDeviceNotificationW, TranslateMessage, DBT_DEVICEARRIVAL, DBT_DEVICEREMOVECOMPLETE,
-        DBT_DEVTYP_DEVICEINTERFACE, DEVICE_NOTIFY_WINDOW_HANDLE, DEV_BROADCAST_DEVICEINTERFACE_W,
-        HDEVNOTIFY, HWND_MESSAGE, MSG, WINDOW_EX_STYLE, WINDOW_STYLE, WM_DEVICECHANGE, WNDCLASSW,
+        CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, PostThreadMessageW,
+        RegisterClassW, RegisterDeviceNotificationW, TranslateMessage, DBT_DEVICEARRIVAL,
+        DBT_DEVICEREMOVECOMPLETE, DBT_DEVTYP_DEVICEINTERFACE, DEVICE_NOTIFY_WINDOW_HANDLE,
+        DEV_BROADCAST_DEVICEINTERFACE_W, HDEVNOTIFY, HWND_MESSAGE, MSG, WINDOW_EX_STYLE,
+        WINDOW_STYLE, WM_DEVICECHANGE, WM_QUIT, WNDCLASSW,
     },
 };
 
@@ -23,6 +25,7 @@ const CLASS_NAME_WIDE: [u16; 22] = [
 
 static DEVICE_EVENT_SENDER: OnceLock<Sender<()>> = OnceLock::new();
 static EGUI_CONTEXT: OnceLock<egui::Context> = OnceLock::new();
+static DEVICE_LISTENER_THREAD_ID: OnceLock<u32> = OnceLock::new();
 
 /// Starts a background thread that listens for WM_DEVICECHANGE events and notifies the UI
 /// whenever a volume (drive) is mounted or unmounted.
@@ -43,6 +46,8 @@ fn run_device_listener(sender: Sender<()>, ctx: egui::Context) -> Result<()> {
         if EGUI_CONTEXT.set(ctx).is_err() {
             return Ok(()); // context already set
         }
+
+        let _ = DEVICE_LISTENER_THREAD_ID.set(GetCurrentThreadId());
 
         let hmodule = GetModuleHandleW(None)?;
         let hinstance = HINSTANCE(hmodule.0);
@@ -83,6 +88,14 @@ fn run_device_listener(sender: Sender<()>, ctx: egui::Context) -> Result<()> {
     }
 
     Ok(())
+}
+
+pub fn shutdown_device_change_listener() {
+    if let Some(thread_id) = DEVICE_LISTENER_THREAD_ID.get().copied() {
+        unsafe {
+            let _ = PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
+        }
+    }
 }
 
 unsafe fn register_volume_notifications(hwnd: HWND) -> Result<()> {
