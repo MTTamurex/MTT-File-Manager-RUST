@@ -91,7 +91,3 @@ pub(in crate::app) fn spawn_incremental_gc_worker(disk_cache: Arc<ThumbnailDiskC
         }
     });
 }
-
-pub fn shutdown_incremental_gc_worker() {
-    GC_WORKER_RUNNING.store(false, std::sync::atomic::Ordering::Release);
-}
