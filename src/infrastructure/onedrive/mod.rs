@@ -54,9 +54,13 @@ static ONEDRIVE_IO_POOL: OnceLock<OneDriveIoPool> = OnceLock::new();
 
 type IoJob = Box<dyn FnOnce() + Send + 'static>;
 
+enum IoMessage {
+    Job(IoJob),
+}
+
 struct OneDriveIoPool {
-    sender: mpsc::SyncSender<IoJob>,
-    receiver: Arc<Mutex<mpsc::Receiver<IoJob>>>,
+    sender: Mutex<Option<mpsc::SyncSender<IoMessage>>>,
+    receiver: Arc<Mutex<mpsc::Receiver<IoMessage>>>,
     active_workers: Arc<AtomicUsize>,
     overflow_workers: Arc<AtomicUsize>,
     max_overflow_workers: usize,
@@ -66,7 +70,7 @@ impl OneDriveIoPool {
     fn new(worker_count: usize, max_overflow_workers: usize) -> Self {
         // Keep queue small to avoid long backlogs behind blocked I/O.
         let queue_capacity = worker_count.max(4);
-        let (sender, receiver) = mpsc::sync_channel::<IoJob>(queue_capacity);
+        let (sender, receiver) = mpsc::sync_channel::<IoMessage>(queue_capacity);
         let receiver = Arc::new(Mutex::new(receiver));
         let active_workers = Arc::new(AtomicUsize::new(0));
         let overflow_workers = Arc::new(AtomicUsize::new(0));
@@ -83,7 +87,7 @@ impl OneDriveIoPool {
                     };
 
                     match recv_result {
-                        Ok(job) => {
+                        Ok(IoMessage::Job(job)) => {
                             active_workers_clone.fetch_add(1, Ordering::SeqCst);
                             let job_start = std::time::Instant::now();
                             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
@@ -111,7 +115,7 @@ impl OneDriveIoPool {
         }
 
         Self {
-            sender,
+            sender: Mutex::new(Some(sender)),
             receiver,
             active_workers,
             overflow_workers,
@@ -128,9 +132,18 @@ impl OneDriveIoPool {
         // requests to avoid piling more threads into the blocked driver.
         let stalled = STALLED_IO_WORKERS.load(Ordering::Acquire);
 
-        let queued = match self.sender.try_send(Box::new(job)) {
+        let sender = match self.sender.lock() {
+            Ok(guard) => guard.clone(),
+            Err(_) => return false,
+        };
+
+        let Some(sender) = sender else {
+            return false;
+        };
+
+        let queued = match sender.try_send(IoMessage::Job(Box::new(job))) {
             Ok(()) => true,
-            Err(mpsc::TrySendError::Full(job)) => {
+            Err(mpsc::TrySendError::Full(IoMessage::Job(job))) => {
                 if stalled >= STALL_OVERFLOW_CUTOFF {
                     log::warn!(
                         "[ONEDRIVE IO-POOL] Rejecting overflow job: {} stall events (cutoff: {})",
@@ -154,6 +167,12 @@ impl OneDriveIoPool {
         }
 
         true
+    }
+
+    fn shutdown(&self) {
+        if let Ok(mut sender) = self.sender.lock() {
+            sender.take();
+        }
     }
 
     fn try_acquire_overflow_slot(&self) -> bool {
@@ -185,7 +204,7 @@ impl OneDriveIoPool {
                     Err(_) => Err(mpsc::RecvTimeoutError::Disconnected),
                 };
 
-                if let Ok(job) = recv_result {
+                if let Ok(IoMessage::Job(job)) = recv_result {
                     active_workers.fetch_add(1, Ordering::SeqCst);
                     let job_start = std::time::Instant::now();
                     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job));
@@ -264,6 +283,12 @@ where
     F: FnOnce() + Send + 'static,
 {
     onedrive_io_pool().execute(job)
+}
+
+pub fn shutdown_onedrive_io_pool() {
+    if let Some(pool) = ONEDRIVE_IO_POOL.get() {
+        pool.shutdown();
+    }
 }
 
 /// Set the minimized state of the application.

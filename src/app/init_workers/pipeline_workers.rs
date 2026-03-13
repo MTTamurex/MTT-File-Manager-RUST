@@ -24,7 +24,6 @@ pub(in crate::app) fn spawn_prefetching_workers(
         thumbnail_queue,
         directory_cache,
         shared_gen,
-        prefetch_tx.clone(),
     );
 
     PrefetchWorkerHandles {

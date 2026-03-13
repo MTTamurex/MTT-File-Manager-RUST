@@ -13,13 +13,20 @@ pub struct CacheInvalidationEntry {
     pub force: bool,
 }
 
+fn should_skip_exists_guard(path: &std::path::Path) -> bool {
+    crate::infrastructure::onedrive::is_onedrive_path(path)
+        || crate::infrastructure::io_priority::is_network_or_virtual(path)
+}
+
 pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
     disk_cache: Arc<ThumbnailDiskCache>,
 ) -> mpsc::Sender<Vec<CacheInvalidationEntry>> {
     let (disk_cache_invalidation_tx, disk_cache_invalidation_rx) =
         mpsc::channel::<Vec<CacheInvalidationEntry>>();
     let disk_cache_for_invalidation = disk_cache.clone();
-    std::thread::spawn(move || {
+    std::thread::Builder::new()
+        .name("disk-cache-invalidation".into())
+        .spawn(move || {
         while let Ok(entries) = disk_cache_invalidation_rx.recv() {
             let mut unique_paths = std::collections::HashSet::with_capacity(entries.len());
             for entry in entries {
@@ -29,9 +36,13 @@ pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
                         // all cache rows. The Shell may not have finished yet,
                         // so `fast_path_exists` would give a false positive.
                         disk_cache_for_invalidation.remove_cache_for_path(&entry.path);
-                    } else if crate::infrastructure::onedrive::fast_path_exists(
-                        entry.path.as_path(),
-                    ) {
+                    } else if should_skip_exists_guard(entry.path.as_path()) {
+                        // DELETE events on OneDrive / network / virtual drives can be
+                        // transient, but probing existence with GetFileAttributesW can
+                        // block indefinitely and strand the process on exit.
+                        // Prefer a harmless false-negative cache eviction over a hung app.
+                        disk_cache_for_invalidation.remove_cache_for_path(&entry.path);
+                    } else if crate::infrastructure::onedrive::fast_path_exists(entry.path.as_path()) {
                         // Guard: if the path still exists on disk, the DELETE
                         // event was transient (common on FUSE/WinFsp drivers
                         // like Cryptomator that emit DELETE+CREATE during
@@ -50,7 +61,8 @@ pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
                 }
             }
         }
-    });
+        })
+        .expect("failed to spawn disk-cache-invalidation worker");
     disk_cache_invalidation_tx
 }
 

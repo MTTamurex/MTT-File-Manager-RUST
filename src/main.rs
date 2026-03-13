@@ -126,7 +126,7 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
 
-    eframe::run_native(
+    let result = eframe::run_native(
         "MTT File Manager",
         options,
         Box::new(|cc| {
@@ -136,5 +136,22 @@ fn main() -> eframe::Result<()> {
 
             Ok(Box::new(ImageViewerApp::new(cc)))
         }),
-    )
+    );
+
+    // Belt-and-suspenders: if eframe returned (window closed) but the process
+    // is still alive (background threads stuck in kernel), force-kill now.
+    #[cfg(target_os = "windows")]
+    {
+        // Fire cancel in background — CancelSynchronousIo can itself block
+        // if the driver ignores the cancellation request.
+        let _ = std::thread::spawn(mtt_file_manager::ui::app::cancel_all_pending_io);
+        unsafe {
+            windows::Win32::System::Threading::TerminateProcess(
+                windows::Win32::System::Threading::GetCurrentProcess(),
+                0,
+            ).ok();
+        }
+    }
+
+    result
 }

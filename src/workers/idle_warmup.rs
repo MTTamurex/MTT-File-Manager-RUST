@@ -5,7 +5,6 @@ use std::time::Instant;
 
 use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::io_priority::{self, IOPriority};
-use crate::workers::prefetch_worker::PrefetchMessage;
 use crate::workers::thumbnail::PriorityThumbnailQueue;
 
 pub enum IdleWarmupMessage {
@@ -49,7 +48,6 @@ pub fn spawn_idle_warmup_worker(
     _thumbnail_queue: Arc<PriorityThumbnailQueue>,
     _directory_cache: Arc<DirectoryCache>,
     _current_generation: Arc<std::sync::atomic::AtomicUsize>,
-    _prefetch_sender: std::sync::mpsc::Sender<PrefetchMessage>,
 ) {
     std::thread::spawn(move || {
         let _priority_guard = io_priority::ThreadPriorityGuard::new(IOPriority::Background);
