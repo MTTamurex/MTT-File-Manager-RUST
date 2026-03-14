@@ -312,14 +312,13 @@ fn recent_write_activity_baseline(path: &Path) -> Option<Instant> {
             }
         });
 
-    match (
-        event_baseline,
-        recent_modified_baseline(path, RECENT_WRITE_ACTIVITY_FALLBACK_SECS),
-    ) {
-        (Some(a), Some(b)) => Some(a.max(b)),
-        (Some(a), None) => Some(a),
-        (None, Some(b)) => Some(b),
-        (None, None) => None,
+    // Only fall back to filesystem metadata when the watcher-event cache
+    // has no entry.  Calling std::fs::metadata here would otherwise hit
+    // the kernel on every probe — including OneDrive/network paths where
+    // the minifilter driver can block indefinitely.
+    match event_baseline {
+        Some(baseline) => Some(baseline),
+        None => recent_modified_baseline(path, RECENT_WRITE_ACTIVITY_FALLBACK_SECS),
     }
 }
 
