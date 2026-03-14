@@ -1,4 +1,4 @@
-﻿//! Standalone dedicated video player mode (separate process).
+//! Standalone dedicated video player mode (separate process).
 //!
 //! When the user clicks "detach" on the docked video player, the main app
 //! spawns a new process (`--video-player <path> [--position <secs>] [--volume <vol>]`)
@@ -360,7 +360,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
             let _ = init.set_option("config-dir", dir_str.as_str());
         }
 
-        // Borderless window â€” OSC provides the window controls
+        // Borderless window — OSC provides the window controls
         if let Err(e) = init.set_option("border", false) {
             log::warn!("[VIDEO-PLAYER] Failed to set border=no: {:?}", e);
         }
@@ -401,7 +401,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
 
     // --- Runtime properties (after mpv_initialize, before loadfile) ---
 
-    // D3D11 pipeline for NVIDIA RTX VSR â€” must be set via set_property after init,
+    // D3D11 pipeline for NVIDIA RTX VSR — must be set via set_property after init,
     // same sequencing as the embedded player (MpvPreview). Setting these in
     // mpv.conf or set_option causes the VO to initialize during mpv_initialize()
     // before the hwdec interop is ready, leaving hwdec-current empty.
@@ -428,9 +428,9 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
     let _ = mpv.set_property("volume", ((volume * 100.0) as i64).clamp(0, 100));
 
     // Window title (shown in taskbar for borderless window)
-    let _ = mpv.set_property("title", format!("Video Player â€” {}", title_name).as_str());
+    let _ = mpv.set_property("title", format!("Video Player — {}", title_name).as_str());
 
-    // Initial window size â€” use percentage to respect display scaling on HiDPI screens
+    // Initial window size — use percentage to respect display scaling on HiDPI screens
     let _ = mpv.set_property("autofit", "55%x55%");
     let _ = mpv.set_property("autofit-larger", "90%x90%");
     let _ = mpv.set_property("hidpi-window-scale", true);
@@ -449,7 +449,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
         volume * 100.0
     );
 
-    // Event loop â€” blocks until mpv shuts down (user closes window or presses 'q')
+    // Event loop — blocks until mpv shuts down (user closes window or presses 'q')
     let mut seek_applied = false;
     let mut eof_reached = false;
     loop {
@@ -517,12 +517,12 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
                         // keep-open=yes: video reached end, player stays open showing
                         // last frame. Mark flag so we know we're in paused-at-EOF state.
                         eof_reached = true;
-                        log::debug!("[VIDEO-PLAYER] EOF reached â€” keep-open holds player open");
+                        log::debug!("[VIDEO-PLAYER] EOF reached — keep-open holds player open");
                     }
                     REASON_QUIT | REASON_STOP => {
                         // User explicitly closed the player (OSC close button, 'q' key,
                         // or equivalent). Exit the event loop.
-                        log::debug!("[VIDEO-PLAYER] EndFile Stop/Quit â€” exiting");
+                        log::debug!("[VIDEO-PLAYER] EndFile Stop/Quit — exiting");
                         break;
                     }
                     _ => {
@@ -530,7 +530,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
                         // (i.e., the player had finished and something triggered close).
                         if eof_reached {
                             log::info!(
-                                "[VIDEO-PLAYER] EndFile reason={} after EOF â€” exiting",
+                                "[VIDEO-PLAYER] EndFile reason={} after EOF — exiting",
                                 reason
                             );
                             break;

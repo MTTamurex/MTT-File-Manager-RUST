@@ -263,14 +263,17 @@ impl ImageViewerApp {
             .as_ref()
             .is_some_and(|selected| Self::normalize_for_match(&selected.path) == old_norm);
 
+        // Mark old path as pending deletion (remove from pending if new
+        // path was previously pending — handles the OneDrive early-return
+        // case in try_add_created_path_to_ui).
         self.file_operation_state
             .pending_deletions
             .insert(cleaned_old.clone(), ());
         self.file_operation_state.pending_deletions.remove(&cleaned_new);
-        self.evict_stale_path_caches(&cleaned_old);
-        self.evict_stale_path_caches(&cleaned_new);
-        self.enqueue_disk_cache_invalidations_forced(vec![cleaned_old.clone(), cleaned_new.clone()]);
 
+        // NOTE: evict_stale_path_caches / enqueue_disk_cache_invalidations_forced
+        // are called inside the sub-methods below.  Calling them here too would
+        // double-increment thumbnail_eviction_skips and queue redundant invalidations.
         let removed_old = self.try_remove_deleted_path_from_ui(&cleaned_old);
         let added_new = self.try_add_created_path_to_ui(&cleaned_new);
 
