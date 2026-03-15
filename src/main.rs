@@ -2,6 +2,28 @@ use eframe::egui;
 use mtt_file_manager::app::ImageViewerApp;
 use std::path::PathBuf;
 
+const APP_ID: &str = "mtt-file-manager";
+
+fn cleanup_eframe_storage(app_id: &str) {
+    let Some(mut storage_dir) = dirs::data_dir() else {
+        return;
+    };
+
+    storage_dir.push(app_id);
+    storage_dir.push("data");
+    storage_dir.push("app.ron");
+
+    if let Err(err) = std::fs::remove_file(&storage_dir) {
+        if err.kind() != std::io::ErrorKind::NotFound {
+            log::debug!(
+                "[STARTUP] Failed to remove stale eframe storage at '{}': {}",
+                storage_dir.display(),
+                err
+            );
+        }
+    }
+}
+
 /// Load application icon from embedded PNG bytes
 fn load_app_icon() -> Option<egui::IconData> {
     // Load PNG from embedded bytes using image crate
@@ -105,13 +127,18 @@ fn main() -> eframe::Result<()> {
     // Load application icon
     let icon_data = load_app_icon();
 
+    // We manage preferences ourselves and force-kill on exit to avoid the
+    // OneDrive/cldflt zombie-process hang. That makes eframe's RON storage
+    // both unnecessary and prone to truncation, so clear it before startup.
+    cleanup_eframe_storage(APP_ID);
+
     // 3-STAGE STARTUP: Start hidden and small (NOT maximized here)
     let mut viewport = egui::ViewportBuilder::default()
         .with_visible(false) // Start hidden
         .with_maximized(false) // NOT maximized at creation
         .with_inner_size([800.0, 600.0]) // Small initial size (will be maximized in update)
         .with_title("MTT File Manager")
-        .with_app_id("mtt-file-manager")
+        .with_app_id(APP_ID)
         .with_decorations(false) // Borderless window - resize handled by native subclass
         .with_resizable(true); // Enable resize (handled by WM_NCHITTEST subclass)
 

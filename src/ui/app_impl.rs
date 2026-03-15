@@ -245,4 +245,8 @@ impl eframe::App for ImageViewerApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         app::lifecycle::handle_exit(self);
     }
+
+    fn persist_egui_memory(&self) -> bool {
+        false
+    }
 }
