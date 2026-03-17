@@ -247,6 +247,7 @@ secondary_toolbar:
   rename: "Renomear (F2)"
   create_folder: "Criar Nova Pasta (Ctrl+Shift+N)"
   delete: "Excluir (Del)"
+  empty_recycle_bin: "Esvaziar Lixeira"
   disabled_suffix: "(Desabilitado)"
   list: "Lista"
   grid: "Grade"

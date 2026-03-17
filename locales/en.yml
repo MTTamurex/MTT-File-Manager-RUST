@@ -247,6 +247,7 @@ secondary_toolbar:
   rename: "Rename (F2)"
   create_folder: "Create New Folder (Ctrl+Shift+N)"
   delete: "Delete (Del)"
+  empty_recycle_bin: "Empty Recycle Bin"
   disabled_suffix: "(Disabled)"
   list: "List"
   grid: "Grid"
