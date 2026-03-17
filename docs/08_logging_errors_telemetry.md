@@ -26,11 +26,20 @@ The application uses the `log` crate (`log::info!`, `log::warn!`, `log::error!`,
 
 ### Capturing Logs
 
+Release builds of `mtt-file-manager.exe` use the Windows GUI subsystem, so double-clicking the executable does not open a log console. For analysis, start the app from PowerShell or use the helper script below.
+
 **Method 1: PowerShell script** (recommended)
 ```powershell
 .\run_with_logs.ps1
 # Output saved to: debug_metadata.log
 ```
+
+**Method 1B: Dedicated diagnostic console window**
+```cmd
+.\open_diagnostic_console.cmd
+```
+
+Use this when you want the release app to stay silent by default but still have a one-click console for troubleshooting.
 
 **Method 2: Manual redirection**
 ```powershell

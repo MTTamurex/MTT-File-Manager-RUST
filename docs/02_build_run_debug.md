@@ -54,7 +54,7 @@ cargo build --release -p mtt-file-manager
 # Release build — search service only
 cargo build --release -p mtt-search-service
 
-# Run the app
+# Run the app (release build opens without a console window on Windows)
 .\target\release\mtt-file-manager.exe
 
 # Run the search service in console mode (debug)
@@ -137,11 +137,20 @@ With this flag, the service returns `redacted` volume states and zeroed counts i
 
 ## Running with Logs
 
+Release builds of `mtt-file-manager.exe` use the Windows GUI subsystem, so launching the executable directly does not open an extra console window. For diagnostics, run it explicitly from PowerShell so stdout/stderr can be captured.
+
 ### Method 1: PowerShell Script (Recommended)
 ```powershell
 .\run_with_logs.ps1
 # Logs are saved to: debug_metadata.log
 ```
+
+### Method 1B: Dedicated diagnostic console window
+```cmd
+.\open_diagnostic_console.cmd
+```
+
+This opens a separate PowerShell window only when you want to inspect logs.
 
 ### Method 2: Manual Redirection
 ```powershell
