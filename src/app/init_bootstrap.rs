@@ -101,6 +101,13 @@ pub(in crate::app) struct AppBootstrap {
 pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     const THUMBNAIL_RESULT_CHANNEL_CAPACITY: usize = 2048;
 
+    if let Err(error) = crate::infrastructure::virtual_drive_config::ensure_config_exists() {
+        log::warn!(
+            "[Config] Failed to initialize virtual drive configuration: {}",
+            error
+        );
+    }
+
     let (file_entry_sender, file_entry_receiver) = mpsc::channel::<(usize, Vec<FileEntry>)>();
     let (items_rebuild_sender, items_rebuild_receiver) = mpsc::channel::<ItemsRebuildResult>();
 
