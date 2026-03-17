@@ -12,10 +12,12 @@ pub(super) enum SecAction {
     Rename,
     CreateFolder,
     Delete,
+    EmptyRecycleBin,
 }
 
 pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp) -> SecAction {
     let icon_size = egui::vec2(28.0, 28.0);
+    let is_recycle_bin_view = app.navigation_state.is_recycle_bin_view;
     let is_drive_selected = app
         .selected_file
         .as_ref()
@@ -27,6 +29,7 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
         && app.selected_item.is_some_and(|idx| app.can_rename_item(idx));
     let can_paste = app.can_paste_into_current_location() && !is_drive_selected;
     let can_create_folder = !app.navigation_state.is_computer_view && !app.navigation_state.is_recycle_bin_view;
+    let can_empty_recycle_bin = is_recycle_bin_view && !app.items.is_empty();
 
     let icon_color = if ui.visuals().dark_mode {
         [220, 220, 220, 255]
@@ -58,7 +61,7 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
             }
 
             if let Some(texture) = svg_manager.get_icon(ui.ctx(), icon_name, 32, color) {
-                let display_size = if icon_name == "folder_new" {
+                let display_size = if matches!(icon_name, "folder_new" | "broom") {
                     18.0
                 } else {
                     16.0
@@ -110,15 +113,16 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
         if render_btn("rename", can_rename, &t!("secondary_toolbar.rename")) {
             action = SecAction::Rename;
         }
-        if render_btn(
-            "folder_new",
-            can_create_folder,
-            &t!("secondary_toolbar.create_folder"),
-        ) {
+        if render_btn("folder_new", can_create_folder, &t!("secondary_toolbar.create_folder")) {
             action = SecAction::CreateFolder;
         }
         if render_btn("delete", has_selection, &t!("secondary_toolbar.delete")) {
             action = SecAction::Delete;
+        }
+        if is_recycle_bin_view
+            && render_btn("broom", can_empty_recycle_bin, &t!("secondary_toolbar.empty_recycle_bin"))
+        {
+            action = SecAction::EmptyRecycleBin;
         }
     }
 
@@ -149,9 +153,14 @@ pub(super) fn execute_action(action: SecAction, app: &mut ImageViewerApp) {
             }
 
             if !targets.is_empty() {
-                app.delete_with_shell_for_paths(&targets);
+                if app.navigation_state.is_recycle_bin_view {
+                    app.delete_permanently(&targets);
+                } else {
+                    app.delete_with_shell_for_paths(&targets);
+                }
             }
         }
+        SecAction::EmptyRecycleBin => app.empty_recycle_bin(),
         SecAction::None => {}
     }
 }
