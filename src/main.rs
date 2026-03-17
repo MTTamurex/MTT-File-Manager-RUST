@@ -1,3 +1,5 @@
+#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+
 use eframe::egui;
 use mtt_file_manager::app::ImageViewerApp;
 use std::path::PathBuf;

@@ -104,7 +104,7 @@ cd MTT-File-Manager-RUST
 # Release build
 cargo build --release --workspace
 
-# Run
+# Run (release build opens without a console window on Windows)
 .\target\release\mtt-file-manager.exe
 ```
 
@@ -263,6 +263,10 @@ Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager" -Recurse -Force
 ```powershell
 .\target\release\mtt-file-manager.exe 2>&1 | Tee-Object "full_debug.log"
 ```
+
+Release builds on Windows run as a GUI app, so opening the executable directly no longer creates an extra console window. When you need logs, start the app from PowerShell or use .\run_with_logs.ps1.
+
+If you want a dedicated log window on demand, run .\open_diagnostic_console.cmd.
 
 ## Contributing
 
