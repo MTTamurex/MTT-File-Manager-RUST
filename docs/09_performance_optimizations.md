@@ -17,7 +17,7 @@ The app uses `NtQueryDirectoryFile` to read directory entries in bulk (64KB per 
 - Returns `DirectoryEntry` structs with name, size, timestamps, and attributes
 - A separate `hdd_directory_reader.rs` provides `read_directory_hdd_batched()` for optimized HDD reads
 
-**Virtual drive overrides**: The `virtual_drive_config.json` file allows manually marking drives as HDD/SSD to control which reading strategy is used.
+**Virtual drive overrides**: The `%LOCALAPPDATA%\MTT-File-Manager\virtual_drive_config.json` file is created automatically on first launch, pre-populated with detected virtual drives, and allows the user to mark them as HDD/SSD to control which reading strategy is used.
 
 ## 2. Drive-Wide Filesystem Monitoring
 

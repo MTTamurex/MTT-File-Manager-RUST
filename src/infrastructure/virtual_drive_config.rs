@@ -8,6 +8,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
+use crate::infrastructure::windows::drives::get_all_drives;
+
 /// Disk type override for a virtual drive
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiskTypeOverride {
@@ -25,18 +27,21 @@ pub struct VirtualDriveConfig {
     pub overrides: FxHashMap<char, DiskTypeOverride>,
 }
 
-impl VirtualDriveConfig {
-    /// Get the config file path (next to the executable)
-    fn config_path() -> PathBuf {
-        // Get the executable's directory
-        if let Ok(exe_path) = std::env::current_exe() {
-            if let Some(exe_dir) = exe_path.parent() {
-                return exe_dir.join("virtual_drive_config.json");
-            }
-        }
+/// Metadata about a detected virtual drive.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DetectedVirtualDrive {
+    pub letter: char,
+    pub label: String,
+    pub file_system: String,
+}
 
-        // Fallback to current directory if exe path detection fails
-        PathBuf::from("virtual_drive_config.json")
+impl VirtualDriveConfig {
+    /// Get the config file path in per-user application data.
+    fn config_path() -> PathBuf {
+        dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("MTT-File-Manager")
+            .join("virtual_drive_config.json")
     }
 
     /// Load configuration from file
@@ -96,6 +101,11 @@ impl VirtualDriveConfig {
     pub fn save(&self) -> Result<(), String> {
         let path = Self::config_path();
 
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create config directory: {}", e))?;
+        }
+
         // Build JSON manually
         let mut overrides_map = serde_json::Map::new();
         for (drive_letter, disk_type) in &self.overrides {
@@ -144,6 +154,169 @@ impl VirtualDriveConfig {
     pub fn clear(&mut self) {
         self.overrides.clear();
     }
+
+    fn from_detected_virtual_drives(drives: &[DetectedVirtualDrive]) -> Self {
+        let mut config = Self::default();
+
+        for drive in drives {
+            // Safe default for virtual drives until the user overrides it.
+            config.set_override(drive.letter, DiskTypeOverride::SSD);
+        }
+
+        config
+    }
+}
+
+fn has_virtual_markers(value: &str) -> bool {
+    let lower = value.to_lowercase();
+    lower.contains("cryptomator")
+        || lower.contains("cryptofs")
+        || lower.contains("dokan")
+        || lower.contains("winfsp")
+        || lower == "fuse"
+        || lower.contains("cryptomator-vault")
+}
+
+fn mapped_provider_name(drive_letter: char) -> Option<String> {
+    use windows::core::{PCWSTR, PWSTR};
+    use windows::Win32::Foundation::{ERROR_MORE_DATA, NO_ERROR};
+    use windows::Win32::NetworkManagement::WNet::WNetGetConnectionW;
+
+    let local = format!("{}:", drive_letter);
+    let local_wide: Vec<u16> = local.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut required_len: u32 = 0;
+
+    unsafe {
+        let probe = WNetGetConnectionW(
+            PCWSTR(local_wide.as_ptr()),
+            None,
+            &mut required_len as *mut u32,
+        );
+
+        if probe != NO_ERROR && probe != ERROR_MORE_DATA {
+            return None;
+        }
+
+        if required_len == 0 {
+            return None;
+        }
+
+        let mut buffer: Vec<u16> = vec![0; required_len as usize + 1];
+        let status = WNetGetConnectionW(
+            PCWSTR(local_wide.as_ptr()),
+            Some(PWSTR(buffer.as_mut_ptr())),
+            &mut required_len as *mut u32,
+        );
+
+        if status != NO_ERROR {
+            return None;
+        }
+
+        let end = buffer
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(required_len as usize)
+            .min(buffer.len());
+
+        if end == 0 {
+            return None;
+        }
+
+        Some(String::from_utf16_lossy(&buffer[..end]))
+    }
+}
+
+pub fn detect_virtual_drive(drive_letter: char) -> Option<DetectedVirtualDrive> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
+
+    let normalized_letter = drive_letter.to_ascii_uppercase();
+    let root_path = format!("{}:\\", normalized_letter);
+    let wide_path: Vec<u16> = root_path.encode_utf16().chain(std::iter::once(0)).collect();
+
+    let mut volume_name = [0u16; 261];
+    let mut file_system_name = [0u16; 261];
+    let mut serial_number: u32 = 0;
+    let mut max_component_len: u32 = 0;
+    let mut fs_flags: u32 = 0;
+
+    let ok = unsafe {
+        GetVolumeInformationW(
+            PCWSTR(wide_path.as_ptr()),
+            Some(&mut volume_name),
+            Some(&mut serial_number),
+            Some(&mut max_component_len),
+            Some(&mut fs_flags),
+            Some(&mut file_system_name),
+        )
+    };
+
+    let provider_name = mapped_provider_name(normalized_letter);
+    let provider_is_virtual = provider_name
+        .as_deref()
+        .is_some_and(has_virtual_markers);
+
+    if ok.is_err() {
+        if !provider_is_virtual {
+            return None;
+        }
+
+        return Some(DetectedVirtualDrive {
+            letter: normalized_letter,
+            label: provider_name.clone().unwrap_or_else(|| format!("{}:\\", normalized_letter)),
+            file_system: provider_name.unwrap_or_else(|| "Virtual".to_string()),
+        });
+    }
+
+    let volume_len = volume_name
+        .iter()
+        .position(|&c| c == 0)
+        .unwrap_or(volume_name.len());
+    let fs_len = file_system_name
+        .iter()
+        .position(|&c| c == 0)
+        .unwrap_or(file_system_name.len());
+
+    let volume = String::from_utf16_lossy(&volume_name[..volume_len]);
+    let file_system = String::from_utf16_lossy(&file_system_name[..fs_len]);
+    let is_virtual = has_virtual_markers(&volume)
+        || has_virtual_markers(&file_system)
+        || provider_is_virtual;
+
+    if !is_virtual {
+        return None;
+    }
+
+    Some(DetectedVirtualDrive {
+        letter: normalized_letter,
+        label: volume,
+        file_system,
+    })
+}
+
+pub fn detect_virtual_drives() -> Vec<DetectedVirtualDrive> {
+    let mut virtual_drives = Vec::new();
+
+    for (path, label) in get_all_drives() {
+        if let Some(drive_letter) = path.chars().next() {
+            if let Some(mut drive) = detect_virtual_drive(drive_letter) {
+                if drive.label.trim().is_empty() {
+                    drive.label = label;
+                }
+                virtual_drives.push(drive);
+            }
+        }
+    }
+
+    virtual_drives.sort_by_key(|drive| drive.letter);
+    virtual_drives
+}
+
+fn create_default_config_from_detected_drives() -> Result<VirtualDriveConfig, String> {
+    let detected_drives = detect_virtual_drives();
+    let config = VirtualDriveConfig::from_detected_virtual_drives(&detected_drives);
+    config.save()?;
+    Ok(config)
 }
 
 /// Global configuration instance
@@ -180,6 +353,30 @@ pub fn get_all_overrides() -> FxHashMap<char, DiskTypeOverride> {
         .lock()
         .map(|cfg| cfg.overrides.clone())
         .unwrap_or_default()
+}
+
+/// Ensure the config file exists on disk.
+///
+/// When the file is missing, the app detects current virtual drives and creates
+/// a default config with SSD entries so users can adjust them later in settings.
+pub fn ensure_config_exists() -> Result<(), String> {
+    let path = VirtualDriveConfig::config_path();
+    if path.exists() {
+        return Ok(());
+    }
+
+    let config = create_default_config_from_detected_drives()?;
+
+    if let Some(global) = CONFIG.get() {
+        let mut cfg = global.lock().map_err(|e| format!("Lock error: {}", e))?;
+        *cfg = config;
+    }
+
+    log::info!(
+        "[Config] Created virtual drive configuration at {:?}",
+        path
+    );
+    Ok(())
 }
 
 /// Reload configuration from disk (useful after external changes)

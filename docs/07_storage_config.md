@@ -7,7 +7,7 @@
 %LOCALAPPDATA%\MTT-File-Manager\
 ├── thumbnails/
 │   └── thumbnails.db          # Main SQLite database (all caches + preferences)
-└── virtual_drive_config.json  # Virtual drive configuration (copied from project)
+└── virtual_drive_config.json  # Virtual drive configuration (created on first app launch)
 ```
 
 ### Search Service Data (system-wide)
@@ -154,7 +154,7 @@ Primary key: `(drive_letter, frn)`.
 
 ## Virtual Drive Configuration
 
-File: `virtual_drive_config.json` (project root, copied to `%LOCALAPPDATA%` at runtime)
+File: `%LOCALAPPDATA%\MTT-File-Manager\virtual_drive_config.json`
 
 ```json
 {
@@ -169,6 +169,12 @@ File: `virtual_drive_config.json` (project root, copied to `%LOCALAPPDATA%` at r
 Maps drive letters to storage type hints. Affects which directory reading strategy is used:
 - **SSD**: Standard directory enumeration
 - **HDD**: Optimized `NtQueryDirectoryFile` bulk reading
+
+Behavior:
+- The app creates this file automatically on first launch if it does not exist.
+- During creation, the app scans currently available virtual drives and writes them into the file.
+- Newly detected virtual drives default to **SSD** until the user changes them in the status bar optimization settings.
+- The settings window reads and writes this same file in `%LOCALAPPDATA%`.
 
 ## Thumbnail Disk Cache
 

@@ -2,9 +2,9 @@
 
 use crate::infrastructure::io_priority;
 use crate::infrastructure::virtual_drive_config::{
-    get_all_overrides, remove_drive_override, set_drive_override, DiskTypeOverride,
+    detect_virtual_drives as detect_virtual_drives_from_system, get_all_overrides,
+    remove_drive_override, set_drive_override, DiskTypeOverride,
 };
-use crate::infrastructure::windows::drives::get_all_drives;
 use eframe::egui;
 use rust_i18n::t;
 
@@ -37,7 +37,7 @@ pub fn render_virtual_drive_settings(ctx: &egui::Context, show_modal: bool) -> b
                 ui.add_space(16.0);
 
                 // Detect virtual drives
-                let virtual_drives = detect_virtual_drives();
+                let virtual_drives = load_virtual_drives();
 
                 if virtual_drives.is_empty() {
                     ui.colored_label(
@@ -103,84 +103,20 @@ pub fn render_virtual_drive_settings(ctx: &egui::Context, show_modal: bool) -> b
 }
 
 /// Detect all virtual drives in the system
-fn detect_virtual_drives() -> Vec<VirtualDriveInfo> {
+fn load_virtual_drives() -> Vec<VirtualDriveInfo> {
     let mut virtual_drives = Vec::new();
     let overrides = get_all_overrides();
 
-    // Get all available drives
-    let drives = get_all_drives();
-
-    for (path, label) in drives {
-        if let Some(drive_letter) = path.chars().next() {
-            let drive_letter = drive_letter.to_ascii_uppercase();
-
-            // Check if it's a virtual drive by querying volume info
-            if let Some((is_virtual, fs)) = check_if_virtual(drive_letter) {
-                if is_virtual {
-                    virtual_drives.push(VirtualDriveInfo {
-                        letter: drive_letter,
-                        label,
-                        file_system: fs,
-                        current_override: overrides.get(&drive_letter).copied(),
-                    });
-                }
-            }
-        }
+    for drive in detect_virtual_drives_from_system() {
+        virtual_drives.push(VirtualDriveInfo {
+            letter: drive.letter,
+            label: drive.label,
+            file_system: drive.file_system,
+            current_override: overrides.get(&drive.letter).copied(),
+        });
     }
 
     virtual_drives
-}
-
-/// Check if a drive is virtual by examining its file system
-fn check_if_virtual(drive_letter: char) -> Option<(bool, String)> {
-    use windows::core::PCWSTR;
-    use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
-
-    let root_path = format!("{}:\\", drive_letter);
-    let wide_path: Vec<u16> = root_path.encode_utf16().chain(std::iter::once(0)).collect();
-
-    let mut volume_name = [0u16; 261];
-    let mut file_system_name = [0u16; 261];
-    let mut serial_number: u32 = 0;
-    let mut max_component_len: u32 = 0;
-    let mut fs_flags: u32 = 0;
-
-    let ok = unsafe {
-        GetVolumeInformationW(
-            PCWSTR(wide_path.as_ptr()),
-            Some(&mut volume_name),
-            Some(&mut serial_number),
-            Some(&mut max_component_len),
-            Some(&mut fs_flags),
-            Some(&mut file_system_name),
-        )
-    };
-
-    if ok.is_err() {
-        return None;
-    }
-
-    let volume_len = volume_name
-        .iter()
-        .position(|&c| c == 0)
-        .unwrap_or(volume_name.len());
-    let fs_len = file_system_name
-        .iter()
-        .position(|&c| c == 0)
-        .unwrap_or(file_system_name.len());
-
-    let volume = String::from_utf16_lossy(&volume_name[..volume_len]).to_lowercase();
-    let file_system = String::from_utf16_lossy(&file_system_name[..fs_len]);
-    let fs_lower = file_system.to_lowercase();
-
-    // Detect virtual drive indicators
-    let is_virtual = volume.contains("cryptomator")
-        || fs_lower.contains("cryptofs")
-        || fs_lower.contains("dokan")
-        || fs_lower.contains("winfsp")
-        || fs_lower == "fuse";
-
-    Some((is_virtual, file_system))
 }
 
 /// Render a single drive configuration row
