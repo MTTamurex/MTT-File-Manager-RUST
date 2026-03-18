@@ -67,6 +67,7 @@ config.local.json
 # ============================================
 /dist/
 /release/
+/installer/output/
 *.exe.config
 *.pdb
 
