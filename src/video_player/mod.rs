@@ -16,7 +16,7 @@ use rfd::FileDialog;
 /// - scalewindowed/scalefullscreen: OSC element sizing (1.0 = default)
 /// - windowcontrols=yes: always show close/minimize/maximize in OSC
 const STANDALONE_OSC_SCRIPT_OPTS: &str =
-    "osc-scalewindowed=2,osc-scalefullscreen=2,osc-windowcontrols=yes";
+    "osc-scalewindowed=1,osc-scalefullscreen=1.5,osc-windowcontrols=yes";
 
 /// Spawn a standalone video player process for the given file.
 ///
