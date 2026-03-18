@@ -26,7 +26,7 @@ local function compute_vsr_scale()
     if vw <= 0 or vh <= 0 or dw <= 0 or dh <= 0 then return nil end
     local s = math.max(dw / vw, dh / vh)
     s = math.floor(s * 10) / 10
-    return math.max(s, 1.0)
+    return math.max(s, 2.0)
 end
 
 local function remove_vsr()
