@@ -435,6 +435,11 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
     let _ = mpv.set_property("autofit-larger", "90%x90%");
     let _ = mpv.set_property("hidpi-window-scale", true);
 
+    // Prevent mpv from auto-resizing the window when the d3d11vpp (RTX VSR)
+    // filter changes video-out dimensions. Without this, enabling VSR in
+    // fullscreen then exiting causes the window to shrink to near-zero.
+    let _ = mpv.set_property("auto-window-resize", false);
+
     // Load and play the file
     let path_str = mpv_path_string(&path);
     if let Err(e) = mpv.command("loadfile", &[&path_str]) {
