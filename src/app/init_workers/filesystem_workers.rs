@@ -37,11 +37,24 @@ pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
                         // so `fast_path_exists` would give a false positive.
                         disk_cache_for_invalidation.remove_cache_for_path(&entry.path);
                     } else if should_skip_exists_guard(entry.path.as_path()) {
-                        // DELETE events on OneDrive / network / virtual drives can be
-                        // transient, but probing existence with GetFileAttributesW can
-                        // block indefinitely and strand the process on exit.
-                        // Prefer a harmless false-negative cache eviction over a hung app.
-                        disk_cache_for_invalidation.remove_cache_for_path(&entry.path);
+                        // BUG FIX: On virtual/network drives we cannot probe
+                        // existence safely (GetFileAttributesW can block
+                        // indefinitely).  Previously this called
+                        // remove_cache_for_path which does
+                        //   DELETE FROM thumbnails WHERE path LIKE 'folder\%'
+                        // wiping ALL child thumbnails recursively — even though
+                        // the invalidation was triggered by a benign cover
+                        // worker update, consistency probe, or watcher event.
+                        //
+                        // Fix: only clear folder visual caches (cover/preview).
+                        // Individual file thumbnails are preserved.  True orphans
+                        // will be cleaned up by the incremental GC.
+                        disk_cache_for_invalidation.remove_folder_preview_cache(&entry.path);
+                        disk_cache_for_invalidation.remove_folder_cover(&entry.path);
+                        log::debug!(
+                            "[CACHE-INVALIDATION] Virtual/network path, cleared folder visual cache only (thumbnails preserved): {:?}",
+                            entry.path.file_name().unwrap_or_default()
+                        );
                     } else if crate::infrastructure::onedrive::fast_path_exists(entry.path.as_path()) {
                         // Guard: if the path still exists on disk, the DELETE
                         // event was transient (common on FUSE/WinFsp drivers
