@@ -59,10 +59,12 @@ foreach ($file in $requiredFiles) {
 # ── Step 3: Run Inno Setup compiler ──────────────────────────────────
 Write-Host "`n[3/3] Compiling installer..." -ForegroundColor Yellow
 
+$isccFromPath = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
 $isccCandidates = @(
-    (Get-Command "ISCC.exe" -ErrorAction SilentlyContinue).Source,
+    $(if ($isccFromPath) { $isccFromPath.Source }),
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
-    "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+    "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
+    "${env:LOCALAPPDATA}\Programs\Inno Setup 6\ISCC.exe"
 ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 
 if (-not $isccCandidates) {
