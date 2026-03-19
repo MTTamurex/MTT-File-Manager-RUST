@@ -171,6 +171,7 @@ mod tests {
             internal_files: vec![PathBuf::from(r"C:\\temp\\a.txt")],
             internal_op: Some(ClipboardOp::Copy),
             internal_sync_sequence: Some(10),
+            ..ClipboardManager::default()
         };
 
         assert!(manager.internal_files_to_paste_for_sequence(Some(11)).is_none());
@@ -183,6 +184,7 @@ mod tests {
             internal_files: vec![PathBuf::from(r"C:\\temp\\a.txt")],
             internal_op: Some(ClipboardOp::Move),
             internal_sync_sequence: Some(22),
+            ..ClipboardManager::default()
         };
 
         let (files, is_move) = manager
@@ -200,6 +202,7 @@ mod tests {
             internal_files: vec![PathBuf::from(r"C:\\temp\\a.txt")],
             internal_op: Some(ClipboardOp::Copy),
             internal_sync_sequence: None,
+            ..ClipboardManager::default()
         };
 
         let (files, is_move) = manager

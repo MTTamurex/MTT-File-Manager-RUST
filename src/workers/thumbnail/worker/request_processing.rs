@@ -397,6 +397,7 @@ mod tests {
             width: 512,
             height: 320,
             requested_size: 256,
+            modified_at: 0,
         };
         assert!(cache_entry_satisfies_request(&entry, 512));
     }
@@ -408,6 +409,7 @@ mod tests {
             width: 128,
             height: 128,
             requested_size: 512,
+            modified_at: 0,
         };
         assert!(cache_entry_satisfies_request(&entry, 512));
     }
