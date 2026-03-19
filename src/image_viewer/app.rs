@@ -3,6 +3,7 @@ use crate::image_viewer::indexer::{self, ImageSequence};
 use crate::image_viewer::loader;
 use eframe::egui;
 use eframe::egui::scroll_area::ScrollBarVisibility;
+use rfd::FileDialog;
 use rust_i18n::t;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -19,10 +20,16 @@ const MIN_NAVIGATE_INTERVAL: Duration = Duration::from_millis(20);
 /// Holds pre-uploaded textures for each frame of an animated GIF along with
 /// display timing information.
 struct GifAnimation {
+    frames: Vec<Arc<loader::DecodedFrame>>,
     textures: Vec<egui::TextureHandle>,
     delays_ms: Vec<u32>,
     current_frame: usize,
     frame_started: std::time::Instant,
+}
+
+struct ViewerStatusMessage {
+    text: String,
+    is_error: bool,
 }
 
 pub struct DedicatedImageViewerApp {
@@ -50,6 +57,9 @@ pub struct DedicatedImageViewerApp {
         usize,
         std::sync::mpsc::Receiver<Result<Vec<loader::GifAnimationFrame>, String>>,
     )>,
+    conversion_rx: Option<std::sync::mpsc::Receiver<Result<std::path::PathBuf, String>>>,
+    conversion_in_progress: bool,
+    status_message: Option<ViewerStatusMessage>,
     /// Timestamp of the last navigation action (for key-repeat throttling).
     last_navigate_instant: std::time::Instant,
 }
@@ -85,6 +95,9 @@ impl DedicatedImageViewerApp {
             gif_animation: None,
             gif_loaded_index: None,
             gif_decode_rx: None,
+            conversion_rx: None,
+            conversion_in_progress: false,
+            status_message: None,
             last_navigate_instant: std::time::Instant::now(),
         };
 
@@ -141,6 +154,9 @@ impl DedicatedImageViewerApp {
         self.gif_animation = None;
         self.gif_loaded_index = None;
         self.gif_decode_rx = None;
+        self.conversion_rx = None;
+        self.conversion_in_progress = false;
+        self.status_message = None;
         self.last_navigate_instant = std::time::Instant::now();
 
         self.try_show_cached_current(ctx);
@@ -175,6 +191,153 @@ impl DedicatedImageViewerApp {
             .and_then(|p| p.file_name())
             .map(|v| v.to_string_lossy().to_string())
             .unwrap_or_else(|| "<unknown>".to_string())
+    }
+
+    fn export_format_label(format: loader::ExportImageFormat) -> String {
+        match format {
+            loader::ExportImageFormat::Png => t!("imageviewer.format_png").to_string(),
+            loader::ExportImageFormat::Jpeg => t!("imageviewer.format_jpeg").to_string(),
+            loader::ExportImageFormat::WebP => t!("imageviewer.format_webp").to_string(),
+            loader::ExportImageFormat::Bmp => t!("imageviewer.format_bmp").to_string(),
+            loader::ExportImageFormat::Tiff => t!("imageviewer.format_tiff").to_string(),
+        }
+    }
+
+    fn suggested_export_filename(&self, format: loader::ExportImageFormat) -> String {
+        let stem = self
+            .current_path()
+            .and_then(|path| path.file_stem())
+            .map(|name| name.to_string_lossy().to_string())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "image".to_string());
+
+        format!("{}.{}", stem, format.extension())
+    }
+
+    fn pick_export_path(
+        &self,
+        format: loader::ExportImageFormat,
+    ) -> Option<std::path::PathBuf> {
+        let mut dialog = FileDialog::new()
+            .add_filter(format.filter_label(), &[format.extension()])
+            .set_file_name(&self.suggested_export_filename(format));
+
+        if let Some(current_path) = self.current_path() {
+            if let Some(parent) = current_path.parent() {
+                dialog = dialog.set_directory(parent);
+            }
+        }
+
+        dialog
+            .save_file()
+            .map(|path| loader::normalize_export_path(&path, format))
+    }
+
+    fn current_export_frame(&self) -> Result<loader::DecodedFrame, String> {
+        if let Some(anim) = &self.gif_animation {
+            if let Some(frame) = anim.frames.get(anim.current_frame) {
+                return Ok((**frame).clone());
+            }
+        }
+
+        if let Some(frame) = self.cache.get(self.current_index) {
+            return Ok(frame.as_ref().clone());
+        }
+
+        let path = self
+            .current_path()
+            .ok_or_else(|| t!("imageviewer.convert_no_image").to_string())?;
+        loader::decode_full_frame(path).map_err(|err| err.to_string())
+    }
+
+    fn start_conversion(&mut self, format: loader::ExportImageFormat, ctx: &egui::Context) {
+        if self.conversion_in_progress {
+            return;
+        }
+
+        let Some(output_path) = self.pick_export_path(format) else {
+            return;
+        };
+
+        let frame = match self.current_export_frame() {
+            Ok(frame) => frame,
+            Err(err) => {
+                self.status_message = Some(ViewerStatusMessage {
+                    text: t!("imageviewer.convert_error", error = err).to_string(),
+                    is_error: true,
+                });
+                return;
+            }
+        };
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let repaint_ctx = ctx.clone();
+        let worker_path = output_path.clone();
+        let format_label = Self::export_format_label(format);
+
+        self.conversion_rx = Some(rx);
+        self.conversion_in_progress = true;
+        self.status_message = Some(ViewerStatusMessage {
+            text: t!("imageviewer.convert_in_progress", format = format_label).to_string(),
+            is_error: false,
+        });
+
+        let spawn_result = std::thread::Builder::new()
+            .name("image-convert".into())
+            .spawn(move || {
+                let result = loader::encode_frame_to_path(&frame, format, &worker_path)
+                    .map(|_| worker_path)
+                    .map_err(|err| err.to_string());
+                let _ = tx.send(result);
+                repaint_ctx.request_repaint();
+            });
+
+        if let Err(err) = spawn_result {
+            self.conversion_rx = None;
+            self.conversion_in_progress = false;
+            self.status_message = Some(ViewerStatusMessage {
+                text: t!("imageviewer.convert_error", error = err.to_string()).to_string(),
+                is_error: true,
+            });
+        }
+    }
+
+    fn poll_conversion(&mut self) {
+        let Some(rx) = &self.conversion_rx else {
+            return;
+        };
+
+        match rx.try_recv() {
+            Ok(Ok(path)) => {
+                self.conversion_rx = None;
+                self.conversion_in_progress = false;
+                let name = path
+                    .file_name()
+                    .map(|value| value.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path.to_string_lossy().to_string());
+                self.status_message = Some(ViewerStatusMessage {
+                    text: t!("imageviewer.convert_success", name = name).to_string(),
+                    is_error: false,
+                });
+            }
+            Ok(Err(err)) => {
+                self.conversion_rx = None;
+                self.conversion_in_progress = false;
+                self.status_message = Some(ViewerStatusMessage {
+                    text: t!("imageviewer.convert_error", error = err).to_string(),
+                    is_error: true,
+                });
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.conversion_rx = None;
+                self.conversion_in_progress = false;
+                self.status_message = Some(ViewerStatusMessage {
+                    text: t!("imageviewer.convert_error", error = "worker disconnected").to_string(),
+                    is_error: true,
+                });
+            }
+        }
     }
 
     fn request_job_if_needed(&mut self, index: usize, priority: LoadPriority) {
@@ -359,24 +522,28 @@ impl DedicatedImageViewerApp {
         match rx.try_recv() {
             Ok(Ok(frames)) if frames.len() > 1 => {
                 let (w, h) = (frames[0].frame.width, frames[0].frame.height);
+                let mut raw_frames = Vec::with_capacity(frames.len());
                 let mut textures = Vec::with_capacity(frames.len());
                 let mut delays = Vec::with_capacity(frames.len());
 
                 for (i, gif_frame) in frames.into_iter().enumerate() {
+                    let raw_frame = Arc::new(gif_frame.frame);
                     let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                        [gif_frame.frame.width as usize, gif_frame.frame.height as usize],
-                        &gif_frame.frame.rgba,
+                        [raw_frame.width as usize, raw_frame.height as usize],
+                        &raw_frame.rgba,
                     );
                     let tex = ctx.load_texture(
                         format!("iv-gif-{}-{}", decode_index, i),
                         color_image,
                         egui::TextureOptions::LINEAR,
                     );
+                    raw_frames.push(raw_frame);
                     textures.push(tex);
                     delays.push(gif_frame.delay_ms);
                 }
 
                 self.gif_animation = Some(GifAnimation {
+                    frames: raw_frames,
                     textures,
                     delays_ms: delays,
                     current_frame: 0,
@@ -521,6 +688,7 @@ impl DedicatedImageViewerApp {
 
     fn render_top_bar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("image_viewer_top_bar").show(ctx, |ui| {
+            let mut selected_format = None;
             ui.horizontal_wrapped(|ui| {
                 let total = self.sequence.entries.len();
                 let prev_enabled = self.current_index > 0;
@@ -540,6 +708,17 @@ impl DedicatedImageViewerApp {
                     self.navigate_next(ctx);
                 }
 
+                ui.add_enabled_ui(!self.sequence.entries.is_empty() && !self.conversion_in_progress, |ui| {
+                    ui.menu_button(t!("imageviewer.convert").to_string(), |ui| {
+                        for format in loader::ExportImageFormat::ALL {
+                            let label = Self::export_format_label(format);
+                            if ui.button(label).clicked() {
+                                selected_format = Some(format);
+                            }
+                        }
+                    });
+                });
+
                 ui.separator();
                 if total == 0 {
                     ui.label("0 / 0");
@@ -552,6 +731,10 @@ impl DedicatedImageViewerApp {
                     ui.small(path.to_string_lossy());
                 }
             });
+
+            if let Some(format) = selected_format {
+                self.start_conversion(format, ctx);
+            }
         });
     }
 
@@ -584,6 +767,16 @@ impl DedicatedImageViewerApp {
                     ui.label(&*t!("imageviewer.resolution", w = w, h = h));
                 } else {
                     ui.label(&*t!("imageviewer.resolution_none"));
+                }
+
+                if let Some(status) = &self.status_message {
+                    ui.separator();
+                    let color = if status.is_error {
+                        egui::Color32::from_rgb(220, 80, 80)
+                    } else {
+                        egui::Color32::from_rgb(80, 170, 90)
+                    };
+                    ui.colored_label(color, &status.text);
                 }
             });
         });
@@ -742,6 +935,7 @@ impl eframe::App for DedicatedImageViewerApp {
         self.load_gif_if_needed(ctx);
         self.poll_gif_decode(ctx);
         self.advance_gif_frame(ctx);
+        self.poll_conversion();
 
         self.render_top_bar(ctx);
         self.render_center(ctx);

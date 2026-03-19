@@ -7,6 +7,7 @@ use once_cell::sync::Lazy;
 use std::fs::File;
 use std::io;
 use std::io::BufReader;
+use std::io::BufWriter;
 use std::io::Cursor;
 use std::path::Path;
 use std::path::PathBuf;
@@ -43,6 +44,49 @@ pub struct DecodedFrame {
     pub rgba: Vec<u8>,
     pub width: u32,
     pub height: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExportImageFormat {
+    Png,
+    Jpeg,
+    WebP,
+    Bmp,
+    Tiff,
+}
+
+impl ExportImageFormat {
+    pub const ALL: [Self; 5] = [Self::Png, Self::Jpeg, Self::WebP, Self::Bmp, Self::Tiff];
+
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Png => "png",
+            Self::Jpeg => "jpg",
+            Self::WebP => "webp",
+            Self::Bmp => "bmp",
+            Self::Tiff => "tiff",
+        }
+    }
+
+    pub fn filter_label(self) -> &'static str {
+        match self {
+            Self::Png => "PNG",
+            Self::Jpeg => "JPEG",
+            Self::WebP => "WebP",
+            Self::Bmp => "BMP",
+            Self::Tiff => "TIFF",
+        }
+    }
+
+    fn image_format(self) -> image::ImageFormat {
+        match self {
+            Self::Png => image::ImageFormat::Png,
+            Self::Jpeg => image::ImageFormat::Jpeg,
+            Self::WebP => image::ImageFormat::WebP,
+            Self::Bmp => image::ImageFormat::Bmp,
+            Self::Tiff => image::ImageFormat::Tiff,
+        }
+    }
 }
 
 /// One frame of a multi-frame (animated) GIF.
@@ -145,6 +189,42 @@ pub fn decode_preview_frame_with_priority(
     };
     let resized = image.resize(max_side, max_side, filter);
     Ok(frame_from_dynamic(resized))
+}
+
+pub fn normalize_export_path(path: &Path, format: ExportImageFormat) -> PathBuf {
+    if path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case(format.extension()))
+        .unwrap_or(false)
+    {
+        return path.to_path_buf();
+    }
+
+    let mut normalized = path.to_path_buf();
+    normalized.set_extension(format.extension());
+    normalized
+}
+
+pub fn encode_frame_to_path(
+    frame: &DecodedFrame,
+    format: ExportImageFormat,
+    output_path: &Path,
+) -> io::Result<()> {
+    let Some(buffer) = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba.clone())
+    else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "decoded frame buffer has invalid dimensions",
+        ));
+    };
+
+    let image = DynamicImage::ImageRgba8(buffer);
+    let file = File::create(output_path)?;
+    let mut writer = BufWriter::new(file);
+    image
+        .write_to(&mut writer, format.image_format())
+        .map_err(|err| io::Error::other(err.to_string()))
 }
 
 fn decode_preview_from_thumbnail_cache(path: &Path, max_side: u32) -> Option<DecodedFrame> {
@@ -294,6 +374,27 @@ fn apply_orientation(img: DynamicImage, orientation: image::metadata::Orientatio
         Rotate90FlipH => img.rotate90().fliph(),
         Rotate270 => img.rotate270(),
         Rotate270FlipH => img.rotate270().fliph(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_export_path_replaces_wrong_extension() {
+        let path = PathBuf::from("sample.png");
+        let normalized = normalize_export_path(&path, ExportImageFormat::WebP);
+
+        assert_eq!(normalized, PathBuf::from("sample.webp"));
+    }
+
+    #[test]
+    fn normalize_export_path_keeps_matching_extension() {
+        let path = PathBuf::from("sample.JPG");
+        let normalized = normalize_export_path(&path, ExportImageFormat::Jpeg);
+
+        assert_eq!(normalized, PathBuf::from("sample.JPG"));
     }
 }
 
