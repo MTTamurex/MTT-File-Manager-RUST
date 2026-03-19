@@ -137,6 +137,7 @@ pub fn approximate_bitrate(size_bytes: u64, duration_100ns: u64) -> Option<u32> 
 #[cfg(test)]
 mod tests {
     use super::{format_date, format_date_utc};
+    use rust_i18n::t;
 
     #[test]
     fn format_date_utc_handles_known_dates() {
@@ -152,7 +153,7 @@ mod tests {
 
     #[test]
     fn format_date_zero_is_unknown() {
-        assert_eq!(format_date(0), "Desconhecido");
+        assert_eq!(format_date(0), t!("file_info.unknown_date").to_string());
     }
 
     #[test]
