@@ -131,6 +131,9 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
 }
 
 pub fn handle_exit(app: &mut ImageViewerApp) {
+    // Stop the GC worker thread before tearing down.
+    crate::app::init_workers::stop_gc_worker();
+
     // ── ROOT CAUSE ──────────────────────────────────────────────────────
     // A background thread is stuck in NtQueryAttributesFile (kernel mode)
     // waiting for the OneDrive cloud filter driver (cldflt.sys).

@@ -285,7 +285,7 @@ impl DedicatedImageViewerApp {
         let spawn_result = std::thread::Builder::new()
             .name("image-convert".into())
             .spawn(move || {
-                let result = loader::encode_frame_to_path(&frame, format, &worker_path)
+                let result = loader::encode_frame_to_path(frame, format, &worker_path)
                     .map(|_| worker_path)
                     .map_err(|err| err.to_string());
                 let _ = tx.send(result);
