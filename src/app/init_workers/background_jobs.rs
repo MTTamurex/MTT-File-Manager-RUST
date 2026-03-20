@@ -4,6 +4,10 @@ use std::sync::{mpsc, Arc};
 
 static GC_WORKER_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
+pub(crate) fn stop_gc_worker() {
+    GC_WORKER_RUNNING.store(false, std::sync::atomic::Ordering::Release);
+}
+
 pub(in crate::app) fn spawn_startup_drive_info_preload(
     disks_snapshot: Vec<String>,
     tx: mpsc::Sender<Vec<(String, crate::domain::file_entry::DriveInfo)>>,
@@ -32,7 +36,6 @@ pub(in crate::app) fn spawn_startup_drive_info_preload(
 }
 
 pub(in crate::app) fn spawn_incremental_gc_worker(disk_cache: Arc<ThumbnailDiskCache>) {
-    GC_WORKER_RUNNING.store(true, std::sync::atomic::Ordering::Release);
     std::thread::spawn(move || {
         const GC_INITIAL_DELAY_SECS: u64 = 20;
         const GC_ACTIVE_INTERVAL_SECS: u64 = 180;

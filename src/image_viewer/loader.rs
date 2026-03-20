@@ -207,11 +207,11 @@ pub fn normalize_export_path(path: &Path, format: ExportImageFormat) -> PathBuf 
 }
 
 pub fn encode_frame_to_path(
-    frame: &DecodedFrame,
+    frame: DecodedFrame,
     format: ExportImageFormat,
     output_path: &Path,
 ) -> io::Result<()> {
-    let Some(buffer) = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba.clone())
+    let Some(buffer) = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba)
     else {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
