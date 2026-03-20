@@ -295,6 +295,10 @@ pub fn is_audio_extension(extension: &str) -> bool {
 
 /// Check if an extension is an image file
 pub fn is_image_extension(extension: &str) -> bool {
+    if extension.eq_ignore_ascii_case("svg") {
+        return true;
+    }
+
     get_perceived_type(extension) == PerceivedType::Image
 }
 
