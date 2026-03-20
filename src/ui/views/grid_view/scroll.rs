@@ -1,5 +1,7 @@
 use eframe::egui::{self, Color32, Rect, Sense, Ui};
 
+const GRID_SCROLL_SPEED: f32 = 4.0;
+
 #[derive(Clone, Copy, Debug)]
 struct ScrollState {
     visual_scroll_y: f32,
@@ -14,8 +16,7 @@ pub(super) fn apply_scroll_input(
     if consume_scroll {
         let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
         if scroll_delta != 0.0 {
-            let speed = 2.5;
-            *target_scroll -= scroll_delta * speed;
+            *target_scroll -= scroll_delta * GRID_SCROLL_SPEED;
         }
     }
 
