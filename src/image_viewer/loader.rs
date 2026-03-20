@@ -151,6 +151,10 @@ pub fn decode_full_frame_with_priority(
     path: &Path,
     priority: DecodePriority,
 ) -> io::Result<DecodedFrame> {
+    if is_svg_path(path) {
+        return decode_svg_frame(path, None, priority);
+    }
+
     let image = decode_dynamic(path, priority)?;
     Ok(frame_from_dynamic(image))
 }
@@ -164,6 +168,10 @@ pub fn decode_preview_frame_with_priority(
     max_side: u32,
     priority: DecodePriority,
 ) -> io::Result<DecodedFrame> {
+    if is_svg_path(path) {
+        return decode_svg_frame(path, Some(max_side), priority);
+    }
+
     if let Some(frame) = decode_preview_from_thumbnail_cache(path, max_side) {
         return Ok(frame);
     }
@@ -243,6 +251,78 @@ fn decode_preview_from_thumbnail_cache(path: &Path, max_side: u32) -> Option<Dec
     };
 
     Some(frame_from_dynamic(image))
+}
+
+fn is_svg_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("svg"))
+        .unwrap_or(false)
+}
+
+fn decode_svg_frame(
+    path: &Path,
+    max_side: Option<u32>,
+    priority: DecodePriority,
+) -> io::Result<DecodedFrame> {
+    let bytes = read_file_fast(path, priority)?;
+    decode_svg_bytes(bytes.as_slice(), max_side)
+}
+
+fn decode_svg_bytes(bytes: &[u8], max_side: Option<u32>) -> io::Result<DecodedFrame> {
+    let options = usvg::Options::default();
+    let tree = usvg::Tree::from_data(bytes, &options)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+
+    let svg_size = tree.size();
+    let base_width = svg_size.width().max(1.0);
+    let base_height = svg_size.height().max(1.0);
+    let scale = match max_side.filter(|limit| *limit > 0) {
+        Some(limit) => {
+            let limit = limit as f32;
+            (limit / base_width.max(base_height)).min(1.0)
+        }
+        None => 1.0,
+    };
+
+    let render_width = (base_width * scale).round().max(1.0) as u32;
+    let render_height = (base_height * scale).round().max(1.0) as u32;
+    let mut pixmap = tiny_skia::Pixmap::new(render_width, render_height)
+        .ok_or_else(|| io::Error::other("failed to allocate SVG render surface"))?;
+
+    pixmap.fill(tiny_skia::Color::TRANSPARENT);
+    let transform = tiny_skia::Transform::from_scale(
+        render_width as f32 / base_width,
+        render_height as f32 / base_height,
+    );
+
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+
+    Ok(DecodedFrame {
+        width: render_width,
+        height: render_height,
+        rgba: unpremultiply_rgba(pixmap.data()),
+    })
+}
+
+fn unpremultiply_rgba(pixels: &[u8]) -> Vec<u8> {
+    let mut rgba = Vec::with_capacity(pixels.len());
+
+    for chunk in pixels.chunks_exact(4) {
+        let alpha = chunk[3];
+        if alpha == 0 {
+            rgba.extend_from_slice(&[0, 0, 0, 0]);
+            continue;
+        }
+
+        let alpha_u32 = alpha as u32;
+        rgba.push(((chunk[0] as u32 * 255) / alpha_u32).min(255) as u8);
+        rgba.push(((chunk[1] as u32 * 255) / alpha_u32).min(255) as u8);
+        rgba.push(((chunk[2] as u32 * 255) / alpha_u32).min(255) as u8);
+        rgba.push(alpha);
+    }
+
+    rgba
 }
 
 fn decode_dynamic(path: &Path, priority: DecodePriority) -> io::Result<DynamicImage> {
@@ -395,6 +475,17 @@ mod tests {
         let normalized = normalize_export_path(&path, ExportImageFormat::Jpeg);
 
         assert_eq!(normalized, PathBuf::from("sample.JPG"));
+    }
+
+    #[test]
+    fn decode_svg_preview_scales_with_aspect_ratio() {
+        let svg = br#"<svg xmlns='http://www.w3.org/2000/svg' width='100' height='50' viewBox='0 0 100 50'><rect width='100' height='50' fill='#ff0000'/></svg>"#;
+
+        let frame = decode_svg_bytes(svg, Some(32)).expect("svg should decode");
+
+        assert_eq!(frame.width, 32);
+        assert_eq!(frame.height, 16);
+        assert_eq!(frame.rgba.len(), (frame.width * frame.height * 4) as usize);
     }
 }
 
