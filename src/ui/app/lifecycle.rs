@@ -86,6 +86,25 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
         )
     });
 
+    // Detect background→foreground transitions (window regains focus after being unfocused)
+    // This catches the case where the app was NOT minimized but simply behind other windows,
+    // which still causes OS paging and GPU wake spikes on return.
+    let is_focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
+    if is_focused && !app.was_focused {
+        let idle_secs = app.last_restore_time.elapsed().as_secs_f64();
+        if idle_secs > 5.0 {
+            app.minimized_duration_secs = idle_secs;
+            app.last_restore_time = std::time::Instant::now();
+            // Reset inflated peak so budgets aren't starved by the wake spike
+            app.frame_time_peak_ms = app.frame_time_avg_ms.max(16.0);
+            log::info!(
+                "[LIFECYCLE] App regained focus after {:.1}s in background - resetting peak metrics",
+                idle_secs
+            );
+        }
+    }
+    app.was_focused = is_focused;
+
     // Handle minimization state changes - CRITICAL for OneDrive thread management
     if minimized_changed {
         app.layout.saved_is_minimized = is_minimized;
@@ -100,8 +119,10 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
             let minimized_secs = app.last_restore_time.elapsed().as_secs_f64();
             app.minimized_duration_secs = minimized_secs;
             app.last_restore_time = std::time::Instant::now();
+            // Reset inflated peak so budgets aren't starved by the wake spike
+            app.frame_time_peak_ms = app.frame_time_avg_ms.max(16.0);
             log::info!(
-                "[LIFECYCLE] App restored after {:.1}s of inactivity - throttling operations",
+                "[LIFECYCLE] App restored after {:.1}s of inactivity - resetting peak metrics",
                 minimized_secs
             );
         }

@@ -56,7 +56,16 @@ impl eframe::App for ImageViewerApp {
             if self.frame_time_peak_ms <= 0.0 {
                 self.frame_time_peak_ms = effective_frame_ms;
             } else {
-                self.frame_time_peak_ms *= 0.95;
+                // Use faster decay when the spike is clearly a transient wake-from-idle
+                // artifact (OS paging / GPU wake) rather than sustained load.
+                // With 0.95: ~40 frames to recover → budgets starved for ~670ms.
+                // With 0.70: ~8 frames to recover → budgets back in ~130ms.
+                let decay = if self.frame_time_peak_ms > 50.0 && self.frame_time_avg_ms < 25.0 {
+                    0.70
+                } else {
+                    0.95
+                };
+                self.frame_time_peak_ms *= decay;
                 if effective_frame_ms > self.frame_time_peak_ms {
                     self.frame_time_peak_ms = effective_frame_ms;
                 }
