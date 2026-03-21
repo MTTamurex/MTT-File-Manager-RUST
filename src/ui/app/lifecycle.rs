@@ -95,8 +95,14 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
         if idle_secs > 5.0 {
             app.minimized_duration_secs = idle_secs;
             app.last_restore_time = std::time::Instant::now();
-            // Reset inflated peak so budgets aren't starved by the wake spike
             app.frame_time_peak_ms = app.frame_time_avg_ms.max(16.0);
+            // Flush GPU textures so the grid re-requests them from the
+            // RGBA RAM cache.  After prolonged inactivity the OS pages out
+            // the GPU working set; keeping stale TextureHandles causes
+            // slow first-paint or blank tiles on resume.
+            if idle_secs > 10.0 {
+                flush_gpu_textures_for_reupload(app);
+            }
             log::info!(
                 "[LIFECYCLE] App regained focus after {:.1}s in background - resetting peak metrics",
                 idle_secs
@@ -119,8 +125,10 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
             let minimized_secs = app.last_restore_time.elapsed().as_secs_f64();
             app.minimized_duration_secs = minimized_secs;
             app.last_restore_time = std::time::Instant::now();
-            // Reset inflated peak so budgets aren't starved by the wake spike
             app.frame_time_peak_ms = app.frame_time_avg_ms.max(16.0);
+            if minimized_secs > 10.0 {
+                flush_gpu_textures_for_reupload(app);
+            }
             log::info!(
                 "[LIFECYCLE] App restored after {:.1}s of inactivity - resetting peak metrics",
                 minimized_secs
@@ -149,6 +157,36 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
             );
         }
     }
+}
+
+/// Flush GPU texture cache so visible items are re-uploaded from the RGBA RAM
+/// cache on the next frame.  After prolonged inactivity the OS pages out the
+/// GPU working set; keeping stale `TextureHandle`s causes slow first-paint
+/// (page-faults on every draw call) or blank tiles.
+///
+/// Only the VRAM layer is cleared — the RGBA RAM cache (Layer 2) is kept intact,
+/// so re-uploads are fast (no disk I/O).  Icons and folder previews are also
+/// flushed since they suffer from the same paging effect.
+fn flush_gpu_textures_for_reupload(app: &mut ImageViewerApp) {
+    let textures = app.cache_manager.texture_cache.len();
+    let folder_previews = app.cache_manager.folder_preview_cache.len();
+    let icons = app.cache_manager.icon_cache.len();
+
+    app.cache_manager.texture_cache.clear();
+    app.cache_manager.folder_preview_cache.clear();
+    app.cache_manager.folder_preview_loading.clear();
+    app.cache_manager.icon_cache.clear();
+    app.cache_manager.loading_set.clear();
+    app.cache_manager.pending_upload_set.clear();
+
+    // Clear pending queue — stale generation data would be rejected anyway,
+    // and new requests from the grid renderer will flow in immediately.
+    app.pending_thumbnails.clear();
+
+    log::info!(
+        "[LIFECYCLE] Flushed GPU textures for re-upload: {} thumbnails, {} folder previews, {} icons",
+        textures, folder_previews, icons
+    );
 }
 
 pub fn handle_exit(app: &mut ImageViewerApp) {
