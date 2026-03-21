@@ -402,6 +402,9 @@ pub struct ImageViewerApp {
 
     // Media keyboard debounce
     pub last_media_key_press: Instant,
+
+    // INACTIVITY RECOVERY: Track window focus for background→foreground detection
+    pub was_focused: bool,
 }
 
 impl ImageViewerApp {

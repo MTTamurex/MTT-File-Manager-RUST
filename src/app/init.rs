@@ -507,6 +507,9 @@ impl ImageViewerApp {
 
             // Media keyboard debounce
             last_media_key_press: std::time::Instant::now(),
+
+            // INACTIVITY RECOVERY: Window focus tracking
+            was_focused: true,
         };
 
         // Pre-set custom composed folder icon on cache_manager (used by grid/list bridges)
