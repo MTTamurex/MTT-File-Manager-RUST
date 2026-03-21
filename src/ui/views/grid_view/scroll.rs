@@ -1,6 +1,6 @@
 use eframe::egui::{self, Color32, Rect, Sense, Ui};
 
-const GRID_SCROLL_SPEED: f32 = 3.0;
+const GRID_SCROLL_SPEED: f32 = 5.0;
 
 #[derive(Clone, Copy, Debug)]
 struct ScrollState {
