@@ -2,9 +2,22 @@ use eframe::egui::{self, Color32, Rect, Sense, Ui};
 
 const GRID_SCROLL_SPEED: f32 = 5.0;
 
+/// Per-frame velocity retention at 60 fps.  Lower = momentum fades faster.
+/// 0.82 ≈ 350 px of extra coast after a typical wheel flick (~2-3 grid rows).
+const MOMENTUM_DECAY_AT_60FPS: f32 = 0.82;
+
+/// Momentum stops below this velocity (pixels / sec).
+const MOMENTUM_MIN_VEL: f32 = 50.0;
+
 #[derive(Clone, Copy, Debug)]
 struct ScrollState {
     visual_scroll_y: f32,
+}
+
+/// Persistent per-frame velocity used for scroll momentum.
+#[derive(Clone, Copy, Debug)]
+struct ScrollMomentum {
+    velocity: f32,
 }
 
 pub(super) fn apply_scroll_input(
@@ -13,14 +26,50 @@ pub(super) fn apply_scroll_input(
     max_scroll: f32,
     consume_scroll: bool,
 ) {
-    if consume_scroll {
-        let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
+    let dt = ui.input(|i| i.predicted_dt).min(0.05);
+    let scroll_delta = if consume_scroll {
+        ui.input(|i| i.smooth_scroll_delta.y)
+    } else {
+        0.0
+    };
+
+    let momentum_id = ui.id().with("scroll_momentum");
+    let has_momentum = ui.ctx().data_mut(|d| {
+        let m = d.get_temp_mut_or_insert_with::<ScrollMomentum>(momentum_id, || {
+            ScrollMomentum { velocity: 0.0 }
+        });
+
         if scroll_delta != 0.0 {
-            *target_scroll -= scroll_delta * GRID_SCROLL_SPEED;
+            // Direct response — same as before, no input lag.
+            let impulse = -scroll_delta * GRID_SCROLL_SPEED;
+            *target_scroll += impulse;
+
+            // Track velocity (px/sec, EMA) for coasting when input stops.
+            let vel = impulse / dt;
+            if vel.signum() != m.velocity.signum() {
+                // Direction reversed → kill old momentum instantly.
+                m.velocity = vel;
+            } else {
+                m.velocity = m.velocity * 0.6 + vel * 0.4;
+            }
+            false
+        } else if m.velocity.abs() > MOMENTUM_MIN_VEL {
+            // No wheel event this frame — coast with decaying velocity.
+            *target_scroll += m.velocity * dt;
+            m.velocity *= MOMENTUM_DECAY_AT_60FPS.powf(dt * 60.0);
+            true
+        } else {
+            m.velocity = 0.0;
+            false
         }
-    }
+    });
 
     *target_scroll = target_scroll.clamp(0.0, max_scroll);
+
+    // Keep the render loop alive while momentum is bleeding off.
+    if has_momentum {
+        ui.ctx().request_repaint();
+    }
 }
 
 pub(super) fn compute_visual_scroll(ui: &Ui, target_scroll: f32, viewport_h: f32) -> (f32, f32) {
