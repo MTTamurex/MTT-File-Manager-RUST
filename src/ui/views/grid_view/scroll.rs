@@ -88,7 +88,7 @@ pub(super) fn compute_visual_scroll(ui: &Ui, target_scroll: f32, viewport_h: f32
             visual_scroll_y: target_scroll,
         });
 
-        let t = (dt * 8.0).min(1.0);
+        let t = (dt * 9.0).min(1.0);
 
         if (state.visual_scroll_y - target_scroll).abs() > viewport_h * 1.5 {
             state.visual_scroll_y = target_scroll;
