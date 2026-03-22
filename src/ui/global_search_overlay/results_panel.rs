@@ -9,6 +9,10 @@ const RESULT_ROW_HEIGHT: f32 = 46.0;
 const ICON_SIZE: f32 = 18.0;
 const LOAD_MORE_STEP: u32 = 500;
 const MAX_RESULTS_CAP: u32 = 10_000;
+const SCROLL_SENSITIVITY: f32 = 5.0;
+const SCROLLBAR_WIDTH: f32 = 4.0;
+const SCROLLBAR_MIN_HANDLE: f32 = 30.0;
+const RESULTS_FOOTER_HEIGHT: f32 = 32.0;
 
 #[inline]
 fn cache_key_for_icon(path: &std::path::Path, size: IconSize) -> String {
@@ -52,8 +56,20 @@ pub(super) fn render_results_panel(
         app.global_search.drive_filter,
     );
 
-    // Results area height is fixed from modal height to avoid dynamic growth.
-    let results_height = (modal_max_height - 212.0).max(200.0);
+    let shows_load_more = !app.global_search.query.is_empty()
+        && app.global_search.has_more_results
+        && !app.global_search.loading
+        && (app.global_search.results.len() as u32) < MAX_RESULTS_CAP;
+    let shows_max_reached = app.global_search.has_more_results
+        && (app.global_search.results.len() as u32) >= MAX_RESULTS_CAP;
+    let footer_height = if shows_load_more || shows_max_reached {
+        RESULTS_FOOTER_HEIGHT
+    } else {
+        0.0
+    };
+    // Use modal_max_height as hard cap. 212 accounts for header+input+filters+spacing above.
+    let panel_height = (modal_max_height - 212.0).max(200.0 + footer_height);
+    let results_height = (panel_height - footer_height).max(200.0);
 
     if app.global_search.loading && app.global_search.results.is_empty() {
         ui.allocate_ui_with_layout(
@@ -147,133 +163,161 @@ pub(super) fn render_results_panel(
 
     ui.add_space(4.0);
 
-    // Scrollable results list (fixed viewport height).
+    // --- MANUAL VIRTUALIZATION (same approach as list view) ---
+    let total_rows = filtered_indices.len();
+    let total_content_height = total_rows as f32 * RESULT_ROW_HEIGHT;
+    let viewport_h = results_height;
+
+    // Keyboard navigation: Arrow Up/Down move selected_index within filtered results.
+    {
+        let arrow_down = ctx.input(|i| i.key_pressed(egui::Key::ArrowDown));
+        let arrow_up = ctx.input(|i| i.key_pressed(egui::Key::ArrowUp));
+        let page_down = ctx.input(|i| i.key_pressed(egui::Key::PageDown));
+        let page_up = ctx.input(|i| i.key_pressed(egui::Key::PageUp));
+
+        if (arrow_down || arrow_up || page_down || page_up) && !filtered_indices.is_empty() {
+            let current_filtered_pos = app
+                .global_search
+                .selected_index
+                .and_then(|sel| filtered_indices.iter().position(|&v| v == sel));
+
+            let page_step = ((viewport_h / RESULT_ROW_HEIGHT).floor() as usize).max(1);
+            let new_filtered_pos = if arrow_down {
+                match current_filtered_pos {
+                    Some(pos) => (pos + 1).min(filtered_indices.len() - 1),
+                    None => 0,
+                }
+            } else if arrow_up {
+                match current_filtered_pos {
+                    Some(pos) => pos.saturating_sub(1),
+                    None => 0,
+                }
+            } else if page_down {
+                match current_filtered_pos {
+                    Some(pos) => (pos + page_step).min(filtered_indices.len() - 1),
+                    None => 0,
+                }
+            } else {
+                // page_up
+                match current_filtered_pos {
+                    Some(pos) => pos.saturating_sub(page_step),
+                    None => 0,
+                }
+            };
+
+            app.global_search.selected_index = Some(filtered_indices[new_filtered_pos]);
+
+            // Auto-scroll to keep selected item visible.
+            let item_top = new_filtered_pos as f32 * RESULT_ROW_HEIGHT;
+            let item_bottom = item_top + RESULT_ROW_HEIGHT;
+            let scroll = &mut app.global_search.scroll_offset_y;
+            if item_top < *scroll {
+                *scroll = item_top.max(0.0);
+            } else if item_bottom > *scroll + viewport_h {
+                let max_scroll = (total_content_height - viewport_h).max(0.0);
+                *scroll = (item_bottom - viewport_h).clamp(0.0, max_scroll);
+            }
+        }
+    }
+
     let mut activate_result: Option<(String, bool)> = None;
-    ui.allocate_ui_with_layout(
-        egui::vec2(ui.available_width(), results_height),
-        egui::Layout::top_down(egui::Align::Min),
-        |ui| {
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    for &source_idx in &filtered_indices {
-                        let Some((full_path, is_dir, size)) = app
-                            .global_search
-                            .results
-                            .get(source_idx)
-                            .map(|r| (r.full_path.clone(), r.is_dir, r.size))
-                        else {
-                            continue;
-                        };
-                        let path_buf = std::path::PathBuf::from(&full_path);
-                        let file_type = file_type_label(&full_path, is_dir);
-                        let size_opt = resolve_result_size(app, &full_path, is_dir, size);
-                        let size_text = size_opt
-                            .map(crate::infrastructure::windows::format_size)
-                            .unwrap_or_else(|| "-".to_string());
-                        let meta_text = format!("{} | {}", file_type, size_text);
-
-                        let icon_tex = lookup_icon_with_size_guard(app, ctx, &path_buf, is_dir);
-                        // Request async extraction for unique-icon files (.exe, .lnk, etc.).
-                        if icon_tex.is_none()
-                            && !is_dir
-                            && !app.loading_icons.contains(&path_buf)
-                            && app.failed_icons.peek(&path_buf).is_none()
-                        {
-                            app.request_icon_load(path_buf.clone());
-                        }
-
-                        let (row_rect, _) = ui.allocate_exact_size(
-                            egui::vec2(ui.available_width(), RESULT_ROW_HEIGHT),
-                            egui::Sense::hover(),
-                        );
-
-                        let row_resp = ui.interact(
-                            row_rect,
-                            ui.id().with(("global_search_row", source_idx)),
-                            egui::Sense::click(),
-                        );
-
-                        if row_resp.clicked() {
-                            app.global_search.selected_index = Some(source_idx);
-                        }
-
-                        let is_selected = app.global_search.selected_index == Some(source_idx);
-                        if is_selected {
-                            ui.painter()
-                                .rect_filled(row_rect, 4.0, theme::COLOR_SELECTION);
-                        } else if row_resp.hovered() {
-                            ui.painter().rect_filled(row_rect, 4.0, hover_color);
-                        }
-
-                        let mut row_ui = ui.new_child(
-                            egui::UiBuilder::new()
-                                .max_rect(row_rect.shrink2(egui::vec2(8.0, 4.0)))
-                                .layout(egui::Layout::left_to_right(egui::Align::Center)),
-                        );
-                        row_ui.style_mut().interaction.selectable_labels = false;
-
-                        if let Some(icon) = icon_tex {
-                            row_ui.add(
-                                egui::Image::new(&icon).max_size(egui::vec2(ICON_SIZE, ICON_SIZE)),
-                            );
-                        }
-
-                        row_ui.add_space(8.0);
-                        row_ui.vertical(|ui| {
-                            let result_name = app
-                                .global_search
-                                .results
-                                .get(source_idx)
-                                .map(|r| r.name.as_str())
-                                .unwrap_or("");
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(result_name).strong().size(13.0),
-                                )
-                                .truncate(),
-                            );
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    egui::RichText::new(&meta_text)
-                                        .size(10.0)
-                                        .color(egui::Color32::from_gray(140)),
-                                );
-                                ui.add_space(6.0);
-                                ui.add(
-                                    egui::Label::new(
-                                        egui::RichText::new(&full_path)
-                                            .size(10.0)
-                                            .color(egui::Color32::from_gray(120)),
-                                    )
-                                    .truncate(),
-                                );
-                            });
-                        });
-
-                        // Double-click navigates to location.
-                        if row_resp.double_clicked() {
-                            activate_result = Some((full_path.clone(), is_dir));
-                        }
-
-                        ui.separator();
-                    }
-                });
-        },
+    let panel_size = egui::vec2(ui.available_width(), panel_height);
+    let (panel_rect, _) = ui.allocate_exact_size(panel_size, egui::Sense::hover());
+    let viewport_rect = egui::Rect::from_min_max(
+        panel_rect.min,
+        egui::pos2(panel_rect.max.x, panel_rect.max.y - footer_height),
     );
+
+    let available_w = viewport_rect.width();
+
+    // Mouse wheel scroll (same ×5 multiplier as list view).
+    let pointer_over = ui
+        .ctx()
+        .pointer_hover_pos()
+        .is_some_and(|pos| viewport_rect.contains(pos));
+    if pointer_over {
+        let delta = ui.input(|i| i.smooth_scroll_delta.y);
+        if delta != 0.0 {
+            app.global_search.scroll_offset_y -= delta * SCROLL_SENSITIVITY;
+            app.global_search.last_scroll_time = std::time::Instant::now();
+        }
+    }
+
+    // Clamp scroll offset.
+    let max_scroll = (total_content_height - viewport_h).max(0.0);
+    app.global_search.scroll_offset_y = app.global_search.scroll_offset_y.clamp(0.0, max_scroll);
+    let current_scroll = app.global_search.scroll_offset_y;
+
+    // Adaptive overscan: fewer rows during active scroll, more when idle.
+    let is_scrolling = app.global_search.last_scroll_time.elapsed().as_millis() < 80;
+
+    // Compute visible row range with adaptive overscan.
+    let overscan: usize = if is_scrolling { 2 } else { 5 };
+    let vis_min_row = ((current_scroll / RESULT_ROW_HEIGHT).floor() as usize).saturating_sub(overscan);
+    let vis_max_row = (((current_scroll + viewport_h) / RESULT_ROW_HEIGHT).ceil() as usize) + overscan;
+    let vis_max_row = vis_max_row.min(total_rows);
+
+    // Clip child UI to viewport.
+    let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(viewport_rect));
+    child_ui.set_clip_rect(viewport_rect);
+
+    let content_min = viewport_rect.min;
+
+    for i in vis_min_row..vis_max_row {
+        let Some(&source_idx) = filtered_indices.get(i) else {
+            continue;
+        };
+
+        let item_rect = egui::Rect::from_min_size(
+            egui::pos2(
+                content_min.x,
+                content_min.y + (i as f32 * RESULT_ROW_HEIGHT) - current_scroll,
+            ),
+            egui::vec2(available_w, RESULT_ROW_HEIGHT),
+        );
+
+        render_result_row(
+            &mut child_ui,
+            app,
+            ctx,
+            source_idx,
+            item_rect,
+            hover_color,
+            &mut activate_result,
+        );
+    }
+
+    // Custom scrollbar (same as list view).
+    if total_content_height > viewport_h && max_scroll > 0.0 {
+        render_scrollbar(
+            ui,
+            viewport_rect,
+            viewport_h,
+            total_content_height,
+            max_scroll,
+            current_scroll,
+            &mut app.global_search.scroll_offset_y,
+        );
+    }
 
     // Real pagination: request next page using offset/limit.
     if !app.global_search.query.is_empty() {
-        if app.global_search.has_more_results
-            && !app.global_search.loading
-            && (app.global_search.results.len() as u32) < MAX_RESULTS_CAP
-        {
+        if shows_load_more {
             let current_loaded = app.global_search.results.len() as u32;
             let next_offset = current_loaded;
             let next_limit = LOAD_MORE_STEP.min(MAX_RESULTS_CAP.saturating_sub(current_loaded));
 
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
+            let footer_rect = egui::Rect::from_min_max(
+                egui::pos2(panel_rect.min.x, panel_rect.max.y - footer_height),
+                panel_rect.max,
+            );
+            let mut footer_ui = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(footer_rect)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            );
+            footer_ui.add_space(6.0);
+            footer_ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new(t!("search.results_loaded", count = current_loaded).to_string())
                         .size(10.0)
@@ -301,11 +345,18 @@ pub(super) fn render_results_panel(
                     }
                 }
             });
-        } else if app.global_search.has_more_results
-            && (app.global_search.results.len() as u32) >= MAX_RESULTS_CAP
-        {
-            ui.add_space(6.0);
-            ui.label(
+        } else if shows_max_reached {
+            let footer_rect = egui::Rect::from_min_max(
+                egui::pos2(panel_rect.min.x, panel_rect.max.y - footer_height),
+                panel_rect.max,
+            );
+            let mut footer_ui = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(footer_rect)
+                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            );
+            footer_ui.add_space(6.0);
+            footer_ui.label(
                 egui::RichText::new(t!("search.max_reached", count = MAX_RESULTS_CAP).to_string())
                     .size(10.0)
                     .color(egui::Color32::from_gray(120)),
@@ -383,6 +434,174 @@ fn activate_search_result(app: &mut ImageViewerApp, full_path: &str, is_dir: boo
     } else {
         app.navigate_to(&parent_path);
     }
+}
+
+fn render_result_row(
+    ui: &mut egui::Ui,
+    app: &mut ImageViewerApp,
+    ctx: &egui::Context,
+    source_idx: usize,
+    row_rect: egui::Rect,
+    hover_color: egui::Color32,
+    activate_result: &mut Option<(String, bool)>,
+) {
+    let Some((full_path, result_name, is_dir, size)) = app
+        .global_search
+        .results
+        .get(source_idx)
+        .map(|result| {
+            (
+                result.full_path.clone(),
+                result.name.clone(),
+                result.is_dir,
+                result.size,
+            )
+        })
+    else {
+        return;
+    };
+
+    let path_buf = std::path::PathBuf::from(&full_path);
+    let file_type = file_type_label(&full_path, is_dir);
+    let size_opt = resolve_result_size(app, &full_path, is_dir, size);
+    let size_text = size_opt
+        .map(crate::infrastructure::windows::format_size)
+        .unwrap_or_else(|| "-".to_string());
+    let meta_text = format!("{} | {}", file_type, size_text);
+
+    let icon_tex = lookup_icon_with_size_guard(app, ctx, &path_buf, is_dir);
+    if icon_tex.is_none()
+        && !is_dir
+        && !app.loading_icons.contains(&path_buf)
+        && app.failed_icons.peek(&path_buf).is_none()
+    {
+        app.request_icon_load(path_buf.clone());
+    }
+
+    let row_resp = ui.interact(
+        row_rect,
+        ui.id().with(("global_search_row", source_idx)),
+        egui::Sense::click(),
+    );
+
+    if row_resp.clicked() {
+        app.global_search.selected_index = Some(source_idx);
+    }
+
+    let is_selected = app.global_search.selected_index == Some(source_idx);
+    if is_selected {
+        ui.painter()
+            .rect_filled(row_rect, 4.0, theme::COLOR_SELECTION);
+    } else if row_resp.hovered() {
+        ui.painter().rect_filled(row_rect, 4.0, hover_color);
+    }
+
+    // Separator line at bottom of row.
+    let separator_color = ui.visuals().widgets.noninteractive.bg_stroke.color;
+    ui.painter().hline(
+        row_rect.x_range(),
+        row_rect.bottom(),
+        egui::Stroke::new(1.0, separator_color),
+    );
+
+    let mut row_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(row_rect.shrink2(egui::vec2(8.0, 4.0)))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    row_ui.style_mut().interaction.selectable_labels = false;
+
+    if let Some(icon) = icon_tex {
+        row_ui.add(egui::Image::new(&icon).max_size(egui::vec2(ICON_SIZE, ICON_SIZE)));
+    }
+
+    row_ui.add_space(8.0);
+    row_ui.vertical(|ui| {
+        ui.add(
+            egui::Label::new(egui::RichText::new(&result_name).strong().size(13.0)).truncate(),
+        );
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new(&meta_text)
+                    .size(10.0)
+                    .color(egui::Color32::from_gray(140)),
+            );
+            ui.add_space(6.0);
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(&full_path)
+                        .size(10.0)
+                        .color(egui::Color32::from_gray(120)),
+                )
+                .truncate(),
+            );
+        });
+    });
+
+    if row_resp.double_clicked() {
+        *activate_result = Some((full_path, is_dir));
+    }
+}
+
+/// Custom scrollbar with track-click and drag (matches list view behavior).
+fn render_scrollbar(
+    ui: &mut egui::Ui,
+    viewport_rect: egui::Rect,
+    viewport_h: f32,
+    total_content_height: f32,
+    max_scroll: f32,
+    current_scroll: f32,
+    scroll_offset: &mut f32,
+) {
+    let bar_rect = egui::Rect::from_min_max(
+        egui::pos2(
+            viewport_rect.right() - SCROLLBAR_WIDTH - 2.0,
+            viewport_rect.top(),
+        ),
+        egui::pos2(viewport_rect.right() - 2.0, viewport_rect.bottom()),
+    );
+
+    let handle_h = (viewport_h / total_content_height * viewport_h)
+        .max(SCROLLBAR_MIN_HANDLE)
+        .min(viewport_h.max(SCROLLBAR_MIN_HANDLE));
+    let travel = (viewport_h - handle_h).max(1.0);
+    let handle_top = (current_scroll / max_scroll) * travel;
+    let handle_rect = egui::Rect::from_min_size(
+        egui::pos2(bar_rect.left(), viewport_rect.top() + handle_top),
+        egui::vec2(SCROLLBAR_WIDTH, handle_h),
+    );
+
+    let scroll_id = ui.id().with("global_search_scrollbar");
+    let response = ui.interact(bar_rect, scroll_id, egui::Sense::click_and_drag());
+
+    if response.clicked() {
+        if let Some(click_pos) = ui.input(|i| i.pointer.interact_pos()) {
+            let relative_y = click_pos.y - bar_rect.top();
+            let target_top = relative_y - (handle_h / 2.0);
+            let ratio = target_top / travel;
+            *scroll_offset = (ratio * max_scroll).clamp(0.0, max_scroll);
+        }
+    } else if response.dragged() {
+        let delta = response.drag_delta().y;
+        let scroll_per_pixel = max_scroll / travel;
+        *scroll_offset += delta * scroll_per_pixel;
+        *scroll_offset = scroll_offset.clamp(0.0, max_scroll);
+    }
+
+    // Draw track.
+    ui.painter()
+        .rect_filled(bar_rect, 0.0, egui::Color32::from_black_alpha(10));
+
+    // Draw handle.
+    let handle_color = if response.dragged() {
+        egui::Color32::from_gray(100)
+    } else if response.hovered() {
+        egui::Color32::from_gray(150)
+    } else {
+        egui::Color32::from_gray(200)
+    };
+    ui.painter()
+        .rect_filled(handle_rect, 2.0, handle_color);
 }
 
 fn file_type_label(full_path: &str, is_dir: bool) -> String {

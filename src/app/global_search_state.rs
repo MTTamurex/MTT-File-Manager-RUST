@@ -33,6 +33,10 @@ pub struct GlobalSearchState {
     pub available: bool,
     pub last_check: Instant,
     pub total_indexed: u64,
+    /// Manual scroll offset for virtualized results list.
+    pub scroll_offset_y: f32,
+    /// Tracks last scroll change for adaptive overscan.
+    pub last_scroll_time: Instant,
 }
 
 impl GlobalSearchState {
@@ -61,6 +65,8 @@ impl GlobalSearchState {
             available: false,
             last_check: Instant::now(),
             total_indexed: 0,
+            scroll_offset_y: 0.0,
+            last_scroll_time: Instant::now(),
         }
     }
 }
