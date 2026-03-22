@@ -92,6 +92,8 @@ pub struct ItemSlotContext<'a> {
     pub pending_upload_set: &'a mut FxHashSet<std::path::PathBuf>,
     pub is_dense_mode: bool,
     pub is_scrolling: bool,
+    /// Per-frame cap to prevent burst of thumbnail requests on folder entry
+    pub thumbnail_requests_this_frame: &'a mut usize,
 }
 
 /// Renders an item slot for grid view

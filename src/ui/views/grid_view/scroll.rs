@@ -25,6 +25,7 @@ pub(super) fn apply_scroll_input(
     target_scroll: &mut f32,
     max_scroll: f32,
     consume_scroll: bool,
+    generation: usize,
 ) {
     let dt = ui.input(|i| i.predicted_dt).min(0.05);
     let scroll_delta = if consume_scroll {
@@ -33,7 +34,8 @@ pub(super) fn apply_scroll_input(
         0.0
     };
 
-    let momentum_id = ui.id().with("scroll_momentum");
+    // Scope momentum to folder generation so it resets on navigation
+    let momentum_id = ui.id().with("scroll_momentum").with(generation);
     let has_momentum = ui.ctx().data_mut(|d| {
         let m = d.get_temp_mut_or_insert_with::<ScrollMomentum>(momentum_id, || {
             ScrollMomentum { velocity: 0.0 }
@@ -72,8 +74,9 @@ pub(super) fn apply_scroll_input(
     }
 }
 
-pub(super) fn compute_visual_scroll(ui: &Ui, target_scroll: f32, viewport_h: f32) -> (f32, f32) {
-    let scroll_state_id = ui.id().with("scroll_state");
+pub(super) fn compute_visual_scroll(ui: &Ui, target_scroll: f32, viewport_h: f32, generation: usize) -> (f32, f32) {
+    // Scope scroll state to folder generation so visual_scroll resets on navigation
+    let scroll_state_id = ui.id().with("scroll_state").with(generation);
     // Use predicted_dt (fixo, ~16.67ms) em vez de stable_dt (variável).
     // stable_dt herda picos de latência do eframe/wgpu (tessellation+present),
     // causando o lerp a "pular" nos frames lentos e "voltar" nos seguintes.

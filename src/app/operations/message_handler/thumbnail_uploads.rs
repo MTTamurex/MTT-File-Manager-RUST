@@ -113,7 +113,15 @@ impl ImageViewerApp {
                     .collect())
             });
 
-        while incoming_count < MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME {
+        // Reduce intake when pending queue is already backlogged to spread
+        // GPU upload work across more frames and prevent frame-time spikes.
+        let effective_incoming_cap = if self.pending_thumbnails.len() > 32 {
+            24
+        } else {
+            MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME
+        };
+
+        while incoming_count < effective_incoming_cap {
             if incoming_start.elapsed() >= incoming_budget {
                 has_more_incoming = true;
                 break;
@@ -205,7 +213,7 @@ impl ImageViewerApp {
             received_any = true;
         }
 
-        if incoming_count >= MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME {
+        if incoming_count >= effective_incoming_cap {
             has_more_incoming = true;
         }
 

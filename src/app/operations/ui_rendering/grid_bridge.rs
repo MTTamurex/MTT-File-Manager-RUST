@@ -294,6 +294,8 @@ impl ImageViewerApp {
             computer_local_indices: &self.navigation_state.computer_view_local_indices,
             computer_network_indices: &self.navigation_state.computer_view_network_indices,
             frame_time_peak_ms: self.frame_time_peak_ms,
+            thumbnail_requests_this_frame: 0,
+            generation: self.generation,
         };
 
         // Use a different approach: collect actions in vectors
