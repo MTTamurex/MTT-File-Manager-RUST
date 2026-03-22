@@ -28,6 +28,7 @@ impl ImageViewerApp {
         let mut pending_folder_preview_loads: Vec<std::path::PathBuf> = Vec::new();
         let mut pending_icon_loads: Vec<std::path::PathBuf> = Vec::new();
         let mut pending_rename: Option<usize> = None;
+        let mut thumbnail_requests_counter: usize = 0;
 
         // Rename text needs to be handled separately
         let mut renaming_text_clone = if is_renaming {
@@ -63,6 +64,7 @@ impl ImageViewerApp {
                 pending_upload_set: &mut self.cache_manager.pending_upload_set,
                 is_dense_mode: false,
                 is_scrolling: false,
+                thumbnail_requests_this_frame: &mut thumbnail_requests_counter,
             };
 
             // Create simple ops struct that collects operations

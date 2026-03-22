@@ -316,6 +316,7 @@ fn render_item_slot_for_grid(
             pending_upload_set: ctx.pending_upload_set,
             is_dense_mode: false,
             is_scrolling,
+            thumbnail_requests_this_frame: &mut ctx.thumbnail_requests_this_frame,
         };
 
         struct SimpleOps<'a> {

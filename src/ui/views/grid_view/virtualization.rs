@@ -36,8 +36,9 @@ pub(super) fn render_virtualized_grid(
     cleanup_loading_set(ctx, vis_min_row, vis_max_row, total_rows, cols, count);
     let t_after_cleanup = std::time::Instant::now();
 
-    let overscan = if ctx.frame_time_peak_ms > 80.0 {
+    let overscan = if ctx.frame_time_peak_ms > 80.0 && !is_scrolling {
         // Recovering from inactivity wake — minimize off-screen work
+        // But allow normal overscan while scrolling to prevent pop-in
         1
     } else if is_scrolling {
         if ctx.scroll_predictor.velocity > 5.0 {
@@ -123,7 +124,10 @@ fn cleanup_loading_set(
     cols: usize,
     count: usize,
 ) {
-    if ctx.loading_set.len() <= 30 {
+    // Skip cleanup when the set is small or items are still loading in batches.
+    // Raising the threshold avoids rebuilding a HashSet every frame during the
+    // initial folder load burst (when loading_set grows rapidly from 0 → 200).
+    if ctx.loading_set.len() <= 80 {
         return;
     }
 

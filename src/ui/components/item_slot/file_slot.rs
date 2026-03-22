@@ -20,13 +20,16 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
         let is_failed = ctx.failed_thumbnails.contains(&item.path);
         let is_pending_upload = ctx.pending_upload_set.contains(&item.path);
 
+        const MAX_THUMBNAIL_REQUESTS_PER_FRAME: usize = 24;
         if !has_texture
             && !is_loading
             && !is_failed
             && !is_pending_upload
             && ctx.loading_set.len() < 200
+            && *ctx.thumbnail_requests_this_frame < MAX_THUMBNAIL_REQUESTS_PER_FRAME
         {
             // MAX_CONCURRENT_LOADS (increased for performance - stale entries are cleaned by grid_view)
+            *ctx.thumbnail_requests_this_frame += 1;
             ctx.loading_set.insert(item.path.clone());
             ops.request_thumbnail_load(
                 item.path.clone(),

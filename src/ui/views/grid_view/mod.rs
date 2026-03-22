@@ -186,6 +186,10 @@ pub struct GridViewContext<'a> {
     pub computer_network_indices: &'a [usize],
     /// PERFORMANCE: Peak frame time for adaptive overscan after inactivity wake
     pub frame_time_peak_ms: f32,
+    /// Per-frame counter to rate-limit thumbnail requests on folder entry
+    pub thumbnail_requests_this_frame: usize,
+    /// Folder generation counter — scopes scroll state to current folder
+    pub generation: usize,
 }
 
 /// Operations that can be performed from grid view
@@ -273,9 +277,9 @@ pub fn render_grid_view(
     });
     let consume_scroll = pointer_over_viewport && !ctx.global_search_active;
 
-    scroll::apply_scroll_input(ui, ctx.mut_scroll_offset_y, max_scroll, consume_scroll);
+    scroll::apply_scroll_input(ui, ctx.mut_scroll_offset_y, max_scroll, consume_scroll, ctx.generation);
     let (current_scroll, scroll_delta) =
-        scroll::compute_visual_scroll(ui, *ctx.mut_scroll_offset_y, viewport_h);
+        scroll::compute_visual_scroll(ui, *ctx.mut_scroll_offset_y, viewport_h, ctx.generation);
     let t_after_scroll = std::time::Instant::now();
 
     // PERFORMANCE: Track scroll changes
