@@ -1373,11 +1373,15 @@ function layouts()
     lo.style = osc_styles.button
 
     lo = add_layout("tog_vsr")
+    lo.geometry = {x = osc_geo.w - 268, y = btnY, an = 5, w = btnW, h = btnH}
+    lo.style = osc_styles.button
+
+    lo = add_layout("tog_hdr")
     lo.geometry = {x = osc_geo.w - 228, y = btnY, an = 5, w = btnW, h = btnH}
     lo.style = osc_styles.button
 
     lo = add_layout("open_sub")
-    lo.geometry = {x = osc_geo.w - 268, y = btnY, an = 5, w = btnW, h = btnH}
+    lo.geometry = {x = osc_geo.w - 308, y = btnY, an = 5, w = btnW, h = btnH}
     lo.style = osc_styles.button
 
     lo = add_layout("tog_norm")
@@ -1612,7 +1616,7 @@ function osc_init()
 
     --open_sub
     ne = new_element("open_sub", "button")
-    ne.visible = (osc_param.playresx >= 616)
+    ne.visible = (osc_param.playresx >= 656)
     ne.tooltip_style = osc_styles.tooltip
     ne.tooltipF = function ()
         return texts.open_subtitle
@@ -1691,22 +1695,41 @@ function osc_init()
 
     --tog_vsr
     ne = new_element("tog_vsr", "button")
-    ne.visible = (osc_param.playresx >= 576)
+    ne.visible = (osc_param.playresx >= 616)
     ne.tooltip_style = osc_styles.tooltip
     ne.tooltipF = function ()
-        local on = mp.get_property_bool("user-data/vsr/vsr-enabled", true)
-        return "RTX: " .. (on and "ON" or "OFF")
+        local on = mp.get_property_bool("user-data/vsr/vsr-enabled", false)
+        return "RTX VSR: " .. (on and "ON" or "OFF")
     end
     ne.content = function ()
-        local on = mp.get_property_bool("user-data/vsr/vsr-enabled", true)
+        local on = mp.get_property_bool("user-data/vsr/vsr-enabled", false)
         if on then
-            return "{\\fs14\\1c&H00FF00}RTX{\\1c&HFFFFFF}"
+            return "{\\fs8\\1c&H00FF00}RTX\\NVSR{\\1c&HFFFFFF}"
         else
-            return "{\\fs14\\1c&H808080}RTX{\\1c&HFFFFFF}"
+            return "{\\fs8\\1c&H808080}RTX\\NVSR{\\1c&HFFFFFF}"
         end
     end
     ne.eventresponder["mbtn_left_up"] =
         function () mp.commandv("script-message-to", "vsr", "toggle-vsr") end
+
+    --tog_hdr
+    ne = new_element("tog_hdr", "button")
+    ne.visible = (osc_param.playresx >= 616)
+    ne.tooltip_style = osc_styles.tooltip
+    ne.tooltipF = function ()
+        local on = mp.get_property_bool("user-data/vsr/hdr-enabled", false)
+        return "RTX HDR: " .. (on and "ON" or "OFF")
+    end
+    ne.content = function ()
+        local on = mp.get_property_bool("user-data/vsr/hdr-enabled", false)
+        if on then
+            return "{\\fs8\\1c&H00FF00}RTX\\NHDR{\\1c&HFFFFFF}"
+        else
+            return "{\\fs8\\1c&H808080}RTX\\NHDR{\\1c&HFFFFFF}"
+        end
+    end
+    ne.eventresponder["mbtn_left_up"] =
+        function () mp.commandv("script-message-to", "vsr", "toggle-hdr") end
 
     --tog_norm
     ne = new_element("tog_norm", "button")
