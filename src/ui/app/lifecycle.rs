@@ -102,6 +102,16 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
             // slow first-paint or blank tiles on resume.
             if idle_secs > 10.0 {
                 flush_gpu_textures_for_reupload(app);
+                // Burst window scales with inactivity: 5s base + 1s per 60s idle, capped at 12s.
+                let burst_secs = (5.0 + idle_secs / 60.0).min(12.0);
+                app.restore_burst_until = Some(
+                    std::time::Instant::now()
+                        + std::time::Duration::from_secs_f64(burst_secs),
+                );
+                log::info!(
+                    "[LIFECYCLE] Restore burst mode enabled for {:.1}s",
+                    burst_secs
+                );
             }
             log::info!(
                 "[LIFECYCLE] App regained focus after {:.1}s in background - resetting peak metrics",
@@ -128,6 +138,15 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
             app.frame_time_peak_ms = app.frame_time_avg_ms.max(16.0);
             if minimized_secs > 10.0 {
                 flush_gpu_textures_for_reupload(app);
+                let burst_secs = (5.0 + minimized_secs / 60.0).min(12.0);
+                app.restore_burst_until = Some(
+                    std::time::Instant::now()
+                        + std::time::Duration::from_secs_f64(burst_secs),
+                );
+                log::info!(
+                    "[LIFECYCLE] Restore burst mode enabled for {:.1}s",
+                    burst_secs
+                );
             }
             log::info!(
                 "[LIFECYCLE] App restored after {:.1}s of inactivity - resetting peak metrics",

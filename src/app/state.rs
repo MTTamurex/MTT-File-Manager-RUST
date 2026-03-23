@@ -370,6 +370,12 @@ pub struct ImageViewerApp {
     pub last_restore_time: Instant,
     pub minimized_duration_secs: f64,
 
+    // RESTORE BURST MODE: After prolonged idle/minimize, the OS pages out the GPU
+    // working set.  Normal adaptive throttling sees slow frames and reduces uploads
+    // to 1-2/frame — exactly the wrong response.  Burst mode overrides the throttle
+    // for a limited window so textures re-populate within ~2-3 seconds.
+    pub restore_burst_until: Option<Instant>,
+
     // PREFERENCES DEBOUNCE: Instead of writing 20+ SQLite rows immediately on every
     // state change (which blocks the UI thread with disk I/O), we set a dirty flag
     // and flush no more than once per second.
@@ -408,6 +414,14 @@ pub struct ImageViewerApp {
 }
 
 impl ImageViewerApp {
+    /// Returns `true` while the post-restore burst window is active.
+    /// During burst, thumbnail upload throttling is bypassed to recover visual
+    /// state quickly after the OS pages out the GPU working set.
+    pub fn is_in_restore_burst(&self) -> bool {
+        self.restore_burst_until
+            .is_some_and(|deadline| Instant::now() < deadline)
+    }
+
     /// Check if a video is actively playing in docked mode (preview panel)
     /// Used to throttle disk I/O from thumbnails to prevent stutter during video playback
     pub fn is_video_playing_docked(&self) -> bool {
@@ -498,7 +512,16 @@ impl ImageViewerApp {
         }
 
         let aggressive = working_set_bytes >= HARD_LIMIT_BYTES;
-        let max_pending = if aggressive { 24 } else { 48 };
+        // During restore burst, allow a larger pending queue — we're actively
+        // re-populating VRAM after an OS paging event.
+        let is_burst = self.is_in_restore_burst();
+        let max_pending = if is_burst {
+            192
+        } else if aggressive {
+            24
+        } else {
+            48
+        };
         let min_folder_previews_keep = self.estimated_visible_folder_previews();
 
         while self.pending_thumbnails.len() > max_pending {
@@ -509,7 +532,10 @@ impl ImageViewerApp {
             }
         }
 
-        let (textures_removed, rgba_removed, folder_previews_removed) = if aggressive {
+        let (textures_removed, rgba_removed, folder_previews_removed) = if is_burst {
+            // Skip texture/RGBA trimming during burst — we need the caches full.
+            (0, 0, 0)
+        } else if aggressive {
             self.cache_manager.trim_thumbnail_caches(
                 96,
                 64 * 1024 * 1024,
