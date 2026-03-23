@@ -92,8 +92,14 @@ impl ImageViewerApp {
         let mut received_any = false;
         let mut incoming_count = 0usize;
         let mut has_more_incoming = false;
+        let is_burst = self.is_in_restore_burst();
         let frame_pressure_ms = live_frame_pressure_ms(self);
-        let incoming_budget = if frame_pressure_ms > CRITICAL_FRAME_TIME_MS {
+        // During burst, ignore frame pressure for intake — the slow frames are caused
+        // by OS paging, not by actual rendering load.  A generous budget lets us
+        // drain the worker channel and queue items for upload faster.
+        let incoming_budget = if is_burst {
+            Duration::from_millis(8)
+        } else if frame_pressure_ms > CRITICAL_FRAME_TIME_MS {
             Duration::from_millis(MIN_INCOMING_THUMBNAIL_BUDGET_MS)
         } else {
             Duration::from_millis(MAX_INCOMING_THUMBNAIL_BUDGET_MS)
@@ -115,7 +121,10 @@ impl ImageViewerApp {
 
         // Reduce intake when pending queue is already backlogged to spread
         // GPU upload work across more frames and prevent frame-time spikes.
-        let effective_incoming_cap = if self.pending_thumbnails.len() > 32 {
+        // During burst mode, skip the throttle — we want to fill the queue fast.
+        let effective_incoming_cap = if is_burst {
+            MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME
+        } else if self.pending_thumbnails.len() > 32 {
             24
         } else {
             MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME
@@ -175,7 +184,7 @@ impl ImageViewerApp {
                 continue;
             }
 
-            while self.pending_thumbnails.len() >= MAX_PENDING_THUMBNAILS {
+            while self.pending_thumbnails.len() >= if is_burst { MAX_PENDING_THUMBNAILS * 3 } else { MAX_PENDING_THUMBNAILS } {
                 // FIX: Smart eviction — prefer removing off-screen items to keep visible
                 // ones alive. On SSD, the worker queue processes most-recently-added items
                 // first (LIFO), so items from the user's final scroll position arrive first
@@ -273,8 +282,10 @@ impl ImageViewerApp {
 
         let is_scrolling = self.last_scroll_time.elapsed() < Duration::from_millis(100);
         let is_video_playing = self.is_video_playing_docked();
-        let is_performance_critical = frame_pressure_ms > CRITICAL_FRAME_TIME_MS;
-        let is_performance_severe = frame_pressure_ms > SEVERE_FRAME_TIME_MS;
+        // During burst, suppress pressure flags so the upload loop doesn't defer
+        // off-screen items or reduce visible-only mode.
+        let is_performance_critical = !is_burst && frame_pressure_ms > CRITICAL_FRAME_TIME_MS;
+        let is_performance_severe = !is_burst && frame_pressure_ms > SEVERE_FRAME_TIME_MS;
 
         let open_tabs = self.tab_manager.count().max(1);
 
@@ -283,9 +294,12 @@ impl ImageViewerApp {
         {
             let queue_pending = self.thumbnail_queue.pending_count();
             let upload_pending = self.pending_thumbnails.len();
+            // During burst, report low pressure so the cache size stays at its
+            // maximum — shrinking the LRU now would evict textures we just uploaded.
+            let retune_pressure = if is_burst { 10.0 } else { frame_pressure_ms };
             let target_texture_items = compute_texture_cache_target_items(
                 self,
-                frame_pressure_ms,
+                retune_pressure,
                 open_tabs,
                 is_scrolling,
                 is_video_playing,
@@ -327,7 +341,14 @@ impl ImageViewerApp {
             1.0
         };
 
-        let base_max_uploads = if is_performance_critical {
+        // During restore burst, bypass the adaptive throttle entirely.
+        // The slow frames are caused by OS page-faults on the RGBA RAM cache,
+        // not by rendering complexity.  Restricting uploads only prolongs the
+        // blank-tile period.  We allow up to 48 uploads/frame (clamped by the
+        // generous time budget below) which fills the visible grid in ~2-3 seconds.
+        let base_max_uploads = if is_burst {
+            48
+        } else if is_performance_critical {
             1
         } else if is_performance_severe {
             2
@@ -343,9 +364,12 @@ impl ImageViewerApp {
 
         let base_max_uploads = ((base_max_uploads as f32) * tab_upload_boost)
             .round()
-            .clamp(1.0, 20.0) as usize;
+            .clamp(1.0, if is_burst { 64.0 } else { 20.0 }) as usize;
 
-        let perf_scale = if self.frame_time_avg_ms <= 0.0 {
+        let perf_scale = if is_burst {
+            // During burst the frame_time_avg is inflated by OS paging; don't penalise.
+            1.0
+        } else if self.frame_time_avg_ms <= 0.0 {
             1.0
         } else if self.frame_time_avg_ms < 12.0 {
             1.25
@@ -356,9 +380,14 @@ impl ImageViewerApp {
         } else {
             0.7
         };
-        let max_uploads_per_frame = ((base_max_uploads as f32) * perf_scale)
-            .round()
-            .clamp(1.0, 20.0) as usize;
+        let max_uploads_per_frame = if is_burst {
+            // Burst: don't reduce through perf_scale; use the burst cap directly.
+            base_max_uploads
+        } else {
+            ((base_max_uploads as f32) * perf_scale)
+                .round()
+                .clamp(1.0, 20.0) as usize
+        };
 
         let mut uploads_this_frame = 0;
         let upload_start = Instant::now();
@@ -387,7 +416,11 @@ impl ImageViewerApp {
             self.last_upload_budget_update = now;
         }
 
-        let base_budget_ms = if is_video_playing && is_scrolling {
+        let base_budget_ms = if is_burst {
+            // Generous time budget during burst — worth spending frame time now
+            // to avoid many more slow frames with blank tiles.
+            16.0
+        } else if is_video_playing && is_scrolling {
             self.upload_budget_ms * 0.6
         } else if is_video_playing {
             self.upload_budget_ms * 0.75
@@ -396,7 +429,11 @@ impl ImageViewerApp {
         } else {
             self.upload_budget_ms
         };
-        let upload_budget_ms = (base_budget_ms * perf_scale).clamp(2.0, 10.0);
+        let upload_budget_ms = if is_burst {
+            base_budget_ms
+        } else {
+            (base_budget_ms * perf_scale).clamp(2.0, 10.0)
+        };
         let upload_budget = Duration::from_millis(upload_budget_ms.round() as u64);
 
         let mut prioritized_path: Option<PathBuf> = None;
@@ -544,9 +581,9 @@ impl ImageViewerApp {
             ctx.request_repaint();
         }
 
-        if received_any && (incoming_count >= 32 || uploads_this_frame >= 8) {
+        if received_any && (is_burst || incoming_count >= 32 || uploads_this_frame >= 8) {
             log::debug!(
-                "[PERF-THUMB-UPLOAD] incoming={} uploads={} pending={} max_uploads={} upload_budget_ms={:.1} frame_pressure_ms={:.1} tabs={} critical={} severe={} scrolling={} video={}",
+                "[PERF-THUMB-UPLOAD] incoming={} uploads={} pending={} max_uploads={} upload_budget_ms={:.1} frame_pressure_ms={:.1} tabs={} burst={} critical={} severe={} scrolling={} video={}",
                 incoming_count,
                 uploads_this_frame,
                 self.pending_thumbnails.len(),
@@ -554,6 +591,7 @@ impl ImageViewerApp {
                 upload_budget_ms,
                 frame_pressure_ms,
                 open_tabs,
+                is_burst,
                 is_performance_critical,
                 is_performance_severe,
                 is_scrolling,

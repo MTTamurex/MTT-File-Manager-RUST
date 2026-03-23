@@ -87,7 +87,13 @@ impl eframe::App for ImageViewerApp {
             self.refresh_drives_if_needed();
             // Ensure the bitmask check runs even when the app is idle (no mouse/keyboard).
             // Without this, egui won't repaint and the timer never fires.
-            ctx.request_repaint_after(std::time::Duration::from_millis(DRIVE_BITMASK_REPAINT_MS));
+            // During restore burst, repaint as fast as possible so textures re-populate
+            // without waiting for user input or the 1-second idle timer.
+            if self.is_in_restore_burst() {
+                ctx.request_repaint();
+            } else {
+                ctx.request_repaint_after(std::time::Duration::from_millis(DRIVE_BITMASK_REPAINT_MS));
+            }
             let t2 = std::time::Instant::now();
             self.poll_drive_scan();
             self.poll_drive_info();

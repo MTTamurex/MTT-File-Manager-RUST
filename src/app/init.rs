@@ -473,6 +473,7 @@ impl ImageViewerApp {
             // INACTIVITY RECOVERY
             last_restore_time: Instant::now(),
             minimized_duration_secs: 0.0,
+            restore_burst_until: None,
 
             // PREFERENCES DEBOUNCE
             preferences_dirty: false,

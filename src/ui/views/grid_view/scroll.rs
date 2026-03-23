@@ -1,6 +1,6 @@
 use eframe::egui::{self, Color32, Rect, Sense, Ui};
 
-const GRID_SCROLL_SPEED: f32 = 5.0;
+const GRID_SCROLL_SPEED: f32 = 8.0;
 
 /// Per-frame velocity retention at 60 fps.  Lower = momentum fades faster.
 /// 0.82 ≈ 350 px of extra coast after a typical wheel flick (~2-3 grid rows).
