@@ -2,10 +2,15 @@ local mp = require 'mp'
 
 -- Configuration
 local autovsr_enabled = false
-local vsr_filter_active = false
+local autohdr_enabled = false
+local rtx_filter_active = false
 
--- Publish initial state for OSC buttons
-mp.set_property_bool("user-data/vsr/vsr-enabled", autovsr_enabled)
+local function publish_button_states()
+    mp.set_property_bool("user-data/vsr/vsr-enabled", autovsr_enabled)
+    mp.set_property_bool("user-data/vsr/hdr-enabled", autohdr_enabled)
+end
+
+publish_button_states()
 
 local function needs_format_conversion(codec, pixelformat)
     if codec:lower():match("hevc") or codec:lower():match("h%.265") then
@@ -30,44 +35,90 @@ local function compute_vsr_scale()
 end
 
 local function remove_vsr()
-    pcall(mp.commandv, "vf", "remove", "@rtx-vsr")
+    pcall(mp.commandv, "vf", "remove", "@rtx-video")
     pcall(mp.commandv, "vf", "remove", "@format-nv12")
-    vsr_filter_active = false
+    rtx_filter_active = false
+end
+
+local function build_rtx_filter()
+    if not autovsr_enabled and not autohdr_enabled then
+        return nil
+    end
+
+    local options = {}
+
+    if autovsr_enabled then
+        local scale = compute_vsr_scale()
+        if not scale then
+            return nil
+        end
+        table.insert(options, "scaling-mode=nvidia")
+        table.insert(options, "scale=" .. scale)
+    end
+
+    if autohdr_enabled then
+        table.insert(options, "nvidia-true-hdr")
+    end
+
+    return "@rtx-video:d3d11vpp=" .. table.concat(options, ":")
 end
 
 -- Add the VSR filter chain. Returns true if successful.
 local function add_vsr()
     local codec = mp.get_property("video-codec", "")
     local pixelformat = mp.get_property("video-params/pixelformat", "")
-    if codec == "" then return false end
+    if codec == "" then
+        return false
+    end
+
+    local filter_str = build_rtx_filter()
+    if not filter_str then
+        return false
+    end
 
     if needs_format_conversion(codec, pixelformat) then
         pcall(mp.commandv, "vf", "append", "@format-nv12:format=nv12")
     end
 
-    local scale = compute_vsr_scale()
-    if not scale then return false end
-
-    local filter_str = "@rtx-vsr:d3d11vpp=scaling-mode=nvidia:scale=" .. scale .. ":nvidia-true-hdr"
     local ok = pcall(mp.commandv, "vf", "append", filter_str)
     if ok then
-        vsr_filter_active = true
+        rtx_filter_active = true
         return true
     end
+    pcall(mp.commandv, "vf", "remove", "@format-nv12")
     return false
+end
+
+local function refresh_rtx_filters()
+    remove_vsr()
+    if autovsr_enabled or autohdr_enabled then
+        return add_vsr()
+    end
+    return true
+end
+
+local function show_toggle_message(label, enabled, active)
+    if enabled then
+        mp.osd_message(active and (label .. ": ON") or (label .. ": ON (not active)"), 2)
+    else
+        mp.osd_message(label .. ": OFF", 2)
+    end
 end
 
 local function toggle_vsr()
     autovsr_enabled = not autovsr_enabled
-    mp.set_property_bool("user-data/vsr/vsr-enabled", autovsr_enabled)
+    publish_button_states()
 
-    remove_vsr()
-    if autovsr_enabled then
-        local ok = add_vsr()
-        mp.osd_message(ok and "RTX: ON" or "RTX: ON (not active)", 2)
-    else
-        mp.osd_message("RTX: OFF", 2)
-    end
+    local ok = refresh_rtx_filters()
+    show_toggle_message("RTX VSR", autovsr_enabled, ok)
+end
+
+local function toggle_hdr()
+    autohdr_enabled = not autohdr_enabled
+    publish_button_states()
+
+    local ok = refresh_rtx_filters()
+    show_toggle_message("RTX HDR", autohdr_enabled, ok)
 end
 
 -- FULLSCREEN TRANSITION FIX
@@ -77,7 +128,7 @@ end
 -- Fix: temporarily remove the filter before the window is resized, then
 -- re-add it once the window has settled at the correct geometry.
 mp.observe_property("fullscreen", "bool", function(name, is_fs)
-    if not is_fs and autovsr_enabled and vsr_filter_active then
+    if not is_fs and autovsr_enabled and rtx_filter_active then
         remove_vsr()
         mp.add_timeout(0.3, function()
             if autovsr_enabled and not mp.get_property_bool("fullscreen") then
@@ -89,7 +140,7 @@ end)
 
 -- Apply filters on file load if VSR was already enabled.
 mp.register_event("file-loaded", function()
-    if autovsr_enabled then
+    if autovsr_enabled or autohdr_enabled then
         local retries = 0
         local max_retries = 15
         local function try_apply()
@@ -106,7 +157,7 @@ mp.register_event("file-loaded", function()
                 if retries <= max_retries then
                     mp.add_timeout(0.2, try_apply)
                 else
-                    mp.msg.warn("RTX VSR: hwdec-current not populated after retries, applying anyway")
+                    mp.msg.warn("RTX filters: hwdec-current not populated after retries, applying anyway")
                     add_vsr()
                 end
             end
@@ -117,3 +168,4 @@ end)
 
 mp.add_key_binding("ctrl+shift+r", "autovsr", toggle_vsr)
 mp.register_script_message("toggle-vsr", toggle_vsr)
+mp.register_script_message("toggle-hdr", toggle_hdr)
