@@ -9,6 +9,8 @@
 #define MyAppVersion   "0.1.0"
 #define MyAppPublisher "MTT"
 #define MyAppExeName   "mtt-file-manager.exe"
+#define MySearchSvc    "mtt-search-service.exe"
+#define MySearchName   "MTTFileManagerSearch"
 #define MyAppURL       "https://github.com/MTT-File-Manager-RUST"
 
 ; Source root is the repository root (one level above this .iss file)
@@ -35,8 +37,7 @@ LZMAUseSeparateProcess=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
-PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
+PrivilegesRequired=admin
 MinVersion=10.0
 DisableProgramGroupPage=yes
 
@@ -54,6 +55,9 @@ Source: "{#SrcRoot}\target\release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ig
 ; libmpv runtime
 Source: "{#SrcRoot}\target\release\libmpv-2.dll"; DestDir: "{app}"; Flags: ignoreversion
 
+; Search service
+Source: "{#SrcRoot}\target\release\{#MySearchSvc}"; DestDir: "{app}"; Flags: ignoreversion
+
 ; mpv portable config (scripts, settings)
 Source: "{#SrcRoot}\mpv_ui\portable_config\mpv.conf";            DestDir: "{app}\mpv_ui\portable_config"; Flags: ignoreversion
 Source: "{#SrcRoot}\mpv_ui\portable_config\scripts\*";           DestDir: "{app}\mpv_ui\portable_config\scripts"; Flags: ignoreversion recursesubdirs
@@ -64,7 +68,16 @@ Name: "{group}\{#MyAppName}";         Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}";   Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
+; Install and start the search indexer Windows service
+Filename: "{app}\{#MySearchSvc}"; Parameters: "install"; StatusMsg: "Installing search service..."; Flags: runhidden waituntilterminated
+Filename: "sc.exe"; Parameters: "start {#MySearchName}"; StatusMsg: "Starting search service..."; Flags: runhidden waituntilterminated
+; Launch main app
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[UninstallRun]
+; Stop and remove the search service before files are deleted
+Filename: "sc.exe"; Parameters: "stop {#MySearchName}"; Flags: runhidden waituntilterminated
+Filename: "{app}\{#MySearchSvc}"; Parameters: "uninstall"; Flags: runhidden waituntilterminated
 
 [Code]
 // Check if VC++ Redistributable 2015-2022 (x64) is installed
