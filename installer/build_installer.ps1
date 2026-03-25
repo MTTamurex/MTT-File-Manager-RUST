@@ -28,7 +28,7 @@ if (-not $SkipBuild) {
     Write-Host "`n[1/3] Building release binary..." -ForegroundColor Yellow
     Push-Location $RepoRoot
     try {
-        cargo build --release
+        cargo build --release --workspace
         if ($LASTEXITCODE -ne 0) { throw "cargo build failed (exit code $LASTEXITCODE)" }
     } finally {
         Pop-Location
@@ -42,6 +42,7 @@ Write-Host "`n[2/3] Validating required files..." -ForegroundColor Yellow
 
 $requiredFiles = @(
     "$RepoRoot\target\release\mtt-file-manager.exe",
+    "$RepoRoot\target\release\mtt-search-service.exe",
     "$RepoRoot\target\release\libmpv-2.dll",
     "$RepoRoot\appicon.ico",
     "$RepoRoot\mpv_ui\portable_config\mpv.conf"
