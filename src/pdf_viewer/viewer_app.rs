@@ -11,7 +11,8 @@ use eframe::egui;
 use rust_i18n::t;
 
 use super::render_worker::{RenderRequest, RenderWorker};
-use super::renderer::PdfRenderer;
+use super::renderer::{PdfRenderer, PdfTextSegment};
+use super::selection::{DragSelection, PageSelection};
 
 /// Pages beyond ±CACHE_RADIUS from the current view are evicted.
 const CACHE_RADIUS: u32 = 6;
@@ -50,9 +51,8 @@ impl PageTexture {
 // ── App ──────────────────────────────────────────────────────────────────────
 
 pub struct PdfViewerApp {
-    /// Renderer is staged here until the first `update()`, then moved to the
-    /// worker thread.
-    renderer_staging: Option<PdfRenderer>,
+    worker_path: PathBuf,
+    pub(super) text_renderer: PdfRenderer,
     worker: Option<RenderWorker>,
 
     pub(super) total_pages: u32,
@@ -78,20 +78,25 @@ pub struct PdfViewerApp {
     pending: HashSet<u32>,
     /// Current total memory used by cached textures (tracked incrementally).
     cache_bytes: usize,
+
+    pub(super) page_text: HashMap<u32, Vec<PdfTextSegment>>,
+    pub(super) drag_selection: Option<DragSelection>,
+    pub(super) selection: Option<PageSelection>,
 }
 
 impl PdfViewerApp {
     pub fn new(path: PathBuf) -> Result<Self, String> {
-        let renderer = PdfRenderer::open(&path)?;
-        let total_pages = renderer.page_count();
+        let text_renderer = PdfRenderer::open(&path)?;
+        let total_pages = text_renderer.page_count();
 
         let mut page_sizes = Vec::with_capacity(total_pages as usize);
         for i in 0..total_pages {
-            page_sizes.push(renderer.page_size(i).unwrap_or((612.0, 792.0)));
+            page_sizes.push(text_renderer.page_size(i).unwrap_or((612.0, 792.0)));
         }
 
         Ok(Self {
-            renderer_staging: Some(renderer),
+            worker_path: path,
+            text_renderer,
             worker: None,
             total_pages,
             page_sizes,
@@ -105,6 +110,9 @@ impl PdfViewerApp {
             textures: HashMap::new(),
             pending: HashSet::new(),
             cache_bytes: 0,
+            page_text: HashMap::new(),
+            drag_selection: None,
+            selection: None,
         })
     }
 
@@ -112,9 +120,7 @@ impl PdfViewerApp {
 
     fn ensure_worker(&mut self, ctx: &egui::Context) {
         if self.worker.is_none() {
-            if let Some(r) = self.renderer_staging.take() {
-                self.worker = Some(RenderWorker::spawn(r, ctx.clone()));
-            }
+            self.worker = Some(RenderWorker::spawn(self.worker_path.clone(), ctx.clone()));
         }
     }
 
@@ -413,7 +419,7 @@ impl PdfViewerApp {
 
                 let (rect, resp) = ui.allocate_exact_size(
                     egui::vec2(dw, dh),
-                    egui::Sense::hover(),
+                    egui::Sense::click_and_drag(),
                 );
 
                 if self.scroll_to_page == Some(idx) {
@@ -443,6 +449,8 @@ impl PdfViewerApp {
                     } else {
                         Self::paint_placeholder(ui.painter(), rect, idx);
                     }
+
+                    self.handle_page_selection(ui, &resp, idx, rect);
                 }
             });
 
@@ -482,6 +490,7 @@ impl eframe::App for PdfViewerApp {
         self.ensure_worker(ctx);
         self.poll_results(ctx);
         self.handle_keyboard(ctx);
+        self.handle_selection_shortcuts(ctx);
 
         egui::TopBottomPanel::top("pdf_toolbar").show(ctx, |ui| {
             self.show_toolbar(ui);

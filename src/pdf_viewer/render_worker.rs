@@ -8,6 +8,7 @@ use super::renderer::PdfRenderer;
 use crossbeam_channel::{Receiver, Sender};
 use eframe::egui;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 pub(super) struct RenderRequest {
     pub page_idx: u32,
@@ -28,14 +29,14 @@ pub(super) struct RenderWorker {
 }
 
 impl RenderWorker {
-    /// Spawn the worker thread.  Takes ownership of the renderer.
-    pub fn spawn(renderer: PdfRenderer, repaint: egui::Context) -> Self {
+    /// Spawn the worker thread.
+    pub fn spawn(path: PathBuf, repaint: egui::Context) -> Self {
         let (req_tx, req_rx) = crossbeam_channel::unbounded();
         let (res_tx, res_rx) = crossbeam_channel::unbounded();
 
         std::thread::Builder::new()
             .name("pdf-render".into())
-            .spawn(move || worker_loop(renderer, req_rx, res_tx, repaint))
+            .spawn(move || worker_loop(path, req_rx, res_tx, repaint))
             .expect("spawn pdf-render thread");
 
         Self {
@@ -60,11 +61,19 @@ impl RenderWorker {
 }
 
 fn worker_loop(
-    renderer: PdfRenderer,
+    path: PathBuf,
     rx: Receiver<RenderRequest>,
     tx: Sender<RenderResult>,
     repaint: egui::Context,
 ) {
+    let renderer = match PdfRenderer::open(&path) {
+        Ok(renderer) => renderer,
+        Err(err) => {
+            log::error!("[PDF-RENDER] failed to open {}: {err}", path.display());
+            return;
+        }
+    };
+
     loop {
         // Block until first request
         let first = match rx.recv() {
