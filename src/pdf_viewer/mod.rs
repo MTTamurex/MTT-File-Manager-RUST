@@ -1,4 +1,4 @@
-//! Native PDF viewer — renders via the built-in Windows.Data.Pdf API.
+//! Native PDF viewer — renders via Pdfium.
 //!
 //! Spawns a dedicated process (same executable with `--pdf-viewer` flag)
 //! so the viewer is fully independent from the main file-manager window.
@@ -16,6 +16,7 @@ use std::process::Command;
 
 mod render_worker;
 mod renderer;
+mod selection;
 mod toolbar;
 mod viewer_app;
 

@@ -26,6 +26,11 @@ impl PdfViewerApp {
 
             // ── Rotation ─────────────────────────────────────────────────
             self.toolbar_rotation(ui);
+
+            ui.separator();
+
+            // ── Selection ────────────────────────────────────────────────
+            self.toolbar_selection(ui);
         });
     }
 
@@ -144,5 +149,22 @@ impl PdfViewerApp {
         {
             self.rotate_cw();
         }
+    }
+
+    fn toolbar_selection(&mut self, ui: &mut egui::Ui) {
+        let button = ui.add_enabled(
+            self.has_text_selection(),
+            egui::Button::new(t!("pdfviewer.copy_selection")),
+        );
+
+        if button.clicked() {
+            if let Err(err) = self.copy_selected_text() {
+                log::warn!("[PDF-VIEWER] copy selection failed: {err}");
+            }
+        }
+
+        button.on_hover_text(t!("pdfviewer.copy_selection_hint"));
+
+        ui.label(self.selection_summary());
     }
 }

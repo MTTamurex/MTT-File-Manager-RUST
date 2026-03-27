@@ -1,4 +1,7 @@
 fn main() {
+    #[cfg(target_os = "windows")]
+    stage_pdfium_runtime();
+
     // Embed Windows icon resource
     #[cfg(target_os = "windows")]
     {
@@ -27,5 +30,55 @@ fn main() {
             eprintln!("Warning: appicon.ico not found at {}", icon_path.display());
             eprintln!("Using default Windows icon.");
         }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn stage_pdfium_runtime() {
+    use std::env;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let target_dir = PathBuf::from(env::var("OUT_DIR").unwrap())
+        .ancestors()
+        .nth(3)
+        .map(Path::to_path_buf);
+
+    let Some(target_dir) = target_dir else {
+        eprintln!("Warning: could not resolve target directory for pdfium.dll staging");
+        return;
+    };
+
+    let dll_name = "pdfium.dll";
+    let source = env::var_os("PDFIUM_DYNAMIC_LIB_PATH")
+        .map(PathBuf::from)
+        .map(|dir| dir.join(dll_name))
+        .filter(|path| path.exists())
+        .or_else(|| {
+            [
+                manifest_dir.join("vendor").join(dll_name),
+                manifest_dir.join("vendor").join("pdfium").join(dll_name),
+            ]
+            .into_iter()
+            .find(|path| path.exists())
+        });
+
+    let Some(source) = source else {
+        println!("cargo:warning=pdfium.dll not found in vendor/ or PDFIUM_DYNAMIC_LIB_PATH; standalone PDF viewer will require the runtime to be staged manually.");
+        return;
+    };
+
+    let destination = target_dir.join(dll_name);
+
+    if let Err(err) = fs::copy(&source, &destination) {
+        eprintln!(
+            "Warning: failed to stage pdfium.dll from {} to {}: {}",
+            source.display(),
+            destination.display(),
+            err
+        );
+    } else {
+        println!("cargo:rerun-if-changed={}", source.display());
     }
 }
