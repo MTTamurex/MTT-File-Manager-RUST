@@ -277,7 +277,7 @@ pub fn render_grid_view(
     });
     let consume_scroll = pointer_over_viewport && !ctx.global_search_active;
 
-    scroll::apply_scroll_input(ui, ctx.mut_scroll_offset_y, max_scroll, consume_scroll, ctx.generation);
+    scroll::apply_scroll_input(ui, ctx.mut_scroll_offset_y, max_scroll, consume_scroll);
     let (current_scroll, scroll_delta) =
         scroll::compute_visual_scroll(ui, *ctx.mut_scroll_offset_y, viewport_h, ctx.generation);
     let t_after_scroll = std::time::Instant::now();
@@ -350,7 +350,7 @@ pub fn render_grid_view(
 
     prefetch::flush_pending_operations(ctx, ops);
     let t_after_flush = std::time::Instant::now();
-    prefetch::process_visible_range_prefetch(ctx, cols, visible_rows_range, ops);
+    prefetch::process_visible_range_prefetch(ctx, cols, visible_rows_range, is_scrolling, ops);
     let t_after_prefetch = std::time::Instant::now();
 
     let total_us = t_total.elapsed().as_micros();

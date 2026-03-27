@@ -30,6 +30,7 @@ pub(super) fn process_visible_range_prefetch(
     ctx: &mut GridViewContext,
     cols: usize,
     visible_rows_range: Option<(usize, usize)>,
+    is_scrolling: bool,
     ops: &mut dyn GridViewOperations,
 ) {
     if let Some((vis_min, vis_max)) = visible_rows_range {
@@ -45,6 +46,11 @@ pub(super) fn process_visible_range_prefetch(
                 prefetch_rows: ctx.prefetch_rows,
                 columns: cols,
             };
+
+            if is_scrolling {
+                return;
+            }
+
             let (prefetch_start, prefetch_end) = tracker.get_prefetch_range(count);
 
             for index in prefetch_start..prefetch_end {
