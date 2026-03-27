@@ -280,7 +280,11 @@ impl ImageViewerApp {
             }
         }
 
-        let is_scrolling = self.last_scroll_time.elapsed() < Duration::from_millis(100);
+        // Hold the scrolling throttle slightly longer than a single wheel tick.
+        // With smooth visual lerp enabled, the grid can still be moving after the
+        // last input event; releasing heavy thumbnail work too early causes
+        // intermittent frame drops in the middle of scroll sequences.
+        let is_scrolling = self.last_scroll_time.elapsed() < Duration::from_millis(180);
         let is_video_playing = self.is_video_playing_docked();
         // During burst, suppress pressure flags so the upload loop doesn't defer
         // off-screen items or reduce visible-only mode.
