@@ -12,6 +12,55 @@ end
 
 publish_button_states()
 
+-- Physical monitor resolution detected asynchronously at startup via WMI.
+-- This bypasses any DPI virtualisation that affects mpv's display-width/height.
+local monitor_res = { w = nil, h = nil }
+
+mp.command_native_async({
+    name = "subprocess",
+    args = {
+        "powershell.exe", "-NoProfile", "-NonInteractive",
+        "-ExecutionPolicy", "Bypass", "-Command",
+        "$v = Get-CimInstance Win32_VideoController | Where-Object {$_.CurrentHorizontalResolution -gt 0} | Sort-Object CurrentHorizontalResolution -Descending | Select-Object -First 1; Write-Output ('' + $v.CurrentHorizontalResolution + 'x' + $v.CurrentVerticalResolution)"
+    },
+    capture_stdout = true,
+    playback_only = false,
+}, function(success, result)
+    if success and result and result.status == 0 and result.stdout then
+        local w, h = result.stdout:match("(%d+)%s*x%s*(%d+)")
+        if w and h then
+            monitor_res.w = tonumber(w)
+            monitor_res.h = tonumber(h)
+            mp.msg.info("VSR: physical monitor detected: " .. monitor_res.w .. "x" .. monitor_res.h)
+        else
+            mp.msg.warn("VSR: WMI returned unexpected output: " .. result.stdout)
+        end
+    else
+        mp.msg.warn("VSR: WMI monitor detection failed, will use mpv fallback")
+    end
+end)
+
+local function get_display_resolution()
+    if monitor_res.w and monitor_res.h then
+        return monitor_res.w, monitor_res.h
+    end
+
+    -- Fallback: mpv display properties with HiDPI correction
+    local dw = mp.get_property_number("display-width")
+    local dh = mp.get_property_number("display-height")
+    if not (dw and dh) or dw <= 0 or dh <= 0 then
+        return nil, nil
+    end
+
+    local hidpi = mp.get_property_number("display-hidpi-scale")
+    if hidpi and hidpi > 1.0 then
+        dw = math.floor(dw * hidpi + 0.5)
+        dh = math.floor(dh * hidpi + 0.5)
+    end
+
+    return math.floor(dw), math.floor(dh)
+end
+
 local function needs_format_conversion(codec, pixelformat)
     if codec:lower():match("hevc") or codec:lower():match("h%.265") then
         if pixelformat:match("p10le$") or pixelformat == "p010" then
@@ -25,13 +74,20 @@ end
 local function compute_vsr_scale()
     local vw = mp.get_property_number("width")
     local vh = mp.get_property_number("height")
-    local dw = mp.get_property_number("display-width")
-    local dh = mp.get_property_number("display-height")
+    local dw, dh = get_display_resolution()
     if not (vw and vh and dw and dh) then return nil end
     if vw <= 0 or vh <= 0 or dw <= 0 or dh <= 0 then return nil end
-    local s = math.max(dw / vw, dh / vh)
+
+    -- Fit the source into the physical monitor resolution while preserving
+    -- aspect ratio, so 1080p->4K becomes 2.0, 720p->4K becomes 3.0, and
+    -- 1440p->4K becomes 1.5 instead of being limited by logical desktop DPI.
+    local s = math.min(dw / vw, dh / vh)
+    if s <= 1.0 then
+        return nil
+    end
+
     s = math.floor(s * 10) / 10
-    return math.max(s, 2.0)
+    return s
 end
 
 local function remove_vsr()
@@ -108,6 +164,21 @@ end
 local function toggle_vsr()
     autovsr_enabled = not autovsr_enabled
     publish_button_states()
+
+    -- Debug: log all resolution values so we can diagnose scale issues
+    local vw = mp.get_property_number("width")
+    local vh = mp.get_property_number("height")
+    local dw, dh = get_display_resolution()
+    local mpv_dw = mp.get_property_number("display-width")
+    local mpv_dh = mp.get_property_number("display-height")
+    local hidpi = mp.get_property_number("display-hidpi-scale")
+    mp.msg.info(string.format(
+        "VSR toggle: video=%sx%s  target=%sx%s  mpv_display=%sx%s  hidpi=%s  wmi=%sx%s",
+        tostring(vw), tostring(vh),
+        tostring(dw), tostring(dh),
+        tostring(mpv_dw), tostring(mpv_dh),
+        tostring(hidpi),
+        tostring(monitor_res.w), tostring(monitor_res.h)))
 
     local ok = refresh_rtx_filters()
     show_toggle_message("RTX VSR", autovsr_enabled, ok)
