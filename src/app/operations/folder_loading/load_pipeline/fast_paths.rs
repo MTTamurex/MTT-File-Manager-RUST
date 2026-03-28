@@ -41,6 +41,36 @@ pub(super) fn try_handle_fast_paths(
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0)
     };
+
+    // Check whether any subdirectory in a cached listing has a stale `modified`
+    // timestamp.  On Windows, modifying files inside subfolder B updates B's
+    // mtime but does NOT touch parent folder A's mtime.  Without this check the
+    // folder-level mtime validation passes even though cached entries carry
+    // outdated subfolder mtimes, causing sort-by-date to show the wrong order.
+    //
+    // Only directory entries are sampled (files' mtimes don't affect the parent
+    // listing's sort when the issue is subfolder ordering).  The cost is one
+    // metadata() call per subfolder — cheap on SSDs, and bounded.
+    let any_subfolder_mtime_stale = |entries: &[FileEntry]| -> bool {
+        for entry in entries.iter().filter(|e| e.is_dir) {
+            let disk_mtime = std::fs::metadata(&entry.path)
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            if disk_mtime != 0 && disk_mtime != entry.modified {
+                log::debug!(
+                    "[FOLDER-LOADING] Subfolder mtime mismatch: {:?} cached={} disk={}",
+                    entry.path.file_name().unwrap_or_default(),
+                    entry.modified,
+                    disk_mtime
+                );
+                return true;
+            }
+        }
+        false
+    };
     let can_trust_persistent_index =
         crate::infrastructure::windows::path_is_usn_filesystem(base_path_buf.as_path())
             .unwrap_or(true);
@@ -72,6 +102,19 @@ pub(super) fn try_handle_fast_paths(
                         log::debug!(
                             "[FOLDER-LOADING] DirectoryCache stale for {:?} (dir_mtime_ms={} > cached_at_ms={}), invalidating",
                             base_path_buf, dir_mtime_ms, cached_at_ms
+                        );
+                        directory_cache.invalidate(base_path_buf);
+                        if let Some(di) = directory_index_opt {
+                            let _ = di.invalidate(base_path_buf);
+                        }
+                    } else if any_subfolder_mtime_stale(&cached_entries) {
+                        // Folder's own mtime is unchanged, but a subfolder inside
+                        // has a newer mtime than what we cached.  This happens on
+                        // Windows when files are modified in a subdir: only the
+                        // subdir's mtime is updated, not the parent's.
+                        log::debug!(
+                            "[FOLDER-LOADING] DirectoryCache stale for {:?} (subfolder mtime changed), invalidating",
+                            base_path_buf
                         );
                         directory_cache.invalidate(base_path_buf);
                         if let Some(di) = directory_index_opt {
@@ -230,11 +273,9 @@ pub(super) fn try_handle_fast_paths(
                     let _ = di.invalidate(&base);
                     // Fall through to disk scan below
                 } else {
-                    log::debug!(
-                        "[FOLDER-LOADING] Using DirectoryIndex (pre-built index) for {:?}",
-                        base
-                    );
-                    let mut entries: Vec<FileEntry> = indexed_files
+                    // Build entries first so we can check subfolder mtimes
+                    // before committing to using the cached index.
+                    let pre_entries: Vec<FileEntry> = indexed_files
                         .into_iter()
                         .filter(|f| !f.name.starts_with('.'))
                         .map(|f| {
@@ -255,6 +296,20 @@ pub(super) fn try_handle_fast_paths(
                             }
                         })
                         .collect();
+
+                    if any_subfolder_mtime_stale(&pre_entries) {
+                        log::debug!(
+                            "[FOLDER-LOADING] DirectoryIndex stale for {:?} (subfolder mtime changed), invalidating",
+                            base
+                        );
+                        let _ = di.invalidate(&base);
+                        // Fall through to disk scan below
+                    } else {
+                    log::debug!(
+                        "[FOLDER-LOADING] Using DirectoryIndex (pre-built index) for {:?}",
+                        base
+                    );
+                    let mut entries = pre_entries;
 
                     let folders: Vec<PathBuf> = entries
                         .iter()
@@ -292,6 +347,7 @@ pub(super) fn try_handle_fast_paths(
                     let _ = file_entry_sender.send((my_gen, Vec::new()));
                     ctx.request_repaint();
                     return true;
+                  } // end else (subfolder mtimes valid)
                 } // end else (index not stale)
             } // end if let Some((meta, indexed_files))
         } // end if let Some(di)
@@ -315,6 +371,17 @@ pub(super) fn try_handle_fast_paths(
                         log::debug!(
                             "[FOLDER-LOADING] Secondary DirectoryCache stale for {:?} (dir_mtime_ms={} > cached_at_ms={}), invalidating",
                             base_path_buf_owned, dir_mtime_ms, cached_at_ms
+                        );
+                        directory_cache.invalidate(&base_path_buf_owned);
+                        if let Some(di) = directory_index_opt {
+                            let _ = di.invalidate(&base_path_buf_owned);
+                        }
+                        return false;
+                    }
+                    if any_subfolder_mtime_stale(&cached_entries) {
+                        log::debug!(
+                            "[FOLDER-LOADING] Secondary DirectoryCache stale for {:?} (subfolder mtime changed), invalidating",
+                            base_path_buf_owned
                         );
                         directory_cache.invalidate(&base_path_buf_owned);
                         if let Some(di) = directory_index_opt {

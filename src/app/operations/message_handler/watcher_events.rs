@@ -312,22 +312,24 @@ impl ImageViewerApp {
         let t_poll_done = Instant::now();
         let drive_event_count = drive_events.len();
 
-        if dropped_drive_events > 0 && !self.layout.saved_is_minimized {
+        if dropped_drive_events > 0 {
             if dropped_drive_events >= max_events.saturating_mul(4) {
                 log::warn!(
-                    "[FS-WATCH] Dropped {} queued drive events (event burst overflow, kept={} batches<= {}, events<= {}). Scheduling safety reload.",
+                    "[FS-WATCH] Dropped {} queued drive events (event burst overflow, kept={} batches<= {}, events<= {}{}). Scheduling safety reload.",
                     dropped_drive_events,
                     drive_event_count,
                     max_batches,
-                    max_events
+                    max_events,
+                    if self.layout.saved_is_minimized { ", minimized" } else { "" }
                 );
             } else {
                 log::debug!(
-                    "[FS-WATCH] Dropped {} queued drive events (kept={} batches<= {}, events<= {})",
+                    "[FS-WATCH] Dropped {} queued drive events (kept={} batches<= {}, events<= {}{})",
                     dropped_drive_events,
                     drive_event_count,
                     max_batches,
-                    max_events
+                    max_events,
+                    if self.layout.saved_is_minimized { ", minimized" } else { "" }
                 );
             }
             if !self.navigation_state.is_computer_view && !self.navigation_state.is_recycle_bin_view

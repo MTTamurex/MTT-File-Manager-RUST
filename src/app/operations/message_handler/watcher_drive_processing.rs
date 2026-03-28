@@ -688,6 +688,23 @@ impl ImageViewerApp {
             // avoid blocking the UI thread during watcher bursts.
             pending_disk_cache_invalidations.push(folder_path.clone());
             let _ = self.cover_worker_sender.send(folder_path.clone());
+
+            // Also invalidate the PARENT directory's cache.
+            //
+            // When files change inside folder B, B's own mtime is updated by
+            // Windows but the cached listing of B's parent (A) still contains
+            // B's old mtime.  Without this invalidation, navigating back to A
+            // would serve the stale cache (A's own mtime didn't change, so the
+            // fast-path mtime validation passes) and sorting by date would show
+            // B in the wrong position until a manual F5 refresh.
+            if let Some(parent) = folder_path.parent() {
+                let parent_buf = parent.to_path_buf();
+                if !folders_with_changed_contents.contains(&parent_buf) {
+                    let parent_norm = Self::normalize_for_match(parent);
+                    self.directory_cache.invalidate(&parent_buf);
+                    self.clear_tab_cache_for_normalized_path(&parent_norm);
+                }
+            }
         }
 
         // Clear stale folder_cover on items whose folder had content changes.
@@ -978,6 +995,14 @@ impl ImageViewerApp {
             self.ui_ctx.request_repaint();
             self.last_folder_mtime_sort = now;
             log::info!("[MTIME-CHECK] Re-sorted items after folder mtime update");
+
+            // Invalidate the directory cache for the current listing so that
+            // navigating away and back won't serve stale entries with old
+            // folder mtimes.  The live `all_items` already have the correct
+            // timestamps, but the cache snapshot was taken before the update.
+            let current_path_buf =
+                PathBuf::from(&self.navigation_state.current_path);
+            self.directory_cache.invalidate(&current_path_buf);
         }
 
         // If there are still pending rechecks, schedule repaint for next due time.
