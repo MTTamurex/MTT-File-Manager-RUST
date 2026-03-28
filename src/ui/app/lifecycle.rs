@@ -118,6 +118,26 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 idle_secs
             );
         }
+
+        // Invalidate directory cache and schedule a reload so watcher events
+        // that were dropped or throttled while the app was in the background
+        // don't leave the listing stale.  The soft reload (force_refresh=false)
+        // re-reads from disk without clearing texture/thumbnail caches.
+        if idle_secs > 2.0
+            && !app.navigation_state.is_computer_view
+            && !app.navigation_state.is_recycle_bin_view
+        {
+            let current_path =
+                std::path::PathBuf::from(&app.navigation_state.current_path);
+            app.directory_dirty_registry.mark_dirty(&current_path);
+            app.directory_cache.invalidate(&current_path);
+            app.pending_auto_reload = true;
+            app.last_auto_reload = std::time::Instant::now();
+            log::info!(
+                "[LIFECYCLE] Scheduled soft reload after {:.1}s in background",
+                idle_secs
+            );
+        }
     }
     app.was_focused = is_focused;
 
