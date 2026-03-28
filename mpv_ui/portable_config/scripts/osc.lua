@@ -1263,7 +1263,7 @@ function layouts()
     local btnY = refY - 28
     local btnW = 40
     local btnH = 56
-    local tcW = osc_geo.w - 600
+    local tcW = osc_geo.w - 640
 
     osc_param.areas = {} -- delete areas
 
