@@ -220,23 +220,34 @@ impl PdfViewerApp {
         let selection_fill = egui::Color32::from_rgba_unmultiplied(88, 156, 255, 24);
         let selection_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(88, 156, 255));
 
-        if let Some(selection) = self.selection.clone() {
-            if selection.page_idx == page_idx {
-                let segments = self.ensure_text_segments(page_idx).cloned().unwrap_or_default();
+        // Extract Copy fields to avoid cloning the entire selection (which contains a String) per frame.
+        let sel_data = self.selection.as_ref().map(|s| (s.page_idx, s.bounds));
 
-                for segment in segments
-                    .iter()
-                    .filter(|segment| segment.bounds.overlaps(&selection.bounds))
-                {
+        if let Some((sel_page, sel_bounds)) = sel_data {
+            if sel_page == page_idx {
+                // Collect matching segment bounds while the mutable borrow is active,
+                // then paint with &self methods after it's released.
+                let highlight_bounds: Vec<PdfTextBounds> = self
+                    .ensure_text_segments(page_idx)
+                    .map(|segments| {
+                        segments
+                            .iter()
+                            .filter(|s| s.bounds.overlaps(&sel_bounds))
+                            .map(|s| s.bounds)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                for bounds in highlight_bounds {
                     painter.rect_filled(
-                        self.page_bounds_to_screen_rect(page_idx, page_rect, segment.bounds),
+                        self.page_bounds_to_screen_rect(page_idx, page_rect, bounds),
                         1.0,
                         highlight_fill,
                     );
                 }
 
                 painter.rect(
-                    self.page_bounds_to_screen_rect(page_idx, page_rect, selection.bounds),
+                    self.page_bounds_to_screen_rect(page_idx, page_rect, sel_bounds),
                     1.0,
                     selection_fill,
                     selection_stroke,

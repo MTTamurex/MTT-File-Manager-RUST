@@ -511,6 +511,7 @@ impl ImageViewerApp {
 
             // INACTIVITY RECOVERY: Window focus tracking
             was_focused: true,
+            focus_lost_at: None,
         };
 
         // Pre-set custom composed folder icon on cache_manager (used by grid/list bridges)

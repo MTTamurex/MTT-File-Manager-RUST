@@ -91,7 +91,11 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
     // which still causes OS paging and GPU wake spikes on return.
     let is_focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
     if is_focused && !app.was_focused {
-        let idle_secs = app.last_restore_time.elapsed().as_secs_f64();
+        let idle_secs = app
+            .focus_lost_at
+            .map(|t| t.elapsed().as_secs_f64())
+            .unwrap_or(0.0);
+        app.focus_lost_at = None;
         if idle_secs > 5.0 {
             app.minimized_duration_secs = idle_secs;
             app.last_restore_time = std::time::Instant::now();
@@ -138,6 +142,9 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 idle_secs
             );
         }
+    }
+    if !is_focused && app.was_focused {
+        app.focus_lost_at = Some(std::time::Instant::now());
     }
     app.was_focused = is_focused;
 
