@@ -158,7 +158,7 @@ impl MpvPreview {
 
         candidates
             .into_iter()
-            .find(|dir| dir.join("scripts").join("osc.lua").is_file())
+            .find(|dir| dir.join("scripts").join("modernH.lua").is_file())
     }
 
     fn create_mpv_instance() -> Result<mpv::Mpv, mpv::Error> {
@@ -166,7 +166,7 @@ impl MpvPreview {
             let config_dir = Self::resolve_mpv_ui_config_dir();
             if config_dir.is_none() {
                 log::warn!(
-                    "[MpvPreview] MPV UI folder not found (expected mpv_ui/portable_config with scripts/osc.lua)"
+                    "[MpvPreview] MPV UI folder not found (expected mpv_ui/portable_config with scripts/modernH.lua)"
                 );
             }
 
@@ -214,10 +214,10 @@ impl MpvPreview {
                         );
                     }
 
-                    let osc_script = dir.join("scripts").join("osc.lua");
+                    let osc_script = dir.join("scripts").join("modernH.lua");
                     if !osc_script.is_file() {
                         log::warn!(
-                            "[MpvPreview] osc.lua not found at {}",
+                            "[MpvPreview] modernH.lua not found at {}",
                             osc_script.to_string_lossy()
                         );
                     }

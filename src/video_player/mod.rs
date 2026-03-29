@@ -13,10 +13,8 @@ use std::process::{Child, Command};
 use rfd::FileDialog;
 
 /// OSC script-opts for the standalone player.
-/// - scalewindowed/scalefullscreen: OSC element sizing (1.0 = default)
-/// - windowcontrols=yes: always show close/minimize/maximize in OSC
 const STANDALONE_OSC_SCRIPT_OPTS: &str =
-    "osc-scalewindowed=1,osc-scalefullscreen=1.5,osc-windowcontrols=yes";
+    "osc-scalewindowed=1,osc-scalefullscreen=1,osc-windowcontrols=yes";
 
 /// Spawn a standalone video player process for the given file.
 ///
@@ -79,7 +77,7 @@ fn resolve_mpv_ui_config_dir() -> Option<PathBuf> {
         .into_iter()
         .find(|dir| {
             let scripts = dir.join("scripts");
-            scripts.join("osc.lua").is_file() && scripts.join("vsr.lua").is_file()
+            scripts.join("modernH.lua").is_file() && scripts.join("vsr.lua").is_file()
         })
 }
 
@@ -346,7 +344,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
         );
     } else {
         log::warn!(
-            "[VIDEO-PLAYER] mpv_ui/portable_config not found (with scripts/osc.lua + scripts/vsr.lua); OSC/VSR may not load"
+            "[VIDEO-PLAYER] mpv_ui/portable_config not found (with scripts/modernH.lua + scripts/vsr.lua); OSC/VSR may not load"
         );
     }
 
@@ -524,15 +522,20 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
                         eof_reached = true;
                         log::debug!("[VIDEO-PLAYER] EOF reached — keep-open holds player open");
                     }
-                    REASON_QUIT | REASON_STOP => {
-                        // User explicitly closed the player (OSC close button, 'q' key,
-                        // or equivalent). Exit the event loop.
-                        log::debug!("[VIDEO-PLAYER] EndFile Stop/Quit — exiting");
+                    REASON_STOP => {
+                        // Stop fires when navigating playlist (playlist-play-index)
+                        // or when the OSC triggers a file change. Do NOT exit here;
+                        // the real quit path goes through Shutdown event.
+                        // Reset flags for the next file.
+                        eof_reached = false;
+                        seek_applied = true; // don't re-seek on playlist navigation
+                        log::debug!("[VIDEO-PLAYER] EndFile Stop — playlist navigation or file change");
+                    }
+                    REASON_QUIT => {
+                        log::debug!("[VIDEO-PLAYER] EndFile Quit — exiting");
                         break;
                     }
                     _ => {
-                        // ERROR or REDIRECT: only exit if we were already at EOF
-                        // (i.e., the player had finished and something triggered close).
                         if eof_reached {
                             log::info!(
                                 "[VIDEO-PLAYER] EndFile reason={} after EOF — exiting",
