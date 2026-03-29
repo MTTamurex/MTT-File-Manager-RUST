@@ -56,7 +56,6 @@ impl MpvPreview {
             if let Some(m) = &self.mpv {
                 let _ = m.command("script-message", &["osc-visibility", "never", "1"]);
             }
-            self.osc_last_playing_for_suppress = None;
         }
     }
 
