@@ -117,8 +117,6 @@ pub struct MpvPreview {
     sidecar_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     // PERF: Track previous interlaced state for change detection
     last_interlaced: Option<bool>,
-    // PERF: Track last play state to minimize osc-visibility IPC commands
-    osc_last_playing_for_suppress: Option<bool>,
 
     /// Native window surface for video rendering (encapsulates all HWND logic)
     pub surface: VideoSurface,
@@ -276,7 +274,6 @@ impl MpvPreview {
             file_loading: Arc::new(AtomicBool::new(false)),
             sidecar_rx: None,
             last_interlaced: None,
-            osc_last_playing_for_suppress: None,
             surface: VideoSurface::new(),
             mpv: None,
             loaded_path: None,

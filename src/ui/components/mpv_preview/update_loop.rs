@@ -157,7 +157,6 @@ impl MpvPreview {
             self.last_interlaced = None;
             // Force OSC state re-sync on new file (MPV reloads scripts on loadfile)
             self.last_osc_enabled = None;
-            self.osc_last_playing_for_suppress = None;
 
             // Signal event loop to query tracks when file is ready
             self.tracks_need_query.store(true, Ordering::Release);

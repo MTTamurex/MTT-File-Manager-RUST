@@ -37,23 +37,18 @@ impl MpvPreview {
                     e
                 );
             }
-            self.last_osc_enabled = Some(desired_custom_osc_visible);
-        }
 
-        // Custom OSC script switches to "always" when paused.
-        // While docked, re-force "never" only when playback state toggles.
-        if !desired_custom_osc_visible {
-            if let Ok(state) = self.state.try_read() {
-                let playing = state.is_playing;
-                drop(state);
-                if self.osc_last_playing_for_suppress != Some(playing) {
-                    let _ = mpv.command("script-message", &["osc-visibility", "never", "1"]);
-                    self.osc_last_playing_for_suppress = Some(playing);
-                }
-            }
-        } else {
-            // Reset suppress tracker when entering detached mode
-            self.osc_last_playing_for_suppress = None;
+            // Disable showonpause at the script level while docked so the
+            // Lua `pause_state` handler never overrides our "never" visibility.
+            // Re-enable it when entering detached mode.
+            let show_on_pause_opt = if desired_custom_osc_visible {
+                "osc-showonpause=yes"
+            } else {
+                "osc-showonpause=no"
+            };
+            let _ = mpv.command("change-list", &["script-opts", "append", show_on_pause_opt]);
+
+            self.last_osc_enabled = Some(desired_custom_osc_visible);
         }
 
         let desired_fullscreen = self.is_fullscreen();
