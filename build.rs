@@ -39,6 +39,8 @@ fn stage_pdfium_runtime() {
     use std::fs;
     use std::path::{Path, PathBuf};
 
+    println!("cargo:rerun-if-env-changed=PDFIUM_DYNAMIC_LIB_PATH");
+
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let target_dir = PathBuf::from(env::var("OUT_DIR").unwrap())
         .ancestors()

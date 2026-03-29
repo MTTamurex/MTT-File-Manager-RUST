@@ -411,6 +411,9 @@ pub struct ImageViewerApp {
 
     // INACTIVITY RECOVERY: Track window focus for background→foreground detection
     pub was_focused: bool,
+    /// Timestamp when the window lost focus (set on focus-lost transition).
+    /// Used to measure actual background duration independently of minimize/restore.
+    pub focus_lost_at: Option<Instant>,
 }
 
 impl ImageViewerApp {

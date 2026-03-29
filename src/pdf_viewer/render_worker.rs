@@ -9,6 +9,7 @@ use crossbeam_channel::{Receiver, Sender};
 use eframe::egui;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 pub(super) struct RenderRequest {
     pub page_idx: u32,
@@ -26,6 +27,8 @@ pub(super) struct RenderResult {
 pub(super) struct RenderWorker {
     tx: Sender<RenderRequest>,
     rx: Receiver<RenderResult>,
+    /// Set by the worker thread if PDF initialisation fails.
+    init_error: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl RenderWorker {
@@ -33,15 +36,18 @@ impl RenderWorker {
     pub fn spawn(path: PathBuf, repaint: egui::Context) -> Self {
         let (req_tx, req_rx) = crossbeam_channel::unbounded();
         let (res_tx, res_rx) = crossbeam_channel::unbounded();
+        let init_error = Arc::new(std::sync::Mutex::new(None));
+        let init_error_w = Arc::clone(&init_error);
 
         std::thread::Builder::new()
             .name("pdf-render".into())
-            .spawn(move || worker_loop(path, req_rx, res_tx, repaint))
+            .spawn(move || worker_loop(path, req_rx, res_tx, repaint, init_error_w))
             .expect("spawn pdf-render thread");
 
         Self {
             tx: req_tx,
             rx: res_rx,
+            init_error,
         }
     }
 
@@ -58,6 +64,11 @@ impl RenderWorker {
         }
         out
     }
+
+    /// Returns the initialisation error if the worker failed to start.
+    pub fn take_init_error(&self) -> Option<String> {
+        self.init_error.lock().ok()?.take()
+    }
 }
 
 fn worker_loop(
@@ -65,11 +76,16 @@ fn worker_loop(
     rx: Receiver<RenderRequest>,
     tx: Sender<RenderResult>,
     repaint: egui::Context,
+    init_error: Arc<std::sync::Mutex<Option<String>>>,
 ) {
     let renderer = match PdfRenderer::open(&path) {
-        Ok(renderer) => renderer,
+        Ok(r) => r,
         Err(err) => {
             log::error!("[PDF-RENDER] failed to open {}: {err}", path.display());
+            if let Ok(mut slot) = init_error.lock() {
+                *slot = Some(err);
+            }
+            repaint.request_repaint();
             return;
         }
     };

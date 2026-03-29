@@ -82,6 +82,8 @@ pub struct PdfViewerApp {
     pub(super) page_text: HashMap<u32, Vec<PdfTextSegment>>,
     pub(super) drag_selection: Option<DragSelection>,
     pub(super) selection: Option<PageSelection>,
+    /// Error from the render worker (init failure).
+    pub(super) worker_error: Option<String>,
 }
 
 impl PdfViewerApp {
@@ -113,6 +115,7 @@ impl PdfViewerApp {
             page_text: HashMap::new(),
             drag_selection: None,
             selection: None,
+            worker_error: None,
         })
     }
 
@@ -125,10 +128,19 @@ impl PdfViewerApp {
     }
 
     fn poll_results(&mut self, ctx: &egui::Context) {
-        let results = match &self.worker {
-            Some(w) => w.drain_results(),
+        let worker = match &self.worker {
+            Some(w) => w,
             None => return,
         };
+
+        if let Some(err) = worker.take_init_error() {
+            log::error!("[PDF-VIEWER] render worker failed: {err}");
+            self.worker_error = Some(err);
+            self.worker = None;
+            return;
+        }
+
+        let results = worker.drain_results();
         for r in results {
             self.pending.remove(&r.page_idx);
             let tex = ctx.load_texture(
@@ -495,6 +507,19 @@ impl eframe::App for PdfViewerApp {
         egui::TopBottomPanel::top("pdf_toolbar").show(ctx, |ui| {
             self.show_toolbar(ui);
         });
+
+        if let Some(err) = &self.worker_error {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.centered_and_justified(|ui| {
+                    ui.label(
+                        egui::RichText::new(err)
+                            .color(egui::Color32::RED)
+                            .size(16.0),
+                    );
+                });
+            });
+            return;
+        }
 
         egui::CentralPanel::default().show(ctx, |ui| {
             let aw = (ui.available_width() - 20.0).max(100.0);
