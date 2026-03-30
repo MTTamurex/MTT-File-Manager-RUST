@@ -38,15 +38,16 @@ impl MpvPreview {
                 );
             }
 
-            // Disable showonpause at the script level while docked so the
-            // Lua `pause_state` handler never overrides our "never" visibility.
-            // Re-enable it when entering detached mode.
-            let show_on_pause_opt = if desired_custom_osc_visible {
-                "osc-showonpause=yes"
+            // Disable showonpause and idlescreen at the script level while
+            // docked so the Lua handlers never override our "never" visibility.
+            // Re-enable them when entering detached mode.
+            if desired_custom_osc_visible {
+                let _ = mpv.command("change-list", &["script-opts", "append", "osc-showonpause=yes"]);
+                let _ = mpv.command("change-list", &["script-opts", "append", "osc-idlescreen=yes"]);
             } else {
-                "osc-showonpause=no"
-            };
-            let _ = mpv.command("change-list", &["script-opts", "append", show_on_pause_opt]);
+                let _ = mpv.command("change-list", &["script-opts", "append", "osc-showonpause=no"]);
+                let _ = mpv.command("change-list", &["script-opts", "append", "osc-idlescreen=no"]);
+            }
 
             self.last_osc_enabled = Some(desired_custom_osc_visible);
         }
