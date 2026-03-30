@@ -557,6 +557,56 @@ fn render_result_row(
         }
 
         if hover_duration >= TOOLTIP_DELAY_SECS {
+            // Grab cached thumbnail (if any) before entering the tooltip closure.
+            // 1) Check in-memory texture cache first (cheap).
+            // 2) Fall back to SQLite disk cache — decode WebP and upload as
+            //    a temporary egui texture, cached via egui data so we only
+            //    decode once per hover target.
+            let thumb_tex: Option<egui::TextureHandle> = if !is_dir {
+                let p = std::path::PathBuf::from(&full_path);
+                let is_media = p
+                    .extension()
+                    .map(|ext| crate::infrastructure::windows::is_media_extension(&ext.to_string_lossy()))
+                    .unwrap_or(false);
+                if is_media {
+                    if let Some(tex) = app.cache_manager.get_thumbnail(&p) {
+                        Some(tex.clone())
+                    } else {
+                        // Try SQLite disk cache, using egui temp storage to
+                        // avoid re-decoding WebP every frame.
+                        let tex_id = egui::Id::new("gs_tooltip_thumb").with(&full_path);
+                        let existing: Option<egui::TextureHandle> =
+                            ui.ctx().data(|d| d.get_temp(tex_id));
+                        if let Some(tex) = existing {
+                            Some(tex)
+                        } else if let Some(entry) = app.disk_cache.get_latest(&p) {
+                            if let Ok(img) = image::load_from_memory_with_format(
+                                &entry.data,
+                                image::ImageFormat::WebP,
+                            ) {
+                                let rgba = img.to_rgba8();
+                                let size = [rgba.width() as usize, rgba.height() as usize];
+                                let tex = ui.ctx().load_texture(
+                                    format!("gs_thumb_{}", source_idx),
+                                    egui::ColorImage::from_rgba_unmultiplied(size, &rgba),
+                                    egui::TextureOptions::LINEAR,
+                                );
+                                ui.ctx().data_mut(|d| d.insert_temp(tex_id, tex.clone()));
+                                Some(tex)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             let tooltip_layer =
                 egui::LayerId::new(egui::Order::Tooltip, row_resp.id.with("tooltip"));
             egui::show_tooltip_at(
@@ -569,6 +619,15 @@ fn render_result_row(
                     ui.vertical(|ui| {
                         ui.label(egui::RichText::new(&result_name).strong());
                         ui.separator();
+                        if let Some(tex) = &thumb_tex {
+                            let tex_size = tex.size_vec2();
+                            let max_w = 280.0_f32;
+                            let max_h = 180.0_f32;
+                            let scale = (max_w / tex_size.x).min(max_h / tex_size.y).min(1.0);
+                            let display_size = egui::vec2(tex_size.x * scale, tex_size.y * scale);
+                            ui.add(egui::Image::new(tex).fit_to_exact_size(display_size));
+                            ui.add_space(4.0);
+                        }
                         ui.horizontal(|ui| {
                             ui.label(t!("file_info.type"));
                             ui.label(&file_type);
