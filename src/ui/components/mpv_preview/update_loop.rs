@@ -41,7 +41,7 @@ impl MpvPreview {
             match Self::create_mpv_instance() {
                 Ok(m) => {
                     let m = Arc::new(m);
-                    let _ = m.set_property("keep-open", "yes");
+                    let _ = m.set_property("keep-open", "always");
 
                     // Mandatory configuration for NVIDIA RTX VSR
                     // We must use D3D11 backend and D3D11 VA hardware decoding
