@@ -413,7 +413,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
     let _ = mpv.set_property("interpolation", false);
     let _ = mpv.set_property("tscale", "linear");
     let _ = mpv.set_property("framedrop", "vo");
-    let _ = mpv.set_property("keep-open", "yes");
+    let _ = mpv.set_property("keep-open", "always");
 
     // Cache/demuxer settings
     let _ = mpv.set_property("cache", "yes");
