@@ -71,6 +71,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
     if close_from_backdrop {
         app.global_search.active = false;
         app.global_search.focus_request = false;
+        app.global_search.size_cache.clear();
         return;
     }
 
@@ -79,6 +80,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
         app.global_search.active = false;
         app.global_search.focus_request = false;
         app.global_search.pending_query_dispatch_at = None;
+        app.global_search.size_cache.clear();
         return;
     }
 

@@ -46,6 +46,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 app.global_search.active = false;
                 app.global_search.focus_request = false;
                 app.global_search.pending_query_dispatch_at = None;
+                app.global_search.size_cache.clear();
                 user_active = true;
             }
 

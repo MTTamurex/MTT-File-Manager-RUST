@@ -13,6 +13,7 @@ const SCROLL_SENSITIVITY: f32 = 5.0;
 const SCROLLBAR_WIDTH: f32 = 4.0;
 const SCROLLBAR_MIN_HANDLE: f32 = 30.0;
 const RESULTS_FOOTER_HEIGHT: f32 = 32.0;
+const TOOLTIP_DELAY_SECS: f32 = 0.3;
 
 #[inline]
 fn cache_key_for_icon(path: &std::path::Path, size: IconSize) -> String {
@@ -405,6 +406,7 @@ fn normalize_path_for_compare(path: &str) -> String {
 fn activate_search_result(app: &mut ImageViewerApp, full_path: &str, is_dir: bool) {
     app.global_search.active = false;
     app.global_search.focus_request = false;
+    app.global_search.size_cache.clear();
 
     if is_dir {
         app.navigate_to(full_path);
@@ -538,6 +540,64 @@ fn render_result_row(
         });
     });
 
+    // Tooltip with debounce (same pattern as the main app list/grid views)
+    if row_resp.hovered() {
+        let current_time = ui.input(|i| i.time);
+        let hover_id = egui::Id::new("global_search_hover_start").with(&full_path);
+        let hover_start_time = ui
+            .ctx()
+            .data_mut(|d| *d.get_temp_mut_or_insert_with(hover_id, || current_time));
+        let hover_duration = (current_time - hover_start_time) as f32;
+
+        if hover_duration < TOOLTIP_DELAY_SECS {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs_f32(
+                    TOOLTIP_DELAY_SECS - hover_duration + 0.01,
+                ));
+        }
+
+        if hover_duration >= TOOLTIP_DELAY_SECS {
+            let tooltip_layer =
+                egui::LayerId::new(egui::Order::Tooltip, row_resp.id.with("tooltip"));
+            egui::show_tooltip_at(
+                ui.ctx(),
+                tooltip_layer,
+                row_resp.id,
+                ui.input(|i| i.pointer.hover_pos()).unwrap_or_default(),
+                |ui: &mut egui::Ui| {
+                    ui.set_max_width(300.0);
+                    ui.vertical(|ui| {
+                        ui.label(egui::RichText::new(&result_name).strong());
+                        ui.separator();
+                        ui.horizontal(|ui| {
+                            ui.label(t!("file_info.type"));
+                            ui.label(&file_type);
+                        });
+                        if !is_dir {
+                            ui.horizontal(|ui| {
+                                ui.label(t!("file_info.size"));
+                                ui.label(&size_text);
+                            });
+                        }
+                        let modified_ts = std::fs::metadata(&full_path)
+                            .ok()
+                            .and_then(|m| m.modified().ok())
+                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+                        ui.horizontal(|ui| {
+                            ui.label(t!("file_info.date_modified"));
+                            ui.label(crate::infrastructure::windows::format_date(modified_ts));
+                        });
+                    });
+                },
+            );
+        }
+    } else {
+        let hover_id = egui::Id::new("global_search_hover_start").with(&full_path);
+        ui.ctx().data_mut(|d| d.remove::<f64>(hover_id));
+    }
+
     if row_resp.double_clicked() {
         *activate_result = Some((full_path, is_dir));
     }
@@ -637,8 +697,10 @@ fn resolve_result_size(
         return *cached;
     }
 
+    // Fetch actual file size from disk when the search index doesn't have it.
+    let resolved = std::fs::metadata(full_path).ok().map(|m| m.len());
     app.global_search
         .size_cache
-        .put(full_path.to_string(), None);
-    None
+        .put(full_path.to_string(), resolved);
+    resolved
 }
