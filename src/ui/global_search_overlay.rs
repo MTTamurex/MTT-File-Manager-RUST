@@ -269,7 +269,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         app,
                         ctx,
                         modal_max_height,
-                        hover_color,
+                        theme::color_selection_hover(),
                     );
                 });
         });

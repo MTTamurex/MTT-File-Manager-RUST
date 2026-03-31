@@ -14,6 +14,17 @@ const SCROLLBAR_WIDTH: f32 = 4.0;
 const SCROLLBAR_MIN_HANDLE: f32 = 30.0;
 const RESULTS_FOOTER_HEIGHT: f32 = 32.0;
 const TOOLTIP_DELAY_SECS: f32 = 0.3;
+const ACTION_BTN_WIDTH: f32 = 52.0;
+const ACTION_BTN_HEIGHT: f32 = 22.0;
+const ACTION_BTN_GAP: f32 = 4.0;
+
+/// What the user wants to do with a search result.
+enum ResultAction {
+    /// Open the file with its default program (or navigate into if directory).
+    OpenFile(String, bool),
+    /// Navigate to the parent folder and select the item.
+    OpenFolder(String, bool),
+}
 
 #[inline]
 fn cache_key_for_icon(path: &std::path::Path, size: IconSize) -> String {
@@ -221,7 +232,7 @@ pub(super) fn render_results_panel(
         }
     }
 
-    let mut activate_result: Option<(String, bool)> = None;
+    let mut activate_result: Option<ResultAction> = None;
     let panel_size = egui::vec2(ui.available_width(), panel_height);
     let (panel_rect, _) = ui.allocate_exact_size(panel_size, egui::Sense::hover());
     let viewport_rect = egui::Rect::from_min_max(
@@ -383,12 +394,19 @@ pub(super) fn render_results_panel(
             .get(selected_idx)
             .map(|r| (r.full_path.clone(), r.is_dir))
         {
-            activate_result = Some((full_path, is_dir));
+            activate_result = Some(ResultAction::OpenFolder(full_path, is_dir));
         }
     }
 
-    if let Some((full_path, is_dir)) = activate_result {
-        activate_search_result(app, &full_path, is_dir);
+    if let Some(action) = activate_result {
+        match action {
+            ResultAction::OpenFile(full_path, is_dir) => {
+                open_file_with_default(app, &full_path, is_dir);
+            }
+            ResultAction::OpenFolder(full_path, is_dir) => {
+                activate_search_result(app, &full_path, is_dir);
+            }
+        }
     }
 }
 
@@ -440,6 +458,22 @@ fn activate_search_result(app: &mut ImageViewerApp, full_path: &str, is_dir: boo
     }
 }
 
+/// Open a file with its default Windows program, or navigate into if directory.
+fn open_file_with_default(app: &mut ImageViewerApp, full_path: &str, is_dir: bool) {
+    app.global_search.active = false;
+    app.global_search.focus_request = false;
+    app.global_search.size_cache.clear();
+    app.global_search.tooltip_texture_cache.clear();
+    app.global_search.metadata_cache.clear();
+
+    if is_dir {
+        app.navigate_to(full_path);
+    } else {
+        let path = std::path::PathBuf::from(full_path);
+        app.open_with_shell_guarded(&path);
+    }
+}
+
 fn render_result_row(
     ui: &mut egui::Ui,
     app: &mut ImageViewerApp,
@@ -447,7 +481,7 @@ fn render_result_row(
     source_idx: usize,
     row_rect: egui::Rect,
     hover_color: egui::Color32,
-    activate_result: &mut Option<(String, bool)>,
+    activate_result: &mut Option<ResultAction>,
 ) {
     let Some((full_path, result_name, is_dir, size)) = app
         .global_search
@@ -520,26 +554,69 @@ fn render_result_row(
     }
 
     row_ui.add_space(8.0);
-    row_ui.vertical(|ui| {
-        ui.add(
-            egui::Label::new(egui::RichText::new(&result_name).strong().size(13.0)).truncate(),
-        );
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new(&meta_text)
-                    .size(10.0)
-                    .color(egui::Color32::from_gray(140)),
-            );
-            ui.add_space(6.0);
+
+    // Reserve space for action buttons on the right.
+    let buttons_total_w = ACTION_BTN_WIDTH * 2.0 + ACTION_BTN_GAP + 4.0;
+    let text_max_w = (row_ui.available_width() - buttons_total_w).max(60.0);
+
+    // File name + metadata (left side, truncated).
+    row_ui.allocate_ui_with_layout(
+        egui::vec2(text_max_w, row_rect.height() - 8.0),
+        egui::Layout::top_down(egui::Align::LEFT),
+        |ui| {
             ui.add(
-                egui::Label::new(
-                    egui::RichText::new(&full_path)
-                        .size(10.0)
-                        .color(egui::Color32::from_gray(120)),
-                )
-                .truncate(),
+                egui::Label::new(egui::RichText::new(&result_name).strong().size(13.0)).truncate(),
             );
-        });
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(&meta_text)
+                        .size(10.0)
+                        .color(egui::Color32::from_gray(140)),
+                );
+                ui.add_space(6.0);
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(&full_path)
+                            .size(10.0)
+                            .color(egui::Color32::from_gray(120)),
+                    )
+                    .truncate(),
+                );
+            });
+        },
+    );
+
+    // Push buttons to the right.
+    row_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        let btn_size = egui::vec2(ACTION_BTN_WIDTH, ACTION_BTN_HEIGHT);
+
+        // "Folder" button (rightmost).
+        if ui
+            .add_sized(
+                btn_size,
+                egui::Button::new(
+                    egui::RichText::new(t!("search.open_folder")).size(11.0),
+                ),
+            )
+            .clicked()
+        {
+            *activate_result = Some(ResultAction::OpenFolder(full_path.clone(), is_dir));
+        }
+
+        ui.add_space(ACTION_BTN_GAP);
+
+        // "Open" button.
+        if ui
+            .add_sized(
+                btn_size,
+                egui::Button::new(
+                    egui::RichText::new(t!("search.open_file")).size(11.0),
+                ),
+            )
+            .clicked()
+        {
+            *activate_result = Some(ResultAction::OpenFile(full_path.clone(), is_dir));
+        }
     });
 
     // Tooltip with debounce (same pattern as the main app list/grid views)
@@ -674,7 +751,7 @@ fn render_result_row(
     }
 
     if row_resp.double_clicked() {
-        *activate_result = Some((full_path, is_dir));
+        *activate_result = Some(ResultAction::OpenFolder(full_path, is_dir));
     }
 }
 

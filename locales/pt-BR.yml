@@ -164,6 +164,8 @@ search:
   max_reached: "Limite máximo atingido (%{count} resultados). Refine a busca para mais precisão."
   service_offline: "Serviço offline"
   indexed_files: "%{count} arquivos indexados"
+  open_file: "Abrir"
+  open_folder: "Pasta"
   filters: "Filtros:"
   drive_filter: "Drive:"
   all_drives: "Todos"
