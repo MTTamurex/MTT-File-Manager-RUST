@@ -142,19 +142,19 @@ cargo build --release --workspace
 
 ## Documentation
 
-Access the [`DOCs/`](DOCs/) folder for complete technical documentation:
+Access the [`docs/`](docs/) folder for complete technical documentation:
 
-- **[Overview](DOCs/01_overview.md)** — Introduction and high-level architecture
-- **[Build & Debug](DOCs/02_build_run_debug.md)** — Build, run, and debug instructions
-- **[Architecture](DOCs/03_architecture.md)** — Detailed architecture and layers
-- **[Module Map](DOCs/04_module_map.md)** — File structure and module responsibilities
-- **[Dependencies](DOCs/05_dependencies_stack.md)** — Full technology stack
-- **[Key Flows](DOCs/06_key_flows.md)** — How major features work
-- **[Storage & Config](DOCs/07_storage_config.md)** — Data storage and configuration
-- **[Logging & Errors](DOCs/08_logging_errors_telemetry.md)** — Logging and debugging
-- **[Performance](DOCs/09_performance_optimizations.md)** — Performance optimizations
+- **[Overview](docs/01_overview.md)** — Introduction and high-level architecture
+- **[Build & Debug](docs/02_build_run_debug.md)** — Build, run, and debug instructions
+- **[Architecture](docs/03_architecture.md)** — Detailed architecture and layers
+- **[Module Map](docs/04_module_map.md)** — File structure and module responsibilities
+- **[Dependencies](docs/05_dependencies_stack.md)** — Full technology stack
+- **[Key Flows](docs/06_key_flows.md)** — How major features work
+- **[Storage & Config](docs/07_storage_config.md)** — Data storage and configuration
+- **[Logging & Errors](docs/08_logging_errors_telemetry.md)** — Logging and debugging
+- **[Performance](docs/09_performance_optimizations.md)** — Performance optimizations
 
-**Documentation index**: [DOCs/INDEX.md](DOCs/INDEX.md)
+**Documentation index**: [docs/INDEX.md](docs/INDEX.md)
 
 ## Development
 
@@ -222,7 +222,7 @@ MTT-File-Manager-RUST/
 │   ├── mtt-search-protocol/          # Shared IPC types (bincode)
 │   └── mtt-search-service/           # Windows Service for file indexing
 ├── locales/                          # i18n (en.yml, pt-BR.yml)
-├── DOCs/                             # Technical documentation
+├── docs/                             # Technical documentation
 └── benches/                          # Benchmarks
 ```
 

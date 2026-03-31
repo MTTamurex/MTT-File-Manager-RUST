@@ -667,7 +667,7 @@ fn render_result_row(
                             let rgba = img.to_rgba8();
                             let size = [rgba.width() as usize, rgba.height() as usize];
                             let tex = ui.ctx().load_texture(
-                                format!("gs_thumb_{}", source_idx),
+                                format!("gs_thumb_{}", full_path),
                                 egui::ColorImage::from_rgba_unmultiplied(size, &rgba),
                                 egui::TextureOptions::LINEAR,
                             );

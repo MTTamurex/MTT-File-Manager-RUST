@@ -69,7 +69,7 @@ MTT-File-Manager-RUST/
 │   ├── mtt-search-protocol/  # IPC types (bincode)
 │   └── mtt-search-service/   # Windows Service for file indexing
 ├── locales/                # i18n translation files (en, pt-BR)
-├── DOCs/                   # This documentation
+├── docs/                   # This documentation
 └── benches/                # Benchmarks
 ```
 
