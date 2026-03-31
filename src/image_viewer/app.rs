@@ -1,11 +1,12 @@
 use crate::image_viewer::cache::{LoadPriority, PrefetchEngine, WindowCache};
 use crate::image_viewer::indexer::{self, ImageSequence};
 use crate::image_viewer::loader;
+use crate::ui::theme;
 use eframe::egui;
 use eframe::egui::scroll_area::ScrollBarVisibility;
 use rfd::FileDialog;
 use rust_i18n::t;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -16,6 +17,15 @@ const MAX_ZOOM_FACTOR: f32 = 8.0;
 /// during rapid key-repeat. 20 ms ≈ 50 navigations/sec — fast enough to feel
 /// responsive but slow enough for workers to keep up.
 const MIN_NAVIGATE_INTERVAL: Duration = Duration::from_millis(20);
+
+// Filmstrip constants
+const FILMSTRIP_THUMB_SIZE: f32 = 80.0;
+const FILMSTRIP_SPACING: f32 = 4.0;
+const FILMSTRIP_PANEL_HEIGHT: f32 = 88.0;
+const FILMSTRIP_OVERSCAN: usize = 20;
+const FILMSTRIP_MAX_CACHED: usize = 200;
+const FILMSTRIP_DECODE_MAX_SIDE: u32 = 160;
+const FILMSTRIP_MAX_UPLOADS_PER_FRAME: usize = 6;
 
 /// Holds pre-uploaded textures for each frame of an animated GIF along with
 /// display timing information.
@@ -30,6 +40,38 @@ struct GifAnimation {
 struct ViewerStatusMessage {
     text: String,
     is_error: bool,
+}
+
+struct FilmstripState {
+    thumbnails: HashMap<usize, egui::TextureHandle>,
+    pending: HashSet<usize>,
+    result_tx: crossbeam_channel::Sender<(usize, u64, loader::DecodedFrame)>,
+    result_rx: crossbeam_channel::Receiver<(usize, u64, loader::DecodedFrame)>,
+    generation: u64,
+    scroll_to_current: bool,
+}
+
+impl FilmstripState {
+    fn new() -> Self {
+        let (result_tx, result_rx) = crossbeam_channel::bounded(64);
+        Self {
+            thumbnails: HashMap::new(),
+            pending: HashSet::new(),
+            result_tx,
+            result_rx,
+            generation: 0,
+            scroll_to_current: true,
+        }
+    }
+
+    fn reset(&mut self) {
+        self.thumbnails.clear();
+        self.pending.clear();
+        self.generation = self.generation.wrapping_add(1);
+        self.scroll_to_current = true;
+        // Drain any stale results from the old generation
+        while self.result_rx.try_recv().is_ok() {}
+    }
 }
 
 pub struct DedicatedImageViewerApp {
@@ -62,6 +104,7 @@ pub struct DedicatedImageViewerApp {
     status_message: Option<ViewerStatusMessage>,
     /// Timestamp of the last navigation action (for key-repeat throttling).
     last_navigate_instant: std::time::Instant,
+    filmstrip: FilmstripState,
 }
 
 impl DedicatedImageViewerApp {
@@ -99,6 +142,7 @@ impl DedicatedImageViewerApp {
             conversion_in_progress: false,
             status_message: None,
             last_navigate_instant: std::time::Instant::now(),
+            filmstrip: FilmstripState::new(),
         };
 
         app.prefetch.set_center(start_index);
@@ -158,6 +202,7 @@ impl DedicatedImageViewerApp {
         self.conversion_in_progress = false;
         self.status_message = None;
         self.last_navigate_instant = std::time::Instant::now();
+        self.filmstrip.reset();
 
         self.try_show_cached_current(ctx);
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
@@ -644,6 +689,8 @@ impl DedicatedImageViewerApp {
         if tail != index {
             self.request_job_if_needed(tail, LoadPriority::High);
         }
+
+        self.filmstrip.scroll_to_current = true;
     }
 
     fn navigate_prev(&mut self, ctx: &egui::Context) {
@@ -684,6 +731,215 @@ impl DedicatedImageViewerApp {
         if next {
             self.navigate_next(ctx);
         }
+    }
+
+    fn poll_filmstrip_results(&mut self, ctx: &egui::Context) {
+        let mut uploads = 0;
+        while let Ok((index, gen, frame)) = self.filmstrip.result_rx.try_recv() {
+            self.filmstrip.pending.remove(&index);
+            if gen != self.filmstrip.generation {
+                continue;
+            }
+            if uploads >= FILMSTRIP_MAX_UPLOADS_PER_FRAME {
+                break;
+            }
+            if frame.width == 0 || frame.height == 0 || frame.rgba.is_empty() {
+                continue;
+            }
+            let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                [frame.width as usize, frame.height as usize],
+                &frame.rgba,
+            );
+            let texture = ctx.load_texture(
+                format!("filmstrip_{}_{}", self.filmstrip.generation, index),
+                color_image,
+                egui::TextureOptions::LINEAR,
+            );
+            self.filmstrip.thumbnails.insert(index, texture);
+            uploads += 1;
+        }
+    }
+
+    fn evict_filmstrip_textures(&mut self) {
+        if self.filmstrip.thumbnails.len() <= FILMSTRIP_MAX_CACHED {
+            return;
+        }
+        let center = self.current_index;
+        let mut indices: Vec<usize> = self.filmstrip.thumbnails.keys().copied().collect();
+        indices.sort_by_key(|i| std::cmp::Reverse(i.abs_diff(center)));
+        let to_remove = self.filmstrip.thumbnails.len() - FILMSTRIP_MAX_CACHED;
+        for idx in indices.into_iter().take(to_remove) {
+            self.filmstrip.thumbnails.remove(&idx);
+        }
+    }
+
+    fn render_filmstrip(&mut self, ctx: &egui::Context) {
+        if self.sequence.entries.len() <= 1 {
+            return;
+        }
+
+        let total = self.sequence.entries.len();
+        let current = self.current_index;
+        let item_w = FILMSTRIP_THUMB_SIZE + FILMSTRIP_SPACING;
+        let total_content_w = total as f32 * item_w + FILMSTRIP_SPACING;
+
+        egui::TopBottomPanel::bottom("filmstrip_panel")
+            .exact_height(FILMSTRIP_PANEL_HEIGHT)
+            .show(ctx, |ui| {
+                let panel_bg = if ui.visuals().dark_mode {
+                    egui::Color32::from_gray(30)
+                } else {
+                    egui::Color32::from_gray(220)
+                };
+                ui.painter()
+                    .rect_filled(ui.max_rect(), 0.0, panel_bg);
+
+                let should_scroll = self.filmstrip.scroll_to_current;
+                self.filmstrip.scroll_to_current = false;
+
+                let scroll_output = egui::ScrollArea::horizontal()
+                    .id_salt("filmstrip_scroll")
+                    .auto_shrink([false, false])
+                    .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(FILMSTRIP_SPACING, 0.0);
+                        ui.set_min_width(total_content_w);
+
+                        let viewport_left = ui.clip_rect().left();
+                        let viewport_right = ui.clip_rect().right();
+                        let content_left = ui.min_rect().left();
+
+                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            ui.spacing_mut().item_spacing.x = FILMSTRIP_SPACING;
+
+                            for idx in 0..total {
+                                let item_left =
+                                    content_left + idx as f32 * item_w;
+                                let item_right = item_left + FILMSTRIP_THUMB_SIZE;
+
+                                let in_visible_range = item_right
+                                    >= viewport_left - FILMSTRIP_OVERSCAN as f32 * item_w
+                                    && item_left
+                                        <= viewport_right
+                                            + FILMSTRIP_OVERSCAN as f32 * item_w;
+
+                                if !in_visible_range && !(should_scroll && idx == current) {
+                                    // Allocate space but don't render
+                                    ui.allocate_exact_size(
+                                        egui::vec2(FILMSTRIP_THUMB_SIZE, FILMSTRIP_THUMB_SIZE),
+                                        egui::Sense::hover(),
+                                    );
+                                    continue;
+                                }
+
+                                // Request decode if not loaded and not pending
+                                if !self.filmstrip.thumbnails.contains_key(&idx)
+                                    && !self.filmstrip.pending.contains(&idx)
+                                {
+                                    if let Some(path) = self.sequence.entries.get(idx).cloned() {
+                                        let tx = self.filmstrip.result_tx.clone();
+                                        let gen = self.filmstrip.generation;
+                                        self.filmstrip.pending.insert(idx);
+                                        rayon::spawn(move || {
+                                            if let Ok(frame) =
+                                                loader::decode_preview_frame_with_priority(
+                                                    &path,
+                                                    FILMSTRIP_DECODE_MAX_SIDE,
+                                                    loader::DecodePriority::Background,
+                                                )
+                                            {
+                                                let _ = tx.send((idx, gen, frame));
+                                            }
+                                        });
+                                    }
+                                }
+
+                                let is_current = idx == current;
+
+                                let (rect, response) = ui.allocate_exact_size(
+                                    egui::vec2(FILMSTRIP_THUMB_SIZE, FILMSTRIP_THUMB_SIZE),
+                                    egui::Sense::click(),
+                                );
+
+                                // Background
+                                let bg_color = if is_current {
+                                    if ui.visuals().dark_mode {
+                                        egui::Color32::from_gray(50)
+                                    } else {
+                                        egui::Color32::from_gray(200)
+                                    }
+                                } else if response.hovered() {
+                                    if ui.visuals().dark_mode {
+                                        egui::Color32::from_gray(45)
+                                    } else {
+                                        egui::Color32::from_gray(210)
+                                    }
+                                } else {
+                                    egui::Color32::TRANSPARENT
+                                };
+                                ui.painter().rect_filled(rect, 4.0, bg_color);
+
+                                // Thumbnail image
+                                if let Some(tex) = self.filmstrip.thumbnails.get(&idx) {
+                                    let tex_size = tex.size_vec2();
+                                    let scale = if tex_size.x > 0.0 && tex_size.y > 0.0 {
+                                        let sx = (FILMSTRIP_THUMB_SIZE - 4.0) / tex_size.x;
+                                        let sy = (FILMSTRIP_THUMB_SIZE - 4.0) / tex_size.y;
+                                        sx.min(sy)
+                                    } else {
+                                        1.0
+                                    };
+                                    let draw_size = tex_size * scale;
+                                    let image_rect =
+                                        egui::Rect::from_center_size(rect.center(), draw_size);
+                                    ui.painter().image(
+                                        tex.id(),
+                                        image_rect,
+                                        egui::Rect::from_min_max(
+                                            egui::pos2(0.0, 0.0),
+                                            egui::pos2(1.0, 1.0),
+                                        ),
+                                        egui::Color32::WHITE,
+                                    );
+                                } else {
+                                    // Placeholder
+                                    let placeholder_color = if ui.visuals().dark_mode {
+                                        egui::Color32::from_gray(40)
+                                    } else {
+                                        egui::Color32::from_gray(200)
+                                    };
+                                    let inner = rect.shrink(4.0);
+                                    ui.painter()
+                                        .rect_filled(inner, 2.0, placeholder_color);
+                                }
+
+                                // Current image border highlight
+                                if is_current {
+                                    ui.painter().rect_stroke(
+                                        rect,
+                                        4.0,
+                                        egui::Stroke::new(2.0, theme::COLOR_ACCENT),
+                                        egui::StrokeKind::Outside,
+                                    );
+                                    if should_scroll {
+                                        response.scroll_to_me(Some(egui::Align::Center));
+                                    }
+                                }
+
+                                if response.clicked() {
+                                    self.navigate_to(idx, ctx);
+                                }
+                            }
+                        });
+                    });
+
+                // Request repaint if we have pending thumbnails
+                if !self.filmstrip.pending.is_empty() {
+                    ctx.request_repaint_after(Duration::from_millis(50));
+                }
+
+                let _ = scroll_output;
+            });
     }
 
     fn render_top_bar(&mut self, ctx: &egui::Context) {
@@ -820,7 +1076,7 @@ impl DedicatedImageViewerApp {
                 egui::ScrollArea::both()
                     .id_salt("image_viewer_center_scroll")
                     .auto_shrink([false, false])
-                    .scroll_bar_visibility(ScrollBarVisibility::AlwaysVisible)
+                    .scroll_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded)
                     .scroll_bar_rect(horizontal_scroll_bar_rect)
                     .show(ui, |ui| {
                         let canvas_size = egui::vec2(
@@ -912,8 +1168,8 @@ impl eframe::App for DedicatedImageViewerApp {
 
         if self.sequence.entries.is_empty() {
             self.render_top_bar(ctx);
-            self.render_center(ctx);
             self.render_bottom_bar(ctx);
+            self.render_center(ctx);
             return;
         }
 
@@ -937,9 +1193,13 @@ impl eframe::App for DedicatedImageViewerApp {
         self.advance_gif_frame(ctx);
         self.poll_conversion();
 
+        self.poll_filmstrip_results(ctx);
+        self.evict_filmstrip_textures();
+
         self.render_top_bar(ctx);
-        self.render_center(ctx);
         self.render_bottom_bar(ctx);
+        self.render_filmstrip(ctx);
+        self.render_center(ctx);
 
         // Low-frequency fallback poll — workers trigger immediate repaints via
         // ctx.request_repaint(), but this ensures progress even if the signal
