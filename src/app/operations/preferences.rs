@@ -136,10 +136,11 @@ impl ImageViewerApp {
 
         // Save last active folder from current tab
         let last_folder = self.tab_manager.active().path.clone();
-        // Only save if it's a real path (not a virtual view)
+        // Save if it's a real path or "This PC" (but not other virtual views or shell URIs)
         if !last_folder.is_empty()
-            && !is_virtual_path(&last_folder)
             && !last_folder.starts_with("shell:")
+            && (last_folder == crate::domain::special_paths::COMPUTER_VIEW_ID
+                || !is_virtual_path(&last_folder))
         {
             prefs.push(("last_folder", last_folder));
         }
