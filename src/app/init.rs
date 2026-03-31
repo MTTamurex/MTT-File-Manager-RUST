@@ -38,6 +38,12 @@ fn determine_initial_path(disk_cache: &ThumbnailDiskCache) -> (String, bool) {
     // Try to load last folder from database
     if let Some(last_folder) = disk_cache.get_preference("last_folder") {
         if !last_folder.is_empty() {
+            // Restore "This PC" directly — no filesystem check needed.
+            if last_folder == COMPUTER_VIEW_ID {
+                log::info!("[INIT] Restoring last folder: This PC");
+                return (COMPUTER_VIEW_ID.to_string(), true);
+            }
+
             // Check if path still exists and is accessible
             let path_buf = PathBuf::from(&last_folder);
 
