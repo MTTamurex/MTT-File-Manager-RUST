@@ -266,12 +266,8 @@ impl ImageViewerApp {
         let watcher_start = Instant::now();
         self.drive_watcher.check_pending_activation();
 
-        let recently_restored = self.minimized_duration_secs >= 10.0
-            && self.last_restore_time.elapsed() < Duration::from_secs(10);
         let (max_batches, max_events) = if self.layout.saved_is_minimized {
             (1usize, 32usize)
-        } else if recently_restored {
-            (2usize, 96usize)
         } else if self.frame_time_peak_ms > 33.33 {
             (2usize, 128usize)
         } else if self.frame_time_peak_ms > 25.0 {

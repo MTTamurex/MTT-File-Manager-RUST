@@ -20,6 +20,15 @@ fn main() {
             res.set("ProductName", "MTT File Manager");
             res.set("CompanyName", "MTT");
 
+            // Embed application manifest for Per-Monitor V2 DPI awareness
+            // and Windows 10/11 compatibility.  Without this, the DWM applies
+            // bitmap-scaling which adds overhead and visual blur.
+            let manifest_path = PathBuf::from(&manifest_dir).join("app.manifest");
+            if manifest_path.exists() {
+                res.set_manifest_file(manifest_path.to_str().unwrap());
+                println!("cargo:rerun-if-changed={}", manifest_path.display());
+            }
+
             // Compile the resource
             if let Err(e) = res.compile() {
                 eprintln!("Warning: Could not embed icon: {}", e);

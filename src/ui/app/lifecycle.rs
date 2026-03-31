@@ -99,27 +99,29 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
         if idle_secs > 5.0 {
             app.minimized_duration_secs = idle_secs;
             app.last_restore_time = std::time::Instant::now();
+            // Hard-reset peak to the current average so adaptive throttling
+            // doesn't starve upload budgets on the very first frames.
             app.frame_time_peak_ms = app.frame_time_avg_ms.max(16.0);
-            // Flush GPU textures so the grid re-requests them from the
-            // RGBA RAM cache.  After prolonged inactivity the OS pages out
-            // the GPU working set; keeping stale TextureHandles causes
-            // slow first-paint or blank tiles on resume.
-            if idle_secs > 10.0 {
+            // Only flush GPU textures after prolonged inactivity (≥60 s).
+            // For shorter idle periods (10–59 s) the OS usually hasn't paged
+            // out the GPU working set yet, so the existing TextureHandles are
+            // still valid and clearing them just forces unnecessary re-uploads
+            // that cause visible stutter.
+            if idle_secs >= 60.0 {
                 flush_gpu_textures_for_reupload(app);
-                // Burst window scales with inactivity: 5s base + 1s per 60s idle, capped at 12s.
-                let burst_secs = (5.0 + idle_secs / 60.0).min(12.0);
-                app.restore_burst_until = Some(
-                    std::time::Instant::now()
-                        + std::time::Duration::from_secs_f64(burst_secs),
-                );
-                log::info!(
-                    "[LIFECYCLE] Restore burst mode enabled for {:.1}s",
-                    burst_secs
-                );
             }
+            // Burst window: short and proportional.  The purpose is only to
+            // let the upload pipeline run at full speed while the first few
+            // frames are still slow from OS paging — not to keep burning
+            // CPU/GPU on continuous repaints for many seconds after.
+            let burst_secs = (2.0 + (idle_secs / 120.0)).min(5.0);
+            app.restore_burst_until = Some(
+                std::time::Instant::now()
+                    + std::time::Duration::from_secs_f64(burst_secs),
+            );
             log::info!(
-                "[LIFECYCLE] App regained focus after {:.1}s in background - resetting peak metrics",
-                idle_secs
+                "[LIFECYCLE] App regained focus after {:.1}s in background - burst {:.1}s, texture_flush={}",
+                idle_secs, burst_secs, idle_secs >= 60.0
             );
         }
 
@@ -163,21 +165,19 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
             app.minimized_duration_secs = minimized_secs;
             app.last_restore_time = std::time::Instant::now();
             app.frame_time_peak_ms = app.frame_time_avg_ms.max(16.0);
-            if minimized_secs > 10.0 {
+            if minimized_secs >= 60.0 {
                 flush_gpu_textures_for_reupload(app);
-                let burst_secs = (5.0 + minimized_secs / 60.0).min(12.0);
+            }
+            if minimized_secs > 5.0 {
+                let burst_secs = (2.0 + minimized_secs / 120.0).min(5.0);
                 app.restore_burst_until = Some(
                     std::time::Instant::now()
                         + std::time::Duration::from_secs_f64(burst_secs),
                 );
-                log::info!(
-                    "[LIFECYCLE] Restore burst mode enabled for {:.1}s",
-                    burst_secs
-                );
             }
             log::info!(
-                "[LIFECYCLE] App restored after {:.1}s of inactivity - resetting peak metrics",
-                minimized_secs
+                "[LIFECYCLE] App restored after {:.1}s of inactivity - burst, texture_flush={}",
+                minimized_secs, minimized_secs >= 60.0
             );
         }
     }

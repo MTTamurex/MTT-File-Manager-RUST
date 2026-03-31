@@ -13,7 +13,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-eframe = { version = "0.31", features = ["persistence"] }
+eframe = { version = "0.31", features = ["persistence", "wgpu"] }
 rayon = "1.10"
 walkdir = "2.5"
 rfd = "0.15"
