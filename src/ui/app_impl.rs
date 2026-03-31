@@ -56,11 +56,15 @@ impl eframe::App for ImageViewerApp {
             if self.frame_time_peak_ms <= 0.0 {
                 self.frame_time_peak_ms = effective_frame_ms;
             } else {
-                // Use faster decay when the spike is clearly a transient wake-from-idle
-                // artifact (OS paging / GPU wake) rather than sustained load.
-                // With 0.95: ~40 frames to recover → budgets starved for ~670ms.
-                // With 0.70: ~8 frames to recover → budgets back in ~130ms.
-                let decay = if self.frame_time_peak_ms > 50.0 && self.frame_time_avg_ms < 25.0 {
+                // During restore burst, force the peak back to the average
+                // immediately.  The slow first frames are caused by OS page
+                // faults, not rendering load --- keeping peak inflated starves
+                // upload budgets through the adaptive throttle guards and
+                // prolongs the blank-tile period.
+                let decay = if self.is_in_restore_burst() {
+                    0.50
+                } else if self.frame_time_peak_ms > 50.0 && self.frame_time_avg_ms < 25.0 {
+                    // Transient wake spike (not burst): fast recovery
                     0.70
                 } else {
                     0.95

@@ -1,5 +1,17 @@
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 
+// Force the discrete GPU on hybrid-GPU laptops (NVIDIA Optimus / AMD PowerXpress).
+// These exported symbols are read by the GPU driver at process start-up to decide
+// which adapter to use.  Without them, the installed binary (windows_subsystem = "windows")
+// may be routed to the integrated GPU, while `cargo run` from a VS Code terminal
+// inherits the parent's GPU affinity and may get the discrete adapter by chance.
+#[cfg(target_os = "windows")]
+#[no_mangle]
+pub static NvOptimusEnablement: u32 = 1;
+#[cfg(target_os = "windows")]
+#[no_mangle]
+pub static AmdPowerXpressRequestHighPerformance: i32 = 1;
+
 use eframe::egui;
 use mtt_file_manager::app::ImageViewerApp;
 use std::path::PathBuf;
@@ -152,6 +164,20 @@ fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport,
         persist_window: false, // Disable eframe persistence - we control manually
+        wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
+            // Request the discrete GPU on hybrid-GPU systems (e.g. laptop with
+            // Intel + NVIDIA/AMD).  Without this, the driver may route the app
+            // to the integrated GPU, causing slower texture uploads and lower
+            // throughput — especially noticeable after returning from idle.
+            wgpu_setup: eframe::egui_wgpu::WgpuSetup::CreateNew(eframe::egui_wgpu::WgpuSetupCreateNew {
+                power_preference: eframe::wgpu::PowerPreference::HighPerformance,
+                ..Default::default()
+            }),
+            // Low-latency presentation: queue only 1 frame ahead so the
+            // compositor shows our content sooner after texture re-uploads.
+            desired_maximum_frame_latency: Some(1),
+            ..Default::default()
+        },
         ..Default::default()
     };
 

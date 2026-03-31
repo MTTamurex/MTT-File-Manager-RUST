@@ -164,6 +164,14 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport,
         persist_window: false,
+        wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
+            wgpu_setup: eframe::egui_wgpu::WgpuSetup::CreateNew(eframe::egui_wgpu::WgpuSetupCreateNew {
+                power_preference: eframe::wgpu::PowerPreference::HighPerformance,
+                ..Default::default()
+            }),
+            desired_maximum_frame_latency: Some(1),
+            ..Default::default()
+        },
         ..Default::default()
     };
 
