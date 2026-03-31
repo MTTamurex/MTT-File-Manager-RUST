@@ -122,7 +122,7 @@ Cached Windows Shell icons (special folders, drives, "This PC", Recycle Bin). St
 ## In-Memory Caches (not persisted)
 
 ### Directory Cache
-`infrastructure/directory_cache.rs` provides an in-memory LRU cache (`lru::LruCache`) of directory contents (200 entries max). Not stored in SQLite — entries are populated on navigation and invalidated by the DriveWatcher on filesystem changes.
+`infrastructure/directory_cache.rs` provides an in-memory LRU cache (`lru::LruCache`) of directory contents (200 entries max). Not stored in SQLite — entries are populated on navigation and invalidated by filesystem watcher events on changes.
 
 ## SQLite Schema: Search Service Database
 

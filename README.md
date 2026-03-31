@@ -33,7 +33,7 @@ MTT File Manager is a desktop file manager that combines Rust's performance and 
 - **Integrated preview** — View files without leaving the app
 - **Dedicated image viewer** — Separate process with sliding-window cache, instant navigation, and multi-threaded decoding
 - **Video player** — Standalone mpv-based player with D3D11 GPU pipeline
-- **PDF viewer** — Native viewer using Windows.Data.Pdf API (WinRT)
+- **PDF viewer** — Native viewer using pdfium (Google's PDF rendering library via `pdfium-render` crate)
 - **Smart thumbnails** — Multi-stage generation: image crate → WIC → Shell API → Media Foundation
 - **Animated GIF playback** — Optimized rendering with play/pause controls
 
@@ -56,17 +56,18 @@ MTT File Manager is a desktop file manager that combines Rust's performance and 
 - **Async workers** — Background processing keeps UI responsive
 - **Smart prefetch** — Predictive preloading of folders and files
 - **UI virtualization** — Efficient rendering of large directories
-- **Drive-wide monitoring** — Native `ReadDirectoryChangesW` with `notify` fallback for UNC paths
+- **Per-folder monitoring** — Default `notify` crate watcher with opt-in drive-wide `ReadDirectoryChangesW`
 
 ## Technologies
 
 | Category | Technology | Version | Purpose |
 |----------|-----------|---------|---------|
 | **Language** | Rust | Edition 2021 | Performance and safety |
-| **GUI** | eframe/egui | 0.31 | Modern immediate-mode GUI |
+| **GUI** | eframe/egui | 0.31 | Modern immediate-mode GUI (features: `persistence`, `wgpu`) |
+| **GPU Backend** | wgpu (via eframe) | 24.0.5 | D3D12/Vulkan rendering with HighPerformance GPU preference |
 | **Windows API** | windows-rs | 0.61.0 | Native Windows integration |
 | **Video** | libmpv2 | 5.0.3 | High-performance video playback |
-| **PDF** | Windows.Data.Pdf | Built-in | Native PDF rendering (WinRT) |
+| **PDF** | pdfium (pdfium-render) | 0.8.37 | Native PDF rendering (requires pdfium.dll) |
 | **Database** | SQLite (rusqlite) | 0.32 | Reliable persistence |
 | **Images** | image crate | 0.25 | Image processing |
 | **Parallelism** | rayon | 1.10 | Parallel processing |
@@ -81,7 +82,7 @@ MTT File Manager is a desktop file manager that combines Rust's performance and 
 - **CPU**: x64, 2+ cores
 - **RAM**: 4 GB
 - **Disk**: 100 MB + cache storage
-- **GPU**: DirectX 11 compatible
+- **GPU**: DirectX 12 or Vulkan capable (via wgpu)
 
 ### Recommended
 - **OS**: Windows 11 (latest update)
@@ -92,6 +93,7 @@ MTT File Manager is a desktop file manager that combines Rust's performance and 
 
 ### Runtime Dependencies
 - **libmpv-2.dll** — Required for video playback
+- **pdfium.dll** — Required for PDF viewer
 
 ## Installation
 
@@ -135,24 +137,24 @@ cargo build --release --workspace
 ### Supported Formats
 - **Images**: JPG, PNG, GIF, WebP, BMP, TIFF, SVG — double-click opens the dedicated viewer
 - **Videos**: MP4, MKV, AVI, MOV, WebM (requires libmpv)
-- **PDFs**: Native viewer via Windows.Data.Pdf API
+- **PDFs**: Native viewer via pdfium (requires pdfium.dll)
 - **GIFs**: Animated playback with play/pause controls
 
 ## Documentation
 
-Access the [`docs/`](docs/) folder for complete technical documentation:
+Access the [`DOCs/`](DOCs/) folder for complete technical documentation:
 
-- **[Overview](docs/01_overview.md)** — Introduction and high-level architecture
-- **[Build & Debug](docs/02_build_run_debug.md)** — Build, run, and debug instructions
-- **[Architecture](docs/03_architecture.md)** — Detailed architecture and layers
-- **[Module Map](docs/04_module_map.md)** — File structure and module responsibilities
-- **[Dependencies](docs/05_dependencies_stack.md)** — Full technology stack
-- **[Key Flows](docs/06_key_flows.md)** — How major features work
-- **[Storage & Config](docs/07_storage_config.md)** — Data storage and configuration
-- **[Logging & Errors](docs/08_logging_errors_telemetry.md)** — Logging and debugging
-- **[Performance](docs/09_performance_optimizations.md)** — Performance optimizations
+- **[Overview](DOCs/01_overview.md)** — Introduction and high-level architecture
+- **[Build & Debug](DOCs/02_build_run_debug.md)** — Build, run, and debug instructions
+- **[Architecture](DOCs/03_architecture.md)** — Detailed architecture and layers
+- **[Module Map](DOCs/04_module_map.md)** — File structure and module responsibilities
+- **[Dependencies](DOCs/05_dependencies_stack.md)** — Full technology stack
+- **[Key Flows](DOCs/06_key_flows.md)** — How major features work
+- **[Storage & Config](DOCs/07_storage_config.md)** — Data storage and configuration
+- **[Logging & Errors](DOCs/08_logging_errors_telemetry.md)** — Logging and debugging
+- **[Performance](DOCs/09_performance_optimizations.md)** — Performance optimizations
 
-**Documentation index**: [docs/INDEX.md](docs/INDEX.md)
+**Documentation index**: [DOCs/INDEX.md](DOCs/INDEX.md)
 
 ## Development
 
@@ -220,7 +222,7 @@ MTT-File-Manager-RUST/
 │   ├── mtt-search-protocol/          # Shared IPC types (bincode)
 │   └── mtt-search-service/           # Windows Service for file indexing
 ├── locales/                          # i18n (en.yml, pt-BR.yml)
-├── docs/                             # Technical documentation
+├── DOCs/                             # Technical documentation
 └── benches/                          # Benchmarks
 ```
 

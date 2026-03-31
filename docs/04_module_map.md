@@ -18,6 +18,7 @@ src/
 │   ├── global_search_state.rs       # Global search session state
 │   ├── layout_state.rs              # Layout preferences
 │   ├── navigation_state.rs          # Navigation state & history
+│   ├── live_file_size.rs              # Live file size monitoring state
 │   ├── ui_state.rs                  # UI preferences state
 │   ├── init.rs                      # ImageViewerApp::new() initialization
 │   ├── init_bootstrap.rs            # Bootstrap sequence
@@ -247,6 +248,7 @@ src/
     ├── viewer_app.rs                # PDF viewer state & rendering
     ├── renderer.rs                  # Page rendering
     ├── render_worker.rs             # Async render worker
+    ├── selection.rs                # Text selection support
     └── toolbar.rs                   # PDF controls
 ```
 
@@ -278,7 +280,8 @@ crates/
 
 ```
 Cargo.toml                           # Workspace root + mtt-file-manager dependencies
-build.rs                             # Windows icon embedding (winresource)
+build.rs                             # Windows icon + DPI manifest embedding (winresource)
+app.manifest                         # DPI awareness and Windows compatibility manifest
 virtual_drive_config.json            # Drive letter → storage type overrides
 locales/
 ├── en.yml                           # English translations

@@ -35,10 +35,10 @@ Check file type (image/video/PDF/GIF)
     ↓
 ┌──────────────┬──────────────────┬──────────────────┬──────────────┐
 │ Image        │ Video            │ PDF              │ GIF          │
-│ Decode via   │ mpv preview in   │ Windows.Data.Pdf │ Frame-based  │
-│ image crate  │ embedded panel   │ WinRT rendering  │ animation    │
+│ Decode via   │ mpv preview in   │ pdfium-render    │ Frame-based  │
+│ image crate  │ embedded panel   │ (pdfium.dll)     │ animation    │
 │ or WIC       │ (libmpv2)        │                  │              │
-└──────────────┴──────────────────┴──────────────────┴──────────────┘
+└──────────────┴──────────────────┴──────────────────┘──────────────┘
     ↓
 Render in preview panel [ui/preview_panel/]
 ```
@@ -168,12 +168,36 @@ Unpin via 📌 icon → remove from SQLite
 
 **Key files**: `app/operations/pinned_folder_ops.rs`, `infrastructure/disk_cache/pinned_folders.rs`, `ui/sidebar.rs`
 
-## 9. Drive Watcher (Filesystem Monitoring)
+## 9. Filesystem Monitoring
 
 **Trigger**: App startup or folder navigation.
 
+The app uses a layered filesystem monitoring strategy with the `notify` crate as the default watcher and the drive-wide `ReadDirectoryChangesW` watcher as an opt-in alternative.
+
+### Default: Per-Folder Watcher (`notify` crate)
+
 ```
-App init: start DriveWatcherManager [app/init.rs]
+Navigate to folder [app/operations/watcher.rs]
+    ↓
+Create notify::RecommendedWatcher for current folder (NonRecursive)
+    ↓
+Events received via crossbeam channel (fs_event_receiver)
+    ↓
+process_legacy_notify_events() [app/operations/message_handler/watcher_legacy.rs]
+    ↓
+┌─────────────────┬──────────────────────────┐
+│ DELETE event     │ ADD/MODIFY event         │
+│ Remove from UI   │ Reload folder contents   │
+│ (no full reload) │                          │
+└─────────────────┴──────────────────────────┘
+```
+
+### Opt-In: Drive-Wide Watcher (ReadDirectoryChangesW)
+
+**Activation**: Set `MTT_ENABLE_DRIVE_WATCHER=1` environment variable. Disabled by default because recursive `ReadDirectoryChangesW` on drive roots causes systemic UI degradation on machines with OneDrive/Cloud Files minifilters over prolonged use.
+
+```
+App init: start DriveWatcherManager (if MTT_ENABLE_DRIVE_WATCHER=1)
     ↓
 Spawn one DriveWatcher per drive (ReadDirectoryChangesW on drive root)
     ↓
@@ -183,16 +207,19 @@ Event received → parse buffer [infrastructure/drive_watcher/buffer_parser.rs]
     ↓
 Filter events by current folder prefix
     ↓
-┌─────────────────┬──────────────────────────┐
-│ DELETE event     │ ADD/MODIFY event         │
-│ Remove from UI   │ Reload folder contents   │
-│ (no full reload) │                          │
-└─────────────────┴──────────────────────────┘
-    ↓
-Fallback: notify-watcher for UNC/network paths
+On NTFS/ReFS: drop notify watcher entirely (drive watcher is sufficient)
+On non-USN (exFAT/FAT): keep both watchers as resilience backup
 ```
 
-**Key files**: `infrastructure/drive_watcher.rs`, `infrastructure/drive_watcher/`, `infrastructure/drive_watcher_integration.rs`, `app/operations/watcher.rs`
+### Resilience: Consistency Probe
+
+A background worker (`app/init_workers/consistency_probe_worker.rs`) periodically computes a signature of the current directory listing and compares it against disk reality. This catches events that either watcher might miss (common on non-NTFS filesystems). Drives detected as unreliable are escalated to active polling mode.
+
+### Special Case: User Session Search
+
+The `user_session_search.rs` module uses `DriveWatcher` independently (not gated by `MTT_ENABLE_DRIVE_WATCHER`) to monitor virtual/FUSE volumes (e.g., Cryptomator/WinFsp mounts) for the in-app search index.
+
+**Key files**: `app/operations/watcher.rs`, `app/operations/message_handler/watcher_legacy.rs`, `app/operations/message_handler/watcher_events.rs`, `infrastructure/drive_watcher.rs`, `infrastructure/drive_watcher_integration.rs`
 
 ## 10. Global Search
 
@@ -306,14 +333,18 @@ Spawn separate process: mtt-file-manager.exe --pdf-viewer <path>
     ↓
 Path validation (no UNC, no traversal, .pdf extension, ≤512MB) [pdf_viewer/mod.rs]
     ↓
-Render pages via Windows.Data.Pdf API (WinRT) [pdf_viewer/renderer.rs]
+Load pdfium.dll dynamically (search next to exe, then system-wide) [pdf_viewer/renderer.rs]
+    ↓
+Render pages via pdfium-render crate [pdf_viewer/renderer.rs]
     ↓
 Texture cache with memory budget and LRU eviction [pdf_viewer/viewer_app.rs]
     ↓
 Async render worker for background page rendering [pdf_viewer/render_worker.rs]
     ↓
+Text selection support [pdf_viewer/selection.rs]
+    ↓
 Toolbar for navigation [pdf_viewer/toolbar.rs]
 ```
 
-**Key files**: `pdf_viewer/mod.rs`, `pdf_viewer/viewer_app.rs`, `pdf_viewer/renderer.rs`, `pdf_viewer/render_worker.rs`
+**Key files**: `pdf_viewer/mod.rs`, `pdf_viewer/viewer_app.rs`, `pdf_viewer/renderer.rs`, `pdf_viewer/render_worker.rs`, `pdf_viewer/selection.rs`
 

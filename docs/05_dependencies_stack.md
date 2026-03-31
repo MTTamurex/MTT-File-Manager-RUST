@@ -6,7 +6,8 @@
 
 | Crate | Version | Purpose |
 |-------|---------|---------|
-| eframe | 0.31 | egui framework with windowing (feature: `persistence`) |
+| eframe | 0.31 | egui framework with windowing (features: `persistence`, `wgpu`) |
+| wgpu | 24.0.5 (via eframe) | GPU rendering backend (D3D12/Vulkan) with HighPerformance preference |
 
 ### Concurrency & Channels
 
@@ -51,6 +52,7 @@
 | Crate | Version | Purpose |
 |-------|---------|---------|
 | libmpv2 | 5.0.3 | mpv video player bindings |
+| pdfium-render | 0.8.37 | PDF rendering (via pdfium.dll, feature: `thread_safe`) |
 
 ### Serialization
 
@@ -168,7 +170,8 @@
 | Dependency | Required | Purpose |
 |-----------|----------|---------|
 | libmpv-2.dll | For video playback | mpv shared library |
-| Windows 10+ | Always | Windows.Data.Pdf API for PDF viewer |
+| pdfium.dll | For PDF viewer | Google's PDF rendering library |
+| Windows 10+ | Always | Native Windows API integration |
 
 ## Feature Flags
 

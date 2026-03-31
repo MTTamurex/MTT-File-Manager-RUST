@@ -17,6 +17,7 @@ winget install Rustlang.Rustup
 ### System Dependencies
 - **Windows 10** or **Windows 11**
 - **libmpv-2.dll** — Required for video playback
+- **pdfium.dll** — Required for PDF viewer
 
 ### Optional Dependencies
 ```powershell

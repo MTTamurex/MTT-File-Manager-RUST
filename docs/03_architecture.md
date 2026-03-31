@@ -137,7 +137,7 @@ Business logic and application services.
 - `sorting.rs` — Sorting facade (`sort_items`, `filter_items`)
 - `sorting/sort_impl.rs` — Sort implementation
 - `sorting/filtering.rs` — Filter implementation
-- `watcher.rs` — Filesystem change monitoring integration
+- `watcher.rs` — Filesystem change monitoring integration (default: `notify` per-folder watcher; opt-in: drive-wide `ReadDirectoryChangesW`)
 - `notification.rs` — Toast notification system
 - `renaming.rs` — File rename logic
 - `context_menu.rs` — Context menu logic
@@ -168,8 +168,8 @@ System access, Windows integration, and data persistence.
 
 **Filesystem**:
 - `ntfs_reader.rs` — NTFS raw directory reading (NtQueryDirectoryFile)
-- `drive_watcher.rs` + `drive_watcher/` — Drive-wide filesystem watcher (ReadDirectoryChangesW, buffer_parser, thread_loop)
-- `drive_watcher_integration.rs` — Multi-drive watcher manager with fallback to notify for UNC paths
+- `drive_watcher.rs` + `drive_watcher/` — Drive-wide filesystem watcher (ReadDirectoryChangesW, buffer_parser, thread_loop) — **disabled by default** due to UI degradation on machines with OneDrive/Cloud Files minifilters; opt-in via `MTT_ENABLE_DRIVE_WATCHER=1`
+- `drive_watcher_integration.rs` — Multi-drive watcher manager; when drive watcher is enabled, adapts drive events into notify-compatible format
 - `folder_compose.rs` — Custom folder cover composition (3-layer PNG)
 - `virtual_drive_config.rs` — Virtual drive and disk type configuration
 - `io_priority.rs` + `io_priority/` — I/O priority management (detection, grouped_queue, threading)
@@ -291,12 +291,14 @@ Standalone mpv-based video player launched as a separate process (`--video-playe
 ### 9. PDF Viewer (Separate Process)
 **Location**: `src/pdf_viewer/`
 
-Native PDF viewer using **Windows.Data.Pdf API** (WinRT, built-in to Windows 10+). Launched as a separate process (`--pdf-viewer` flag).
+Native PDF viewer using **pdfium** (Google's PDF rendering library via `pdfium-render` crate). Requires `pdfium.dll` at runtime. Launched as a separate process (`--pdf-viewer` flag).
 
+- Dynamic loading of `pdfium.dll` (searches next to executable, then system-wide)
 - Path validation: blocks UNC paths, null bytes, path traversal, and non-`.pdf` extensions
 - File size limit: 512 MB
 - Texture cache with memory budget and LRU eviction
 - Render worker for asynchronous page rendering
+- Text selection support
 - Toolbar for navigation controls
 
 ## Key Boundaries
@@ -342,7 +344,7 @@ Process Input → Update State → Render UI       │ (60 FPS loop)
    - Initialize worker threads (thumbnails, files, icons, metadata, covers, folder previews)
    - Load preferences from SQLite
    - Configure caches and indices
-   - Initialize watchers (if `notify-watcher` feature enabled)
+   - Initialize filesystem watcher (`notify` per-folder by default; drive-wide `ReadDirectoryChangesW` opt-in via `MTT_ENABLE_DRIVE_WATCHER=1`)
    - Load initial state
    - Configure custom fonts
 

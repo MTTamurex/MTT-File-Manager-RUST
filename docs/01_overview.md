@@ -25,7 +25,7 @@ MTT File Manager is a native Windows file manager built in Rust with a modern bo
 - **Integrated preview panel** — View images, videos, GIFs, and PDFs without leaving the app
 - **Dedicated image viewer** — Separate process with sliding-window cache, multi-threaded decoding, and instant navigation between images
 - **Video player** — Standalone mpv-based player with D3D11 GPU pipeline, borderless window, and subtitle support
-- **PDF viewer** — Native viewer using Windows.Data.Pdf API (WinRT), with texture memory budgeting and page caching
+- **PDF viewer** — Native viewer using pdfium (Google's PDF rendering library via `pdfium-render` crate), with texture memory budgeting and page caching
 - **Smart thumbnails** — Multi-stage generation pipeline: image crate → WIC → Shell API → force extract → Media Foundation
 - **Custom folder covers** — Folder previews composed from 3 PNG layers (back/thumbnail/front) via `image` crate, replacing Shell API
 - **Animated GIF playback** — Optimized GIF rendering with play/pause controls
@@ -97,11 +97,12 @@ MTT File Manager is a native Windows file manager built in Rust with a modern bo
 | Category | Technology | Version | Purpose |
 |----------|-----------|---------|---------|
 | Language | Rust | 2021 Edition | Core language |
-| GUI Framework | eframe/egui | 0.31 | Immediate-mode GUI |
+| GUI Framework | eframe/egui | 0.31 | Immediate-mode GUI (features: `persistence`, `wgpu`) |
 | Windows API | windows-rs | 0.61.0 | Native Windows integration |
 | Database | SQLite (rusqlite) | 0.32 | Thumbnail/preference persistence |
 | Video | libmpv2 | 5.0.3 | Video playback |
-| PDF | Windows.Data.Pdf | Built-in | Native PDF rendering (WinRT) |
+| PDF | pdfium (pdfium-render) | 0.8.37 | Native PDF rendering |
+| GPU Backend | wgpu (via eframe) | 24.0.5 | D3D12/Vulkan rendering with HighPerformance GPU preference |
 | Images | image crate | 0.25 | Image processing (WebP, GIF) |
 | SVG | resvg/usvg | 0.44 | SVG icon rendering |
 | Parallelism | rayon | 1.10 | Parallel processing |
@@ -120,7 +121,8 @@ MTT File Manager is a native Windows file manager built in Rust with a modern bo
 ## Runtime Dependencies
 
 - **libmpv-2.dll** — Required for video playback (place in executable directory or PATH)
-- **Windows 10+** — Required for Windows.Data.Pdf API used by the PDF viewer
+- **pdfium.dll** — Required for PDF viewer (place in executable directory or PATH)
+- **Windows 10+** — Required for native Windows API integration
 
 ## Known Limitations
 
@@ -135,7 +137,7 @@ MTT File Manager is a native Windows file manager built in Rust with a modern bo
 - x64 processor, 2+ cores
 - 4 GB RAM
 - 100 MB disk space + cache storage
-- DirectX 11 compatible GPU
+- DirectX 12 or Vulkan capable GPU (via wgpu)
 
 ### Recommended
 - Windows 11 (latest update)

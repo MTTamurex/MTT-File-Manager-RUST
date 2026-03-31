@@ -4,25 +4,76 @@
 
 ### Log Categories
 
-The application uses the `log` crate (`log::info!`, `log::warn!`, `log::error!`, `log::debug!`) with `env_logger` as the backend for structured logging with category prefixes:
+The main application uses the `log` crate (`log::info!`, `log::warn!`, `log::error!`, `log::debug!`) with `env_logger` as the backend. The search service uses `eprintln!` for output. Messages are tagged with bracket prefixes for filtering.
+
+#### Main Application (`src/`) — via `log::` macros
 
 | Prefix | Category | Description |
 |--------|----------|-------------|
 | `[INIT]` | Initialization | App startup events |
-| `[CACHE]` | Cache | Cache hits, misses, evictions |
-| `[THUMB]` | Thumbnails | Thumbnail generation events |
-| `[FILE_OP]` | File operations | Copy, move, delete operations |
+| `[LIFECYCLE]` | Lifecycle | Focus/minimize restore, idle detection, shutdown |
+| `[EXIT]` | Shutdown | App exit and cleanup |
 | `[NAV]` | Navigation | Path navigation events |
-| `[WORKER]` | Workers | Worker thread lifecycle |
-| `[ERROR]` | Errors | Error conditions |
-| `[WARN]` | Warnings | Warning conditions |
-| `[PERF]` | Performance | Timing and performance data |
-| `[WATCHER]` | File watcher | Filesystem change events |
-| `[PDF]` | PDF viewer | PDF viewer events |
-| `[MPV]` | Video player | mpv player events |
-| `[IMAGE-VIEWER]` | Image viewer | Dedicated viewer events |
-| `[FLOW]` | Flow control | Application flow tracking |
-| `[STATE]` | State | State transition events |
+| `[PERF]` | Performance | Frame timing and performance data |
+| `[PERF-MSG]` | Message processing | Per-frame message handler timing |
+| `[PERF-ICON]` | Icon performance | Icon extraction timing |
+| `[WATCHER]` | Watcher routing | Watcher strategy selection and lifecycle |
+| `[FS-WATCH]` | Filesystem events | Watcher event processing and auto-reload |
+| `[NOTIFY-WATCHER]` | Notify watcher | Per-folder `notify` crate watcher events |
+| `[DRIVE-WATCHER]` | Drive watcher | Drive-wide `ReadDirectoryChangesW` events |
+| `[DRIVE-WATCHER-MGR]` | Drive watcher manager | Multi-drive watcher management |
+| `[MTIME-CHECK]` | Modification time | File modification time verification |
+| `[MTIME-SCHED]` | Mtime scheduling | Scheduled modification time checks |
+| `[GLOBAL-SEARCH]` | Global search | Search overlay and IPC events |
+| `[SESSION-SEARCH]` | Session search | User session search index events |
+| `[THUMB WORKER]` | Thumbnail worker | Thumbnail request processing |
+| `[Thumbnail]` | Thumbnail extraction | Thumbnail extraction pipeline events |
+| `[ThumbnailWorker]` | Thumbnail lifecycle | Thumbnail worker lifecycle |
+| `[FILE-OP]` | File operations | File operation worker events |
+| `[FileOps]` | File operations | Copy, move, delete, paste operations |
+| `[SECURITY]` | Security | Security validation events |
+| `[FOLDER-LOCK]` | Folder locks | Per-folder view preference events |
+| `[PINNED]` | Pinned folders | Pinned folder persistence |
+| `[PinnedFolders]` | Pinned folders | Pinned folder operations |
+| `[Cache]` | Cache | Cache initialization and disk cache events |
+| `[DISK-CACHE]` | Disk cache | SQLite disk cache operations |
+| `[GC]` | Garbage collection | Cache garbage collection |
+| `[IconDiskCache]` | Icon cache | Icon disk cache operations |
+| `[Config]` | Configuration | Virtual drive and settings events |
+| `[DEBUG]` | Debug | Miscellaneous debug information |
+| `[COVER]` | Folder covers | Folder cover composition events |
+| `[DRIVE-REFRESH]` | Drive refresh | Drive list refresh events |
+| `[GifPlayer]` | GIF playback | GIF animation events |
+| `[IMAGE-VIEWER]` | Image viewer | Dedicated image viewer events |
+| `[VIDEO-PLAYER]` | Video player | Standalone video player events |
+| `[VIDEO]` | Video preview | Video preview lifecycle |
+| `[PDF-VIEWER]` | PDF viewer | PDF viewer events |
+| `[PDF-RENDER]` | PDF render | PDF page rendering events |
+| `[MPV]` | mpv | mpv player events |
+| `[MpvPreview]` | mpv preview | Embedded mpv preview events |
+| `[ShellMenu]` | Shell menu | Native context menu events |
+| `[ShellMenuWorker]` | Shell menu worker | Background shell menu extraction |
+| `[SHELL-FOLDER]` | Shell folders | Shell special folder resolution |
+| `[OneDrive]` | OneDrive | OneDrive path detection |
+| `[ISO]` | ISO mount | ISO file mounting |
+| `[METADATA]` | Metadata | File metadata extraction |
+| `[Lixeira]` | Recycle Bin | Recycle Bin enumeration |
+| `[RECYCLE]` | Recycle Bin | Recycle Bin operation events |
+| `[RECYCLE BIN]` | Recycle Bin | Recycle Bin view setup |
+| `[PROPERTIES]` | Properties | File properties dialog |
+| `[VOLUME-RENAME]` | Volume rename | Drive volume label changes |
+| `[HardwareDetection]` | Hardware | GPU hardware acceleration detection |
+| `[device_change]` | Device change | Device plug/unplug monitoring |
+
+#### Search Service (`crates/mtt-search-service/`) — via `eprintln!`
+
+| Prefix | Category | Description |
+|--------|----------|-------------|
+| `[SERVICE]` | Service | Service lifecycle and SCM events |
+| `[IPC]` | IPC | Named Pipe server events |
+| `[DB]` | Database | SQLite persistence events |
+| `[SCAN]` | Scanning | Volume scanning events |
+| `[USN]` | USN Journal | USN Journal indexing events |
 
 ### Capturing Logs
 

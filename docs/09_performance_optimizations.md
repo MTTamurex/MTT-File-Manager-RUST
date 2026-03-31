@@ -19,24 +19,43 @@ The app uses `NtQueryDirectoryFile` to read directory entries in bulk (64KB per 
 
 **Virtual drive overrides**: The `%LOCALAPPDATA%\MTT-File-Manager\virtual_drive_config.json` file is created automatically on first launch, pre-populated with detected virtual drives, and allows the user to mark them as HDD/SSD to control which reading strategy is used.
 
-## 2. Drive-Wide Filesystem Monitoring
+## 2. Filesystem Monitoring Strategy
+
+### Default: Per-Folder Watcher (`notify` crate)
+
+**Location**: `src/app/operations/watcher.rs`
+
+By default, the app uses the `notify` crate (`RecommendedWatcher`) to monitor the **current folder only** (non-recursive). When the user navigates to a different folder, the previous watcher is dropped and a new one is created.
+
+**Why this is the default**: The drive-wide `ReadDirectoryChangesW` watcher (see below) was disabled by default because recursive monitoring of drive roots causes systemic UI degradation on machines with OneDrive/Cloud Files minifilters over prolonged use.
+
+### Opt-In: Drive-Wide Watcher (ReadDirectoryChangesW)
 
 **Location**: `src/infrastructure/drive_watcher.rs`, `src/infrastructure/drive_watcher/`
 
-Instead of creating a new filesystem watcher per folder (expensive and slow during navigation), the app monitors entire drive roots.
+**Activation**: Set `MTT_ENABLE_DRIVE_WATCHER=1` environment variable.
 
-**Architecture**:
+When enabled, the app monitors entire drive roots instead of individual folders:
 - `DriveWatcher`: monitors a single drive root (e.g., `C:\`) using `ReadDirectoryChangesW`
 - `DriveWatcherManager` (`drive_watcher_integration.rs`): manages one watcher per drive
 - Async I/O with `OVERLAPPED` structure — non-blocking
 - Events are filtered by the current folder prefix — only relevant changes are processed
+- On NTFS/ReFS drives, the `notify` watcher is dropped entirely when the drive watcher is active
 
-**Benefits**:
-- Zero overhead when navigating between folders (no watcher recreation)
+**Benefits when enabled**:
+- Zero overhead when navigating between folders on the same drive (no watcher recreation)
 - Instant change detection for the current folder
 - Single watcher per drive regardless of navigation depth
 
-**Fallback**: UNC/network paths use the `notify` crate (`notify-watcher` feature) since drive-root monitoring doesn't apply to network shares.
+### Resilience: Consistency Probe
+
+**Location**: `src/app/init_workers/consistency_probe_worker.rs`
+
+A background worker periodically computes a directory listing signature and compares it against the disk. This catches events that any watcher might miss (common on non-NTFS/non-USN filesystems). Unreliable drives are escalated to active polling mode.
+
+### UNC/Network Paths
+
+UNC and network paths always use the `notify` crate since drive-root monitoring doesn't apply to network shares.
 
 ## 3. Smart DELETE Handling
 
@@ -119,3 +138,28 @@ Folder loading uses adaptive batch sizes that adjust based on system performance
 ## 10. UI Virtualization
 
 Grid and list views only render items that are currently visible in the viewport. Combined with scroll prediction, this allows smooth scrolling through folders with thousands of files.
+
+## 11. GPU Selection & DPI Awareness
+
+**Location**: `src/main.rs`, `app.manifest`
+
+### GPU Preference
+
+On hybrid GPU laptops (Intel + NVIDIA/AMD), Windows may route GUI-subsystem apps to the integrated GPU. The app forces discrete GPU selection via:
+- **NVIDIA**: `NvOptimusEnablement = 1` (exported static)
+- **AMD**: `AmdPowerXpressRequestHighPerformance = 1` (exported static)
+- **wgpu**: `PowerPreference::HighPerformance` in `WgpuConfiguration`
+
+### DPI Awareness
+
+The `app.manifest` (embedded via `build.rs` + `winresource`) declares **Per-Monitor V2 DPI awareness**. This prevents DWM from bitmap-scaling the window on high-DPI displays, avoiding blurriness and GPU overhead.
+
+## 12. Restore-from-Idle Optimization
+
+**Location**: `src/ui/app/lifecycle.rs`, `src/ui/app_impl.rs`
+
+When the app returns from an idle or minimized state:
+
+- **GPU texture flush**: Only flushes textures after 60s of idle (prevents unnecessary VRAM churn on short idle periods)
+- **Burst mode**: Short burst window (`2s + idle_secs/120`, capped at 5s) with aggressive `frame_time_peak_ms` decay (0.50 factor) to prevent inflated peak metrics from starving thumbnail upload budgets
+- **No watcher throttling**: Watcher event batches are not reduced after restore, ensuring filesystem changes are processed at full speed

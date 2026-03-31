@@ -69,7 +69,7 @@ MTT-File-Manager-RUST/
 │   ├── mtt-search-protocol/  # IPC types (bincode)
 │   └── mtt-search-service/   # Windows Service for file indexing
 ├── locales/                # i18n translation files (en, pt-BR)
-├── docs/                   # This documentation
+├── DOCs/                   # This documentation
 └── benches/                # Benchmarks
 ```
 
@@ -81,6 +81,7 @@ MTT-File-Manager-RUST/
 | `mtt-file-manager --image-viewer <path>` | `src/image_viewer/` | Dedicated image viewer |
 | `mtt-file-manager --video-player <path>` | `src/video_player/` | Standalone video player |
 | `mtt-file-manager --pdf-viewer <path>` | `src/pdf_viewer/` | Native PDF viewer |
+| `mtt-file-manager --set-volume-label <drive> <label>` | `src/main.rs` | Elevated helper for renaming drive volume labels |
 | `mtt-search-service` | `crates/mtt-search-service/src/main.rs` | File indexing Windows Service |
 
 ## Useful Commands
