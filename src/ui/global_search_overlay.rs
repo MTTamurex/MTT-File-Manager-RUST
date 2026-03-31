@@ -167,14 +167,62 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
 
                     ui.add_space(8.0);
 
-                    // Search input
-                    let search_resp = ui.add_sized(
-                        egui::vec2(ui.available_width(), 32.0),
+                    // Search input (custom container with magnifying glass icon)
+                    let input_height = 32.0;
+                    let full_width = ui.available_width();
+                    let (search_rect, container_resp) = ui.allocate_exact_size(
+                        egui::vec2(full_width, input_height),
+                        egui::Sense::click_and_drag(),
+                    );
+
+                    // Draw background and border
+                    let visuals = ui.style().interact(&container_resp);
+                    ui.painter().rect_filled(
+                        search_rect,
+                        visuals.corner_radius,
+                        egui::Color32::WHITE,
+                    );
+                    ui.painter().rect_stroke(
+                        search_rect,
+                        visuals.corner_radius,
+                        ui.visuals().widgets.inactive.bg_stroke,
+                        egui::StrokeKind::Inside,
+                    );
+
+                    let mut search_ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(search_rect)
+                            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                    );
+
+                    // Left padding + magnifying glass icon
+                    search_ui.add_space(8.0);
+                    crate::ui::svg_icons::icon_image(
+                        &mut search_ui,
+                        &mut app.svg_icon_manager,
+                        "search",
+                        16.0,
+                    );
+                    search_ui.add_space(6.0);
+
+                    // Text input
+                    let text_available_w = search_ui.available_width() - 8.0;
+                    let hint = egui::RichText::new(t!("search.placeholder"))
+                        .color(egui::Color32::from_gray(120));
+                    let search_resp = search_ui.add_sized(
+                        egui::vec2(text_available_w, input_height - 2.0),
                         egui::TextEdit::singleline(&mut app.global_search.query)
-                            .hint_text(&*t!("search.placeholder"))
-                            .font(egui::TextStyle::Body)
+                            .frame(false)
+                            .hint_text(hint)
+                            .text_color(egui::Color32::BLACK)
+                            .vertical_align(egui::Align::Center)
                             .id_source("global_search_input"),
                     );
+
+                    // Focus input when clicking empty container area
+                    if container_resp.clicked() {
+                        search_resp.request_focus();
+                    }
 
                     // Auto-focus on open
                     if app.global_search.focus_request {
