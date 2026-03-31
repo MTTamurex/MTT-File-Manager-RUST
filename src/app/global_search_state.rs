@@ -1,3 +1,4 @@
+use eframe::egui;
 use lru::LruCache;
 use std::num::NonZeroUsize;
 use std::sync::mpsc::{Receiver, Sender};
@@ -22,6 +23,10 @@ pub struct GlobalSearchState {
     pub selected_index: Option<usize>,
     pub focus_request: bool,
     pub size_cache: LruCache<String, Option<u64>>,
+    /// Bounded cache for tooltip thumbnail textures (prevents VRAM leak).
+    pub tooltip_texture_cache: LruCache<String, egui::TextureHandle>,
+    /// Bounded cache for tooltip modified-date timestamps (avoids per-frame fs::metadata).
+    pub metadata_cache: LruCache<String, u64>,
     pub category: GlobalSearchCategory,
     pub drive_filter: Option<char>,
     pub active: bool,
@@ -53,6 +58,12 @@ impl GlobalSearchState {
             focus_request: false,
             size_cache: LruCache::new(
                 NonZeroUsize::new(2000).expect("global_search size_cache size must be non-zero"),
+            ),
+            tooltip_texture_cache: LruCache::new(
+                NonZeroUsize::new(50).expect("tooltip_texture_cache size must be non-zero"),
+            ),
+            metadata_cache: LruCache::new(
+                NonZeroUsize::new(500).expect("metadata_cache size must be non-zero"),
             ),
             category: GlobalSearchCategory::All,
             drive_filter: None,

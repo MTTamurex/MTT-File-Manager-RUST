@@ -407,6 +407,8 @@ fn activate_search_result(app: &mut ImageViewerApp, full_path: &str, is_dir: boo
     app.global_search.active = false;
     app.global_search.focus_request = false;
     app.global_search.size_cache.clear();
+    app.global_search.tooltip_texture_cache.clear();
+    app.global_search.metadata_cache.clear();
 
     if is_dir {
         app.navigate_to(full_path);
@@ -559,9 +561,9 @@ fn render_result_row(
         if hover_duration >= TOOLTIP_DELAY_SECS {
             // Grab cached thumbnail (if any) before entering the tooltip closure.
             // 1) Check in-memory texture cache first (cheap).
-            // 2) Fall back to SQLite disk cache — decode WebP and upload as
-            //    a temporary egui texture, cached via egui data so we only
-            //    decode once per hover target.
+            // 2) Fall back to bounded tooltip texture cache (LRU-evicted).
+            // 3) Fall back to SQLite disk cache — decode WebP and upload,
+            //    stored in the bounded LRU so GPU textures are evicted properly.
             let thumb_tex: Option<egui::TextureHandle> = if !is_dir {
                 let p = std::path::PathBuf::from(&full_path);
                 let is_media = p
@@ -571,40 +573,55 @@ fn render_result_row(
                 if is_media {
                     if let Some(tex) = app.cache_manager.get_thumbnail(&p) {
                         Some(tex.clone())
-                    } else {
-                        // Try SQLite disk cache, using egui temp storage to
-                        // avoid re-decoding WebP every frame.
-                        let tex_id = egui::Id::new("gs_tooltip_thumb").with(&full_path);
-                        let existing: Option<egui::TextureHandle> =
-                            ui.ctx().data(|d| d.get_temp(tex_id));
-                        if let Some(tex) = existing {
+                    } else if let Some(tex) = app.global_search.tooltip_texture_cache.get(&full_path) {
+                        Some(tex.clone())
+                    } else if let Some(entry) = app.disk_cache.get_latest(&p) {
+                        if let Ok(img) = image::load_from_memory_with_format(
+                            &entry.data,
+                            image::ImageFormat::WebP,
+                        ) {
+                            let rgba = img.to_rgba8();
+                            let size = [rgba.width() as usize, rgba.height() as usize];
+                            let tex = ui.ctx().load_texture(
+                                format!("gs_thumb_{}", source_idx),
+                                egui::ColorImage::from_rgba_unmultiplied(size, &rgba),
+                                egui::TextureOptions::LINEAR,
+                            );
+                            app.global_search.tooltip_texture_cache.put(full_path.clone(), tex.clone());
                             Some(tex)
-                        } else if let Some(entry) = app.disk_cache.get_latest(&p) {
-                            if let Ok(img) = image::load_from_memory_with_format(
-                                &entry.data,
-                                image::ImageFormat::WebP,
-                            ) {
-                                let rgba = img.to_rgba8();
-                                let size = [rgba.width() as usize, rgba.height() as usize];
-                                let tex = ui.ctx().load_texture(
-                                    format!("gs_thumb_{}", source_idx),
-                                    egui::ColorImage::from_rgba_unmultiplied(size, &rgba),
-                                    egui::TextureOptions::LINEAR,
-                                );
-                                ui.ctx().data_mut(|d| d.insert_temp(tex_id, tex.clone()));
-                                Some(tex)
-                            } else {
-                                None
-                            }
                         } else {
                             None
                         }
+                    } else {
+                        None
                     }
                 } else {
                     None
                 }
             } else {
                 None
+            };
+
+            // Resolve modified timestamp once, then serve from cache.
+            // Also populate size_cache from the same metadata call to avoid
+            // redundant fs::metadata I/O in resolve_result_size.
+            let modified_ts = if let Some(&cached_ts) = app.global_search.metadata_cache.get(&full_path) {
+                cached_ts
+            } else {
+                let meta = std::fs::metadata(&full_path).ok();
+                let ts = meta
+                    .as_ref()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                if !is_dir {
+                    if let Some(len) = meta.as_ref().map(|m| m.len()) {
+                        app.global_search.size_cache.put(full_path.clone(), Some(len));
+                    }
+                }
+                app.global_search.metadata_cache.put(full_path.clone(), ts);
+                ts
             };
 
             let tooltip_layer =
@@ -638,12 +655,6 @@ fn render_result_row(
                                 ui.label(&size_text);
                             });
                         }
-                        let modified_ts = std::fs::metadata(&full_path)
-                            .ok()
-                            .and_then(|m| m.modified().ok())
-                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                            .map(|d| d.as_secs())
-                            .unwrap_or(0);
                         ui.horizontal(|ui| {
                             ui.label(t!("file_info.date_modified"));
                             ui.label(crate::infrastructure::windows::format_date(modified_ts));
