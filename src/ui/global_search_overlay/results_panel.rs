@@ -642,7 +642,12 @@ fn render_result_row(
                             let max_h = 180.0_f32;
                             let scale = (max_w / tex_size.x).min(max_h / tex_size.y).min(1.0);
                             let display_size = egui::vec2(tex_size.x * scale, tex_size.y * scale);
-                            ui.add(egui::Image::new(tex).fit_to_exact_size(display_size));
+                            ui.with_layout(
+                                egui::Layout::top_down(egui::Align::Center),
+                                |ui| {
+                                    ui.add(egui::Image::new(tex).fit_to_exact_size(display_size));
+                                },
+                            );
                             ui.add_space(4.0);
                         }
                         ui.horizontal(|ui| {
