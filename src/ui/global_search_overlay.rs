@@ -72,6 +72,8 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
         app.global_search.active = false;
         app.global_search.focus_request = false;
         app.global_search.size_cache.clear();
+        app.global_search.tooltip_texture_cache.clear();
+        app.global_search.metadata_cache.clear();
         return;
     }
 
@@ -81,6 +83,8 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
         app.global_search.focus_request = false;
         app.global_search.pending_query_dispatch_at = None;
         app.global_search.size_cache.clear();
+        app.global_search.tooltip_texture_cache.clear();
+        app.global_search.metadata_cache.clear();
         return;
     }
 
@@ -186,6 +190,8 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         app.global_search.requested_offset = 0;
                         app.global_search.requested_limit = INITIAL_PAGE_LIMIT;
                         app.global_search.scroll_offset_y = 0.0;
+                        app.global_search.tooltip_texture_cache.clear();
+                        app.global_search.metadata_cache.clear();
                         app.global_search.pending_query_dispatch_at = Some(
                             std::time::Instant::now()
                                 + std::time::Duration::from_millis(SEARCH_INPUT_DEBOUNCE_MS),
@@ -202,6 +208,8 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         app.global_search.requested_limit = INITIAL_PAGE_LIMIT;
                         app.global_search.pending_query_dispatch_at = None;
                         app.global_search.scroll_offset_y = 0.0;
+                        app.global_search.tooltip_texture_cache.clear();
+                        app.global_search.metadata_cache.clear();
                     }
 
                     ui.add_space(8.0);
