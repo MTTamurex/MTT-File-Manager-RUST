@@ -12,6 +12,7 @@ const MAX_RESULTS_CAP: u32 = 10_000;
 const SCROLL_SENSITIVITY: f32 = 5.0;
 const SCROLLBAR_WIDTH: f32 = 4.0;
 const SCROLLBAR_MIN_HANDLE: f32 = 30.0;
+const SCROLLBAR_GAP: f32 = 4.0;
 const RESULTS_FOOTER_HEIGHT: f32 = 32.0;
 const TOOLTIP_DELAY_SECS: f32 = 0.3;
 const ACTION_BTN_WIDTH: f32 = 52.0;
@@ -240,7 +241,13 @@ pub(super) fn render_results_panel(
         egui::pos2(panel_rect.max.x, panel_rect.max.y - footer_height),
     );
 
-    let available_w = viewport_rect.width();
+    // Reserve space for the scrollbar so rows don't extend underneath it.
+    let has_scrollbar = total_content_height > viewport_h;
+    let available_w = if has_scrollbar {
+        viewport_rect.width() - SCROLLBAR_WIDTH - SCROLLBAR_GAP - 2.0
+    } else {
+        viewport_rect.width()
+    };
 
     // Mouse wheel scroll (same ×5 multiplier as list view).
     let pointer_over = ui
