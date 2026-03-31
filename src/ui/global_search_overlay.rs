@@ -208,7 +208,9 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                     search_ui.add_space(6.0);
 
                     // Text input
-                    let text_available_w = search_ui.available_width() - 8.0;
+                    let has_text = !app.global_search.query.is_empty();
+                    let clear_btn_space = if has_text { 22.0 + 4.0 } else { 0.0 };
+                    let text_available_w = search_ui.available_width() - 8.0 - clear_btn_space;
                     let hint = egui::RichText::new(t!("search.placeholder"))
                         .color(egui::Color32::from_gray(120));
                     let search_resp = search_ui.add_sized(
@@ -220,6 +222,28 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                             .vertical_align(egui::Align::Center)
                             .id_source("global_search_input"),
                     );
+
+                    // Clear button (X)
+                    if has_text {
+                        if search_ui
+                            .add(
+                                egui::Button::new("✕")
+                                    .frame(false)
+                                    .min_size(egui::vec2(18.0, 18.0)),
+                            )
+                            .clicked()
+                        {
+                            app.global_search.query.clear();
+                            app.global_search.results.clear();
+                            app.global_search.selected_index = None;
+                            app.global_search.has_more_results = false;
+                            app.global_search.loading = false;
+                            app.global_search.scroll_offset_y = 0.0;
+                            app.global_search.tooltip_texture_cache.clear();
+                            app.global_search.metadata_cache.clear();
+                            search_resp.request_focus();
+                        }
+                    }
 
                     // Focus input when clicking empty container area
                     if container_resp.clicked() {
