@@ -127,10 +127,12 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
             ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
             ui.visuals_mut().widgets.hovered.bg_fill = hover_color;
             ui.visuals_mut().widgets.hovered.weak_bg_fill = hover_color;
-            ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
+            ui.visuals_mut().widgets.hovered.bg_stroke =
+                egui::Stroke::new(1.0, theme::COLOR_ACCENT);
             ui.visuals_mut().widgets.active.bg_fill = hover_color;
             ui.visuals_mut().widgets.active.weak_bg_fill = hover_color;
-            ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
+            ui.visuals_mut().widgets.active.bg_stroke =
+                egui::Stroke::new(1.0, theme::COLOR_ACCENT);
 
             egui::Frame::window(ui.style())
                 .inner_margin(egui::Margin::same(16))
