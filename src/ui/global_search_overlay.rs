@@ -182,7 +182,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                     ui.painter().rect_filled(
                         search_rect,
                         visuals.corner_radius,
-                        egui::Color32::WHITE,
+                        ui.visuals().widgets.inactive.bg_fill,
                     );
                     ui.painter().rect_stroke(
                         search_rect,
@@ -218,7 +218,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         egui::TextEdit::singleline(&mut app.global_search.query)
                             .frame(false)
                             .hint_text(hint)
-                            .text_color(egui::Color32::BLACK)
+                            .text_color(ui.visuals().text_color())
                             .vertical_align(egui::Align::Center)
                             .id_source("global_search_input"),
                     );
