@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 
@@ -11,6 +12,8 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::System::Pipes::ImpersonateNamedPipeClient;
 
 use crate::file_index::{self, VolumeIndex};
+use crate::index_db;
+use crate::path_resolver;
 use mtt_search_protocol::SearchResultItem;
 
 const AUTHZ_RAW_BATCH_SIZE: usize = 512;
@@ -74,6 +77,38 @@ fn current_client_can_read_path(full_path: &str) -> bool {
     }
 }
 
+/// Check if the impersonated client can read a parent directory.
+/// Uses the same `CreateFileW` approach but with `FILE_FLAG_BACKUP_SEMANTICS`
+/// which is required for opening directories.
+#[inline]
+fn parent_dir_of(full_path: &str) -> Option<&str> {
+    // Fast rsearch for the last backslash (Windows paths).
+    // Avoid allocating a PathBuf — just work with the raw string.
+    let idx = full_path.rfind('\\')?;
+    if idx == 0 {
+        return None;
+    }
+    // Keep drive root like "C:\" intact (don't strip to "C:")
+    if idx == 2 && full_path.as_bytes().get(1) == Some(&b':') {
+        return Some(&full_path[..3]);
+    }
+    Some(&full_path[..idx])
+}
+
+/// Look up (or populate) the per-directory authorization cache.
+/// Returns `true` if the impersonated client can read files in the given
+/// directory, caching the result so subsequent files in the same directory
+/// are answered without a syscall.
+#[inline]
+fn is_parent_authorized(cache: &mut HashMap<String, bool>, parent: &str) -> bool {
+    if let Some(&cached) = cache.get(parent) {
+        return cached;
+    }
+    let ok = current_client_can_read_path(parent);
+    cache.insert(parent.to_owned(), ok);
+    ok
+}
+
 pub fn collect_authorized_search_page(
     pipe: HANDLE,
     indices: &[VolumeIndex],
@@ -99,6 +134,10 @@ pub fn collect_authorized_search_page(
     let mut has_more_authorized = false;
     let mut batches = 0usize;
 
+    // Cache authorization results by parent directory to avoid redundant
+    // CreateFileW calls for files in the same folder (common in search results).
+    let mut dir_auth_cache: HashMap<String, bool> = HashMap::with_capacity(64);
+
     while raw_has_more && batches < AUTHZ_MAX_BATCHES && !has_more_authorized {
         batches += 1;
 
@@ -112,7 +151,15 @@ pub fn collect_authorized_search_page(
         raw_has_more = raw_page.has_more;
 
         for result in raw_page.items {
-            if !current_client_can_read_path(&result.full_path) {
+            // Fast path: check parent directory authorization from cache.
+            // Most files inherit ACLs from their parent, so a single directory
+            // check covers all sibling files without per-file CreateFileW.
+            let authorized = match parent_dir_of(&result.full_path) {
+                Some(parent) => is_parent_authorized(&mut dir_auth_cache, parent),
+                None => current_client_can_read_path(&result.full_path),
+            };
+
+            if !authorized {
                 continue;
             }
 
@@ -151,6 +198,120 @@ pub fn collect_authorized_search_page(
     let has_more = has_more_authorized || (raw_has_more && !authorized_items.is_empty());
 
     let total_matches = if !raw_has_more && !has_more_authorized {
+        Some(authorized_total_seen.min(u32::MAX as usize) as u32)
+    } else {
+        None
+    };
+
+    Ok(AuthorizedSearchPage {
+        items: authorized_items,
+        has_more,
+        total_matches,
+    })
+}
+
+/// FTS5-accelerated version of [`collect_authorized_search_page`].
+///
+/// Uses the SQLite FTS5 trigram index for fast substring matching, then resolves
+/// full paths from the in-memory `VolumeIndex` and applies parent-directory
+/// authorization caching — identical security semantics to the linear scan path.
+pub fn collect_authorized_fts_page(
+    pipe: HANDLE,
+    fts_searcher: &index_db::FtsSearcher,
+    indices: &[VolumeIndex],
+    query: &str,
+    offset: usize,
+    limit: usize,
+) -> Result<AuthorizedSearchPage, String> {
+    if limit == 0 || query.is_empty() {
+        return Ok(AuthorizedSearchPage {
+            items: Vec::new(),
+            has_more: false,
+            total_matches: Some(0),
+        });
+    }
+
+    let _impersonation = PipeImpersonationGuard::new(pipe)?;
+
+    let mut dir_auth_cache: HashMap<String, bool> = HashMap::with_capacity(64);
+    // Per-volume directory path caches (keyed by drive_letter).
+    let mut dir_path_caches: HashMap<char, HashMap<u64, String>> = HashMap::new();
+    let mut authorized_items: Vec<SearchResultItem> = Vec::with_capacity(limit.min(1024));
+    let mut authorized_total_seen = 0usize;
+    let mut has_more_authorized = false;
+    let mut fts_offset = 0usize;
+    let mut fts_has_more = true;
+
+    for _ in 0..AUTHZ_MAX_BATCHES {
+        if !fts_has_more || has_more_authorized {
+            break;
+        }
+
+        let fts_results = fts_searcher
+            .search(query, fts_offset, AUTHZ_RAW_BATCH_SIZE)
+            .map_err(|e| format!("FTS search error: {}", e))?;
+
+        if fts_results.is_empty() {
+            fts_has_more = false;
+            break;
+        }
+        fts_offset += fts_results.len();
+        fts_has_more = fts_results.len() >= AUTHZ_RAW_BATCH_SIZE;
+
+        for fts_match in fts_results {
+            // Find the in-memory VolumeIndex for path resolution.
+            let vol = indices.iter().find(|v| {
+                v.drive_letter == fts_match.drive_letter
+                    && matches!(v.state, file_index::IndexState::Ready)
+            });
+            let Some(vol) = vol else { continue };
+
+            // Resolve full path from the in-memory index (always current).
+            let dir_cache = dir_path_caches
+                .entry(fts_match.drive_letter)
+                .or_default();
+            let Some(full_path) =
+                path_resolver::resolve_path_cached(fts_match.frn, vol, dir_cache)
+            else {
+                continue;
+            };
+
+            // Authorization check with parent-directory cache.
+            let authorized = match parent_dir_of(&full_path) {
+                Some(parent) => is_parent_authorized(&mut dir_auth_cache, parent),
+                None => current_client_can_read_path(&full_path),
+            };
+            if !authorized {
+                continue;
+            }
+
+            authorized_total_seen += 1;
+            if authorized_total_seen <= offset {
+                continue;
+            }
+
+            if authorized_items.len() < limit {
+                authorized_items.push(SearchResultItem {
+                    name: fts_match.name,
+                    full_path,
+                    is_dir: fts_match.is_dir,
+                    size: 0,
+                });
+                continue;
+            }
+
+            has_more_authorized = true;
+            break;
+        }
+    }
+
+    if !has_more_authorized && fts_has_more && !authorized_items.is_empty() {
+        has_more_authorized = true;
+    }
+
+    let has_more = has_more_authorized;
+
+    let total_matches = if !fts_has_more && !has_more_authorized {
         Some(authorized_total_seen.min(u32::MAX as usize) as u32)
     } else {
         None

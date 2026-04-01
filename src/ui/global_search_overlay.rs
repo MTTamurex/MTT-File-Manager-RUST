@@ -5,10 +5,10 @@ use crate::app::global_search_state::GlobalSearchCategory;
 use crate::app::state::ImageViewerApp;
 use crate::ui::theme;
 use eframe::egui;
-use filters::{available_drives, category_label, format_number};
+use filters::{category_label, format_number};
 use rust_i18n::t;
 
-mod filters;
+pub(crate) mod filters;
 mod results_panel;
 
 const INITIAL_PAGE_LIMIT: u32 = 200;
@@ -235,6 +235,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         {
                             app.global_search.query.clear();
                             app.global_search.results.clear();
+                            app.global_search.results_generation += 1;
                             app.global_search.selected_index = None;
                             app.global_search.has_more_results = false;
                             app.global_search.loading = false;
@@ -276,6 +277,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                     } else if app.global_search.query.is_empty() {
                         app.global_search.selected_index = None;
                         app.global_search.results.clear();
+                        app.global_search.results_generation += 1;
                         app.global_search.loading = false;
                         app.global_search.has_more_results = false;
                         app.global_search.requested_offset = 0;
@@ -311,7 +313,9 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
         GlobalSearchCategory::Documents,
     ];
 
-    let drives = available_drives(&app.global_search.results);
+    // Use cached drives to avoid O(N) recomputation every frame.
+    app.global_search.ensure_filter_cache();
+    let drives = app.global_search.cached_available_drives.clone();
     if app
         .global_search
         .drive_filter
