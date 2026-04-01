@@ -31,7 +31,9 @@ impl FtsSearcher {
         )
         .map_err(|e| format!("FTS searcher open error: {}", e))?;
         // WAL is already set by the writer; this is a no-op but explicit.
-        conn.execute_batch("PRAGMA journal_mode=WAL;")
+        // busy_timeout lets the reader retry for up to 10s instead of failing
+        // immediately with SQLITE_BUSY when the writer is rebuilding FTS5.
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=10000;")
             .map_err(|e| format!("FTS searcher PRAGMA error: {}", e))?;
         Ok(Self {
             conn: Mutex::new(conn),
@@ -181,8 +183,10 @@ impl IndexDb {
     pub fn open(path: &Path) -> Result<Self, String> {
         let conn = Connection::open(path).map_err(|e| format!("SQLite open error: {}", e))?;
 
-        // Enable WAL mode for better concurrency
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
+        // Enable WAL mode for better concurrency.
+        // busy_timeout lets concurrent operations retry for up to 10s instead of
+        // failing immediately with SQLITE_BUSY.
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=10000;")
             .map_err(|e| format!("PRAGMA error: {}", e))?;
 
         // Create tables (compact schema — no name_lower, no size)
@@ -339,6 +343,10 @@ impl IndexDb {
     }
 
     /// Save the complete volume index to the database.
+    ///
+    /// This is expensive for large volumes (DELETE ALL + INSERT ALL + FTS5 rebuild).
+    /// Use only for initial scan or service shutdown.  For periodic persist, prefer
+    /// `save_volume_state` + `sync_fts_incremental`.
     pub fn save_volume(&self, index: &VolumeIndex) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| format!("Lock error: {}", e))?;
 
@@ -414,6 +422,156 @@ impl IndexDb {
             index.drive_letter,
             fts_start.elapsed().as_secs_f64()
         );
+        Ok(())
+    }
+
+    /// Lightweight persist: save only the volume state (journal position, record count).
+    ///
+    /// This is O(1) and safe to call frequently (e.g., every 5 minutes).
+    pub fn save_volume_state(&self, index: &VolumeIndex) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| format!("Lock error: {}", e))?;
+
+        let drive = index.drive_letter.to_string();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+
+        conn.execute(
+            "INSERT OR REPLACE INTO volume_state
+             (drive_letter, journal_id, last_usn, files_indexed, last_full_scan_epoch)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                drive,
+                index.journal_id as i64,
+                index.last_usn,
+                index.records.len() as i64,
+                now
+            ],
+        )
+        .map_err(|e| format!("Save volume_state error: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Incrementally sync file_records and FTS5 for only the changed records.
+    ///
+    /// Much faster than `save_volume` for typical USN deltas (hundreds of changes
+    /// vs. millions of records). The FTS5 index stays consistent throughout because
+    /// changes are applied atomically inside a single transaction.
+    pub fn sync_fts_incremental(
+        &self,
+        index: &VolumeIndex,
+        additions: &std::collections::HashSet<u64>,
+        removals: &std::collections::HashSet<u64>,
+    ) -> Result<(), String> {
+        if additions.is_empty() && removals.is_empty() {
+            return Ok(());
+        }
+
+        let conn = self.conn.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let drive = index.drive_letter.to_string();
+
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| format!("Transaction begin error: {}", e))?;
+
+        let mut removed_count = 0usize;
+        let mut added_count = 0usize;
+        let mut updated_count = 0usize;
+
+        // --- Process removals ---
+        // For content-sync FTS5, we must tell FTS5 about the deletion BEFORE
+        // we delete the row from file_records.
+        for &frn in removals {
+            // Look up the existing rowid + name so we can remove the FTS5 entry.
+            let existing: Option<(i64, String)> = tx
+                .query_row(
+                    "SELECT rowid, name FROM file_records WHERE drive_letter = ?1 AND frn = ?2",
+                    params![drive, frn as i64],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .ok();
+
+            if let Some((rowid, old_name)) = existing {
+                // Remove from FTS5 first.
+                let _ = tx.execute(
+                    "INSERT INTO search_fts(search_fts, rowid, name) VALUES('delete', ?1, ?2)",
+                    params![rowid, old_name],
+                );
+                // Remove from file_records.
+                tx.execute(
+                    "DELETE FROM file_records WHERE drive_letter = ?1 AND frn = ?2",
+                    params![drive, frn as i64],
+                )
+                .map_err(|e| format!("Delete record error: {}", e))?;
+                removed_count += 1;
+            }
+        }
+
+        // --- Process additions (new + updated records) ---
+        for &frn in additions {
+            let Some(record) = index.records.get(&frn) else {
+                continue;
+            };
+            let name = index.names.get(record.name_ref());
+
+            // Check if row already exists (update/rename case).
+            let existing: Option<(i64, String)> = tx
+                .query_row(
+                    "SELECT rowid, name FROM file_records WHERE drive_letter = ?1 AND frn = ?2",
+                    params![drive, frn as i64],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .ok();
+
+            if let Some((rowid, old_name)) = existing {
+                // Update existing row (preserves rowid).
+                tx.execute(
+                    "UPDATE file_records SET name = ?1, parent_frn = ?2, is_dir = ?3
+                     WHERE drive_letter = ?4 AND frn = ?5",
+                    params![name, record.parent_ref as i64, record.is_dir, drive, frn as i64],
+                )
+                .map_err(|e| format!("Update record error: {}", e))?;
+
+                // Re-sync FTS5: remove old entry, add updated entry (same rowid).
+                let _ = tx.execute(
+                    "INSERT INTO search_fts(search_fts, rowid, name) VALUES('delete', ?1, ?2)",
+                    params![rowid, old_name],
+                );
+                let _ = tx.execute(
+                    "INSERT INTO search_fts(rowid, name) VALUES(?1, ?2)",
+                    params![rowid, name],
+                );
+                updated_count += 1;
+            } else {
+                // New record — insert into file_records, then FTS5.
+                tx.execute(
+                    "INSERT INTO file_records (frn, drive_letter, name, parent_frn, is_dir)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![frn as i64, drive, name, record.parent_ref as i64, record.is_dir],
+                )
+                .map_err(|e| format!("Insert record error: {}", e))?;
+
+                let new_rowid = tx.last_insert_rowid();
+                let _ = tx.execute(
+                    "INSERT INTO search_fts(rowid, name) VALUES(?1, ?2)",
+                    params![new_rowid, name],
+                );
+                added_count += 1;
+            }
+        }
+
+        tx.commit()
+            .map_err(|e| format!("Transaction commit error: {}", e))?;
+
+        if removed_count > 0 || added_count > 0 || updated_count > 0 {
+            eprintln!(
+                "[DB] {}:\\ Incremental sync: +{} ~{} -{} records",
+                index.drive_letter, added_count, updated_count, removed_count
+            );
+        }
+
         Ok(())
     }
 }

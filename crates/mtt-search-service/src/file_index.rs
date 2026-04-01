@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::name_arena::{NameArena, NameRef};
 use crate::path_resolver;
@@ -66,6 +66,10 @@ pub struct VolumeIndex {
     pub journal_id: u64,
     /// Indexing state.
     pub state: IndexState,
+    /// FRNs added or modified since the last DB persist.
+    pub pending_additions: HashSet<u64>,
+    /// FRNs removed since the last DB persist.
+    pub pending_removals: HashSet<u64>,
 }
 
 impl VolumeIndex {
@@ -78,6 +82,8 @@ impl VolumeIndex {
             last_usn: 0,
             journal_id: 0,
             state: IndexState::NotStarted,
+            pending_additions: HashSet::new(),
+            pending_removals: HashSet::new(),
         }
     }
 
@@ -94,18 +100,34 @@ impl VolumeIndex {
                 _pad: 0,
             },
         );
+        // Track for incremental FTS sync.
+        self.pending_removals.remove(&frn);
+        self.pending_additions.insert(frn);
     }
 
     /// Remove a file record from the index.
     /// The name bytes remain in the arena as dead space (reclaimed on persist+reload).
     pub fn remove_record(&mut self, frn: u64) {
         self.records.remove(&frn);
+        // If it was added since last persist, just undo the add (never reached DB).
+        // Otherwise mark for removal from DB.
+        if !self.pending_additions.remove(&frn) {
+            self.pending_removals.insert(frn);
+        }
     }
 
     /// Clear all records and arena data (for full re-scan).
     pub fn clear(&mut self) {
         self.records.clear();
         self.names.clear();
+        self.pending_additions.clear();
+        self.pending_removals.clear();
+    }
+
+    /// Reset change tracking (call after a full `save_volume` persist).
+    pub fn clear_pending(&mut self) {
+        self.pending_additions.clear();
+        self.pending_removals.clear();
     }
 
     /// Compact the arena: rebuild with only the names referenced by current
