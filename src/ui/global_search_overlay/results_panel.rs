@@ -563,7 +563,11 @@ fn render_result_row(
     row_ui.add_space(8.0);
 
     // Reserve space for action buttons on the right.
-    let buttons_total_w = ACTION_BTN_WIDTH * 2.0 + ACTION_BTN_GAP + 4.0;
+    // Include item_spacing.x to account for egui's internal spacing added before
+    // the first widget in the right-to-left layout, which would otherwise cause
+    // the truncated text (and its ellipsis) to visually overlap the buttons.
+    let item_spacing_x = row_ui.spacing().item_spacing.x;
+    let buttons_total_w = ACTION_BTN_WIDTH * 2.0 + ACTION_BTN_GAP + 4.0 + item_spacing_x;
     let text_max_w = (row_ui.available_width() - buttons_total_w).max(60.0);
 
     // File name + metadata (left side, truncated).
