@@ -97,6 +97,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
         app.global_search.requested_offset = 0;
         app.global_search.requested_limit = INITIAL_PAGE_LIMIT;
         app.global_search.scroll_offset_y = 0.0;
+        app.global_search.last_scroll_offset_y = 0.0;
 
         if let Err(e) = app.global_search.sender.send(
             crate::workers::global_search_worker::GlobalSearchRequest::Search {
@@ -240,6 +241,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                             app.global_search.has_more_results = false;
                             app.global_search.loading = false;
                             app.global_search.scroll_offset_y = 0.0;
+                            app.global_search.last_scroll_offset_y = 0.0;
                             app.global_search.tooltip_texture_cache.clear();
                             app.global_search.metadata_cache.clear();
                             search_resp.request_focus();
@@ -265,6 +267,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         app.global_search.requested_offset = 0;
                         app.global_search.requested_limit = INITIAL_PAGE_LIMIT;
                         app.global_search.scroll_offset_y = 0.0;
+                        app.global_search.last_scroll_offset_y = 0.0;
                         app.global_search.tooltip_texture_cache.clear();
                         app.global_search.metadata_cache.clear();
                         app.global_search.pending_query_dispatch_at = Some(
@@ -284,6 +287,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         app.global_search.requested_limit = INITIAL_PAGE_LIMIT;
                         app.global_search.pending_query_dispatch_at = None;
                         app.global_search.scroll_offset_y = 0.0;
+                        app.global_search.last_scroll_offset_y = 0.0;
                         app.global_search.tooltip_texture_cache.clear();
                         app.global_search.metadata_cache.clear();
                     }
