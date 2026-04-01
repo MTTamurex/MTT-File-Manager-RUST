@@ -112,6 +112,7 @@ pub(crate) fn index_non_ntfs_volume(
                         crate::redact_paths(&e.to_string())
                     );
                 }
+                scanned_index.clear_pending();
 
                 let records = stats.records_indexed;
                 {
@@ -465,7 +466,7 @@ pub(crate) fn index_volume(
             }
         }
 
-        // Persist to database.
+        // Persist to database (full save — initial scan).
         if let Err(e) = db.save_volume(&index) {
             eprintln!(
                 "[USN] {}:\\ Failed to save index: {}",
@@ -473,6 +474,8 @@ pub(crate) fn index_volume(
                 crate::redact_paths(&e.to_string())
             );
         }
+        // Reset change tracking so the incremental sync starts fresh.
+        index.clear_pending();
     }
 
     index.state = file_index::IndexState::Ready;
@@ -580,16 +583,35 @@ pub(crate) fn index_volume(
             last_contention_log = std::time::Instant::now();
         }
 
-        // 3) Persist every 5 minutes under read lock.
+        // 3) Persist every 5 minutes — incremental sync only (not full rebuild).
         if last_persist.elapsed() > std::time::Duration::from_secs(300) {
-            let indices_lock = indices.read().unwrap_or_else(|e| e.into_inner());
-            if let Some(vol_index) = indices_lock.iter().find(|v| v.drive_letter == drive_letter) {
-                if let Err(e) = db.save_volume(vol_index) {
+            let mut indices_lock = indices.write().unwrap_or_else(|e| e.into_inner());
+            if let Some(vol_index) = indices_lock.iter_mut().find(|v| v.drive_letter == drive_letter) {
+                // Take pending changes (clears them in VolumeIndex).
+                let additions = std::mem::take(&mut vol_index.pending_additions);
+                let removals = std::mem::take(&mut vol_index.pending_removals);
+
+                // Save lightweight volume state (journal position).
+                if let Err(e) = db.save_volume_state(vol_index) {
                     eprintln!(
-                        "[USN] {}:\\ Persist error: {}",
+                        "[USN] {}:\\ Volume state persist error: {}",
                         drive_letter,
                         crate::redact_paths(&e.to_string())
                     );
+                }
+
+                // Incremental FTS5 sync for changed records only.
+                if !additions.is_empty() || !removals.is_empty() {
+                    if let Err(e) = db.sync_fts_incremental(vol_index, &additions, &removals) {
+                        eprintln!(
+                            "[USN] {}:\\ Incremental sync error (will retry): {}",
+                            drive_letter,
+                            crate::redact_paths(&e.to_string())
+                        );
+                        // Put changes back so they're retried next cycle.
+                        vol_index.pending_additions = additions;
+                        vol_index.pending_removals = removals;
+                    }
                 }
             }
             last_persist = std::time::Instant::now();
