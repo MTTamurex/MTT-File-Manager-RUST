@@ -509,9 +509,27 @@ fn render_result_row(
         return;
     };
 
-    let path_buf = std::path::PathBuf::from(&full_path);
+    // During active scroll, skip expensive operations:
+    // - No PathBuf allocation
+    // - No icon lookup (avoids sync Windows Shell calls that can eat 4ms+/frame)
+    // - No filesystem I/O for size
+    // Icons and metadata appear instantly (~80ms) when scrolling stops.
+    let icon_tex = if is_scrolling {
+        None
+    } else {
+        let path_buf = std::path::PathBuf::from(&full_path);
+        let tex = lookup_icon_with_size_guard(app, ctx, &path_buf, is_dir);
+        if tex.is_none()
+            && !is_dir
+            && !app.loading_icons.contains(&path_buf)
+            && app.failed_icons.peek(&path_buf).is_none()
+        {
+            app.request_icon_load(path_buf.clone());
+        }
+        tex
+    };
+
     let file_type = file_type_label(&full_path, is_dir);
-    // During active scroll, skip filesystem I/O — use cached size or show "-".
     let size_opt = if is_scrolling {
         resolve_result_size_cached_only(app, &full_path, is_dir, size)
     } else {
@@ -521,17 +539,6 @@ fn render_result_row(
         .map(crate::infrastructure::windows::format_size)
         .unwrap_or_else(|| "-".to_string());
     let meta_text = format!("{} | {}", file_type, size_text);
-
-    let icon_tex = lookup_icon_with_size_guard(app, ctx, &path_buf, is_dir);
-    // Don't queue new icon loads during active scroll to avoid async churn.
-    if !is_scrolling
-        && icon_tex.is_none()
-        && !is_dir
-        && !app.loading_icons.contains(&path_buf)
-        && app.failed_icons.peek(&path_buf).is_none()
-    {
-        app.request_icon_load(path_buf.clone());
-    }
 
     let row_resp = ui.interact(
         row_rect,
