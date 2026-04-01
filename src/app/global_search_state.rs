@@ -42,6 +42,16 @@ pub struct GlobalSearchState {
     pub scroll_offset_y: f32,
     /// Tracks last scroll change for adaptive overscan.
     pub last_scroll_time: Instant,
+
+    // --- Cached filter state (avoids O(N) recomputation every frame) ---
+    /// Monotonic counter incremented whenever `results` changes.
+    pub results_generation: u64,
+    /// Cached `build_filtered_indices` output.
+    pub cached_filtered_indices: Vec<usize>,
+    /// Cached `available_drives` output.
+    pub cached_available_drives: Vec<char>,
+    /// Generation + filter params when the cache was last built.
+    filter_cache_key: (u64, GlobalSearchCategory, Option<char>),
 }
 
 impl GlobalSearchState {
@@ -78,6 +88,29 @@ impl GlobalSearchState {
             total_indexed: 0,
             scroll_offset_y: 0.0,
             last_scroll_time: Instant::now(),
+            results_generation: 0,
+            cached_filtered_indices: Vec::new(),
+            cached_available_drives: Vec::new(),
+            filter_cache_key: (u64::MAX, GlobalSearchCategory::All, None),
         }
+    }
+
+    /// Rebuild the cached filtered indices and available drives only when the
+    /// inputs have changed (results generation, category, or drive filter).
+    /// Returns a reference to the cached filtered indices.
+    pub fn ensure_filter_cache(&mut self) -> &[usize] {
+        let key = (self.results_generation, self.category, self.drive_filter);
+        if self.filter_cache_key != key {
+            self.cached_filtered_indices =
+                crate::ui::global_search_overlay::filters::build_filtered_indices(
+                    &self.results,
+                    self.category,
+                    self.drive_filter,
+                );
+            self.cached_available_drives =
+                crate::ui::global_search_overlay::filters::available_drives(&self.results);
+            self.filter_cache_key = key;
+        }
+        &self.cached_filtered_indices
     }
 }

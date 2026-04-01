@@ -279,6 +279,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 app.global_search.focus_request = true;
                 app.global_search.query.clear();
                 app.global_search.results.clear();
+                app.global_search.results_generation += 1;
                 app.global_search.loading = false;
                 app.global_search.pending_query_dispatch_at = None;
                 app.global_search.has_more_results = false;

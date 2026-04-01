@@ -2,7 +2,6 @@
 //! Follows the same Request/Response pattern as file_operation_worker.rs.
 
 use std::collections::HashSet;
-use std::path::Path;
 use std::sync::mpsc::{Receiver, Sender};
 
 use mtt_search_protocol::{IndexStatusInfo, SearchResultItem};
@@ -104,27 +103,6 @@ fn query_service_with_retry(
 
 fn should_skip_service_query(query: &str, _offset: u32) -> bool {
     query.chars().count() < MIN_QUERY_LEN_FOR_SERVICE_SEARCH
-}
-
-fn filter_existing_results(
-    items: Vec<SearchResultItem>,
-    max_limit: usize,
-) -> Vec<SearchResultItem> {
-    if items.is_empty() || max_limit == 0 {
-        return Vec::new();
-    }
-
-    let mut filtered = Vec::with_capacity(items.len().min(max_limit));
-    for item in items {
-        if crate::infrastructure::onedrive::fast_path_exists(Path::new(&item.full_path)) {
-            filtered.push(item);
-            if filtered.len() >= max_limit {
-                break;
-            }
-        }
-    }
-
-    filtered
 }
 
 fn refresh_and_send_status(
@@ -272,10 +250,9 @@ pub fn start_global_search_worker(
                     if should_skip_service_query(&query, offset) {
                         let (local_items, local_has_more) =
                             session_index.search_page(&query, offset as usize, max_limit);
-                        let items = filter_existing_results(local_items, max_limit);
                         let _ = sender.send(GlobalSearchResponse::Results {
                             query,
-                            items,
+                            items: local_items,
                             offset,
                             limit,
                             has_more: local_has_more,
@@ -338,10 +315,9 @@ pub fn start_global_search_worker(
                                 }
                             }
 
-                            let items = filter_existing_results(merged, max_limit);
                             let _ = sender.send(GlobalSearchResponse::Results {
                                 query,
-                                items,
+                                items: merged,
                                 offset,
                                 limit,
                                 has_more,
@@ -359,10 +335,9 @@ pub fn start_global_search_worker(
                                     "[GLOBAL-SEARCH] Service query failed, returning session index results: {}",
                                     e
                                 );
-                                let items = filter_existing_results(local_items, max_limit);
                                 let _ = sender.send(GlobalSearchResponse::Results {
                                     query,
-                                    items,
+                                    items: local_items,
                                     offset,
                                     limit,
                                     has_more: local_has_more,

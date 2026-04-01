@@ -19,7 +19,8 @@ use windows::Win32::System::IO::OVERLAPPED;
 use windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES;
 
 use crate::file_index::{IndexState, VolumeIndex};
-use crate::ipc_authorization::collect_authorized_search_page;
+use crate::index_db;
+use crate::ipc_authorization::{collect_authorized_fts_page, collect_authorized_search_page};
 use crate::security_policy::IpcSecurityPolicy;
 use mtt_search_protocol::*;
 
@@ -42,10 +43,27 @@ const MAX_QUERY_OFFSET: usize = 5_000_000;
 const IO_TIMEOUT_SECS: u64 = 30;
 
 /// Start the IPC server loop.
-pub fn run_ipc_server(indices: Arc<RwLock<Vec<VolumeIndex>>>, shutdown: Arc<AtomicBool>) {
+pub fn run_ipc_server(
+    indices: Arc<RwLock<Vec<VolumeIndex>>>,
+    shutdown: Arc<AtomicBool>,
+    db_path: std::path::PathBuf,
+) {
     let is_warming = Arc::new(AtomicBool::new(false));
     let active_clients = Arc::new(AtomicU32::new(0));
     let security_policy = Arc::new(IpcSecurityPolicy::from_env());
+
+    // FTS5 searcher: separate read-only SQLite connection for fast queries.
+    let fts_searcher: Option<Arc<index_db::FtsSearcher>> =
+        match index_db::FtsSearcher::open(&db_path) {
+            Ok(s) => {
+                eprintln!("[IPC] FTS5 searcher ready");
+                Some(Arc::new(s))
+            }
+            Err(e) => {
+                eprintln!("[IPC] FTS5 searcher unavailable, falling back to linear scan: {}", e);
+                None
+            }
+        };
 
     if security_policy.redact_status_metrics {
         eprintln!("[IPC] Security policy: status metrics redaction is enabled");
@@ -111,6 +129,7 @@ pub fn run_ipc_server(indices: Arc<RwLock<Vec<VolumeIndex>>>, shutdown: Arc<Atom
         let warming_for_client = is_warming.clone();
         let active_for_client = active_clients.clone();
         let policy_for_client = security_policy.clone();
+        let fts_for_client = fts_searcher.clone();
         let pipe_raw = pipe.0 as usize;
         std::thread::spawn(move || {
             let pipe = HANDLE(pipe_raw as *mut core::ffi::c_void);
@@ -141,7 +160,7 @@ pub fn run_ipc_server(indices: Arc<RwLock<Vec<VolumeIndex>>>, shutdown: Arc<Atom
             });
 
             if let Err(e) = catch_unwind(AssertUnwindSafe(|| {
-                handle_client(pipe, &indices_for_client, &warming_for_client, &policy_for_client)
+                handle_client(pipe, &indices_for_client, &warming_for_client, &policy_for_client, &fts_for_client)
             })) {
                 eprintln!("[IPC] Client handler panic: {:?}", e);
             }
@@ -361,6 +380,7 @@ fn handle_client(
     indices: &Arc<RwLock<Vec<VolumeIndex>>>,
     is_warming: &Arc<AtomicBool>,
     security_policy: &IpcSecurityPolicy,
+    fts_searcher: &Option<Arc<index_db::FtsSearcher>>,
 ) {
     let request_data = match read_message(pipe) {
         Some(data) => data,
@@ -466,7 +486,31 @@ fn handle_client(
                     poisoned.into_inner()
                 }
             };
-            match collect_authorized_search_page(pipe, &indices_lock, &text, offset, limit) {
+
+            // FTS5 path: use trigram-indexed search when all tokens are ≥3 chars.
+            // Shorter tokens would cause FTS5 to fall back to a full table scan
+            // (slower than the in-memory linear scan), so we keep the old path.
+            let min_token_len = text
+                .split_whitespace()
+                .map(|t| t.len())
+                .min()
+                .unwrap_or(0);
+            let use_fts = min_token_len >= 3 && fts_searcher.is_some();
+
+            let result = if use_fts {
+                collect_authorized_fts_page(
+                    pipe,
+                    fts_searcher.as_ref().unwrap(),
+                    &indices_lock,
+                    &text,
+                    offset,
+                    limit,
+                )
+            } else {
+                collect_authorized_search_page(pipe, &indices_lock, &text, offset, limit)
+            };
+
+            match result {
                 Ok(page) => {
                     let _ = send_response(
                         pipe,

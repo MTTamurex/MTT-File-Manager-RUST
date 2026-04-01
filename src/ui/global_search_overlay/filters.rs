@@ -13,7 +13,7 @@ pub(super) fn category_label(category: GlobalSearchCategory) -> String {
     }
 }
 
-pub(super) fn build_filtered_indices(
+pub(crate) fn build_filtered_indices(
     results: &[mtt_search_protocol::SearchResultItem],
     category: GlobalSearchCategory,
     drive_filter: Option<char>,
@@ -35,7 +35,7 @@ pub(super) fn build_filtered_indices(
     filtered
 }
 
-pub(super) fn available_drives(results: &[mtt_search_protocol::SearchResultItem]) -> Vec<char> {
+pub(crate) fn available_drives(results: &[mtt_search_protocol::SearchResultItem]) -> Vec<char> {
     let mut drives: Vec<char> = results
         .iter()
         .filter_map(|r| extract_drive_letter(&r.full_path))

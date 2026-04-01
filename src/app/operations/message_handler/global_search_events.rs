@@ -45,8 +45,10 @@ impl ImageViewerApp {
                         if offset == 0 {
                             self.global_search.results = items;
                             self.global_search.selected_index = None;
+                            self.global_search.results_generation += 1;
                         } else if offset == self.global_search.results.len() as u32 {
                             append_unique_results(&mut self.global_search.results, items);
+                            self.global_search.results_generation += 1;
                         } else {
                             // Stale page response (offset mismatch), ignore.
                             continue;

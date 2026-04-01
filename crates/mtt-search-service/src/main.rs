@@ -186,7 +186,7 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
         "[SERVICE] Starting IPC server on {}...",
         mtt_search_protocol::PIPE_NAME
     );
-    ipc_server::run_ipc_server(indices.clone(), shutdown.clone());
+    ipc_server::run_ipc_server(indices.clone(), shutdown.clone(), db_path);
 
     eprintln!("[SERVICE] Shutting down...");
 }
