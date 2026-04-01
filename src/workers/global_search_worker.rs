@@ -35,7 +35,7 @@ pub enum GlobalSearchResponse {
 }
 
 const OFFLINE_FAILURE_THRESHOLD: u8 = 3;
-const STATUS_RETRY_COUNT: usize = 3;
+const STATUS_RETRY_COUNT: usize = 1;
 const MIN_QUERY_LEN_FOR_SERVICE_SEARCH: usize = 2;
 
 fn is_transient_ipc_error(message: &str) -> bool {
@@ -199,175 +199,151 @@ pub fn start_global_search_worker(
         ctx.request_repaint();
 
         while let Ok(request) = receiver.recv() {
+            // ── Coalesce: drain the channel, keeping only the latest Search
+            //    and noting whether any CheckStatus was enqueued. ──────────
+            let mut latest_search: Option<(String, u32, u32)> = None;
+            let mut pending_status_check = false;
+
             match request {
                 GlobalSearchRequest::Search {
-                    mut query,
-                    mut offset,
-                    mut limit,
+                    query,
+                    offset,
+                    limit,
                 } => {
-                    // Coalesce rapid typing bursts:
-                    // process only the latest queued Search before touching IPC.
-                    let mut pending_status_check = false;
-                    while let Ok(next) = receiver.try_recv() {
-                        match next {
-                            GlobalSearchRequest::Search {
-                                query: next_query,
-                                offset: next_offset,
-                                limit: next_limit,
-                            } => {
-                                query = next_query;
-                                offset = next_offset;
-                                limit = next_limit;
-                            }
-                            GlobalSearchRequest::CheckStatus => {
-                                pending_status_check = true;
-                            }
-                        }
-                    }
-
-                    let max_limit = limit as usize;
-                    if query.is_empty() || max_limit == 0 {
-                        let _ = sender.send(GlobalSearchResponse::Results {
-                            query,
-                            items: Vec::new(),
-                            offset,
-                            limit,
-                            has_more: false,
-                        });
-                        if pending_status_check {
-                            refresh_and_send_status(
-                                &sender,
-                                &mut session_index,
-                                &mut last_known_available,
-                                &mut last_known_total_indexed,
-                                &mut last_known_service_volumes,
-                                &mut consecutive_failures,
-                            );
-                        }
-                        continue;
-                    }
-
-                    if should_skip_service_query(&query, offset) {
-                        let (local_items, local_has_more) =
-                            session_index.search_page(&query, offset as usize, max_limit);
-                        let _ = sender.send(GlobalSearchResponse::Results {
-                            query,
-                            items: local_items,
-                            offset,
-                            limit,
-                            has_more: local_has_more,
-                        });
-
-                        if pending_status_check {
-                            refresh_and_send_status(
-                                &sender,
-                                &mut session_index,
-                                &mut last_known_available,
-                                &mut last_known_total_indexed,
-                                &mut last_known_service_volumes,
-                                &mut consecutive_failures,
-                            );
-                        }
-                        continue;
-                    }
-
-                    // Never scan drives in the query path; use cached session index only.
-                    // Refresh happens in status cycles to keep typing/search latency stable.
-                    session_index.poll_fast_updates();
-
-                    match query_service_with_retry(&query, offset, limit) {
-                        Ok(service_page) => {
-                            let mut merged = service_page.items;
-                            let mut has_more = service_page.has_more;
-
-                            // If service page exhausted before filling this page, continue from the
-                            // session-only index using the remaining portion.
-                            if !service_page.has_more && merged.len() < max_limit {
-                                let service_total = service_page
-                                    .total_matches
-                                    .unwrap_or(offset.saturating_add(merged.len() as u32));
-                                let local_offset = offset.saturating_sub(service_total);
-                                let local_limit = max_limit.saturating_sub(merged.len());
-
-                                if local_limit > 0 {
-                                    let (local_items, local_has_more) = session_index.search_page(
-                                        &query,
-                                        local_offset as usize,
-                                        local_limit,
-                                    );
-                                    append_unique_items(&mut merged, local_items, max_limit);
-                                    has_more = local_has_more;
-                                } else {
-                                    has_more = false;
-                                }
-                            } else if !service_page.has_more && merged.len() == max_limit {
-                                // Boundary case: service page ended exactly at service tail.
-                                // Check if session-only index has at least one item for the next page.
-                                if let Some(service_total) = service_page.total_matches {
-                                    let next_offset = offset.saturating_add(merged.len() as u32);
-                                    if next_offset >= service_total {
-                                        let local_offset =
-                                            next_offset.saturating_sub(service_total);
-                                        let (probe_items, probe_has_more) = session_index
-                                            .search_page(&query, local_offset as usize, 1);
-                                        has_more = !probe_items.is_empty() || probe_has_more;
-                                    }
-                                }
-                            }
-
-                            let _ = sender.send(GlobalSearchResponse::Results {
-                                query,
-                                items: merged,
-                                offset,
-                                limit,
-                                has_more,
-                            });
-                        }
-                        Err(e) => {
-                            let (local_items, local_has_more) =
-                                session_index.search_page(&query, offset as usize, max_limit);
-
-                            if local_items.is_empty() {
-                                let _ =
-                                    sender.send(GlobalSearchResponse::Error { query, message: e });
-                            } else {
-                                log::warn!(
-                                    "[GLOBAL-SEARCH] Service query failed, returning session index results: {}",
-                                    e
-                                );
-                                let _ = sender.send(GlobalSearchResponse::Results {
-                                    query,
-                                    items: local_items,
-                                    offset,
-                                    limit,
-                                    has_more: local_has_more,
-                                });
-                            }
-                        }
-                    }
-
-                    if pending_status_check {
-                        refresh_and_send_status(
-                            &sender,
-                            &mut session_index,
-                            &mut last_known_available,
-                            &mut last_known_total_indexed,
-                            &mut last_known_service_volumes,
-                            &mut consecutive_failures,
-                        );
-                    }
+                    latest_search = Some((query, offset, limit));
                 }
                 GlobalSearchRequest::CheckStatus => {
-                    refresh_and_send_status(
-                        &sender,
-                        &mut session_index,
-                        &mut last_known_available,
-                        &mut last_known_total_indexed,
-                        &mut last_known_service_volumes,
-                        &mut consecutive_failures,
-                    );
+                    pending_status_check = true;
                 }
             }
+
+            while let Ok(next) = receiver.try_recv() {
+                match next {
+                    GlobalSearchRequest::Search {
+                        query,
+                        offset,
+                        limit,
+                    } => {
+                        latest_search = Some((query, offset, limit));
+                    }
+                    GlobalSearchRequest::CheckStatus => {
+                        pending_status_check = true;
+                    }
+                }
+            }
+
+            // ── Search always takes priority over status checks ──────────
+            if let Some((query, offset, limit)) = latest_search {
+                let max_limit = limit as usize;
+                if query.is_empty() || max_limit == 0 {
+                    let _ = sender.send(GlobalSearchResponse::Results {
+                        query,
+                        items: Vec::new(),
+                        offset,
+                        limit,
+                        has_more: false,
+                    });
+                    // Don't cascade into a status check — let the periodic timer handle it.
+                    ctx.request_repaint();
+                    continue;
+                }
+
+                if should_skip_service_query(&query, offset) {
+                    let (local_items, local_has_more) =
+                        session_index.search_page(&query, offset as usize, max_limit);
+                    let _ = sender.send(GlobalSearchResponse::Results {
+                        query,
+                        items: local_items,
+                        offset,
+                        limit,
+                        has_more: local_has_more,
+                    });
+                    ctx.request_repaint();
+                    continue;
+                }
+
+                // Never scan drives in the query path; use cached session index only.
+                session_index.poll_fast_updates();
+
+                match query_service_with_retry(&query, offset, limit) {
+                    Ok(service_page) => {
+                        let mut merged = service_page.items;
+                        let mut has_more = service_page.has_more;
+
+                        if !service_page.has_more && merged.len() < max_limit {
+                            let service_total = service_page
+                                .total_matches
+                                .unwrap_or(offset.saturating_add(merged.len() as u32));
+                            let local_offset = offset.saturating_sub(service_total);
+                            let local_limit = max_limit.saturating_sub(merged.len());
+
+                            if local_limit > 0 {
+                                let (local_items, local_has_more) = session_index.search_page(
+                                    &query,
+                                    local_offset as usize,
+                                    local_limit,
+                                );
+                                append_unique_items(&mut merged, local_items, max_limit);
+                                has_more = local_has_more;
+                            } else {
+                                has_more = false;
+                            }
+                        } else if !service_page.has_more && merged.len() == max_limit {
+                            if let Some(service_total) = service_page.total_matches {
+                                let next_offset = offset.saturating_add(merged.len() as u32);
+                                if next_offset >= service_total {
+                                    let local_offset =
+                                        next_offset.saturating_sub(service_total);
+                                    let (probe_items, probe_has_more) = session_index
+                                        .search_page(&query, local_offset as usize, 1);
+                                    has_more = !probe_items.is_empty() || probe_has_more;
+                                }
+                            }
+                        }
+
+                        let _ = sender.send(GlobalSearchResponse::Results {
+                            query,
+                            items: merged,
+                            offset,
+                            limit,
+                            has_more,
+                        });
+                    }
+                    Err(e) => {
+                        let (local_items, local_has_more) =
+                            session_index.search_page(&query, offset as usize, max_limit);
+
+                        if local_items.is_empty() {
+                            let _ =
+                                sender.send(GlobalSearchResponse::Error { query, message: e });
+                        } else {
+                            log::warn!(
+                                "[GLOBAL-SEARCH] Service query failed, returning session index results: {}",
+                                e
+                            );
+                            let _ = sender.send(GlobalSearchResponse::Results {
+                                query,
+                                items: local_items,
+                                offset,
+                                limit,
+                                has_more: local_has_more,
+                            });
+                        }
+                    }
+                }
+                // Don't cascade status check after search — keeps the worker responsive.
+            } else if pending_status_check {
+                // Only process status check when no search is pending.
+                refresh_and_send_status(
+                    &sender,
+                    &mut session_index,
+                    &mut last_known_available,
+                    &mut last_known_total_indexed,
+                    &mut last_known_service_volumes,
+                    &mut consecutive_failures,
+                );
+            }
+
             ctx.request_repaint();
         }
     });

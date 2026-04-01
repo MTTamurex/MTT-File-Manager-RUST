@@ -8,7 +8,7 @@ use windows::Win32::Storage::FileSystem::{
 };
 use windows::Win32::System::Pipes::PeekNamedPipe;
 
-const PIPE_IO_TIMEOUT_MS: u64 = 8000;
+const PIPE_IO_TIMEOUT_MS: u64 = 5000;
 const PIPE_POLL_INTERVAL_MS: u64 = 15;
 
 pub struct SearchPage {
@@ -77,58 +77,43 @@ pub fn warm_index() -> Result<(), String> {
 
 /// Check if the service is running.
 pub fn ping() -> bool {
-    const ATTEMPTS: usize = 3;
-    for attempt in 0..ATTEMPTS {
-        let pipe = match open_pipe() {
-            Ok(pipe) => pipe,
-            Err(e) => {
-                // Service may be saturated but alive; don't mark as offline immediately.
-                if e.contains("All pipe instances are busy") {
-                    log::debug!("[GLOBAL-SEARCH] Ping: service busy");
-                    return true;
-                }
-                return false;
+    let pipe = match open_pipe() {
+        Ok(pipe) => pipe,
+        Err(e) => {
+            // Service may be saturated but alive; don't mark as offline immediately.
+            if e.contains("All pipe instances are busy") {
+                log::debug!("[GLOBAL-SEARCH] Ping: service busy");
+                return true;
             }
-        };
-
-        let ping_write = write_message(pipe, &SearchRequest::Ping);
-        let ping_read = if ping_write.is_ok() {
-            read_response::<SearchResponse>(pipe)
-        } else {
-            Err(ping_write
-                .err()
-                .unwrap_or_else(|| "Ping write failed".to_string()))
-        };
-
-        unsafe {
-            let _ = CloseHandle(pipe);
+            return false;
         }
+    };
 
-        if matches!(ping_read, Ok(SearchResponse::Pong)) {
-            return true;
-        }
+    let ping_write = write_message(pipe, &SearchRequest::Ping);
+    let ping_read = if ping_write.is_ok() {
+        read_response::<SearchResponse>(pipe)
+    } else {
+        Err(ping_write
+            .err()
+            .unwrap_or_else(|| "Ping write failed".to_string()))
+    };
 
-        let transient = match &ping_read {
-            Ok(_) => false,
-            Err(e) => is_transient_pipe_error(e),
-        };
-        if transient && attempt + 1 < ATTEMPTS {
-            std::thread::sleep(std::time::Duration::from_millis(120));
-            continue;
-        }
-
-        if transient {
-            // Keep optimistic online signal for transient pipe races.
-            return true;
-        }
-
-        if let Err(e) = ping_read {
-            log::warn!("[GLOBAL-SEARCH] Ping failed: {}", e);
-        }
-        return false;
+    unsafe {
+        let _ = CloseHandle(pipe);
     }
 
-    false
+    match &ping_read {
+        Ok(SearchResponse::Pong) => true,
+        Ok(_) => false,
+        Err(e) => {
+            // Transient pipe errors still mean the service is alive.
+            if is_transient_pipe_error(e) {
+                return true;
+            }
+            log::warn!("[GLOBAL-SEARCH] Ping failed: {}", e);
+            false
+        }
+    }
 }
 
 fn is_transient_pipe_error(message: &str) -> bool {

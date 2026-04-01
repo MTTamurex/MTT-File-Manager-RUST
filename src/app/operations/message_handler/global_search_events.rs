@@ -97,13 +97,15 @@ impl ImageViewerApp {
             self.ui_ctx.request_repaint();
         }
 
-        // Check availability faster while offline, slower while stable online.
+        // Check availability at a moderate interval. Avoid aggressive polling
+        // that can starve the single-threaded worker when it should be processing
+        // search requests.
         let interval = if self.global_search.active {
-            Duration::from_secs(1)
+            Duration::from_secs(5)
         } else if self.global_search.available {
             Duration::from_secs(30)
         } else {
-            Duration::from_secs(3)
+            Duration::from_secs(5)
         };
 
         if self.global_search.last_check.elapsed() > interval {
