@@ -17,6 +17,8 @@ const TOOLTIP_DELAY_SECS: f32 = 0.3;
 const ACTION_BTN_WIDTH: f32 = 52.0;
 const ACTION_BTN_HEIGHT: f32 = 22.0;
 const ACTION_BTN_GAP: f32 = 4.0;
+const ACTIVE_SCROLL_WINDOW_MS: u64 = 80;
+const SCROLL_RENDER_OVERSCAN: usize = 1;
 
 /// What the user wants to do with a search result.
 enum ResultAction {
@@ -24,6 +26,11 @@ enum ResultAction {
     OpenFile(String, bool),
     /// Navigate to the parent folder and select the item.
     OpenFolder(String, bool),
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ScrollAnimationState {
+    visual_scroll_y: f32,
 }
 
 #[inline]
@@ -53,6 +60,54 @@ fn lookup_icon_with_size_guard(
         .icon_cache
         .get(&small_key)
         .cloned()
+}
+
+fn compute_visual_scroll(
+    ui: &egui::Ui,
+    target_scroll: f32,
+    viewport_h: f32,
+    generation: u64,
+) -> (f32, f32) {
+    let scroll_state_id = ui
+        .id()
+        .with("global_search_scroll_state")
+        .with(generation);
+    let dt = ui.input(|i| i.predicted_dt).min(0.05);
+
+    let visual_scroll = ui.ctx().data_mut(|d| {
+        let state = d.get_temp_mut_or_insert_with::<ScrollAnimationState>(scroll_state_id, || {
+            ScrollAnimationState {
+                visual_scroll_y: target_scroll,
+            }
+        });
+
+        let t = (dt * 9.0).min(1.0);
+
+        if (state.visual_scroll_y - target_scroll).abs() > viewport_h * 1.5 {
+            state.visual_scroll_y = target_scroll;
+        } else {
+            state.visual_scroll_y =
+                state.visual_scroll_y + (target_scroll - state.visual_scroll_y) * t;
+        }
+
+        if (state.visual_scroll_y - target_scroll).abs() < 1.0 {
+            state.visual_scroll_y = target_scroll;
+        }
+
+        state.visual_scroll_y
+    });
+
+    let scroll_delta = (visual_scroll - target_scroll).abs();
+    if scroll_delta > 0.5 {
+        ui.ctx().request_repaint();
+    }
+
+    (visual_scroll, scroll_delta)
+}
+
+#[inline]
+fn format_result_meta(file_type: &str) -> String {
+    file_type.to_string()
 }
 
 pub(super) fn render_results_panel(
@@ -256,23 +311,50 @@ pub(super) fn render_results_panel(
         let delta = ui.input(|i| i.smooth_scroll_delta.y);
         if delta != 0.0 {
             app.global_search.scroll_offset_y -= delta * SCROLL_SENSITIVITY;
-            app.global_search.last_scroll_time = std::time::Instant::now();
         }
     }
 
-    // Clamp scroll offset.
+    // Clamp target scroll offset.
     let max_scroll = (total_content_height - viewport_h).max(0.0);
     app.global_search.scroll_offset_y = app.global_search.scroll_offset_y.clamp(0.0, max_scroll);
-    let current_scroll = app.global_search.scroll_offset_y;
 
-    // Adaptive overscan: fewer rows during active scroll, more when idle.
-    let is_scrolling = app.global_search.last_scroll_time.elapsed().as_millis() < 80;
+    if (app.global_search.scroll_offset_y - app.global_search.last_scroll_offset_y).abs() > 0.1 {
+        app.global_search.last_scroll_time = std::time::Instant::now();
+        app.global_search.last_scroll_offset_y = app.global_search.scroll_offset_y;
+    }
+
+    let (current_scroll, scroll_delta) = compute_visual_scroll(
+        ui,
+        app.global_search.scroll_offset_y,
+        viewport_h,
+        app.global_search.results_generation,
+    );
+
+    let has_recent_scroll_input = app.global_search.last_scroll_time.elapsed()
+        < std::time::Duration::from_millis(ACTIVE_SCROLL_WINDOW_MS);
+    let is_scrolling = has_recent_scroll_input || scroll_delta > 0.5;
 
     // Compute visible row range with adaptive overscan.
     let overscan: usize = if is_scrolling { 2 } else { 5 };
     let vis_min_row = ((current_scroll / RESULT_ROW_HEIGHT).floor() as usize).saturating_sub(overscan);
     let vis_max_row = (((current_scroll + viewport_h) / RESULT_ROW_HEIGHT).ceil() as usize) + overscan;
     let vis_max_row = vis_max_row.min(total_rows);
+    let trim_rows = overscan.saturating_sub(SCROLL_RENDER_OVERSCAN);
+    let tentative_render_min = if is_scrolling {
+        vis_min_row.saturating_add(trim_rows)
+    } else {
+        vis_min_row
+    };
+    let tentative_render_max = if is_scrolling {
+        vis_max_row.saturating_sub(trim_rows).min(total_rows)
+    } else {
+        vis_max_row
+    };
+    let (render_min_row, render_max_row) = if tentative_render_min < tentative_render_max {
+        (tentative_render_min, tentative_render_max)
+    } else {
+        (vis_min_row, vis_max_row)
+    };
 
     // Clip child UI to viewport.
     let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(viewport_rect));
@@ -280,7 +362,9 @@ pub(super) fn render_results_panel(
 
     let content_min = viewport_rect.min;
 
-    for i in vis_min_row..vis_max_row {
+    // Full row path for both idle and scrolling states. The HDD stutter was
+    // coming from metadata and icon churn, not from drawing the widgets.
+    for i in render_min_row..render_max_row {
         let Some(&source_idx) = filtered_indices.get(i) else {
             continue;
         };
@@ -300,7 +384,6 @@ pub(super) fn render_results_panel(
             source_idx,
             item_rect,
             hover_color,
-            is_scrolling,
             &mut activate_result,
         );
     }
@@ -490,7 +573,6 @@ fn render_result_row(
     source_idx: usize,
     row_rect: egui::Rect,
     hover_color: egui::Color32,
-    is_scrolling: bool,
     activate_result: &mut Option<ResultAction>,
 ) {
     let Some((full_path, result_name, is_dir, size)) = app
@@ -508,37 +590,6 @@ fn render_result_row(
     else {
         return;
     };
-
-    // During active scroll, skip expensive operations:
-    // - No PathBuf allocation
-    // - No icon lookup (avoids sync Windows Shell calls that can eat 4ms+/frame)
-    // - No filesystem I/O for size
-    // Icons and metadata appear instantly (~80ms) when scrolling stops.
-    let icon_tex = if is_scrolling {
-        None
-    } else {
-        let path_buf = std::path::PathBuf::from(&full_path);
-        let tex = lookup_icon_with_size_guard(app, ctx, &path_buf, is_dir);
-        if tex.is_none()
-            && !is_dir
-            && !app.loading_icons.contains(&path_buf)
-            && app.failed_icons.peek(&path_buf).is_none()
-        {
-            app.request_icon_load(path_buf.clone());
-        }
-        tex
-    };
-
-    let file_type = file_type_label(&full_path, is_dir);
-    let size_opt = if is_scrolling {
-        resolve_result_size_cached_only(app, &full_path, is_dir, size)
-    } else {
-        resolve_result_size(app, &full_path, is_dir, size)
-    };
-    let size_text = size_opt
-        .map(crate::infrastructure::windows::format_size)
-        .unwrap_or_else(|| "-".to_string());
-    let meta_text = format!("{} | {}", file_type, size_text);
 
     let row_resp = ui.interact(
         row_rect,
@@ -566,6 +617,30 @@ fn render_result_row(
         egui::Stroke::new(1.0, separator_color),
     );
 
+    // ── Full row: icon, metadata, buttons, tooltip ──
+
+    // Global search can surface files scattered across the disk. Requesting icons
+    // for every visible row causes avoidable background HDD churn, so only the
+    // active row may trigger a new async icon load. Cache hits still render.
+    let icon_tex = {
+        let path_buf = std::path::PathBuf::from(&full_path);
+        let tex = lookup_icon_with_size_guard(app, ctx, &path_buf, is_dir);
+        if tex.is_none()
+            && !is_dir
+            && (is_selected || row_resp.hovered())
+            && !app.loading_icons.contains(&path_buf)
+            && app.failed_icons.peek(&path_buf).is_none()
+        {
+            app.request_icon_load(path_buf.clone());
+        }
+        tex
+    };
+
+    let file_type = file_type_label(&full_path, is_dir);
+    let size_opt = resolve_result_size(app, &full_path, is_dir, size);
+    let size_text = size_opt.map(crate::infrastructure::windows::format_size);
+    let meta_text = format_result_meta(&file_type);
+
     let mut row_ui = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(row_rect.shrink2(egui::vec2(8.0, 4.0)))
@@ -579,10 +654,6 @@ fn render_result_row(
 
     row_ui.add_space(8.0);
 
-    // Reserve space for action buttons on the right.
-    // Include item_spacing.x to account for egui's internal spacing added before
-    // the first widget in the right-to-left layout, which would otherwise cause
-    // the truncated text (and its ellipsis) to visually overlap the buttons.
     let item_spacing_x = row_ui.spacing().item_spacing.x;
     let buttons_total_w = ACTION_BTN_WIDTH * 2.0 + ACTION_BTN_GAP + 4.0 + item_spacing_x;
     let text_max_w = (row_ui.available_width() - buttons_total_w).max(60.0);
@@ -647,54 +718,49 @@ fn render_result_row(
         }
     });
 
-    // Tooltip with debounce — skip entirely during scroll to avoid per-row
-    // egui::Id hashing + data_mut overhead that causes frame drops.
-    if !is_scrolling {
-        if row_resp.hovered() {
-            let current_time = ui.input(|i| i.time);
-            let hover_id = egui::Id::new("global_search_hover_start").with(&full_path);
-            let hover_start_time = ui
-                .ctx()
-                .data_mut(|d| *d.get_temp_mut_or_insert_with(hover_id, || current_time));
-            let hover_duration = (current_time - hover_start_time) as f32;
+    // Tooltip with debounce (only reached when not scrolling — scroll path returns early).
+    if row_resp.hovered() {
+        let current_time = ui.input(|i| i.time);
+        let hover_id = egui::Id::new("global_search_hover_start").with(&full_path);
+        let hover_start_time = ui
+            .ctx()
+            .data_mut(|d| *d.get_temp_mut_or_insert_with(hover_id, || current_time));
+        let hover_duration = (current_time - hover_start_time) as f32;
 
-            if hover_duration < TOOLTIP_DELAY_SECS {
-                ui.ctx()
-                    .request_repaint_after(std::time::Duration::from_secs_f32(
-                        TOOLTIP_DELAY_SECS - hover_duration + 0.01,
-                    ));
-            }
+        if hover_duration < TOOLTIP_DELAY_SECS {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs_f32(
+                    TOOLTIP_DELAY_SECS - hover_duration + 0.01,
+                ));
+        }
 
-            if hover_duration >= TOOLTIP_DELAY_SECS {
-                // Grab cached thumbnail (if any) before entering the tooltip closure.
-                let thumb_tex: Option<egui::TextureHandle> = if !is_dir {
-                    let p = std::path::PathBuf::from(&full_path);
-                    let is_media = p
-                        .extension()
-                        .map(|ext| crate::infrastructure::windows::is_media_extension(&ext.to_string_lossy()))
-                        .unwrap_or(false);
-                    if is_media {
-                        if let Some(tex) = app.cache_manager.get_thumbnail(&p) {
-                            Some(tex.clone())
-                        } else if let Some(tex) = app.global_search.tooltip_texture_cache.get(&full_path) {
-                            Some(tex.clone())
-                        } else if let Some(entry) = app.disk_cache.get_latest(&p) {
-                            if let Ok(img) = image::load_from_memory_with_format(
-                                &entry.data,
-                                image::ImageFormat::WebP,
-                            ) {
-                                let rgba = img.to_rgba8();
-                                let size = [rgba.width() as usize, rgba.height() as usize];
-                                let tex = ui.ctx().load_texture(
-                                    format!("gs_thumb_{}", full_path),
-                                    egui::ColorImage::from_rgba_unmultiplied(size, &rgba),
-                                    egui::TextureOptions::LINEAR,
-                                );
-                                app.global_search.tooltip_texture_cache.put(full_path.clone(), tex.clone());
-                                Some(tex)
-                            } else {
-                                None
-                            }
+        if hover_duration >= TOOLTIP_DELAY_SECS {
+            // Grab cached thumbnail (if any) before entering the tooltip closure.
+            let thumb_tex: Option<egui::TextureHandle> = if !is_dir {
+                let p = std::path::PathBuf::from(&full_path);
+                let is_media = p
+                    .extension()
+                    .map(|ext| crate::infrastructure::windows::is_media_extension(&ext.to_string_lossy()))
+                    .unwrap_or(false);
+                if is_media {
+                    if let Some(tex) = app.cache_manager.get_thumbnail(&p) {
+                        Some(tex.clone())
+                    } else if let Some(tex) = app.global_search.tooltip_texture_cache.get(&full_path) {
+                        Some(tex.clone())
+                    } else if let Some(entry) = app.disk_cache.get_latest(&p) {
+                        if let Ok(img) = image::load_from_memory_with_format(
+                            &entry.data,
+                            image::ImageFormat::WebP,
+                        ) {
+                            let rgba = img.to_rgba8();
+                            let size = [rgba.width() as usize, rgba.height() as usize];
+                            let tex = ui.ctx().load_texture(
+                                format!("gs_thumb_{}", full_path),
+                                egui::ColorImage::from_rgba_unmultiplied(size, &rgba),
+                                egui::TextureOptions::LINEAR,
+                            );
+                            app.global_search.tooltip_texture_cache.put(full_path.clone(), tex.clone());
+                            Some(tex)
                         } else {
                             None
                         }
@@ -703,76 +769,78 @@ fn render_result_row(
                     }
                 } else {
                     None
-                };
+                }
+            } else {
+                None
+            };
 
-                // Resolve modified timestamp once, then serve from cache.
-                let modified_ts = if let Some(&cached_ts) = app.global_search.metadata_cache.get(&full_path) {
-                    cached_ts
-                } else {
-                    let meta = std::fs::metadata(&full_path).ok();
-                    let ts = meta
-                        .as_ref()
-                        .and_then(|m| m.modified().ok())
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    if !is_dir {
-                        if let Some(len) = meta.as_ref().map(|m| m.len()) {
-                            app.global_search.size_cache.put(full_path.clone(), Some(len));
-                        }
+            // Resolve modified timestamp once, then serve from cache.
+            let modified_ts = if let Some(&cached_ts) = app.global_search.metadata_cache.get(&full_path) {
+                cached_ts
+            } else {
+                let meta = std::fs::metadata(&full_path).ok();
+                let ts = meta
+                    .as_ref()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                if !is_dir {
+                    if let Some(len) = meta.as_ref().map(|m| m.len()) {
+                        app.global_search.size_cache.put(full_path.clone(), Some(len));
                     }
-                    app.global_search.metadata_cache.put(full_path.clone(), ts);
-                    ts
-                };
+                }
+                app.global_search.metadata_cache.put(full_path.clone(), ts);
+                ts
+            };
 
-                let tooltip_layer =
-                    egui::LayerId::new(egui::Order::Tooltip, row_resp.id.with("tooltip"));
-                egui::show_tooltip_at(
-                    ui.ctx(),
-                    tooltip_layer,
-                    row_resp.id,
-                    ui.input(|i| i.pointer.hover_pos()).unwrap_or_default(),
-                    |ui: &mut egui::Ui| {
-                        ui.set_max_width(300.0);
-                        ui.vertical(|ui| {
-                            ui.label(egui::RichText::new(&result_name).strong());
-                            ui.separator();
-                            if let Some(tex) = &thumb_tex {
-                                let tex_size = tex.size_vec2();
-                                let max_w = 280.0_f32;
-                                let max_h = 180.0_f32;
-                                let scale = (max_w / tex_size.x).min(max_h / tex_size.y).min(1.0);
-                                let display_size = egui::vec2(tex_size.x * scale, tex_size.y * scale);
-                                ui.with_layout(
-                                    egui::Layout::top_down(egui::Align::Center),
-                                    |ui| {
-                                        ui.add(egui::Image::new(tex).fit_to_exact_size(display_size));
-                                    },
-                                );
-                                ui.add_space(4.0);
-                            }
-                            ui.horizontal(|ui| {
-                                ui.label(t!("file_info.type"));
-                                ui.label(&file_type);
-                            });
-                            if !is_dir {
-                                ui.horizontal(|ui| {
-                                    ui.label(t!("file_info.size"));
-                                    ui.label(&size_text);
-                                });
-                            }
-                            ui.horizontal(|ui| {
-                                ui.label(t!("file_info.date_modified"));
-                                ui.label(crate::infrastructure::windows::format_date(modified_ts));
-                            });
+            let tooltip_layer =
+                egui::LayerId::new(egui::Order::Tooltip, row_resp.id.with("tooltip"));
+            egui::show_tooltip_at(
+                ui.ctx(),
+                tooltip_layer,
+                row_resp.id,
+                ui.input(|i| i.pointer.hover_pos()).unwrap_or_default(),
+                |ui: &mut egui::Ui| {
+                    ui.set_max_width(300.0);
+                    ui.vertical(|ui| {
+                        ui.label(egui::RichText::new(&result_name).strong());
+                        ui.separator();
+                        if let Some(tex) = &thumb_tex {
+                            let tex_size = tex.size_vec2();
+                            let max_w = 280.0_f32;
+                            let max_h = 180.0_f32;
+                            let scale = (max_w / tex_size.x).min(max_h / tex_size.y).min(1.0);
+                            let display_size = egui::vec2(tex_size.x * scale, tex_size.y * scale);
+                            ui.with_layout(
+                                egui::Layout::top_down(egui::Align::Center),
+                                |ui| {
+                                    ui.add(egui::Image::new(tex).fit_to_exact_size(display_size));
+                                },
+                            );
+                            ui.add_space(4.0);
+                        }
+                        ui.horizontal(|ui| {
+                            ui.label(t!("file_info.type"));
+                            ui.label(&file_type);
                         });
-                    },
-                );
-            }
-        } else {
-            let hover_id = egui::Id::new("global_search_hover_start").with(&full_path);
-            ui.ctx().data_mut(|d| d.remove::<f64>(hover_id));
+                        if !is_dir {
+                            ui.horizontal(|ui| {
+                                ui.label(t!("file_info.size"));
+                                ui.label(size_text.as_deref().unwrap_or("-"));
+                            });
+                        }
+                        ui.horizontal(|ui| {
+                            ui.label(t!("file_info.date_modified"));
+                            ui.label(crate::infrastructure::windows::format_date(modified_ts));
+                        });
+                    });
+                },
+            );
         }
+    } else {
+        let hover_id = egui::Id::new("global_search_hover_start").with(&full_path);
+        ui.ctx().data_mut(|d| d.remove::<f64>(hover_id));
     }
 
     if row_resp.double_clicked() {
@@ -870,32 +938,9 @@ fn resolve_result_size(
         return Some(size);
     }
 
-    if let Some(cached) = app.global_search.size_cache.get(full_path) {
-        return *cached;
-    }
-
-    // Fetch actual file size from disk when the search index doesn't have it.
-    let resolved = std::fs::metadata(full_path).ok().map(|m| m.len());
-    app.global_search
-        .size_cache
-        .put(full_path.to_string(), resolved);
-    resolved
-}
-
-/// Like `resolve_result_size` but never touches the filesystem.
-/// Used during active scroll to avoid blocking the UI thread.
-fn resolve_result_size_cached_only(
-    app: &mut ImageViewerApp,
-    full_path: &str,
-    is_dir: bool,
-    size: u64,
-) -> Option<u64> {
-    if is_dir {
-        return None;
-    }
-    if size > 0 {
-        return Some(size);
-    }
+    // The search service currently reports `size = 0` for many results. Doing a
+    // synchronous `metadata()` lookup here turns row painting into random HDD I/O.
+    // Keep rendering cache-only; hover/explicit actions can populate metadata later.
     app.global_search
         .size_cache
         .get(full_path)
