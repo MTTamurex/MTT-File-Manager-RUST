@@ -14,6 +14,7 @@ mod results_panel;
 const INITIAL_PAGE_LIMIT: u32 = 200;
 const BACKDROP_ALPHA: u8 = 72;
 const SEARCH_INPUT_DEBOUNCE_MS: u64 = 180;
+const SEARCH_LOADING_TIMEOUT_MS: u64 = 12_000;
 
 /// Render the global search overlay. Returns true if the overlay should remain open.
 pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Context) {
@@ -82,10 +83,32 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
         app.global_search.active = false;
         app.global_search.focus_request = false;
         app.global_search.pending_query_dispatch_at = None;
+        app.global_search.in_flight_query = None;
+        app.global_search.in_flight_started_at = None;
         app.global_search.size_cache.clear();
         app.global_search.tooltip_texture_cache.clear();
         app.global_search.metadata_cache.clear();
         return;
+    }
+
+    if app.global_search.loading
+        && app.global_search.pending_query_dispatch_at.is_none()
+        && app.global_search.in_flight_started_at.is_some_and(|started_at| {
+            started_at.elapsed() >= std::time::Duration::from_millis(SEARCH_LOADING_TIMEOUT_MS)
+        })
+    {
+        log::warn!(
+            "[GLOBAL-SEARCH] Search watchdog released stuck loading state for query='{}'",
+            app.global_search.query
+        );
+        app.global_search.loading = false;
+        app.global_search.in_flight_query = None;
+        app.global_search.in_flight_started_at = None;
+        app.global_search.has_more_results = false;
+        let _ = app
+            .global_search
+            .sender
+            .send(crate::workers::global_search_worker::GlobalSearchRequest::CheckStatus);
     }
 
     if app.global_search.pending_query_dispatch_at.is_some_and(|deadline| {
@@ -93,11 +116,15 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
     }) {
         app.global_search.selected_index = None;
         app.global_search.loading = true;
+        app.global_search.results.clear();
+        app.global_search.results_generation += 1;
         app.global_search.has_more_results = false;
         app.global_search.requested_offset = 0;
         app.global_search.requested_limit = INITIAL_PAGE_LIMIT;
         app.global_search.scroll_offset_y = 0.0;
         app.global_search.last_scroll_offset_y = 0.0;
+        app.global_search.in_flight_query = Some(app.global_search.query.clone());
+        app.global_search.in_flight_started_at = Some(std::time::Instant::now());
 
         if let Err(e) = app.global_search.sender.send(
             crate::workers::global_search_worker::GlobalSearchRequest::Search {
@@ -107,6 +134,8 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
             },
         ) {
             app.global_search.loading = false;
+            app.global_search.in_flight_query = None;
+            app.global_search.in_flight_started_at = None;
             log::error!("[GLOBAL-SEARCH] Failed to queue search request: {}", e);
         }
 
@@ -242,6 +271,8 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                             app.global_search.loading = false;
                             app.global_search.scroll_offset_y = 0.0;
                             app.global_search.last_scroll_offset_y = 0.0;
+                            app.global_search.in_flight_query = None;
+                            app.global_search.in_flight_started_at = None;
                             app.global_search.tooltip_texture_cache.clear();
                             app.global_search.metadata_cache.clear();
                             search_resp.request_focus();
@@ -262,12 +293,16 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                     // Trigger search on text change (with debounce)
                     if search_resp.changed() && !app.global_search.query.is_empty() {
                         app.global_search.selected_index = None;
+                        app.global_search.results.clear();
+                        app.global_search.results_generation += 1;
                         app.global_search.loading = true;
                         app.global_search.has_more_results = false;
                         app.global_search.requested_offset = 0;
                         app.global_search.requested_limit = INITIAL_PAGE_LIMIT;
                         app.global_search.scroll_offset_y = 0.0;
                         app.global_search.last_scroll_offset_y = 0.0;
+                        app.global_search.in_flight_query = None;
+                        app.global_search.in_flight_started_at = None;
                         app.global_search.tooltip_texture_cache.clear();
                         app.global_search.metadata_cache.clear();
                         app.global_search.pending_query_dispatch_at = Some(
@@ -288,6 +323,8 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         app.global_search.pending_query_dispatch_at = None;
                         app.global_search.scroll_offset_y = 0.0;
                         app.global_search.last_scroll_offset_y = 0.0;
+                        app.global_search.in_flight_query = None;
+                        app.global_search.in_flight_started_at = None;
                         app.global_search.tooltip_texture_cache.clear();
                         app.global_search.metadata_cache.clear();
                     }

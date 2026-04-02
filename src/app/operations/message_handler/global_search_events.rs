@@ -55,6 +55,8 @@ impl ImageViewerApp {
                         }
 
                         self.global_search.loading = false;
+                        self.global_search.in_flight_query = None;
+                        self.global_search.in_flight_started_at = None;
                         self.global_search.requested_offset = offset;
                         self.global_search.requested_limit = limit;
                         self.global_search.has_more_results = has_more;
@@ -70,6 +72,8 @@ impl ImageViewerApp {
                 GlobalSearchResponse::Error { query, message } => {
                     if query == self.global_search.query {
                         self.global_search.loading = false;
+                        self.global_search.in_flight_query = None;
+                        self.global_search.in_flight_started_at = None;
                         self.global_search.has_more_results = false;
                     }
                     log::error!("[GLOBAL-SEARCH] Error for '{}': {}", query, message);

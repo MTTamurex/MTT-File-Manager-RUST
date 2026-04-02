@@ -8,7 +8,7 @@ use windows::Win32::Storage::FileSystem::{
 };
 use windows::Win32::System::Pipes::PeekNamedPipe;
 
-const SEARCH_PIPE_IO_TIMEOUT_MS: u64 = 20_000;
+const SEARCH_PIPE_IO_TIMEOUT_MS: u64 = 8_000;
 const CONTROL_PIPE_IO_TIMEOUT_MS: u64 = 5_000;
 const PIPE_POLL_INTERVAL_MS: u64 = 15;
 
