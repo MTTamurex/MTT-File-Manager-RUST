@@ -152,6 +152,54 @@ fn format_result_meta(file_type: &str) -> String {
 }
 
 #[inline]
+fn measure_text_width(
+    ui: &egui::Ui,
+    text: &str,
+    font_id: &egui::FontId,
+    color: egui::Color32,
+) -> f32 {
+    ui.fonts(|fonts| {
+        fonts
+            .layout_no_wrap(text.to_string(), font_id.clone(), color)
+            .rect
+            .width()
+    })
+}
+
+fn paint_action_button(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    id: egui::Id,
+    label: &str,
+) -> egui::Response {
+    let response = ui.interact(rect, id, egui::Sense::click());
+    let visuals = if response.is_pointer_button_down_on() {
+        &ui.visuals().widgets.active
+    } else if response.hovered() {
+        &ui.visuals().widgets.hovered
+    } else {
+        &ui.visuals().widgets.inactive
+    };
+
+    ui.painter().rect_filled(rect, 4.0, visuals.bg_fill);
+    ui.painter().rect_stroke(
+        rect,
+        4.0,
+        visuals.bg_stroke,
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        label,
+        egui::FontId::proportional(11.0),
+        visuals.text_color(),
+    );
+
+    response
+}
+
+#[inline]
 fn filtered_contains(filtered_indices: &[usize], source_idx: usize) -> bool {
     filtered_indices.binary_search(&source_idx).is_ok()
 }
@@ -407,6 +455,8 @@ pub(super) fn render_results_panel(
         (vis_min_row, vis_max_row)
     };
     let mut icon_request_budget = if is_scrolling { 2usize } else { 6usize };
+    let open_folder_label = t!("search.open_folder").to_string();
+    let open_file_label = t!("search.open_file").to_string();
 
     // Clip child UI to viewport.
     let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(viewport_rect));
@@ -437,6 +487,8 @@ pub(super) fn render_results_panel(
             item_rect,
             hover_color,
             &mut icon_request_budget,
+            &open_folder_label,
+            &open_file_label,
             &mut activate_result,
         );
     }
@@ -631,6 +683,8 @@ fn render_result_row(
     row_rect: egui::Rect,
     hover_color: egui::Color32,
     icon_request_budget: &mut usize,
+    open_folder_label: &str,
+    open_file_label: &str,
     activate_result: &mut Option<ResultAction>,
 ) {
     let Some((full_path, result_name, is_dir, size)) = app
@@ -704,86 +758,117 @@ fn render_result_row(
     };
 
     let file_type = file_type_label(&full_path, is_dir);
-    let size_opt = resolve_result_size(app, &full_path, is_dir, size);
-    let size_text = size_opt.map(crate::infrastructure::windows::format_size);
     let meta_text = format_result_meta(&file_type);
+    let text_color = if is_selected {
+        theme::COLOR_SELECTION_TEXT
+    } else {
+        ui.visuals().text_color()
+    };
+    let secondary_color = if is_selected {
+        theme::COLOR_SELECTION_TEXT
+    } else {
+        egui::Color32::from_gray(120)
+    };
+    let meta_color = if is_selected {
+        theme::COLOR_SELECTION_TEXT
+    } else {
+        egui::Color32::from_gray(140)
+    };
 
-    let mut row_ui = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(row_rect.shrink2(egui::vec2(8.0, 4.0)))
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    let content_rect = row_rect.shrink2(egui::vec2(8.0, 4.0));
+    let button_size = egui::vec2(ACTION_BTN_WIDTH, ACTION_BTN_HEIGHT);
+    let buttons_top = content_rect.center().y - button_size.y * 0.5;
+    let folder_button_rect = egui::Rect::from_min_size(
+        egui::pos2(content_rect.right() - button_size.x, buttons_top),
+        button_size,
     );
-    row_ui.style_mut().interaction.selectable_labels = false;
+    let open_button_rect = egui::Rect::from_min_size(
+        egui::pos2(
+            folder_button_rect.left() - ACTION_BTN_GAP - button_size.x,
+            buttons_top,
+        ),
+        button_size,
+    );
 
-    if let Some(icon) = icon_tex {
-        row_ui.add(egui::Image::new(&icon).max_size(egui::vec2(ICON_SIZE, ICON_SIZE)));
+    let folder_button_resp = paint_action_button(
+        ui,
+        folder_button_rect,
+        ui.id().with(("global_search_open_folder", source_idx)),
+        open_folder_label,
+    );
+    if folder_button_resp.clicked() {
+        *activate_result = Some(ResultAction::OpenFolder(full_path.clone(), is_dir));
     }
 
-    row_ui.add_space(8.0);
+    let open_button_resp = paint_action_button(
+        ui,
+        open_button_rect,
+        ui.id().with(("global_search_open_file", source_idx)),
+        open_file_label,
+    );
+    if open_button_resp.clicked() {
+        *activate_result = Some(ResultAction::OpenFile(full_path.clone(), is_dir));
+    }
 
-    let item_spacing_x = row_ui.spacing().item_spacing.x;
-    let buttons_total_w = ACTION_BTN_WIDTH * 2.0 + ACTION_BTN_GAP + 4.0 + item_spacing_x;
-    let text_max_w = (row_ui.available_width() - buttons_total_w).max(60.0);
+    let icon_rect = egui::Rect::from_min_size(
+        egui::pos2(content_rect.left(), content_rect.center().y - ICON_SIZE * 0.5),
+        egui::vec2(ICON_SIZE, ICON_SIZE),
+    );
+    if let Some(icon) = icon_tex {
+        ui.painter().image(
+            icon.id(),
+            icon_rect,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+    }
 
-    // File name + metadata (left side, truncated).
-    row_ui.allocate_ui_with_layout(
-        egui::vec2(text_max_w, row_rect.height() - 8.0),
-        egui::Layout::top_down(egui::Align::LEFT),
-        |ui| {
-            ui.add(
-                egui::Label::new(egui::RichText::new(&result_name).strong().size(13.0)).truncate(),
-            );
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(&meta_text)
-                        .size(10.0)
-                        .color(egui::Color32::from_gray(140)),
-                );
-                ui.add_space(6.0);
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(&full_path)
-                            .size(10.0)
-                            .color(egui::Color32::from_gray(120)),
-                    )
-                    .truncate(),
-                );
-            });
-        },
+    let name_font = egui::FontId::proportional(13.0);
+    let meta_font = egui::FontId::proportional(10.0);
+    let text_left = icon_rect.right() + 8.0;
+    let text_right = open_button_rect.left() - 8.0;
+    let text_max_w = (text_right - text_left).max(60.0);
+    let display_name = crate::ui::views::list_view::truncate_text_for_column(
+        &result_name,
+        text_max_w,
+        &name_font,
+        ui,
+    );
+    ui.painter().text(
+        egui::pos2(text_left, content_rect.top()),
+        egui::Align2::LEFT_TOP,
+        display_name,
+        name_font.clone(),
+        text_color,
     );
 
-    // Push buttons to the right.
-    row_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        let btn_size = egui::vec2(ACTION_BTN_WIDTH, ACTION_BTN_HEIGHT);
+    let meta_y = (content_rect.bottom() - meta_font.size).max(content_rect.top() + 16.0);
+    let meta_width = measure_text_width(ui, &meta_text, &meta_font, meta_color);
+    ui.painter().text(
+        egui::pos2(text_left, meta_y),
+        egui::Align2::LEFT_TOP,
+        &meta_text,
+        meta_font.clone(),
+        meta_color,
+    );
 
-        // "Folder" button (rightmost).
-        if ui
-            .add_sized(
-                btn_size,
-                egui::Button::new(
-                    egui::RichText::new(t!("search.open_folder")).size(11.0),
-                ),
-            )
-            .clicked()
-        {
-            *activate_result = Some(ResultAction::OpenFolder(full_path.clone(), is_dir));
-        }
-
-        ui.add_space(ACTION_BTN_GAP);
-
-        // "Open" button.
-        if ui
-            .add_sized(
-                btn_size,
-                egui::Button::new(
-                    egui::RichText::new(t!("search.open_file")).size(11.0),
-                ),
-            )
-            .clicked()
-        {
-            *activate_result = Some(ResultAction::OpenFile(full_path.clone(), is_dir));
-        }
-    });
+    let path_left = text_left + meta_width + 6.0;
+    let path_max_w = (text_right - path_left).max(0.0);
+    if path_max_w > 8.0 {
+        let display_path = crate::ui::views::list_view::truncate_text_for_column(
+            &full_path,
+            path_max_w,
+            &meta_font,
+            ui,
+        );
+        ui.painter().text(
+            egui::pos2(path_left, meta_y),
+            egui::Align2::LEFT_TOP,
+            display_path,
+            meta_font.clone(),
+            secondary_color,
+        );
+    }
 
     // Tooltip with debounce (only reached when not scrolling — scroll path returns early).
     if row_resp.hovered() {
@@ -802,6 +887,8 @@ fn render_result_row(
         }
 
         if hover_duration >= TOOLTIP_DELAY_SECS {
+            let size_opt = resolve_result_size(app, &full_path, is_dir, size);
+            let size_text = size_opt.map(crate::infrastructure::windows::format_size);
             // Grab cached thumbnail (if any) before entering the tooltip closure.
             let thumb_tex: Option<egui::TextureHandle> = if !is_dir {
                 let p = std::path::PathBuf::from(&full_path);
