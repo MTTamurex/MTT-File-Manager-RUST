@@ -33,14 +33,20 @@ static CACHED_USER_OBJECTS: AtomicU64 = AtomicU64::new(0);
 static CACHED_HANDLE_COUNT: AtomicU64 = AtomicU64::new(0);
 static CACHED_THREAD_COUNT: AtomicU64 = AtomicU64::new(0);
 static CACHED_PEAK_THREAD_COUNT: AtomicU64 = AtomicU64::new(0);
-static CACHED_KERNEL_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
 static LAST_THREAD_WARN_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
 static LAST_THREAD_WARN_COUNT: AtomicU64 = AtomicU64::new(0);
 static LAST_THREAD_CRITICAL_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
 static THREAD_CRITICAL_STREAK: AtomicU64 = AtomicU64::new(0);
+/// Set by the UI thread so the background kernel monitor can suppress false
+/// thread-count warnings during video playback.
+static VIDEO_PREVIEW_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// TTL for RAM/VRAM cache (1 second)
 const STATUS_CACHE_TTL_MS: u64 = 1000;
+/// Interval for the background kernel metrics thread. CreateToolhelp32Snapshot
+/// enumerates ALL system threads and can take 40-150ms, so it must never run on
+/// the UI thread. 5 seconds is sufficient for leak detection.
+const KERNEL_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 /// Minimum interval between repeated HIGH thread warnings for stable counts.
 const THREAD_WARN_COOLDOWN_MS: u64 = 30_000;
 /// Number of consecutive 1s samples above critical threshold before escalating.
@@ -158,45 +164,64 @@ struct KernelResourceMetrics {
     peak_thread_count: u32,
 }
 
-/// Returns cached kernel resource metrics (GDI Objects, USER Objects, Handle Count).
-/// Refreshes only after TTL expires. These metrics reveal COM/handle leaks that are
-/// invisible in Task Manager's default view.
-fn get_kernel_resources_cached(allow_refresh: bool, video_preview_active: bool) -> KernelResourceMetrics {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-    let last = CACHED_KERNEL_TIMESTAMP.load(Ordering::Relaxed);
-    if allow_refresh && now.saturating_sub(last) > STATUS_CACHE_TTL_MS {
+/// Returns cached kernel resource metrics. The actual system queries run on a
+/// dedicated background thread (spawned once) so the UI thread never blocks on
+/// `CreateToolhelp32Snapshot` or `GetGuiResources`.
+fn get_kernel_resources_cached(_allow_refresh: bool, video_preview_active: bool) -> KernelResourceMetrics {
+    // Communicate video state to the background thread via atomic.
+    VIDEO_PREVIEW_ACTIVE.store(video_preview_active, Ordering::Relaxed);
+
+    // Ensure the background poller is running (spawned exactly once).
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| {
+        std::thread::Builder::new()
+            .name("kernel-metrics".into())
+            .spawn(kernel_metrics_poller)
+            .ok();
+    });
+
+    KernelResourceMetrics {
+        gdi_objects: CACHED_GDI_OBJECTS.load(Ordering::Relaxed) as u32,
+        user_objects: CACHED_USER_OBJECTS.load(Ordering::Relaxed) as u32,
+        handle_count: CACHED_HANDLE_COUNT.load(Ordering::Relaxed) as u32,
+        thread_count: CACHED_THREAD_COUNT.load(Ordering::Relaxed) as u32,
+        peak_thread_count: CACHED_PEAK_THREAD_COUNT.load(Ordering::Relaxed) as u32,
+    }
+}
+
+/// Background thread that periodically queries kernel resource metrics.
+/// Runs forever with a sleep interval, keeping the expensive syscalls off the UI thread.
+fn kernel_metrics_poller() {
+    loop {
+        std::thread::sleep(KERNEL_POLL_INTERVAL);
+
         let metrics = get_kernel_resources();
         CACHED_GDI_OBJECTS.store(metrics.gdi_objects as u64, Ordering::Relaxed);
         CACHED_USER_OBJECTS.store(metrics.user_objects as u64, Ordering::Relaxed);
         CACHED_HANDLE_COUNT.store(metrics.handle_count as u64, Ordering::Relaxed);
         CACHED_THREAD_COUNT.store(metrics.thread_count as u64, Ordering::Relaxed);
-        // Track peak thread count across the entire session for leak detection.
-        // A monotonically growing peak strongly suggests thread leak.
+
         let prev_peak = CACHED_PEAK_THREAD_COUNT.load(Ordering::Relaxed) as u32;
         if metrics.thread_count > prev_peak {
             CACHED_PEAK_THREAD_COUNT.store(metrics.thread_count as u64, Ordering::Relaxed);
         }
 
-        // Dynamic thresholds based on CPU count.
-        // Expected baseline threads ≈ cpu*3 + workers + egui overhead.
-        // Only warn on GROWTH above baseline — it's leak detection, not absolute count.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
         let cpu_count = std::thread::available_parallelism()
             .map(|n| n.get() as u32)
             .unwrap_or(4);
-        // Baseline: rayon global (cpu) + folder-size pool (cpu) + icon workers (min(cpu,16))
-        //         + thumbnail (min(cpu,8)) + folder preview (min(cpu,6)) + OneDrive(4)
-        //         + ~20 single-purpose workers + egui (~4)
         let expected_baseline = cpu_count * 2 + cpu_count.min(16) + cpu_count.min(8) + cpu_count.min(6) + 28;
         let warn_threshold = expected_baseline + 20;
         let critical_threshold = expected_baseline + 50;
         let stalled = crate::infrastructure::onedrive::get_stalled_io_workers();
+        let video_active = VIDEO_PREVIEW_ACTIVE.load(Ordering::Relaxed);
+
         if metrics.thread_count >= critical_threshold {
-            if is_video_preview_thread_spike_expected(video_preview_active, stalled) {
-                // In-panel video playback can legitimately keep thread count high
-                // for long periods. Avoid false-positive CRITICAL/HIGH spam.
+            if is_video_preview_thread_spike_expected(video_active, stalled) {
                 THREAD_CRITICAL_STREAK.store(0, Ordering::Relaxed);
             } else if should_emit_thread_critical(now, metrics.thread_count, critical_threshold, stalled)
             {
@@ -221,7 +246,7 @@ fn get_kernel_resources_cached(allow_refresh: bool, video_preview_active: bool) 
             }
         } else if metrics.thread_count >= warn_threshold {
             THREAD_CRITICAL_STREAK.store(0, Ordering::Relaxed);
-            if !is_video_preview_thread_spike_expected(video_preview_active, stalled)
+            if !is_video_preview_thread_spike_expected(video_active, stalled)
                 && should_emit_thread_warning(now, metrics.thread_count)
             {
                 log::warn!(
@@ -232,20 +257,6 @@ fn get_kernel_resources_cached(allow_refresh: bool, video_preview_active: bool) 
             }
         } else {
             THREAD_CRITICAL_STREAK.store(0, Ordering::Relaxed);
-        }
-
-        CACHED_KERNEL_TIMESTAMP.store(now, Ordering::Relaxed);
-        KernelResourceMetrics {
-            peak_thread_count: CACHED_PEAK_THREAD_COUNT.load(Ordering::Relaxed) as u32,
-            ..metrics
-        }
-    } else {
-        KernelResourceMetrics {
-            gdi_objects: CACHED_GDI_OBJECTS.load(Ordering::Relaxed) as u32,
-            user_objects: CACHED_USER_OBJECTS.load(Ordering::Relaxed) as u32,
-            handle_count: CACHED_HANDLE_COUNT.load(Ordering::Relaxed) as u32,
-            thread_count: CACHED_THREAD_COUNT.load(Ordering::Relaxed) as u32,
-            peak_thread_count: CACHED_PEAK_THREAD_COUNT.load(Ordering::Relaxed) as u32,
         }
     }
 }

@@ -551,6 +551,34 @@ impl ImageViewerApp {
 
         run_post_startup_jobs(&mut app, &ctx);
 
+        // Log GPU adapter info to file for diagnostics (works without console).
+        if let Some(render_state) = &cc.wgpu_render_state {
+            let info = render_state.adapter.get_info();
+            let has_console = {
+                #[cfg(target_os = "windows")]
+                {
+                    use std::os::windows::io::AsRawHandle;
+                    let h = std::io::stderr().as_raw_handle() as usize;
+                    h != 0 && h != usize::MAX
+                }
+                #[cfg(not(target_os = "windows"))]
+                { true }
+            };
+            let diag = format!(
+                "GPU: {} ({:?})\nBackend: {:?}\nDriver: {} {}\nHas console: {}\nExe: {:?}\nCWD: {:?}\nTimestamp: {:?}\n",
+                info.name,
+                info.device_type,
+                info.backend,
+                info.driver,
+                info.driver_info,
+                has_console,
+                std::env::current_exe().ok(),
+                std::env::current_dir().ok(),
+                std::time::SystemTime::now(),
+            );
+            log::info!("[GPU] {}", diag.trim());
+        }
+
         app
     }
 }
