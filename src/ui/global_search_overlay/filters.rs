@@ -94,11 +94,9 @@ fn matches_category(
                 "ico",
             ],
         ),
-        GlobalSearchCategory::Videos => extension_in(
+        GlobalSearchCategory::Videos => extension_matches(
             &result.full_path,
-            &[
-                "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v", "mpeg", "mpg", "ts",
-            ],
+            crate::infrastructure::windows::is_video_extension,
         ),
         GlobalSearchCategory::Audio => extension_in(
             &result.full_path,
@@ -127,6 +125,13 @@ fn extension_in(path: &str, allowed: &[&str]) -> bool {
     allowed.iter().any(|candidate| *candidate == ext)
 }
 
+fn extension_matches(path: &str, predicate: fn(&str) -> bool) -> bool {
+    std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(predicate)
+}
+
 pub(super) fn format_number(n: u64) -> String {
     if n >= 1_000_000 {
         format!("{:.1}M", n as f64 / 1_000_000.0)
@@ -139,7 +144,9 @@ pub(super) fn format_number(n: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::extract_drive_letter;
+    use super::{build_filtered_indices, extract_drive_letter};
+    use crate::app::global_search_state::GlobalSearchCategory;
+    use mtt_search_protocol::SearchResultItem;
 
     #[test]
     fn extract_drive_letter_accepts_regular_windows_path() {
@@ -157,5 +164,18 @@ mod tests {
     fn extract_drive_letter_rejects_non_drive_paths() {
         assert_eq!(extract_drive_letter(r"\\server\share\file.txt"), None);
         assert_eq!(extract_drive_letter(r"/home/user/file.txt"), None);
+    }
+
+    #[test]
+    fn video_filter_includes_ogm() {
+        let results = vec![SearchResultItem {
+            name: "sample.ogm".to_string(),
+            full_path: r"C:\media\sample.ogm".to_string(),
+            is_dir: false,
+            size: 0,
+        }];
+
+        let filtered = build_filtered_indices(&results, GlobalSearchCategory::Videos, None);
+        assert_eq!(filtered, vec![0]);
     }
 }
