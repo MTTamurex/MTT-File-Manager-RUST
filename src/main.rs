@@ -61,9 +61,37 @@ fn load_app_icon() -> Option<egui::IconData> {
     }
 }
 
+/// Check whether a real stderr console handle is attached.
+/// GUI-subsystem binaries launched from a shortcut (Explorer) have no console,
+/// so `GetStdHandle(STD_ERROR_HANDLE)` returns NULL or INVALID_HANDLE_VALUE.
+/// When launched from a terminal (`cargo run`, PowerShell), the handle is valid.
+#[cfg(target_os = "windows")]
+fn has_stderr_console() -> bool {
+    use std::os::windows::io::AsRawHandle;
+    let h = std::io::stderr().as_raw_handle() as usize;
+    // NULL = 0, INVALID_HANDLE_VALUE = usize::MAX (i.e. -1 as usize)
+    h != 0 && h != usize::MAX
+}
+
 fn main() -> eframe::Result<()> {
-    // Initialize logging: default=warn, MTT modules=info, RUST_LOG env overrides
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,mtt_file_manager=info"))
+    // When running without a console (installed binary launched from shortcut),
+    // reduce the default log level. Background worker threads continuously emit
+    // log::info! which formats a String and acquires the global Stderr mutex.
+    // With no real console the write fails instantly, so workers cycle through
+    // alloc→lock→fail→unlock→free extremely fast, creating heavy heap-allocator
+    // contention with the UI thread and causing scroll stutter.
+    // Raising the floor to `warn` eliminates the vast majority of those
+    // allocations while preserving actionable diagnostics.
+    #[cfg(target_os = "windows")]
+    let default_filter = if has_stderr_console() {
+        "warn,mtt_file_manager=info"
+    } else {
+        "warn,mtt_file_manager=warn"
+    };
+    #[cfg(not(target_os = "windows"))]
+    let default_filter = "warn,mtt_file_manager=info";
+
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_filter))
         .format_timestamp_millis()
         .init();
 

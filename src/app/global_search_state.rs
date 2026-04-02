@@ -56,6 +56,7 @@ pub struct GlobalSearchState {
     pub cached_available_drives: Vec<char>,
     /// Generation + filter params when the cache was last built.
     filter_cache_key: (u64, GlobalSearchCategory, Option<char>),
+
 }
 
 impl GlobalSearchState {

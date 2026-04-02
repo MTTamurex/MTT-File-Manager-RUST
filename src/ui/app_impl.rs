@@ -111,14 +111,15 @@ impl eframe::App for ImageViewerApp {
             self.reap_video_player_process();
             let t5 = std::time::Instant::now();
 
-            let msg_ms = t1.duration_since(t0).as_millis();
-            let drives_ms = t2.duration_since(t1).as_millis();
-            let poll_ms = t3.duration_since(t2).as_millis();
-            let prefs_ms = t4.duration_since(t3).as_millis();
-            let memory_ms = t5.duration_since(t4).as_millis();
-            if msg_ms + drives_ms + poll_ms + prefs_ms + memory_ms > 50 {
+            let msg_ms = t1.duration_since(t0).as_secs_f32() * 1000.0;
+            let drives_ms = t2.duration_since(t1).as_secs_f32() * 1000.0;
+            let poll_ms = t3.duration_since(t2).as_secs_f32() * 1000.0;
+            let prefs_ms = t4.duration_since(t3).as_secs_f32() * 1000.0;
+            let memory_ms = t5.duration_since(t4).as_secs_f32() * 1000.0;
+            let infra_total = msg_ms + drives_ms + poll_ms + prefs_ms + memory_ms;
+            if infra_total > 50.0 {
                 log::warn!(
-                    "[PERF] Slow infrastructure: messages={}ms drives={}ms poll={}ms prefs={}ms memory={}ms",
+                    "[PERF] Slow infrastructure: messages={:.0}ms drives={:.0}ms poll={:.0}ms prefs={:.0}ms memory={:.0}ms",
                     msg_ms, drives_ms, poll_ms, prefs_ms, memory_ms
                 );
             }
@@ -188,10 +189,9 @@ impl eframe::App for ImageViewerApp {
         // Keep full rendering even during move/resize so content/video stays visible and synchronized.
         let t_panels = std::time::Instant::now();
         app::panels::render_panels(self, ctx, frame);
-        let t_post_panels = std::time::Instant::now();
-        let panels_ms = t_post_panels.duration_since(t_panels).as_millis();
-        if panels_ms > 50 {
-            log::warn!("[PERF] Slow render_panels: {}ms", panels_ms);
+        let panels_ms = t_panels.elapsed().as_secs_f32() * 1000.0;
+        if panels_ms > 50.0 {
+            log::warn!("[PERF] Slow render_panels: {:.0}ms", panels_ms);
         }
 
         // 9. Operations: Context Menu (Rendering & Actions)
@@ -251,11 +251,12 @@ impl eframe::App for ImageViewerApp {
         }
 
         // PERF: Log total frame time when slow (helps diagnose post-inactivity freezes)
-        let frame_total_ms = t_frame_start.elapsed().as_millis();
-        self.last_actual_frame_ms = frame_total_ms as f32;
-        if !self.layout.saved_is_minimized && frame_total_ms > 100 {
+        let frame_total_ms = t_frame_start.elapsed().as_secs_f32() * 1000.0;
+        self.last_actual_frame_ms = frame_total_ms;
+
+        if !self.layout.saved_is_minimized && frame_total_ms > 100.0 {
             log::warn!(
-                "[PERF] SLOW FRAME: {}ms total (stable_dt={:.0}ms)",
+                "[PERF] SLOW FRAME: {:.0}ms total (stable_dt={:.0}ms)",
                 frame_total_ms, frame_ms
             );
         }

@@ -35,8 +35,13 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
         .exact_height(24.0)
         .show(ctx, |ui| {
             use crate::ui::status_bar::{render_status_bar, StatusBarAction};
-            let allow_system_refresh =
-                app.last_scroll_time.elapsed() >= std::time::Duration::from_millis(400);
+            // Suppress RAM/VRAM cache refresh while scrolling (main list or global search).
+            // Kernel metrics (GDI, threads, handles) run on a background thread and are
+            // never queried on the UI thread.
+            let gs_scrolling = app.global_search.active
+                && app.global_search.last_scroll_time.elapsed() < std::time::Duration::from_millis(400);
+            let allow_system_refresh = !gs_scrolling
+                && app.last_scroll_time.elapsed() >= std::time::Duration::from_millis(400);
             let video_preview_active = app
                 .media_preview
                 .as_ref()

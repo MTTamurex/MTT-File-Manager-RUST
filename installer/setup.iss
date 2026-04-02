@@ -67,8 +67,8 @@ Source: "{#SrcRoot}\mpv_ui\portable_config\scripts\*";           DestDir: "{app}
 Source: "{#SrcRoot}\mpv_ui\portable_config\script-opts\*";       DestDir: "{app}\mpv_ui\portable_config\script-opts"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist
 
 [Icons]
-Name: "{group}\{#MyAppName}";         Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\{#MyAppName}";   Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{group}\{#MyAppName}";         Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
+Name: "{autodesktop}\{#MyAppName}";   Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; WorkingDir: "{app}"
 
 [Run]
 ; Install and start the search indexer Windows service
