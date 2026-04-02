@@ -20,11 +20,18 @@ pub struct FtsMatch {
 /// never contend with the writer (`IndexDb`). WAL mode allows both to operate
 /// concurrently.
 pub struct FtsSearcher {
-    conn: Mutex<Connection>,
+    db_path: PathBuf,
 }
 
 impl FtsSearcher {
     pub fn open(path: &Path) -> Result<Self, String> {
+        Self::open_read_connection(path)?;
+        Ok(Self {
+            db_path: path.to_path_buf(),
+        })
+    }
+
+    fn open_read_connection(path: &Path) -> Result<Connection, String> {
         let conn = Connection::open_with_flags(
             path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -35,9 +42,7 @@ impl FtsSearcher {
         // immediately with SQLITE_BUSY when the writer is rebuilding FTS5.
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=10000;")
             .map_err(|e| format!("FTS searcher PRAGMA error: {}", e))?;
-        Ok(Self {
-            conn: Mutex::new(conn),
-        })
+        Ok(conn)
     }
 
     /// Query FTS5 for file names matching `query` (substring match via trigram tokenizer).
@@ -59,10 +64,9 @@ impl FtsSearcher {
             return Ok(Vec::new());
         }
 
-        let conn = self
-            .conn
-            .lock()
-            .map_err(|e| format!("FTS searcher lock error: {}", e))?;
+        // Open a short-lived read-only connection per request so concurrent
+        // FTS queries do not serialize behind a single shared mutex.
+        let conn = Self::open_read_connection(&self.db_path)?;
 
         let mut stmt = conn
             .prepare_cached(
