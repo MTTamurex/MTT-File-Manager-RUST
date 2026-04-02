@@ -36,6 +36,7 @@ pub enum GlobalSearchResponse {
 
 const OFFLINE_FAILURE_THRESHOLD: u8 = 3;
 const STATUS_RETRY_COUNT: usize = 1;
+const SEARCH_RETRY_COUNT: usize = 3;
 const MIN_QUERY_LEN_FOR_SERVICE_SEARCH: usize = 2;
 
 fn is_transient_ipc_error(message: &str) -> bool {
@@ -91,14 +92,26 @@ fn query_service_with_retry(
     offset: u32,
     limit: u32,
 ) -> Result<crate::infrastructure::global_search::SearchPage, String> {
-    match crate::infrastructure::global_search::search(query, offset, limit) {
-        Ok(page) => Ok(page),
-        Err(e) if e.contains("All pipe instances are busy") => {
-            std::thread::sleep(std::time::Duration::from_millis(200));
-            crate::infrastructure::global_search::search(query, offset, limit)
+    let mut last_error = None;
+
+    for attempt in 0..SEARCH_RETRY_COUNT {
+        match crate::infrastructure::global_search::search(query, offset, limit) {
+            Ok(page) => return Ok(page),
+            Err(e) => {
+                let transient = is_transient_ipc_error(&e);
+                last_error = Some(e.clone());
+
+                if !transient || attempt + 1 >= SEARCH_RETRY_COUNT {
+                    break;
+                }
+
+                let _ = crate::infrastructure::global_search::warm_index();
+                std::thread::sleep(std::time::Duration::from_millis(300));
+            }
         }
-        Err(e) => Err(e),
     }
+
+    Err(last_error.unwrap_or_else(|| "Search service query failed".to_string()))
 }
 
 fn should_skip_service_query(query: &str, _offset: u32) -> bool {
@@ -147,14 +160,12 @@ fn refresh_and_send_status(
                 && *consecutive_failures >= OFFLINE_FAILURE_THRESHOLD
             {
                 *last_known_available = false;
-                *last_known_total_indexed = 0;
             }
         }
     } else {
         *consecutive_failures = (*consecutive_failures).saturating_add(1);
         if *consecutive_failures >= OFFLINE_FAILURE_THRESHOLD {
             *last_known_available = false;
-            *last_known_total_indexed = 0;
         }
     }
 
@@ -310,15 +321,28 @@ pub fn start_global_search_worker(
                         });
                     }
                     Err(e) => {
+                        let transient = is_transient_ipc_error(&e);
+                        if transient {
+                            let _ = crate::infrastructure::global_search::warm_index();
+                            refresh_and_send_status(
+                                &sender,
+                                &mut session_index,
+                                &mut last_known_available,
+                                &mut last_known_total_indexed,
+                                &mut last_known_service_volumes,
+                                &mut consecutive_failures,
+                            );
+                        }
+
                         let (local_items, local_has_more) =
                             session_index.search_page(&query, offset as usize, max_limit);
+                        let can_use_local_only = !last_known_available
+                            && last_known_total_indexed == 0
+                            && !local_items.is_empty();
 
-                        if local_items.is_empty() {
-                            let _ =
-                                sender.send(GlobalSearchResponse::Error { query, message: e });
-                        } else {
+                        if can_use_local_only {
                             log::warn!(
-                                "[GLOBAL-SEARCH] Service query failed, returning session index results: {}",
+                                "[GLOBAL-SEARCH] Service unavailable, using session-only fallback: {}",
                                 e
                             );
                             let _ = sender.send(GlobalSearchResponse::Results {
@@ -328,6 +352,9 @@ pub fn start_global_search_worker(
                                 limit,
                                 has_more: local_has_more,
                             });
+                        } else {
+                            let _ =
+                                sender.send(GlobalSearchResponse::Error { query, message: e });
                         }
                     }
                 }

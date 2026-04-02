@@ -62,6 +62,47 @@ fn lookup_icon_with_size_guard(
         .cloned()
 }
 
+#[inline]
+fn lookup_cached_icon_only(
+    app: &mut ImageViewerApp,
+    path: &std::path::Path,
+    is_dir: bool,
+) -> Option<egui::TextureHandle> {
+    if !is_dir {
+        if let Some(ext) = path.extension().and_then(|ext| ext.to_str()) {
+            let ext_key = format!(
+                "{}_{:?}",
+                crate::infrastructure::windows::icons::canonical_icon_ext(
+                    &ext.to_ascii_lowercase()
+                ),
+                IconSize::Large
+            );
+            if let Some(icon) = app.item_icon_loader.extension_cache.get(&ext_key) {
+                return Some(icon.clone());
+            }
+
+            let small_ext_key = format!(
+                "{}_{:?}",
+                crate::infrastructure::windows::icons::canonical_icon_ext(
+                    &ext.to_ascii_lowercase()
+                ),
+                IconSize::Small
+            );
+            if let Some(icon) = app.item_icon_loader.extension_cache.get(&small_ext_key) {
+                return Some(icon.clone());
+            }
+        }
+    }
+
+    let large_key = cache_key_for_icon(path, IconSize::Large);
+    if let Some(icon) = app.item_icon_loader.icon_cache.get(&large_key) {
+        return Some(icon.clone());
+    }
+
+    let small_key = cache_key_for_icon(path, IconSize::Small);
+    app.item_icon_loader.icon_cache.get(&small_key).cloned()
+}
+
 fn compute_visual_scroll(
     ui: &egui::Ui,
     target_scroll: f32,
@@ -108,6 +149,16 @@ fn compute_visual_scroll(
 #[inline]
 fn format_result_meta(file_type: &str) -> String {
     file_type.to_string()
+}
+
+#[inline]
+fn filtered_contains(filtered_indices: &[usize], source_idx: usize) -> bool {
+    filtered_indices.binary_search(&source_idx).is_ok()
+}
+
+#[inline]
+fn filtered_position(filtered_indices: &[usize], source_idx: usize) -> Option<usize> {
+    filtered_indices.binary_search(&source_idx).ok()
 }
 
 pub(super) fn render_results_panel(
@@ -206,7 +257,7 @@ pub(super) fn render_results_panel(
         app.global_search.selected_index = None;
     }
     if app.global_search.selected_index.is_some_and(|idx| {
-        !filtered_indices.contains(&idx)
+        !filtered_contains(&filtered_indices, idx)
     }) {
         app.global_search.selected_index = None;
     }
@@ -245,7 +296,7 @@ pub(super) fn render_results_panel(
             let current_filtered_pos = app
                 .global_search
                 .selected_index
-                .and_then(|sel| filtered_indices.iter().position(|&v| v == sel));
+                .and_then(|sel| filtered_position(&filtered_indices, sel));
 
             let page_step = ((viewport_h / RESULT_ROW_HEIGHT).floor() as usize).max(1);
             let new_filtered_pos = if arrow_down {
@@ -355,6 +406,7 @@ pub(super) fn render_results_panel(
     } else {
         (vis_min_row, vis_max_row)
     };
+    let mut icon_request_budget = if is_scrolling { 2usize } else { 6usize };
 
     // Clip child UI to viewport.
     let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(viewport_rect));
@@ -384,6 +436,7 @@ pub(super) fn render_results_panel(
             source_idx,
             item_rect,
             hover_color,
+            &mut icon_request_budget,
             &mut activate_result,
         );
     }
@@ -473,7 +526,7 @@ pub(super) fn render_results_panel(
         let selected_idx = app
             .global_search
             .selected_index
-            .filter(|idx| filtered_indices.iter().any(|v| v == idx))
+            .filter(|idx| filtered_contains(&filtered_indices, *idx))
             .unwrap_or(filtered_indices[0]);
         app.global_search.selected_index = Some(selected_idx);
 
@@ -573,6 +626,7 @@ fn render_result_row(
     source_idx: usize,
     row_rect: egui::Rect,
     hover_color: egui::Color32,
+    icon_request_budget: &mut usize,
     activate_result: &mut Option<ResultAction>,
 ) {
     let Some((full_path, result_name, is_dir, size)) = app
@@ -620,18 +674,27 @@ fn render_result_row(
     // ── Full row: icon, metadata, buttons, tooltip ──
 
     // Global search can surface files scattered across the disk. Requesting icons
-    // for every visible row causes avoidable background HDD churn, so only the
-    // active row may trigger a new async icon load. Cache hits still render.
+    // for every visible row causes avoidable background HDD churn, so the panel
+    // spends only a small per-frame budget on new async icon requests.
+    let path = std::path::Path::new(&full_path);
+    let row_has_priority = is_selected || row_resp.hovered();
+    let row_may_spend_budget = *icon_request_budget > 0;
     let icon_tex = {
-        let path_buf = std::path::PathBuf::from(&full_path);
-        let tex = lookup_icon_with_size_guard(app, ctx, &path_buf, is_dir);
+        let tex = if row_has_priority || row_may_spend_budget {
+            lookup_icon_with_size_guard(app, ctx, path, is_dir)
+        } else {
+            lookup_cached_icon_only(app, path, is_dir)
+        };
         if tex.is_none()
             && !is_dir
-            && (is_selected || row_resp.hovered())
-            && !app.loading_icons.contains(&path_buf)
-            && app.failed_icons.peek(&path_buf).is_none()
+            && (row_has_priority || row_may_spend_budget)
+            && !app.loading_icons.contains(path)
+            && app.failed_icons.peek(path).is_none()
         {
-            app.request_icon_load(path_buf.clone());
+            app.request_icon_load(path.to_path_buf());
+            if !row_has_priority && row_may_spend_budget {
+                *icon_request_budget = icon_request_budget.saturating_sub(1);
+            }
         }
         tex
     };

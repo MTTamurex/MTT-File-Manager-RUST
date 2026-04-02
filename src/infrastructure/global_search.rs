@@ -8,7 +8,8 @@ use windows::Win32::Storage::FileSystem::{
 };
 use windows::Win32::System::Pipes::PeekNamedPipe;
 
-const PIPE_IO_TIMEOUT_MS: u64 = 5000;
+const SEARCH_PIPE_IO_TIMEOUT_MS: u64 = 20_000;
+const CONTROL_PIPE_IO_TIMEOUT_MS: u64 = 5_000;
 const PIPE_POLL_INTERVAL_MS: u64 = 15;
 
 pub struct SearchPage {
@@ -28,7 +29,7 @@ pub fn search(query: &str, offset: u32, limit: u32) -> Result<SearchPage, String
             limit,
         };
         write_message(pipe, &request)?;
-        let response: SearchResponse = read_response(pipe)?;
+        let response: SearchResponse = read_response(pipe, SEARCH_PIPE_IO_TIMEOUT_MS)?;
 
         match response {
             SearchResponse::Results {
@@ -59,7 +60,7 @@ pub fn warm_index() -> Result<(), String> {
 
     let result = (|| {
         write_message(pipe, &SearchRequest::WarmIndex)?;
-        let response: SearchResponse = read_response(pipe)?;
+        let response: SearchResponse = read_response(pipe, CONTROL_PIPE_IO_TIMEOUT_MS)?;
 
         match response {
             SearchResponse::WarmStarted => Ok(()),
@@ -91,7 +92,7 @@ pub fn ping() -> bool {
 
     let ping_write = write_message(pipe, &SearchRequest::Ping);
     let ping_read = if ping_write.is_ok() {
-        read_response::<SearchResponse>(pipe)
+        read_response::<SearchResponse>(pipe, CONTROL_PIPE_IO_TIMEOUT_MS)
     } else {
         Err(ping_write
             .err()
@@ -133,7 +134,7 @@ pub fn get_status() -> Result<IndexStatusInfo, String> {
 
     let result = (|| {
         write_message(pipe, &SearchRequest::GetStatus)?;
-        let response: SearchResponse = read_response(pipe)?;
+        let response: SearchResponse = read_response(pipe, CONTROL_PIPE_IO_TIMEOUT_MS)?;
 
         match response {
             SearchResponse::Status(info) => Ok(info),
@@ -219,10 +220,13 @@ fn write_all(pipe: HANDLE, data: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-fn read_response<T: for<'de> serde::Deserialize<'de>>(pipe: HANDLE) -> Result<T, String> {
+fn read_response<T: for<'de> serde::Deserialize<'de>>(
+    pipe: HANDLE,
+    timeout_ms: u64,
+) -> Result<T, String> {
     // Read 4-byte length prefix
     let mut len_buf = [0u8; 4];
-    read_exact_with_timeout(pipe, &mut len_buf, PIPE_IO_TIMEOUT_MS)?;
+    read_exact_with_timeout(pipe, &mut len_buf, timeout_ms)?;
 
     let payload_len = u32::from_le_bytes(len_buf) as usize;
     if payload_len == 0 || payload_len > 1024 * 1024 {
@@ -231,7 +235,7 @@ fn read_response<T: for<'de> serde::Deserialize<'de>>(pipe: HANDLE) -> Result<T,
 
     // Read payload
     let mut payload = vec![0u8; payload_len];
-    read_exact_with_timeout(pipe, &mut payload, PIPE_IO_TIMEOUT_MS)?;
+    read_exact_with_timeout(pipe, &mut payload, timeout_ms)?;
 
     decode_message(&payload)
 }
