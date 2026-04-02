@@ -498,14 +498,24 @@ fn handle_client(
             let use_fts = min_token_len >= 3 && fts_searcher.is_some();
 
             let result = if use_fts {
-                collect_authorized_fts_page(
+                match collect_authorized_fts_page(
                     pipe,
                     fts_searcher.as_ref().unwrap(),
                     &indices_lock,
                     &text,
                     offset,
                     limit,
-                )
+                ) {
+                    Ok(page) => Ok(page),
+                    Err(e) => {
+                        eprintln!(
+                            "[IPC] FTS query failed for '{}', falling back to linear scan: {}",
+                            text,
+                            e
+                        );
+                        collect_authorized_search_page(pipe, &indices_lock, &text, offset, limit)
+                    }
+                }
             } else {
                 collect_authorized_search_page(pipe, &indices_lock, &text, offset, limit)
             };
