@@ -6,6 +6,8 @@ use rusqlite::{params, Connection};
 
 use crate::file_index::VolumeIndex;
 
+const FTS_READER_BUSY_TIMEOUT_MS: u64 = 2_000;
+
 /// A single FTS5 search match.
 pub struct FtsMatch {
     pub frn: u64,
@@ -40,7 +42,10 @@ impl FtsSearcher {
         // WAL is already set by the writer; this is a no-op but explicit.
         // busy_timeout lets the reader retry for up to 10s instead of failing
         // immediately with SQLITE_BUSY when the writer is rebuilding FTS5.
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=10000;")
+        conn.execute_batch(&format!(
+            "PRAGMA journal_mode=WAL; PRAGMA busy_timeout={};",
+            FTS_READER_BUSY_TIMEOUT_MS
+        ))
             .map_err(|e| format!("FTS searcher PRAGMA error: {}", e))?;
         Ok(conn)
     }
@@ -429,13 +434,16 @@ impl IndexDb {
         Ok(())
     }
 
-    /// Lightweight persist: save only the volume state (journal position, record count).
-    ///
-    /// This is O(1) and safe to call frequently (e.g., every 5 minutes).
-    pub fn save_volume_state(&self, index: &VolumeIndex) -> Result<(), String> {
+    pub fn save_volume_state_snapshot(
+        &self,
+        drive_letter: char,
+        journal_id: u64,
+        last_usn: i64,
+        files_indexed: usize,
+    ) -> Result<(), String> {
         let conn = self.conn.lock().map_err(|e| format!("Lock error: {}", e))?;
 
-        let drive = index.drive_letter.to_string();
+        let drive = drive_letter.to_string();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -445,28 +453,17 @@ impl IndexDb {
             "INSERT OR REPLACE INTO volume_state
              (drive_letter, journal_id, last_usn, files_indexed, last_full_scan_epoch)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                drive,
-                index.journal_id as i64,
-                index.last_usn,
-                index.records.len() as i64,
-                now
-            ],
+            params![drive, journal_id as i64, last_usn, files_indexed as i64, now],
         )
         .map_err(|e| format!("Save volume_state error: {}", e))?;
 
         Ok(())
     }
 
-    /// Incrementally sync file_records and FTS5 for only the changed records.
-    ///
-    /// Much faster than `save_volume` for typical USN deltas (hundreds of changes
-    /// vs. millions of records). The FTS5 index stays consistent throughout because
-    /// changes are applied atomically inside a single transaction.
-    pub fn sync_fts_incremental(
+    pub fn sync_fts_incremental_snapshot(
         &self,
-        index: &VolumeIndex,
-        additions: &std::collections::HashSet<u64>,
+        drive_letter: char,
+        additions: &[(u64, String, u64, bool)],
         removals: &std::collections::HashSet<u64>,
     ) -> Result<(), String> {
         if additions.is_empty() && removals.is_empty() {
@@ -474,7 +471,7 @@ impl IndexDb {
         }
 
         let conn = self.conn.lock().map_err(|e| format!("Lock error: {}", e))?;
-        let drive = index.drive_letter.to_string();
+        let drive = drive_letter.to_string();
 
         let tx = conn
             .unchecked_transaction()
@@ -514,11 +511,10 @@ impl IndexDb {
         }
 
         // --- Process additions (new + updated records) ---
-        for &frn in additions {
-            let Some(record) = index.records.get(&frn) else {
-                continue;
-            };
-            let name = index.names.get(record.name_ref());
+        for (frn, name, parent_ref, is_dir) in additions {
+            let frn = *frn;
+            let parent_ref = *parent_ref;
+            let is_dir = *is_dir;
 
             // Check if row already exists (update/rename case).
             let existing: Option<(i64, String)> = tx
@@ -534,7 +530,7 @@ impl IndexDb {
                 tx.execute(
                     "UPDATE file_records SET name = ?1, parent_frn = ?2, is_dir = ?3
                      WHERE drive_letter = ?4 AND frn = ?5",
-                    params![name, record.parent_ref as i64, record.is_dir, drive, frn as i64],
+                    params![name, parent_ref as i64, is_dir, drive, frn as i64],
                 )
                 .map_err(|e| format!("Update record error: {}", e))?;
 
@@ -553,7 +549,7 @@ impl IndexDb {
                 tx.execute(
                     "INSERT INTO file_records (frn, drive_letter, name, parent_frn, is_dir)
                      VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![frn as i64, drive, name, record.parent_ref as i64, record.is_dir],
+                    params![frn as i64, drive, name, parent_ref as i64, is_dir],
                 )
                 .map_err(|e| format!("Insert record error: {}", e))?;
 
@@ -572,7 +568,7 @@ impl IndexDb {
         if removed_count > 0 || added_count > 0 || updated_count > 0 {
             eprintln!(
                 "[DB] {}:\\ Incremental sync: +{} ~{} -{} records",
-                index.drive_letter, added_count, updated_count, removed_count
+                drive_letter, added_count, updated_count, removed_count
             );
         }
 

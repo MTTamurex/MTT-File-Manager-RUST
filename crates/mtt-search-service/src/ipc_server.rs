@@ -532,6 +532,9 @@ fn handle_client(
                     );
                 }
                 Err(e) => {
+                    if e == "Client disconnected" {
+                        return;
+                    }
                     eprintln!("[IPC] Authorization check failed: {}", e);
                     let _ = send_response(pipe, &SearchResponse::Error("Authorization failed".to_string()));
                 }

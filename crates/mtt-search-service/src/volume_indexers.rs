@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT};
+use std::collections::HashSet;
 use windows::Win32::Storage::FileSystem::{
     FindCloseChangeNotification, FindFirstChangeNotificationW, FindNextChangeNotification,
     FILE_NOTIFY_CHANGE_ATTRIBUTES, FILE_NOTIFY_CHANGE_CREATION, FILE_NOTIFY_CHANGE_DIR_NAME,
@@ -59,7 +60,12 @@ pub(crate) fn index_non_ntfs_volume(
     shutdown: Arc<AtomicBool>,
 ) {
     let cadence = non_usn_scan_cadence(&file_system);
-    let change_monitor = NonUsnChangeMonitor::new(drive_letter);
+    let fs_lower = file_system.to_ascii_lowercase();
+    let change_monitor = if is_fat_family_fs(&fs_lower) {
+        None
+    } else {
+        NonUsnChangeMonitor::new(drive_letter)
+    };
 
     eprintln!(
         "[SCAN] Starting fallback indexer for {}:\\ (filesystem: {}, periodic={}s, trigger-gap={}s, change-monitor={})",
@@ -206,6 +212,16 @@ struct NonUsnChangeMonitor {
     handle: HANDLE,
 }
 
+struct PendingPersistSnapshot {
+    drive_letter: char,
+    journal_id: u64,
+    last_usn: i64,
+    files_indexed: usize,
+    additions: HashSet<u64>,
+    removals: HashSet<u64>,
+    addition_rows: Vec<(u64, String, u64, bool)>,
+}
+
 impl NonUsnChangeMonitor {
     fn new(drive_letter: char) -> Option<Self> {
         let root = format!("{}:\\", drive_letter);
@@ -311,6 +327,20 @@ fn upsert_volume_index(
     }
 }
 
+fn restore_pending_snapshot(
+    indices: &Arc<RwLock<Vec<file_index::VolumeIndex>>>,
+    snapshot: PendingPersistSnapshot,
+) {
+    let mut indices_lock = indices.write().unwrap_or_else(|e| e.into_inner());
+    if let Some(vol_index) = indices_lock
+        .iter_mut()
+        .find(|v| v.drive_letter == snapshot.drive_letter)
+    {
+        vol_index.pending_additions.extend(snapshot.additions);
+        vol_index.pending_removals.extend(snapshot.removals);
+    }
+}
+
 pub(crate) fn index_volume(
     drive_letter: char,
     indices: Arc<RwLock<Vec<file_index::VolumeIndex>>>,
@@ -377,6 +407,10 @@ pub(crate) fn index_volume(
                 );
                 index.journal_id = state.journal_id;
                 index.last_usn = state.last_usn;
+
+                // DB-loaded rows are already persisted. Keep only real USN catch-up
+                // changes as pending for the next incremental sync.
+                index.clear_pending();
 
                 // Catch up from last USN.
                 match usn_journal::read_usn_changes(
@@ -585,14 +619,46 @@ pub(crate) fn index_volume(
 
         // 3) Persist every 5 minutes — incremental sync only (not full rebuild).
         if last_persist.elapsed() > std::time::Duration::from_secs(300) {
-            let mut indices_lock = indices.write().unwrap_or_else(|e| e.into_inner());
-            if let Some(vol_index) = indices_lock.iter_mut().find(|v| v.drive_letter == drive_letter) {
-                // Take pending changes (clears them in VolumeIndex).
-                let additions = std::mem::take(&mut vol_index.pending_additions);
-                let removals = std::mem::take(&mut vol_index.pending_removals);
+            let pending_snapshot = {
+                let mut indices_lock = indices.write().unwrap_or_else(|e| e.into_inner());
+                indices_lock
+                    .iter_mut()
+                    .find(|v| v.drive_letter == drive_letter)
+                    .map(|vol_index| {
+                        let additions = std::mem::take(&mut vol_index.pending_additions);
+                        let removals = std::mem::take(&mut vol_index.pending_removals);
+                        let addition_rows = additions
+                            .iter()
+                            .filter_map(|frn| {
+                                let record = vol_index.records.get(frn)?;
+                                Some((
+                                    *frn,
+                                    vol_index.names.get(record.name_ref()).to_string(),
+                                    record.parent_ref,
+                                    record.is_dir,
+                                ))
+                            })
+                            .collect();
 
-                // Save lightweight volume state (journal position).
-                if let Err(e) = db.save_volume_state(vol_index) {
+                        PendingPersistSnapshot {
+                            drive_letter: vol_index.drive_letter,
+                            journal_id: vol_index.journal_id,
+                            last_usn: vol_index.last_usn,
+                            files_indexed: vol_index.records.len(),
+                            additions,
+                            removals,
+                            addition_rows,
+                        }
+                    })
+            };
+
+            if let Some(snapshot) = pending_snapshot {
+                if let Err(e) = db.save_volume_state_snapshot(
+                    snapshot.drive_letter,
+                    snapshot.journal_id,
+                    snapshot.last_usn,
+                    snapshot.files_indexed,
+                ) {
                     eprintln!(
                         "[USN] {}:\\ Volume state persist error: {}",
                         drive_letter,
@@ -600,17 +666,18 @@ pub(crate) fn index_volume(
                     );
                 }
 
-                // Incremental FTS5 sync for changed records only.
-                if !additions.is_empty() || !removals.is_empty() {
-                    if let Err(e) = db.sync_fts_incremental(vol_index, &additions, &removals) {
+                if !snapshot.additions.is_empty() || !snapshot.removals.is_empty() {
+                    if let Err(e) = db.sync_fts_incremental_snapshot(
+                        snapshot.drive_letter,
+                        &snapshot.addition_rows,
+                        &snapshot.removals,
+                    ) {
                         eprintln!(
                             "[USN] {}:\\ Incremental sync error (will retry): {}",
                             drive_letter,
                             crate::redact_paths(&e.to_string())
                         );
-                        // Put changes back so they're retried next cycle.
-                        vol_index.pending_additions = additions;
-                        vol_index.pending_removals = removals;
+                        restore_pending_snapshot(&indices, snapshot);
                     }
                 }
             }

@@ -10,6 +10,7 @@ use windows::Win32::Storage::FileSystem::{
     FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows::Win32::System::Pipes::ImpersonateNamedPipeClient;
+use windows::Win32::System::Pipes::PeekNamedPipe;
 
 use crate::file_index::{self, VolumeIndex};
 use crate::index_db;
@@ -18,6 +19,7 @@ use mtt_search_protocol::SearchResultItem;
 
 const AUTHZ_RAW_BATCH_SIZE: usize = 512;
 const AUTHZ_MAX_BATCHES: usize = 64;
+const CLIENT_CONNECTION_CHECK_INTERVAL: usize = 64;
 const GENERIC_READ: u32 = 0x80000000;
 
 pub struct AuthorizedSearchPage {
@@ -109,6 +111,16 @@ fn is_parent_authorized(cache: &mut HashMap<String, bool>, parent: &str) -> bool
     ok
 }
 
+#[inline]
+fn ensure_client_connected(pipe: HANDLE) -> Result<(), String> {
+    let mut total_avail = 0u32;
+    unsafe {
+        PeekNamedPipe(pipe, None, 0, None, Some(&mut total_avail), None)
+            .map_err(|_| "Client disconnected".to_string())?;
+    }
+    Ok(())
+}
+
 pub fn collect_authorized_search_page(
     pipe: HANDLE,
     indices: &[VolumeIndex],
@@ -139,6 +151,7 @@ pub fn collect_authorized_search_page(
     let mut dir_auth_cache: HashMap<String, bool> = HashMap::with_capacity(64);
 
     while raw_has_more && batches < AUTHZ_MAX_BATCHES && !has_more_authorized {
+        ensure_client_connected(pipe)?;
         batches += 1;
 
         let raw_page = file_index::search_page(indices, query, raw_offset, AUTHZ_RAW_BATCH_SIZE);
@@ -150,7 +163,11 @@ pub fn collect_authorized_search_page(
         raw_offset = raw_offset.saturating_add(raw_page.items.len());
         raw_has_more = raw_page.has_more;
 
-        for result in raw_page.items {
+        for (result_index, result) in raw_page.items.into_iter().enumerate() {
+            if result_index.is_multiple_of(CLIENT_CONNECTION_CHECK_INTERVAL) {
+                ensure_client_connected(pipe)?;
+            }
+
             // Fast path: check parent directory authorization from cache.
             // Most files inherit ACLs from their parent, so a single directory
             // check covers all sibling files without per-file CreateFileW.
@@ -243,6 +260,7 @@ pub fn collect_authorized_fts_page(
     let mut fts_has_more = true;
 
     for _ in 0..AUTHZ_MAX_BATCHES {
+        ensure_client_connected(pipe)?;
         if !fts_has_more || has_more_authorized {
             break;
         }
@@ -258,7 +276,11 @@ pub fn collect_authorized_fts_page(
         fts_offset += fts_results.len();
         fts_has_more = fts_results.len() >= AUTHZ_RAW_BATCH_SIZE;
 
-        for fts_match in fts_results {
+        for (result_index, fts_match) in fts_results.into_iter().enumerate() {
+            if result_index.is_multiple_of(CLIENT_CONNECTION_CHECK_INTERVAL) {
+                ensure_client_connected(pipe)?;
+            }
+
             // Find the in-memory VolumeIndex for path resolution.
             let vol = indices.iter().find(|v| {
                 v.drive_letter == fts_match.drive_letter
