@@ -483,6 +483,8 @@ pub(super) fn render_results_panel(
                     .clicked()
                 {
                     app.global_search.loading = true;
+                    app.global_search.in_flight_query = Some(app.global_search.query.clone());
+                    app.global_search.in_flight_started_at = Some(std::time::Instant::now());
                     app.global_search.has_more_results = false;
                     app.global_search.requested_offset = next_offset;
                     app.global_search.requested_limit = next_limit;
@@ -495,6 +497,8 @@ pub(super) fn render_results_panel(
                         },
                     ) {
                         app.global_search.loading = false;
+                        app.global_search.in_flight_query = None;
+                        app.global_search.in_flight_started_at = None;
                         log::error!("[GLOBAL-SEARCH] Failed to queue load-more request: {}", e);
                     }
                 }

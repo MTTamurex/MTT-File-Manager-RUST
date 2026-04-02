@@ -36,7 +36,7 @@ pub enum GlobalSearchResponse {
 
 const OFFLINE_FAILURE_THRESHOLD: u8 = 3;
 const STATUS_RETRY_COUNT: usize = 1;
-const SEARCH_RETRY_COUNT: usize = 3;
+const SEARCH_RETRY_COUNT: usize = 2;
 const MIN_QUERY_LEN_FOR_SERVICE_SEARCH: usize = 2;
 
 fn is_transient_ipc_error(message: &str) -> bool {
