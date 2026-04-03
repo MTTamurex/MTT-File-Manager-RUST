@@ -241,10 +241,13 @@ impl Drop for ComGuard {
     }
 }
 
+use crate::infrastructure::archive_extract::SharedExtractionProgress;
+
 /// Starts the file operation worker thread.
 pub(crate) fn start_file_operation_worker(
     receiver: Receiver<FileOperationRequest>,
     result_sender: std::sync::mpsc::Sender<FileOperationResult>,
+    extraction_progress: SharedExtractionProgress,
 ) {
     std::thread::spawn(move || {
         // Initialize COM as Single-Threaded Apartment (STA)
@@ -269,28 +272,28 @@ pub(crate) fn start_file_operation_worker(
                         dest_folder,
                         hwnd,
                     } => {
-                        handlers::handle_copy(path, dest_folder, hwnd, &result_sender);
+                        handlers::handle_copy(path, dest_folder, hwnd, &result_sender, &extraction_progress);
                     }
                     FileOperationRequest::Move {
                         path,
                         dest_folder,
                         hwnd,
                     } => {
-                        handlers::handle_move(path, dest_folder, hwnd, &result_sender);
+                        handlers::handle_move(path, dest_folder, hwnd, &result_sender, &extraction_progress);
                     }
                     FileOperationRequest::CopyBatch {
                         paths,
                         dest_folder,
                         hwnd,
                     } => {
-                        handlers::handle_copy_batch(paths, dest_folder, hwnd, &result_sender);
+                        handlers::handle_copy_batch(paths, dest_folder, hwnd, &result_sender, &extraction_progress);
                     }
                     FileOperationRequest::MoveBatch {
                         paths,
                         dest_folder,
                         hwnd,
                     } => {
-                        handlers::handle_move_batch(paths, dest_folder, hwnd, &result_sender);
+                        handlers::handle_move_batch(paths, dest_folder, hwnd, &result_sender, &extraction_progress);
                     }
                     FileOperationRequest::RestoreFromRecycleBin { items } => {
                         handlers::handle_restore_from_recycle_bin(items, &result_sender);

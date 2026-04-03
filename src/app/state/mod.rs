@@ -214,6 +214,7 @@ pub struct ImageViewerApp {
     pub last_auto_reload: Instant,
     pub pending_auto_reload: bool,
     pub skip_next_auto_reload: bool, // SMART DELETE: Prevent reload after direct UI update
+    pub watcher_cooldown_until: Option<Instant>,
     /// Background OneDrive pin operations set this flag when attrib finishes,
     /// so the update loop can trigger a folder reload with fresh sync status.
     pub onedrive_pin_reload_pending: Arc<AtomicBool>,

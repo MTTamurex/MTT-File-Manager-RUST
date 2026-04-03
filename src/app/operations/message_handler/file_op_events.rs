@@ -455,6 +455,13 @@ impl ImageViewerApp {
 
                 self.loaded_path.clear();
                 self.load_folder(false);
+
+                // Suppress watcher-triggered reloads for 2 seconds after the
+                // forced reload. Archive extraction creates many files, causing the
+                // watcher to fire events for seconds afterward. Without this
+                // cooldown the status bar item count keeps flickering.
+                self.watcher_cooldown_until =
+                    Some(Instant::now() + Duration::from_secs(2));
             }
         }
     }

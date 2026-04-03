@@ -10,8 +10,144 @@ use std::collections::HashSet;
 use std::fs;
 use std::io::{self, BufWriter};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use crate::domain::file_entry::{ends_with_ignore_case, split_archive_path};
+
+// ---------------------------------------------------------------------------
+// Entry matching (files + folder prefixes)
+// ---------------------------------------------------------------------------
+
+/// How an archive entry matched a requested path.
+enum MatchKind {
+    /// No match.
+    None,
+    /// Direct file match → extract flat (just the filename).
+    ExactFile,
+    /// Entry is inside a requested folder → preserve relative path starting at `rel_start` bytes.
+    FolderChild { rel_start: usize },
+}
+
+/// Builds lookup sets from the requested internal paths and provides an O(1) / O(n_prefixes)
+/// match check for every archive entry.
+struct EntryMatcher {
+    full_paths: HashSet<String>,
+    bare_names: HashSet<String>,
+    /// (lowered prefix with trailing "/", byte offset where the folder name begins)
+    folder_prefixes: Vec<(String, usize)>,
+}
+
+impl EntryMatcher {
+    fn new(internal_paths: &[&str]) -> Self {
+        let mut full_paths = HashSet::with_capacity(internal_paths.len());
+        let mut bare_names = HashSet::with_capacity(internal_paths.len());
+        let mut folder_prefixes = Vec::with_capacity(internal_paths.len());
+
+        for &p in internal_paths {
+            let normalized = p.replace('\\', "/").to_ascii_lowercase();
+            let bare = normalized
+                .rsplit('/')
+                .next()
+                .unwrap_or(&normalized)
+                .to_string();
+            bare_names.insert(bare);
+            full_paths.insert(normalized.clone());
+            // Every requested path might be a folder; add as prefix candidate.
+            let prefix = format!("{}/", normalized);
+            let rel_start = normalized.rfind('/').map(|i| i + 1).unwrap_or(0);
+            folder_prefixes.push((prefix, rel_start));
+        }
+
+        Self {
+            full_paths,
+            bare_names,
+            folder_prefixes,
+        }
+    }
+
+    /// Check if a lowered archive entry path matches any requested path.
+    fn match_entry(&self, entry_path_lower: &str) -> MatchKind {
+        // 1) Exact full-path match → flat extraction.
+        if self.full_paths.contains(entry_path_lower) {
+            return MatchKind::ExactFile;
+        }
+
+        // 2) Bare filename match → flat extraction.
+        let bare = entry_path_lower
+            .rsplit('/')
+            .next()
+            .unwrap_or(entry_path_lower);
+        if self.bare_names.contains(bare) {
+            return MatchKind::ExactFile;
+        }
+
+        // 3) Folder prefix match → preserve relative directory structure.
+        for (prefix, rel_start) in &self.folder_prefixes {
+            if entry_path_lower.starts_with(prefix.as_str()) {
+                return MatchKind::FolderChild {
+                    rel_start: *rel_start,
+                };
+            }
+        }
+
+        MatchKind::None
+    }
+}
+
+/// Derives the destination file path for an archive entry based on match kind.
+fn derive_output_path(
+    entry_name: &str,
+    match_kind: &MatchKind,
+    dest_folder: &Path,
+) -> io::Result<PathBuf> {
+    match match_kind {
+        MatchKind::ExactFile => {
+            let file_name = Path::new(entry_name)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| entry_name.to_string());
+            Ok(dest_folder.join(sanitize_filename(&file_name)))
+        }
+        MatchKind::FolderChild { rel_start } => {
+            let relative = &entry_name[*rel_start..];
+            let dest_path = dest_folder.join(sanitize_relative_path(relative));
+            if let Some(parent) = dest_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            Ok(dest_path)
+        }
+        MatchKind::None => unreachable!(),
+    }
+}
+
+/// Sanitizes each component of a relative path (preserving directory structure).
+fn sanitize_relative_path(rel_path: &str) -> PathBuf {
+    let components = rel_path.replace('\\', "/");
+    let mut result = PathBuf::new();
+    for component in components.split('/') {
+        if !component.is_empty() {
+            result.push(sanitize_filename(component));
+        }
+    }
+    result
+}
+
+/// Shared progress state for archive extraction, read by the UI thread.
+#[derive(Clone, Debug)]
+pub struct ExtractionProgress {
+    pub archive_name: String,
+    pub current_file: String,
+    pub extracted: usize,
+    pub total: usize,
+}
+
+/// Thread-safe handle for extraction progress. `None` means no extraction in progress.
+pub type SharedExtractionProgress = Arc<Mutex<Option<ExtractionProgress>>>;
+
+/// Creates a new shared progress handle (initialized to `None`).
+pub fn new_shared_progress() -> SharedExtractionProgress {
+    Arc::new(Mutex::new(None))
+}
 
 /// Returns true if ALL the given virtual paths point to archive formats
 /// that can be extracted natively (ZIP, 7z, RAR, TAR variants) without relying on Windows Shell.
@@ -49,7 +185,11 @@ fn is_natively_supported(archive_path: &Path) -> bool {
 /// then extracted using the appropriate native crate.
 ///
 /// Returns `true` if all files were extracted successfully.
-pub fn extract_files_from_archive(paths: &[PathBuf], dest_folder: &Path) -> bool {
+pub fn extract_files_from_archive(
+    paths: &[PathBuf],
+    dest_folder: &Path,
+    progress: &SharedExtractionProgress,
+) -> bool {
     // Group paths by their parent archive file.
     let mut groups: HashMap<PathBuf, Vec<String>> = HashMap::new();
     let mut non_archive_paths = Vec::new();
@@ -73,10 +213,41 @@ pub fn extract_files_from_archive(paths: &[PathBuf], dest_folder: &Path) -> bool
         return false;
     }
 
+    let total_files: usize = groups.values().map(|v| v.len()).sum();
+
+    // Initialize progress
+    let first_archive = groups.keys().next().unwrap();
+    let archive_display = first_archive
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if let Ok(mut p) = progress.lock() {
+        *p = Some(ExtractionProgress {
+            archive_name: archive_display,
+            current_file: String::new(),
+            extracted: 0,
+            total: total_files,
+        });
+    }
+
+    let mut global_extracted = 0usize;
     let mut all_ok = true;
     for (archive_path, internal_paths) in &groups {
+        let archive_display = archive_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        // Update archive name when switching archives
+        if let Ok(mut p) = progress.lock() {
+            if let Some(ref mut state) = *p {
+                state.archive_name = archive_display;
+            }
+        }
+
         let refs: Vec<&str> = internal_paths.iter().map(|s| s.as_str()).collect();
-        let result = extract_from_archive(archive_path, &refs, dest_folder);
+        let result =
+            extract_from_archive(archive_path, &refs, dest_folder, progress, &mut global_extracted);
         match result {
             Ok(count) => {
                 log::info!(
@@ -100,6 +271,11 @@ pub fn extract_files_from_archive(paths: &[PathBuf], dest_folder: &Path) -> bool
         }
     }
 
+    // Clear progress when done
+    if let Ok(mut p) = progress.lock() {
+        *p = None;
+    }
+
     all_ok
 }
 
@@ -108,17 +284,19 @@ fn extract_from_archive(
     archive_path: &Path,
     internal_paths: &[&str],
     dest_folder: &Path,
+    progress: &SharedExtractionProgress,
+    global_extracted: &mut usize,
 ) -> io::Result<usize> {
     let name = archive_path.to_string_lossy();
 
     if ends_with_ignore_case(&name, ".zip") {
-        extract_from_zip(archive_path, internal_paths, dest_folder)
+        extract_from_zip(archive_path, internal_paths, dest_folder, progress, global_extracted)
     } else if ends_with_ignore_case(&name, ".7z") {
-        extract_from_7z(archive_path, internal_paths, dest_folder)
+        extract_from_7z(archive_path, internal_paths, dest_folder, progress, global_extracted)
     } else if ends_with_ignore_case(&name, ".rar") {
-        extract_from_rar(archive_path, internal_paths, dest_folder)
+        extract_from_rar(archive_path, internal_paths, dest_folder, progress, global_extracted)
     } else if is_tar_variant(&name) {
-        extract_from_tar(archive_path, internal_paths, dest_folder)
+        extract_from_tar(archive_path, internal_paths, dest_folder, progress, global_extracted)
     } else {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
@@ -143,60 +321,68 @@ fn is_tar_variant(name: &str) -> bool {
         || ends_with_ignore_case(name, ".tzst")
 }
 
+/// Helper to update shared progress state.
+/// Automatically adjusts `total` upward when folder extraction discovers more files than
+/// initially estimated.
+fn update_progress(
+    progress: &SharedExtractionProgress,
+    current_file: &str,
+    extracted: usize,
+) {
+    if let Ok(mut p) = progress.lock() {
+        if let Some(ref mut state) = *p {
+            state.current_file = current_file.to_string();
+            state.extracted = extracted;
+            if state.total < extracted {
+                state.total = extracted;
+            }
+        }
+    }
+}
+
 /// Extracts specific files from a ZIP archive.
 fn extract_from_zip(
     archive_path: &Path,
     internal_paths: &[&str],
     dest_folder: &Path,
+    progress: &SharedExtractionProgress,
+    global_extracted: &mut usize,
 ) -> io::Result<usize> {
     let file = fs::File::open(archive_path)?;
     let mut archive = zip::ZipArchive::new(file)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
 
+    let matcher = EntryMatcher::new(internal_paths);
     let mut extracted = 0;
 
-    for &requested in internal_paths {
-        // Normalize separators: Windows uses `\`, ZIP uses `/`.
-        let normalized = requested.replace('\\', "/");
-
-        // Try exact match first, then case-insensitive scan.
-        let index = archive.index_for_name(&normalized).or_else(|| {
-            let lower = normalized.to_ascii_lowercase();
-            archive
-                .file_names()
-                .enumerate()
-                .find(|(_, name)| name.to_ascii_lowercase() == lower)
-                .map(|(i, _)| i)
-        });
-
-        let Some(idx) = index else {
-            log::warn!(
-                "[ArchiveExtract/ZIP] Entry not found in {}: '{}'",
-                archive_path.display(),
-                requested
-            );
-            continue;
-        };
-
+    for i in 0..archive.len() {
         let mut entry = archive
-            .by_index(idx)
+            .by_index(i)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
 
         if entry.is_dir() {
             continue;
         }
 
-        // Derive output file name (just the file name component, flat extraction).
-        let entry_name = entry.name().to_string();
-        let file_name = Path::new(&entry_name)
+        let entry_name = entry.name().replace('\\', "/");
+        let entry_lower = entry_name.to_ascii_lowercase();
+
+        let match_kind = matcher.match_entry(&entry_lower);
+        if matches!(match_kind, MatchKind::None) {
+            continue;
+        }
+
+        let dest_path = derive_output_path(&entry_name, &match_kind, dest_folder)?;
+        let sanitized = dest_path
             .file_name()
-            .unwrap_or_else(|| std::ffi::OsStr::new(&entry_name));
-        let sanitized = sanitize_filename(&file_name.to_string_lossy());
-        let dest_path = dest_folder.join(&sanitized);
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
 
         let mut out_file = BufWriter::new(fs::File::create(&dest_path)?);
         io::copy(&mut entry, &mut out_file)?;
         extracted += 1;
+        *global_extracted += 1;
+        update_progress(progress, &sanitized, *global_extracted);
 
         log::debug!(
             "[ArchiveExtract/ZIP] Extracted '{}' → {}",
@@ -213,21 +399,10 @@ fn extract_from_7z(
     archive_path: &Path,
     internal_paths: &[&str],
     dest_folder: &Path,
+    progress: &SharedExtractionProgress,
+    global_extracted: &mut usize,
 ) -> io::Result<usize> {
-    let total_requested = internal_paths.len();
-
-    // Build lookup sets for O(1) matching: full normalized paths + bare filenames.
-    let mut full_paths: HashSet<String> = HashSet::with_capacity(total_requested);
-    let mut bare_names: HashSet<String> = HashSet::with_capacity(total_requested);
-    for &p in internal_paths {
-        let normalized = p.replace('\\', "/").to_ascii_lowercase();
-        if let Some(name) = normalized.rsplit('/').next() {
-            bare_names.insert(name.to_string());
-        }
-        bare_names.insert(normalized.rsplit('/').next().unwrap_or(&normalized).to_string());
-        full_paths.insert(normalized);
-    }
-
+    let matcher = EntryMatcher::new(internal_paths);
     let mut extracted = 0usize;
 
     sevenz_rust::decompress_file_with_extract_fn(archive_path, dest_folder, |entry, reader, _| {
@@ -238,28 +413,25 @@ fn extract_from_7z(
         let entry_name = entry.name().replace('\\', "/");
         let entry_lower = entry_name.to_ascii_lowercase();
 
-        // O(1) check: full path match or bare filename match.
-        let is_requested = full_paths.contains(&entry_lower) || {
-            let bare = entry_lower.rsplit('/').next().unwrap_or(&entry_lower);
-            bare_names.contains(bare)
-        };
-
-        if !is_requested {
+        let match_kind = matcher.match_entry(&entry_lower);
+        if matches!(match_kind, MatchKind::None) {
             return Ok(true);
         }
 
-        let file_name = Path::new(&entry_name)
+        let dest_path = derive_output_path(&entry_name, &match_kind, dest_folder)
+            .map_err(|e| sevenz_rust::Error::other(format!("Path error: {}", e)))?;
+        let sanitized = dest_path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| entry_name.clone());
-        let sanitized = sanitize_filename(&file_name);
-        let dest_path = dest_folder.join(&sanitized);
+            .unwrap_or_default();
 
         let mut out_file = BufWriter::new(fs::File::create(&dest_path)
             .map_err(|e| sevenz_rust::Error::other(format!("Failed to create {}: {}", dest_path.display(), e)))?);
         io::copy(reader, &mut out_file)
             .map_err(|e| sevenz_rust::Error::other(format!("Failed to write {}: {}", dest_path.display(), e)))?;
         extracted += 1;
+        *global_extracted += 1;
+        update_progress(progress, &sanitized, *global_extracted);
 
         log::debug!(
             "[ArchiveExtract/7z] Extracted '{}' → {}",
@@ -279,17 +451,10 @@ fn extract_from_rar(
     archive_path: &Path,
     internal_paths: &[&str],
     dest_folder: &Path,
+    progress: &SharedExtractionProgress,
+    global_extracted: &mut usize,
 ) -> io::Result<usize> {
-    // Build lookup sets for O(1) matching.
-    let mut full_paths: HashSet<String> = HashSet::with_capacity(internal_paths.len());
-    let mut bare_names: HashSet<String> = HashSet::with_capacity(internal_paths.len());
-    for &p in internal_paths {
-        let normalized = p.replace('\\', "/").to_ascii_lowercase();
-        let bare = normalized.rsplit('/').next().unwrap_or(&normalized);
-        bare_names.insert(bare.to_string());
-        full_paths.insert(normalized);
-    }
-
+    let matcher = EntryMatcher::new(internal_paths);
     let mut extracted = 0usize;
     let mut archive = unrar::Archive::new(archive_path)
         .open_for_processing()
@@ -306,35 +471,35 @@ fn extract_from_rar(
         let entry_name = entry.filename.to_string_lossy().replace('\\', "/");
         let entry_lower = entry_name.to_ascii_lowercase();
 
-        let is_requested = !entry.is_directory() && (
-            full_paths.contains(&entry_lower) || {
-                let bare = entry_lower.rsplit('/').next().unwrap_or(&entry_lower);
-                bare_names.contains(bare)
-            }
-        );
+        let match_kind = if entry.is_directory() {
+            MatchKind::None
+        } else {
+            matcher.match_entry(&entry_lower)
+        };
 
-        if !is_requested {
+        if matches!(match_kind, MatchKind::None) {
             archive = header
                 .skip()
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
             continue;
         }
 
-        // Read file content into memory, then write with sanitized name.
+        // Read file content into memory, then write with derived output path.
         let (data, next) = header
             .read()
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
         archive = next;
 
-        let file_name = Path::new(&entry_name)
+        let dest_path = derive_output_path(&entry_name, &match_kind, dest_folder)?;
+        let sanitized = dest_path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| entry_name.clone());
-        let sanitized = sanitize_filename(&file_name);
-        let dest_path = dest_folder.join(&sanitized);
+            .unwrap_or_default();
 
         fs::write(&dest_path, &data)?;
         extracted += 1;
+        *global_extracted += 1;
+        update_progress(progress, &sanitized, *global_extracted);
 
         log::debug!(
             "[ArchiveExtract/RAR] Extracted '{}' → {}",
@@ -352,17 +517,9 @@ fn extract_from_tar(
     archive_path: &Path,
     internal_paths: &[&str],
     dest_folder: &Path,
+    progress: &SharedExtractionProgress,
+    global_extracted: &mut usize,
 ) -> io::Result<usize> {
-    // Build lookup sets for O(1) matching.
-    let mut full_paths: HashSet<String> = HashSet::with_capacity(internal_paths.len());
-    let mut bare_names: HashSet<String> = HashSet::with_capacity(internal_paths.len());
-    for &p in internal_paths {
-        let normalized = p.replace('\\', "/").to_ascii_lowercase();
-        let bare = normalized.rsplit('/').next().unwrap_or(&normalized);
-        bare_names.insert(bare.to_string());
-        full_paths.insert(normalized);
-    }
-
     let file = fs::File::open(archive_path)?;
     let name_lower = archive_path.to_string_lossy().to_ascii_lowercase();
 
@@ -383,33 +540,36 @@ fn extract_from_tar(
         Box::new(file)
     };
 
+    let matcher = EntryMatcher::new(internal_paths);
     let mut archive = tar::Archive::new(reader);
     let mut extracted = 0usize;
 
     for entry_result in archive.entries()? {
         let mut entry = entry_result?;
-        let entry_path = entry.path()?.to_string_lossy().replace('\\', "/");
-        let entry_lower = entry_path.to_ascii_lowercase();
 
-        let is_requested = full_paths.contains(&entry_lower) || {
-            let bare = entry_lower.rsplit('/').next().unwrap_or(&entry_lower);
-            bare_names.contains(bare)
-        };
-
-        if !is_requested || entry.header().entry_type().is_dir() {
+        if entry.header().entry_type().is_dir() {
             continue;
         }
 
-        let file_name = Path::new(&entry_path)
+        let entry_path = entry.path()?.to_string_lossy().replace('\\', "/");
+        let entry_lower = entry_path.to_ascii_lowercase();
+
+        let match_kind = matcher.match_entry(&entry_lower);
+        if matches!(match_kind, MatchKind::None) {
+            continue;
+        }
+
+        let dest_path = derive_output_path(&entry_path, &match_kind, dest_folder)?;
+        let sanitized = dest_path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| entry_path.clone());
-        let sanitized = sanitize_filename(&file_name);
-        let dest_path = dest_folder.join(&sanitized);
+            .unwrap_or_default();
 
         let mut out_file = BufWriter::new(fs::File::create(&dest_path)?);
         io::copy(&mut entry, &mut out_file)?;
         extracted += 1;
+        *global_extracted += 1;
+        update_progress(progress, &sanitized, *global_extracted);
 
         log::debug!(
             "[ArchiveExtract/TAR] Extracted '{}' → {}",

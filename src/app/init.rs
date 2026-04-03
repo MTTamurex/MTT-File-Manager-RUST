@@ -113,6 +113,7 @@ impl ImageViewerApp {
             idle_warmup_tx,
             file_op_tx,
             file_op_res_rx,
+            extraction_progress,
             global_search_tx,
             global_search_res_rx,
             disk_cache_invalidation_tx,
@@ -292,6 +293,7 @@ impl ImageViewerApp {
             last_auto_reload: Instant::now(),
             pending_auto_reload: false,
             skip_next_auto_reload: false,
+            watcher_cooldown_until: None,
             onedrive_pin_reload_pending: Arc::new(AtomicBool::new(false)),
             watcher_fallback_polling: false,
             watcher_fallback_fs: None,
@@ -505,6 +507,7 @@ impl ImageViewerApp {
             file_operation_state: build_file_operation_state(
                 file_op_tx,
                 file_op_res_rx,
+                extraction_progress,
                 disk_cache_invalidation_tx,
                 prefetch_tx,
                 idle_warmup_tx,

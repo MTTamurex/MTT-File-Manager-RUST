@@ -35,11 +35,17 @@ pub(in crate::app) fn spawn_prefetching_workers(
 pub(in crate::app) fn spawn_file_operation_worker() -> (
     mpsc::Sender<crate::workers::file_operation_worker::FileOperationRequest>,
     mpsc::Receiver<crate::workers::file_operation_worker::FileOperationResult>,
+    crate::infrastructure::archive_extract::SharedExtractionProgress,
 ) {
     let (file_op_tx, file_op_rx) = mpsc::channel();
     let (file_op_res_tx, file_op_res_rx) = mpsc::channel();
-    crate::workers::file_operation_worker::start_file_operation_worker(file_op_rx, file_op_res_tx);
-    (file_op_tx, file_op_res_rx)
+    let extraction_progress = crate::infrastructure::archive_extract::new_shared_progress();
+    crate::workers::file_operation_worker::start_file_operation_worker(
+        file_op_rx,
+        file_op_res_tx,
+        extraction_progress.clone(),
+    );
+    (file_op_tx, file_op_res_rx, extraction_progress)
 }
 
 pub(in crate::app) fn spawn_global_search_worker(

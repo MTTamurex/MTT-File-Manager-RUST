@@ -5,6 +5,7 @@ use std::sync::Arc;
 pub struct FileOperationState {
     pub(crate) file_op_sender: Sender<crate::workers::file_operation_worker::FileOperationRequest>,
     pub file_op_res_receiver: Receiver<crate::workers::file_operation_worker::FileOperationResult>,
+    pub extraction_progress: crate::infrastructure::archive_extract::SharedExtractionProgress,
     pub disk_cache_invalidation_sender:
         Sender<Vec<crate::app::init_workers::CacheInvalidationEntry>>,
     pub prefetch_sender: Sender<crate::workers::prefetch_worker::PrefetchMessage>,
