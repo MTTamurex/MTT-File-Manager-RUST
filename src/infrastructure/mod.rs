@@ -1,6 +1,7 @@
 // Infrastructure - Windows APIs, cache, file watching
 
 pub mod adaptive_batch;
+pub mod archive_extract;
 pub mod directory_cache;
 pub mod directory_dirty_registry;
 pub mod directory_index;

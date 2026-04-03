@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 
+use crate::infrastructure::archive_extract;
 use crate::infrastructure::windows::recycle_bin;
 use crate::infrastructure::windows::shell_operations;
 
@@ -124,12 +125,23 @@ pub(super) fn handle_copy(
     let valid_dest = sanitize_operation_path(&dest_folder);
     match (valid_path, valid_dest) {
         (Ok(path), Ok(dest_folder)) => {
-            if crate::infrastructure::windows::is_shell_navigation_path(&path, false) {
-                let _ = shell_operations::copy_item_with_file_op(&path, &dest_folder, hwnd.0);
+            let is_virtual = crate::infrastructure::windows::is_shell_navigation_path(&path, false);
+            let native_ok = archive_extract::has_native_support(&[path.clone()]);
+            log::info!("[FileOps] handle_copy: path={}, is_virtual={}, native_support={}", path.display(), is_virtual, native_ok);
+
+            let success = if is_virtual && native_ok {
+                log::info!("[FileOps] Using native archive extraction for: {}", path.display());
+                archive_extract::extract_files_from_archive(&[path], &dest_folder)
+            } else if is_virtual {
+                shell_operations::copy_item_with_file_op(&path, &dest_folder, hwnd.0)
             } else {
-                let _ = shell_operations::copy_item_with_shell(&path, &dest_folder, hwnd.0);
+                shell_operations::copy_item_with_shell(&path, &dest_folder, hwnd.0)
+            };
+            log::info!("[FileOps] handle_copy result: success={}", success);
+
+            if success {
+                let _ = result_sender.send(FileOperationResult::CopyCompleted { dest_folder });
             }
-            let _ = result_sender.send(FileOperationResult::CopyCompleted { dest_folder });
         }
         (Err(err), _) | (_, Err(err)) => {
             log::warn!("[SECURITY] Copy blocked: {}", err);
@@ -150,12 +162,19 @@ pub(super) fn handle_move(
             // Capture source folder before move
             let source_folder = path.parent().map(|p| p.to_path_buf());
             // Use IFileOperation for virtual paths (like items inside archives)
-            let success = if crate::infrastructure::windows::is_shell_navigation_path(&path, false)
-            {
+            let is_virtual = crate::infrastructure::windows::is_shell_navigation_path(&path, false);
+            let native_ok = archive_extract::has_native_support(&[path.clone()]);
+            log::info!("[FileOps] handle_move: path={}, is_virtual={}, native_support={}", path.display(), is_virtual, native_ok);
+
+            let success = if is_virtual && native_ok {
+                log::info!("[FileOps] Using native archive extraction (move) for: {}", path.display());
+                archive_extract::extract_files_from_archive(&[path.clone()], &dest_folder)
+            } else if is_virtual {
                 shell_operations::move_item_with_file_op(&path, &dest_folder, hwnd.0)
             } else {
                 shell_operations::move_item_with_shell(&path, &dest_folder, hwnd.0)
             };
+            log::info!("[FileOps] handle_move result: success={}", success);
 
             if success {
                 if let Some(src) = source_folder {
@@ -185,12 +204,21 @@ pub(super) fn handle_copy_batch(
             let has_virtual_path = paths
                 .iter()
                 .any(|p| crate::infrastructure::windows::is_shell_navigation_path(p, false));
+            let native_ok = archive_extract::has_native_support(&paths);
+            log::info!("[FileOps] handle_copy_batch: {} paths, has_virtual={}, native_support={}", paths.len(), has_virtual_path, native_ok);
+            for p in &paths {
+                log::info!("[FileOps]   batch path: {}", p.display());
+            }
 
-            let success = if has_virtual_path {
+            let success = if has_virtual_path && native_ok {
+                log::info!("[FileOps] Using native archive extraction for batch copy ({} files)", paths.len());
+                archive_extract::extract_files_from_archive(&paths, &dest_folder)
+            } else if has_virtual_path {
                 shell_operations::copy_items_with_file_op(&paths, &dest_folder, hwnd.0)
             } else {
                 shell_operations::copy_items_with_shell(&paths, &dest_folder, hwnd.0)
             };
+            log::info!("[FileOps] handle_copy_batch result: success={}", success);
 
             if success {
                 let _ = result_sender.send(FileOperationResult::CopyCompleted { dest_folder });
@@ -223,12 +251,18 @@ pub(super) fn handle_move_batch(
             let has_virtual_path = paths
                 .iter()
                 .any(|p| crate::infrastructure::windows::is_shell_navigation_path(p, false));
+            let native_ok = archive_extract::has_native_support(&paths);
+            log::info!("[FileOps] handle_move_batch: {} paths, has_virtual={}, native_support={}", paths.len(), has_virtual_path, native_ok);
 
-            let success = if has_virtual_path {
+            let success = if has_virtual_path && native_ok {
+                log::info!("[FileOps] Using native archive extraction for batch move ({} files)", paths.len());
+                archive_extract::extract_files_from_archive(&paths, &dest_folder)
+            } else if has_virtual_path {
                 shell_operations::move_items_with_file_op(&paths, &dest_folder, hwnd.0)
             } else {
                 shell_operations::move_items_with_shell(&paths, &dest_folder, hwnd.0)
             };
+            log::info!("[FileOps] handle_move_batch result: success={}", success);
 
             if success && !source_folders.is_empty() {
                 let _ = result_sender.send(FileOperationResult::MoveBatchCompleted {

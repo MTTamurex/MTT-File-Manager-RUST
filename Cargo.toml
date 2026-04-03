@@ -49,6 +49,8 @@ mtt-search-protocol = { path = "crates/mtt-search-protocol" }
 bincode = { workspace = true }
 serde = { workspace = true }
 rust-i18n = "3"
+zip = "2"                   # Native ZIP extraction fallback when Shell fails
+sevenz-rust = "0.6"         # Native 7z extraction fallback when Shell fails
 # video-rs = { version = "0.9", features = ["ndarray"] }
 # ndarray = "0.16"            # Required by video-rs for frames
 # rodio = "0.19"
