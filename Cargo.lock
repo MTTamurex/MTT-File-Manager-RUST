@@ -2923,6 +2923,7 @@ version = "0.1.0"
 dependencies = [
  "bincode",
  "mtt-search-protocol",
+ "parking_lot",
  "rusqlite",
  "serde",
  "windows 0.61.3",

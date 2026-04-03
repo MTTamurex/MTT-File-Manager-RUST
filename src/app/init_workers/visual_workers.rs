@@ -202,6 +202,8 @@ pub(in crate::app) fn spawn_icon_worker(
                         continue;
                     }
 
+                    let process_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+
                     // Fast path: for files that don't have unique per-file icons,
                     // use extension-based extraction (SHGFI_USEFILEATTRIBUTES, ~0.5ms)
                     // instead of real-path extraction (SHGetFileInfoW on real file, ~80ms).
@@ -258,6 +260,19 @@ pub(in crate::app) fn spawn_icon_worker(
                         }
                     }
                     icon_ctx.request_repaint();
+
+                    })); // end catch_unwind
+
+                    if let Err(e) = process_result {
+                        let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                            s.to_string()
+                        } else if let Some(s) = e.downcast_ref::<String>() {
+                            s.clone()
+                        } else {
+                            "unknown".to_string()
+                        };
+                        log::error!("[IconWorker-{}] panic: {}", worker_id, msg);
+                    }
                 }
 
                 unsafe {

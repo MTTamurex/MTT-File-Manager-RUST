@@ -66,6 +66,8 @@ pub fn build_sequence(open_path: &Path) -> io::Result<ImageSequence> {
 }
 
 fn collect_image_entries(dir: &Path) -> io::Result<Vec<PathBuf>> {
+    const MAX_IMAGE_ENTRIES: usize = 10_000;
+
     let mut paths = Vec::new();
     for entry in std::fs::read_dir(dir)? {
         let entry = match entry {
@@ -80,6 +82,9 @@ fn collect_image_entries(dir: &Path) -> io::Result<Vec<PathBuf>> {
 
         if is_supported_image(&path) {
             paths.push(path);
+            if paths.len() >= MAX_IMAGE_ENTRIES {
+                break;
+            }
         }
     }
 

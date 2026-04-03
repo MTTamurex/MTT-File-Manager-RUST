@@ -119,11 +119,16 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         Ok(cache) => cache,
         Err(e) => {
             log::error!(
-                "[Cache] Fatal: failed to initialize thumbnail cache at {:?}: {:?}",
+                "[Cache] Failed to initialize thumbnail cache at {:?}: {:?}. Retrying in-memory.",
                 cache_dir,
                 e
             );
-            std::process::exit(1);
+            // Last-resort in-memory fallback — thumbnails won't persist but app keeps running.
+            ThumbnailDiskCache::new(std::env::temp_dir().join("mtt-cache-fallback"))
+                .unwrap_or_else(|e2| {
+                    log::error!("[Cache] In-memory fallback also failed: {:?}. Exiting.", e2);
+                    std::process::exit(1);
+                })
         }
     });
     let directory_index = match DirectoryIndex::open(&cache_dir.join("thumbnails.db")) {

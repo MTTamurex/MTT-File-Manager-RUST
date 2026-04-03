@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use parking_lot::RwLock;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use std::collections::HashSet;
@@ -88,13 +89,24 @@ pub(crate) fn index_non_ntfs_volume(
         cached_index.last_usn = 0;
         cached_index.state = file_index::IndexState::Ready;
 
-        let mut indices_lock = indices.write().unwrap_or_else(|e| e.into_inner());
+        let mut indices_lock = indices.write();
         upsert_volume_index(&mut indices_lock, cached_index);
         eprintln!(
             "[SCAN] {}:\\ Loaded {} cached records for fallback index",
             drive_letter, cached_count
         );
     }
+
+    // Adaptive backoff: if consecutive scans show no change in record count,
+    // increase the wait interval (up to 3× the base) to reduce I/O on idle volumes.
+    // Reset to base interval as soon as a change is detected.
+    // Note: record count alone can miss renames (delete+create = same count),
+    // so we keep the multiplier conservative. Volumes with a change_monitor
+    // (ReadDirectoryChangesW) are safe because the monitor wakes the loop
+    // immediately on real changes regardless of backoff.
+    let max_interval = cadence.periodic_interval * 3;
+    let mut current_interval = cadence.periodic_interval;
+    let mut prev_record_count: Option<usize> = None;
 
     loop {
         if shutdown.load(Ordering::Relaxed) {
@@ -122,17 +134,29 @@ pub(crate) fn index_non_ntfs_volume(
 
                 let records = stats.records_indexed;
                 {
-                    let mut indices_lock = indices.write().unwrap_or_else(|e| e.into_inner());
+                    let mut indices_lock = indices.write();
                     upsert_volume_index(&mut indices_lock, scanned_index);
                 }
 
+                // Adaptive backoff based on whether record count changed.
+                let changed = prev_record_count.map_or(true, |prev| prev != records);
+                prev_record_count = Some(records);
+
+                if changed {
+                    current_interval = cadence.periodic_interval;
+                } else {
+                    // Double the interval, capped at max_interval.
+                    current_interval = (current_interval * 2).min(max_interval);
+                }
+
                 eprintln!(
-                    "[SCAN] {}:\\ Indexed {} records ({} directories, {} read errors) in {:.2}s",
+                    "[SCAN] {}:\\ Indexed {} records ({} directories, {} read errors) in {:.2}s (next in {}s)",
                     drive_letter,
                     records,
                     stats.directories_scanned,
                     stats.errors,
-                    stats.elapsed.as_secs_f64()
+                    stats.elapsed.as_secs_f64(),
+                    current_interval.as_secs()
                 );
             }
             Err(e) => {
@@ -142,7 +166,7 @@ pub(crate) fn index_non_ntfs_volume(
                     crate::redact_paths(&e)
                 );
 
-                let mut indices_lock = indices.write().unwrap_or_else(|poison| poison.into_inner());
+                let mut indices_lock = indices.write();
                 if let Some(existing) = indices_lock
                     .iter_mut()
                     .find(|v| v.drive_letter == drive_letter)
@@ -155,8 +179,8 @@ pub(crate) fn index_non_ntfs_volume(
         }
 
         let wait_result = if let Some(monitor) = &change_monitor {
-            monitor.wait_for_change_or_timeout(&shutdown, cadence.periodic_interval)
-        } else if wait_for_shutdown_or_timeout(&shutdown, cadence.periodic_interval) {
+            monitor.wait_for_change_or_timeout(&shutdown, current_interval)
+        } else if wait_for_shutdown_or_timeout(&shutdown, current_interval) {
             NonUsnWaitResult::Shutdown
         } else {
             NonUsnWaitResult::Timeout
@@ -166,6 +190,8 @@ pub(crate) fn index_non_ntfs_volume(
             NonUsnWaitResult::Shutdown => break,
             NonUsnWaitResult::Timeout => {}
             NonUsnWaitResult::Triggered => {
+                // External change detected — reset backoff to base interval.
+                current_interval = cadence.periodic_interval;
                 // Guardrail against scan thrash on chatty filesystems.
                 if wait_for_shutdown_or_timeout(&shutdown, cadence.min_trigger_gap) {
                     break;
@@ -331,7 +357,7 @@ fn restore_pending_snapshot(
     indices: &Arc<RwLock<Vec<file_index::VolumeIndex>>>,
     snapshot: PendingPersistSnapshot,
 ) {
-    let mut indices_lock = indices.write().unwrap_or_else(|e| e.into_inner());
+    let mut indices_lock = indices.write();
     if let Some(vol_index) = indices_lock
         .iter_mut()
         .find(|v| v.drive_letter == snapshot.drive_letter)
@@ -517,7 +543,7 @@ pub(crate) fn index_volume(
 
     // Add to shared indices.
     {
-        let mut indices_lock = indices.write().unwrap_or_else(|e| e.into_inner());
+        let mut indices_lock = indices.write();
         upsert_volume_index(&mut indices_lock, index);
     }
 
@@ -553,7 +579,7 @@ pub(crate) fn index_volume(
                 let mut attempt = 0usize;
                 while attempt < INCREMENTAL_APPLY_RETRY_ATTEMPTS {
                     match indices.try_write() {
-                        Ok(mut indices_lock) => {
+                        Some(mut indices_lock) => {
                             if let Some(vol_index) = indices_lock
                                 .iter_mut()
                                 .find(|v| v.drive_letter == drive_letter)
@@ -574,7 +600,7 @@ pub(crate) fn index_volume(
                             }
                             break;
                         }
-                        Err(_) => {
+                        None => {
                             attempt += 1;
                             if attempt < INCREMENTAL_APPLY_RETRY_ATTEMPTS {
                                 contention_retries += 1;
@@ -585,7 +611,27 @@ pub(crate) fn index_volume(
                 }
 
                 if !applied {
-                    contention_skipped_cycles += 1;
+                    // Fallback: blocking write to avoid silently dropping USN updates.
+                    // With parking_lot this is safe (no poisoning) and bounded by reader drain time.
+                    let mut indices_lock = indices.write();
+                    if let Some(vol_index) = indices_lock
+                        .iter_mut()
+                        .find(|v| v.drive_letter == drive_letter)
+                    {
+                        let mut dummy_count = 0;
+                        usn_journal::parse_usn_records(
+                            &buffer[8..bytes_returned as usize],
+                            vol_index,
+                            &mut dummy_count,
+                            true,
+                        );
+                        vol_index.last_usn = new_usn;
+                        current_usn = new_usn;
+                        applied = true;
+                    }
+                    if !applied {
+                        contention_skipped_cycles += 1;
+                    }
                 }
             }
             Ok(None) => {}
@@ -620,7 +666,7 @@ pub(crate) fn index_volume(
         // 3) Persist every 5 minutes — incremental sync only (not full rebuild).
         if last_persist.elapsed() > std::time::Duration::from_secs(300) {
             let pending_snapshot = {
-                let mut indices_lock = indices.write().unwrap_or_else(|e| e.into_inner());
+                let mut indices_lock = indices.write();
                 indices_lock
                     .iter_mut()
                     .find(|v| v.drive_letter == drive_letter)

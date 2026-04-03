@@ -140,7 +140,7 @@ impl PdfViewerApp {
             return Err(t!("pdfviewer.selection_missing").to_string());
         }
 
-        if let Ok(_clip) = Clipboard::new_attempts(10) {
+        if let Ok(_clip) = Clipboard::new_attempts(3) {
             if formats::Unicode.write_clipboard(&selection.text).is_ok() {
                 return Ok(());
             }

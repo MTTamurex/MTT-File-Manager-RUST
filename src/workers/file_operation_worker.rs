@@ -252,64 +252,83 @@ pub(crate) fn start_file_operation_worker(
         let _com = ComGuard::init_sta();
 
         while let Ok(request) = receiver.recv() {
-            match request {
-                FileOperationRequest::Delete { paths, hwnd } => {
-                    handlers::handle_delete(paths, hwnd, &result_sender);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                match request {
+                    FileOperationRequest::Delete { paths, hwnd } => {
+                        handlers::handle_delete(paths, hwnd, &result_sender);
+                    }
+                    FileOperationRequest::Rename {
+                        path,
+                        new_name,
+                        hwnd,
+                    } => {
+                        handlers::handle_rename(path, new_name, hwnd, &result_sender);
+                    }
+                    FileOperationRequest::Copy {
+                        path,
+                        dest_folder,
+                        hwnd,
+                    } => {
+                        handlers::handle_copy(path, dest_folder, hwnd, &result_sender);
+                    }
+                    FileOperationRequest::Move {
+                        path,
+                        dest_folder,
+                        hwnd,
+                    } => {
+                        handlers::handle_move(path, dest_folder, hwnd, &result_sender);
+                    }
+                    FileOperationRequest::CopyBatch {
+                        paths,
+                        dest_folder,
+                        hwnd,
+                    } => {
+                        handlers::handle_copy_batch(paths, dest_folder, hwnd, &result_sender);
+                    }
+                    FileOperationRequest::MoveBatch {
+                        paths,
+                        dest_folder,
+                        hwnd,
+                    } => {
+                        handlers::handle_move_batch(paths, dest_folder, hwnd, &result_sender);
+                    }
+                    FileOperationRequest::RestoreFromRecycleBin { items } => {
+                        handlers::handle_restore_from_recycle_bin(items, &result_sender);
+                    }
+                    FileOperationRequest::DeletePermanently {
+                        physical_paths,
+                        hwnd,
+                    } => handlers::handle_delete_permanently(physical_paths, hwnd, &result_sender),
+                    FileOperationRequest::EmptyRecycleBin { hwnd } => {
+                        handlers::handle_empty_recycle_bin(hwnd, &result_sender);
+                    }
+                    FileOperationRequest::ShowProperties { paths, hwnd } => {
+                        handlers::handle_show_properties(paths, hwnd);
+                        // No Finished message — fire-and-forget, dialog manages itself
+                        return false;
+                    }
                 }
-                FileOperationRequest::Rename {
-                    path,
-                    new_name,
-                    hwnd,
-                } => {
-                    handlers::handle_rename(path, new_name, hwnd, &result_sender);
+                true
+            }));
+
+            match result {
+                Ok(true) => {
+                    // Notify general completion for other operations.
+                    let _ = result_sender.send(FileOperationResult::Finished);
                 }
-                FileOperationRequest::Copy {
-                    path,
-                    dest_folder,
-                    hwnd,
-                } => {
-                    handlers::handle_copy(path, dest_folder, hwnd, &result_sender);
-                }
-                FileOperationRequest::Move {
-                    path,
-                    dest_folder,
-                    hwnd,
-                } => {
-                    handlers::handle_move(path, dest_folder, hwnd, &result_sender);
-                }
-                FileOperationRequest::CopyBatch {
-                    paths,
-                    dest_folder,
-                    hwnd,
-                } => {
-                    handlers::handle_copy_batch(paths, dest_folder, hwnd, &result_sender);
-                }
-                FileOperationRequest::MoveBatch {
-                    paths,
-                    dest_folder,
-                    hwnd,
-                } => {
-                    handlers::handle_move_batch(paths, dest_folder, hwnd, &result_sender);
-                }
-                FileOperationRequest::RestoreFromRecycleBin { items } => {
-                    handlers::handle_restore_from_recycle_bin(items, &result_sender);
-                }
-                FileOperationRequest::DeletePermanently {
-                    physical_paths,
-                    hwnd,
-                } => handlers::handle_delete_permanently(physical_paths, hwnd, &result_sender),
-                FileOperationRequest::EmptyRecycleBin { hwnd } => {
-                    handlers::handle_empty_recycle_bin(hwnd, &result_sender);
-                }
-                FileOperationRequest::ShowProperties { paths, hwnd } => {
-                    handlers::handle_show_properties(paths, hwnd);
-                    // No Finished message — fire-and-forget, dialog manages itself
-                    continue;
+                Ok(false) => { /* ShowProperties — no Finished */ }
+                Err(e) => {
+                    let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = e.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "unknown".to_string()
+                    };
+                    log::error!("[FileOpWorker] panic: {}", msg);
+                    let _ = result_sender.send(FileOperationResult::Finished);
                 }
             }
-
-            // Notify general completion for other operations.
-            let _ = result_sender.send(FileOperationResult::Finished);
         }
         // COM cleanup handled by _com (ComGuard) RAII Drop
     });
