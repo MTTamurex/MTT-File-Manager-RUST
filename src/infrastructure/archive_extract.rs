@@ -1,8 +1,9 @@
 //! Native archive extraction fallback.
 //!
 //! When Windows Shell `IFileOperation` fails to copy files from inside archives
-//! (ZIP, 7z), this module extracts them directly using pure-Rust crates.
-//! This bypasses Shell namespace limitations (encoding issues, invalid names, path length).
+//! (ZIP, 7z, RAR, TAR variants), this module extracts them directly using
+//! native crates. This bypasses Shell namespace limitations (encoding issues,
+//! invalid names, path length).
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -13,17 +14,32 @@ use std::path::{Path, PathBuf};
 use crate::domain::file_entry::{ends_with_ignore_case, split_archive_path};
 
 /// Returns true if ALL the given virtual paths point to archive formats
-/// that can be extracted natively (ZIP, 7z) without relying on Windows Shell.
+/// that can be extracted natively (ZIP, 7z, RAR, TAR variants) without relying on Windows Shell.
 pub fn has_native_support(paths: &[PathBuf]) -> bool {
     paths.iter().all(|p| {
         match split_archive_path(p) {
-            Some((archive, _)) => {
-                let name = archive.to_string_lossy();
-                ends_with_ignore_case(&name, ".zip") || ends_with_ignore_case(&name, ".7z")
-            }
+            Some((archive, _)) => is_natively_supported(&archive),
             None => false,
         }
     })
+}
+
+/// Checks whether a given archive file has a natively-supported format.
+fn is_natively_supported(archive_path: &Path) -> bool {
+    let name = archive_path.to_string_lossy();
+    // Order matters: compound extensions (.tar.gz) must be checked before simple ones (.gz).
+    ends_with_ignore_case(&name, ".zip")
+        || ends_with_ignore_case(&name, ".7z")
+        || ends_with_ignore_case(&name, ".rar")
+        || ends_with_ignore_case(&name, ".tar.gz")
+        || ends_with_ignore_case(&name, ".tgz")
+        || ends_with_ignore_case(&name, ".tar.bz2")
+        || ends_with_ignore_case(&name, ".tbz2")
+        || ends_with_ignore_case(&name, ".tar.xz")
+        || ends_with_ignore_case(&name, ".txz")
+        || ends_with_ignore_case(&name, ".tar.zst")
+        || ends_with_ignore_case(&name, ".tzst")
+        || ends_with_ignore_case(&name, ".tar")
 }
 
 /// Attempts to extract files from archives to `dest_folder`.
@@ -99,6 +115,10 @@ fn extract_from_archive(
         extract_from_zip(archive_path, internal_paths, dest_folder)
     } else if ends_with_ignore_case(&name, ".7z") {
         extract_from_7z(archive_path, internal_paths, dest_folder)
+    } else if ends_with_ignore_case(&name, ".rar") {
+        extract_from_rar(archive_path, internal_paths, dest_folder)
+    } else if is_tar_variant(&name) {
+        extract_from_tar(archive_path, internal_paths, dest_folder)
     } else {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
@@ -108,6 +128,19 @@ fn extract_from_archive(
             ),
         ))
     }
+}
+
+/// Returns true if the archive name is a TAR variant (.tar, .tar.gz, .tgz, etc.).
+fn is_tar_variant(name: &str) -> bool {
+    ends_with_ignore_case(name, ".tar")
+        || ends_with_ignore_case(name, ".tar.gz")
+        || ends_with_ignore_case(name, ".tgz")
+        || ends_with_ignore_case(name, ".tar.bz2")
+        || ends_with_ignore_case(name, ".tbz2")
+        || ends_with_ignore_case(name, ".tar.xz")
+        || ends_with_ignore_case(name, ".txz")
+        || ends_with_ignore_case(name, ".tar.zst")
+        || ends_with_ignore_case(name, ".tzst")
 }
 
 /// Extracts specific files from a ZIP archive.
@@ -237,6 +270,153 @@ fn extract_from_7z(
         Ok(true)
     })
     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+
+    Ok(extracted)
+}
+
+/// Extracts specific files from a RAR archive.
+fn extract_from_rar(
+    archive_path: &Path,
+    internal_paths: &[&str],
+    dest_folder: &Path,
+) -> io::Result<usize> {
+    // Build lookup sets for O(1) matching.
+    let mut full_paths: HashSet<String> = HashSet::with_capacity(internal_paths.len());
+    let mut bare_names: HashSet<String> = HashSet::with_capacity(internal_paths.len());
+    for &p in internal_paths {
+        let normalized = p.replace('\\', "/").to_ascii_lowercase();
+        let bare = normalized.rsplit('/').next().unwrap_or(&normalized);
+        bare_names.insert(bare.to_string());
+        full_paths.insert(normalized);
+    }
+
+    let mut extracted = 0usize;
+    let mut archive = unrar::Archive::new(archive_path)
+        .open_for_processing()
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+
+    loop {
+        let header = archive
+            .read_header()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+
+        let Some(header) = header else { break };
+
+        let entry = header.entry();
+        let entry_name = entry.filename.to_string_lossy().replace('\\', "/");
+        let entry_lower = entry_name.to_ascii_lowercase();
+
+        let is_requested = !entry.is_directory() && (
+            full_paths.contains(&entry_lower) || {
+                let bare = entry_lower.rsplit('/').next().unwrap_or(&entry_lower);
+                bare_names.contains(bare)
+            }
+        );
+
+        if !is_requested {
+            archive = header
+                .skip()
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+            continue;
+        }
+
+        // Read file content into memory, then write with sanitized name.
+        let (data, next) = header
+            .read()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+        archive = next;
+
+        let file_name = Path::new(&entry_name)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| entry_name.clone());
+        let sanitized = sanitize_filename(&file_name);
+        let dest_path = dest_folder.join(&sanitized);
+
+        fs::write(&dest_path, &data)?;
+        extracted += 1;
+
+        log::debug!(
+            "[ArchiveExtract/RAR] Extracted '{}' → {}",
+            entry_name,
+            dest_path.display()
+        );
+    }
+
+    Ok(extracted)
+}
+
+/// Extracts specific files from a TAR archive (plain or compressed).
+/// Supports: .tar, .tar.gz/.tgz, .tar.bz2/.tbz2, .tar.xz/.txz, .tar.zst/.tzst
+fn extract_from_tar(
+    archive_path: &Path,
+    internal_paths: &[&str],
+    dest_folder: &Path,
+) -> io::Result<usize> {
+    // Build lookup sets for O(1) matching.
+    let mut full_paths: HashSet<String> = HashSet::with_capacity(internal_paths.len());
+    let mut bare_names: HashSet<String> = HashSet::with_capacity(internal_paths.len());
+    for &p in internal_paths {
+        let normalized = p.replace('\\', "/").to_ascii_lowercase();
+        let bare = normalized.rsplit('/').next().unwrap_or(&normalized);
+        bare_names.insert(bare.to_string());
+        full_paths.insert(normalized);
+    }
+
+    let file = fs::File::open(archive_path)?;
+    let name_lower = archive_path.to_string_lossy().to_ascii_lowercase();
+
+    // Chain the appropriate decompressor based on file extension.
+    let reader: Box<dyn io::Read> = if name_lower.ends_with(".tar.gz") || name_lower.ends_with(".tgz") {
+        Box::new(flate2::read::GzDecoder::new(file))
+    } else if name_lower.ends_with(".tar.bz2") || name_lower.ends_with(".tbz2") {
+        Box::new(bzip2::read::BzDecoder::new(file))
+    } else if name_lower.ends_with(".tar.xz") || name_lower.ends_with(".txz") {
+        Box::new(xz2::read::XzDecoder::new(file))
+    } else if name_lower.ends_with(".tar.zst") || name_lower.ends_with(".tzst") {
+        Box::new(
+            zstd::stream::read::Decoder::new(file)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?,
+        )
+    } else {
+        // Plain .tar
+        Box::new(file)
+    };
+
+    let mut archive = tar::Archive::new(reader);
+    let mut extracted = 0usize;
+
+    for entry_result in archive.entries()? {
+        let mut entry = entry_result?;
+        let entry_path = entry.path()?.to_string_lossy().replace('\\', "/");
+        let entry_lower = entry_path.to_ascii_lowercase();
+
+        let is_requested = full_paths.contains(&entry_lower) || {
+            let bare = entry_lower.rsplit('/').next().unwrap_or(&entry_lower);
+            bare_names.contains(bare)
+        };
+
+        if !is_requested || entry.header().entry_type().is_dir() {
+            continue;
+        }
+
+        let file_name = Path::new(&entry_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| entry_path.clone());
+        let sanitized = sanitize_filename(&file_name);
+        let dest_path = dest_folder.join(&sanitized);
+
+        let mut out_file = BufWriter::new(fs::File::create(&dest_path)?);
+        io::copy(&mut entry, &mut out_file)?;
+        extracted += 1;
+
+        log::debug!(
+            "[ArchiveExtract/TAR] Extracted '{}' → {}",
+            entry_path,
+            dest_path.display()
+        );
+    }
 
     Ok(extracted)
 }
