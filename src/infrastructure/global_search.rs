@@ -29,7 +29,7 @@ pub fn search(query: &str, offset: u32, limit: u32) -> Result<SearchPage, String
             limit,
         };
         write_message(pipe, &request)?;
-        let response: SearchResponse = read_response(pipe, SEARCH_PIPE_IO_TIMEOUT_MS)?;
+        let response = read_validated_response(pipe, SEARCH_PIPE_IO_TIMEOUT_MS)?;
 
         match response {
             SearchResponse::Results {
@@ -60,7 +60,7 @@ pub fn warm_index() -> Result<(), String> {
 
     let result = (|| {
         write_message(pipe, &SearchRequest::WarmIndex)?;
-        let response: SearchResponse = read_response(pipe, CONTROL_PIPE_IO_TIMEOUT_MS)?;
+        let response = read_validated_response(pipe, CONTROL_PIPE_IO_TIMEOUT_MS)?;
 
         match response {
             SearchResponse::WarmStarted => Ok(()),
@@ -92,7 +92,7 @@ pub fn ping() -> bool {
 
     let ping_write = write_message(pipe, &SearchRequest::Ping);
     let ping_read = if ping_write.is_ok() {
-        read_response::<SearchResponse>(pipe, CONTROL_PIPE_IO_TIMEOUT_MS)
+        read_validated_response(pipe, CONTROL_PIPE_IO_TIMEOUT_MS)
     } else {
         Err(ping_write
             .err()
@@ -134,7 +134,7 @@ pub fn get_status() -> Result<IndexStatusInfo, String> {
 
     let result = (|| {
         write_message(pipe, &SearchRequest::GetStatus)?;
-        let response: SearchResponse = read_response(pipe, CONTROL_PIPE_IO_TIMEOUT_MS)?;
+        let response = read_validated_response(pipe, CONTROL_PIPE_IO_TIMEOUT_MS)?;
 
         match response {
             SearchResponse::Status(info) => Ok(info),
@@ -238,6 +238,17 @@ fn read_response<T: for<'de> serde::Deserialize<'de>>(
     read_exact_with_timeout(pipe, &mut payload, timeout_ms)?;
 
     decode_message(&payload)
+}
+
+/// Reads and validates a [`SearchResponse`] from the pipe. Returns an error if
+/// the response fails post-deserialization validation (e.g. too many items).
+fn read_validated_response(
+    pipe: HANDLE,
+    timeout_ms: u64,
+) -> Result<SearchResponse, String> {
+    let resp: SearchResponse = read_response(pipe, timeout_ms)?;
+    resp.validate()?;
+    Ok(resp)
 }
 
 fn read_exact_with_timeout(pipe: HANDLE, buf: &mut [u8], timeout_ms: u64) -> Result<(), String> {

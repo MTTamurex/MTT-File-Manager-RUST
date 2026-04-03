@@ -80,7 +80,10 @@ pub fn scan_volume(
 
             let name = entry.file_name().to_string_lossy().into_owned();
             let is_dir = file_type.is_dir();
-            index.insert_record(entry_ref, &name, parent_ref, is_dir);
+            if !index.insert_record(entry_ref, &name, parent_ref, is_dir) {
+                eprintln!("[FS-WALKER] Name arena full — stopping scan");
+                break;
+            }
 
             if !is_dir || file_type.is_symlink() {
                 continue;

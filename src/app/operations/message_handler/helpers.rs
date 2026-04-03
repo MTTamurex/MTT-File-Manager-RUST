@@ -159,9 +159,13 @@ impl ImageViewerApp {
         let path_to_remove = path.to_path_buf();
         let path_norm = Self::normalize_for_match(&path_to_remove);
 
-        self.file_operation_state
-            .pending_deletions
-            .insert(path_to_remove.clone(), ());
+        // Prevent unbounded growth of pending_deletions from rapid watcher events.
+        // A single folder rarely contains more than 10 000 deletions between reloads.
+        if self.file_operation_state.pending_deletions.len() < 10_000 {
+            self.file_operation_state
+                .pending_deletions
+                .insert(path_to_remove.clone(), ());
+        }
         self.evict_stale_path_caches(&path_to_remove);
         self.enqueue_disk_cache_invalidations_forced(vec![path_to_remove.clone()]);
 

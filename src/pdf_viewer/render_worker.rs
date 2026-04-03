@@ -34,8 +34,8 @@ pub(super) struct RenderWorker {
 impl RenderWorker {
     /// Spawn the worker thread.
     pub fn spawn(path: PathBuf, repaint: egui::Context) -> Self {
-        let (req_tx, req_rx) = crossbeam_channel::unbounded();
-        let (res_tx, res_rx) = crossbeam_channel::unbounded();
+        let (req_tx, req_rx) = crossbeam_channel::bounded(32);
+        let (res_tx, res_rx) = crossbeam_channel::bounded(64);
         let init_error = Arc::new(std::sync::Mutex::new(None));
         let init_error_w = Arc::clone(&init_error);
 

@@ -13,7 +13,7 @@ impl ImageViewerApp {
     fn remember_current_folder_modified_hint(&mut self) {
         if let Some((path, modified)) = self.current_folder_modified_hint.as_ref() {
             if *modified > 0 {
-                self.folder_modified_hints.insert(path.clone(), *modified);
+                self.folder_modified_hints.put(path.clone(), *modified);
             }
         }
     }
@@ -38,7 +38,7 @@ impl ImageViewerApp {
             })
             .or_else(|| {
                 self.folder_modified_hints
-                    .get(destination_path)
+                    .peek(destination_path)
                     .copied()
                     .filter(|modified| *modified > 0)
                     .map(|modified| (destination_path.to_path_buf(), modified))

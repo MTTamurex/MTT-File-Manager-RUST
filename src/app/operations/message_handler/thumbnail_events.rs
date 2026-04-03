@@ -20,6 +20,7 @@ impl ImageViewerApp {
                 "[FOLDER-LOADING] TIMEOUT: Loading took more than 30 seconds, clearing loading state"
             );
             self.is_loading_folder = false;
+            self.file_operation_state.pending_deletions.clear();
         }
 
         let mut saw_end_of_load = false;

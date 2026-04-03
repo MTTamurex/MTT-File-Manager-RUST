@@ -343,7 +343,10 @@ impl IndexDb {
             .ok()?;
 
         for (frn, name, parent_ref, is_dir) in rows.flatten() {
-            index.insert_record(frn, &name, parent_ref, is_dir);
+            if !index.insert_record(frn, &name, parent_ref, is_dir) {
+                eprintln!("[INDEX-DB] Name arena full — stopping load for volume");
+                break;
+            }
             count += 1;
             // `name` (String) is dropped here — no memory buildup
         }

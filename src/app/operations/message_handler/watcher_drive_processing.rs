@@ -815,6 +815,15 @@ impl ImageViewerApp {
                     folder_path.file_name().unwrap_or_default()
                 );
             } else {
+                // Cap the pending list to prevent unbounded growth under a flood
+                // of watcher events hitting many distinct folders.
+                if self.pending_folder_mtime_recheck.len() >= 500 {
+                    log::warn!(
+                        "[MTIME-SCHED] Pending mtime recheck list full (500), dropping: {:?}",
+                        folder_path.file_name().unwrap_or_default()
+                    );
+                    continue;
+                }
                 log::debug!(
                     "[MTIME-SCHED] Scheduled mtime recheck for folder: {:?} (due in 2s)",
                     folder_path.file_name().unwrap_or_default()

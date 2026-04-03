@@ -88,8 +88,12 @@ impl VolumeIndex {
     }
 
     /// Insert a file record into the index, storing its name in the arena.
-    pub fn insert_record(&mut self, frn: u64, name: &str, parent_ref: u64, is_dir: bool) {
-        let nr = self.names.insert(name);
+    /// Returns `false` if the arena is full and the record was not inserted.
+    pub fn insert_record(&mut self, frn: u64, name: &str, parent_ref: u64, is_dir: bool) -> bool {
+        let nr = match self.names.insert(name) {
+            Some(nr) => nr,
+            None => return false,
+        };
         self.records.insert(
             frn,
             FileRecord {
@@ -103,6 +107,7 @@ impl VolumeIndex {
         // Track for incremental FTS sync.
         self.pending_removals.remove(&frn);
         self.pending_additions.insert(frn);
+        true
     }
 
     /// Remove a file record from the index.
@@ -137,7 +142,11 @@ impl VolumeIndex {
         let mut new_arena = NameArena::with_capacity(self.records.len() * 25);
         for record in self.records.values_mut() {
             let name = self.names.get(record.name_ref());
-            let nr = new_arena.insert(name);
+            // This cannot fail: we are rebuilding from existing names that
+            // already fit in the old arena (same size or smaller).
+            let nr = new_arena
+                .insert(name)
+                .expect("compact_arena: rebuilt data must fit");
             record.name_offset = nr.offset;
             record.name_len = nr.len;
         }
