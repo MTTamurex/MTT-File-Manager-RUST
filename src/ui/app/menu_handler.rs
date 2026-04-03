@@ -2,6 +2,7 @@ use crate::app::ImageViewerApp;
 use eframe::egui;
 use rust_i18n::t;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 fn is_onedrive_pin_text(text: &str) -> bool {
     let lower = text.trim().to_lowercase();
@@ -46,16 +47,11 @@ fn apply_onedrive_pin(
     command: crate::infrastructure::onedrive::PinCommand,
 ) {
     let paths = target_paths.to_vec();
-    let current_dir = PathBuf::from(&app.navigation_state.current_path);
     let ui_ctx = app.ui_ctx.clone();
-
-    // Invalidate caches immediately so the next reload reads fresh data.
-    app.directory_cache.invalidate(&current_dir);
-    for path in &paths {
-        app.directory_cache.invalidate(path);
-        app.directory_cache.invalidate_children(path);
-    }
-    app.loaded_path.clear();
+    let reload_flag = Arc::clone(&app.onedrive_pin_reload_pending);
+    let dir_cache = Arc::clone(&app.directory_cache);
+    let dirty_reg = Arc::clone(&app.directory_dirty_registry);
+    let current_dir = PathBuf::from(&app.navigation_state.current_path);
 
     // Run the blocking attrib commands on a background thread.
     std::thread::spawn(move || {
@@ -67,11 +63,18 @@ fn apply_onedrive_pin(
                 );
             }
         }
-        // Trigger repaint so the UI reloads the folder with updated sync status.
+        // Invalidate caches AFTER attrib finishes so the next read gets fresh data.
+        dir_cache.invalidate(&current_dir);
+        for path in &paths {
+            dir_cache.invalidate(path);
+            dir_cache.invalidate_children(path);
+            dirty_reg.mark_dirty(path);
+        }
+        dirty_reg.mark_dirty(&current_dir);
+        // Signal the UI thread to reload the folder.
+        reload_flag.store(true, std::sync::atomic::Ordering::Release);
         ui_ctx.request_repaint();
     });
-
-    app.load_folder(false);
 }
 
 pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {

@@ -62,6 +62,13 @@ impl ImageViewerApp {
         // Apply async rebuild results (filter/sort) from background thread
         self.process_items_rebuild_results(ctx);
 
+        // OneDrive pin completion: background attrib finished, reload for fresh sync status
+        if self.onedrive_pin_reload_pending.swap(false, std::sync::atomic::Ordering::Acquire) {
+            self.directory_cache.invalidate(&std::path::PathBuf::from(&self.navigation_state.current_path));
+            self.loaded_path.clear();
+            self.load_folder(false);
+        }
+
         // PERFORMANCE: Precompute normalized current path once for all comparisons
         let current_path_norm =
             Self::normalize_for_match(Path::new(&self.navigation_state.current_path));
