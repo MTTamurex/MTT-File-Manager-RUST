@@ -4,6 +4,7 @@
 mod header;
 mod helpers;
 mod item_renderer;
+mod item_renderer_details;
 mod virtualization;
 
 use eframe::egui::{self, Color32, FontId, Ui};
