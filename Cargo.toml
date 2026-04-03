@@ -51,6 +51,12 @@ serde = { workspace = true }
 rust-i18n = "3"
 zip = "2"                   # Native ZIP extraction fallback when Shell fails
 sevenz-rust = "0.6"         # Native 7z extraction fallback when Shell fails
+unrar = "0.5"               # Native RAR extraction (statically links unrar C++ source)
+tar = "0.4"                 # Native TAR archive reading
+flate2 = "1"                # Gzip decompression for .tar.gz / .tgz
+bzip2 = "0.5"               # Bzip2 decompression for .tar.bz2 / .tbz2
+xz2 = "0.1"                 # XZ/LZMA decompression for .tar.xz / .txz
+zstd = "0.13"               # Zstandard decompression for .tar.zst / .tzst
 # video-rs = { version = "0.9", features = ["ndarray"] }
 # ndarray = "0.16"            # Required by video-rs for frames
 # rodio = "0.19"
