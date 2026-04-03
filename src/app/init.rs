@@ -11,6 +11,7 @@ use crate::ui::cache::FxHashSet;
 use crate::domain::special_paths::{COMPUTER_VIEW_ID, is_virtual_path};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 use crate::application::ClipboardManager;
@@ -291,6 +292,7 @@ impl ImageViewerApp {
             last_auto_reload: Instant::now(),
             pending_auto_reload: false,
             skip_next_auto_reload: false,
+            onedrive_pin_reload_pending: Arc::new(AtomicBool::new(false)),
             watcher_fallback_polling: false,
             watcher_fallback_fs: None,
             watcher_fallback_last_probe: Instant::now(),
