@@ -2,6 +2,9 @@ use std::io;
 use std::path::Path;
 use std::process::Command;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PinCommand {
     AlwaysKeepOnDevice,
@@ -9,7 +12,11 @@ pub enum PinCommand {
 }
 
 fn run_attrib(args: &[String], path: &Path) -> io::Result<()> {
-    let output = Command::new("attrib").args(args).output()?;
+    let mut cmd = Command::new("attrib");
+    cmd.args(args);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    let output = cmd.output()?;
 
     if output.status.success() {
         return Ok(());

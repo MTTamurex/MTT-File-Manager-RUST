@@ -227,6 +227,49 @@ impl ImageViewerApp {
                 }
             }
 
+            // ========== ONEDRIVE ITEMS — "Always keep on this device" / "Free up space" ==========
+            // Windows shell extensions for cloud files may not expose these items
+            // through IContextMenu on newer Windows 11 builds, so we add them natively.
+            if !is_drive {
+                let onedrive_sync = paths.first().and_then(|p| {
+                    if !crate::infrastructure::onedrive::is_onedrive_path(p) {
+                        return None;
+                    }
+                    // Use cached sync_status from already-loaded items (no I/O)
+                    _item_index
+                        .and_then(|idx| self.items.get(idx))
+                        .map(|item| item.sync_status)
+                        .or_else(|| {
+                            self.items
+                                .iter()
+                                .find(|it| it.path == *p)
+                                .map(|it| it.sync_status)
+                        })
+                });
+                if let Some(status) = onedrive_sync {
+                    use crate::domain::file_entry::SyncStatus;
+                    // Show "Always keep on this device" when NOT already pinned
+                    // Show "Free up space" when NOT already cloud-only
+                    let show_pin = status != SyncStatus::Pinned;
+                    let show_free = status != SyncStatus::CloudOnly;
+                    if show_pin || show_free {
+                        items.push(ContextMenuItem::separator());
+                        if show_pin {
+                            items.push(
+                                ContextMenuItem::new(-70, t!("context_menu.always_keep_on_device"))
+                                    .with_command("onedrive_pin"),
+                            );
+                        }
+                        if show_free {
+                            items.push(
+                                ContextMenuItem::new(-71, t!("context_menu.free_up_space"))
+                                    .with_command("onedrive_free"),
+                            );
+                        }
+                    }
+                }
+            }
+
             items.push(ContextMenuItem::separator());
             items.push(
                 ContextMenuItem::new(-28, t!("context_menu.properties"))
@@ -287,6 +330,11 @@ impl ImageViewerApp {
                 "copiar como caminho",
                 "create shortcut",
                 "criar atalho",
+                // OneDrive items — handled natively to guarantee availability
+                "always keep on this device",
+                "sempre manter neste dispositivo",
+                "free up space",
+                "liberar espaço",
             ];
             if BLACKLIST.iter().any(|&t| lower.contains(t)) {
                 return None;

@@ -149,6 +149,8 @@ context_menu:
   pin_quick_access: "Pin to Quick Access"
   unpin_quick_access: "Remove from Quick Access"
   properties: "Properties"
+  always_keep_on_device: "Always keep on this device"
+  free_up_space: "Free up space"
   show_more: "Show more options"
 search:
   title: "Global Search"

@@ -40,6 +40,40 @@ fn find_menu_item_text_by_id(
     None
 }
 
+fn apply_onedrive_pin(
+    app: &mut ImageViewerApp,
+    target_paths: &[PathBuf],
+    command: crate::infrastructure::onedrive::PinCommand,
+) {
+    let paths = target_paths.to_vec();
+    let current_dir = PathBuf::from(&app.navigation_state.current_path);
+    let ui_ctx = app.ui_ctx.clone();
+
+    // Invalidate caches immediately so the next reload reads fresh data.
+    app.directory_cache.invalidate(&current_dir);
+    for path in &paths {
+        app.directory_cache.invalidate(path);
+        app.directory_cache.invalidate_children(path);
+    }
+    app.loaded_path.clear();
+
+    // Run the blocking attrib commands on a background thread.
+    std::thread::spawn(move || {
+        for path in &paths {
+            if let Err(e) = crate::infrastructure::onedrive::set_pin_state(path, command) {
+                log::warn!(
+                    "[OneDrive] Failed to apply pin command {:?} to {:?}: {}",
+                    command, path, e
+                );
+            }
+        }
+        // Trigger repaint so the UI reloads the folder with updated sync status.
+        ui_ctx.request_repaint();
+    });
+
+    app.load_folder(false);
+}
+
 pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
     // 1. Render the menu (ui construction)
     let mut context_menu = std::mem::take(&mut app.context_menu);
@@ -78,35 +112,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 });
 
                 if is_cloud_target {
-                    let mut had_error = false;
-                    for path in &context_menu.target_paths {
-                        if let Err(e) = crate::infrastructure::onedrive::set_pin_state(path, command) {
-                            had_error = true;
-                            log::warn!(
-                                "[OneDrive] Failed to apply pin command {:?} to {:?}: {}",
-                                command,
-                                path,
-                                e
-                            );
-                        }
-                    }
-
-                    if had_error {
-                        app.notifications
-                            .push(crate::application::AppNotification::error(
-                                t!("operations.onedrive_command_failed").to_string(),
-                            ));
-                    }
-
-                    app.directory_cache.invalidate(&std::path::PathBuf::from(&app.navigation_state.current_path));
-                    // Invalidate each target and its children so navigation into
-                    // affected folders reads fresh sync_status from disk, not cache.
-                    for path in &context_menu.target_paths {
-                        app.directory_cache.invalidate(path);
-                        app.directory_cache.invalidate_children(path);
-                    }
-                    app.loaded_path.clear();
-                    app.load_folder(false);
+                    apply_onedrive_pin(app, &context_menu.target_paths, command);
                     context_menu.close();
                     app.context_menu = context_menu;
                     return;
@@ -128,19 +134,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 // the shell invoke (some OneDrive shell extensions fire silently).
                 if let Some(text) = selected_shell_item_text {
                     if let Some(command) = onedrive_pin_command_from_text(text) {
-                        for path in &context_menu.target_paths {
-                            let _ = crate::infrastructure::onedrive::set_pin_state(path, command);
-                        }
-                        app.directory_cache.invalidate(&std::path::PathBuf::from(
-                            &app.navigation_state.current_path,
-                        ));
-                        // Same invalidation for the shell-invoke fallback path.
-                        for path in &context_menu.target_paths {
-                            app.directory_cache.invalidate(path);
-                            app.directory_cache.invalidate_children(path);
-                        }
-                        app.loaded_path.clear();
-                        app.load_folder(false);
+                        apply_onedrive_pin(app, &context_menu.target_paths, command);
                     }
                 }
             }
@@ -270,6 +264,14 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     if let Some(path) = path {
                         app.unpin_folder(&path);
                     }
+                }
+                // OneDrive: "Always keep on this device"
+                -70 => {
+                    apply_onedrive_pin(app, &context_menu.target_paths, crate::infrastructure::onedrive::PinCommand::AlwaysKeepOnDevice);
+                }
+                // OneDrive: "Free up space"
+                -71 => {
+                    apply_onedrive_pin(app, &context_menu.target_paths, crate::infrastructure::onedrive::PinCommand::FreeUpSpace);
                 }
                 _ => {}
             }
