@@ -8,8 +8,11 @@ use eframe::egui;
 use filters::{category_label, format_number};
 use rust_i18n::t;
 
+mod actions;
 pub(crate) mod filters;
+mod result_row;
 mod results_panel;
+mod scrollbar;
 
 const INITIAL_PAGE_LIMIT: u32 = 200;
 const BACKDROP_ALPHA: u8 = 72;
