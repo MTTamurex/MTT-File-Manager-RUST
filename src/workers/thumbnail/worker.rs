@@ -223,30 +223,43 @@ fn thumbnail_worker_loop(
             continue;
         }
 
-        let is_virtual_bulk_scan = matches!(req_source, ThumbnailRequestSource::BulkScan)
-            && io_priority::is_virtual_drive_path(&path);
-        let _virtual_drive_permit = if is_virtual_bulk_scan {
-            Some(virtual_drive_semaphore.acquire_guard())
-        } else {
-            None
-        };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let is_virtual_bulk_scan = matches!(req_source, ThumbnailRequestSource::BulkScan)
+                && io_priority::is_virtual_drive_path(&path);
+            let _virtual_drive_permit = if is_virtual_bulk_scan {
+                Some(virtual_drive_semaphore.acquire_guard())
+            } else {
+                None
+            };
 
-        request_processing::process_thumbnail_request(
-            &path,
-            req_gen,
-            req_size,
-            req_priority,
-            req_modified,
-            &tx,
-            &ctx,
-            &disk_cache,
-            &semaphore,
-            &pending_deletions,
-            &mut last_repaint,
-        );
+            request_processing::process_thumbnail_request(
+                &path,
+                req_gen,
+                req_size,
+                req_priority,
+                req_modified,
+                &tx,
+                &ctx,
+                &disk_cache,
+                &semaphore,
+                &pending_deletions,
+                &mut last_repaint,
+            );
 
-        if is_virtual_bulk_scan {
-            std::thread::sleep(std::time::Duration::from_millis(50));
+            if is_virtual_bulk_scan {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }));
+
+        if let Err(e) = result {
+            let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = e.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "unknown".to_string()
+            };
+            log::error!("[ThumbnailWorker] panic processing {}: {}", path.display(), msg);
         }
     }
     // _mf and _com dropped here — MFShutdown() then CoUninitialize() guaranteed

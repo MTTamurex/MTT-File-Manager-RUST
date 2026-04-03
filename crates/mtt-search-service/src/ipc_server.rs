@@ -1,7 +1,8 @@
 use std::hint::black_box;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use parking_lot::RwLock;
 
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
@@ -172,6 +173,24 @@ pub fn run_ipc_server(
             }
             active_for_client.fetch_sub(1, Ordering::Relaxed);
         });
+    }
+
+    // Graceful shutdown: wait up to 5 seconds for active client threads to finish.
+    // Windows SCM has a 120s timeout, but we should not block that long.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let remaining = active_clients.load(Ordering::Relaxed);
+        if remaining == 0 {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            eprintln!(
+                "[IPC] Shutdown timeout: {} client(s) still active, force-exiting",
+                remaining
+            );
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
 }
 
@@ -421,7 +440,8 @@ fn handle_client(
                 std::thread::spawn(move || {
                     eprintln!("[IPC] WarmIndex: warming in-memory index...");
                     let start = std::time::Instant::now();
-                    if let Ok(lock) = indices_clone.read() {
+                    {
+                        let lock = indices_clone.read();
                         let mut touched = 0u64;
                         for vol in lock.iter() {
                             // Touch the contiguous arena buffer to bring pages into RAM.
@@ -444,13 +464,7 @@ fn handle_client(
             }
         }
         SearchRequest::GetStatus => {
-            let indices_lock = match indices.read() {
-                Ok(lock) => lock,
-                Err(poisoned) => {
-                    eprintln!("[IPC] indices lock poisoned on GetStatus");
-                    poisoned.into_inner()
-                }
-            };
+            let indices_lock = indices.read();
             let status = build_status_response(&indices_lock, security_policy);
 
             let _ = send_response(
@@ -485,13 +499,7 @@ fn handle_client(
                 return;
             }
 
-            let indices_lock = match indices.read() {
-                Ok(lock) => lock,
-                Err(poisoned) => {
-                    eprintln!("[IPC] indices lock poisoned on Query");
-                    poisoned.into_inner()
-                }
-            };
+            let indices_lock = indices.read();
 
             // FTS5 path: use trigram-indexed search when all tokens are ≥3 chars.
             // Shorter tokens would cause FTS5 to fall back to a full table scan

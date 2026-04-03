@@ -1,6 +1,6 @@
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 use rusqlite::{params, Connection};
 
@@ -296,7 +296,7 @@ impl IndexDb {
 
     /// Load persisted volume state.
     pub fn load_volume_state(&self, drive_letter: char) -> Option<PersistedVolumeState> {
-        let conn = self.conn.lock().ok()?;
+        let conn = self.conn.lock();
         let mut stmt = conn
             .prepare(
                 "SELECT journal_id, last_usn, files_indexed FROM volume_state WHERE drive_letter = ?1",
@@ -323,7 +323,7 @@ impl IndexDb {
         &self,
         index: &mut crate::file_index::VolumeIndex,
     ) -> Option<usize> {
-        let conn = self.conn.lock().ok()?;
+        let conn = self.conn.lock();
         let mut stmt = conn
             .prepare(
                 "SELECT frn, name, parent_frn, is_dir
@@ -360,7 +360,7 @@ impl IndexDb {
     /// Use only for initial scan or service shutdown.  For periodic persist, prefer
     /// `save_volume_state` + `sync_fts_incremental`.
     pub fn save_volume(&self, index: &VolumeIndex) -> Result<(), String> {
-        let conn = self.conn.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let conn = self.conn.lock();
 
         let drive = index.drive_letter.to_string();
         let now = std::time::SystemTime::now()
@@ -444,7 +444,7 @@ impl IndexDb {
         last_usn: i64,
         files_indexed: usize,
     ) -> Result<(), String> {
-        let conn = self.conn.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let conn = self.conn.lock();
 
         let drive = drive_letter.to_string();
         let now = std::time::SystemTime::now()
@@ -473,7 +473,7 @@ impl IndexDb {
             return Ok(());
         }
 
-        let conn = self.conn.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let conn = self.conn.lock();
         let drive = drive_letter.to_string();
 
         let tx = conn

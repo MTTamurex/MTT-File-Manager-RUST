@@ -12,7 +12,8 @@ mod volume_indexers;
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::Arc;
+use parking_lot::{Mutex, RwLock};
 
 /// Redact filesystem paths from error messages to prevent information leakage.
 /// Replaces tokens that look like paths (containing `\` or starting with a drive letter)
@@ -201,7 +202,7 @@ fn spawn_indexers_for_discovered_volumes(
     for volume in discovered {
         let drive_letter = volume.drive_letter;
         let should_spawn = {
-            let mut tracked = tracked_volumes.lock().unwrap_or_else(|e| e.into_inner());
+            let mut tracked = tracked_volumes.lock();
             tracked.insert(drive_letter)
         };
 
@@ -258,7 +259,7 @@ fn spawn_volume_indexer(
             );
         }
 
-        let mut tracked = tracked_volumes.lock().unwrap_or_else(|e| e.into_inner());
+        let mut tracked = tracked_volumes.lock();
         tracked.remove(&drive_letter);
     });
 }
