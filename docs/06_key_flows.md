@@ -15,7 +15,7 @@ read_directory_fast / read_directory_hdd_batched [infrastructure/ntfs_reader.rs,
     ↓
 Sort & filter entries [application/sorting.rs]
     ↓
-Update items in state [app/state.rs]
+Update items in state [app/state/]
     ↓
 Request thumbnails for visible items [app/operations/thumbnails.rs]
     ↓
@@ -217,7 +217,7 @@ A background worker (`app/init_workers/consistency_probe_worker.rs`) periodicall
 
 ### Special Case: User Session Search
 
-The `user_session_search.rs` module uses `DriveWatcher` independently (not gated by `MTT_ENABLE_DRIVE_WATCHER`) to monitor virtual/FUSE volumes (e.g., Cryptomator/WinFsp mounts) for the in-app search index.
+The `user_session_search/` module uses `DriveWatcher` independently (not gated by `MTT_ENABLE_DRIVE_WATCHER`) to monitor virtual/FUSE volumes (e.g., Cryptomator/WinFsp mounts) for the in-app search index.
 
 **Key files**: `app/operations/watcher.rs`, `app/operations/message_handler/watcher_legacy.rs`, `app/operations/message_handler/watcher_events.rs`, `infrastructure/drive_watcher.rs`, `infrastructure/drive_watcher_integration.rs`
 
@@ -300,7 +300,7 @@ Workers check AtomicUsize center before decoding (skip obsolete jobs)
 Previous image stays visible until new one is ready
 ```
 
-**Key files**: `image_viewer/mod.rs`, `image_viewer/app.rs`, `image_viewer/cache.rs`, `image_viewer/indexer.rs`, `image_viewer/loader.rs`
+**Key files**: `image_viewer/mod.rs`, `image_viewer/app/` (mod, filmstrip, rendering, gif_export), `image_viewer/cache.rs`, `image_viewer/indexer.rs`, `image_viewer/loader.rs`
 
 ## 13. Video Player
 

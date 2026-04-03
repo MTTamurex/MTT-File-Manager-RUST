@@ -200,7 +200,7 @@ System access, Windows integration, and data persistence.
 **Other Infrastructure**:
 - `global_search.rs` — Named Pipe client for search service IPC
 - `shell_menu_worker.rs` — Shell context menu extraction worker
-- `user_session_search.rs` — User session search index
+- `user_session_search/` — User session search index (split module: orchestration, db persistence, discovery, scanner)
 - `security.rs` + `security/` — Security validation (components, drive, shell_namespace, symlink, unc)
 - `windows_clipboard.rs` — Windows clipboard (CF_HDROP)
 - `onedrive/` — OneDrive integration (path_detection, attributes, timeout_ops, directory_enum, pin_state)
@@ -234,13 +234,13 @@ Separate Windows Service that indexes all files with a hybrid per-volume strateg
 - `fs_walker.rs` — Full-tree scanner for non-USN volumes
 - `file_index.rs` — In-memory index: `HashMap<u64, FileRecord>` (FRN → record)
 - `path_resolver.rs` — Full path reconstruction via parent FRN chain
-- `index_db.rs` — SQLite persistence (`%PROGRAMDATA%\MTT-File-Manager\search_index.db`)
-- `ipc_server.rs` — Named Pipe server
+- `index_db/` — SQLite persistence (split module: core queries, FTS5 search, index-to-DB sync)
+- `ipc_server/` — Named Pipe server (split module: server loop, pipe I/O with DACL security, request handler)
 - `ipc_authorization.rs` — IPC authorization handling
 - `security_policy.rs` — Security policy configuration
 - `service_control.rs` — Service install/uninstall via `windows-service`
 - `name_arena.rs` — String arena for name storage
-- `volume_indexers.rs` — Per-volume indexer management
+- `volume_indexers/` — Per-volume indexer management (split module: orchestration, USN journal indexer, non-USN full-tree indexer)
 
 **IPC Protocol** (`crates/mtt-search-protocol/`):
 - Serialization via **bincode** with 4-byte length-prefix framing (LE)
@@ -262,7 +262,7 @@ Dedicated image viewer running as a **separate process** (same binary, `--image-
 
 **Modules**:
 - `mod.rs` — `open_image_viewer()` spawns the process, `run_standalone()` initializes eframe
-- `app.rs` — `DedicatedImageViewerApp`: navigation, zoom, keyboard shortcuts, rendering
+- `app/` — `DedicatedImageViewerApp` (split module: struct & navigation in `mod.rs`, filmstrip in `filmstrip.rs`, UI rendering in `rendering.rs`, GIF/export in `gif_export.rs`)
 - `cache.rs` — `WindowCache` (HashMap sliding-window, 512MB budget, eviction by distance) + `PrefetchEngine` (crossbeam bounded channel workers, atomic center tracking)
 - `indexer.rs` — `build_sequence()`: reads directory, filters images, natural sort
 - `loader.rs` — Decoding: memory-mapped files for >1MB, EXIF orientation, WIC fallback

@@ -10,7 +10,9 @@ src/
 │
 ├── app/                             # Application state & initialization
 │   ├── mod.rs                       # Module declarations
-│   ├── state.rs                     # ImageViewerApp — main app state struct
+│   ├── state/                       # ImageViewerApp — main app state (split module)
+│   │   ├── mod.rs                   # ImageViewerApp struct definition & core state
+│   │   └── helpers.rs               # State helper methods & utilities
 │   ├── cache_state.rs               # Cache state management
 │   ├── drive_state.rs               # Drive information state
 │   ├── file_operation_state.rs      # File operation tracking
@@ -36,7 +38,10 @@ src/
 │       ├── mod.rs
 │       ├── clipboard_ops.rs         # Copy/paste operations
 │       ├── context_menu.rs          # Right-click menu handling
-│       ├── drag_drop.rs             # Drag-and-drop support
+│       ├── drag_drop/               # Drag-and-drop support (split module)
+│       │   ├── mod.rs               # Drag-and-drop orchestration
+│       │   ├── validation.rs        # Drop target validation
+│       │   └── rendering.rs         # Drag ghost & visual feedback rendering
 │       ├── file_ops.rs              # OS-level file operations
 │       ├── folder_loading/          # Async folder loading
 │       ├── folder_lock_ops.rs       # Per-folder view preferences
@@ -120,7 +125,11 @@ src/
 │   │   ├── symlink.rs               # Symlink validation
 │   │   └── unc.rs                   # UNC path validation
 │   ├── shell_menu_worker.rs         # Shell context menu extraction
-│   ├── user_session_search.rs       # User session search index
+│   ├── user_session_search/          # User session search index (split module)
+│   │   ├── mod.rs                   # Search index orchestration
+│   │   ├── db.rs                    # SQLite persistence for search index
+│   │   ├── discovery.rs             # Volume & path discovery
+│   │   └── scanner.rs               # Directory scanning & indexing
 │   ├── virtual_drive_config.rs      # Virtual drive configuration
 │   ├── windows_clipboard.rs         # Windows clipboard (CF_HDROP)
 │   ├── onedrive/                    # OneDrive integration
@@ -181,13 +190,20 @@ src/
 │   │   ├── layers/                  # Layer submodules
 │   │   ├── menu_handler.rs          # Menu handler
 │   │   ├── notifications.rs         # Notification rendering
-│   │   └── panels.rs                # Panel layout
+│   │   └── panels/                  # Panel layout (split module)
+│   │       ├── mod.rs               # render_panels entry, sidebar, resize handles
+│   │       └── content.rs           # Preview panel & central panel content rendering
 │   ├── tab_bar/                     # Tab system
 │   ├── preview_panel/               # Preview panel with video support
 │   ├── icon_loader.rs               # Icon loading
 │   ├── icon_loader/                 # Icon loader submodules
-│   ├── global_search_overlay.rs     # Global search overlay
+│   ├── global_search_overlay.rs     # Global search overlay entry point
 │   ├── global_search_overlay/       # Search overlay submodules
+│   │   ├── results_panel.rs         # Results panel layout
+│   │   ├── actions.rs               # Search action handlers
+│   │   ├── result_row.rs            # Individual result row rendering
+│   │   ├── scrollbar.rs             # Custom scrollbar widget
+│   │   └── filters.rs               # Search filter logic
 │   ├── components/                  # Reusable UI components
 │   │   ├── mod.rs
 │   │   ├── media_preview.rs         # Media preview component
@@ -204,6 +220,12 @@ src/
 │       ├── computer_view.rs         # "This PC" view
 │       ├── grid_view/               # Grid view
 │       └── list_view/               # List view
+│           ├── mod.rs               # Module declarations, ListViewContext, ColumnWidths
+│           ├── header.rs            # Column header rendering
+│           ├── helpers.rs           # Shared helpers (file type strings, status badges)
+│           ├── item_renderer.rs     # render_list_item entry, selection, rename, column data
+│           ├── item_renderer_details.rs  # Tooltip rendering, icon rendering for list items
+│           └── virtualization.rs    # Virtual scrolling / row recycling
 │
 ├── tabs/                            # Tab management
 │   └── mod.rs                       # TabState struct, per-tab history/sort/view/selection
@@ -233,7 +255,11 @@ src/
 │
 ├── image_viewer/                    # Dedicated image viewer (separate process)
 │   ├── mod.rs                       # Process spawn & standalone runner
-│   ├── app.rs                       # DedicatedImageViewerApp state
+│   ├── app/                         # DedicatedImageViewerApp (split module)
+│   │   ├── mod.rs                   # App struct, construction, navigation, cache/prefetch, shortcuts, eframe::App impl
+│   │   ├── filmstrip.rs             # FilmstripState, filmstrip thumbnail strip rendering
+│   │   ├── gif_export.rs            # GIF animation playback, image export/conversion
+│   │   └── rendering.rs             # Top bar, bottom bar, center viewport rendering
 │   ├── cache.rs                     # WindowCache + PrefetchEngine
 │   ├── indexer.rs                   # Image sequence builder
 │   ├── ipc.rs                       # Inter-process communication
@@ -267,13 +293,22 @@ crates/
         ├── fs_walker.rs              # Full-tree scanner for non-USN volumes
         ├── file_index.rs             # In-memory HashMap index
         ├── path_resolver.rs          # Path reconstruction via FRN chain
-        ├── index_db.rs               # SQLite persistence
-        ├── ipc_server.rs             # Named Pipe server
+        ├── index_db/                 # SQLite persistence (split module)
+        │   ├── mod.rs               # DB initialization & core queries
+        │   ├── fts.rs               # FTS5 full-text search integration
+        │   └── sync.rs              # Index-to-DB synchronization
+        ├── ipc_server/               # Named Pipe server (split module)
+        │   ├── mod.rs               # Server loop, client accept, wait_for_client
+        │   ├── pipe_io.rs           # Pipe creation (DACL/ACL security), read/write I/O
+        │   └── handler.rs           # Request dispatch, status response, tests
         ├── ipc_authorization.rs      # IPC authorization
         ├── security_policy.rs        # Security policy
         ├── service_control.rs        # Service install/uninstall
         ├── name_arena.rs             # String arena for name storage
-        └── volume_indexers.rs        # Per-volume indexer management
+        └── volume_indexers/           # Per-volume indexer management (split module)
+            ├── mod.rs               # Indexer orchestration & shared types
+            ├── non_usn.rs           # Full-tree scanner indexer (non-NTFS/ReFS)
+            └── usn.rs               # USN journal indexer (NTFS/ReFS)
 ```
 
 ## Configuration Files
@@ -304,7 +339,7 @@ User Input (keyboard/mouse)
     ↓
 UI Layer (src/ui/)
     ↓
-App State (src/app/state.rs) ←→ Application Services (src/application/)
+App State (src/app/state/) ←→ Application Services (src/application/)
     ↓                                    ↓
 Operations (src/app/operations/)     Domain Models (src/domain/)
     ↓
