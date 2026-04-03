@@ -71,6 +71,8 @@ pub(in crate::app) struct AppBootstrap {
         mpsc::Sender<crate::workers::file_operation_worker::FileOperationRequest>,
     pub(in crate::app) file_op_res_rx:
         mpsc::Receiver<crate::workers::file_operation_worker::FileOperationResult>,
+    pub(in crate::app) extraction_progress:
+        crate::infrastructure::archive_extract::SharedExtractionProgress,
     pub(in crate::app) global_search_tx:
         mpsc::Sender<crate::workers::global_search_worker::GlobalSearchRequest>,
     pub(in crate::app) global_search_res_rx:
@@ -232,7 +234,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         shared_gen.clone(),
     );
 
-    let (file_op_tx, file_op_res_rx) = spawn_file_operation_worker();
+    let (file_op_tx, file_op_res_rx, extraction_progress) = spawn_file_operation_worker();
     let (global_search_tx, global_search_res_rx) = spawn_global_search_worker(ctx);
     let disk_cache_invalidation_tx = spawn_disk_cache_invalidation_worker(disk_cache.clone());
     let (consistency_probe_tx, consistency_probe_rx) = spawn_consistency_probe_worker(ctx.clone());
@@ -277,6 +279,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         idle_warmup_tx,
         file_op_tx,
         file_op_res_rx,
+        extraction_progress,
         global_search_tx,
         global_search_res_rx,
         disk_cache_invalidation_tx,

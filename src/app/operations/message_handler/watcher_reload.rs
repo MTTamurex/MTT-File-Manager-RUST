@@ -25,6 +25,16 @@ impl ImageViewerApp {
         // The DriveWatcher thread now coalesces and deduplicates events internally
         // (200ms batches, max 500 unique events per batch), so event floods from
         // OneDrive dehydration are absorbed before reaching the UI thread.
+        // Cooldown after file operations: suppress watcher reloads to avoid
+        // status bar flickering when many files were created (e.g. archive extraction).
+        if let Some(until) = self.watcher_cooldown_until {
+            if Instant::now() < until {
+                self.pending_auto_reload = false;
+                return;
+            }
+            self.watcher_cooldown_until = None;
+        }
+
         if self.pending_auto_reload
             && self.file_operation_state.file_ops_in_progress == 0
             && !self.is_loading_folder

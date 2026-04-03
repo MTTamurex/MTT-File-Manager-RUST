@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 
-use crate::infrastructure::archive_extract;
+use crate::infrastructure::archive_extract::{self, SharedExtractionProgress};
 use crate::infrastructure::windows::recycle_bin;
 use crate::infrastructure::windows::shell_operations;
 
@@ -120,6 +120,7 @@ pub(super) fn handle_copy(
     dest_folder: PathBuf,
     hwnd: SendHwnd,
     result_sender: &Sender<FileOperationResult>,
+    progress: &SharedExtractionProgress,
 ) {
     let valid_path = sanitize_operation_path(&path);
     let valid_dest = sanitize_operation_path(&dest_folder);
@@ -131,7 +132,7 @@ pub(super) fn handle_copy(
 
             let success = if is_virtual && native_ok {
                 log::info!("[FileOps] Using native archive extraction for: {}", path.display());
-                archive_extract::extract_files_from_archive(&[path], &dest_folder)
+                archive_extract::extract_files_from_archive(&[path], &dest_folder, progress)
             } else if is_virtual {
                 shell_operations::copy_item_with_file_op(&path, &dest_folder, hwnd.0)
             } else {
@@ -154,6 +155,7 @@ pub(super) fn handle_move(
     dest_folder: PathBuf,
     hwnd: SendHwnd,
     result_sender: &Sender<FileOperationResult>,
+    progress: &SharedExtractionProgress,
 ) {
     let valid_path = sanitize_operation_path(&path);
     let valid_dest = sanitize_operation_path(&dest_folder);
@@ -168,7 +170,7 @@ pub(super) fn handle_move(
 
             let success = if is_virtual && native_ok {
                 log::info!("[FileOps] Using native archive extraction (move) for: {}", path.display());
-                archive_extract::extract_files_from_archive(&[path.clone()], &dest_folder)
+                archive_extract::extract_files_from_archive(&[path.clone()], &dest_folder, progress)
             } else if is_virtual {
                 shell_operations::move_item_with_file_op(&path, &dest_folder, hwnd.0)
             } else {
@@ -196,6 +198,7 @@ pub(super) fn handle_copy_batch(
     dest_folder: PathBuf,
     hwnd: SendHwnd,
     result_sender: &Sender<FileOperationResult>,
+    progress: &SharedExtractionProgress,
 ) {
     let valid_paths = sanitize_operation_paths(&paths);
     let valid_dest = sanitize_operation_path(&dest_folder);
@@ -212,7 +215,7 @@ pub(super) fn handle_copy_batch(
 
             let success = if has_virtual_path && native_ok {
                 log::info!("[FileOps] Using native archive extraction for batch copy ({} files)", paths.len());
-                archive_extract::extract_files_from_archive(&paths, &dest_folder)
+                archive_extract::extract_files_from_archive(&paths, &dest_folder, progress)
             } else if has_virtual_path {
                 shell_operations::copy_items_with_file_op(&paths, &dest_folder, hwnd.0)
             } else {
@@ -235,6 +238,7 @@ pub(super) fn handle_move_batch(
     dest_folder: PathBuf,
     hwnd: SendHwnd,
     result_sender: &Sender<FileOperationResult>,
+    progress: &SharedExtractionProgress,
 ) {
     let valid_paths = sanitize_operation_paths(&paths);
     let valid_dest = sanitize_operation_path(&dest_folder);
@@ -256,7 +260,7 @@ pub(super) fn handle_move_batch(
 
             let success = if has_virtual_path && native_ok {
                 log::info!("[FileOps] Using native archive extraction for batch move ({} files)", paths.len());
-                archive_extract::extract_files_from_archive(&paths, &dest_folder)
+                archive_extract::extract_files_from_archive(&paths, &dest_folder, progress)
             } else if has_virtual_path {
                 shell_operations::move_items_with_file_op(&paths, &dest_folder, hwnd.0)
             } else {
