@@ -79,7 +79,7 @@ pub struct ImageViewerApp {
     /// Per-path counter of stale in-flight thumbnail results to skip.
     /// Incremented on cache eviction, decremented when a stale result is drained.
     pub thumbnail_eviction_skips: std::collections::HashMap<PathBuf, u32>,
-    /// Snapshot of old items' metadata (path → (modified, size)) taken before
+    /// Snapshot of old items' metadata (path â†’ (modified, size)) taken before
     /// a watcher-triggered reload clears `all_items`. Used after end-of-load to
     /// detect and evict stale `texture_cache` entries for items whose content
     /// changed on disk.
@@ -100,8 +100,8 @@ pub struct ImageViewerApp {
     pub items_rebuild_request_id: usize,
 
     // COVER WORKER: Folder cover system (Single Thread Worker)
-    pub cover_worker_sender: Sender<PathBuf>, // UI → Worker: Sends folder to process
-    pub cover_worker_receiver: Receiver<(PathBuf, Option<PathBuf>)>, // Worker → UI: Result
+    pub cover_worker_sender: Sender<PathBuf>, // UI â†’ Worker: Sends folder to process
+    pub cover_worker_receiver: Receiver<(PathBuf, Option<PathBuf>)>, // Worker â†’ UI: Result
     pub scanned_folders: LruCache<PathBuf, ()>, // Cache: avoids re-scan (LRU bounded)
 
     // FOLDER PREVIEW WORKER: Native Windows Shell folder previews (sandwich effect)
@@ -119,7 +119,7 @@ pub struct ImageViewerApp {
     pub folders_position: FoldersPosition, // First, Last, Mixed
     pub show_hidden_files: bool,           // Show files with FILE_ATTRIBUTE_HIDDEN
 
-    // "Normal" (unlocked) state — these track what unlocked folders should use.
+    // "Normal" (unlocked) state â€” these track what unlocked folders should use.
     // When a locked folder overrides active settings, these remain unchanged.
     pub sort_descending_normal: bool,
     pub folders_position_normal: FoldersPosition,
@@ -148,7 +148,7 @@ pub struct ImageViewerApp {
     pub drag_source_folder: Option<PathBuf>,
     pub drag_target_folder: Option<PathBuf>,
     pub drag_hovered_folder: Option<PathBuf>,
-    /// Icon pre-loaded when drag starts — avoids blocking Shell calls in the render loop.
+    /// Icon pre-loaded when drag starts â€” avoids blocking Shell calls in the render loop.
     pub drag_icon_cache: Option<egui::TextureHandle>,
     pub selected_thumbnail: Option<egui::TextureHandle>, // Persistent thumbnail for preview panel
     pub selected_gif: Option<crate::ui::components::media_preview::GifPlayer>, // Local GIF for preview panel
@@ -192,7 +192,7 @@ pub struct ImageViewerApp {
     pub focus_rename: bool,                      // Trigger to focus the input
 
     // SIDEBAR DRIVE RENAME (inline in sidebar, not in main view)
-    /// (drive_path, editable_label) — active inline rename in the sidebar
+    /// (drive_path, editable_label) â€” active inline rename in the sidebar
     pub sidebar_renaming: Option<(String, String)>,
     pub sidebar_rename_focus: bool,
 
@@ -270,8 +270,8 @@ pub struct ImageViewerApp {
     pub gif_manager: crate::ui::components::gif_manager::GifManager,
 
     // ASYNC ICON WORKER (avoids blocking I/O in the render loop)
-    pub icon_req_sender: Sender<(PathBuf, usize)>, // UI → Worker
-    pub icon_res_receiver: Receiver<(PathBuf, usize, Vec<u8>, u32, u32)>, // Worker → UI
+    pub icon_req_sender: Sender<(PathBuf, usize)>, // UI â†’ Worker
+    pub icon_res_receiver: Receiver<(PathBuf, usize, Vec<u8>, u32, u32)>, // Worker â†’ UI
     pub loading_icons: FxHashSet<PathBuf>, // Tracking in-progress
     pub loading_extensions: rustc_hash::FxHashSet<String>, // Dedup by extension (prevent 10x .dll requests)
     pub failed_icons: LruCache<PathBuf, ()>, // Icons that failed extraction (LRU bounded)
@@ -319,7 +319,7 @@ pub struct ImageViewerApp {
     // One-shot guard: suppress Enter-to-open in file views after committing address bar input.
     pub suppress_next_enter_open: bool,
 
-    // One-shot: foca a barra de endereços no próximo frame de renderização do toolbar.
+    // One-shot: foca a barra de endereÃ§os no prÃ³ximo frame de renderizaÃ§Ã£o do toolbar.
     pub address_bar_focus_request: bool,
 
     // Window handle for native shell interactions
@@ -376,7 +376,7 @@ pub struct ImageViewerApp {
 
     // RESTORE BURST MODE: After prolonged idle/minimize, the OS pages out the GPU
     // working set.  Normal adaptive throttling sees slow frames and reduces uploads
-    // to 1-2/frame — exactly the wrong response.  Burst mode overrides the throttle
+    // to 1-2/frame â€” exactly the wrong response.  Burst mode overrides the throttle
     // for a limited window so textures re-populate within ~2-3 seconds.
     pub restore_burst_until: Option<Instant>,
 
@@ -386,7 +386,7 @@ pub struct ImageViewerApp {
     pub preferences_dirty: bool,
     pub preferences_last_save: Instant,
 
-    // Media player volume — session-level (updated on slider/keyboard changes, saved to disk on exit)
+    // Media player volume â€” session-level (updated on slider/keyboard changes, saved to disk on exit)
     pub session_volume: f32,
 
     // Per-folder locked view preferences
@@ -413,228 +413,14 @@ pub struct ImageViewerApp {
     // Media keyboard debounce
     pub last_media_key_press: Instant,
 
-    // INACTIVITY RECOVERY: Track window focus for background→foreground detection
+    // INACTIVITY RECOVERY: Track window focus for backgroundâ†’foreground detection
     pub was_focused: bool,
     /// Timestamp when the window lost focus (set on focus-lost transition).
     /// Used to measure actual background duration independently of minimize/restore.
     pub focus_lost_at: Option<Instant>,
 }
 
-impl ImageViewerApp {
-    /// Returns `true` while the post-restore burst window is active.
-    /// During burst, thumbnail upload throttling is bypassed to recover visual
-    /// state quickly after the OS pages out the GPU working set.
-    pub fn is_in_restore_burst(&self) -> bool {
-        self.restore_burst_until
-            .is_some_and(|deadline| Instant::now() < deadline)
-    }
-
-    /// Check if a video is actively playing in docked mode (preview panel)
-    /// Used to throttle disk I/O from thumbnails to prevent stutter during video playback
-    pub fn is_video_playing_docked(&self) -> bool {
-        if let Some(preview) = &self.media_preview {
-            // Must be: (1) docked (not detached), (2) visible/initialized, and (3) playing
-            if !preview.is_detached() && preview.is_player_visible() {
-                if let Some(state) = preview.get_video_state() {
-                    return state.is_playing;
-                }
-            }
-        }
-        false
-    }
-
-    pub fn is_video_docked_visible(&self) -> bool {
-        if let Some(preview) = &self.media_preview {
-            !preview.is_detached() && preview.is_visible()
-        } else {
-            false
-        }
-    }
-
-    /// Check if the media player should currently capture all keyboard arrow/space input.
-    /// Returns true if player is detached/fullscreen AND has focus.
-    pub fn is_media_keyboard_focused(&self) -> bool {
-        let preview = if let Some(p) = &self.media_preview {
-            p
-        } else {
-            return false;
-        };
-
-        // Condition 1: Must be detached or fullscreen
-        if !preview.is_detached() && !preview.is_maximized() {
-            return false;
-        }
-
-        // Condition 2: Current tab must be the owner
-        let active_tab_id = self.tab_manager.active().id;
-        if self.media_preview_owner_tab_id != Some(active_tab_id) {
-            return false;
-        }
-
-        #[cfg(target_os = "windows")]
-        {
-            use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
-            let foreground = unsafe { GetForegroundWindow() };
-            if foreground.is_invalid() {
-                return false;
-            }
-
-            // Focused if either the main app or the MPV child window is in foreground
-            self.native_hwnd == Some(foreground) || preview.get_hwnd() == Some(foreground)
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            false
-        }
-    }
-
-    /// Applies bounded cache cleanup when process memory is above thresholds.
-    /// Keeps hot assets while avoiding long-session RAM growth.
-    pub fn run_memory_maintenance(&mut self) {
-        self.run_memory_maintenance_impl(false);
-    }
-
-    /// Runs memory maintenance immediately, bypassing normal periodic throttle.
-    pub fn run_memory_maintenance_now(&mut self) {
-        self.run_memory_maintenance_impl(true);
-    }
-
-    fn run_memory_maintenance_impl(&mut self, force: bool) {
-        use std::time::Duration;
-
-        if !force && self.last_memory_maintenance.elapsed() < Duration::from_secs(2) {
-            return;
-        }
-        self.last_memory_maintenance = Instant::now();
-
-        let Some(working_set_bytes) = current_working_set_bytes() else {
-            return;
-        };
-
-        const SOFT_LIMIT_BYTES: u64 = 550 * 1024 * 1024;
-        const HARD_LIMIT_BYTES: u64 = 700 * 1024 * 1024;
-
-        if working_set_bytes < SOFT_LIMIT_BYTES {
-            return;
-        }
-
-        let aggressive = working_set_bytes >= HARD_LIMIT_BYTES;
-        // During restore burst, allow a larger pending queue — we're actively
-        // re-populating VRAM after an OS paging event.
-        let is_burst = self.is_in_restore_burst();
-        let max_pending = if is_burst {
-            192
-        } else if aggressive {
-            24
-        } else {
-            48
-        };
-        let min_folder_previews_keep = self.estimated_visible_folder_previews();
-
-        while self.pending_thumbnails.len() > max_pending {
-            if let Some(old) = self.pending_thumbnails.pop_front() {
-                self.cache_manager.finish_pending_upload(&old.path);
-            } else {
-                break;
-            }
-        }
-
-        let (textures_removed, rgba_removed, folder_previews_removed) = if is_burst {
-            // Skip texture/RGBA trimming during burst — we need the caches full.
-            (0, 0, 0)
-        } else if aggressive {
-            self.cache_manager.trim_thumbnail_caches(
-                96,
-                64 * 1024 * 1024,
-                min_folder_previews_keep.max(72),
-            )
-        } else {
-            self.cache_manager.trim_thumbnail_caches(
-                140,
-                96 * 1024 * 1024,
-                min_folder_previews_keep.max(120),
-            )
-        };
-
-        if aggressive {
-            self.directory_cache.clear();
-            self.visible_paths_cache.clear();
-            self.visible_range_cached = None;
-        }
-
-        // Reuse existing GIF cleanup policy (TTL + bounded memory) without forcing visible preview drop.
-        self.gif_manager.cleanup(false);
-
-        if textures_removed > 0 || rgba_removed > 0 || folder_previews_removed > 0 {
-            log::debug!(
-                "[MEMORY] RAM {:.1}MB -> trimmed textures={} rgba={} folder_previews={} pending={} mode={}",
-                working_set_bytes as f64 / 1024.0 / 1024.0,
-                textures_removed,
-                rgba_removed,
-                folder_previews_removed,
-                max_pending,
-                if aggressive { "hard" } else { "soft" }
-            );
-        }
-    }
-
-    fn estimated_visible_folder_previews(&self) -> usize {
-        if !matches!(self.view_mode, ViewMode::Grid)
-            || self.navigation_state.is_computer_view
-            || self.navigation_state.is_recycle_bin_view
-        {
-            return 0;
-        }
-
-        let screen = self.ui_ctx.screen_rect();
-        let mut central_width = screen.width()
-            - self.layout.sidebar_left_width.clamp(150.0, 500.0)
-            - if self.show_preview_panel {
-                self.layout.sidebar_right_width.clamp(250.0, 500.0)
-            } else {
-                0.0
-            };
-        central_width = (central_width - 24.0).max(0.0);
-
-        let thumbnail_size = self.thumbnail_size.max(96.0);
-        let padding = 8.0;
-        let cols = ((central_width - padding) / (thumbnail_size + padding))
-            .floor()
-            .max(1.0) as usize;
-
-        let central_height = (screen.height() - 72.0).max(0.0);
-        let row_height = thumbnail_size + 20.0 + padding;
-        let rows = (central_height / row_height).ceil().max(1.0) as usize;
-
-        cols.saturating_mul(rows.saturating_add(2)).clamp(48, 320)
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn current_working_set_bytes() -> Option<u64> {
-    use windows::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
-    use windows::Win32::System::Threading::GetCurrentProcess;
-
-    unsafe {
-        let mut counters = PROCESS_MEMORY_COUNTERS::default();
-        if K32GetProcessMemoryInfo(
-            GetCurrentProcess(),
-            &mut counters,
-            std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
-        )
-        .as_bool()
-        {
-            Some(counters.WorkingSetSize as u64)
-        } else {
-            None
-        }
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn current_working_set_bytes() -> Option<u64> {
-    None
-}
+mod helpers;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScrollRequest {
