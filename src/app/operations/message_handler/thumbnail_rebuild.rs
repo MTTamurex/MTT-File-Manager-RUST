@@ -44,7 +44,7 @@ impl ImageViewerApp {
         }
 
         self.current_folder_modified_hint = Some((current_path.clone(), secs));
-        self.folder_modified_hints.insert(current_path, secs);
+        self.folder_modified_hints.put(current_path, secs);
     }
 
     fn build_sorted_items_snapshot(&self) -> Vec<crate::domain::file_entry::FileEntry> {

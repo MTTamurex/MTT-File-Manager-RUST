@@ -400,7 +400,10 @@ pub fn parse_usn_records(
             } else {
                 // Initial enumeration: just insert
                 let is_dir = (file_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-                index.insert_record(frn, &name, parent_frn, is_dir);
+                if !index.insert_record(frn, &name, parent_frn, is_dir) {
+                    eprintln!("[USN] Name arena full — stopping enumeration");
+                    return;
+                }
                 *count += 1;
             }
         }

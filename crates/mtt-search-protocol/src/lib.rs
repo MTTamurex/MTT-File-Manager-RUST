@@ -3,6 +3,14 @@ use serde::{Deserialize, Serialize};
 /// Named pipe path for IPC between the search service and the file manager app.
 pub const PIPE_NAME: &str = r"\\.\pipe\MTTFileManagerSearch";
 
+/// Maximum accepted query text length (bytes). Anything longer is likely
+/// malformed or a deliberate abuse attempt, so we reject it early.
+pub const MAX_QUERY_TEXT_LEN: usize = 4096;
+
+/// Maximum result items we accept per response. Prevents a compromised or
+/// buggy service from flooding the client with millions of entries.
+pub const MAX_RESULT_ITEMS: usize = 10_000;
+
 /// Requests sent from the app to the search service.
 #[derive(Serialize, Deserialize, Debug)]
 pub enum SearchRequest {
@@ -18,6 +26,28 @@ pub enum SearchRequest {
     Ping,
     /// Ask the service to warm its in-memory index (bring paged-out memory back to RAM).
     WarmIndex,
+}
+
+impl SearchRequest {
+    /// Validate deserialized fields to reject obviously malformed requests.
+    pub fn validate(&self) -> Result<(), String> {
+        if let SearchRequest::Query { text, limit, .. } = self {
+            if text.len() > MAX_QUERY_TEXT_LEN {
+                return Err(format!(
+                    "query text too long ({} bytes, max {})",
+                    text.len(),
+                    MAX_QUERY_TEXT_LEN
+                ));
+            }
+            if *limit > MAX_RESULT_ITEMS as u32 {
+                return Err(format!(
+                    "limit too large ({}, max {})",
+                    limit, MAX_RESULT_ITEMS
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Responses sent from the search service to the app.
@@ -37,6 +67,22 @@ pub enum SearchResponse {
     WarmStarted,
     /// Error message.
     Error(String),
+}
+
+impl SearchResponse {
+    /// Validate deserialized response to reject pathologically large payloads.
+    pub fn validate(&self) -> Result<(), String> {
+        if let SearchResponse::Results { items, .. } = self {
+            if items.len() > MAX_RESULT_ITEMS {
+                return Err(format!(
+                    "too many result items ({}, max {})",
+                    items.len(),
+                    MAX_RESULT_ITEMS
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

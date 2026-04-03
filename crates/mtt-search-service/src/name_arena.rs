@@ -37,25 +37,21 @@ impl NameArena {
 
     /// Append a name to the arena and return a compact reference.
     ///
-    /// # Panics
-    /// Panics if the arena exceeds 4 GB (u32 offset overflow) or a single name
-    /// exceeds 65 535 bytes (u16 len overflow).  Both are unreachable in practice
-    /// for NTFS file names (max 255 UTF-16 code units ≈ 1 020 bytes UTF-8).
-    pub fn insert(&mut self, name: &str) -> NameRef {
+    /// Returns `None` if the arena would exceed 4 GB (u32 offset overflow) or
+    /// the individual name exceeds 65 535 bytes (u16 len overflow).  Both are
+    /// unreachable in practice for NTFS file names (max 255 UTF-16 code units
+    /// ≈ 1 020 bytes UTF-8) but returning `None` avoids crashing a system
+    /// service if it ever happens.
+    pub fn insert(&mut self, name: &str) -> Option<NameRef> {
         let offset = self.buf.len();
-        assert!(
-            offset <= u32::MAX as usize,
-            "NameArena exceeded 4 GB limit"
-        );
-        assert!(
-            name.len() <= u16::MAX as usize,
-            "File name exceeds 65 535 bytes"
-        );
+        if offset > u32::MAX as usize || name.len() > u16::MAX as usize {
+            return None;
+        }
         self.buf.extend_from_slice(name.as_bytes());
-        NameRef {
+        Some(NameRef {
             offset: offset as u32,
             len: name.len() as u16,
-        }
+        })
     }
 
     /// Retrieve a name by reference.

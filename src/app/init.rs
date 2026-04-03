@@ -174,7 +174,9 @@ impl ImageViewerApp {
         let mut app = Self {
             navigation_state: NavigationState::new(initial_path.clone(), is_computer_view_initial),
             current_folder_modified_hint: None,
-            folder_modified_hints: std::collections::HashMap::new(),
+            folder_modified_hints: lru::LruCache::new(
+                std::num::NonZeroUsize::new(500).unwrap(),
+            ),
             loaded_path: String::new(), // Start empty - will be set when first folder loads
             thumbnail_queue,
             image_receiver: img_rx,

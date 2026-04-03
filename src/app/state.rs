@@ -68,7 +68,8 @@ pub struct ImageViewerApp {
     pub current_folder_modified_hint: Option<(PathBuf, u64)>,
     /// Cache of known folder modified timestamps by folder path.
     /// Used to preserve "Data modificada" in preview panel across back/forward navigation.
-    pub folder_modified_hints: std::collections::HashMap<PathBuf, u64>,
+    /// Bounded to 500 entries via LRU eviction to prevent unbounded growth.
+    pub folder_modified_hints: lru::LruCache<PathBuf, u64>,
     pub loaded_path: String, // Tracks the last path we actually requested (prevents spam)
 
     // --- OPTIMIZED THUMBNAIL SYSTEM ---

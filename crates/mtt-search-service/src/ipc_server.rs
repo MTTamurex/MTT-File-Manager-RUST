@@ -397,6 +397,12 @@ fn handle_client(
         }
     };
 
+    if let Err(e) = request.validate() {
+        eprintln!("[IPC] Request validation failed: {}", e);
+        let _ = send_response(pipe, &SearchResponse::Error("Invalid request".to_string()));
+        return;
+    }
+
     match request {
         SearchRequest::Ping => {
             let _ = send_response(pipe, &SearchResponse::Pong);

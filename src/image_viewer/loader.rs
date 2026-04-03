@@ -97,9 +97,19 @@ pub struct GifAnimationFrame {
     pub delay_ms: u32,
 }
 
+/// Hard cap on total RGBA bytes for GIF frames to prevent OOM on pathological
+/// files (e.g. 1 000-frame 4K GIF ≈ 16 GB without this limit).
+const GIF_MAX_TOTAL_RGBA_BYTES: usize = 512 * 1024 * 1024; // 512 MB
+/// Hard cap on the number of decoded frames to bound memory and CPU time.
+const GIF_MAX_FRAMES: usize = 500;
+
 /// Decodes all frames of an animated GIF. Returns an error if the file is not
 /// a valid GIF or has no decodable frames. For single-frame / static GIFs the
 /// returned `Vec` will contain exactly one element.
+///
+/// Applies safety caps: at most [`GIF_MAX_FRAMES`] frames and
+/// [`GIF_MAX_TOTAL_RGBA_BYTES`] of combined pixel data.  Remaining frames are
+/// silently discarded so the viewer stays responsive.
 pub fn decode_gif_frames(path: &Path) -> io::Result<Vec<GifAnimationFrame>> {
     use image::AnimationDecoder;
     use image::codecs::gif::GifDecoder;
@@ -110,13 +120,32 @@ pub fn decode_gif_frames(path: &Path) -> io::Result<Vec<GifAnimationFrame>> {
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
 
     let mut frames_out: Vec<GifAnimationFrame> = Vec::new();
+    let mut total_rgba_bytes: usize = 0;
     for frame_result in decoder.into_frames() {
+        if frames_out.len() >= GIF_MAX_FRAMES {
+            log::warn!(
+                "[IMAGE-VIEWER] GIF frame cap reached ({} frames), truncating",
+                GIF_MAX_FRAMES
+            );
+            break;
+        }
+
         match frame_result {
             Ok(f) => {
                 let (numer, denom) = f.delay().numer_denom_ms();
                 // GIF spec: 0 delay → display "as fast as possible". Use 10 ms minimum.
                 let delay_ms = if denom == 0 { 100 } else { (numer / denom).max(10) };
                 let rgba = f.into_buffer();
+                let frame_bytes = rgba.as_raw().len();
+                total_rgba_bytes = total_rgba_bytes.saturating_add(frame_bytes);
+                if total_rgba_bytes > GIF_MAX_TOTAL_RGBA_BYTES {
+                    log::warn!(
+                        "[IMAGE-VIEWER] GIF memory cap reached ({} MB), truncating at {} frames",
+                        total_rgba_bytes / (1024 * 1024),
+                        frames_out.len()
+                    );
+                    break;
+                }
                 frames_out.push(GifAnimationFrame {
                     frame: DecodedFrame {
                         width: rgba.width(),
@@ -269,6 +298,10 @@ fn decode_svg_frame(
     decode_svg_bytes(bytes.as_slice(), max_side)
 }
 
+/// Absolute upper bound for SVG rasterisation to prevent multi-gigabyte
+/// allocations from pathological viewBox values (e.g. viewBox="0 0 65535 65535").
+const SVG_MAX_RENDER_SIDE: u32 = 8192;
+
 fn decode_svg_bytes(bytes: &[u8], max_side: Option<u32>) -> io::Result<DecodedFrame> {
     let options = usvg::Options::default();
     let tree = usvg::Tree::from_data(bytes, &options)
@@ -277,13 +310,14 @@ fn decode_svg_bytes(bytes: &[u8], max_side: Option<u32>) -> io::Result<DecodedFr
     let svg_size = tree.size();
     let base_width = svg_size.width().max(1.0);
     let base_height = svg_size.height().max(1.0);
-    let scale = match max_side.filter(|limit| *limit > 0) {
-        Some(limit) => {
-            let limit = limit as f32;
-            (limit / base_width.max(base_height)).min(1.0)
-        }
-        None => 1.0,
+
+    // Apply user-requested limit, then additionally clamp to SVG_MAX_RENDER_SIDE
+    // to guard against SVGs with absurdly large intrinsic dimensions.
+    let effective_limit = match max_side.filter(|limit| *limit > 0) {
+        Some(limit) => limit.min(SVG_MAX_RENDER_SIDE),
+        None => SVG_MAX_RENDER_SIDE,
     };
+    let scale = (effective_limit as f32 / base_width.max(base_height)).min(1.0);
 
     let render_width = (base_width * scale).round().max(1.0) as u32;
     let render_height = (base_height * scale).round().max(1.0) as u32;
