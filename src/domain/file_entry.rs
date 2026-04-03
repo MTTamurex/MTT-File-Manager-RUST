@@ -147,6 +147,38 @@ pub fn path_contains_archive_segment(path_lower: &str) -> bool {
     false
 }
 
+/// Splits a path that traverses an archive into (archive_file, internal_relative_path).
+/// E.g.: `"C:\dl\archive.zip\folder\VR.nfo"` → `Some(("C:\dl\archive.zip", "folder\VR.nfo"))`
+/// Returns `None` if the path does not contain an archive segment.
+pub fn split_archive_path(path: &std::path::Path) -> Option<(std::path::PathBuf, String)> {
+    let path_str = path.to_string_lossy();
+    let path_lower = path_str.to_ascii_lowercase();
+
+    let mut best_end: Option<usize> = None;
+
+    for ext in ARCHIVE_EXTENSIONS {
+        for sep in &["\\", "/"] {
+            let pattern = format!("{}{}", ext, sep);
+            if let Some(pos) = path_lower.find(&pattern) {
+                let end = pos + ext.len();
+                match best_end {
+                    None => best_end = Some(end),
+                    Some(prev) if end < prev => best_end = Some(end),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    let boundary = best_end?;
+    let archive_path = std::path::PathBuf::from(&path_str[..boundary]);
+    let internal = &path_str[boundary + 1..]; // skip path separator
+    if internal.is_empty() {
+        return None;
+    }
+    Some((archive_path, internal.to_string()))
+}
+
 /// Returns the type label for displaying an archive file.
 /// E.g.: "Arquivo ZIP", "Arquivo RAR". Returns None if not an archive file.
 pub fn archive_type_label(name: &str) -> Option<String> {

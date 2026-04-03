@@ -118,7 +118,7 @@ impl ImageViewerApp {
 
     /// Paste: Reads from clipboard using ClipboardManager via Background Worker
     pub fn command_paste(&mut self, idx: Option<usize>) {
-        log::debug!("[DEBUG] command_paste called with idx: {:?}", idx);
+        log::warn!("[PASTE-DIAG] command_paste called with idx: {:?}, ops_in_progress: {}", idx, self.file_operation_state.file_ops_in_progress);
 
         if !self.can_paste_into_current_location() {
             self.context_menu.target_paths.clear();
