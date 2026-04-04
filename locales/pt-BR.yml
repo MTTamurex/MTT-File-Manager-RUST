@@ -330,6 +330,9 @@ pdfviewer:
   metadata_read_failed: "Não foi possível ler os metadados do arquivo: %{error}"
 drive_slot:
   free_of: "%{free_val} %{free_unit} livres de %{total_val} %{total_unit}"
+extract:
+  items_extracted: "extraídos"
+  preparing: "Preparando…"
 status_bar_system:
   threads: "Threads: %{count} (pico: %{peak})"
   handles: "Handles: %{count}"

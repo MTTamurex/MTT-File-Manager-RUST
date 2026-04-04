@@ -1,6 +1,6 @@
 use crate::application::navigation::NavigationHistory;
 use crate::domain::file_entry::{SortMode, ViewMode};
-use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID, is_virtual_path};
+use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::theme;
 use crate::ui::widgets;
@@ -114,10 +114,20 @@ pub fn render_toolbar(
     svg_manager: &mut SvgIconManager,
 ) -> Option<ToolbarAction> {
     let mut action = None;
-    let recent_paths: Vec<String> = navigation
+    let recent_paths: Vec<(String, String)> = navigation
         .recent_paths(5)
         .into_iter()
-        .filter(|path| !path.is_empty() && !is_virtual_path(path))
+        .filter(|path| !path.is_empty())
+        .map(|path| {
+            let display = if path == COMPUTER_VIEW_ID {
+                t!("nav.computer").to_string()
+            } else if path == RECYCLE_BIN_VIEW_ID {
+                t!("nav.recycle_bin").to_string()
+            } else {
+                path.clone()
+            };
+            (display, path)
+        })
         .collect();
 
     ui.horizontal(|ui| {
@@ -366,7 +376,7 @@ pub fn render_toolbar(
                                 ui.set_max_width(addr_rect.width());
                                 ui.spacing_mut().item_spacing.y = 0.0;
 
-                                for path in &recent_paths {
+                                for (display, actual_path) in &recent_paths {
                                     let item_size = egui::vec2(addr_rect.width() - 8.0, 28.0);
                                     let (item_rect, response) =
                                         ui.allocate_exact_size(item_size, egui::Sense::click());
@@ -384,13 +394,13 @@ pub fn render_toolbar(
                                     ui.painter().text(
                                         egui::pos2(text_rect.left(), text_rect.center().y),
                                         egui::Align2::LEFT_CENTER,
-                                        path,
+                                        display,
                                         egui::TextStyle::Button.resolve(ui.style()),
                                         egui::Color32::BLACK,
                                     );
 
                                     if response.clicked() {
-                                        selected_path = Some(path.clone());
+                                        selected_path = Some(actual_path.clone());
                                     }
                                 }
                             });
