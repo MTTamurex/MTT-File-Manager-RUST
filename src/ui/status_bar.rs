@@ -1,28 +1,15 @@
 //! Status bar rendering for the file manager.
 //!
 //! This module contains the rendering logic for the application status bar.
-//!
-//! PERFORMANCE: RAM usage (kernel syscall) and VRAM estimation (O(n) texture iteration)
-//! are cached with 1-second TTL to avoid per-frame overhead.
+//! Low-level thread/resource monitoring stays in the background, but those
+//! process metrics are intentionally not exposed in the UI.
 
-use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
 use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::theme;
 use crate::ui::widgets;
 use eframe::egui;
-use lru::LruCache;
 use rust_i18n::t;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-
-/// Cached RAM usage value (atomic for cheap per-frame read)
-static CACHED_RAM_BYTES: AtomicU64 = AtomicU64::new(0);
-/// Last time RAM was queried (ms since epoch, stored as u64)
-static CACHED_RAM_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
-/// Cached VRAM estimation in bytes
-static CACHED_VRAM_BYTES: AtomicU64 = AtomicU64::new(0);
-/// Last time VRAM was calculated
-static CACHED_VRAM_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
 
 // --- Kernel resource monitoring (GDI Objects, USER Objects, Handle Count) ---
 // These metrics make resource leaks visible at runtime.
@@ -41,7 +28,7 @@ static THREAD_CRITICAL_STREAK: AtomicU64 = AtomicU64::new(0);
 /// thread-count warnings during video playback.
 static VIDEO_PREVIEW_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// TTL for RAM/VRAM cache (1 second)
+/// Shared timing constant for the background monitor.
 const STATUS_CACHE_TTL_MS: u64 = 1000;
 /// Interval for the background kernel metrics thread. CreateToolhelp32Snapshot
 /// enumerates ALL system threads and can take 40-150ms, so it must never run on
@@ -107,61 +94,12 @@ fn should_emit_thread_warning(now_ms: u64, thread_count: u32) -> bool {
     false
 }
 
-/// Returns cached RAM usage, refreshing only after TTL expires.
-fn get_ram_usage_cached(allow_refresh: bool) -> Option<u64> {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-    let last = CACHED_RAM_TIMESTAMP.load(Ordering::Relaxed);
-    if allow_refresh && now.saturating_sub(last) > STATUS_CACHE_TTL_MS {
-        if let Some(ram) = get_ram_usage() {
-            CACHED_RAM_BYTES.store(ram, Ordering::Relaxed);
-            CACHED_RAM_TIMESTAMP.store(now, Ordering::Relaxed);
-            return Some(ram);
-        }
-    }
-    let cached = CACHED_RAM_BYTES.load(Ordering::Relaxed);
-    if cached > 0 {
-        Some(cached)
-    } else {
-        None
-    }
-}
-
-/// Returns cached VRAM estimation, refreshing only after TTL expires.
-fn get_vram_usage_cached(
-    texture_cache: &LruCache<PathBuf, egui::TextureHandle>,
-    allow_refresh: bool,
-) -> usize {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-    let last = CACHED_VRAM_TIMESTAMP.load(Ordering::Relaxed);
-    if allow_refresh && now.saturating_sub(last) > STATUS_CACHE_TTL_MS {
-        let vram: usize = texture_cache
-            .iter()
-            .map(|(_, tex)| {
-                let size = tex.size();
-                size[0] * size[1] * 4
-            })
-            .sum();
-        CACHED_VRAM_BYTES.store(vram as u64, Ordering::Relaxed);
-        CACHED_VRAM_TIMESTAMP.store(now, Ordering::Relaxed);
-        vram
-    } else {
-        CACHED_VRAM_BYTES.load(Ordering::Relaxed) as usize
-    }
-}
-
 /// Kernel resource metrics for runtime leak detection.
 struct KernelResourceMetrics {
     gdi_objects: u32,
     user_objects: u32,
     handle_count: u32,
     thread_count: u32,
-    peak_thread_count: u32,
 }
 
 /// Returns cached kernel resource metrics. The actual system queries run on a
@@ -185,7 +123,6 @@ fn get_kernel_resources_cached(_allow_refresh: bool, video_preview_active: bool)
         user_objects: CACHED_USER_OBJECTS.load(Ordering::Relaxed) as u32,
         handle_count: CACHED_HANDLE_COUNT.load(Ordering::Relaxed) as u32,
         thread_count: CACHED_THREAD_COUNT.load(Ordering::Relaxed) as u32,
-        peak_thread_count: CACHED_PEAK_THREAD_COUNT.load(Ordering::Relaxed) as u32,
     }
 }
 
@@ -303,7 +240,6 @@ fn get_kernel_resources() -> KernelResourceMetrics {
             user_objects: user,
             handle_count: handles,
             thread_count,
-            peak_thread_count: 0, // filled by caller
         }
     }
 }
@@ -367,10 +303,6 @@ fn count_process_threads() -> u32 {
 /// Status bar action that needs to be handled by the caller
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StatusBarAction {
-    /// Sort mode or direction changed
-    SortChanged,
-    /// View mode changed
-    ViewModeChanged,
     /// Open virtual drive settings
     OpenVirtualDriveSettings,
     /// Open language settings
@@ -391,21 +323,10 @@ pub fn render_status_bar(
     svg_manager: &mut SvgIconManager,
     is_loading_folder: &mut bool,
     total_items: usize,
-    view_mode: &mut ViewMode,
-    sort_mode: &mut SortMode,
-    sort_descending: &mut bool,
-    folders_position: &mut FoldersPosition,
-    texture_cache: &LruCache<PathBuf, egui::TextureHandle>,
-    _frame_time_avg_ms: f32,
-    _frame_time_peak_ms: f32,
-    _fps_avg: f32,
-    _upload_budget_ms: f32,
     is_computer_view: bool,
     is_recycle_bin_view: bool,
     bulk_progress: Option<(usize, usize)>,
-    folder_locked: bool,
     show_hidden_files: &mut bool,
-    allow_system_refresh: bool,
     video_preview_active: bool,
 ) -> StatusBarAction {
     let mut action = StatusBarAction::None;
@@ -433,6 +354,10 @@ pub fn render_status_bar(
         ui.visuals_mut().widgets.active.weak_bg_fill = hover_color;
         ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
         ui.visuals_mut().widgets.active.fg_stroke = egui::Stroke::NONE;
+
+        // Keep the background thread monitor alive without exposing those
+        // low-level process metrics in the status bar.
+        let _ = get_kernel_resources_cached(false, video_preview_active);
 
         ui.horizontal(|ui| {
             // === LEFTMOST: Virtual drive settings button ===
@@ -532,187 +457,23 @@ pub fn render_status_bar(
             egui::Frame::NONE
                 .inner_margin(egui::Margin { left: 0, right: 0, top: 0, bottom: 2 })
                 .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-
-            // === LEFT SIDE: Item count and loading status ===
-            if *is_loading_folder {
-                ui.label(t!("status_bar.loading").to_string());
-            } else {
-                let item_text = if total_items == 1 {
-                    t!("status_bar.item_one").to_string()
-                } else {
-                    t!("status_bar.item_many", count = total_items).to_string()
-                };
-                ui.label(item_text);
-            }
-
-            ui.separator();
-
-            // === CENTER: View mode (disabled when folder is locked) ===
-            ui.scope(|ui| {
-                if folder_locked { ui.disable(); }
-                ui.label(t!("status_bar.mode").to_string());
-                if ui
-                    .selectable_label(*view_mode == ViewMode::Grid, t!("status_bar.grid").to_string())
-                    .clicked()
-                {
-                    *view_mode = ViewMode::Grid;
-                    action = StatusBarAction::ViewModeChanged;
-                }
-                if ui
-                    .selectable_label(*view_mode == ViewMode::List, t!("status_bar.list").to_string())
-                    .clicked()
-                {
-                    *view_mode = ViewMode::List;
-                    action = StatusBarAction::ViewModeChanged;
-                }
-            });
-
-            ui.separator();
-
-            // === CENTER-RIGHT: Sort controls (disabled when folder is locked) ===
-            ui.scope(|ui| {
-                if folder_locked { ui.disable(); }
-                ui.label(t!("status_bar.sort").to_string());
-
-                // PERFORMANCE: Build sort mode pairs per frame (i18n requires runtime lookup)
-                let sort_modes: Vec<(SortMode, String)> = if is_computer_view {
-                    vec![
-                        (SortMode::Name, t!("status_bar.sort_name").to_string()),
-                        (SortMode::DriveTotalSpace, t!("status_bar.sort_total_space").to_string()),
-                        (SortMode::DriveFreeSpace, t!("status_bar.sort_free_space").to_string()),
-                    ]
-                } else {
-                    vec![
-                        (SortMode::Name, t!("status_bar.sort_name").to_string()),
-                        (SortMode::Date, t!("status_bar.sort_date").to_string()),
-                        (SortMode::Size, t!("status_bar.sort_size").to_string()),
-                    ]
-                };
-
-                for (mode, label) in &sort_modes {
-                    if ui.selectable_label(*sort_mode == *mode, label.as_str()).clicked() {
-                        if *sort_mode == *mode {
-                            *sort_descending = !*sort_descending;
+                    if *is_loading_folder {
+                        ui.label(t!("status_bar.loading").to_string());
+                    } else {
+                        let item_text = if total_items == 1 {
+                            t!("status_bar.item_one").to_string()
                         } else {
-                            *sort_mode = *mode;
-                            *sort_descending = false;
-                        }
-                        action = StatusBarAction::SortChanged;
+                            t!("status_bar.item_many", count = total_items).to_string()
+                        };
+                        ui.label(item_text);
                     }
-                }
-
-                // Sort direction indicator
-                let arrow = if *sort_descending { "↓" } else { "↑" };
-                ui.label(arrow);
-            });
-
-            ui.separator();
-
-            ui.scope(|ui| {
-                if folder_locked { ui.disable(); }
-                ui.label(t!("status_bar.folders").to_string());
-                if ui
-                    .selectable_label(*folders_position == FoldersPosition::First, t!("status_bar.folders_first").to_string())
-                    .on_hover_text(t!("status_bar.folders_first_hint"))
-                    .clicked()
-                {
-                    *folders_position = FoldersPosition::First;
-                    action = StatusBarAction::SortChanged;
-                }
-                if ui
-                    .selectable_label(*folders_position == FoldersPosition::Last, t!("status_bar.folders_last").to_string())
-                    .on_hover_text(t!("status_bar.folders_last_hint"))
-                    .clicked()
-                {
-                    *folders_position = FoldersPosition::Last;
-                    action = StatusBarAction::SortChanged;
-                }
-                if ui
-                    .selectable_label(*folders_position == FoldersPosition::Mixed, t!("status_bar.folders_mixed").to_string())
-                    .on_hover_text(t!("status_bar.folders_mixed_hint"))
-                    .clicked()
-                {
-                    *folders_position = FoldersPosition::Mixed;
-                    action = StatusBarAction::SortChanged;
-                }
-            });
-
-                    }); // end text items horizontal
                 }); // end Frame
 
-            ui.separator();
-
-            // === RIGHT SIDE: System info (push to right with available space) ===
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label("MTT File Manager");
-                ui.separator();
-
-                // Kernel resource monitoring (cached with 1s TTL)
-                // These metrics expose handle/GDI/USER leaks at runtime.
-                let km = get_kernel_resources_cached(allow_system_refresh, video_preview_active);
-                ui.label(&*t!("status_bar_system.threads", count = km.thread_count, peak = km.peak_thread_count));
-                ui.label(&*t!("status_bar_system.handles", count = km.handle_count));
-                ui.label(&*t!("status_bar_system.gdi", count = km.gdi_objects));
-                ui.label(&*t!("status_bar_system.user", count = km.user_objects));
-                ui.separator();
-
-                // RAM usage (cached with 1s TTL — avoids kernel syscall every frame)
-                if let Some(ram_usage) = get_ram_usage_cached(allow_system_refresh) {
-                    ui.label(format!("RAM: {}", format_size(ram_usage)));
-                }
-
-                // VRAM estimation (cached with 1s TTL — avoids O(n) texture iteration every frame)
-                let vram_usage = get_vram_usage_cached(texture_cache, allow_system_refresh);
-
-                ui.label(format!(
-                    "VRAM: {:.1} MB",
-                    vram_usage as f64 / 1024.0 / 1024.0
-                ));
             });
         });
     });
 
     action
-}
-
-/// Gets the current process RAM usage (RSS/Working Set).
-fn get_ram_usage() -> Option<u64> {
-    use windows::{
-        Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS},
-        Win32::System::Threading::GetCurrentProcess,
-    };
-
-    unsafe {
-        let mut counters = PROCESS_MEMORY_COUNTERS::default();
-        if K32GetProcessMemoryInfo(
-            GetCurrentProcess(),
-            &mut counters,
-            std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
-        )
-        .as_bool()
-        {
-            Some(counters.WorkingSetSize as u64)
-        } else {
-            None
-        }
-    }
-}
-
-/// Formats size in bytes to human readable string
-fn format_size(bytes: u64) -> String {
-    const UNITS: [&str; 6] = ["B", "KB", "MB", "GB", "TB", "PB"];
-
-    if bytes == 0 {
-        return "0 B".to_string();
-    }
-
-    let base = 1024_f64;
-    let bytes_f64 = bytes as f64;
-    let exponent = (bytes_f64.log10() / base.log10()).floor() as i32;
-    let clamped_exponent = exponent.clamp(0, 5);
-    let unit_index = clamped_exponent as usize;
-    let divisor = base.powi(clamped_exponent);
-
-    format!("{:.1} {}", bytes_f64 / divisor, UNITS[unit_index])
 }
