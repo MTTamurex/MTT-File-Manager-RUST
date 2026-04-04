@@ -1,5 +1,6 @@
 use crate::app::ImageViewerApp;
 use eframe::egui;
+use rust_i18n::t;
 use std::time::Duration;
 
 pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
@@ -70,8 +71,9 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
                 // Title + count (truncate archive name to fit toast width)
                 let max_name_chars = 30;
-                let archive_display = if progress.archive_name.len() > max_name_chars {
-                    format!("{}…", &progress.archive_name[..max_name_chars])
+                let archive_display = if progress.archive_name.chars().count() > max_name_chars {
+                    let truncated: String = progress.archive_name.chars().take(max_name_chars).collect();
+                    format!("{}…", truncated)
                 } else {
                     progress.archive_name.clone()
                 };
@@ -84,11 +86,11 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     )
                 } else if progress.extracted > 0 {
                     format!(
-                        "{} ({} extraídos)",
-                        archive_display, progress.extracted,
+                        "{} ({} {})",
+                        archive_display, progress.extracted, t!("extract.items_extracted"),
                     )
                 } else {
-                    format!("{} — Preparando…", archive_display)
+                    format!("{} — {}", archive_display, t!("extract.preparing"))
                 };
                 let title_galley = ui.painter().layout(
                     title,
@@ -104,8 +106,9 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
                 // Current file name (truncated to fit)
                 if !progress.current_file.is_empty() {
-                    let display_name = if progress.current_file.len() > 35 {
-                        format!("…{}", &progress.current_file[progress.current_file.len() - 34..])
+                    let display_name = if progress.current_file.chars().count() > 35 {
+                        let suffix: String = progress.current_file.chars().skip(progress.current_file.chars().count() - 34).collect();
+                        format!("…{}", suffix)
                     } else {
                         progress.current_file.clone()
                     };
