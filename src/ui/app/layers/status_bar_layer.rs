@@ -35,13 +35,6 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
         .exact_height(24.0)
         .show(ctx, |ui| {
             use crate::ui::status_bar::{render_status_bar, StatusBarAction};
-            // Suppress RAM/VRAM cache refresh while scrolling (main list or global search).
-            // Kernel metrics (GDI, threads, handles) run on a background thread and are
-            // never queried on the UI thread.
-            let gs_scrolling = app.global_search.active
-                && app.global_search.last_scroll_time.elapsed() < std::time::Duration::from_millis(400);
-            let allow_system_refresh = !gs_scrolling
-                && app.last_scroll_time.elapsed() >= std::time::Duration::from_millis(400);
             let video_preview_active = app
                 .media_preview
                 .as_ref()
@@ -52,37 +45,13 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                 &mut app.svg_icon_manager,
                 &mut app.is_loading_folder,
                 app.total_items,
-                &mut app.view_mode,
-                &mut app.sort_mode,
-                &mut app.sort_descending,
-                &mut app.folders_position,
-                &app.cache_manager.texture_cache,
-                app.frame_time_avg_ms,
-                app.frame_time_peak_ms,
-                app.fps_avg,
-                app.upload_budget_ms,
                 app.navigation_state.is_computer_view,
                 app.navigation_state.is_recycle_bin_view,
                 bulk_progress,
-                app.current_folder_locked,
                 &mut app.show_hidden_files,
-                allow_system_refresh,
                 video_preview_active,
             );
             match action {
-                StatusBarAction::SortChanged => {
-                    if app.navigation_state.is_computer_view {
-                        app.sort_mode_computer = app.sort_mode;
-                    } else {
-                        app.sort_mode_normal = app.sort_mode;
-                    }
-                    if !app.current_folder_locked {
-                        app.sort_descending_normal = app.sort_descending;
-                        app.folders_position_normal = app.folders_position;
-                    }
-                    app.sort_items();
-                    app.save_preferences();
-                }
                 StatusBarAction::OpenVirtualDriveSettings => {
                     app.navigation_state.show_virtual_drive_settings = true;
                 }

@@ -44,9 +44,9 @@ pub(crate) fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egu
                 } else {
                     6.0
                 };
-                // Added ~36px for the lock button + separator
+                // Includes sort controls, folder-position toggle, lock, and view/zoom controls.
                 let content_width =
-                    action_button_count * 28.0 + 30.0 + 110.0 + 28.0 + 2.0 * 28.0 + 80.0 + 80.0 + 4.0 * 8.0 + 16.0 * 12.0;
+                    action_button_count * 28.0 + 30.0 + 110.0 + 28.0 + 40.0 + 2.0 * 28.0 + 80.0 + 80.0 + 4.0 * 8.0 + 17.0 * 12.0;
                 let available = ui.available_width();
                 let left_pad = ((available - content_width) / 2.0).max(0.0);
                 ui.add_space(left_pad);
