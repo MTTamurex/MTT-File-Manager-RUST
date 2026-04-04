@@ -135,11 +135,21 @@ impl MpvPreview {
                     .map(crate::infrastructure::windows::is_audio_extension)
                     .unwrap_or(false);
 
-                // IMPORTANT: when using wid-embedding, force-window must only be
-                // enabled after the child HWND exists. Setting it during MPV init
-                // makes MPV briefly create transient top-level windows before it
-                // reattaches to our embedded surface, which looks like flicker.
-                let _ = m.set_property("force-window", is_audio);
+                // Audio visualization: showwaves renders a real-time waveform.
+                // The lavfi-complex graph produces a [vo] output, so force-window
+                // is NOT needed.  format=pix_fmts=rgb24 strips the alpha channel
+                // so the background is solid black instead of transparent.
+                // For video files the graph is cleared so the normal track plays.
+                if is_audio {
+                    let _ = m.set_property("force-window", false);
+                    let _ = m.set_property(
+                        "lavfi-complex",
+                        "[aid1]asplit[ao][a1];[a1]showwaves=s=1920x1080:mode=cline:rate=30:colors=white,format=pix_fmts=rgb24[vo]",
+                    );
+                } else {
+                    let _ = m.set_property("force-window", false);
+                    let _ = m.set_property("lavfi-complex", "");
+                }
 
                 let path_str = self.path.to_string_lossy().to_string();
                 let _ = m.command("loadfile", &[&path_str]);

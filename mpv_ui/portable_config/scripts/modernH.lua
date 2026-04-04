@@ -1876,7 +1876,7 @@ local UI_OFFSET_Y = -30
     lo.geometry = geo
     lo.style = osc_styles.Title
 	lo.alpha[3] = 0
-    lo.button.maxchars = 120
+    lo.button.maxchars = 70
 end
 
 -- Validate string type user options
@@ -2339,76 +2339,7 @@ function osc_init()
   ne = new_element('title', 'button')
 ne.content = function ()
     local raw = mp.command_native({"expand-text", user_opts.title})
-
-    -- clean filename
-    raw = raw
-        :gsub('%.', ' ')
-        :gsub('_', ' ')
-        :gsub('%b[]', '')
-
-    -- detect series + episode title
-    local show, season, episode, epname =
-    raw:match("^(.-)[%s%.%-_]*[Ss](%d+)[Ee](%d+)[%s%.%-_]*(.-)$")
-
-    if show and season and episode then
-        show = show:gsub("%s+$", "")
-        epname = epname or ""
-
-        -- remove junk after episode name
-        epname = epname
-            :gsub('1080p.*', '')
-            :gsub('720p.*', '')
-            :gsub('BluRay.*', '')
-            :gsub('WEB%-DL.*', '')
-            :gsub('WEBRip.*', '')
-            :gsub('HDRip.*', '')
-            :gsub('x264.*', '')
-            :gsub('x265.*', '')
-            :gsub('%s+$', '')
-            :gsub('%s%-%s.*', '')
-            :gsub('[%s%(%-]+$', '')
-
-        if epname ~= "" then
-            return string.format(
-                "%s • S%02dE%02d • %s",
-                show,
-                tonumber(season),
-                tonumber(episode),
-                epname
-            )
-        else
-            return string.format(
-    "%s • S%02dE%02d",
-    show,
-    tonumber(season),
-    tonumber(episode)
-)
-        end
-    end
-
-    -- detect movie + year
-    local title, year = raw:match("^(.-)%s+(%d%d%d%d)%s")
-
-    if title and year then
-        title = title:gsub("%s+$", "")
-        return string.format("%s (%s)", title, year)
-    end
-
-    -- final cleanup fallback
-raw = raw
-    :gsub('1080p.*', '')
-    :gsub('720p.*', '')
-    :gsub('BluRay.*', '')
-    :gsub('WEB%-DL.*', '')
-    :gsub('WEBRip.*', '')
-    :gsub('HDRip.*', '')
-    :gsub('x264.*', '')
-    :gsub('x265.*', '')
-    :gsub('DTS.*', '')
-    :gsub('%-.*', '')
-    :gsub('%s+$', '')
-
-return raw
+    return raw
 end
 
 

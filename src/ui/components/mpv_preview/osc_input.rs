@@ -9,6 +9,19 @@ impl MpvPreview {
         if !MPV_OSC_POC_ENABLED {
             return false;
         }
+        // Disable native OSC for audio files — the egui control bar handles
+        // playback and the OSC renders at wrong proportions on the small
+        // waveform visualization surface.
+        if let Some(p) = &self.loaded_path {
+            let is_audio = p
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(crate::infrastructure::windows::is_audio_extension)
+                .unwrap_or(false);
+            if is_audio {
+                return false;
+            }
+        }
         if MPV_OSC_POC_DETACHED_ONLY {
             return self.is_detached();
         }
