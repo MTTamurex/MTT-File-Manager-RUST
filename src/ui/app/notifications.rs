@@ -75,10 +75,21 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 } else {
                     progress.archive_name.clone()
                 };
-                let title = format!(
-                    "{} ({}/{})",
-                    archive_display, progress.extracted, progress.total,
-                );
+
+                let total_known = progress.total > 0;
+                let title = if total_known {
+                    format!(
+                        "{} ({}/{})",
+                        archive_display, progress.extracted, progress.total,
+                    )
+                } else if progress.extracted > 0 {
+                    format!(
+                        "{} ({} extraídos)",
+                        archive_display, progress.extracted,
+                    )
+                } else {
+                    format!("{} — Preparando…", archive_display)
+                };
                 let title_galley = ui.painter().layout(
                     title,
                     egui::FontId::proportional(13.0),
@@ -123,16 +134,25 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 ui.painter()
                     .rect_filled(bar_rect, 2.0, egui::Color32::from_rgb(40, 50, 70));
 
-                let fraction = if progress.total > 0 {
-                    (progress.extracted as f32 / progress.total as f32).min(1.0)
+                if total_known {
+                    let fraction = (progress.extracted as f32 / progress.total as f32).min(1.0);
+                    let fill_rect = egui::Rect::from_min_size(
+                        egui::pos2(bar_left, bar_y),
+                        egui::vec2(bar_width * fraction, bar_height),
+                    );
+                    ui.painter().rect_filled(fill_rect, 2.0, accent);
                 } else {
-                    0.0
-                };
-                let fill_rect = egui::Rect::from_min_size(
-                    egui::pos2(bar_left, bar_y),
-                    egui::vec2(bar_width * fraction, bar_height),
-                );
-                ui.painter().rect_filled(fill_rect, 2.0, accent);
+                    // Indeterminate animated bar (total unknown, e.g. TAR or pre-scan phase)
+                    let t = ui.ctx().input(|i| i.time) as f32;
+                    let cycle = (t * 0.8).sin() * 0.5 + 0.5;
+                    let highlight_width = bar_width * 0.3;
+                    let highlight_x = bar_left + cycle * (bar_width - highlight_width);
+                    let fill_rect = egui::Rect::from_min_size(
+                        egui::pos2(highlight_x, bar_y),
+                        egui::vec2(highlight_width, bar_height),
+                    );
+                    ui.painter().rect_filled(fill_rect, 2.0, accent);
+                }
             });
     }
 
