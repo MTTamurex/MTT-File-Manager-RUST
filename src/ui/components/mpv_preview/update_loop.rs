@@ -128,6 +128,19 @@ impl MpvPreview {
                 // The file watcher will trigger a refresh when the download completes.
                 self.loaded_path = Some(self.path.clone());
             } else if let Some(m) = &self.mpv {
+                let is_audio = self
+                    .path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(crate::infrastructure::windows::is_audio_extension)
+                    .unwrap_or(false);
+
+                // IMPORTANT: when using wid-embedding, force-window must only be
+                // enabled after the child HWND exists. Setting it during MPV init
+                // makes MPV briefly create transient top-level windows before it
+                // reattaches to our embedded surface, which looks like flicker.
+                let _ = m.set_property("force-window", is_audio);
+
                 let path_str = self.path.to_string_lossy().to_string();
                 let _ = m.command("loadfile", &[&path_str]);
 

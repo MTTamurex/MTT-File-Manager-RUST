@@ -1,6 +1,6 @@
-//! Standalone dedicated video player mode (separate process).
+//! Standalone dedicated media player mode (separate process).
 //!
-//! When the user clicks "detach" on the docked video player, the main app
+//! When the user clicks "detach" on the docked player, the main app
 //! spawns a new process (`--video-player <path> [--position <secs>] [--volume <vol>]`)
 //! that runs an independent mpv window (borderless, with OSC window controls).
 //!
@@ -334,7 +334,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
     let title_name = path
         .file_name()
         .map(|v| v.to_string_lossy().to_string())
-        .unwrap_or_else(|| "Video Player".to_string());
+        .unwrap_or_else(|| "Media Player".to_string());
 
     let config_dir = resolve_mpv_ui_config_dir();
     if let Some(dir) = &config_dir {
@@ -409,6 +409,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
     let _ = mpv.set_property("hwdec", "d3d11va");
 
     // Playback stability
+    let _ = mpv.set_property("force-window", true);
     let _ = mpv.set_property("video-sync", "audio");
     let _ = mpv.set_property("interpolation", false);
     let _ = mpv.set_property("tscale", "linear");
@@ -426,7 +427,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
     let _ = mpv.set_property("volume", ((volume * 100.0) as i64).clamp(0, 100));
 
     // Window title (shown in taskbar for borderless window)
-    let _ = mpv.set_property("title", format!("Video Player — {}", title_name).as_str());
+    let _ = mpv.set_property("title", format!("Media Player — {}", title_name).as_str());
 
     // Initial window size — use percentage to respect display scaling on HiDPI screens
     let _ = mpv.set_property("autofit", "55%x55%");

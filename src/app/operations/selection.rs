@@ -49,7 +49,7 @@ impl ImageViewerApp {
         // pressure, causing page faults on the very next render frame.
     }
 
-    /// Starts video playback in the preview panel using the same flow as clicking
+    /// Starts media playback in the preview panel using the same flow as clicking
     /// the play overlay in the details panel.
     pub fn request_video_preview_playback(&mut self, path: std::path::PathBuf) {
         use crate::ui::components::media_preview::MediaPreview;
@@ -83,7 +83,7 @@ impl ImageViewerApp {
     /// (video play / image viewer / PDF viewer) for the currently selected file.
     /// Returns true when an action was triggered.
     pub fn trigger_selected_preview_overlay_action(&mut self) -> bool {
-        let (path, is_video, is_pdf, is_image) = {
+        let (path, is_video, is_audio, is_pdf, is_image) = {
             let Some(selected) = self.selected_file.as_ref() else {
                 return false;
             };
@@ -102,12 +102,13 @@ impl ImageViewerApp {
             (
                 path,
                 crate::infrastructure::windows::is_video_extension(&ext),
+                crate::infrastructure::windows::is_audio_extension(&ext),
                 ext.eq_ignore_ascii_case("pdf"),
                 crate::infrastructure::windows::is_image_extension(&ext),
             )
         };
 
-        if is_video {
+        if is_video || is_audio {
             self.request_video_preview_playback(path);
             return true;
         }
