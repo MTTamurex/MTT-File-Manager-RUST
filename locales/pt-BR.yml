@@ -49,6 +49,7 @@ status_bar:
   processing: "Processando %{done}/%{total}"
   hidden_hide: "Esconder itens ocultos"
   hidden_show: "Exibir itens ocultos"
+  settings: "Abrir configurações do aplicativo"
   vdrive_settings: "Configurar otimização de drives virtuais"
   bulk_thumbnails: "Gerar thumbnails para todas as subpastas"
   reload_thumbnail: "Recarregar Thumbnail"
@@ -188,8 +189,15 @@ list_view:
   size_col: "Tamanho"
   status: "Status"
 settings:
+  window_title: "Configurações"
+  categories: "Categorias"
+  general: "Geral"
+  general_description: "Ajuste preferências globais do aplicativo."
   language: "Idioma"
   language_title: "Configurações de Idioma"
+  language_description: "Escolha o idioma da interface do aplicativo."
+  language_apply_immediately: "As alterações de idioma são aplicadas imediatamente."
+  virtual_drives: "Drives Virtuais"
   close: "Fechar"
 preview:
   select_item: "Selecione um único item para ver detalhes"

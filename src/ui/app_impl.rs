@@ -200,24 +200,15 @@ impl eframe::App for ImageViewerApp {
         // 10. Operations: Resize borders (on top) - REMOVED, handled by native subclass
         // app::input::handle_resize_borders(self, ctx);
 
-        // 11. Virtual drive settings modal
-        if self.navigation_state.show_virtual_drive_settings {
-            self.navigation_state.show_virtual_drive_settings =
-                crate::ui::components::virtual_drive_settings::render_virtual_drive_settings(
-                    ctx,
-                    self.navigation_state.show_virtual_drive_settings,
-                );
-        }
-
-        // 11b. Language settings modal
-        if self.navigation_state.show_language_settings {
-            let (keep_open, language_changed) =
-                crate::ui::components::language_settings::render_language_settings(
-                    ctx,
-                    self.navigation_state.show_language_settings,
-                );
-            self.navigation_state.show_language_settings = keep_open;
-            if language_changed {
+        // 11. Settings window
+        if self.navigation_state.show_settings_window {
+            let output = crate::ui::components::settings_window::render_settings_window(
+                ctx,
+                self.navigation_state.show_settings_window,
+                &mut self.navigation_state.active_settings_section,
+            );
+            self.navigation_state.show_settings_window = output.keep_open;
+            if output.language_changed {
                 self.save_preferences();
                 self.force_save_preferences();
             }

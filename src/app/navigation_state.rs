@@ -1,5 +1,11 @@
 use crate::application::navigation::NavigationHistory;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SettingsSection {
+    General,
+    VirtualDrives,
+}
+
 /// Navigation state
 #[derive(Clone, Debug)]
 pub struct NavigationState {
@@ -10,8 +16,8 @@ pub struct NavigationState {
     pub is_recycle_bin_view: bool,
     pub computer_view_local_indices: Vec<usize>,
     pub computer_view_network_indices: Vec<usize>,
-    pub show_virtual_drive_settings: bool,
-    pub show_language_settings: bool,
+    pub show_settings_window: bool,
+    pub active_settings_section: SettingsSection,
 }
 
 impl NavigationState {
@@ -24,8 +30,8 @@ impl NavigationState {
             is_recycle_bin_view: false,
             computer_view_local_indices: Vec::new(),
             computer_view_network_indices: Vec::new(),
-            show_virtual_drive_settings: false,
-            show_language_settings: false,
+            show_settings_window: false,
+            active_settings_section: SettingsSection::General,
         }
     }
 }

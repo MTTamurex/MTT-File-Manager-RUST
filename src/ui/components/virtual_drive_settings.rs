@@ -17,89 +17,48 @@ struct VirtualDriveInfo {
     current_override: Option<DiskTypeOverride>,
 }
 
-/// Render the virtual drive settings modal window
-pub fn render_virtual_drive_settings(ctx: &egui::Context, show_modal: bool) -> bool {
-    let mut keep_open = show_modal;
+pub fn render_virtual_drive_settings_section(ui: &mut egui::Ui) {
+    ui.heading(t!("settings.virtual_drives"));
+    ui.add_space(8.0);
+    ui.label(t!("vdrive_settings.description"));
+    ui.label(t!("vdrive_settings.ssd_desc"));
+    ui.label(t!("vdrive_settings.hdd_desc"));
+    ui.add_space(16.0);
 
-    let response = egui::Window::new(t!("vdrive_settings.window_title"))
-        .collapsible(false)
-        .resizable(true)
-        .default_width(600.0)
-        .default_height(400.0)
-        .show(ctx, |ui| {
-            ui.vertical(|ui| {
-                // Header explanation
-                ui.heading(t!("vdrive_settings.title"));
-                ui.add_space(8.0);
-                ui.label(t!("vdrive_settings.description"));
-                ui.label(t!("vdrive_settings.ssd_desc"));
-                ui.label(t!("vdrive_settings.hdd_desc"));
-                ui.add_space(16.0);
+    let virtual_drives = load_virtual_drives();
 
-                // Detect virtual drives
-                let virtual_drives = load_virtual_drives();
-
-                if virtual_drives.is_empty() {
-                    ui.colored_label(
-                        egui::Color32::from_rgb(200, 200, 0),
-                        t!("vdrive_settings.no_drives")
-                    );
-                    ui.add_space(8.0);
-                    ui.label(t!("vdrive_settings.typical_drives"));
-                    ui.label("• Cryptomator (CryptoFS)");
-                    ui.label("• Dokan");
-                    ui.label("• WinFsp");
-                } else {
-                    // Table header
-                    egui::Grid::new("virtual_drives_grid")
-                        .striped(true)
-                        .min_col_width(60.0)
-                        .show(ui, |ui| {
-                            ui.strong(t!("vdrive_settings.col_drive"));
-                            ui.strong(t!("vdrive_settings.col_label"));
-                            ui.strong(t!("vdrive_settings.col_system"));
-                            ui.strong(t!("vdrive_settings.col_optimization"));
-                            ui.strong(t!("vdrive_settings.col_actions"));
-                            ui.end_row();
-
-                            for drive_info in &virtual_drives {
-                                render_drive_row(ui, drive_info);
-                            }
-                        });
-                }
-
-                ui.add_space(16.0);
-
-                ui.separator();
-
-                // Info footer
-                ui.horizontal(|ui| {
-                    ui.label("💡");
-                    ui.label(t!("vdrive_settings.config_info"));
-                });
-
-                ui.add_space(8.0);
-
-                // Close button
-                ui.horizontal(|ui| {
-                    if ui.button(t!("vdrive_settings.close")).clicked() {
-                        keep_open = false;
-                    }
-                });
-            });
-        });
-
-    // Check if user closed via X button
-    if let Some(resp) = response {
-        if resp.response.hovered() {
-            // Window still open
-            keep_open
-        } else {
-            keep_open
-        }
+    if virtual_drives.is_empty() {
+        ui.colored_label(
+            egui::Color32::from_rgb(200, 200, 0),
+            t!("vdrive_settings.no_drives"),
+        );
+        ui.add_space(8.0);
+        ui.label(t!("vdrive_settings.typical_drives"));
+        ui.label("• Cryptomator (CryptoFS)");
+        ui.label("• Dokan");
+        ui.label("• WinFsp");
     } else {
-        false // Window was closed
+        egui::Grid::new("virtual_drives_grid")
+            .striped(true)
+            .min_col_width(60.0)
+            .show(ui, |ui| {
+                ui.strong(t!("vdrive_settings.col_drive"));
+                ui.strong(t!("vdrive_settings.col_label"));
+                ui.strong(t!("vdrive_settings.col_system"));
+                ui.strong(t!("vdrive_settings.col_optimization"));
+                ui.strong(t!("vdrive_settings.col_actions"));
+                ui.end_row();
+
+                for drive_info in &virtual_drives {
+                    render_drive_row(ui, drive_info);
+                }
+            });
     }
+
+    ui.add_space(16.0);
+    ui.separator();
+    ui.add_space(8.0);
+    ui.label(t!("vdrive_settings.config_info"));
 }
 
 /// Detect all virtual drives in the system
