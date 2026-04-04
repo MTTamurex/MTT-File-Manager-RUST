@@ -14,7 +14,7 @@ use rfd::FileDialog;
 
 /// OSC script-opts for the standalone player.
 const STANDALONE_OSC_SCRIPT_OPTS: &str =
-    "osc-scalewindowed=1,osc-scalefullscreen=1,osc-windowcontrols=yes";
+    "osc-scalewindowed=1,osc-scalefullscreen=1,osc-scaleforcedwindow=1,osc-windowcontrols=yes";
 
 /// Spawn a standalone video player process for the given file.
 ///
@@ -441,6 +441,21 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
 
     // Load and play the file
     let path_str = mpv_path_string(&path);
+
+    // Audio visualization: showwaves renders a real-time white waveform on
+    // black background.  format=pix_fmts=rgb24 strips the alpha channel.
+    let is_audio = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(crate::infrastructure::windows::is_audio_extension)
+        .unwrap_or(false);
+    if is_audio {
+        let _ = mpv.set_property(
+            "lavfi-complex",
+            "[aid1]asplit[ao][a1];[a1]showwaves=s=1920x1080:mode=cline:rate=30:colors=white,format=pix_fmts=rgb24[vo]",
+        );
+    }
+
     if let Err(e) = mpv.command("loadfile", &[&path_str]) {
         log::error!("[VIDEO-PLAYER] Failed to load file '{}': {:?}", path_str, e);
         return Ok(());

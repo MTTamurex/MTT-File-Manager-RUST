@@ -35,7 +35,7 @@ const MPV_DOCKED_DEMUXER_MAX_BYTES: i64 = 48_i64 * 1024 * 1024;
 const MPV_DOCKED_DEMUXER_MAX_BACK_BYTES: i64 = 12_i64 * 1024 * 1024;
 const MPV_OSC_POC_ENABLED: bool = true;
 const MPV_OSC_POC_DETACHED_ONLY: bool = true;
-const MPV_OSC_POC_SCRIPT_OPTS: &str = "osc-scalewindowed=1.8,osc-scalefullscreen=2.8,osc-idlescreen=no,osc-showonpause=no";
+const MPV_OSC_POC_SCRIPT_OPTS: &str = "osc-scalewindowed=1.8,osc-scalefullscreen=2.8,osc-scaleforcedwindow=1.8,osc-idlescreen=no,osc-showonpause=no";
 
 /// Represents the current display mode of the video player.
 #[derive(Debug, Clone, PartialEq)]
