@@ -343,6 +343,24 @@ pub fn render_file_info_table(
                 if let Some(depth) = meta.color_depth {
                     add_detail(ui, &t!("file_info.bit_depth"), format!("{} bits", depth));
                 }
+                if let Some(sr) = meta.audio_sample_rate {
+                    add_detail(ui, &t!("file_info.sample_rate"), format!("{} Hz", sr));
+                }
+                if let Some(title) = &meta.track_title {
+                    add_detail(ui, &t!("file_info.track_title"), title.clone());
+                }
+                if let Some(artist) = &meta.artist {
+                    add_detail(ui, &t!("file_info.artist"), artist.clone());
+                }
+                if let Some(album) = &meta.album {
+                    add_detail(ui, &t!("file_info.album"), album.clone());
+                }
+                if let Some(genre) = &meta.genre {
+                    add_detail(ui, &t!("file_info.genre"), genre.clone());
+                }
+                if let Some(year) = meta.year {
+                    add_detail(ui, &t!("file_info.year"), year.to_string());
+                }
             }
 
             // 5. Drive Details

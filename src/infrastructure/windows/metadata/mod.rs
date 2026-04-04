@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+pub mod audio;
 pub mod audio_sniffing;
 pub mod image;
 pub mod property_keys;
@@ -8,6 +9,7 @@ pub mod utils;
 pub mod video;
 pub mod video_sniffing;
 
+pub use audio::read_audio_metadata;
 pub use audio_sniffing::{sniff_audio_codec, AudioCodec};
 pub use image::read_image_metadata;
 pub use video::read_video_metadata;
@@ -53,6 +55,14 @@ pub struct MediaMetadata {
     pub audio_codec: Option<String>,
     pub audio_bitrate: Option<u32>,
     pub audio_channels: Option<u32>,
+    pub audio_sample_rate: Option<u32>,
+
+    // Audio Tags (music files)
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub track_title: Option<String>,
+    pub genre: Option<String>,
+    pub year: Option<u32>,
 }
 
 /// Extracts metadata for common media types (images/videos).
@@ -87,8 +97,9 @@ pub fn extract_media_metadata(path: &Path) -> MediaMetadata {
 
     let is_image = image::is_image_extension(&ext);
     let is_video = video::is_video_extension(&ext);
+    let is_audio = crate::infrastructure::windows::file_type::is_audio_extension(&ext);
 
-    if !is_image && !is_video {
+    if !is_image && !is_video && !is_audio {
         return MediaMetadata::default();
     }
 
@@ -96,17 +107,19 @@ pub fn extract_media_metadata(path: &Path) -> MediaMetadata {
     // Even "locally available" files can block on Property Store COM calls,
     // Media Foundation source reader, or codec sniffing I/O.
     if onedrive::is_onedrive_path(path) {
-        return extract_media_metadata_with_timeout(path, is_image);
+        return extract_media_metadata_with_timeout(path, is_image, is_audio);
     }
 
     // Non-OneDrive: extract directly (no timeout overhead)
-    extract_media_metadata_inner(path, is_image)
+    extract_media_metadata_inner(path, is_image, is_audio)
 }
 
 /// Inner extraction logic (no timeout wrapper).
-fn extract_media_metadata_inner(path: &Path, is_image: bool) -> MediaMetadata {
+fn extract_media_metadata_inner(path: &Path, is_image: bool, is_audio: bool) -> MediaMetadata {
     if is_image {
         read_image_metadata(path).unwrap_or_default()
+    } else if is_audio {
+        read_audio_metadata(path).unwrap_or_default()
     } else {
         read_video_metadata(path).unwrap_or_default()
     }
@@ -124,7 +137,7 @@ fn extract_media_metadata_inner(path: &Path, is_image: bool) -> MediaMetadata {
 /// 1. Reuses a fixed set of worker threads (no unbounded thread creation)
 /// 2. Has a capped overflow mechanism (max 24 temporary workers)
 /// 3. Jobs that block in the pool don't create new kernel threads per call
-fn extract_media_metadata_with_timeout(path: &Path, is_image: bool) -> MediaMetadata {
+fn extract_media_metadata_with_timeout(path: &Path, is_image: bool, is_audio: bool) -> MediaMetadata {
     let path_buf = path.to_path_buf();
     let path_for_log = path_buf.clone();
     let timeout = Duration::from_millis(METADATA_EXTRACTION_TIMEOUT_MS);
@@ -132,7 +145,7 @@ fn extract_media_metadata_with_timeout(path: &Path, is_image: bool) -> MediaMeta
     let (tx, rx) = std::sync::mpsc::channel::<MediaMetadata>();
 
     let submitted = onedrive::onedrive_io_pool_execute(move || {
-        let result = extract_media_metadata_inner(&path_buf, is_image);
+        let result = extract_media_metadata_inner(&path_buf, is_image, is_audio);
         let _ = tx.send(result);
     });
 
