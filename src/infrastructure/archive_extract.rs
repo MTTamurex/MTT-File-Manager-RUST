@@ -138,6 +138,7 @@ pub struct ExtractionProgress {
     pub archive_name: String,
     pub current_file: String,
     pub extracted: usize,
+    /// Known total of files to extract. `0` means total is unknown (e.g. TAR).
     pub total: usize,
 }
 
@@ -213,9 +214,7 @@ pub fn extract_files_from_archive(
         return false;
     }
 
-    let total_files: usize = groups.values().map(|v| v.len()).sum();
-
-    // Initialize progress
+    // Initialize progress (total=0 means unknown; each format handler will set it via pre-scan).
     let first_archive = groups.keys().next().unwrap();
     let archive_display = first_archive
         .file_name()
@@ -226,7 +225,7 @@ pub fn extract_files_from_archive(
             archive_name: archive_display,
             current_file: String::new(),
             extracted: 0,
-            total: total_files,
+            total: 0,
         });
     }
 
@@ -322,8 +321,6 @@ fn is_tar_variant(name: &str) -> bool {
 }
 
 /// Helper to update shared progress state.
-/// Automatically adjusts `total` upward when folder extraction discovers more files than
-/// initially estimated.
 fn update_progress(
     progress: &SharedExtractionProgress,
     current_file: &str,
@@ -333,10 +330,23 @@ fn update_progress(
         if let Some(ref mut state) = *p {
             state.current_file = current_file.to_string();
             state.extracted = extracted;
-            if state.total < extracted {
-                state.total = extracted;
-            }
         }
+    }
+}
+
+/// Sets the known total for progress (called after pre-scan).
+fn set_progress_total(progress: &SharedExtractionProgress, total: usize) {
+    if let Ok(mut p) = progress.lock() {
+        if let Some(ref mut state) = *p {
+            state.total += total;
+        }
+    }
+}
+
+/// Clears progress so the UI toast disappears immediately.
+fn clear_progress(progress: &SharedExtractionProgress) {
+    if let Ok(mut p) = progress.lock() {
+        *p = None;
     }
 }
 
@@ -353,8 +363,24 @@ fn extract_from_zip(
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
 
     let matcher = EntryMatcher::new(internal_paths);
-    let mut extracted = 0;
 
+    // Pre-scan: count matching entries (cheap — reads central directory only).
+    let mut total_matching = 0usize;
+    for i in 0..archive.len() {
+        if let Ok(entry) = archive.by_index(i) {
+            if !entry.is_dir() {
+                let name = entry.name().replace('\\', "/");
+                let lower = name.to_ascii_lowercase();
+                if !matches!(matcher.match_entry(&lower), MatchKind::None) {
+                    total_matching += 1;
+                }
+            }
+        }
+    }
+    set_progress_total(progress, total_matching);
+
+    // Extract matching entries.
+    let mut extracted = 0;
     for i in 0..archive.len() {
         let mut entry = archive
             .by_index(i)
@@ -403,6 +429,27 @@ fn extract_from_7z(
     global_extracted: &mut usize,
 ) -> io::Result<usize> {
     let matcher = EntryMatcher::new(internal_paths);
+
+    // Pre-scan: read archive metadata (no decompression) to count matching entries.
+    let total_matching = match sevenz_rust::Archive::open(archive_path) {
+        Ok(archive) => {
+            let count = archive.files.iter().filter(|entry| {
+                if entry.is_directory() {
+                    return false;
+                }
+                let name = entry.name().replace('\\', "/");
+                let lower = name.to_ascii_lowercase();
+                !matches!(matcher.match_entry(&lower), MatchKind::None)
+            }).count();
+            set_progress_total(progress, count);
+            count
+        }
+        Err(e) => {
+            log::warn!("[ArchiveExtract/7z] Pre-scan failed, total unknown: {}", e);
+            0
+        }
+    };
+
     let mut extracted = 0usize;
 
     sevenz_rust::decompress_file_with_extract_fn(archive_path, dest_folder, |entry, reader, _| {
@@ -439,6 +486,13 @@ fn extract_from_7z(
             dest_path.display()
         );
 
+        // Clear progress immediately after last matching file is extracted,
+        // so the toast disappears right away instead of lingering during
+        // 7z solid-block post-scan of remaining entries.
+        if total_matching > 0 && extracted >= total_matching {
+            clear_progress(progress);
+        }
+
         Ok(true)
     })
     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
@@ -455,6 +509,34 @@ fn extract_from_rar(
     global_extracted: &mut usize,
 ) -> io::Result<usize> {
     let matcher = EntryMatcher::new(internal_paths);
+
+    // Pre-scan: skip-through to count matching entries (no decompression).
+    {
+        let mut scan = unrar::Archive::new(archive_path)
+            .open_for_processing()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+        let mut total_matching = 0usize;
+        loop {
+            let header = scan
+                .read_header()
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+            let Some(header) = header else { break };
+            let entry = header.entry();
+            if !entry.is_directory() {
+                let name = entry.filename.to_string_lossy().replace('\\', "/");
+                let lower = name.to_ascii_lowercase();
+                if !matches!(matcher.match_entry(&lower), MatchKind::None) {
+                    total_matching += 1;
+                }
+            }
+            scan = header
+                .skip()
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+        }
+        set_progress_total(progress, total_matching);
+    }
+
+    // Extract matching entries.
     let mut extracted = 0usize;
     let mut archive = unrar::Archive::new(archive_path)
         .open_for_processing()
