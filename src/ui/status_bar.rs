@@ -303,10 +303,8 @@ fn count_process_threads() -> u32 {
 /// Status bar action that needs to be handled by the caller
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StatusBarAction {
-    /// Open virtual drive settings
-    OpenVirtualDriveSettings,
-    /// Open language settings
-    OpenLanguageSettings,
+    /// Open application settings
+    OpenSettings,
     /// Start bulk thumbnail extraction for current folder and subfolders
     BulkThumbnailScan,
     /// Show/hide hidden files toggled
@@ -360,36 +358,20 @@ pub fn render_status_bar(
         let _ = get_kernel_resources_cached(false, video_preview_active);
 
         ui.horizontal(|ui| {
-            // === LEFTMOST: Virtual drive settings button ===
+            // === LEFTMOST: Settings button ===
             if widgets::toggle_icon_button_sized(
                 ui,
                 svg_manager,
                 "settings",
                 false,
-                &t!("status_bar.vdrive_settings"),
+                &t!("status_bar.settings"),
                 theme::ICON_SIZE_SM,
                 1.0,
                 0.75,
             )
             .clicked()
             {
-                action = StatusBarAction::OpenVirtualDriveSettings;
-            }
-
-            // === LANGUAGE SETTINGS button ===
-            if widgets::toggle_icon_button_sized(
-                ui,
-                svg_manager,
-                "languages",
-                false,
-                &t!("settings.language"),
-                theme::ICON_SIZE_SM,
-                1.0,
-                0.75,
-            )
-            .clicked()
-            {
-                action = StatusBarAction::OpenLanguageSettings;
+                action = StatusBarAction::OpenSettings;
             }
 
             // === BULK THUMBNAIL SCAN button ===

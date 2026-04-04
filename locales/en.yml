@@ -49,6 +49,7 @@ status_bar:
   processing: "Processing %{done}/%{total}"
   hidden_hide: "Hide hidden items"
   hidden_show: "Show hidden items"
+  settings: "Open application settings"
   vdrive_settings: "Configure virtual drive optimization"
   bulk_thumbnails: "Generate thumbnails for all subfolders"
   reload_thumbnail: "Reload Thumbnail"
@@ -188,8 +189,15 @@ list_view:
   size_col: "Size"
   status: "Status"
 settings:
+  window_title: "Settings"
+  categories: "Categories"
+  general: "General"
+  general_description: "Adjust global application preferences."
   language: "Language"
   language_title: "Language Settings"
+  language_description: "Choose the interface language for the application."
+  language_apply_immediately: "Language changes are applied immediately."
+  virtual_drives: "Virtual Drives"
   close: "Close"
 preview:
   select_item: "Select a single item to see details"

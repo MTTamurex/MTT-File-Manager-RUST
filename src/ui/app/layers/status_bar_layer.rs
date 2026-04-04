@@ -52,11 +52,10 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                 video_preview_active,
             );
             match action {
-                StatusBarAction::OpenVirtualDriveSettings => {
-                    app.navigation_state.show_virtual_drive_settings = true;
-                }
-                StatusBarAction::OpenLanguageSettings => {
-                    app.navigation_state.show_language_settings = true;
+                StatusBarAction::OpenSettings => {
+                    app.navigation_state.show_settings_window = true;
+                    app.navigation_state.active_settings_section =
+                        crate::app::navigation_state::SettingsSection::General;
                 }
                 StatusBarAction::BulkThumbnailScan => {
                     let root = std::path::PathBuf::from(&app.navigation_state.current_path);
