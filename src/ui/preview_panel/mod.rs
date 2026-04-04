@@ -16,7 +16,7 @@ pub use actions::{PreviewPanelAction, PREVIEW_MAX_HEIGHT};
 use fallback_renderer::render_fallback;
 use file_info_table::render_file_info_table;
 use image_preview::{render_gif_preview, render_texture_with_overlay};
-use video_preview::render_video_preview;
+use video_preview::{render_media_launcher, render_video_preview};
 
 #[allow(clippy::too_many_arguments)]
 pub fn render_preview_panel(
@@ -46,13 +46,15 @@ pub fn render_preview_panel(
     // Metadata is processed asynchronously; when it arrives, metadata will be Some(...)
     let mut action = None;
 
-    // Check if this is a video file
-    let is_video = file
+    // Check if this is a playable media file for MPV
+    let extension = file
         .path
         .extension()
         .and_then(|ext| ext.to_str())
-        .map(crate::infrastructure::windows::is_video_extension)
-        .unwrap_or(false);
+        .unwrap_or("");
+    let is_video = crate::infrastructure::windows::is_video_extension(extension);
+    let is_audio = crate::infrastructure::windows::is_audio_extension(extension);
+    let is_playable_media = is_video || is_audio;
 
     // === MULTI-SELECTION VIEW ===
     if multi_selection_count > 1 {
@@ -99,7 +101,7 @@ pub fn render_preview_panel(
             // === NATIVE GIF AUTOPLAY (PRIORITY 1) ===
             render_gif_preview(ui, file, gif_player, svg_manager);
         } else if let Some(preview) = media_preview {
-            if is_video {
+            if is_playable_media {
                 // VIDEO PLAYER LOGIC (MPV)
                 if let Some(act) = render_video_preview(
                     ui,
@@ -134,61 +136,10 @@ pub fn render_preview_panel(
                     }
                 }
             }
-        } else if is_video {
+        } else if is_playable_media {
             // === NO ACTIVE MEDIA PREVIEW YET (Non-owner tab or first selection) ===
-            // Use video preview logic for thumbnail with play overlay
-            // We need a way to call render_video_preview without a real preview struct?
-            // Actually, render_video_preview needs MediaPreview.
-            // Let's duplicate the thumbnail logic here or refactor.
-            if let Some(tex) = &texture {
-                let max_preview_width = ui.available_width() - 16.0;
-                let max_preview_height = PREVIEW_MAX_HEIGHT;
-                let max_preview_size = egui::vec2(max_preview_width, max_preview_height);
-
-                let image_resp = ui.add(
-                    egui::Image::new(tex)
-                        .max_size(max_preview_size)
-                        .shrink_to_fit(),
-                );
-                let media_rect = image_resp.rect;
-
-                let hover_pos = ui.input(|i| i.pointer.hover_pos());
-                let is_hovered = hover_pos.is_some_and(|pos| media_rect.contains(pos));
-
-                if is_hovered {
-                    let center_size = 64.0;
-                    let center_rect = egui::Rect::from_center_size(
-                        media_rect.center(),
-                        egui::vec2(center_size, center_size),
-                    );
-                    ui.painter().rect_filled(
-                        center_rect,
-                        center_size / 2.0,
-                        egui::Color32::from_black_alpha(160),
-                    );
-                    if let Some(tex_play) =
-                        svg_manager.get_icon(ui.ctx(), "play", 96, [255, 255, 255, 255])
-                    {
-                        ui.painter().image(
-                            tex_play.id(),
-                            center_rect.shrink(14.0),
-                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            egui::Color32::WHITE,
-                        );
-                    }
-                }
-                if ui
-                    .interact(
-                        media_rect,
-                        egui::Id::new("video_play_overlay_mod"),
-                        egui::Sense::click(),
-                    )
-                    .clicked()
-                {
-                    action = Some(PreviewPanelAction::RequestPlay(file.path.clone()));
-                }
-            } else {
-                ui.allocate_space(egui::vec2(ui.available_width() - 16.0, 200.0));
+            if let Some(act) = render_media_launcher(ui, file, svg_manager, texture.as_ref()) {
+                action = Some(act);
             }
         } else if let Some(tex) = &texture {
             // Fallback: Static Thumbnail (No MediaPreview state)

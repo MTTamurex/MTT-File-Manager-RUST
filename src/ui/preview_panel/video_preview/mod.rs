@@ -12,6 +12,110 @@ use crate::ui::preview_panel::video_preview::fullscreen::render_fullscreen_video
 use crate::ui::svg_icons::SvgIconManager;
 use eframe::egui;
 
+pub fn render_media_launcher(
+    ui: &mut egui::Ui,
+    file: &FileEntry,
+    svg_manager: &mut SvgIconManager,
+    texture: Option<&egui::TextureHandle>,
+) -> Option<PreviewPanelAction> {
+    let max_preview_width = ui.available_width() - 16.0;
+    let max_preview_height = PREVIEW_MAX_HEIGHT;
+    let max_preview_size = egui::vec2(max_preview_width, max_preview_height);
+
+    let media_rect = if let Some(tex) = texture {
+        ui.add(
+            egui::Image::new(tex)
+                .max_size(max_preview_size)
+                .shrink_to_fit(),
+        )
+        .rect
+    } else {
+        let desired_size = egui::vec2(max_preview_width.max(120.0), max_preview_height);
+        let (rect, _) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
+
+        let visuals = ui.visuals();
+        let fill = if visuals.dark_mode {
+            egui::Color32::from_rgb(28, 28, 32)
+        } else {
+            egui::Color32::from_rgb(243, 245, 248)
+        };
+        let stroke = if visuals.dark_mode {
+            egui::Color32::from_rgb(58, 58, 64)
+        } else {
+            egui::Color32::from_rgb(216, 220, 226)
+        };
+        ui.painter().rect(
+            rect,
+            16.0,
+            fill,
+            egui::Stroke::new(1.0, stroke),
+            egui::StrokeKind::Outside,
+        );
+
+        let is_audio = file
+            .path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(crate::infrastructure::windows::is_audio_extension)
+            .unwrap_or(false);
+        let icon_name = if is_audio { "headphones" } else { "play" };
+        let icon_color = if visuals.dark_mode {
+            [214, 218, 224, 255]
+        } else {
+            [96, 102, 110, 255]
+        };
+        if let Some(icon) = svg_manager.get_icon(ui.ctx(), icon_name, 128, icon_color) {
+            let icon_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(72.0, 72.0));
+            ui.painter().image(
+                icon.id(),
+                icon_rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        }
+
+        rect
+    };
+
+    let hover_pos = ui.input(|i| i.pointer.hover_pos());
+    let is_hovered = hover_pos.is_some_and(|pos| media_rect.contains(pos));
+
+    if is_hovered {
+        let center_size = 64.0;
+        let center_rect = egui::Rect::from_center_size(
+            media_rect.center(),
+            egui::vec2(center_size, center_size),
+        );
+        ui.painter().rect_filled(
+            center_rect,
+            center_size / 2.0,
+            egui::Color32::from_black_alpha(160),
+        );
+        if let Some(tex_play) = svg_manager.get_icon(ui.ctx(), "play", 96, [255, 255, 255, 255])
+        {
+            ui.painter().image(
+                tex_play.id(),
+                center_rect.shrink(14.0),
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        }
+    }
+
+    if ui
+        .interact(
+            media_rect,
+            egui::Id::new(("media_play_overlay", &file.path)),
+            egui::Sense::click(),
+        )
+        .clicked()
+    {
+        return Some(PreviewPanelAction::RequestPlay(file.path.clone()));
+    }
+
+    None
+}
+
 pub fn render_video_preview(
     ui: &mut egui::Ui,
     file: &FileEntry,
@@ -30,8 +134,6 @@ pub fn render_video_preview(
     let is_muted = video_state.as_ref().map(|s| s.is_muted).unwrap_or(false);
 
     let max_preview_width = ui.available_width() - 16.0;
-    let max_preview_height = PREVIEW_MAX_HEIGHT;
-    let max_preview_size = egui::vec2(max_preview_width, max_preview_height);
 
     // PATH CHECK: Only show active player if the file is the one playing AND we are the owner
     let paths_match = preview.path() == Some(&file.path);
@@ -80,53 +182,8 @@ pub fn render_video_preview(
         action = action.or(vol_action);
     } else {
         // === THUMBNAIL WITH PLAY OVERLAY (NON-OWNER) ===
-        if let Some(tex) = texture {
-            let image_resp = ui.add(
-                egui::Image::new(tex)
-                    .max_size(max_preview_size)
-                    .shrink_to_fit(),
-            );
-            let media_rect = image_resp.rect;
-
-            // Central play button on hover
-            let hover_pos = ui.input(|i| i.pointer.hover_pos());
-            let is_hovered = hover_pos.is_some_and(|pos| media_rect.contains(pos));
-
-            if is_hovered {
-                let center_size = 64.0;
-                let center_rect = egui::Rect::from_center_size(
-                    media_rect.center(),
-                    egui::vec2(center_size, center_size),
-                );
-                ui.painter().rect_filled(
-                    center_rect,
-                    center_size / 2.0,
-                    egui::Color32::from_black_alpha(160),
-                );
-                if let Some(tex_play) =
-                    svg_manager.get_icon(ui.ctx(), "play", 96, [255, 255, 255, 255])
-                {
-                    ui.painter().image(
-                        tex_play.id(),
-                        center_rect.shrink(14.0),
-                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                        egui::Color32::WHITE,
-                    );
-                }
-            }
-            // Click area = entire thumbnail
-            if ui
-                .interact(
-                    media_rect,
-                    egui::Id::new("video_play_overlay_router"),
-                    egui::Sense::click(),
-                )
-                .clicked()
-            {
-                action = Some(PreviewPanelAction::RequestPlay(file.path.clone()));
-            }
-        } else {
-            ui.allocate_space(egui::vec2(max_preview_width, 200.0));
+        if let Some(launcher_action) = render_media_launcher(ui, file, svg_manager, texture) {
+            action = Some(launcher_action);
         }
     }
     action
