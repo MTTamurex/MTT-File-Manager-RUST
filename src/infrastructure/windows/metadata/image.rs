@@ -25,11 +25,7 @@ pub fn read_image_metadata(path: &Path) -> Result<MediaMetadata, image::ImageErr
     Ok(MediaMetadata {
         width: Some(width),
         height: Some(height),
-        duration_100ns: None,
-        frame_rate: None,
-        bitrate: None,
         format: format_label,
-        color_depth: None,
         camera_maker: exif_metadata.camera_maker,
         camera_model: exif_metadata.camera_model,
         f_stop: exif_metadata.f_stop,
@@ -41,10 +37,7 @@ pub fn read_image_metadata(path: &Path) -> Result<MediaMetadata, image::ImageErr
         flash_mode: exif_metadata.flash_mode,
         date_taken: exif_metadata.date_taken,
         subject: exif_metadata.subject,
-        video_codec: None,
-        audio_codec: None,
-        audio_bitrate: None,
-        audio_channels: None,
+        ..Default::default()
     })
 }
 
