@@ -1,6 +1,6 @@
 use eframe::egui;
 
-/// Estado de UI
+/// UI state
 #[derive(Clone)]
 pub struct UIState {
     pub ui_ctx: egui::Context,

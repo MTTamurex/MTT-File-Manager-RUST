@@ -277,7 +277,7 @@ impl ImageViewerApp {
         false
     }
 
-    /// Renomeia arquivo usando Shell API via Background Worker
+    /// Renames a file using the Shell API via the background worker
     pub fn rename_with_shell(&mut self, idx: usize) {
         if !self.can_rename_item(idx) {
             self.renaming_state = None;

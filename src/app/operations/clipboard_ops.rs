@@ -84,7 +84,7 @@ impl ImageViewerApp {
         }
     }
 
-    /// Recortar: Coloca o arquivo no clipboard do Windows com flag de MOVE
+    /// Cut: place the file on the Windows clipboard with the MOVE flag
     pub fn command_cut(&mut self, idx: Option<usize>) {
         if idx.is_none() && !self.context_menu.target_paths.is_empty() {
             self.clipboard.cut(&self.context_menu.target_paths.clone());

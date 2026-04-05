@@ -70,8 +70,8 @@ pub fn delete_items_with_shell(paths: &[PathBuf], hwnd: HWND) -> bool {
     result == 0 && op.fAnyOperationsAborted.0 == 0
 }
 
-/// Permanently deletes multiple files using Windows Shell (sem lixeira, com diálogo de confirmação).
-/// Equivalente ao Shift+Delete do Explorer.
+/// Permanently deletes multiple files using Windows Shell (without recycle bin, with confirmation dialog).
+/// Equivalent to Explorer Shift+Delete.
 /// Returns true if operation was successful (not cancelled).
 pub fn delete_items_permanently_with_shell(paths: &[PathBuf], hwnd: HWND) -> bool {
     if paths.is_empty() {
@@ -85,8 +85,8 @@ pub fn delete_items_permanently_with_shell(paths: &[PathBuf], hwnd: HWND) -> boo
         wFunc: FO_DELETE,
         pFrom: PCWSTR(from_vec.as_ptr()),
         pTo: PCWSTR::default(),
-        // Sem FOF_ALLOWUNDO = exclusão permanente
-        // FOF_WANTNUKEWARNING = diálogo nativo "tem certeza?" do Windows
+        // Without FOF_ALLOWUNDO = permanent deletion
+        // FOF_WANTNUKEWARNING = native Windows "are you sure?" dialog
         fFlags: FOF_WANTNUKEWARNING.0 as u16,
         ..Default::default()
     };

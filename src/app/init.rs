@@ -404,7 +404,7 @@ impl ImageViewerApp {
             // Address-bar Enter must not bubble into list/grid "open selected".
             suppress_next_enter_open: false,
 
-            // Ctrl+L: focar barra de endereços no próximo render do toolbar.
+            // Ctrl+L: focus the address bar on the next toolbar render.
             address_bar_focus_request: false,
 
             // Native HWND (captured on first update)

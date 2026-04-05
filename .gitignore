@@ -85,12 +85,12 @@ coverage/
 /mdbook-output/
 
 # ============================================
-# Dependências Locais (se houver)
+# Local Dependencies (if any)
 # ============================================
 /vendor/
 
 # ============================================
-# Outros Arquivos Específicos do Projeto
+# Other Project-Specific Files
 # ============================================
 errors.txt
 debug_output.txt
