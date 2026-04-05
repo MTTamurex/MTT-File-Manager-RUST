@@ -453,7 +453,11 @@ pub fn render_status_bar(
                 }); // end Frame
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label("MTT File Manager");
+                egui::Frame::NONE
+                    .inner_margin(egui::Margin { left: 0, right: 0, top: 0, bottom: 2 })
+                    .show(ui, |ui| {
+                        ui.label("MTT File Manager");
+                    });
             });
         });
     });

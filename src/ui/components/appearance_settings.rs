@@ -24,9 +24,9 @@ pub fn render_appearance_settings_section(ui: &mut egui::Ui, theme_mode: &mut Th
     }
 
     ui.add_space(12.0);
-    ui.separator();
-    ui.add_space(8.0);
     ui.label(egui::RichText::new(t!("settings.theme_apply_immediately").to_string()).small());
+    ui.add_space(8.0);
+    ui.separator();
 
     changed
 }

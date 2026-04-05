@@ -21,6 +21,13 @@ impl ImageViewerApp {
             return;
         }
 
+        if !self
+            .ui_ctx
+            .input(|i| i.pointer.button_down(eframe::egui::PointerButton::Primary))
+        {
+            return;
+        }
+
         if self.renaming_state.is_some()
             || self.navigation_state.is_computer_view
             || self.navigation_state.is_recycle_bin_view

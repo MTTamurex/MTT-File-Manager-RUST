@@ -33,9 +33,9 @@ pub fn render_language_settings_section(ui: &mut egui::Ui) -> bool {
     }
 
     ui.add_space(12.0);
-    ui.separator();
-    ui.add_space(8.0);
     ui.label(egui::RichText::new(t!("settings.language_apply_immediately").to_string()).small());
+    ui.add_space(8.0);
+    ui.separator();
 
     language_changed
 }
