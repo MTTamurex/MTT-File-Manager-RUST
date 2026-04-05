@@ -7,6 +7,12 @@ pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
         app.startup_tick += 1;
 
         if app.startup_tick == 1 {
+            // Frame 1: Apply saved theme before anything else
+            match app.theme_mode {
+                crate::app::navigation_state::ThemeMode::Dark => ctx.set_visuals(egui::Visuals::dark()),
+                crate::app::navigation_state::ThemeMode::Light => ctx.set_visuals(egui::Visuals::light()),
+            }
+
             // Frame 1: Apply saved geometry while window is hidden
             if app.layout.saved_is_maximized {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));

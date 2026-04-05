@@ -52,12 +52,15 @@ pub struct DedicatedImageViewerApp {
     /// Timestamp of the last navigation action (for key-repeat throttling).
     pub(super) last_navigate_instant: std::time::Instant,
     pub(super) filmstrip: FilmstripState,
+    /// Whether to apply dark theme on first frame.
+    pub(super) dark_mode: bool,
 }
 
 impl DedicatedImageViewerApp {
     pub fn new(
         sequence: ImageSequence,
         external_open_rx: std::sync::mpsc::Receiver<std::path::PathBuf>,
+        dark_mode: bool,
     ) -> Self {
         let worker_count = std::thread::available_parallelism()
             .map(|v| v.get())
@@ -90,6 +93,7 @@ impl DedicatedImageViewerApp {
             status_message: None,
             last_navigate_instant: std::time::Instant::now(),
             filmstrip: FilmstripState::new(),
+            dark_mode,
         };
 
         app.prefetch.set_center(start_index);
@@ -410,10 +414,30 @@ impl DedicatedImageViewerApp {
 }
 
 impl eframe::App for DedicatedImageViewerApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         if !self.repaint_ctx_set {
             self.prefetch.set_repaint_ctx(ctx.clone());
             self.repaint_ctx_set = true;
+
+            // Apply theme on first frame (cc.egui_ctx.set_visuals in creator
+            // can be overridden by the platform integration).
+            if self.dark_mode {
+                ctx.set_visuals(egui::Visuals::dark());
+            } else {
+                ctx.set_visuals(egui::Visuals::light());
+            }
+
+            // Apply dark/light title bar on the native Windows decoration.
+            use raw_window_handle::HasWindowHandle;
+            if let Ok(handle) = frame.window_handle() {
+                if let raw_window_handle::RawWindowHandle::Win32(wh) = handle.as_raw() {
+                    let hwnd = windows::Win32::Foundation::HWND(wh.hwnd.get() as _);
+                    crate::infrastructure::windows::window_corners::apply_dark_title_bar(
+                        hwnd,
+                        self.dark_mode,
+                    );
+                }
+            }
         }
 
         self.handle_external_open_requests(ctx);

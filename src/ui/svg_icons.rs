@@ -58,9 +58,9 @@ impl SvgIconManager {
 
         let ppp = ctx.pixels_per_point();
         // M-7: hash key — no String alloc on cache hit
-        let effective_color = if preserve_colors { [0, 0, 0, 0] } else { color };
+        // Duotone icons use the color to recolor black pixels, so include it in the key.
         let ppp_100 = (ppp * 100.0) as u32;
-        let cache_key = svg_icon_key(icon_name, size, effective_color, ppp_100);
+        let cache_key = svg_icon_key(icon_name, size, color, ppp_100);
 
         // Return cached texture if available
         if let Some(texture) = self.cache.get(&cache_key) {
@@ -72,11 +72,7 @@ impl SvgIconManager {
         let image = render_svg_to_image(svg_data, size, color, ppp, preserve_colors)?;
 
         // Create texture with unique name
-        let color_str = if preserve_colors {
-            "original".to_string()
-        } else {
-            format!("{:02x}{:02x}{:02x}", color[0], color[1], color[2])
-        };
+        let color_str = format!("{:02x}{:02x}{:02x}", color[0], color[1], color[2]);
 
         let texture = ctx.load_texture(
             format!("icon_{}_{}_{}_{}", icon_name, size, ppp_100, color_str),
@@ -141,17 +137,34 @@ fn render_svg_to_image(
     // Render SVG to pixmap
     resvg::render(&tree, transform, &mut pixmap.as_mut());
 
-    // Apply color tint only if NOT preserving original colors
+    // Apply color tint
     if !preserve_colors {
+        // Monochrome: replace ALL pixel colors with target color
         let pixels = pixmap.data_mut();
         for chunk in pixels.chunks_exact_mut(4) {
             let alpha = chunk[3];
             if alpha > 0 {
-                // Replace RGB with target color, scale alpha by target alpha
                 chunk[0] = color[0];
                 chunk[1] = color[1];
                 chunk[2] = color[2];
                 chunk[3] = ((alpha as u32 * color[3] as u32) / 255) as u8;
+            }
+        }
+    } else {
+        // Duotone: replace only dark/black pixels with target color,
+        // keeping the accent-colored (blue) pixels intact.
+        let pixels = pixmap.data_mut();
+        for chunk in pixels.chunks_exact_mut(4) {
+            let alpha = chunk[3];
+            if alpha > 0 {
+                // In premultiplied alpha, black pixels have near-zero RGB.
+                // Accent blue (#7AB8FF) pixels have significant RGB values.
+                let rgb_sum = chunk[0] as u32 + chunk[1] as u32 + chunk[2] as u32;
+                if rgb_sum < (alpha as u32) / 2 {
+                    chunk[0] = color[0];
+                    chunk[1] = color[1];
+                    chunk[2] = color[2];
+                }
             }
         }
     }

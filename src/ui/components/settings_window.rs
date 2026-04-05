@@ -50,9 +50,9 @@ pub fn render_settings_window(
                             .auto_shrink([false, false])
                             .show(ui, |ui| match *active_section {
                                 SettingsSection::General => {
-                                    theme_changed |= crate::ui::components::appearance_settings::render_appearance_settings_section(ui, theme_mode);
-                                    ui.add_space(16.0);
                                     language_changed |= crate::ui::components::language_settings::render_language_settings_section(ui);
+                                    ui.add_space(16.0);
+                                    theme_changed |= crate::ui::components::appearance_settings::render_appearance_settings_section(ui, theme_mode);
                                 }
                                 SettingsSection::VirtualDrives => {
                                     crate::ui::components::virtual_drive_settings::render_virtual_drive_settings_section(ui);

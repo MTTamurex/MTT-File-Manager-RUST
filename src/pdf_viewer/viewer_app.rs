@@ -84,10 +84,12 @@ pub struct PdfViewerApp {
     pub(super) selection: Option<PageSelection>,
     /// Error from the render worker (init failure).
     pub(super) worker_error: Option<String>,
+    /// Whether to apply dark theme (set once at creation, applied on first frame).
+    dark_mode: Option<bool>,
 }
 
 impl PdfViewerApp {
-    pub fn new(path: PathBuf) -> Result<Self, String> {
+    pub fn new(path: PathBuf, dark_mode: bool) -> Result<Self, String> {
         let text_renderer = PdfRenderer::open(&path)?;
         let total_pages = text_renderer.page_count();
 
@@ -116,6 +118,7 @@ impl PdfViewerApp {
             drag_selection: None,
             selection: None,
             worker_error: None,
+            dark_mode: Some(dark_mode),
         })
     }
 
@@ -300,14 +303,16 @@ impl PdfViewerApp {
         painter.add(egui::Shape::mesh(mesh));
     }
 
-    fn paint_placeholder(painter: &egui::Painter, rect: egui::Rect, idx: u32) {
-        painter.rect_filled(rect, 0.0, egui::Color32::from_gray(40));
+    fn paint_placeholder(painter: &egui::Painter, rect: egui::Rect, idx: u32, dark_mode: bool) {
+        let bg = if dark_mode { egui::Color32::from_gray(40) } else { egui::Color32::from_gray(220) };
+        let text_color = if dark_mode { egui::Color32::from_gray(140) } else { egui::Color32::from_gray(100) };
+        painter.rect_filled(rect, 0.0, bg);
         painter.text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
             t!("pdfviewer.page", page = idx + 1).to_string(),
             egui::FontId::proportional(18.0),
-            egui::Color32::GRAY,
+            text_color,
         );
     }
 
@@ -459,7 +464,7 @@ impl PdfViewerApp {
                     if let Some(t) = self.textures.get(&idx) {
                         Self::paint_page(ui.painter(), rect, t.texture.id(), self.rotation);
                     } else {
-                        Self::paint_placeholder(ui.painter(), rect, idx);
+                        Self::paint_placeholder(ui.painter(), rect, idx, ui.visuals().dark_mode);
                     }
 
                     self.handle_page_selection(ui, &resp, idx, rect);
@@ -498,7 +503,28 @@ impl PdfViewerApp {
 // ── eframe::App ──────────────────────────────────────────────────────────────
 
 impl eframe::App for PdfViewerApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Apply theme on first frame (cc.set_visuals in creator can be
+        // overridden by the platform integration).
+        if let Some(dark) = self.dark_mode.take() {
+            if dark {
+                ctx.set_visuals(egui::Visuals::dark());
+            } else {
+                ctx.set_visuals(egui::Visuals::light());
+            }
+
+            // Apply dark/light title bar on the native Windows decoration.
+            use raw_window_handle::HasWindowHandle;
+            if let Ok(handle) = frame.window_handle() {
+                if let raw_window_handle::RawWindowHandle::Win32(wh) = handle.as_raw() {
+                    let hwnd = windows::Win32::Foundation::HWND(wh.hwnd.get() as _);
+                    crate::infrastructure::windows::window_corners::apply_dark_title_bar(
+                        hwnd, dark,
+                    );
+                }
+            }
+        }
+
         self.ensure_worker(ctx);
         self.poll_results(ctx);
         self.handle_keyboard(ctx);
