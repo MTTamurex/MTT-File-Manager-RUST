@@ -66,7 +66,7 @@ MTT File Manager is a desktop file manager that combines Rust's performance and 
 |----------|-----------|---------|---------|
 | **Language** | Rust | Edition 2021 | Performance and safety |
 | **GUI** | eframe/egui | 0.31 | Modern immediate-mode GUI (features: `persistence`, `wgpu`) |
-| **GPU Backend** | wgpu (via eframe) | 24.0.5 | D3D12/Vulkan rendering with HighPerformance GPU preference |
+| **GPU Backend** | wgpu (via eframe) | 24.0.5 | Prefers native primary backends on Windows, with GL/ANGLE compatibility fallback and HighPerformance adapter preference |
 | **Windows API** | windows-rs | 0.61.0 | Native Windows integration |
 | **Video** | libmpv2 | 5.0.3 | High-performance video playback |
 | **PDF** | pdfium (pdfium-render) | 0.8.37 | Native PDF rendering (requires pdfium.dll) |
@@ -84,7 +84,7 @@ MTT File Manager is a desktop file manager that combines Rust's performance and 
 - **CPU**: x64, 2+ cores
 - **RAM**: 4 GB
 - **Disk**: 100 MB + cache storage
-- **GPU**: DirectX 12 or Vulkan capable (via wgpu)
+- **GPU**: Windows graphics stack supported by wgpu; primary native backends are preferred, with GL/ANGLE compatibility fallback available
 
 ### Recommended
 - **OS**: Windows 11 (latest update)
@@ -92,6 +92,8 @@ MTT File Manager is a desktop file manager that combines Rust's performance and 
 - **RAM**: 8 GB or more
 - **Storage**: SSD for cache performance
 - **GPU**: Dedicated GPU for video preview
+
+HighPerformance GPU selection is a preference only. On hybrid systems the app will prefer the discrete adapter when one is available, but integrated GPUs can still be used if they expose a compatible wgpu backend.
 
 ### Runtime Dependencies
 - **libmpv-2.dll** — Required for video playback
@@ -297,4 +299,20 @@ MTT-File-Manager-RUST/
 ├── locales/                          # i18n (en.yml, pt-BR.yml)
 ├── docs/                             # Technical documentation
 └── benches/                          # Benchmarks
+```
+
+## Troubleshooting
+
+### App does not start on a specific GPU/driver
+If `wgpu` fails to initialize on a given machine, test the OpenGL/ANGLE compatibility path from PowerShell:
+
+```powershell
+$env:WGPU_BACKEND = "opengl"
+.\target\release\mtt-file-manager.exe 2>&1 | Tee-Object "gpu-debug.log"
+```
+
+If that works, the machine likely cannot initialize the preferred native backend reliably. The override only affects the current shell. Remove it with:
+
+```powershell
+Remove-Item Env:WGPU_BACKEND
 ```

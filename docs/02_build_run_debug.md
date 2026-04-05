@@ -19,6 +19,13 @@ winget install Rustlang.Rustup
 - **libmpv-2.dll** — Required for video playback
 - **pdfium.dll** — Required for PDF viewer
 
+### GPU Backend Notes
+- The desktop app uses `eframe` with the `wgpu` renderer.
+- Current startup configuration prefers the native primary `wgpu` backends on Windows and requests `HighPerformance` adapter selection.
+- A dedicated GPU is not mandatory. On hybrid systems, the discrete adapter is preferred when available, but compatible integrated GPUs can still be selected.
+- The renderer configuration also allows the `GL` backend, which gives Windows an OpenGL/ANGLE compatibility path when the preferred native backend is not available.
+- There is no separate `glow` renderer fallback in this project. If `wgpu` cannot initialize any compatible backend or adapter, startup fails.
+
 ### Optional Dependencies
 ```powershell
 # libmpv (for video playback)
@@ -322,6 +329,25 @@ cargo build --release --workspace
 
 # Option 2: copy it manually next to the executable
 Copy-Item "C:\Path\To\pdfium.dll" -Destination ".\target\release\"
+```
+
+### Renderer initialization or blank startup window
+If the default `wgpu` backend selection fails on a specific machine, force the OpenGL/ANGLE compatibility path for a diagnostic run:
+
+```powershell
+$env:WGPU_BACKEND = "opengl"
+.\target\release\mtt-file-manager.exe 2>&1 | Tee-Object "gpu-debug.log"
+```
+
+Notes:
+- This override only affects the current PowerShell session.
+- If the app starts with `opengl`, the machine likely cannot initialize the preferred native backend reliably.
+- Startup logs include the selected adapter and backend, which helps confirm what `wgpu` actually used.
+
+Clear the override after testing:
+
+```powershell
+Remove-Item Env:WGPU_BACKEND
 ```
 
 ### Slow Build
