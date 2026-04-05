@@ -255,7 +255,8 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             // zoom_delta > 1.0 = scroll para cima (aumentar), < 1.0 = diminuir
             // Escala: cada entalhe da roda gera delta ~0.1 → 0.1 × 24 = ~2.4px por entalhe
             let change = (zoom_delta - 1.0) * 24.0;
-            app.thumbnail_size = (app.thumbnail_size + change).clamp(64.0, 256.0);
+            app.thumbnail_size = (app.thumbnail_size + change)
+                .clamp(crate::ui::theme::THUMBNAIL_MIN, 256.0);
             // Impede que o egui aplique o zoom à própria UI
             ctx.set_zoom_factor(1.0);
             app.save_preferences();

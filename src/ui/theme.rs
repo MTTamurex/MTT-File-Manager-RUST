@@ -11,7 +11,7 @@ pub const PADDING_XL: f32 = 16.0;
 pub const ICON_SIZE_SM: f32 = 16.0;
 pub const ICON_SIZE_MD: f32 = 22.0;
 pub const ICON_SIZE_LG: f32 = 24.0;
-pub const THUMBNAIL_MIN: f32 = 64.0;
+pub const THUMBNAIL_MIN: f32 = 96.0;
 pub const THUMBNAIL_MAX: f32 = 512.0;
 pub const THUMBNAIL_DEFAULT: f32 = 128.0;
 

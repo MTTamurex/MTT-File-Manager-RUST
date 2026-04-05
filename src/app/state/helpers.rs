@@ -178,7 +178,7 @@ impl ImageViewerApp {
             };
         central_width = (central_width - 24.0).max(0.0);
 
-        let thumbnail_size = self.thumbnail_size.max(96.0);
+        let thumbnail_size = self.thumbnail_size.max(crate::ui::theme::THUMBNAIL_MIN);
         let padding = 8.0;
         let cols = ((central_width - padding) / (thumbnail_size + padding))
             .floor()

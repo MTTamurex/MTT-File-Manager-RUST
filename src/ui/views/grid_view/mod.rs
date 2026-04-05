@@ -16,7 +16,7 @@ mod virtualization;
 // PERFORMANCE: Tooltip debounce to avoid creation/destruction during scroll
 const TOOLTIP_DELAY_SECS: f32 = 0.3; // Only show tooltip after 300ms hover
                                      // STRICT LIMIT: Minimum zoom allowed to prevent performance degradation
-const MIN_THUMBNAIL_SIZE: f32 = 96.0;
+const MIN_THUMBNAIL_SIZE: f32 = crate::ui::theme::THUMBNAIL_MIN;
 
 #[derive(Clone, Copy)]
 pub struct ScrollPredictor {

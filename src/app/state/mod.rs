@@ -137,7 +137,7 @@ pub struct ImageViewerApp {
 
     // UI state
     pub drive_state: DriveState,
-    pub thumbnail_size: f32, // Zoom: 64-512
+    pub thumbnail_size: f32, // Zoom: 96-512
     pub selected_item: Option<usize>,
     pub selected_file: Option<FileEntry>,
     pub multi_selection: FxHashSet<PathBuf>,
