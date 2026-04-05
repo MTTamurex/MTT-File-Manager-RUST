@@ -128,17 +128,17 @@ pub(super) fn handle_copy(
         (Ok(path), Ok(dest_folder)) => {
             let is_virtual = crate::infrastructure::windows::is_shell_navigation_path(&path, false);
             let native_ok = archive_extract::has_native_support(&[path.clone()]);
-            log::info!("[FileOps] handle_copy: path={}, is_virtual={}, native_support={}", path.display(), is_virtual, native_ok);
+            log::debug!("[FileOps] handle_copy: path={}, is_virtual={}, native_support={}", path.display(), is_virtual, native_ok);
 
             let success = if is_virtual && native_ok {
-                log::info!("[FileOps] Using native archive extraction for: {}", path.display());
+                log::debug!("[FileOps] Using native archive extraction for: {}", path.display());
                 archive_extract::extract_files_from_archive(&[path], &dest_folder, progress)
             } else if is_virtual {
                 shell_operations::copy_item_with_file_op(&path, &dest_folder, hwnd.0)
             } else {
                 shell_operations::copy_item_with_shell(&path, &dest_folder, hwnd.0)
             };
-            log::info!("[FileOps] handle_copy result: success={}", success);
+            log::debug!("[FileOps] handle_copy result: success={}", success);
 
             if success {
                 let _ = result_sender.send(FileOperationResult::CopyCompleted { dest_folder });
@@ -166,17 +166,17 @@ pub(super) fn handle_move(
             // Use IFileOperation for virtual paths (like items inside archives)
             let is_virtual = crate::infrastructure::windows::is_shell_navigation_path(&path, false);
             let native_ok = archive_extract::has_native_support(&[path.clone()]);
-            log::info!("[FileOps] handle_move: path={}, is_virtual={}, native_support={}", path.display(), is_virtual, native_ok);
+            log::debug!("[FileOps] handle_move: path={}, is_virtual={}, native_support={}", path.display(), is_virtual, native_ok);
 
             let success = if is_virtual && native_ok {
-                log::info!("[FileOps] Using native archive extraction (move) for: {}", path.display());
+                log::debug!("[FileOps] Using native archive extraction (move) for: {}", path.display());
                 archive_extract::extract_files_from_archive(&[path.clone()], &dest_folder, progress)
             } else if is_virtual {
                 shell_operations::move_item_with_file_op(&path, &dest_folder, hwnd.0)
             } else {
                 shell_operations::move_item_with_shell(&path, &dest_folder, hwnd.0)
             };
-            log::info!("[FileOps] handle_move result: success={}", success);
+            log::debug!("[FileOps] handle_move result: success={}", success);
 
             if success {
                 if let Some(src) = source_folder {
@@ -208,20 +208,20 @@ pub(super) fn handle_copy_batch(
                 .iter()
                 .any(|p| crate::infrastructure::windows::is_shell_navigation_path(p, false));
             let native_ok = archive_extract::has_native_support(&paths);
-            log::info!("[FileOps] handle_copy_batch: {} paths, has_virtual={}, native_support={}", paths.len(), has_virtual_path, native_ok);
+            log::debug!("[FileOps] handle_copy_batch: {} paths, has_virtual={}, native_support={}", paths.len(), has_virtual_path, native_ok);
             for p in &paths {
-                log::info!("[FileOps]   batch path: {}", p.display());
+                log::debug!("[FileOps]   batch path: {}", p.display());
             }
 
             let success = if has_virtual_path && native_ok {
-                log::info!("[FileOps] Using native archive extraction for batch copy ({} files)", paths.len());
+                log::debug!("[FileOps] Using native archive extraction for batch copy ({} files)", paths.len());
                 archive_extract::extract_files_from_archive(&paths, &dest_folder, progress)
             } else if has_virtual_path {
                 shell_operations::copy_items_with_file_op(&paths, &dest_folder, hwnd.0)
             } else {
                 shell_operations::copy_items_with_shell(&paths, &dest_folder, hwnd.0)
             };
-            log::info!("[FileOps] handle_copy_batch result: success={}", success);
+            log::debug!("[FileOps] handle_copy_batch result: success={}", success);
 
             if success {
                 let _ = result_sender.send(FileOperationResult::CopyCompleted { dest_folder });
@@ -256,17 +256,17 @@ pub(super) fn handle_move_batch(
                 .iter()
                 .any(|p| crate::infrastructure::windows::is_shell_navigation_path(p, false));
             let native_ok = archive_extract::has_native_support(&paths);
-            log::info!("[FileOps] handle_move_batch: {} paths, has_virtual={}, native_support={}", paths.len(), has_virtual_path, native_ok);
+            log::debug!("[FileOps] handle_move_batch: {} paths, has_virtual={}, native_support={}", paths.len(), has_virtual_path, native_ok);
 
             let success = if has_virtual_path && native_ok {
-                log::info!("[FileOps] Using native archive extraction for batch move ({} files)", paths.len());
+                log::debug!("[FileOps] Using native archive extraction for batch move ({} files)", paths.len());
                 archive_extract::extract_files_from_archive(&paths, &dest_folder, progress)
             } else if has_virtual_path {
                 shell_operations::move_items_with_file_op(&paths, &dest_folder, hwnd.0)
             } else {
                 shell_operations::move_items_with_shell(&paths, &dest_folder, hwnd.0)
             };
-            log::info!("[FileOps] handle_move_batch result: success={}", success);
+            log::debug!("[FileOps] handle_move_batch result: success={}", success);
 
             if success && !source_folders.is_empty() {
                 let _ = result_sender.send(FileOperationResult::MoveBatchCompleted {

@@ -207,7 +207,7 @@ pub(super) fn render_results_panel(
         viewport_rect.width()
     };
 
-    // Mouse wheel scroll (same Ã—5 multiplier as list view).
+    // Mouse wheel scroll (same x5 multiplier as list view).
     let pointer_over = ui
         .ctx()
         .pointer_hover_pos()

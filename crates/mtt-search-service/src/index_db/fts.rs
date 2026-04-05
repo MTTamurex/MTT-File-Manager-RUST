@@ -36,7 +36,7 @@ impl FtsSearcher {
         )
         .map_err(|e| format!("FTS searcher open error: {}", e))?;
         conn.execute_batch(&format!(
-            "PRAGMA journal_mode=WAL; PRAGMA busy_timeout={};",
+            "PRAGMA query_only=1; PRAGMA busy_timeout={};",
             FTS_READER_BUSY_TIMEOUT_MS
         ))
             .map_err(|e| format!("FTS searcher PRAGMA error: {}", e))?;
