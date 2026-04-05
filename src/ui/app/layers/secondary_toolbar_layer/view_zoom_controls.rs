@@ -54,7 +54,8 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
         }
         ui.add_sized(
             egui::vec2(80.0, 20.0),
-            egui::Slider::new(&mut app.thumbnail_size, 64.0..=256.0).show_value(false),
+            egui::Slider::new(&mut app.thumbnail_size, crate::ui::theme::THUMBNAIL_MIN..=256.0)
+                .show_value(false),
         );
         ui.label(&*t!("secondary_toolbar.zoom"));
     });
