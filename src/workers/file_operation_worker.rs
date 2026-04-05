@@ -241,13 +241,14 @@ impl Drop for ComGuard {
     }
 }
 
-use crate::infrastructure::archive_extract::SharedExtractionProgress;
+use crate::infrastructure::archive_extract::{ExtractionCancelFlag, SharedExtractionProgress};
 
 /// Starts the file operation worker thread.
 pub(crate) fn start_file_operation_worker(
     receiver: Receiver<FileOperationRequest>,
     result_sender: std::sync::mpsc::Sender<FileOperationResult>,
     extraction_progress: SharedExtractionProgress,
+    extraction_cancel: ExtractionCancelFlag,
 ) {
     std::thread::spawn(move || {
         // Initialize COM as Single-Threaded Apartment (STA)
@@ -255,6 +256,9 @@ pub(crate) fn start_file_operation_worker(
         let _com = ComGuard::init_sta();
 
         while let Ok(request) = receiver.recv() {
+            // Reset cancel flag at the start of each operation
+            extraction_cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 match request {
                     FileOperationRequest::Delete { paths, hwnd } => {
@@ -272,28 +276,28 @@ pub(crate) fn start_file_operation_worker(
                         dest_folder,
                         hwnd,
                     } => {
-                        handlers::handle_copy(path, dest_folder, hwnd, &result_sender, &extraction_progress);
+                        handlers::handle_copy(path, dest_folder, hwnd, &result_sender, &extraction_progress, &extraction_cancel);
                     }
                     FileOperationRequest::Move {
                         path,
                         dest_folder,
                         hwnd,
                     } => {
-                        handlers::handle_move(path, dest_folder, hwnd, &result_sender, &extraction_progress);
+                        handlers::handle_move(path, dest_folder, hwnd, &result_sender, &extraction_progress, &extraction_cancel);
                     }
                     FileOperationRequest::CopyBatch {
                         paths,
                         dest_folder,
                         hwnd,
                     } => {
-                        handlers::handle_copy_batch(paths, dest_folder, hwnd, &result_sender, &extraction_progress);
+                        handlers::handle_copy_batch(paths, dest_folder, hwnd, &result_sender, &extraction_progress, &extraction_cancel);
                     }
                     FileOperationRequest::MoveBatch {
                         paths,
                         dest_folder,
                         hwnd,
                     } => {
-                        handlers::handle_move_batch(paths, dest_folder, hwnd, &result_sender, &extraction_progress);
+                        handlers::handle_move_batch(paths, dest_folder, hwnd, &result_sender, &extraction_progress, &extraction_cancel);
                     }
                     FileOperationRequest::RestoreFromRecycleBin { items } => {
                         handlers::handle_restore_from_recycle_bin(items, &result_sender);

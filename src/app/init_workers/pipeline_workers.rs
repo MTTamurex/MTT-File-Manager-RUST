@@ -36,16 +36,19 @@ pub(in crate::app) fn spawn_file_operation_worker() -> (
     mpsc::Sender<crate::workers::file_operation_worker::FileOperationRequest>,
     mpsc::Receiver<crate::workers::file_operation_worker::FileOperationResult>,
     crate::infrastructure::archive_extract::SharedExtractionProgress,
+    crate::infrastructure::archive_extract::ExtractionCancelFlag,
 ) {
     let (file_op_tx, file_op_rx) = mpsc::channel();
     let (file_op_res_tx, file_op_res_rx) = mpsc::channel();
     let extraction_progress = crate::infrastructure::archive_extract::new_shared_progress();
+    let extraction_cancel = crate::infrastructure::archive_extract::new_cancel_flag();
     crate::workers::file_operation_worker::start_file_operation_worker(
         file_op_rx,
         file_op_res_tx,
         extraction_progress.clone(),
+        extraction_cancel.clone(),
     );
-    (file_op_tx, file_op_res_rx, extraction_progress)
+    (file_op_tx, file_op_res_rx, extraction_progress, extraction_cancel)
 }
 
 pub(in crate::app) fn spawn_global_search_worker(

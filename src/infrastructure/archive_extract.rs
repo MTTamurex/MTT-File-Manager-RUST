@@ -10,6 +10,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::io::{self, BufWriter};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::domain::file_entry::{ends_with_ignore_case, split_archive_path};
@@ -145,9 +146,22 @@ pub struct ExtractionProgress {
 /// Thread-safe handle for extraction progress. `None` means no extraction in progress.
 pub type SharedExtractionProgress = Arc<Mutex<Option<ExtractionProgress>>>;
 
+/// Thread-safe cancellation flag. Set to `true` by the UI to request abort.
+pub type ExtractionCancelFlag = Arc<AtomicBool>;
+
 /// Creates a new shared progress handle (initialized to `None`).
 pub fn new_shared_progress() -> SharedExtractionProgress {
     Arc::new(Mutex::new(None))
+}
+
+/// Creates a new cancel flag (initialized to `false`).
+pub fn new_cancel_flag() -> ExtractionCancelFlag {
+    Arc::new(AtomicBool::new(false))
+}
+
+/// Checks if cancellation was requested.
+fn is_cancelled(cancel: &ExtractionCancelFlag) -> bool {
+    cancel.load(Ordering::Relaxed)
 }
 
 /// Returns true if ALL the given virtual paths point to archive formats
@@ -190,6 +204,7 @@ pub fn extract_files_from_archive(
     paths: &[PathBuf],
     dest_folder: &Path,
     progress: &SharedExtractionProgress,
+    cancel: &ExtractionCancelFlag,
 ) -> bool {
     // Group paths by their parent archive file.
     let mut groups: HashMap<PathBuf, Vec<String>> = HashMap::new();
@@ -244,9 +259,15 @@ pub fn extract_files_from_archive(
             }
         }
 
+        if is_cancelled(cancel) {
+            log::info!("[ArchiveExtract] Cancelled by user");
+            all_ok = false;
+            break;
+        }
+
         let refs: Vec<&str> = internal_paths.iter().map(|s| s.as_str()).collect();
         let result =
-            extract_from_archive(archive_path, &refs, dest_folder, progress, &mut global_extracted);
+            extract_from_archive(archive_path, &refs, dest_folder, progress, cancel, &mut global_extracted);
         match result {
             Ok(count) => {
                 log::info!(
@@ -284,18 +305,19 @@ fn extract_from_archive(
     internal_paths: &[&str],
     dest_folder: &Path,
     progress: &SharedExtractionProgress,
+    cancel: &ExtractionCancelFlag,
     global_extracted: &mut usize,
 ) -> io::Result<usize> {
     let name = archive_path.to_string_lossy();
 
     if ends_with_ignore_case(&name, ".zip") {
-        extract_from_zip(archive_path, internal_paths, dest_folder, progress, global_extracted)
+        extract_from_zip(archive_path, internal_paths, dest_folder, progress, cancel, global_extracted)
     } else if ends_with_ignore_case(&name, ".7z") {
-        extract_from_7z(archive_path, internal_paths, dest_folder, progress, global_extracted)
+        extract_from_7z(archive_path, internal_paths, dest_folder, progress, cancel, global_extracted)
     } else if ends_with_ignore_case(&name, ".rar") {
-        extract_from_rar(archive_path, internal_paths, dest_folder, progress, global_extracted)
+        extract_from_rar(archive_path, internal_paths, dest_folder, progress, cancel, global_extracted)
     } else if is_tar_variant(&name) {
-        extract_from_tar(archive_path, internal_paths, dest_folder, progress, global_extracted)
+        extract_from_tar(archive_path, internal_paths, dest_folder, progress, cancel, global_extracted)
     } else {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
@@ -356,6 +378,7 @@ fn extract_from_zip(
     internal_paths: &[&str],
     dest_folder: &Path,
     progress: &SharedExtractionProgress,
+    cancel: &ExtractionCancelFlag,
     global_extracted: &mut usize,
 ) -> io::Result<usize> {
     let file = fs::File::open(archive_path)?;
@@ -382,6 +405,11 @@ fn extract_from_zip(
     // Extract matching entries.
     let mut extracted = 0;
     for i in 0..archive.len() {
+        if is_cancelled(cancel) {
+            log::info!("[ArchiveExtract/ZIP] Cancelled by user after {} files", extracted);
+            break;
+        }
+
         let mut entry = archive
             .by_index(i)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
@@ -426,6 +454,7 @@ fn extract_from_7z(
     internal_paths: &[&str],
     dest_folder: &Path,
     progress: &SharedExtractionProgress,
+    cancel: &ExtractionCancelFlag,
     global_extracted: &mut usize,
 ) -> io::Result<usize> {
     let matcher = EntryMatcher::new(internal_paths);
@@ -453,6 +482,10 @@ fn extract_from_7z(
     let mut extracted = 0usize;
 
     sevenz_rust::decompress_file_with_extract_fn(archive_path, dest_folder, |entry, reader, _| {
+        if is_cancelled(cancel) {
+            return Ok(false); // abort decompression
+        }
+
         if entry.is_directory() {
             return Ok(true);
         }
@@ -506,6 +539,7 @@ fn extract_from_rar(
     internal_paths: &[&str],
     dest_folder: &Path,
     progress: &SharedExtractionProgress,
+    cancel: &ExtractionCancelFlag,
     global_extracted: &mut usize,
 ) -> io::Result<usize> {
     let matcher = EntryMatcher::new(internal_paths);
@@ -543,6 +577,11 @@ fn extract_from_rar(
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
 
     loop {
+        if is_cancelled(cancel) {
+            log::info!("[ArchiveExtract/RAR] Cancelled by user after {} files", extracted);
+            break;
+        }
+
         let header = archive
             .read_header()
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
@@ -600,6 +639,7 @@ fn extract_from_tar(
     internal_paths: &[&str],
     dest_folder: &Path,
     progress: &SharedExtractionProgress,
+    cancel: &ExtractionCancelFlag,
     global_extracted: &mut usize,
 ) -> io::Result<usize> {
     let file = fs::File::open(archive_path)?;
@@ -627,6 +667,11 @@ fn extract_from_tar(
     let mut extracted = 0usize;
 
     for entry_result in archive.entries()? {
+        if is_cancelled(cancel) {
+            log::info!("[ArchiveExtract/TAR] Cancelled by user after {} files", extracted);
+            break;
+        }
+
         let mut entry = entry_result?;
 
         if entry.header().entry_type().is_dir() {

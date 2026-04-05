@@ -40,7 +40,9 @@ fn render_progress_toast(
     title: String,
     subtitle: Option<String>,
     progress: Option<(usize, usize)>,
-) {
+    show_cancel: bool,
+) -> bool {
+    let mut cancelled = false;
     egui::Area::new(id)
         .fixed_pos(pos)
         .order(egui::Order::Foreground)
@@ -84,6 +86,31 @@ fn render_progress_toast(
                 );
             }
 
+            if show_cancel {
+                let btn_size = 18.0;
+                let btn_rect = egui::Rect::from_min_size(
+                    egui::pos2(rect.max.x - inner_pad - btn_size, rect.min.y + 6.0),
+                    egui::vec2(btn_size, btn_size),
+                );
+                let btn_response = ui.allocate_rect(btn_rect, egui::Sense::click())
+                    .on_hover_text(t!("extract.cancel_tooltip").to_string());
+                let btn_color = if btn_response.hovered() {
+                    egui::Color32::from_rgb(255, 100, 100)
+                } else {
+                    egui::Color32::from_rgb(180, 180, 180)
+                };
+                ui.painter().text(
+                    btn_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "✕",
+                    egui::FontId::proportional(14.0),
+                    btn_color,
+                );
+                if btn_response.clicked() {
+                    cancelled = true;
+                }
+            }
+
             let bar_y = rect.min.y + toast_height - 12.0;
             let bar_left = rect.min.x + text_left;
             let bar_width = toast_width - text_left - inner_pad;
@@ -114,6 +141,7 @@ fn render_progress_toast(
                 ui.painter().rect_filled(fill_rect, 2.0, accent);
             }
         });
+    cancelled
 }
 
 pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
@@ -162,7 +190,7 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
             format!("{} — {}", archive_display, t!("extract.preparing"))
         };
 
-        render_progress_toast(
+        let cancelled = render_progress_toast(
             ctx,
             egui::Id::new("extraction_progress_toast"),
             egui::pos2(base_x, toast_y),
@@ -182,7 +210,17 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
             } else {
                 None
             },
+            true,
         );
+
+        if cancelled {
+            app.file_operation_state
+                .extraction_cancel
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            if let Ok(mut guard) = app.file_operation_state.extraction_progress.lock() {
+                *guard = None;
+            }
+        }
     }
 
     let bulk_progress = app
@@ -242,6 +280,7 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
             } else {
                 None
             },
+            false,
         );
     }
 
