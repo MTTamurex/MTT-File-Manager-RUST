@@ -57,7 +57,7 @@ pub fn process_list_keyboard_input(
     row_height: f32,
     viewport_h: f32,
 ) -> KeyboardNavResult {
-    // Não capturar teclas quando um campo de texto (endereço, busca) está com foco
+    // Do not capture keys when a text field (address, search) has focus
     if ui.ctx().wants_keyboard_input() {
         return KeyboardNavResult::no_action();
     }
@@ -107,7 +107,7 @@ pub fn process_list_keyboard_input(
         );
     }
 
-    // Alt+Enter é reservado para Propriedades — não dispara "abrir"
+    // Alt+Enter is reserved for Properties - do not trigger "open"
     let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.alt);
 
     KeyboardNavResult {
@@ -128,7 +128,7 @@ pub fn process_grid_keyboard_input(
     cell_h: f32,
     viewport_h: f32,
 ) -> KeyboardNavResult {
-    // Não capturar teclas quando um campo de texto (endereço, busca) está com foco
+    // Do not capture keys when a text field (address, search) has focus
     if ui.ctx().wants_keyboard_input() {
         return KeyboardNavResult::no_action();
     }
@@ -184,7 +184,7 @@ pub fn process_grid_keyboard_input(
         );
     }
 
-    // Alt+Enter é reservado para Propriedades — não dispara "abrir"
+    // Alt+Enter is reserved for Properties - do not trigger "open"
     let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.alt);
 
     KeyboardNavResult {

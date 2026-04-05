@@ -218,7 +218,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             app.command_paste(None);
         }
 
-        // Delete: Excluir para lixeira (somente sem Shift)
+        // Delete: move to recycle bin (only without Shift)
         // Skip when a text input (search bar, address bar) has keyboard focus.
         if !text_input_active
             && ctx.input(|i| !i.modifiers.shift && i.key_pressed(egui::Key::Delete))
@@ -227,9 +227,9 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             user_active = true;
         }
 
-        // Shift+Delete: tratado via GetAsyncKeyState abaixo (egui não entrega confiavelmente)
+        // Shift+Delete: handled via GetAsyncKeyState below (egui does not report it reliably)
 
-        // Alt+Enter: Propriedades
+        // Alt+Enter: Properties
         // Skip when a text input has keyboard focus.
         if !text_input_active
             && ctx.input(|i| i.modifiers.alt && i.key_pressed(egui::Key::Enter))
@@ -238,7 +238,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             user_active = true;
         }
 
-        // Ctrl+L: Focar barra de endereços
+        // Ctrl+L: focus address bar
         if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::L)) {
             app.navigation_state.path_input = app.navigation_state.current_path.clone();
             app.is_address_editing = true;
@@ -247,23 +247,23 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             user_active = true;
         }
 
-        // Ctrl+Scroll: Ajustar tamanho dos thumbnails (somente no modo Grade)
-        // eframe/winit converte Ctrl+Scroll em zoom_delta antes do smooth_scroll_delta
-        // Lemos zoom_delta e resetamos o fator de zoom da UI de volta a 1.0
+        // Ctrl+Scroll: adjust thumbnail size (grid mode only)
+        // eframe/winit converts Ctrl+Scroll into zoom_delta before smooth_scroll_delta
+        // Read zoom_delta and reset the UI zoom factor back to 1.0
         let zoom_delta = ctx.input(|i| i.zoom_delta());
         if (zoom_delta - 1.0).abs() > 0.001 && app.view_mode == ViewMode::Grid {
-            // zoom_delta > 1.0 = scroll para cima (aumentar), < 1.0 = diminuir
-            // Escala: cada entalhe da roda gera delta ~0.1 → 0.1 × 24 = ~2.4px por entalhe
+            // zoom_delta > 1.0 = scroll up (increase), < 1.0 = decrease
+            // Scale: each wheel notch produces delta ~0.1 -> 0.1 x 24 = ~2.4px per notch
             let change = (zoom_delta - 1.0) * 24.0;
             app.thumbnail_size = (app.thumbnail_size + change)
                 .clamp(crate::ui::theme::THUMBNAIL_MIN, 256.0);
-            // Impede que o egui aplique o zoom à própria UI
+            // Prevent egui from applying zoom to the UI itself
             ctx.set_zoom_factor(1.0);
             app.save_preferences();
             user_active = true;
         }
 
-        // Ctrl + Shift + N: Nova Pasta
+        // Ctrl + Shift + N: New Folder
         if ctx.input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::N))
             && !app.navigation_state.is_computer_view
             && !app.navigation_state.is_recycle_bin_view

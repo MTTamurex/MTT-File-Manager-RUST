@@ -1,10 +1,10 @@
-﻿# Script para testar o executavel standalone (sem depender de assets externos)
+﻿# Script to test the standalone executable (without depending on external assets)
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "Teste do Executavel Standalone" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-# Criar diretorio temporario para teste
+# Create a temporary directory for testing
 $tempTestDir = Join-Path $env:TEMP "mtt_standalone_test"
 if (Test-Path $tempTestDir) {
     Remove-Item -Path $tempTestDir -Recurse -Force
@@ -31,11 +31,11 @@ Write-Host "   Os icones SVG e a fonte devem aparecer corretamente!" -Foreground
 Write-Host "   Pressione Ctrl+C para encerrar o teste." -ForegroundColor Gray
 Write-Host ""
 
-# Executar o programa
+# Run the program
 Set-Location $tempTestDir
 .\mtt-file-manager.exe
 
-# Cleanup (so executa se o usuario encerrar normalmente)
+# Cleanup (only runs if the user exits normally)
 Write-Host ""
 Write-Host "Limpando arquivos de teste..." -ForegroundColor Yellow
 Set-Location $PSScriptRoot

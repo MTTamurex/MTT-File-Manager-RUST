@@ -1,4 +1,4 @@
-# Script para executar o app e capturar logs de debug
+# Script to run the app and capture debug logs
 Write-Host "MTT File Manager - Diagnostic Console" -ForegroundColor Cyan
 Write-Host ("=" * 80) -ForegroundColor Gray
 Write-Host "Logs serão exibidos em tempo real e salvos em: debug_metadata.log" -ForegroundColor Green

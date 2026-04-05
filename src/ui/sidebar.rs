@@ -224,7 +224,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
         }
     }
 
-    // 2. LIXEIRA (RECYCLE BIN)
+    // 2. RECYCLE BIN
     {
         let is_selected = ctx.is_recycle_bin_view;
         let (mut rect, response) =

@@ -84,7 +84,7 @@ impl ThumbnailDiskCache {
         }
     }
 
-    /// Remove a capa armazenada de uma pasta
+    /// Remove the stored cover for a folder
     /// [WRITER]
     pub fn remove_folder_cover(&self, folder_path: &Path) {
         if let Ok(db) = self.writer.lock() {

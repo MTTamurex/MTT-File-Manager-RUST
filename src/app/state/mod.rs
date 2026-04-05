@@ -320,7 +320,7 @@ pub struct ImageViewerApp {
     // One-shot guard: suppress Enter-to-open in file views after committing address bar input.
     pub suppress_next_enter_open: bool,
 
-    // One-shot: foca a barra de endereÃ§os no prÃ³ximo frame de renderizaÃ§Ã£o do toolbar.
+    // One-shot: focus the address bar on the next toolbar render.
     pub address_bar_focus_request: bool,
 
     // Window handle for native shell interactions

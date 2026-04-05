@@ -29,10 +29,10 @@ pub(super) fn apply_scroll_input(
 pub(super) fn compute_visual_scroll(ui: &Ui, target_scroll: f32, viewport_h: f32, generation: usize) -> (f32, f32) {
     // Scope scroll state to folder generation so visual_scroll resets on navigation
     let scroll_state_id = ui.id().with("scroll_state").with(generation);
-    // Use predicted_dt (fixo, ~16.67ms) em vez de stable_dt (variável).
-    // stable_dt herda picos de latência do eframe/wgpu (tessellation+present),
-    // causando o lerp a "pular" nos frames lentos e "voltar" nos seguintes.
-    // predicted_dt é constante e garante movimento visual uniforme.
+    // Use predicted_dt (fixed, ~16.67ms) instead of stable_dt (variable).
+    // stable_dt inherits latency spikes from eframe/wgpu (tessellation+present),
+    // causing the lerp to "jump" on slow frames and "snap back" on following frames.
+    // predicted_dt is constant and guarantees uniform visual motion.
     let dt = ui.input(|i| i.predicted_dt).min(0.05);
 
     let visual_scroll = ui.ctx().data_mut(|d| {
@@ -58,17 +58,17 @@ pub(super) fn compute_visual_scroll(ui: &Ui, target_scroll: f32, viewport_h: f32
 
     let scroll_delta = (visual_scroll - target_scroll).abs();
     if scroll_delta > 0.5 {
-        // FIX: request_repaint() (imediato) em vez de request_repaint_after(16ms).
+        // FIX: request_repaint() (immediate) instead of request_repaint_after(16ms).
         //
-        // O timer de 16ms não é sincronizado com o vsync do wgpu/driver. Quando
-        // o timer dispara no meio de um ciclo de vsync (ex: 3ms antes do próximo
-        // present), o eframe agenda o update() tarde demais → perde a janela do
-        // vsync → o present() espera mais um ciclo (~16.7ms extra) → dt efetivo
-        // de ~33-42ms em vez de ~16.7ms. Isso acontece a cada ~1 segundo,
-        // criando o padrão rítmico de micro stutter observado nos logs.
+        // The 16ms timer is not synchronized with wgpu/driver vsync. When
+        // the timer fires in the middle of a vsync cycle (e.g. 3ms before the next
+        // present), eframe schedules update() too late -> it misses the
+        // vsync window -> present() waits one more cycle (~16.7ms extra) -> effective dt
+        // of ~33-42ms instead of ~16.7ms. This happens about every ~1 second,
+        // creating the rhythmic micro-stutter pattern observed in the logs.
         //
-        // request_repaint() pede "o mais cedo possível", e o eframe sincroniza
-        // naturalmente com o vsync, eliminando o conflito de timing.
+        // request_repaint() asks for "as early as possible", and eframe synchronizes
+        // naturally with vsync, eliminating the timing conflict.
         ui.ctx().request_repaint();
     }
 
