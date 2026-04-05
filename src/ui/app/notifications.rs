@@ -37,7 +37,6 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
         let bg = egui::Color32::from_rgb(30, 58, 95);
         let accent = egui::Color32::from_rgb(100, 160, 255);
-        let border = egui::Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 180);
 
         egui::Area::new(egui::Id::new("extraction_progress_toast"))
             .fixed_pos(egui::pos2(base_x, toast_y))
@@ -49,16 +48,6 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 );
 
                 ui.painter().rect_filled(rect, 8.0, bg);
-                ui.painter().rect_stroke(
-                    rect,
-                    8.0,
-                    egui::Stroke::new(1.0, border),
-                    egui::StrokeKind::Inside,
-                );
-
-                // Accent bar
-                let bar = egui::Rect::from_min_size(rect.min, egui::vec2(3.5, progress_toast_height));
-                ui.painter().rect_filled(bar, 0.0, accent);
 
                 // Icon (spinning-style: use a simple arrow)
                 ui.painter().text(
@@ -188,9 +177,6 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
             let bg = egui::Color32::from_rgba_unmultiplied(
                 bg_color.r(), bg_color.g(), bg_color.b(), (alpha * 240.0) as u8,
             );
-            let border = egui::Color32::from_rgba_unmultiplied(
-                accent.r(), accent.g(), accent.b(), (alpha * 180.0) as u8,
-            );
 
             egui::Area::new(egui::Id::new(format!("toast_{}", i)))
                 .fixed_pos(egui::pos2(base_x, toast_y))
@@ -201,27 +187,8 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         egui::vec2(toast_width, toast_height),
                     );
 
-                    // Background with border
+                    // Background only; accent is carried by the icon/text colors.
                     ui.painter().rect_filled(rect, 8.0, bg);
-                    ui.painter().rect_stroke(
-                        rect,
-                        8.0,
-                        egui::Stroke::new(1.0, border),
-                        egui::StrokeKind::Inside,
-                    );
-
-                    // Thin accent bar on the left
-                    let bar = egui::Rect::from_min_size(
-                        rect.min,
-                        egui::vec2(3.5, toast_height),
-                    );
-                    ui.painter().rect_filled(
-                        bar,
-                        0.0,
-                        egui::Color32::from_rgba_unmultiplied(
-                            accent.r(), accent.g(), accent.b(), (alpha * 220.0) as u8,
-                        ),
-                    );
 
                     // Icon
                     let icon_color = egui::Color32::from_rgba_unmultiplied(
