@@ -140,6 +140,7 @@ impl PriorityThumbnailQueue {
             directory_index,
             modified,
             source,
+            track_bulk_progress: matches!(source, ThumbnailRequestSource::BulkScan),
         };
 
         // Deduplication with merge: upgrade existing request instead of dropping.
@@ -265,6 +266,11 @@ impl PriorityThumbnailQueue {
                     updated = true;
                 }
 
+                if incoming.track_bulk_progress && !existing.track_bulk_progress {
+                    existing.track_bulk_progress = true;
+                    updated = true;
+                }
+
                 if updated && !is_ssd {
                     items.sort_by(|a, b| match a.priority.cmp(&b.priority) {
                         std::cmp::Ordering::Equal => a.directory_index.cmp(&b.directory_index),
@@ -301,7 +307,7 @@ impl PriorityThumbnailQueue {
     }
 
     /// Pop the next request, optimizing for disk locality on HDDs
-    pub fn pop(&self) -> Option<(PathBuf, usize, u32, IOPriority, u64, ThumbnailRequestSource)> {
+    pub fn pop(&self) -> Option<(PathBuf, usize, u32, IOPriority, u64, ThumbnailRequestSource, bool)> {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 
         loop {
@@ -323,6 +329,7 @@ impl PriorityThumbnailQueue {
                     request.priority,
                     request.modified,
                     request.source,
+                    request.track_bulk_progress,
                 ));
             }
 

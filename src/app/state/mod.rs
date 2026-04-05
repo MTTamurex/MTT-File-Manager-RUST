@@ -411,6 +411,8 @@ pub struct ImageViewerApp {
     pub bulk_thumbnail_scanning: Arc<AtomicBool>,
     pub bulk_thumbnail_was_scanning: bool,
     pub bulk_thumbnail_total: Arc<AtomicUsize>,
+    pub bulk_thumbnail_completed: Arc<AtomicUsize>,
+    pub bulk_thumbnail_progress: crate::workers::thumbnail::SharedBulkThumbnailProgress,
 
     // Media keyboard debounce
     pub last_media_key_press: Instant,

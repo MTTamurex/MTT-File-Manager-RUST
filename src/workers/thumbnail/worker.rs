@@ -10,6 +10,7 @@ use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::io_priority::{self, IOPriority};
 use crate::workers::thumbnail::queue::PriorityThumbnailQueue;
 use crate::workers::thumbnail::types::ThumbnailRequestSource;
+use crate::workers::thumbnail::SharedBulkThumbnailProgress;
 use crossbeam_channel::Sender;
 use eframe::egui;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -103,6 +104,8 @@ pub fn spawn_thumbnail_workers(
     gen_tracker: Arc<AtomicUsize>,
     disk_cache: Arc<ThumbnailDiskCache>,
     pending_deletions: Arc<dashmap::DashMap<std::path::PathBuf, ()>>,
+    bulk_thumbnail_progress: SharedBulkThumbnailProgress,
+    bulk_thumbnail_completed: Arc<AtomicUsize>,
 ) {
     let cpu_count = available_cpu_count();
     let worker_count = compute_thumbnail_worker_count(cpu_count);
@@ -132,6 +135,8 @@ pub fn spawn_thumbnail_workers(
         let semaphore = semaphore.clone();
         let virtual_drive_semaphore = virtual_drive_semaphore.clone();
         let pending_deletions = pending_deletions.clone();
+        let bulk_thumbnail_progress = bulk_thumbnail_progress.clone();
+        let bulk_thumbnail_completed = bulk_thumbnail_completed.clone();
 
         let spawn_result = std::thread::Builder::new()
             .name(format!("thumb-worker-{}", worker_id))
@@ -145,6 +150,8 @@ pub fn spawn_thumbnail_workers(
                     semaphore,
                     virtual_drive_semaphore,
                     pending_deletions,
+                    bulk_thumbnail_progress,
+                    bulk_thumbnail_completed,
                 );
             });
 
@@ -188,6 +195,8 @@ fn thumbnail_worker_loop(
     semaphore: Arc<Semaphore>,
     virtual_drive_semaphore: Arc<Semaphore>,
     pending_deletions: Arc<dashmap::DashMap<std::path::PathBuf, ()>>,
+    bulk_thumbnail_progress: SharedBulkThumbnailProgress,
+    bulk_thumbnail_completed: Arc<AtomicUsize>,
 ) {
     let mut last_repaint = Instant::now();
 
@@ -217,10 +226,16 @@ fn thumbnail_worker_loop(
     // RAII guard ensures THREAD_MODE_BACKGROUND_END is called even on panic.
     let _priority_guard = io_priority::ThreadPriorityGuard::new(IOPriority::Background);
 
-    while let Some((path, req_gen, req_size, req_priority, req_modified, req_source)) = queue.pop() {
+    while let Some((path, req_gen, req_size, req_priority, req_modified, req_source, track_bulk_progress)) = queue.pop() {
+        let participates_in_bulk_scan = track_bulk_progress;
+
         // Check generation match - skip stale requests
-        if req_gen != gen_tracker.load(Ordering::Relaxed) {
+        if !participates_in_bulk_scan && req_gen != gen_tracker.load(Ordering::Relaxed) {
             continue;
+        }
+
+        if participates_in_bulk_scan {
+            crate::workers::thumbnail::set_bulk_thumbnail_current_file(&bulk_thumbnail_progress, &path);
         }
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -260,6 +275,11 @@ fn thumbnail_worker_loop(
                 "unknown".to_string()
             };
             log::error!("[ThumbnailWorker] panic processing {}: {}", path.display(), msg);
+        }
+
+        if participates_in_bulk_scan {
+            bulk_thumbnail_completed.fetch_add(1, Ordering::Relaxed);
+            ctx.request_repaint();
         }
     }
     // _mf and _com dropped here — MFShutdown() then CoUninitialize() guaranteed

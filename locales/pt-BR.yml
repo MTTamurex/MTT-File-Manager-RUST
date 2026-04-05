@@ -52,6 +52,8 @@ status_bar:
   settings: "Abrir configurações do aplicativo"
   vdrive_settings: "Configurar otimização de drives virtuais"
   bulk_thumbnails: "Gerar thumbnails para todas as subpastas"
+  bulk_thumbnails_extracting: "Extraindo thumbnails"
+  bulk_thumbnails_complete: "Extração de thumbnails em lote concluída. (%{count} arquivos)"
   reload_thumbnail: "Recarregar Thumbnail"
 file_info:
   type: "Tipo:"

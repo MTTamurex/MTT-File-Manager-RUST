@@ -8,12 +8,18 @@
 //! - Failure tracking to avoid repeated attempts on broken files
 
 pub mod extraction;
+pub mod progress;
 pub mod processing;
 pub mod queue;
 pub mod types;
 pub mod worker;
 
 pub use queue::PriorityThumbnailQueue;
+pub use progress::{
+    begin_bulk_thumbnail_progress, clear_bulk_thumbnail_progress,
+    new_shared_bulk_thumbnail_progress, set_bulk_thumbnail_current_file,
+    BulkThumbnailProgress, SharedBulkThumbnailProgress,
+};
 pub use types::{ThumbnailPriority, ThumbnailRequest};
 pub use worker::spawn_thumbnail_workers;
 

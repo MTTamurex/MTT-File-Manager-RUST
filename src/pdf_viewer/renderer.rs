@@ -90,30 +90,6 @@ impl PdfRenderer {
         })
     }
 
-    pub fn render_page(
-        &self,
-        index: u32,
-        target_width: u32,
-        target_height: u32,
-    ) -> Result<RenderedPage, String> {
-        with_document(&self.path, |document| {
-            let page = document
-                .pages()
-                .get(index as PdfPageIndex)
-                .map_err(|e| e.to_string())?;
-
-            let bitmap = page
-                .render(target_width as Pixels, target_height as Pixels, None)
-                .map_err(|e| format!("RenderPage: {e}"))?;
-
-            Ok(RenderedPage {
-                width: bitmap.width() as u32,
-                height: bitmap.height() as u32,
-                pixels: bitmap.as_rgba_bytes(),
-            })
-        })
-    }
-
     pub fn page_text_segments(&self, index: u32) -> Result<Vec<PdfTextSegment>, String> {
         with_document(&self.path, |document| {
             let page = document
