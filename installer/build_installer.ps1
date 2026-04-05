@@ -37,8 +37,13 @@ if (-not $SkipBuild) {
     Write-Host "`n[1/3] Skipping cargo build (-SkipBuild)" -ForegroundColor DarkGray
 }
 
-# ── Step 2: Validate required files ───────────────────────────────────
-Write-Host "`n[2/3] Validating required files..." -ForegroundColor Yellow
+# ── Step 2: Validate required files and directories ───────────────────
+Write-Host "`n[2/3] Validating required files and directories..." -ForegroundColor Yellow
+
+$requiredDirectories = @(
+    "$RepoRoot\mpv_ui\portable_config\scripts",
+    "$RepoRoot\mpv_ui\portable_config\script-opts"
+)
 
 $requiredFiles = @(
     "$RepoRoot\target\release\mtt-file-manager.exe",
@@ -46,16 +51,29 @@ $requiredFiles = @(
     "$RepoRoot\target\release\libmpv-2.dll",
     "$RepoRoot\target\release\pdfium.dll",
     "$RepoRoot\appicon.ico",
-    "$RepoRoot\mpv_ui\portable_config\mpv.conf"
+    "$RepoRoot\mpv_ui\portable_config\mpv.conf",
+    "$RepoRoot\mpv_ui\portable_config\scripts\autoload.lua",
+    "$RepoRoot\mpv_ui\portable_config\scripts\modernH.lua",
+    "$RepoRoot\mpv_ui\portable_config\scripts\vsr.lua",
+    "$RepoRoot\mpv_ui\portable_config\script-opts\osc.conf"
 )
 
+foreach ($dir in $requiredDirectories) {
+    if (-not (Test-Path $dir -PathType Container)) {
+        throw "Required directory not found: $dir"
+    }
+
+    $relative = $dir.Replace("$RepoRoot\", "")
+    Write-Host "  OK  $relative/" -ForegroundColor Green
+}
+
 foreach ($file in $requiredFiles) {
-    if (-not (Test-Path $file)) {
+    if (-not (Test-Path $file -PathType Leaf)) {
         throw "Required file not found: $file"
     }
     $size = (Get-Item $file).Length
-    $name = Split-Path $file -Leaf
-    Write-Host "  OK  $name ($([math]::Round($size / 1MB, 1)) MB)" -ForegroundColor Green
+    $relative = $file.Replace("$RepoRoot\", "")
+    Write-Host "  OK  $relative ($([math]::Round($size / 1MB, 1)) MB)" -ForegroundColor Green
 }
 
 # ── Step 3: Run Inno Setup compiler ──────────────────────────────────
