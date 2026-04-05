@@ -33,7 +33,7 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
 
         if ui
             .add(egui::Button::new(
-                egui::RichText::new(sort_symbol).color(egui::Color32::BLACK),
+                egui::RichText::new(sort_symbol).color(theme::text_color(ui.visuals().dark_mode)),
             ))
             .on_hover_text(t!("secondary_toolbar.reverse_order"))
             .clicked()
@@ -57,25 +57,28 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
             theme::color_hover()
         };
 
-        let black_stroke = egui::Stroke::new(1.0, egui::Color32::BLACK);
+        let is_dark = ui.visuals().dark_mode;
+        let fg_color = theme::text_color(is_dark);
+        let combo_bg = theme::input_bg_color(is_dark);
+        let fg_stroke = egui::Stroke::new(1.0, fg_color);
 
-        ui.visuals_mut().widgets.noninteractive.bg_fill = egui::Color32::WHITE;
-        ui.visuals_mut().widgets.noninteractive.fg_stroke = black_stroke;
+        ui.visuals_mut().widgets.noninteractive.bg_fill = combo_bg;
+        ui.visuals_mut().widgets.noninteractive.fg_stroke = fg_stroke;
         ui.visuals_mut().widgets.noninteractive.bg_stroke = egui::Stroke::NONE;
 
-        ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::WHITE;
-        ui.visuals_mut().widgets.inactive.fg_stroke = black_stroke;
+        ui.visuals_mut().widgets.inactive.bg_fill = combo_bg;
+        ui.visuals_mut().widgets.inactive.fg_stroke = fg_stroke;
         ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
 
         ui.visuals_mut().widgets.hovered.bg_fill = hover_color;
-        ui.visuals_mut().widgets.hovered.fg_stroke = black_stroke;
+        ui.visuals_mut().widgets.hovered.fg_stroke = fg_stroke;
         ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
 
         ui.visuals_mut().widgets.active.bg_fill = hover_color;
-        ui.visuals_mut().widgets.active.fg_stroke = black_stroke;
+        ui.visuals_mut().widgets.active.fg_stroke = fg_stroke;
         ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
 
-        ui.visuals_mut().override_text_color = Some(egui::Color32::BLACK);
+        ui.visuals_mut().override_text_color = Some(fg_color);
 
         egui::ComboBox::from_id_salt("sort_mode_secondary")
             .selected_text(match app.sort_mode {

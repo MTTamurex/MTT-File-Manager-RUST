@@ -4,6 +4,7 @@
 //! asynchronous workers, channels, and loading initial state/configuration.
 
 // use eframe::egui;
+use eframe::egui;
 use lru::LruCache;
 use std::num::NonZeroUsize;
 // PERFORMANCE: FxHashSet uses faster hashing for PathBuf keys
@@ -146,10 +147,17 @@ impl ImageViewerApp {
             session_volume,
             show_hidden_files,
             language,
+            theme_mode,
         } = startup_preferences;
 
         // Apply saved language preference
         rust_i18n::set_locale(&language);
+
+        // Apply saved theme preference
+        match theme_mode {
+            crate::app::navigation_state::ThemeMode::Dark => ctx.set_visuals(egui::Visuals::dark()),
+            crate::app::navigation_state::ThemeMode::Light => ctx.set_visuals(egui::Visuals::light()),
+        }
 
         // Load folder locks from database
         let folder_locks = disk_cache.get_all_folder_locks();
@@ -492,6 +500,8 @@ impl ImageViewerApp {
             preferences_last_save: Instant::now(),
 
             session_volume,
+
+            theme_mode,
 
             folder_locks,
             current_folder_locked: false,

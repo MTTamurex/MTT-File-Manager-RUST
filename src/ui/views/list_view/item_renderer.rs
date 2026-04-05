@@ -152,14 +152,14 @@ pub(super) fn render_list_item(
         }
 
         let text_color = if is_selected {
-            crate::ui::theme::COLOR_SELECTION_TEXT
+            crate::ui::theme::selection_text_color(ui.visuals().dark_mode)
         } else {
-            Color32::BLACK
+            crate::ui::theme::text_color(ui.visuals().dark_mode)
         }.gamma_multiply(hidden_opacity);
         let secondary_color = if is_selected {
-            crate::ui::theme::COLOR_SELECTION_TEXT
+            crate::ui::theme::selection_text_color(ui.visuals().dark_mode)
         } else {
-            Color32::from_gray(100)
+            crate::ui::theme::secondary_text_color(ui.visuals().dark_mode)
         }.gamma_multiply(hidden_opacity);
 
         // 1. Icon + Name

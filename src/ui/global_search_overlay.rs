@@ -155,8 +155,9 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
             } else {
                 theme::color_hover()
             };
-            ui.visuals_mut().selection.bg_fill = theme::COLOR_SELECTION;
-            ui.visuals_mut().selection.stroke = egui::Stroke::new(0.0, theme::COLOR_SELECTION_TEXT);
+            let dark_mode = ui.visuals().dark_mode;
+            ui.visuals_mut().selection.bg_fill = theme::selection_color(dark_mode);
+            ui.visuals_mut().selection.stroke = egui::Stroke::new(0.0, theme::selection_text_color(dark_mode));
             ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
             ui.visuals_mut().widgets.hovered.bg_fill = hover_color;
             ui.visuals_mut().widgets.hovered.weak_bg_fill = hover_color;
@@ -341,7 +342,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         app,
                         ctx,
                         modal_max_height,
-                        theme::color_selection_hover(),
+                        theme::selection_hover_color(dark_mode),
                     );
                 });
         });

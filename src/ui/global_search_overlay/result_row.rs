@@ -168,10 +168,11 @@ pub(super) fn render_result_row(
         app.global_search.selected_index = Some(source_idx);
     }
 
+    let dark_mode = ui.visuals().dark_mode;
     let is_selected = app.global_search.selected_index == Some(source_idx);
     if is_selected {
         ui.painter()
-            .rect_filled(row_rect, 4.0, theme::COLOR_SELECTION);
+            .rect_filled(row_rect, 4.0, theme::selection_color(dark_mode));
     } else if row_resp.hovered() {
         ui.painter().rect_filled(row_rect, 4.0, hover_color);
     }
@@ -209,17 +210,17 @@ pub(super) fn render_result_row(
     let file_type = actions::file_type_label(&full_path, is_dir);
     let meta_text = actions::format_result_meta(&file_type);
     let text_color = if is_selected {
-        theme::COLOR_SELECTION_TEXT
+        theme::selection_text_color(dark_mode)
     } else {
         ui.visuals().text_color()
     };
     let secondary_color = if is_selected {
-        theme::COLOR_SELECTION_TEXT
+        theme::selection_text_color(dark_mode)
     } else {
         egui::Color32::from_gray(120)
     };
     let meta_color = if is_selected {
-        theme::COLOR_SELECTION_TEXT
+        theme::selection_text_color(dark_mode)
     } else {
         egui::Color32::from_gray(140)
     };

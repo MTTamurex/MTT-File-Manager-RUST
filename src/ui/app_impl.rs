@@ -206,8 +206,17 @@ impl eframe::App for ImageViewerApp {
                 ctx,
                 self.navigation_state.show_settings_window,
                 &mut self.navigation_state.active_settings_section,
+                &mut self.theme_mode,
             );
             self.navigation_state.show_settings_window = output.keep_open;
+            if output.theme_changed {
+                match self.theme_mode {
+                    crate::app::navigation_state::ThemeMode::Dark => ctx.set_visuals(egui::Visuals::dark()),
+                    crate::app::navigation_state::ThemeMode::Light => ctx.set_visuals(egui::Visuals::light()),
+                }
+                self.save_preferences();
+                self.force_save_preferences();
+            }
             if output.language_changed {
                 self.save_preferences();
                 self.force_save_preferences();

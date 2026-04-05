@@ -211,10 +211,10 @@ pub fn render_toolbar(
                 egui::Sense::click_and_drag(),
             );
 
-            // Draw white background for search field
+            // Draw background for search field
             let visuals = ui.style().interact(&search_resp);
             ui.painter()
-                .rect_filled(search_rect, visuals.corner_radius, egui::Color32::WHITE);
+                .rect_filled(search_rect, visuals.corner_radius, theme::input_bg_color(ui.visuals().dark_mode));
             ui.painter().rect_stroke(
                 search_rect,
                 visuals.corner_radius,
@@ -248,7 +248,7 @@ pub fn render_toolbar(
                 egui::TextEdit::singleline(search_query)
                     .frame(false)
                     .hint_text(hint)
-                    .text_color(egui::Color32::BLACK)
+                    .text_color(theme::text_color(ui.visuals().dark_mode))
                     .vertical_align(egui::Align::Center),
             );
 
@@ -286,9 +286,9 @@ pub fn render_toolbar(
             let (addr_rect, addr_resp) =
                 ui.allocate_exact_size(egui::vec2(addr_width, input_height), egui::Sense::click());
 
-            // Draw white background
+            // Draw background
             ui.painter()
-                .rect_filled(addr_rect, 4.0, egui::Color32::WHITE);
+                .rect_filled(addr_rect, 4.0, theme::input_bg_color(ui.visuals().dark_mode));
             ui.painter().rect_stroke(
                 addr_rect,
                 4.0,
@@ -313,7 +313,7 @@ pub fn render_toolbar(
                         .hint_text(t!("toolbar.path_placeholder"))
                         .id_source("address_edit")
                         .frame(false)
-                        .text_color(egui::Color32::BLACK),
+                        .text_color(theme::text_color(ui.visuals().dark_mode)),
                 );
 
                 let mut close_history_clicked = false;
@@ -396,7 +396,7 @@ pub fn render_toolbar(
                                         egui::Align2::LEFT_CENTER,
                                         display,
                                         egui::TextStyle::Button.resolve(ui.style()),
-                                        egui::Color32::BLACK,
+                                        theme::text_color(ui.visuals().dark_mode),
                                     );
 
                                     if response.clicked() {
@@ -427,13 +427,13 @@ pub fn render_toolbar(
                     addr_ui.label(
                         egui::RichText::new(t!("nav.computer"))
                             .size(13.0)
-                            .color(egui::Color32::BLACK),
+                            .color(theme::text_color(addr_ui.visuals().dark_mode)),
                     );
                 } else if current_path == RECYCLE_BIN_VIEW_ID {
                     addr_ui.label(
                         egui::RichText::new(t!("nav.recycle_bin"))
                             .size(13.0)
-                            .color(egui::Color32::BLACK),
+                            .color(theme::text_color(addr_ui.visuals().dark_mode)),
                     );
                 } else {
                     // M-3: use cached segments — only recomputed on path change
@@ -461,10 +461,10 @@ pub fn render_toolbar(
                                 ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
 
                                 ui.visuals_mut().widgets.active.bg_fill =
-                                    egui::Color32::from_gray(210);
+                                    if ui.visuals().dark_mode { egui::Color32::from_gray(70) } else { egui::Color32::from_gray(210) };
                                 ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
 
-                                ui.button(egui::RichText::new(&display).color(egui::Color32::BLACK))
+                                ui.button(egui::RichText::new(&display).color(theme::text_color(ui.visuals().dark_mode)))
                             })
                             .inner;
 

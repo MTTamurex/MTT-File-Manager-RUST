@@ -29,7 +29,7 @@ use crate::app::file_operation_state::FileOperationState;
 use crate::app::folder_size_state::FolderSizeState;
 use crate::app::global_search_state::GlobalSearchState;
 use crate::app::layout_state::LayoutState;
-use crate::app::navigation_state::NavigationState;
+use crate::app::navigation_state::{NavigationState, ThemeMode};
 use crate::application::ClipboardManager;
 use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
 use crate::domain::thumbnail::ThumbnailData;
@@ -389,7 +389,8 @@ pub struct ImageViewerApp {
 
     // Media player volume â€” session-level (updated on slider/keyboard changes, saved to disk on exit)
     pub session_volume: f32,
-
+    // User-selected theme (Light / Dark)
+    pub theme_mode: ThemeMode,
     // Per-folder locked view preferences
     pub folder_locks: std::collections::HashMap<String, crate::domain::folder_lock::FolderLock>,
     pub current_folder_locked: bool,

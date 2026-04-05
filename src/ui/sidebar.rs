@@ -84,14 +84,15 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
         let is_selected = ctx.is_computer_view;
 
         // Background
+        let dark_mode = ui.visuals().dark_mode;
         if is_selected {
             ui.painter()
-                .rect_filled(header_rect_full, 0.0, crate::ui::theme::COLOR_SELECTION);
+                .rect_filled(header_rect_full, 0.0, crate::ui::theme::selection_color(dark_mode));
         } else if header_response.hovered() && !ctx.is_item_dragging {
             ui.painter().rect_filled(
                 header_rect_full,
                 0.0,
-                crate::ui::theme::color_selection_hover(),
+                crate::ui::theme::selection_hover_color(dark_mode),
             );
         }
 
@@ -119,7 +120,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
             t!("nav.computer"),
             egui::FontId::proportional(12.0),
             if is_selected {
-                crate::ui::theme::COLOR_SELECTION_TEXT
+                crate::ui::theme::selection_text_color(dark_mode)
             } else {
                 ui.visuals().text_color()
             },
@@ -167,12 +168,13 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
         rect.max.x = ui.clip_rect().max.x;
 
         if ui.is_rect_visible(rect) {
+            let dark_mode = ui.visuals().dark_mode;
             if is_selected {
                 ui.painter()
-                    .rect_filled(rect, 0.0, crate::ui::theme::COLOR_SELECTION);
+                    .rect_filled(rect, 0.0, crate::ui::theme::selection_color(dark_mode));
             } else if response.hovered() {
                 ui.painter()
-                    .rect_filled(rect, 0.0, crate::ui::theme::color_selection_hover());
+                    .rect_filled(rect, 0.0, crate::ui::theme::selection_hover_color(dark_mode));
             }
 
             let mut cursor_x = rect.min.x + 12.0;
@@ -210,7 +212,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
                 "OneDrive",
                 egui::FontId::proportional(11.5),
                 if is_selected {
-                    crate::ui::theme::COLOR_SELECTION_TEXT
+                    crate::ui::theme::selection_text_color(dark_mode)
                 } else {
                     ui.visuals().text_color()
                 },
@@ -232,12 +234,13 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
         rect.max.x = ui.clip_rect().max.x;
 
         if ui.is_rect_visible(rect) {
+            let dark_mode = ui.visuals().dark_mode;
             if is_selected {
                 ui.painter()
-                    .rect_filled(rect, 0.0, crate::ui::theme::COLOR_SELECTION);
+                    .rect_filled(rect, 0.0, crate::ui::theme::selection_color(dark_mode));
             } else if response.hovered() && !ctx.is_item_dragging {
                 ui.painter()
-                    .rect_filled(rect, 0.0, crate::ui::theme::color_selection_hover());
+                    .rect_filled(rect, 0.0, crate::ui::theme::selection_hover_color(dark_mode));
             }
 
             let mut cursor_x = rect.min.x + 12.0;
@@ -267,7 +270,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
                 t!("nav.recycle_bin"),
                 egui::FontId::proportional(11.5),
                 if is_selected {
-                    crate::ui::theme::COLOR_SELECTION_TEXT
+                    crate::ui::theme::selection_text_color(dark_mode)
                 } else {
                     ui.visuals().text_color()
                 },
@@ -359,12 +362,13 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
             rect.max.x = ui.clip_rect().max.x;
 
             if ui.is_rect_visible(rect) {
+                let dark_mode = ui.visuals().dark_mode;
                 if is_selected {
                     ui.painter()
-                        .rect_filled(rect, 0.0, crate::ui::theme::COLOR_SELECTION);
+                        .rect_filled(rect, 0.0, crate::ui::theme::selection_color(dark_mode));
                 } else if response.hovered() {
                     ui.painter()
-                        .rect_filled(rect, 0.0, crate::ui::theme::color_selection_hover());
+                        .rect_filled(rect, 0.0, crate::ui::theme::selection_hover_color(dark_mode));
                 }
 
                 let mut cursor_x = rect.min.x + 12.0; // Indentation for drives
@@ -400,7 +404,7 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
                         disk_label,
                         egui::FontId::proportional(11.5),
                         if is_selected {
-                            crate::ui::theme::COLOR_SELECTION_TEXT
+                            crate::ui::theme::selection_text_color(dark_mode)
                         } else {
                             ui.visuals().text_color()
                         },
@@ -501,6 +505,7 @@ fn render_pinned_folders(
         return;
     }
 
+    let dark_mode = ui.visuals().dark_mode;
     let drag_id = egui::Id::new("qa_reorder_drag");
     let drag_src: Option<usize> = ui.ctx().data(|d| d.get_temp(drag_id));
     let mut hover_drop_idx: Option<usize> = None;
@@ -561,10 +566,10 @@ fn render_pinned_folders(
                 );
             } else if is_selected {
                 ui.painter()
-                    .rect_filled(rect, 0.0, crate::ui::theme::COLOR_SELECTION);
+                    .rect_filled(rect, 0.0, crate::ui::theme::selection_color(dark_mode));
             } else if response.hovered() || response.dragged() {
                 ui.painter()
-                    .rect_filled(rect, 0.0, crate::ui::theme::color_selection_hover());
+                    .rect_filled(rect, 0.0, crate::ui::theme::selection_hover_color(dark_mode));
             }
 
             let mut cursor_x = rect.min.x + 12.0;
@@ -590,7 +595,7 @@ fn render_pinned_folders(
             }
 
             let text_color = if is_selected {
-                crate::ui::theme::COLOR_SELECTION_TEXT
+                crate::ui::theme::selection_text_color(dark_mode)
             } else {
                 ui.visuals().text_color()
             };
