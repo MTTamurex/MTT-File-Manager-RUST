@@ -5,6 +5,7 @@ use rust_i18n::t;
 
 use super::helpers::render_section_header;
 use super::item_renderer::render_list_item;
+use super::scroll;
 use super::{ColumnWidths, ListViewContext, ListViewOperations};
 use crate::ui::views::ViewportTracker;
 
@@ -34,6 +35,7 @@ pub(super) fn render_virtualized_content(
     let total_content_height = total_rows as f32 * row_height;
     let viewport_rect = ui.available_rect_before_wrap();
     let viewport_h = viewport_rect.height();
+    let max_scroll = (total_content_height - viewport_h).max(0.0);
 
     // 1. Handle mouse wheel scroll (Manual Source of Truth)
     let pointer_over_viewport = ui.ctx().pointer_hover_pos().is_some_and(|pos| {
@@ -43,15 +45,10 @@ pub(super) fn render_virtualized_content(
                 .layer_id_at(pos)
                 .is_none_or(|layer| layer.order != egui::Order::Foreground)
     });
-    if pointer_over_viewport && !ctx.global_search_active {
-        let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
-        if scroll_delta != 0.0 {
-            *ctx.mut_scroll_offset_y -= scroll_delta * 5.0;
-        }
-    }
+    let consume_scroll = pointer_over_viewport && !ctx.global_search_active;
+    scroll::apply_scroll_input(ui, ctx.mut_scroll_offset_y, max_scroll, consume_scroll);
 
     // 2. Clamp scroll offset
-    let max_scroll = (total_content_height - viewport_h).max(0.0);
     *ctx.mut_scroll_offset_y = ctx.mut_scroll_offset_y.clamp(0.0, max_scroll);
 
     // 2.5 KEYBOARD SCROLL SYNC: Ensure selected item is visible
@@ -75,12 +72,15 @@ pub(super) fn render_virtualized_content(
         }
     }
 
-    let current_scroll = *ctx.mut_scroll_offset_y;
+    let target_scroll = *ctx.mut_scroll_offset_y;
+    let (current_scroll, scroll_delta) =
+        scroll::compute_visual_scroll(ui, target_scroll, viewport_h, ctx.generation);
+    let is_scrolling = scroll_delta > 0.5;
 
     // PERFORMANCE: Track scroll changes for GPU upload throttling
-    if (current_scroll - *ctx.last_scroll_offset).abs() > 0.1 {
+    if (target_scroll - *ctx.last_scroll_offset).abs() > 0.1 {
         *ctx.last_scroll_time = std::time::Instant::now();
-        *ctx.last_scroll_offset = current_scroll;
+        *ctx.last_scroll_offset = target_scroll;
     }
 
     // 3. Render Virtual List
@@ -118,6 +118,7 @@ pub(super) fn render_virtualized_content(
             available_w,
             row_height,
             col_widths,
+            is_scrolling,
             &mut clicked_item,
             &mut double_clicked_item,
             &mut secondary_clicked_item,
@@ -140,7 +141,15 @@ pub(super) fn render_virtualized_content(
 
     // Prefetch and visible range tracking
     if total_rows > 0 {
-        handle_prefetch(ctx, ops, current_scroll, viewport_h, row_height, total_rows);
+        handle_prefetch(
+            ctx,
+            ops,
+            current_scroll,
+            viewport_h,
+            row_height,
+            total_rows,
+            is_scrolling,
+        );
     }
 
     // Fallback global: detect secondary click on empty area if no item was clicked
@@ -274,14 +283,11 @@ fn render_regular_virtualized(
     available_w: f32,
     row_height: f32,
     col_widths: &ColumnWidths,
+    is_scrolling: bool,
     clicked_item: &mut Option<usize>,
     double_clicked_item: &mut Option<usize>,
     secondary_clicked_item: &mut Option<usize>,
 ) {
-    let is_scrolling = std::time::Instant::now()
-        .duration_since(*ctx.last_scroll_time)
-        .as_millis()
-        < 80;
     let overscan = if is_scrolling { 2 } else { 5 };
     let vis_min_row = ((current_scroll / row_height).floor() as usize).saturating_sub(overscan);
     let vis_max_row = (((current_scroll + viewport_h) / row_height).ceil() as usize) + overscan;
@@ -401,6 +407,7 @@ fn handle_prefetch(
     viewport_h: f32,
     row_height: f32,
     total_rows: usize,
+    is_scrolling: bool,
 ) {
     let first_visible_index = (current_scroll / row_height).floor() as usize;
     let last_visible_index = ((current_scroll + viewport_h) / row_height).ceil() as usize;
@@ -412,14 +419,8 @@ fn handle_prefetch(
 
     // PERFORMANCE: On HDD, skip prefetch during active scroll to avoid competing
     // for disk I/O with visible item rendering. Prefetch only when scroll stops.
-    if ctx.is_on_hdd {
-        let is_scrolling = std::time::Instant::now()
-            .duration_since(*ctx.last_scroll_time)
-            .as_millis()
-            < 150;
-        if is_scrolling {
-            return;
-        }
+    if ctx.is_on_hdd && is_scrolling {
+        return;
     }
 
     let tracker = ViewportTracker {

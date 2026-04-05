@@ -5,6 +5,7 @@ mod header;
 mod helpers;
 mod item_renderer;
 mod item_renderer_details;
+mod scroll;
 mod virtualization;
 
 use eframe::egui::{self, Color32, FontId, Ui};
@@ -199,6 +200,7 @@ pub struct ListViewContext<'a> {
     pub renaming_state: Option<(usize, String)>,
     pub focus_rename: bool,
     pub scroll_to_selected: bool, // Scroll to selected item on keyboard navigation
+    pub generation: usize,
     pub is_computer_view: bool,
     pub is_recycle_bin_view: bool,
     pub is_onedrive_folder: bool,
