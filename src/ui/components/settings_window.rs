@@ -1,19 +1,22 @@
-use crate::app::navigation_state::SettingsSection;
+use crate::app::navigation_state::{SettingsSection, ThemeMode};
 use eframe::egui;
 use rust_i18n::t;
 
 pub struct SettingsWindowOutput {
     pub keep_open: bool,
     pub language_changed: bool,
+    pub theme_changed: bool,
 }
 
 pub fn render_settings_window(
     ctx: &egui::Context,
     show_window: bool,
     active_section: &mut SettingsSection,
+    theme_mode: &mut ThemeMode,
 ) -> SettingsWindowOutput {
     let mut keep_open = show_window;
     let mut language_changed = false;
+    let mut theme_changed = false;
 
     egui::Window::new(t!("settings.window_title"))
         .open(&mut keep_open)
@@ -47,6 +50,8 @@ pub fn render_settings_window(
                             .auto_shrink([false, false])
                             .show(ui, |ui| match *active_section {
                                 SettingsSection::General => {
+                                    theme_changed |= crate::ui::components::appearance_settings::render_appearance_settings_section(ui, theme_mode);
+                                    ui.add_space(16.0);
                                     language_changed |= crate::ui::components::language_settings::render_language_settings_section(ui);
                                 }
                                 SettingsSection::VirtualDrives => {
@@ -61,6 +66,7 @@ pub fn render_settings_window(
     SettingsWindowOutput {
         keep_open,
         language_changed,
+        theme_changed,
     }
 }
 

@@ -335,11 +335,12 @@ pub fn render_status_bar(
         } else {
             theme::color_hover()
         };
-        let selection_stroke = egui::Stroke::new(0.0, theme::COLOR_SELECTION_TEXT);
+        let is_dark = ui.visuals().dark_mode;
+        let selection_stroke = egui::Stroke::new(0.0, theme::selection_text_color(is_dark));
 
-        ui.visuals_mut().selection.bg_fill = theme::COLOR_SELECTION;
+        ui.visuals_mut().selection.bg_fill = theme::selection_color(is_dark);
         ui.visuals_mut().selection.stroke = selection_stroke;
-        ui.visuals_mut().override_text_color = Some(egui::Color32::BLACK);
+        ui.visuals_mut().override_text_color = Some(theme::text_color(is_dark));
         ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
         ui.visuals_mut().widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
         ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
@@ -378,7 +379,7 @@ pub fn render_status_bar(
             if let Some((done, total)) = bulk_progress {
                 ui.label(
                     egui::RichText::new(t!("status_bar.processing", done = done, total = total))
-                        .color(egui::Color32::BLACK)
+                        .color(theme::text_color(ui.visuals().dark_mode))
                         .small()
                 );
             } else if !is_computer_view

@@ -205,6 +205,11 @@ settings:
   language_apply_immediately: "Language changes are applied immediately."
   virtual_drives: "Virtual Drives"
   close: "Close"
+  appearance: "Appearance"
+  appearance_description: "Choose the visual theme for the application."
+  theme_light: "Light"
+  theme_dark: "Dark"
+  theme_apply_immediately: "Theme changes are applied immediately."
 preview:
   select_item: "Select a single item to see details"
   items_selected: "%{count} items selected"

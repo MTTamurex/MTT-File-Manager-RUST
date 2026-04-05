@@ -1,6 +1,12 @@
 use crate::application::navigation::NavigationHistory;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ThemeMode {
+    Light,
+    Dark,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SettingsSection {
     General,
     VirtualDrives,

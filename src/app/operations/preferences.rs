@@ -7,6 +7,7 @@
 //! but only writes to disk if >1 second has passed since the last write. This prevents
 //! 20+ synchronous SQLite writes from blocking the UI thread on state changes.
 
+use crate::app::navigation_state::ThemeMode;
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
 use crate::domain::special_paths::is_virtual_path;
@@ -156,6 +157,13 @@ impl ImageViewerApp {
 
         // Language preference
         prefs.push(("language", rust_i18n::locale().to_string()));
+
+        // Theme preference
+        let theme_str = match self.theme_mode {
+            ThemeMode::Light => "light",
+            ThemeMode::Dark => "dark",
+        };
+        prefs.push(("theme_mode", theme_str.to_string()));
 
         // Save list view column widths - Regular view
         prefs.push(("list_col_name_width", self.layout.list_col_name_width.to_string()));

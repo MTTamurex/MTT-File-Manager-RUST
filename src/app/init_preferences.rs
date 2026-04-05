@@ -1,3 +1,4 @@
+use crate::app::navigation_state::ThemeMode;
 use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::ui::theme;
@@ -20,6 +21,7 @@ pub(super) struct StartupPreferences {
     pub(super) session_volume: f32,
     pub(super) show_hidden_files: bool,
     pub(super) language: String,
+    pub(super) theme_mode: ThemeMode,
 }
 
 impl StartupPreferences {
@@ -144,6 +146,14 @@ impl StartupPreferences {
             .get_preference("language")
             .unwrap_or_else(|| "pt-BR".to_string());
 
+        let theme_mode = disk_cache
+            .get_preference("theme_mode")
+            .map(|s| match s.as_str() {
+                "dark" => ThemeMode::Dark,
+                _ => ThemeMode::Light,
+            })
+            .unwrap_or(ThemeMode::Light);
+
         Self {
             sort_mode,
             sort_mode_computer,
@@ -162,6 +172,7 @@ impl StartupPreferences {
             session_volume,
             show_hidden_files,
             language,
+            theme_mode,
         }
     }
 }

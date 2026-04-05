@@ -176,7 +176,7 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
                 egui::Label::new(
                     egui::RichText::new(&item.name)
                         .size(11.0)
-                        .color(egui::Color32::BLACK),
+                        .color(crate::ui::theme::text_color(ui.visuals().dark_mode)),
                 )
                 .truncate(),
             );

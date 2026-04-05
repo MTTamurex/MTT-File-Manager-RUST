@@ -1,3 +1,4 @@
+pub mod appearance_settings;
 pub mod gif_manager;
 pub mod item_slot;
 pub mod language_settings;
