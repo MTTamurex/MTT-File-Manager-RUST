@@ -23,6 +23,18 @@ fn apply_saved_locale() {
     }
 }
 
+fn is_saved_theme_dark() -> bool {
+    let cache_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("MTT-File-Manager")
+        .join("thumbnails");
+    crate::infrastructure::disk_cache::ThumbnailDiskCache::new(cache_dir)
+        .ok()
+        .and_then(|c| c.get_preference("theme_mode"))
+        .map(|s| s == "dark")
+        .unwrap_or(false)
+}
+
 /// Named mutex used to guarantee only one image viewer instance runs at a time.
 const IMAGE_VIEWER_MUTEX_NAME: &str = "Global\\MTTFileManager_ImageViewer_SingleInstance\0";
 
@@ -175,6 +187,8 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
         ..Default::default()
     };
 
+    let dark_mode = is_saved_theme_dark();
+
     eframe::run_native(
         &rust_i18n::t!("imageviewer.title"),
         options,
@@ -182,6 +196,7 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
             Ok(Box::new(app::DedicatedImageViewerApp::new(
                 sequence,
                 external_open_rx,
+                dark_mode,
             )))
         }),
     )

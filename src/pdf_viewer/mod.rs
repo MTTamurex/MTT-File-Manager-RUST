@@ -33,6 +33,18 @@ fn apply_saved_locale() {
     }
 }
 
+fn is_saved_theme_dark() -> bool {
+    let cache_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("MTT-File-Manager")
+        .join("thumbnails");
+    crate::infrastructure::disk_cache::ThumbnailDiskCache::new(cache_dir)
+        .ok()
+        .and_then(|c| c.get_preference("theme_mode"))
+        .map(|s| s == "dark")
+        .unwrap_or(false)
+}
+
 /// Maximum PDF file size accepted by the viewer (512 MB).
 const MAX_PDF_FILE_SIZE: u64 = 512 * 1024 * 1024;
 
@@ -197,14 +209,18 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
         ..Default::default()
     };
 
+    let dark_mode = is_saved_theme_dark();
+
     eframe::run_native(
         &rust_i18n::t!("pdfviewer.title"),
         options,
-        Box::new(move |_cc| match viewer_app::PdfViewerApp::new(path) {
-            Ok(app) => Ok(Box::new(app)),
-            Err(e) => {
-                log::error!("[PDF-VIEWER] failed to open PDF: {}", e);
-                Ok(Box::new(viewer_app::ErrorApp { message: e }))
+        Box::new(move |_cc| {
+            match viewer_app::PdfViewerApp::new(path, dark_mode) {
+                Ok(app) => Ok(Box::new(app)),
+                Err(e) => {
+                    log::error!("[PDF-VIEWER] failed to open PDF: {}", e);
+                    Ok(Box::new(viewer_app::ErrorApp { message: e }))
+                }
             }
         }),
     )
