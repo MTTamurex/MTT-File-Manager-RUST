@@ -354,6 +354,7 @@ drive_slot:
 extract:
   items_extracted: "extraídos"
   preparing: "Preparando…"
+  cancel_tooltip: "Cancelar"
 status_bar_system:
   threads: "Threads: %{count} (pico: %{peak})"
   handles: "Handles: %{count}"
