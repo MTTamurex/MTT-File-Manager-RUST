@@ -108,6 +108,39 @@ impl IconLoader {
         self.failed_drive_icons.clear();
     }
 
+    /// Set of Jumbo icon cache keys currently being loaded in background.
+    /// Tracks file icon Jumbo extractions (separate from drive/folder icons).
+    pub fn is_jumbo_icon_loading(&self, cache_key: &str) -> bool {
+        self.loading_drive_icons.contains(cache_key)
+    }
+
+    /// Enqueue an asynchronous Jumbo icon extraction for the preview panel.
+    ///
+    /// Spawns a background thread to extract the icon, sends the result
+    /// through the async icon channel, and stores it in `icon_cache` (keyed
+    /// with `_Jumbo` suffix) when `poll_async_icons` picks it up.
+    pub fn enqueue_jumbo_icon(&mut self, path: &std::path::Path, is_virtual: bool) {
+        let path_text = path.to_string_lossy();
+        let cache_key = format!("{}_Jumbo", path_text);
+
+        // Already in-flight or previously failed — skip.
+        if self.loading_drive_icons.contains(&cache_key) || self.failed_drive_icons.contains(&cache_key) {
+            return;
+        }
+
+        self.loading_drive_icons.insert(cache_key.clone());
+        let path_owned = path.to_path_buf();
+        let tx = self.icon_result_tx.clone();
+        std::thread::spawn(move || {
+            let data = if is_virtual {
+                windows::extract_shell_icon(&path_owned, IconSize::Jumbo).ok()
+            } else {
+                windows::extract_file_icon_by_path(&path_owned, IconSize::Jumbo).ok()
+            };
+            let _ = tx.send(AsyncIconResult { key: cache_key, data });
+        });
+    }
+
     fn can_run_non_blocking_sync_icon_lookup(
         &mut self,
         path: &std::path::Path,

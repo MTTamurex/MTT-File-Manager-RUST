@@ -119,8 +119,6 @@ pub(super) fn handle_client(
                 return;
             }
 
-            let indices_lock = indices.read();
-
             // FTS5 path: use trigram-indexed search when all tokens are ≥3 chars.
             // Shorter tokens would cause FTS5 to fall back to a full table scan
             // (slower than the in-memory linear scan), so we keep the old path.
@@ -131,11 +129,16 @@ pub(super) fn handle_client(
                 .unwrap_or(0);
             let use_fts = min_token_len >= 3 && fts_searcher.is_some();
 
+            // ── Snapshot candidates under lock, then release before authorization ──
+            // Authorization calls CreateFileW which can be slow (AV, cloud, FUSE).
+            // Holding the RwLock during those calls would block index writers.
             let result = if use_fts {
+                // FTS path: query SQLite (no lock needed), then resolve paths
+                // from the in-memory index under a short lock.
                 match collect_authorized_fts_page(
                     pipe,
                     fts_searcher.as_ref().unwrap(),
-                    &indices_lock,
+                    indices,
                     &text,
                     offset,
                     limit,
@@ -147,11 +150,11 @@ pub(super) fn handle_client(
                             text,
                             e
                         );
-                        collect_authorized_search_page(pipe, &indices_lock, &text, offset, limit)
+                        collect_authorized_search_page(pipe, indices, &text, offset, limit)
                     }
                 }
             } else {
-                collect_authorized_search_page(pipe, &indices_lock, &text, offset, limit)
+                collect_authorized_search_page(pipe, indices, &text, offset, limit)
             };
 
             match result {

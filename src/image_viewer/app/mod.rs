@@ -101,31 +101,43 @@ impl DedicatedImageViewerApp {
     }
 
     fn build_initial_cache(sequence: &ImageSequence, index: usize) -> WindowCache {
-        let mut cache = WindowCache::new(DEFAULT_CACHE_RADIUS);
-        if let Some(path) = sequence.entries.get(index) {
-            match loader::decode_full_frame_with_priority(path, loader::DecodePriority::Interactive)
-            {
-                Ok(frame) => {
-                    cache.put(index, Arc::new(frame));
-                }
-                Err(err) => {
-                    log::warn!("[IMAGE-VIEWER] failed to sync-load image: {}", err);
-                }
-            }
-        }
-        cache
+        // Return an empty cache — the first frame will be loaded asynchronously
+        // by the prefetch engine. This avoids blocking the UI thread with a
+        // synchronous decode during startup (which can be slow for large images,
+        // cold storage, or problematic formats like SVG).
+        let _ = (sequence, index);
+        WindowCache::new(DEFAULT_CACHE_RADIUS)
     }
 
     fn open_requested_path(&mut self, path: std::path::PathBuf, ctx: &egui::Context) {
-        let sequence = match indexer::build_sequence(&path) {
-            Ok(sequence) => sequence,
-            Err(err) => {
-                log::warn!(
-                    "[IMAGE-VIEWER] failed to build sequence for '{}': {}",
-                    path.display(),
-                    err
-                );
-                ImageSequence::single(path.clone())
+        // Build sequence on a background thread to avoid blocking the UI
+        // with directory enumeration and sorting on large/slow folders.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let path_clone = path.clone();
+        std::thread::Builder::new()
+            .name("seq-build".into())
+            .spawn(move || {
+                let sequence = match indexer::build_sequence(&path_clone) {
+                    Ok(sequence) => sequence,
+                    Err(err) => {
+                        log::warn!(
+                            "[IMAGE-VIEWER] failed to build sequence for '{}': {}",
+                            path_clone.display(),
+                            err
+                        );
+                        ImageSequence::single(path_clone)
+                    }
+                };
+                let _ = tx.send(sequence);
+            })
+            .ok();
+
+        // Wait with a bounded timeout so UI isn't stuck forever on pathological I/O.
+        let sequence = match rx.recv_timeout(Duration::from_secs(5)) {
+            Ok(seq) => seq,
+            Err(_) => {
+                log::warn!("[IMAGE-VIEWER] sequence build timed out for '{}'", path.display());
+                ImageSequence::single(path)
             }
         };
 

@@ -53,7 +53,13 @@ impl IconLoader {
                         ),
                         egui::TextureOptions::LINEAR,
                     );
-                    self.drive_icon_cache.insert(result.key, texture);
+                    // Jumbo file icon results go into icon_cache (LRU) so
+                    // get_or_load_icon_sized finds them on subsequent frames.
+                    if result.key.ends_with("_Jumbo") {
+                        self.icon_cache.put(result.key, texture);
+                    } else {
+                        self.drive_icon_cache.insert(result.key, texture);
+                    }
                     uploads += 1;
                 }
                 None => {

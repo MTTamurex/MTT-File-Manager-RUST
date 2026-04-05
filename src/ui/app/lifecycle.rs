@@ -245,38 +245,43 @@ pub fn handle_exit(app: &mut ImageViewerApp) {
     // Stop the GC worker thread before tearing down.
     crate::app::init_workers::stop_gc_worker();
 
-    // ── ROOT CAUSE ──────────────────────────────────────────────────────
-    // A background thread is stuck in NtQueryAttributesFile (kernel mode)
-    // waiting for the OneDrive cloud filter driver (cldflt.sys).
-    //
-    // CancelSynchronousIo ALSO blocks when the driver ignores the cancel
-    // request, so we must fire it from a background thread and NOT wait.
-    // ────────────────────────────────────────────────────────────────────
+    // ── Phase 1: cooperative shutdown ────────────────────────────────────
+    // Signal all background workers to exit by dropping their Senders.
+    // Each worker loop breaks on RecvError and runs its destructors.
+    app.shutdown_background_workers();
+    log::info!("[EXIT] Background worker channels disconnected.");
 
-    // 1. Fire-and-forget: attempt to cancel stuck I/O from a background
-    //    thread so it doesn't block the main thread / UI closure.
+    // Fire CancelSynchronousIo from a background thread to unblock any
+    // threads stuck in kernel-mode I/O (e.g. OneDrive cldflt.sys).
     let _ = std::thread::Builder::new()
         .name("io-cancel".into())
         .spawn(|| {
             cancel_all_pending_io();
         });
 
-    // 2. Shut down libmpv to release GPU/decoder resources.
+    // Shut down libmpv to release GPU/decoder resources.
     if let Some(preview) = app.media_preview.as_mut() {
         preview.shutdown();
     }
     app.media_preview = None;
 
-    // 3. Kill standalone video player process if running
+    // Kill standalone video player process if running
     app.kill_video_player_process();
 
-    // 4. Persist user preferences
+    // Persist user preferences
     app.force_save_preferences();
-    log::info!("[EXIT] Preferences saved. Terminating.");
+    log::info!("[EXIT] Preferences saved.");
 
-    // 5. Force-kill immediately. The io-cancel thread may still be
-    //    blocked in CancelSynchronousIo — that's fine, TerminateProcess
-    //    will tear down the whole process (including that thread).
+    // ── Phase 2: bounded wait ────────────────────────────────────────────
+    // Give workers a short grace period to finish cleanup. Most will exit
+    // almost instantly once their channel is disconnected.
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    log::info!("[EXIT] Grace period elapsed. Exiting process.");
+
+    // ── Phase 3: hard-kill as last resort ────────────────────────────────
+    // Only force-kill if normal exit doesn't complete. The io-cancel
+    // thread may still be blocked in CancelSynchronousIo — that's fine,
+    // TerminateProcess will tear down the whole process.
     unsafe {
         windows::Win32::System::Threading::TerminateProcess(
             windows::Win32::System::Threading::GetCurrentProcess(),

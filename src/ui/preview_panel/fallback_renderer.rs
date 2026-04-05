@@ -123,16 +123,30 @@ pub fn render_fallback(
         // Force is_folder=false for archives to get the archive icon
         let treat_as_folder = file.is_dir && !file.is_archive();
 
-        if let Some(icon) = item_icon_loader.get_or_load_icon_sized(
+        // First try non-blocking: returns cached Jumbo icon if available.
+        let icon = item_icon_loader.get_or_load_icon_sized(
             ui.ctx(),
             &file.path,
             IconSize::Jumbo,
             treat_as_folder,
-            true, // allow_blocking: preview panel renders a single selected file,
-                  // so a one-time ~1-5ms synchronous extraction is acceptable.
-                  // The async icon workers only populate _Large keys, not _Jumbo,
-                  // so non-blocking always misses for Jumbo and returns None.
-        ) {
+            false, // never block the UI thread
+        ).or_else(|| {
+            // Jumbo not cached yet — trigger async extraction and show Large
+            // fallback in the meantime.
+            let path_lower = file.path.to_string_lossy().to_lowercase();
+            let is_virtual = crate::domain::file_entry::path_contains_archive_segment(&path_lower);
+            item_icon_loader.enqueue_jumbo_icon(&file.path, is_virtual);
+            // Try Large as immediate fallback.
+            item_icon_loader.get_or_load_icon_sized(
+                ui.ctx(),
+                &file.path,
+                IconSize::Large,
+                treat_as_folder,
+                false,
+            )
+        });
+
+        if let Some(icon) = icon {
             let image_resp = ui.add(
                 egui::Image::new(&icon).max_size(egui::vec2(icon_size * 0.8, icon_size * 0.8)),
             );

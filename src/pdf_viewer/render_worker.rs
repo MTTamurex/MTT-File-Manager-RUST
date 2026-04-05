@@ -78,7 +78,7 @@ fn worker_loop(
     repaint: egui::Context,
     init_error: Arc<std::sync::Mutex<Option<String>>>,
 ) {
-    let renderer = match PdfRenderer::open(&path) {
+    let _renderer = match PdfRenderer::open(&path) {
         Ok(r) => r,
         Err(err) => {
             log::error!("[PDF-RENDER] failed to open {}: {err}", path.display());
@@ -86,6 +86,23 @@ fn worker_loop(
                 *slot = Some(err);
             }
             repaint.request_repaint();
+            return;
+        }
+    };
+
+    // Keep a persistent Pdfium + document handle open for the lifetime of
+    // this worker, avoiding repeated file open/close on every render.
+    let pdfium = match super::renderer::pdfium() {
+        Ok(p) => p,
+        Err(err) => {
+            log::error!("[PDF-RENDER] failed to init pdfium: {err}");
+            return;
+        }
+    };
+    let document = match pdfium.load_pdf_from_file(&path, None) {
+        Ok(d) => d,
+        Err(err) => {
+            log::error!("[PDF-RENDER] failed to load document: {err}");
             return;
         }
     };
@@ -105,7 +122,29 @@ fn worker_loop(
         }
 
         for (_, req) in latest {
-            match renderer.render_page(req.page_idx, req.width, req.height) {
+            // Use the cached document handle instead of reopening.
+            let render_result = (|| -> Result<super::renderer::RenderedPage, String> {
+                let page = document
+                    .pages()
+                    .get(req.page_idx as pdfium_render::prelude::PdfPageIndex)
+                    .map_err(|e| e.to_string())?;
+
+                let bitmap = page
+                    .render(
+                        req.width as pdfium_render::prelude::Pixels,
+                        req.height as pdfium_render::prelude::Pixels,
+                        None,
+                    )
+                    .map_err(|e| format!("RenderPage: {e}"))?;
+
+                Ok(super::renderer::RenderedPage {
+                    width: bitmap.width() as u32,
+                    height: bitmap.height() as u32,
+                    pixels: bitmap.as_rgba_bytes(),
+                })
+            })();
+
+            match render_result {
                 Ok(p) => {
                     let _ = tx.send(RenderResult {
                         page_idx: req.page_idx,
