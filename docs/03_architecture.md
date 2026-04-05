@@ -194,7 +194,7 @@ System access, Windows integration, and data persistence.
 - `device_change.rs` — Device change monitoring
 - `shell_folder.rs` — Shell special folders
 - `system_info.rs` — System information
-- `window_corners.rs` — Window corner styling
+- `window_corners.rs` — Window corner styling and native dark title bar (`DwmSetWindowAttribute` with `DWMWA_USE_IMMERSIVE_DARK_MODE`)
 - `window_subclass.rs` — Window subclassing for customization
 
 **Other Infrastructure**:
@@ -342,7 +342,8 @@ Process Input → Update State → Render UI       │ (60 FPS loop)
 4. In `ImageViewerApp::new()`:
    - Create communication channels (multiple workers)
    - Initialize worker threads (thumbnails, files, icons, metadata, covers, folder previews)
-   - Load preferences from SQLite
+   - Load preferences from SQLite (including theme mode)
+   - Apply saved theme visuals (`Visuals::dark()` / `Visuals::light()`) on first frame
    - Configure caches and indices
    - Initialize filesystem watcher (`notify` per-folder by default; drive-wide `ReadDirectoryChangesW` opt-in via `MTT_ENABLE_DRIVE_WATCHER=1`)
    - Load initial state

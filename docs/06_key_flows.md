@@ -348,3 +348,50 @@ Toolbar for navigation [pdf_viewer/toolbar.rs]
 
 **Key files**: `pdf_viewer/mod.rs`, `pdf_viewer/viewer_app.rs`, `pdf_viewer/renderer.rs`, `pdf_viewer/render_worker.rs`, `pdf_viewer/selection.rs`
 
+## 15. Theme Switching (Dark / Light Mode)
+
+**Trigger**: User selects a theme in Settings > Appearance.
+
+```
+User selects Dark or Light in appearance_settings
+    ↓
+ThemeMode updated in app state [app/navigation_state.rs]
+    ↓
+ctx.set_visuals(Visuals::dark() / Visuals::light()) applied immediately [ui/app_impl.rs]
+    ↓
+Dark-mode-aware helper functions adjust all UI colors [ui/theme.rs]
+    ↓
+SVG icons swap dark pixels for light equivalents (preserving accent colors) [ui/svg_icons.rs]
+    ↓
+Preference persisted to SQLite (key: "theme_mode", value: "dark"/"light") [app/operations/preferences.rs]
+```
+
+**Startup restoration** (main app):
+```
+Load "theme_mode" from SQLite [app/init_preferences.rs]
+    ↓
+On first frame: ctx.set_visuals() in lifecycle.rs (deferred because eframe
+    can override visuals set during the creator callback)
+```
+
+**Viewer processes** (image viewer & PDF viewer):
+```
+Viewer process starts (--image-viewer / --pdf-viewer flag)
+    ↓
+is_saved_theme_dark() reads "theme_mode" from SQLite [image_viewer/mod.rs, pdf_viewer/mod.rs]
+    ↓
+dark_mode bool passed to viewer app struct
+    ↓
+First frame: ctx.set_visuals() + DwmSetWindowAttribute(DWMWA_USE_IMMERSIVE_DARK_MODE)
+    to set both egui visuals AND native Windows title bar color
+    [image_viewer/app/mod.rs, pdf_viewer/viewer_app.rs, infrastructure/windows/window_corners.rs]
+```
+
+**Key details**:
+- `ThemeMode` enum: `Light` | `Dark` (defined in `app/navigation_state.rs`)
+- Color helpers in `ui/theme.rs`: `text_color()`, `secondary_text_color()`, `input_bg_color()`, `selection_color()`, `selection_text_color()`, `selection_hover_color()`, `header_active_bg()` — all take `dark_mode: bool`
+- Native title bar darkening uses `DwmSetWindowAttribute` with attribute 20 (`DWMWA_USE_IMMERSIVE_DARK_MODE`) on Windows 10 build 18985+
+- Duotone SVG icons replace only dark/black pixels (rgb_sum < alpha/2) with the theme color, preserving blue accent pixels (#7AB8FF)
+
+**Key files**: `app/navigation_state.rs`, `ui/components/appearance_settings.rs`, `ui/theme.rs`, `ui/svg_icons.rs`, `ui/app_impl.rs`, `ui/app/lifecycle.rs`, `app/operations/preferences.rs`, `image_viewer/mod.rs`, `image_viewer/app/mod.rs`, `pdf_viewer/mod.rs`, `pdf_viewer/viewer_app.rs`, `infrastructure/windows/window_corners.rs`
+

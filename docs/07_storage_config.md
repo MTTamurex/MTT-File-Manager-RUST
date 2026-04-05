@@ -42,7 +42,7 @@ Stores user preferences as key-value pairs.
 | `key` | TEXT (PK) | Preference key |
 | `value` | TEXT | Preference value |
 
-**Stored preference keys**: `sort_mode`, `sort_mode_computer`, `sort_mode_normal`, `sort_descending`, `folders_position`, `thumbnail_size`, `view_mode`, `show_preview_panel`, `upload_budget_ms`, `window_width`, `window_height`, `window_is_maximized`, `sidebar_left_width`, `sidebar_right_width`, `last_folder`, `media_volume`, `show_hidden_files`, `language`, `list_col_name_width`, `list_col_date_width`, `list_col_type_width`, `list_col_size_width`, `list_col_onedrive_name_width`, `list_col_onedrive_date_width`, `list_col_onedrive_type_width`, `list_col_onedrive_size_width`, `list_col_onedrive_status_width`, `list_col_computer_name_width`, `list_col_computer_total_width`, `list_col_computer_free_width`
+**Stored preference keys**: `sort_mode`, `sort_mode_computer`, `sort_mode_normal`, `sort_descending`, `folders_position`, `thumbnail_size`, `view_mode`, `show_preview_panel`, `upload_budget_ms`, `window_width`, `window_height`, `window_is_maximized`, `sidebar_left_width`, `sidebar_right_width`, `last_folder`, `media_volume`, `show_hidden_files`, `language`, `theme_mode`, `list_col_name_width`, `list_col_date_width`, `list_col_type_width`, `list_col_size_width`, `list_col_onedrive_name_width`, `list_col_onedrive_date_width`, `list_col_onedrive_type_width`, `list_col_onedrive_size_width`, `list_col_onedrive_status_width`, `list_col_computer_name_width`, `list_col_computer_total_width`, `list_col_computer_free_width`
 
 ### Table: `folder_covers`
 Stores user-selected cover image for folders (which image to use as folder thumbnail).

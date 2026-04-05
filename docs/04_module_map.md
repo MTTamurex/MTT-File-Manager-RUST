@@ -19,7 +19,7 @@ src/
 │   ├── folder_size_state.rs         # Folder size computation state
 │   ├── global_search_state.rs       # Global search session state
 │   ├── layout_state.rs              # Layout preferences
-│   ├── navigation_state.rs          # Navigation state & history
+│   ├── navigation_state.rs          # Navigation state, history & ThemeMode enum
 │   ├── live_file_size.rs              # Live file size monitoring state
 │   ├── ui_state.rs                  # UI preferences state
 │   ├── init.rs                      # ImageViewerApp::new() initialization
@@ -167,16 +167,16 @@ src/
 │       ├── shell_operations.rs      # Shell file operations
 │       ├── shell_operations/        # Shell operations submodules
 │       ├── system_info.rs           # System information
-│       ├── window_corners.rs        # Window corner styling
+│       ├── window_corners.rs        # Window corner styling & dark title bar (DWM)
 │       └── window_subclass.rs       # Window subclassing
 │
 ├── ui/                              # User interface
 │   ├── mod.rs
 │   ├── app_impl.rs                  # eframe::App implementation
 │   ├── cache.rs                     # Texture/icon cache manager
-│   ├── theme.rs                     # UI theming
+│   ├── theme.rs                     # UI theming (color constants, dark-mode-aware helpers)
 │   ├── widgets.rs                   # Custom egui widgets
-│   ├── svg_icons.rs                 # SVG icon renderer
+│   ├── svg_icons.rs                 # SVG icon renderer (duotone dark-mode support)
 │   ├── toolbar.rs                   # Top toolbar
 │   ├── sidebar.rs                   # Side panel
 │   ├── navigation.rs                # Navigation UI
@@ -210,6 +210,7 @@ src/
 │   │   ├── gif_manager.rs           # GIF playback manager
 │   │   ├── video_controls_state.rs  # Video controls state
 │   │   ├── language_settings.rs     # Language settings component
+│   │   ├── appearance_settings.rs   # Theme (dark/light) settings component
 │   │   ├── virtual_drive_settings.rs # Virtual drive settings
 │   │   ├── item_slot/               # Item slot rendering (drive/folder/file)
 │   │   ├── mpv/                     # mpv integration
