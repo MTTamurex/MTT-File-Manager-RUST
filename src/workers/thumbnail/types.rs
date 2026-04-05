@@ -28,4 +28,5 @@ pub struct ThumbnailRequest {
     /// When 0, falls back to reading metadata from disk.
     pub modified: u64,
     pub source: ThumbnailRequestSource,
+    pub track_bulk_progress: bool,
 }

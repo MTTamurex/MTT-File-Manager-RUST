@@ -7,7 +7,10 @@ use crate::infrastructure::folder_compose::FolderComposer;
 use crate::infrastructure::icon_disk_cache::IconDiskCache;
 use crate::infrastructure::onedrive;
 use crate::infrastructure::windows as windows_infra;
-use crate::workers::thumbnail::{spawn_thumbnail_workers, PriorityThumbnailQueue};
+use crate::workers::thumbnail::{
+    new_shared_bulk_thumbnail_progress, spawn_thumbnail_workers, PriorityThumbnailQueue,
+    SharedBulkThumbnailProgress,
+};
 use eframe::egui;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -48,6 +51,10 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) shared_gen: Arc<AtomicUsize>,
     pub(in crate::app) img_rx: crossbeam_channel::Receiver<crate::domain::thumbnail::ThumbnailData>,
     pub(in crate::app) pending_deletions: Arc<dashmap::DashMap<PathBuf, ()>>,
+    pub(in crate::app) bulk_thumbnail_progress: SharedBulkThumbnailProgress,
+    pub(in crate::app) bulk_thumbnail_scanning: Arc<AtomicBool>,
+    pub(in crate::app) bulk_thumbnail_total: Arc<AtomicUsize>,
+    pub(in crate::app) bulk_thumbnail_completed: Arc<AtomicUsize>,
     pub(in crate::app) font_rx: mpsc::Receiver<egui::FontDefinitions>,
 
     pub(in crate::app) icon_req_tx: mpsc::Sender<(PathBuf, usize)>,
@@ -150,6 +157,10 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     let (img_tx, img_rx) = crossbeam_channel::bounded(THUMBNAIL_RESULT_CHANNEL_CAPACITY);
     let thumbnail_queue = Arc::new(PriorityThumbnailQueue::new());
     let shared_gen = Arc::new(AtomicUsize::new(0));
+    let bulk_thumbnail_progress = new_shared_bulk_thumbnail_progress();
+    let bulk_thumbnail_scanning = Arc::new(AtomicBool::new(false));
+    let bulk_thumbnail_total = Arc::new(AtomicUsize::new(0));
+    let bulk_thumbnail_completed = Arc::new(AtomicUsize::new(0));
 
     onedrive::init_onedrive_paths();
     let directory_cache = Arc::new(DirectoryCache::new());
@@ -164,6 +175,8 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         shared_gen.clone(),
         disk_cache.clone(),
         pending_deletions.clone(),
+        bulk_thumbnail_progress.clone(),
+        bulk_thumbnail_completed.clone(),
     );
 
     // --- Icon disk cache: persist extension icons across app launches ---
@@ -263,6 +276,10 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         shared_gen,
         img_rx,
         pending_deletions,
+        bulk_thumbnail_progress,
+        bulk_thumbnail_scanning,
+        bulk_thumbnail_total,
+        bulk_thumbnail_completed,
         font_rx,
         icon_req_tx,
         icon_res_rx,

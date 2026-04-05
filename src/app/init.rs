@@ -98,6 +98,10 @@ impl ImageViewerApp {
             shared_gen,
             img_rx,
             pending_deletions,
+            bulk_thumbnail_progress,
+            bulk_thumbnail_scanning,
+            bulk_thumbnail_total,
+            bulk_thumbnail_completed,
             font_rx,
             icon_req_tx,
             icon_res_rx,
@@ -525,9 +529,11 @@ impl ImageViewerApp {
             ),
 
             // BULK THUMBNAIL SCAN
-            bulk_thumbnail_scanning: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            bulk_thumbnail_scanning,
             bulk_thumbnail_was_scanning: false,
-            bulk_thumbnail_total: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            bulk_thumbnail_total,
+            bulk_thumbnail_completed,
+            bulk_thumbnail_progress,
 
             // Media keyboard debounce
             last_media_key_press: std::time::Instant::now(),

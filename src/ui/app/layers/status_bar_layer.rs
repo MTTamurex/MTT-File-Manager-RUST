@@ -1,35 +1,35 @@
 use crate::app::ImageViewerApp;
 use eframe::egui;
+use rust_i18n::t;
 
 pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context) {
-    // Detect bulk scan completion: scan thread finished AND queue fully drained
+    // Detect bulk scan completion using bulk-specific counters instead of the shared queue.
     let is_scanning = app.bulk_thumbnail_scanning.load(std::sync::atomic::Ordering::Relaxed);
     let bulk_total = app.bulk_thumbnail_total.load(std::sync::atomic::Ordering::Relaxed);
-    let queue_pending = app.thumbnail_queue.pending_count();
+    let bulk_completed = app.bulk_thumbnail_completed.load(std::sync::atomic::Ordering::Relaxed);
+    let bulk_active = is_scanning || (bulk_total > 0 && bulk_completed < bulk_total);
 
-    // Completion = was scanning, scan thread finished, and queue is empty
-    if app.bulk_thumbnail_was_scanning && !is_scanning && bulk_total > 0 && queue_pending == 0 {
+    if app.bulk_thumbnail_was_scanning && !is_scanning && bulk_total > 0 && bulk_completed >= bulk_total {
         app.notifications.push(
             crate::application::AppNotification::success(
-                format!("Bulk thumbnail extraction complete! ({} files)", bulk_total)
+                t!("status_bar.bulk_thumbnails_complete", count = bulk_total).to_string()
             ).with_duration(std::time::Duration::from_secs(6))
         );
         app.bulk_thumbnail_total.store(0, std::sync::atomic::Ordering::Relaxed);
+        app.bulk_thumbnail_completed.store(0, std::sync::atomic::Ordering::Relaxed);
+        crate::workers::thumbnail::clear_bulk_thumbnail_progress(&app.bulk_thumbnail_progress);
         app.bulk_thumbnail_was_scanning = false;
-    } else if !is_scanning && !app.bulk_thumbnail_was_scanning {
-        // Not scanning — nothing to do
+    } else if app.bulk_thumbnail_was_scanning && !is_scanning && bulk_total == 0 {
+        app.bulk_thumbnail_completed.store(0, std::sync::atomic::Ordering::Relaxed);
+        crate::workers::thumbnail::clear_bulk_thumbnail_progress(&app.bulk_thumbnail_progress);
+        app.bulk_thumbnail_was_scanning = false;
     } else {
-        app.bulk_thumbnail_was_scanning = is_scanning || queue_pending > 0;
+        app.bulk_thumbnail_was_scanning = bulk_active;
     }
 
-    // Calculate progress for status bar display
-    let bulk_progress = if bulk_total > 0 && (is_scanning || queue_pending > 0) {
-        let done = bulk_total.saturating_sub(queue_pending);
+    if bulk_active || is_scanning {
         ctx.request_repaint(); // Keep UI refreshing while processing
-        Some((done, bulk_total))
-    } else {
-        None
-    };
+    }
 
     egui::TopBottomPanel::bottom("status_bar")
         .exact_height(24.0)
@@ -47,7 +47,7 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                 app.total_items,
                 app.navigation_state.is_computer_view,
                 app.navigation_state.is_recycle_bin_view,
-                bulk_progress,
+                bulk_active || is_scanning,
                 &mut app.show_hidden_files,
                 video_preview_active,
             );
@@ -63,17 +63,17 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                     let generation = app.generation;
                     let scanning_flag = app.bulk_thumbnail_scanning.clone();
                     let total_flag = app.bulk_thumbnail_total.clone();
+                    let completed_flag = app.bulk_thumbnail_completed.clone();
+                    let progress_state = app.bulk_thumbnail_progress.clone();
                     let ctx_clone = app.ui_ctx.clone();
                     let disk_cache = app.disk_cache.clone();
                     let is_virtual_drive = crate::infrastructure::io_priority::is_virtual_drive_path(&root);
 
                     scanning_flag.store(true, std::sync::atomic::Ordering::Relaxed);
                     total_flag.store(0, std::sync::atomic::Ordering::Relaxed);
-                    app.notifications.push(
-                        crate::application::AppNotification::info(
-                            "Bulk thumbnail scan started..."
-                        )
-                    );
+                    completed_flag.store(0, std::sync::atomic::Ordering::Relaxed);
+                    crate::workers::thumbnail::begin_bulk_thumbnail_progress(&progress_state, &root);
+                    ctx.request_repaint();
 
                     std::thread::Builder::new()
                         .name("bulk-thumbnail-scan".into())
@@ -108,6 +108,7 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                                 if disk_cache.get(path, modified).is_some() {
                                     continue;
                                 }
+                                crate::workers::thumbnail::set_bulk_thumbnail_current_file(&progress_state, path);
                                 queue.push_bulk_scan(
                                     path.to_path_buf(),
                                     generation,

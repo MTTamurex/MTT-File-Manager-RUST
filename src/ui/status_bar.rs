@@ -323,7 +323,7 @@ pub fn render_status_bar(
     total_items: usize,
     is_computer_view: bool,
     is_recycle_bin_view: bool,
-    bulk_progress: Option<(usize, usize)>,
+    bulk_scan_active: bool,
     show_hidden_files: &mut bool,
     video_preview_active: bool,
 ) -> StatusBarAction {
@@ -376,26 +376,27 @@ pub fn render_status_bar(
             }
 
             // === BULK THUMBNAIL SCAN button ===
-            if let Some((done, total)) = bulk_progress {
-                ui.label(
-                    egui::RichText::new(t!("status_bar.processing", done = done, total = total))
-                        .color(theme::text_color(ui.visuals().dark_mode))
-                        .small()
-                );
-            } else if !is_computer_view
-                && widgets::toggle_icon_button_sized(
-                    ui,
-                    svg_manager,
-                    "image",
-                    false,
-                    &t!("status_bar.bulk_thumbnails"),
-                    theme::ICON_SIZE_SM,
-                    1.0,
-                    0.75,
-                )
-                .clicked()
-            {
-                action = StatusBarAction::BulkThumbnailScan;
+            if !is_computer_view {
+                ui.scope(|ui| {
+                    if bulk_scan_active {
+                        ui.disable();
+                    }
+
+                    if widgets::toggle_icon_button_sized(
+                        ui,
+                        svg_manager,
+                        "image",
+                        bulk_scan_active,
+                        &t!("status_bar.bulk_thumbnails"),
+                        theme::ICON_SIZE_SM,
+                        1.0,
+                        0.75,
+                    )
+                    .clicked()
+                    {
+                        action = StatusBarAction::BulkThumbnailScan;
+                    }
+                });
             }
 
             ui.add(egui::Separator::default().grow(6.0));
