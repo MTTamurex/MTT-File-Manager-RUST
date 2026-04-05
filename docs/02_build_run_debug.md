@@ -26,6 +26,25 @@ winget install Rustlang.Rustup
 # Place libmpv-2.dll in the same directory as the executable or in PATH
 ```
 
+### pdfium Runtime Staging
+```powershell
+# build.rs tries to stage pdfium.dll automatically for local builds.
+# Supported lookup locations:
+#   .\vendor\pdfium.dll
+#   .\vendor\pdfium\pdfium.dll
+#   $env:PDFIUM_DYNAMIC_LIB_PATH\pdfium.dll
+
+# If automatic staging does not happen, place pdfium.dll next to the executable
+# before running the app or building the installer.
+```
+
+### Audio Runtime Notes
+- Audio-only files are routed to the standalone mpv player and rendered with a real-time waveform visualization.
+- Explicit fast-path audio extension handling includes: `mp3`, `wav`, `ogg`, `wma`, `aac`, `m4a`, `ape`, `mid`, `flac`, `alac`, `opus`, `aiff`, `weba`.
+- Audio metadata extraction reads duration, codec, bitrate, channels, sample rate, artist, album, track title, genre, and year.
+- Codec fallback sniffing currently recognizes `AAC`, `MP3`, `FLAC`, `Opus`, `Vorbis`, `AC-3`, `E-AC-3`, `ALAC`, `PCM`, `WMA`, and `DTS`.
+- Additional formats may work when Windows or installed codec handlers classify them via `AssocGetPerceivedType`, but the list above reflects the formats explicitly covered by the app code.
+
 ## Building
 
 ### Development Build
@@ -61,6 +80,8 @@ cargo build --release -p mtt-search-service
 # Run the search service in console mode (debug)
 .\target\release\mtt-search-service.exe run-console
 ```
+
+`cargo build --release --workspace` is the simplest way to produce both `mtt-file-manager.exe` and `mtt-search-service.exe` for local testing or packaging.
 
 ### Feature Flags
 ```bash
@@ -101,6 +122,16 @@ The search service (`mtt-search-service`) runs as a Windows Service with hybrid 
 - **NTFS/ReFS**: USN Journal (full MFT scan on first run + incremental loop)
 - **Non-USN (exFAT/FAT32/FUSE/CryptoFS)**: Full-tree scan with SQLite cache + periodic re-scan
 
+The service is a separate workspace binary located at `crates/mtt-search-service`.
+
+```powershell
+# Build only the service binary
+cargo build --release -p mtt-search-service
+
+# Binary output
+.\target\release\mtt-search-service.exe
+```
+
 ```powershell
 # Install as service (requires Administrator PowerShell)
 .\target\release\mtt-search-service.exe install
@@ -135,6 +166,48 @@ sc.exe start MTTFileManagerSearch
 ```
 
 With this flag, the service returns `redacted` volume states and zeroed counts in `GetStatus` responses while search/pagination remains functional.
+
+### Installer Build
+
+The installer is generated with Inno Setup 6 and bundles:
+- `mtt-file-manager.exe`
+- `mtt-search-service.exe`
+- `libmpv-2.dll`
+- `pdfium.dll`
+- `mpv_ui\portable_config\*`
+
+```powershell
+# Install Inno Setup 6
+winget install JRSoftware.InnoSetup
+
+# From the repository root: build release artifacts + installer
+.\installer\build_installer.ps1
+
+# Reuse an existing release build
+.\installer\build_installer.ps1 -SkipBuild
+
+# Manual compilation (equivalent)
+ISCC.exe .\installer\setup.iss
+```
+
+Artifacts explicitly prevalidated by `installer\build_installer.ps1`:
+- `target\release\mtt-file-manager.exe`
+- `target\release\mtt-search-service.exe`
+- `target\release\libmpv-2.dll`
+- `target\release\pdfium.dll`
+- `appicon.ico`
+- `mpv_ui\portable_config\mpv.conf`
+- `mpv_ui\portable_config\scripts\`
+- `mpv_ui\portable_config\scripts\autoload.lua`
+- `mpv_ui\portable_config\scripts\modernH.lua`
+- `mpv_ui\portable_config\scripts\vsr.lua`
+- `mpv_ui\portable_config\script-opts\`
+- `mpv_ui\portable_config\script-opts\osc.conf`
+
+Installer behavior:
+- Output is written to `installer\output\MTT-File-Manager-Setup-<version>.exe`
+- The installer automatically installs and starts the `MTTFileManagerSearch` Windows service
+- The installer warns if Microsoft Visual C++ Redistributable 2015-2022 (x64) is not detected
 
 ## Running with Logs
 
@@ -239,6 +312,16 @@ cargo outdated                # Available updates
 Copy-Item "path\to\libmpv-2.dll" -Destination ".\target\release\"
 # Or add to PATH
 $env:PATH += ";C:\Path\To\libmpv"
+```
+
+### "pdfium.dll not found"
+```powershell
+# Option 1: provide it via the environment variable before building
+$env:PDFIUM_DYNAMIC_LIB_PATH = "C:\Path\To\Pdfium"
+cargo build --release --workspace
+
+# Option 2: copy it manually next to the executable
+Copy-Item "C:\Path\To\pdfium.dll" -Destination ".\target\release\"
 ```
 
 ### Slow Build

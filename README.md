@@ -34,6 +34,7 @@ MTT File Manager is a desktop file manager that combines Rust's performance and 
 - **Integrated preview** — View files without leaving the app
 - **Dedicated image viewer** — Separate process with sliding-window cache, instant navigation, and multi-threaded decoding
 - **Video player** — Standalone mpv-based player with D3D11 GPU pipeline
+- **Audio playback & metadata** — Audio-only files open in the standalone mpv player with real-time waveform visualization; the preview panel extracts codec, bitrate, channels, sample rate, and music tags
 - **PDF viewer** — Native viewer using pdfium (Google's PDF rendering library via `pdfium-render` crate)
 - **Smart thumbnails** — Multi-stage generation: image crate → WIC → Shell API → Media Foundation
 - **Animated GIF playback** — Optimized rendering with play/pause controls
@@ -104,7 +105,7 @@ MTT File Manager is a desktop file manager that combines Rust's performance and 
 git clone <repository-url>
 cd MTT-File-Manager-RUST
 
-# Release build
+# Release build of the full workspace (main app + search service)
 cargo build --release --workspace
 
 # Run (release build opens without a console window on Windows)
@@ -115,6 +116,18 @@ cargo build --release --workspace
 ```powershell
 # Download from: https://sourceforge.net/projects/mpv-player-windows/files/libmpv/
 # Place libmpv-2.dll in the same directory as the executable
+```
+
+### pdfium Setup
+```powershell
+# build.rs tries to stage pdfium.dll automatically for local builds.
+# Supported lookup locations:
+#   .\vendor\pdfium.dll
+#   .\vendor\pdfium\pdfium.dll
+#   $env:PDFIUM_DYNAMIC_LIB_PATH\pdfium.dll
+
+# If automatic staging does not happen, place pdfium.dll next to the executable
+# before running the app or building the installer.
 ```
 
 ## Usage
@@ -138,8 +151,14 @@ cargo build --release --workspace
 ### Supported Formats
 - **Images**: JPG, PNG, GIF, WebP, BMP, TIFF, SVG — double-click opens the dedicated viewer
 - **Videos**: MP4, MKV, AVI, MOV, WebM (requires libmpv)
+- **Audio file detection / routing**: MP3, WAV, OGG, WMA, AAC, M4A, APE, MID, FLAC, ALAC, Opus, AIFF, WEBA
+- **Audio playback**: Audio-only files open in the mpv-based player with a real-time waveform visualization
+- **Audio metadata pipeline**: duration, codec, bitrate, channels, sample rate, artist, album, track title, genre, and year
+- **Audio codec fallback detection**: AAC, MP3, FLAC, Opus, Vorbis, AC-3, E-AC-3, ALAC, PCM, WMA, DTS
 - **PDFs**: Native viewer via pdfium (requires pdfium.dll)
 - **GIFs**: Animated playback with play/pause controls
+
+Additional formats may also work when Windows or installed codec handlers classify them as audio/video via `AssocGetPerceivedType`, but the list above reflects the explicit formats handled by the app's fast-path media routing and metadata code.
 
 ## Documentation
 
@@ -179,6 +198,9 @@ cargo run
 # Release build
 cargo build --release --workspace
 
+# Release build - search service only
+cargo build --release -p mtt-search-service
+
 # Run with logs
 cargo run 2>&1 | Tee-Object "debug.log"
 
@@ -187,6 +209,16 @@ cargo bench
 ```
 
 ### Global Search Service
+The search service is a separate workspace binary at `crates/mtt-search-service` and is also included automatically when you build the full workspace.
+
+```powershell
+# Build only the search service binary
+cargo build --release -p mtt-search-service
+
+# Binary output
+.\target\release\mtt-search-service.exe
+```
+
 ```powershell
 # Install as service (requires Administrator)
 .\target\release\mtt-search-service.exe install
@@ -203,6 +235,46 @@ sc.exe query MTTFileManagerSearch
 # Uninstall
 .\target\release\mtt-search-service.exe uninstall
 ```
+
+Notes:
+- The service installs as `LocalSystem` and exposes IPC over `\\.\pipe\MTTFileManagerSearch`.
+- `cargo build --release --workspace` is the simplest way to produce both `mtt-file-manager.exe` and `mtt-search-service.exe` for local testing or packaging.
+
+### Installer Build
+The installer is generated with Inno Setup 6 and bundles the main app, search service, `libmpv-2.dll`, `pdfium.dll`, and the portable mpv configuration.
+
+```powershell
+# Install Inno Setup 6
+winget install JRSoftware.InnoSetup
+
+# From the repository root: build release artifacts + installer
+.\installer\build_installer.ps1
+
+# Reuse an existing release build
+.\installer\build_installer.ps1 -SkipBuild
+
+# Manual compilation (equivalent)
+ISCC.exe .\installer\setup.iss
+```
+
+Artifacts explicitly prevalidated by `installer\build_installer.ps1`:
+- `target\release\mtt-file-manager.exe`
+- `target\release\mtt-search-service.exe`
+- `target\release\libmpv-2.dll`
+- `target\release\pdfium.dll`
+- `appicon.ico`
+- `mpv_ui\portable_config\mpv.conf`
+- `mpv_ui\portable_config\scripts\`
+- `mpv_ui\portable_config\scripts\autoload.lua`
+- `mpv_ui\portable_config\scripts\modernH.lua`
+- `mpv_ui\portable_config\scripts\vsr.lua`
+- `mpv_ui\portable_config\script-opts\`
+- `mpv_ui\portable_config\script-opts\osc.conf`
+
+Installer behavior:
+- Output is written to `installer\output\MTT-File-Manager-Setup-<version>.exe`
+- The installer automatically installs and starts the `MTTFileManagerSearch` Windows service
+- The installer warns if Microsoft Visual C++ Redistributable 2015-2022 (x64) is not detected
 
 ### Project Structure
 ```
