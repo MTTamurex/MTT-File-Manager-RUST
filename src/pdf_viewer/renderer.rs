@@ -174,7 +174,26 @@ fn with_document<T>(path: &Path, op: impl FnOnce(&PdfDocument<'_>) -> Result<T, 
     op(&document)
 }
 
-fn pdfium() -> Result<Pdfium, String> {
+/// Execute an operation with a timeout. Spawns a worker thread and waits
+/// up to `timeout` for the result. Returns an error on timeout.
+#[allow(dead_code)]
+pub fn with_timeout<T: Send + 'static>(
+    timeout: std::time::Duration,
+    op: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("pdf-op-timeout".into())
+        .spawn(move || {
+            let _ = tx.send(op());
+        })
+        .map_err(|e| format!("Failed to spawn timeout thread: {e}"))?;
+
+    rx.recv_timeout(timeout)
+        .map_err(|_| format!("PDF operation timed out after {}s", timeout.as_secs()))?
+}
+
+pub(super) fn pdfium() -> Result<Pdfium, String> {
     if PDFIUM_READY.get().is_some() {
         return Ok(Pdfium::default());
     }

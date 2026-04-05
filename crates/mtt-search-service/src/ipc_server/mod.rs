@@ -129,17 +129,28 @@ pub fn run_ipc_server(
             // Watchdog thread: disconnects the pipe if the client exceeds
             // IO_TIMEOUT_SECS, preventing slowloris-style DoS that would
             // exhaust the MAX_ACTIVE_CLIENTS handler pool.
+            //
+            // Synchronization: `client_done` uses SeqCst to ensure the
+            // watchdog sees the handler's store before it tries to disconnect.
+            // The handler sets `client_done = true` BEFORE touching the pipe,
+            // and the watchdog checks it BEFORE calling DisconnectNamedPipe,
+            // so only one thread operates on the pipe at a time.
             let client_done = Arc::new(AtomicBool::new(false));
             let watchdog_done = client_done.clone();
             let watchdog_pipe = pipe_raw;
             std::thread::spawn(move || {
                 for _ in 0..IO_TIMEOUT_SECS {
                     std::thread::sleep(std::time::Duration::from_secs(1));
-                    if watchdog_done.load(Ordering::Relaxed) {
+                    if watchdog_done.load(Ordering::SeqCst) {
                         return;
                     }
                 }
-                if !watchdog_done.load(Ordering::Relaxed) {
+                // Use compare_exchange to ensure only one thread proceeds
+                // with pipe operations: either the watchdog or the handler.
+                if watchdog_done
+                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
+                {
                     eprintln!(
                         "[IPC] Client timeout after {}s, disconnecting",
                         IO_TIMEOUT_SECS
@@ -156,11 +167,18 @@ pub fn run_ipc_server(
             })) {
                 eprintln!("[IPC] Client handler panic: {:?}", e);
             }
-            client_done.store(true, Ordering::Relaxed);
-            unsafe {
-                let _ = FlushFileBuffers(pipe);
-                let _ = DisconnectNamedPipe(pipe);
-                let _ = CloseHandle(pipe);
+            // Mark done BEFORE touching the pipe. If the watchdog already
+            // claimed the flag via compare_exchange, we skip pipe cleanup
+            // because the watchdog is handling disconnection.
+            let we_own_pipe = client_done
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok();
+            if we_own_pipe {
+                unsafe {
+                    let _ = FlushFileBuffers(pipe);
+                    let _ = DisconnectNamedPipe(pipe);
+                    let _ = CloseHandle(pipe);
+                }
             }
             active_for_client.fetch_sub(1, Ordering::Relaxed);
         });

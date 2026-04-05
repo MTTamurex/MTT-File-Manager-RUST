@@ -28,6 +28,13 @@ impl ImageViewerApp {
         let _ = std::thread::Builder::new()
             .name("folder-load-pipeline".to_string())
             .spawn(move || {
+            // Immediate generation check: if a newer load was already started
+            // before this thread was scheduled, exit instantly without doing
+            // any I/O. This prevents stale thread buildup from rapid navigation.
+            if gen_clone.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
+                return;
+            }
+
             let scan_start = std::time::Instant::now();
 
             let base_path = if current_path.len() == 2 && current_path.ends_with(':') {

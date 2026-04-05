@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
+use std::sync::Arc;
+use parking_lot::RwLock;
 
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
@@ -123,7 +125,7 @@ fn ensure_client_connected(pipe: HANDLE) -> Result<(), String> {
 
 pub fn collect_authorized_search_page(
     pipe: HANDLE,
-    indices: &[VolumeIndex],
+    indices: &Arc<RwLock<Vec<VolumeIndex>>>,
     query: &str,
     offset: usize,
     limit: usize,
@@ -154,7 +156,12 @@ pub fn collect_authorized_search_page(
         ensure_client_connected(pipe)?;
         batches += 1;
 
-        let raw_page = file_index::search_page(indices, query, raw_offset, AUTHZ_RAW_BATCH_SIZE);
+        // Snapshot: hold the read lock only for the search_page call, then drop
+        // it before doing filesystem authorization checks (CreateFileW).
+        let raw_page = {
+            let indices_lock = indices.read();
+            file_index::search_page(&indices_lock, query, raw_offset, AUTHZ_RAW_BATCH_SIZE)
+        };
         if raw_page.items.is_empty() {
             raw_has_more = false;
             break;
@@ -163,6 +170,9 @@ pub fn collect_authorized_search_page(
         raw_offset = raw_offset.saturating_add(raw_page.items.len());
         raw_has_more = raw_page.has_more;
 
+        // Authorization runs WITHOUT the index lock held — CreateFileW, ACL
+        // checks, and path resolution can now take arbitrarily long without
+        // blocking writers (USN journal incremental updates).
         for (result_index, result) in raw_page.items.into_iter().enumerate() {
             if result_index.is_multiple_of(CLIENT_CONNECTION_CHECK_INTERVAL) {
                 ensure_client_connected(pipe)?;
@@ -235,7 +245,7 @@ pub fn collect_authorized_search_page(
 pub fn collect_authorized_fts_page(
     pipe: HANDLE,
     fts_searcher: &index_db::FtsSearcher,
-    indices: &[VolumeIndex],
+    indices: &Arc<RwLock<Vec<VolumeIndex>>>,
     query: &str,
     offset: usize,
     limit: usize,
@@ -276,27 +286,32 @@ pub fn collect_authorized_fts_page(
         fts_offset += fts_results.len();
         fts_has_more = fts_results.len() >= AUTHZ_RAW_BATCH_SIZE;
 
-        for (result_index, fts_match) in fts_results.into_iter().enumerate() {
+        // Resolve full paths from the in-memory index under a short lock.
+        // The lock is released BEFORE authorization checks (CreateFileW).
+        let resolved: Vec<(String, String, bool)> = {
+            let indices_lock = indices.read();
+            fts_results
+                .into_iter()
+                .filter_map(|fts_match| {
+                    let vol = indices_lock.iter().find(|v| {
+                        v.drive_letter == fts_match.drive_letter
+                            && matches!(v.state, file_index::IndexState::Ready)
+                    })?;
+                    let dir_cache = dir_path_caches
+                        .entry(fts_match.drive_letter)
+                        .or_default();
+                    let full_path =
+                        path_resolver::resolve_path_cached(fts_match.frn, vol, dir_cache)?;
+                    Some((fts_match.name, full_path, fts_match.is_dir))
+                })
+                .collect()
+        };
+
+        // Authorization runs WITHOUT the index lock held.
+        for (result_index, (name, full_path, is_dir)) in resolved.into_iter().enumerate() {
             if result_index.is_multiple_of(CLIENT_CONNECTION_CHECK_INTERVAL) {
                 ensure_client_connected(pipe)?;
             }
-
-            // Find the in-memory VolumeIndex for path resolution.
-            let vol = indices.iter().find(|v| {
-                v.drive_letter == fts_match.drive_letter
-                    && matches!(v.state, file_index::IndexState::Ready)
-            });
-            let Some(vol) = vol else { continue };
-
-            // Resolve full path from the in-memory index (always current).
-            let dir_cache = dir_path_caches
-                .entry(fts_match.drive_letter)
-                .or_default();
-            let Some(full_path) =
-                path_resolver::resolve_path_cached(fts_match.frn, vol, dir_cache)
-            else {
-                continue;
-            };
 
             // Authorization check with parent-directory cache.
             let authorized = match parent_dir_of(&full_path) {
@@ -314,9 +329,9 @@ pub fn collect_authorized_fts_page(
 
             if authorized_items.len() < limit {
                 authorized_items.push(SearchResultItem {
-                    name: fts_match.name,
+                    name,
                     full_path,
-                    is_dir: fts_match.is_dir,
+                    is_dir,
                     size: 0,
                 });
                 continue;
@@ -353,14 +368,15 @@ mod tests {
 
     #[test]
     fn returns_empty_for_zero_limit_or_empty_query() {
-        let res_zero = collect_authorized_search_page(HANDLE(std::ptr::null_mut()), &[], "abc", 0, 0)
+        let empty_indices = Arc::new(RwLock::new(Vec::<VolumeIndex>::new()));
+        let res_zero = collect_authorized_search_page(HANDLE(std::ptr::null_mut()), &empty_indices, "abc", 0, 0)
             .expect("zero-limit should succeed");
         assert!(res_zero.items.is_empty());
         assert!(!res_zero.has_more);
         assert_eq!(res_zero.total_matches, Some(0));
 
         let res_empty_query =
-            collect_authorized_search_page(HANDLE(std::ptr::null_mut()), &[], "", 0, 10)
+            collect_authorized_search_page(HANDLE(std::ptr::null_mut()), &empty_indices, "", 0, 10)
                 .expect("empty-query should succeed");
         assert!(res_empty_query.items.is_empty());
         assert!(!res_empty_query.has_more);

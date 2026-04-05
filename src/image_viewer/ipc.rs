@@ -5,17 +5,22 @@ use windows::core::PCWSTR;
 use windows::Win32::Foundation::{
     CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_PIPE_BUSY, GetLastError, HANDLE,
 };
+use windows::Win32::Security::{
+    InitializeSecurityDescriptor, SetSecurityDescriptorDacl, PSECURITY_DESCRIPTOR,
+    SECURITY_ATTRIBUTES,
+};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, ReadFile, WriteFile, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_NONE, OPEN_EXISTING,
 };
 use windows::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_REJECT_REMOTE_CLIENTS,
-    PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
+    PIPE_TYPE_BYTE, PIPE_WAIT,
 };
 
 pub const IMAGE_VIEWER_PIPE_NAME: &str = r"\\.\pipe\MTTFileManagerImageViewer";
 
 const PIPE_BUFFER_SIZE: u32 = 32 * 1024;
+const MAX_PIPE_INSTANCES: u32 = 4;
 const MAX_MESSAGE_BYTES: usize = 32 * 1024;
 const CLIENT_RETRY_COUNT: usize = 8;
 const CLIENT_RETRY_DELAY: Duration = Duration::from_millis(60);
@@ -124,26 +129,83 @@ fn create_pipe() -> Result<HANDLE, String> {
         .chain(std::iter::once(0))
         .collect();
 
-    let pipe = unsafe {
-        CreateNamedPipeW(
+    unsafe {
+        // Build an explicit DACL granting access to BUILTIN\Users and SYSTEM only.
+        // Without this, the pipe inherits the process default descriptor which may
+        // be overly permissive and allow local DoS via repeated open_request spam.
+
+        // BUILTIN\Users SID: S-1-5-32-545
+        let mut sid_users = [0u8; 16];
+        sid_users[0] = 1; // Revision
+        sid_users[1] = 2; // SubAuthorityCount
+        sid_users[7] = 5; // NT Authority
+        sid_users[8..12].copy_from_slice(&32u32.to_le_bytes());
+        sid_users[12..16].copy_from_slice(&545u32.to_le_bytes());
+
+        // NT AUTHORITY\SYSTEM SID: S-1-5-18
+        let mut sid_system = [0u8; 12];
+        sid_system[0] = 1;
+        sid_system[1] = 1;
+        sid_system[7] = 5;
+        sid_system[8..12].copy_from_slice(&18u32.to_le_bytes());
+
+        let ace1_size = 8 + sid_users.len();   // 24
+        let ace2_size = 8 + sid_system.len();   // 20
+        let acl_size = 8 + ace1_size + ace2_size;
+
+        let mut acl_buffer = vec![0u8; acl_size];
+        acl_buffer[0] = 2; // ACL_REVISION
+        acl_buffer[2..4].copy_from_slice(&(acl_size as u16).to_le_bytes());
+        acl_buffer[4..6].copy_from_slice(&2u16.to_le_bytes()); // AceCount
+
+        // Users: read+write access for pipe clients
+        let access_mask_users: u32 = 0x0012019F;
+        let access_mask_system: u32 = 0x001F01FF;
+
+        let ace1_off = 8;
+        acl_buffer[ace1_off] = 0; // ACCESS_ALLOWED_ACE_TYPE
+        acl_buffer[ace1_off + 2..ace1_off + 4].copy_from_slice(&(ace1_size as u16).to_le_bytes());
+        acl_buffer[ace1_off + 4..ace1_off + 8].copy_from_slice(&access_mask_users.to_le_bytes());
+        acl_buffer[ace1_off + 8..ace1_off + 8 + sid_users.len()].copy_from_slice(&sid_users);
+
+        let ace2_off = ace1_off + ace1_size;
+        acl_buffer[ace2_off] = 0;
+        acl_buffer[ace2_off + 2..ace2_off + 4].copy_from_slice(&(ace2_size as u16).to_le_bytes());
+        acl_buffer[ace2_off + 4..ace2_off + 8].copy_from_slice(&access_mask_system.to_le_bytes());
+        acl_buffer[ace2_off + 8..ace2_off + 8 + sid_system.len()].copy_from_slice(&sid_system);
+
+        let mut sd_buffer = vec![0u8; 256];
+        let sd_ptr = PSECURITY_DESCRIPTOR(sd_buffer.as_mut_ptr() as *mut _);
+        InitializeSecurityDescriptor(sd_ptr, 1)
+            .map_err(|e| format!("InitializeSecurityDescriptor: {}", e))?;
+
+        let acl_ptr = acl_buffer.as_ptr() as *const windows::Win32::Security::ACL;
+        SetSecurityDescriptorDacl(sd_ptr, true, Some(acl_ptr), false)
+            .map_err(|e| format!("SetSecurityDescriptorDacl: {}", e))?;
+
+        let sa = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: sd_ptr.0,
+            bInheritHandle: false.into(),
+        };
+
+        let pipe = CreateNamedPipeW(
             PCWSTR(pipe_name_wide.as_ptr()),
             windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES(0x00000003),
             PIPE_TYPE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
-            PIPE_UNLIMITED_INSTANCES,
+            MAX_PIPE_INSTANCES,
             PIPE_BUFFER_SIZE,
             PIPE_BUFFER_SIZE,
             0,
-            None,
-        )
-    };
+            Some(&sa as *const _),
+        );
 
-    if pipe.is_invalid() {
-        return Err(format!("CreateNamedPipeW failed: {:?}", unsafe {
-            GetLastError()
-        }));
+        if pipe.is_invalid() {
+            return Err(format!("CreateNamedPipeW failed: {:?}", GetLastError()));
+        }
+
+        Ok(pipe)
     }
-
-    Ok(pipe)
 }
 
 fn write_message(pipe: HANDLE, payload: &[u8]) -> Result<(), String> {

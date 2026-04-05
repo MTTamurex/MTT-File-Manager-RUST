@@ -295,12 +295,36 @@ fn decode_svg_frame(
     priority: DecodePriority,
 ) -> io::Result<DecodedFrame> {
     let bytes = read_file_fast(path, priority)?;
-    decode_svg_bytes(bytes.as_slice(), max_side)
+    let bytes_vec = bytes.as_slice().to_vec();
+
+    // Reject SVGs with obviously abusive intrinsic dimensions early
+    // (before allocating the parse tree).
+    if bytes_vec.len() > 50 * 1024 * 1024 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "SVG file exceeds 50 MB size limit",
+        ));
+    }
+
+    // Render in a worker thread with a timeout to prevent pathological SVGs
+    // from blocking the viewer indefinitely.
+    let (tx, rx) = std::sync::mpsc::channel();
+    let max_side_clone = max_side;
+    std::thread::Builder::new()
+        .name("svg-render".into())
+        .spawn(move || {
+            let result = decode_svg_bytes(&bytes_vec, max_side_clone);
+            let _ = tx.send(result);
+        })
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+    rx.recv_timeout(std::time::Duration::from_secs(10))
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "SVG rasterization timed out (10s limit)"))?
 }
 
 /// Absolute upper bound for SVG rasterisation to prevent multi-gigabyte
 /// allocations from pathological viewBox values (e.g. viewBox="0 0 65535 65535").
-const SVG_MAX_RENDER_SIDE: u32 = 8192;
+const SVG_MAX_RENDER_SIDE: u32 = 4096;
 
 fn decode_svg_bytes(bytes: &[u8], max_side: Option<u32>) -> io::Result<DecodedFrame> {
     let options = usvg::Options::default();
