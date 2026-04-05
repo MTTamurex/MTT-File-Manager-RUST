@@ -268,6 +268,7 @@ impl ImageViewerApp {
             renaming_state,
             focus_rename,
             scroll_to_selected,
+            generation: self.generation,
             is_computer_view: self.navigation_state.is_computer_view,
             is_recycle_bin_view: self.navigation_state.is_recycle_bin_view,
             is_onedrive_folder,
