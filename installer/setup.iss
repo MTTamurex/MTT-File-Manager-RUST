@@ -79,8 +79,8 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 
 [UninstallRun]
 ; Stop and remove the search service before files are deleted
-Filename: "sc.exe"; Parameters: "stop {#MySearchName}"; Flags: runhidden waituntilterminated
-Filename: "{app}\{#MySearchSvc}"; Parameters: "uninstall"; Flags: runhidden waituntilterminated
+Filename: "sc.exe"; Parameters: "stop {#MySearchName}"; RunOnceId: "StopSearchService"; Flags: runhidden waituntilterminated
+Filename: "{app}\{#MySearchSvc}"; Parameters: "uninstall"; RunOnceId: "UninstallSearchService"; Flags: runhidden waituntilterminated
 
 [Code]
 // Check if VC++ Redistributable 2015-2022 (x64) is installed
