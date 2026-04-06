@@ -136,13 +136,36 @@ pub fn extract_shell_icon(
     size: IconSize,
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     unsafe {
-        // 1. Parse Path to PIDL
-        let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
         let path_wide: Vec<u16> = path
             .as_os_str()
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
+
+        // For Jumbo, try IShellItemImageFactory first (256x256, high quality).
+        // SHCreateItemFromParsingName supports virtual paths (ZIP contents)
+        // just like SHParseDisplayName.
+        if matches!(size, IconSize::Jumbo) {
+            if let Ok(shell_item) =
+                SHCreateItemFromParsingName::<_, _, IShellItem>(PCWSTR(path_wide.as_ptr()), None)
+            {
+                if let Ok(image_factory) = shell_item.cast::<IShellItemImageFactory>() {
+                    let size_factory = SIZE { cx: 256, cy: 256 };
+                    if let Ok(hbitmap) = image_factory.GetImage(size_factory, SIIGBF_ICONONLY) {
+                        let res =
+                            crate::infrastructure::windows::bitmap_conversion::hbitmap_to_rgba(
+                                hbitmap,
+                            )?;
+                        let _ = DeleteObject(hbitmap.into());
+                        return Ok(res);
+                    }
+                }
+            }
+            // Fall through to PIDL-based extraction if ImageFactory fails.
+        }
+
+        // 1. Parse Path to PIDL
+        let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
 
         // SHParseDisplayName handles virtual paths like "C:\Archive.zip\Folder"
         if SHParseDisplayName(PCWSTR(path_wide.as_ptr()), None, &mut pidl, 0, None).is_err() {

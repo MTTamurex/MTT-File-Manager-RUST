@@ -132,12 +132,23 @@ impl IconLoader {
         let path_owned = path.to_path_buf();
         let tx = self.icon_result_tx.clone();
         std::thread::spawn(move || {
+            // STA COM is required for SHParseDisplayName / IShellItemImageFactory
+            // to correctly resolve PIDL-based icons (especially ZIP virtual paths).
+            // Without explicit init, Shell API may auto-init as MTA and return
+            // generic icons.
+            use ::windows::Win32::System::Com::{
+                CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED,
+            };
+            unsafe {
+                let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            }
             let data = if is_virtual {
                 windows::extract_shell_icon(&path_owned, IconSize::Jumbo).ok()
             } else {
                 windows::extract_file_icon_by_path(&path_owned, IconSize::Jumbo).ok()
             };
             let _ = tx.send(AsyncIconResult { key: cache_key, data });
+            unsafe { CoUninitialize(); }
         });
     }
 
