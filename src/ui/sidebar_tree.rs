@@ -67,20 +67,14 @@ fn render_tree_node(
         &node.path.to_string_lossy(),
     );
 
-    // Allocate row
-    let (mut rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_HEIGHT), Sense::click());
-    rect.min.x = ui.clip_rect().min.x;
-    rect.max.x = ui.clip_rect().max.x;
-
-    // Auto-scroll: when the current path just changed, scroll the matching node into view
-    if is_selected {
-        if ctx.tree_state.last_synced_path.as_deref()
-            != Some(&node.path)
-        {
-            response.scroll_to_me(Some(egui::Align::Center));
-        }
-    }
+    // Allocate row — use max of available width and content width so deep nodes
+    // push the ScrollArea's content wider, enabling horizontal scroll.
+    let content_min_width = indent + ARROW_WIDTH + ICON_SIZE + 4.0
+        + ui.fonts(|f| f.layout_no_wrap(node.name.clone(), egui::FontId::proportional(11.0), Color32::WHITE).size().x)
+        + 8.0; // right padding
+    let row_width = ui.available_width().max(content_min_width);
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(row_width, ROW_HEIGHT), Sense::click());
 
     if ui.is_rect_visible(rect) {
         let dark_mode = ui.visuals().dark_mode;

@@ -125,10 +125,6 @@ impl ImageViewerApp {
         // SYNC TAB STATE after clearing stale lists to avoid heavy cloning on navigation.
         self.sync_to_tab();
 
-        // Auto-expand sidebar folder tree to reveal the new path
-        self.sidebar_tree.expand_to_path(&destination_path);
-        self.sidebar_tree.last_synced_path = Some(destination_path);
-
         self.load_folder(false);
     }
 
