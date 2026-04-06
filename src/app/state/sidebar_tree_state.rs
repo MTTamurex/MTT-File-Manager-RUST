@@ -119,7 +119,23 @@ impl SidebarTreeState {
         let mut any = false;
         while let Ok(result) = self.rx.try_recv() {
             self.loading.remove(&result.parent);
-            self.children.insert(result.parent, result.children);
+            let has_children = !result.children.is_empty();
+            self.children.insert(result.parent.clone(), result.children);
+
+            // Update the parent's has_subfolders in its own parent's children list
+            // so the arrow disappears for empty folders.
+            if !has_children {
+                if let Some(grandparent) = result.parent.parent() {
+                    if let Some(siblings) = self.children.get_mut(grandparent) {
+                        if let Some(node) = siblings.iter_mut().find(|n| n.path == result.parent) {
+                            node.has_subfolders = Some(false);
+                        }
+                    }
+                }
+                // Also collapse it since there's nothing to show
+                self.expanded.remove(&result.parent);
+            }
+
             any = true;
         }
         any
@@ -129,7 +145,6 @@ impl SidebarTreeState {
 // ── Folder Enumeration (runs on background thread) ───────────────────
 
 /// List immediate subdirectories of `parent`, sorted alphabetically.
-/// For each child, peeks one level deeper to determine `has_subfolders`.
 fn enumerate_subfolders(parent: &Path) -> Vec<FolderNode> {
     let read_dir = match std::fs::read_dir(parent) {
         Ok(rd) => rd,
@@ -156,13 +171,10 @@ fn enumerate_subfolders(parent: &Path) -> Vec<FolderNode> {
             continue;
         }
 
-        // Peek one level deeper: does this folder have any subdirectories?
-        let has_subfolders = peek_has_subfolders(&path);
-
         folders.push(FolderNode {
             path,
             name,
-            has_subfolders: Some(has_subfolders),
+            has_subfolders: None, // resolved lazily when expanded
         });
     }
 
@@ -170,24 +182,6 @@ fn enumerate_subfolders(parent: &Path) -> Vec<FolderNode> {
     folders.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
     folders
-}
-
-/// Quick check: does `dir` contain at least one visible subdirectory?
-fn peek_has_subfolders(dir: &Path) -> bool {
-    let read_dir = match std::fs::read_dir(dir) {
-        Ok(rd) => rd,
-        Err(_) => return false,
-    };
-
-    for entry in read_dir.flatten() {
-        if let Ok(ft) = entry.file_type() {
-            if ft.is_dir() && !is_hidden_or_system(&entry.path()) {
-                return true;
-            }
-        }
-    }
-
-    false
 }
 
 /// Check Windows hidden/system attributes.
