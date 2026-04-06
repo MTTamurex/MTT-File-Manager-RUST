@@ -177,7 +177,7 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
         let archive_display = truncate_end(&progress.archive_name, 30);
         let total_known = progress.total > 0;
-        let title = if total_known {
+        let subtitle = if total_known {
             format!("{} ({}/{})", archive_display, progress.extracted, progress.total)
         } else if progress.extracted > 0 {
             format!(
@@ -203,8 +203,8 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
             egui::Color32::from_rgb(30, 58, 95),
             egui::Color32::from_rgb(100, 160, 255),
             "📦",
-            title,
-            (!progress.current_file.is_empty()).then(|| truncate_tail(&progress.current_file, 35)),
+            t!("extract.title").to_string(),
+            Some(subtitle),
             if total_known {
                 Some((progress.extracted, progress.total))
             } else {
