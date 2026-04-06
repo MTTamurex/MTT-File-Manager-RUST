@@ -18,6 +18,7 @@ pub fn render_media_launcher(
     svg_manager: &mut SvgIconManager,
     texture: Option<&egui::TextureHandle>,
 ) -> Option<PreviewPanelAction> {
+    let preview_launch_allowed = !crate::domain::file_entry::is_path_inside_archive(&file.path);
     let max_preview_width = ui.available_width() - 16.0;
     let max_preview_height = PREVIEW_MAX_HEIGHT;
     let max_preview_size = egui::vec2(max_preview_width, max_preview_height);
@@ -80,7 +81,7 @@ pub fn render_media_launcher(
     let hover_pos = ui.input(|i| i.pointer.hover_pos());
     let is_hovered = hover_pos.is_some_and(|pos| media_rect.contains(pos));
 
-    if is_hovered {
+    if preview_launch_allowed && is_hovered {
         let center_size = 64.0;
         let center_rect = egui::Rect::from_center_size(
             media_rect.center(),
@@ -102,7 +103,8 @@ pub fn render_media_launcher(
         }
     }
 
-    if ui
+    if preview_launch_allowed
+        && ui
         .interact(
             media_rect,
             egui::Id::new(("media_play_overlay", &file.path)),

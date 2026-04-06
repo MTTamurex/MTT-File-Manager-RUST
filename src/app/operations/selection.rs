@@ -8,6 +8,14 @@
 use crate::app::state::ImageViewerApp;
 use crate::infrastructure::onedrive;
 
+enum SelectedPreviewOverlayAction {
+    None,
+    BlockedInArchive,
+    PlayMedia(std::path::PathBuf),
+    OpenPdf(std::path::PathBuf),
+    OpenImage(std::path::PathBuf),
+}
+
 impl ImageViewerApp {
     /// Kill the standalone video player process if one is running.
     pub fn kill_video_player_process(&mut self) {
@@ -79,51 +87,71 @@ impl ImageViewerApp {
         self.update_video_visibility();
     }
 
+    fn selected_preview_overlay_action(&self) -> SelectedPreviewOverlayAction {
+        let Some(selected) = self.selected_file.as_ref() else {
+            return SelectedPreviewOverlayAction::None;
+        };
+
+        if selected.is_dir {
+            return SelectedPreviewOverlayAction::None;
+        }
+
+        let ext = selected
+            .path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_owned();
+        let is_video = crate::infrastructure::windows::is_video_extension(&ext);
+        let is_audio = crate::infrastructure::windows::is_audio_extension(&ext);
+        let is_pdf = ext.eq_ignore_ascii_case("pdf");
+        let is_image = crate::infrastructure::windows::is_image_extension(&ext);
+
+        if !is_video && !is_audio && !is_pdf && !is_image {
+            return SelectedPreviewOverlayAction::None;
+        }
+
+        let path = selected.path.clone();
+        if crate::domain::file_entry::is_path_inside_archive(&path) {
+            return SelectedPreviewOverlayAction::BlockedInArchive;
+        }
+
+        if is_video || is_audio {
+            SelectedPreviewOverlayAction::PlayMedia(path)
+        } else if is_pdf {
+            SelectedPreviewOverlayAction::OpenPdf(path)
+        } else {
+            SelectedPreviewOverlayAction::OpenImage(path)
+        }
+    }
+
+    pub(crate) fn should_consume_space_for_selected_preview_overlay_action(&self) -> bool {
+        !matches!(
+            self.selected_preview_overlay_action(),
+            SelectedPreviewOverlayAction::None
+        )
+    }
+
     /// Triggers the same action exposed by the preview overlays
     /// (video play / image viewer / PDF viewer) for the currently selected file.
     /// Returns true when an action was triggered.
     pub fn trigger_selected_preview_overlay_action(&mut self) -> bool {
-        let (path, is_video, is_audio, is_pdf, is_image) = {
-            let Some(selected) = self.selected_file.as_ref() else {
-                return false;
-            };
-
-            if selected.is_dir {
-                return false;
+        match self.selected_preview_overlay_action() {
+            SelectedPreviewOverlayAction::PlayMedia(path) => {
+                self.request_video_preview_playback(path);
+                true
             }
-
-            let ext = selected
-                .path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("")
-                .to_owned();
-            let path = selected.path.clone();
-            (
-                path,
-                crate::infrastructure::windows::is_video_extension(&ext),
-                crate::infrastructure::windows::is_audio_extension(&ext),
-                ext.eq_ignore_ascii_case("pdf"),
-                crate::infrastructure::windows::is_image_extension(&ext),
-            )
-        };
-
-        if is_video || is_audio {
-            self.request_video_preview_playback(path);
-            return true;
+            SelectedPreviewOverlayAction::OpenPdf(path) => {
+                crate::pdf_viewer::open_pdf_viewer(path);
+                true
+            }
+            SelectedPreviewOverlayAction::OpenImage(path) => {
+                crate::image_viewer::open_image_viewer(path);
+                true
+            }
+            SelectedPreviewOverlayAction::BlockedInArchive
+            | SelectedPreviewOverlayAction::None => false,
         }
-
-        if is_pdf {
-            crate::pdf_viewer::open_pdf_viewer(path);
-            return true;
-        }
-
-        if is_image {
-            crate::image_viewer::open_image_viewer(path);
-            return true;
-        }
-
-        false
     }
 
     pub fn update_selected_thumbnail(&mut self) {
