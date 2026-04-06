@@ -173,7 +173,9 @@ pub(in crate::app) fn spawn_icon_worker(
             .name(format!("icon-worker-{}", worker_id))
             .spawn(move || {
                 use crate::domain::file_entry::IconSize;
-                use crate::infrastructure::windows::{extract_file_icon_by_path, get_file_type_icon};
+                use crate::infrastructure::windows::{
+                    extract_file_icon_by_path, extract_shell_icon, get_file_type_icon,
+                };
                 use windows::Win32::System::Com::{
                     CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED,
                 };
@@ -214,7 +216,11 @@ pub(in crate::app) fn spawn_icon_worker(
                         .map(|e| UNIQUE_ICON_EXTS.contains(&e))
                         .unwrap_or(true);
 
-                    let icon_result = if needs_real_path {
+                    let is_virtual_archive_path = crate::domain::file_entry::is_path_inside_archive(&path);
+
+                    let icon_result = if is_virtual_archive_path {
+                        extract_shell_icon(&path, IconSize::Large)
+                    } else if needs_real_path {
                         extract_file_icon_by_path(&path, IconSize::Large)
                     } else {
                         let ext_raw = ext_lower.as_deref().unwrap_or("");
