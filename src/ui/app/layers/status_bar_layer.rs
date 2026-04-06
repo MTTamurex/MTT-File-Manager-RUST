@@ -105,7 +105,10 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                                 let modified = entry.metadata().ok()
                                     .and_then(|m| m.modified().ok())
                                     .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                                if disk_cache.get(path, modified).is_some() {
+                                if disk_cache
+                                    .get(path, modified)
+                                    .is_some_and(|entry| entry.satisfies_request(512))
+                                {
                                     continue;
                                 }
                                 crate::workers::thumbnail::set_bulk_thumbnail_current_file(&progress_state, path);

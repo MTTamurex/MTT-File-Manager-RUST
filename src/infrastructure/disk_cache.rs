@@ -53,6 +53,18 @@ pub struct ThumbnailCacheEntry {
     pub modified_at: u64,
 }
 
+impl ThumbnailCacheEntry {
+    /// Returns true when this cached entry can satisfy a request for `req_size`.
+    pub fn satisfies_request(&self, req_size: u32) -> bool {
+        let cached_max_dim = self.width.max(self.height);
+        if cached_max_dim == 0 {
+            return false;
+        }
+
+        cached_max_dim >= req_size || self.requested_size >= req_size
+    }
+}
+
 /// Manages persistent thumbnail storage in SQLite
 pub struct ThumbnailDiskCache {
     writer: Arc<Mutex<Connection>>, // For put, set_*, garbage_collect (DELETE)
