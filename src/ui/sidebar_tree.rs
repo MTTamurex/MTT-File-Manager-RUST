@@ -62,7 +62,7 @@ fn render_tree_node(
     let indent = BASE_INDENT + (depth as f32) * INDENT_PX;
     let is_expanded = ctx.tree_state.is_expanded(&node.path);
     let is_loading = ctx.tree_state.is_loading(&node.path);
-    let has_children = node.has_subfolders.unwrap_or(false);
+    let has_children = node.has_subfolders.unwrap_or(true); // optimistic: show arrow until proven empty
     let is_selected = ctx.current_path.eq_ignore_ascii_case(
         &node.path.to_string_lossy(),
     );
