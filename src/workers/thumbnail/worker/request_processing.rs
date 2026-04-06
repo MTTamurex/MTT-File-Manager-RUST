@@ -352,12 +352,7 @@ fn decode_cache_entry(entry: ThumbnailCacheEntry, req_size: u32) -> Option<(Vec<
 }
 
 pub(super) fn cache_entry_satisfies_request(entry: &ThumbnailCacheEntry, req_size: u32) -> bool {
-    let cached_max_dim = entry.width.max(entry.height);
-    if cached_max_dim == 0 {
-        return false;
-    }
-
-    cached_max_dim >= req_size || entry.requested_size >= req_size
+    entry.satisfies_request(req_size)
 }
 
 /// Adaptive repaint throttling based on priority.
