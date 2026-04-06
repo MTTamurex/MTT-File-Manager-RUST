@@ -1,0 +1,264 @@
+use crate::app::state::sidebar_tree_state::{FolderNode, SidebarTreeState};
+use eframe::egui::{self, Color32, Pos2, Rect, Sense};
+use std::path::Path;
+
+/// Actions emitted by the folder tree widget.
+pub enum SidebarTreeAction {
+    /// User clicked a folder name — navigate the central panel there.
+    NavigateTo(String),
+    /// User clicked the expand/collapse arrow on a node.
+    ToggleExpand(std::path::PathBuf),
+}
+
+/// Shared context references needed for tree rendering.
+pub struct SidebarTreeContext<'a> {
+    pub tree_state: &'a SidebarTreeState,
+    pub current_path: &'a str,
+    pub icon_loader: &'a mut crate::ui::icon_loader::IconLoader,
+    pub is_renaming: bool,
+}
+
+const ROW_HEIGHT: f32 = 24.0;
+const INDENT_PX: f32 = 16.0;
+const ARROW_WIDTH: f32 = 16.0;
+const ICON_SIZE: f32 = 16.0;
+const BASE_INDENT: f32 = 20.0; // Extra indent for tree nodes vs drive row
+
+/// Render the folder tree for a single drive root.
+/// Returns the first action triggered this frame (if any).
+pub fn render_drive_tree(
+    ui: &mut egui::Ui,
+    drive_path: &str,
+    ctx: &mut SidebarTreeContext,
+) -> Option<SidebarTreeAction> {
+    let root = Path::new(drive_path);
+    let mut action: Option<SidebarTreeAction> = None;
+
+    // If the drive root is expanded, render its children
+    if ctx.tree_state.is_expanded(root) {
+        if ctx.tree_state.is_loading(root) && ctx.tree_state.get_children(root).is_none() {
+            // Show loading indicator
+            render_loading_row(ui, 1);
+        } else if let Some(children) = ctx.tree_state.get_children(root) {
+            // Clone to avoid borrow conflict with ctx.icon_loader
+            let children_owned: Vec<FolderNode> = children.to_vec();
+            for node in &children_owned {
+                render_tree_node(ui, node, 1, ctx, &mut action);
+            }
+        }
+    }
+
+    action
+}
+
+/// Render a single tree node and recurse into its expanded children.
+fn render_tree_node(
+    ui: &mut egui::Ui,
+    node: &FolderNode,
+    depth: usize,
+    ctx: &mut SidebarTreeContext,
+    action: &mut Option<SidebarTreeAction>,
+) {
+    let indent = BASE_INDENT + (depth as f32) * INDENT_PX;
+    let is_expanded = ctx.tree_state.is_expanded(&node.path);
+    let is_loading = ctx.tree_state.is_loading(&node.path);
+    let has_children = node.has_subfolders.unwrap_or(false);
+    let is_selected = ctx.current_path.eq_ignore_ascii_case(
+        &node.path.to_string_lossy(),
+    );
+
+    // Allocate row
+    let (mut rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_HEIGHT), Sense::click());
+    rect.min.x = ui.clip_rect().min.x;
+    rect.max.x = ui.clip_rect().max.x;
+
+    // Auto-scroll: when the current path just changed, scroll the matching node into view
+    if is_selected {
+        if ctx.tree_state.last_synced_path.as_deref()
+            != Some(&node.path)
+        {
+            response.scroll_to_me(Some(egui::Align::Center));
+        }
+    }
+
+    if ui.is_rect_visible(rect) {
+        let dark_mode = ui.visuals().dark_mode;
+
+        // Row background
+        if is_selected {
+            ui.painter()
+                .rect_filled(rect, 0.0, crate::ui::theme::selection_color(dark_mode));
+        } else if response.hovered() {
+            ui.painter()
+                .rect_filled(rect, 0.0, crate::ui::theme::selection_hover_color(dark_mode));
+        }
+
+        let mut cursor_x = rect.min.x + indent;
+
+        // ── Arrow (expand/collapse indicator) ──
+        if has_children || is_loading {
+            let arrow_rect = Rect::from_center_size(
+                Pos2::new(cursor_x + ARROW_WIDTH / 2.0, rect.center().y),
+                egui::vec2(ARROW_WIDTH, ROW_HEIGHT),
+            );
+
+            let arrow_text = if is_loading {
+                "…"
+            } else if is_expanded {
+                "▾"
+            } else {
+                "▸"
+            };
+
+            let arrow_color = if response.hovered() {
+                ui.visuals().text_color()
+            } else {
+                Color32::from_gray(140)
+            };
+
+            ui.painter().text(
+                arrow_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                arrow_text,
+                egui::FontId::proportional(11.0),
+                arrow_color,
+            );
+        }
+        cursor_x += ARROW_WIDTH;
+
+        // ── Folder Icon ──
+        let folder_icon = ctx.icon_loader.get_or_load_folder_path_icon(
+            ui.ctx(),
+            &node.path.to_string_lossy(),
+        );
+        if let Some(icon) = folder_icon {
+            let icon_rect = Rect::from_center_size(
+                Pos2::new(cursor_x + ICON_SIZE / 2.0, rect.center().y),
+                egui::vec2(ICON_SIZE, ICON_SIZE),
+            );
+            ui.painter().image(
+                icon.id(),
+                icon_rect,
+                Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
+                Color32::WHITE,
+            );
+            cursor_x += ICON_SIZE + 4.0;
+        } else {
+            cursor_x += ICON_SIZE + 4.0;
+        }
+
+        // ── Folder Name ──
+        let text_color = if is_selected {
+            crate::ui::theme::selection_text_color(dark_mode)
+        } else {
+            ui.visuals().text_color()
+        };
+
+        ui.painter().text(
+            Pos2::new(cursor_x, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            &node.name,
+            egui::FontId::proportional(11.0),
+            text_color,
+        );
+    }
+
+    // ── Handle clicks ──
+    if response.clicked() && action.is_none() && !ctx.is_renaming {
+        // Determine if click was on the arrow area
+        let click_pos = ui.input(|inp| inp.pointer.interact_pos());
+        let arrow_end_x = rect.min.x + indent + ARROW_WIDTH;
+
+        let clicked_arrow = click_pos
+            .map(|p| p.x < arrow_end_x && p.x >= rect.min.x + indent)
+            .unwrap_or(false);
+
+        if clicked_arrow && (has_children || is_loading) {
+            *action = Some(SidebarTreeAction::ToggleExpand(node.path.clone()));
+        } else {
+            *action = Some(SidebarTreeAction::NavigateTo(
+                node.path.to_string_lossy().into_owned(),
+            ));
+        }
+    }
+
+    // ── Recurse into children (if expanded) ──
+    if is_expanded && action.is_none() {
+        if is_loading && ctx.tree_state.get_children(&node.path).is_none() {
+            render_loading_row(ui, depth + 1);
+        } else if let Some(children) = ctx.tree_state.get_children(&node.path) {
+            let children_owned: Vec<FolderNode> = children.to_vec();
+            for child in &children_owned {
+                render_tree_node(ui, child, depth + 1, ctx, action);
+            }
+        }
+    }
+}
+
+/// Render a "loading..." placeholder row at the given depth.
+fn render_loading_row(ui: &mut egui::Ui, depth: usize) {
+    let indent = BASE_INDENT + (depth as f32) * INDENT_PX + ARROW_WIDTH;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_HEIGHT), Sense::hover());
+
+    if ui.is_rect_visible(rect) {
+        ui.painter().text(
+            Pos2::new(rect.min.x + indent, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            "…",
+            egui::FontId::proportional(11.0),
+            Color32::from_gray(120),
+        );
+    }
+}
+
+/// Render an expand/collapse arrow for a drive root in the sidebar.
+/// This is called from `sidebar.rs` to prepend an arrow to the existing drive row.
+/// Returns `true` if the arrow was clicked.
+pub fn render_drive_expand_arrow(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    drive_path: &str,
+    tree_state: &SidebarTreeState,
+) -> bool {
+    let root = Path::new(drive_path);
+    let is_expanded = tree_state.is_expanded(root);
+    let is_loading = tree_state.is_loading(root);
+
+    // We don't know yet if a drive has subfolders — always show the arrow
+    let arrow_text = if is_loading {
+        "…"
+    } else if is_expanded {
+        "▾"
+    } else {
+        "▸"
+    };
+
+    let arrow_rect = Rect::from_center_size(
+        Pos2::new(rect.min.x + 6.0, rect.center().y),
+        egui::vec2(12.0, ROW_HEIGHT),
+    );
+
+    let pointer_pos = ui.input(|inp| inp.pointer.hover_pos());
+    let arrow_hovered = pointer_pos
+        .map(|p| arrow_rect.expand(2.0).contains(p))
+        .unwrap_or(false);
+
+    let arrow_color = if arrow_hovered {
+        ui.visuals().text_color()
+    } else {
+        Color32::from_gray(140)
+    };
+
+    ui.painter().text(
+        arrow_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        arrow_text,
+        egui::FontId::proportional(10.0),
+        arrow_color,
+    );
+
+    // Check if user clicked in the arrow zone
+    let clicked = ui.input(|inp| inp.pointer.primary_clicked());
+    clicked && arrow_hovered
+}

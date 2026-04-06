@@ -1,3 +1,4 @@
+use crate::app::state::sidebar_tree_state::SidebarTreeState;
 use crate::domain::pinned_folder::PinnedFolder;
 use crate::infrastructure::windows::{detect_drive_type, DriveType};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense};
@@ -48,6 +49,8 @@ pub struct SidebarContext<'a> {
     /// Inline drive rename: (drive_path, editable_text)
     pub sidebar_renaming: Option<(&'a str, &'a str)>,
     pub sidebar_rename_focus: bool,
+    /// Folder tree expansion state (shared reference for rendering)
+    pub tree_state: &'a SidebarTreeState,
 }
 
 /// Actions that can be triggered by the sidebar
@@ -63,6 +66,8 @@ pub enum SidebarAction {
     CommitDriveRename { drive_path: String, new_label: String },
     /// User cancelled inline drive rename
     CancelDriveRename,
+    /// Toggle expand/collapse of a folder tree node
+    TreeToggleExpand(std::path::PathBuf),
 }
 
 /// Renders the sidebar with drives and computer view
@@ -355,11 +360,21 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
             let is_selected = ctx.highlighted_drive_path == Some(disk_path.as_str())
                 || (!ctx.is_computer_view && !in_onedrive && ctx.current_path.starts_with(disk_path));
 
+            let root_path = std::path::Path::new(disk_path.as_str());
+            let is_expanded = ctx.tree_state.is_expanded(root_path);
+            let is_tree_loading = ctx.tree_state.is_loading(root_path);
+
             let (mut rect, response) =
                 ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), Sense::click());
 
             rect.min.x = ui.clip_rect().min.x;
             rect.max.x = ui.clip_rect().max.x;
+
+            // Track arrow click zone for this drive row
+            let arrow_zone = Rect::from_min_size(
+                Pos2::new(rect.min.x, rect.min.y),
+                egui::vec2(20.0, rect.height()),
+            );
 
             if ui.is_rect_visible(rect) {
                 let dark_mode = ui.visuals().dark_mode;
@@ -371,7 +386,35 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
                         .rect_filled(rect, 0.0, crate::ui::theme::selection_hover_color(dark_mode));
                 }
 
-                let mut cursor_x = rect.min.x + 12.0; // Indentation for drives
+                let mut cursor_x = rect.min.x + 2.0; // Start with expand arrow
+
+                // ── Expand/collapse arrow ──
+                {
+                    let arrow_text = if is_tree_loading {
+                        "…"
+                    } else if is_expanded {
+                        "▾"
+                    } else {
+                        "▸"
+                    };
+                    let pointer_pos = ui.input(|inp| inp.pointer.hover_pos());
+                    let arrow_hovered = pointer_pos
+                        .map(|p| arrow_zone.contains(p))
+                        .unwrap_or(false);
+                    let arrow_color = if arrow_hovered {
+                        ui.visuals().text_color()
+                    } else {
+                        Color32::from_gray(140)
+                    };
+                    ui.painter().text(
+                        Pos2::new(cursor_x + 8.0, rect.center().y),
+                        egui::Align2::CENTER_CENTER,
+                        arrow_text,
+                        egui::FontId::proportional(10.0),
+                        arrow_color,
+                    );
+                    cursor_x += 18.0;
+                }
 
                 // Try to load real drive icon (via IconLoader)
                 let drive_icon = ctx.icon_loader.get_or_load_drive_icon(ui.ctx(), disk_path);
@@ -466,11 +509,42 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
                     });
                 }
             } else if response.clicked() && !ctx.is_renaming {
-                action = Some(SidebarAction::NavigateTo(disk_path.to_string()));
+                // Detect if click was on the expand arrow area
+                let click_pos = ui.input(|inp| inp.pointer.interact_pos());
+                let clicked_arrow = click_pos
+                    .map(|p| arrow_zone.contains(p))
+                    .unwrap_or(false);
+                if clicked_arrow {
+                    action = Some(SidebarAction::TreeToggleExpand(root_path.to_path_buf()));
+                } else {
+                    action = Some(SidebarAction::NavigateTo(disk_path.to_string()));
+                }
             } else if response.secondary_clicked() && !ctx.is_renaming {
                 action = Some(SidebarAction::OpenDriveContextMenu(disk_path.to_string()));
             }
             ui.add_space(2.0);
+
+            // ── Folder tree under this drive (if expanded) ──
+            if is_expanded && action.is_none() {
+                let mut tree_ctx = crate::ui::sidebar_tree::SidebarTreeContext {
+                    tree_state: ctx.tree_state,
+                    current_path: ctx.current_path,
+                    icon_loader: ctx.icon_loader,
+                    is_renaming: ctx.is_renaming,
+                };
+                if let Some(tree_action) =
+                    crate::ui::sidebar_tree::render_drive_tree(ui, disk_path, &mut tree_ctx)
+                {
+                    match tree_action {
+                        crate::ui::sidebar_tree::SidebarTreeAction::NavigateTo(path) => {
+                            action = Some(SidebarAction::NavigateTo(path));
+                        }
+                        crate::ui::sidebar_tree::SidebarTreeAction::ToggleExpand(path) => {
+                            action = Some(SidebarAction::TreeToggleExpand(path));
+                        }
+                    }
+                }
+            }
         }
 
         ui.add_space(6.0);
