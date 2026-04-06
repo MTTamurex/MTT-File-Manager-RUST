@@ -347,6 +347,8 @@ impl ImageViewerApp {
                 log::warn!("[FS-WATCH] DriveLost signal received for: {:?}", drive_root);
                 self.drive_state.last_drive_refresh = Instant::now();
                 self.reload_drive_list_async();
+                // Clear sidebar tree state for the lost drive
+                self.sidebar_tree.clear_drive(drive_root);
 
                 let drive_prefix = drive_root.to_string_lossy().to_string();
                 if !self.navigation_state.is_computer_view
@@ -385,6 +387,13 @@ impl ImageViewerApp {
             &mut pending_disk_cache_invalidations,
             &mut folders_with_changed_contents,
         );
+
+        // Invalidate sidebar folder tree for any changed directories.
+        // This ensures the tree re-loads children for expanded nodes that
+        // received file system events (create/delete/rename of subfolders).
+        for folder in &folders_with_changed_contents {
+            self.sidebar_tree.clear_children(folder);
+        }
 
         self.apply_folder_content_change_invalidations(
             folders_with_changed_contents,

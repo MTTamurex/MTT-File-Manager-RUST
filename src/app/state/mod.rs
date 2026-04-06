@@ -398,6 +398,9 @@ pub struct ImageViewerApp {
     // Quick Access pinned folders (ordered by position)
     pub pinned_folders: Vec<crate::domain::pinned_folder::PinnedFolder>,
 
+    // SIDEBAR FOLDER TREE (hierarchical expand/collapse state)
+    pub sidebar_tree: sidebar_tree_state::SidebarTreeState,
+
     // Explicit scroll request for keyboard navigation
     pub scroll_request: ScrollRequest,
 
@@ -424,6 +427,7 @@ pub struct ImageViewerApp {
     pub focus_lost_at: Option<Instant>,
 }
 
+pub mod sidebar_tree_state;
 mod helpers;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -513,6 +513,9 @@ impl ImageViewerApp {
 
             pinned_folders,
 
+            // SIDEBAR FOLDER TREE
+            sidebar_tree: crate::app::state::sidebar_tree_state::SidebarTreeState::new(),
+
             scroll_request: crate::app::state::ScrollRequest::None,
 
             // GLOBAL SEARCH

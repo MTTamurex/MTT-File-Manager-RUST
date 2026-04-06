@@ -140,6 +140,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                 dragging_path,
                 sidebar_renaming: sidebar_renaming_ref,
                 sidebar_rename_focus: app.sidebar_rename_focus,
+                tree_state: &app.sidebar_tree,
             };
 
             egui::ScrollArea::vertical()
@@ -223,6 +224,9 @@ fn handle_sidebar_action(app: &mut ImageViewerApp, action: SidebarAction) {
         SidebarAction::CancelDriveRename => {
             app.sidebar_renaming = None;
             app.sidebar_rename_focus = false;
+        }
+        SidebarAction::TreeToggleExpand(path) => {
+            app.sidebar_tree.toggle_expand(&path);
         }
     }
 }

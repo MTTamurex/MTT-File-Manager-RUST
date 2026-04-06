@@ -101,6 +101,10 @@ impl eframe::App for ImageViewerApp {
             let t2 = std::time::Instant::now();
             self.poll_drive_scan();
             self.poll_drive_info();
+            // Poll sidebar folder tree background loads
+            if self.sidebar_tree.poll_loaded() {
+                ctx.request_repaint();
+            }
             let t3 = std::time::Instant::now();
             // Flush debounced preferences (max once per second)
             self.flush_preferences_if_needed();
