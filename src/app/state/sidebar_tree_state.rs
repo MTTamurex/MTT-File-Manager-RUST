@@ -31,6 +31,10 @@ pub struct SidebarTreeState {
     rx: mpsc::Receiver<LoadResult>,
     /// The last path we auto-scrolled to (prevents re-scrolling every frame).
     pub last_synced_path: Option<PathBuf>,
+    /// Smooth scroll: the target offset (where the user wants to go).
+    pub scroll_target_y: f32,
+    /// Smooth scroll: the visual offset (smoothly animates toward target).
+    pub scroll_visual_y: f32,
 }
 
 impl SidebarTreeState {
@@ -43,6 +47,8 @@ impl SidebarTreeState {
             tx,
             rx,
             last_synced_path: None,
+            scroll_target_y: 0.0,
+            scroll_visual_y: 0.0,
         }
     }
 

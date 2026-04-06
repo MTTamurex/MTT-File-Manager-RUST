@@ -123,6 +123,39 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
             let sidebar_renaming_ref = app.sidebar_renaming.as_ref()
                 .map(|(p, t)| (p.as_str(), t.as_str()));
 
+            // ── Smooth scroll: intercept wheel input and animate ──
+            // Must happen BEFORE sidebar_ctx borrows app.sidebar_tree
+            const SIDEBAR_SCROLL_SPEED: f32 = 5.0;
+            let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
+            let pointer_in_sidebar = ui.input(|i| {
+                i.pointer.hover_pos()
+                    .map(|p| ui.max_rect().contains(p))
+                    .unwrap_or(false)
+            });
+
+            if scroll_delta != 0.0 && pointer_in_sidebar {
+                app.sidebar_tree.scroll_target_y += -scroll_delta * SIDEBAR_SCROLL_SPEED;
+                if app.sidebar_tree.scroll_target_y < 0.0 {
+                    app.sidebar_tree.scroll_target_y = 0.0;
+                }
+            }
+
+            // Animate visual scroll toward target
+            let dt = ui.input(|i| i.predicted_dt).min(0.05);
+            let t = (dt * 9.0).min(1.0);
+            let diff = app.sidebar_tree.scroll_target_y - app.sidebar_tree.scroll_visual_y;
+            if diff.abs() > 1.0 {
+                app.sidebar_tree.scroll_visual_y += diff * t;
+            } else {
+                app.sidebar_tree.scroll_visual_y = app.sidebar_tree.scroll_target_y;
+            }
+
+            if (app.sidebar_tree.scroll_visual_y - app.sidebar_tree.scroll_target_y).abs() > 0.5 {
+                ui.ctx().request_repaint();
+            }
+
+            let scroll_offset = app.sidebar_tree.scroll_visual_y;
+
             let mut sidebar_ctx = SidebarContext {
                 disks: &app.drive_state.disks,
                 current_path: &app.navigation_state.current_path,
@@ -143,11 +176,35 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                 tree_state: &app.sidebar_tree,
             };
 
-            egui::ScrollArea::vertical()
+            let output = egui::ScrollArea::vertical()
                 .id_salt("sidebar_scroll")
                 .auto_shrink([false, false])
-                .show(ui, |ui| render_sidebar(ui, &mut sidebar_ctx))
-                .inner
+                .enable_scrolling(false) // We handle scroll ourselves for smooth animation
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
+                .vertical_scroll_offset(scroll_offset)
+                .show(ui, |ui| render_sidebar(ui, &mut sidebar_ctx));
+
+            // sidebar_ctx borrow released — safe to mutate sidebar_tree again
+
+            // Clamp target to actual content bounds after rendering
+            let max_scroll = (output.content_size.y - output.inner_rect.height()).max(0.0);
+            if app.sidebar_tree.scroll_target_y > max_scroll {
+                app.sidebar_tree.scroll_target_y = max_scroll;
+            }
+            if app.sidebar_tree.scroll_visual_y > max_scroll {
+                app.sidebar_tree.scroll_visual_y = max_scroll;
+            }
+
+            // If ScrollArea was scrolled by egui internally (e.g. scroll_to_me),
+            // sync our target to match.
+            let actual_offset = output.state.offset.y;
+            let our_offset = app.sidebar_tree.scroll_visual_y;
+            if (actual_offset - our_offset).abs() > 2.0 {
+                app.sidebar_tree.scroll_target_y = actual_offset;
+                app.sidebar_tree.scroll_visual_y = actual_offset;
+            }
+
+            output.inner
         });
 
     // Consume focus flag after rendering so it only fires once
