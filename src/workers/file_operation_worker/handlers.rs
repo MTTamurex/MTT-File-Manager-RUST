@@ -18,10 +18,14 @@ pub(super) fn handle_delete(
                 return;
             }
 
-            // L-4: log when shell delete returns false (silent failure)
             if !shell_operations::delete_items_with_shell(&valid_paths, hwnd.0) {
-                log::warn!("[FileOps] delete_items_with_shell returned false for {} paths", valid_paths.len());
+                log::warn!(
+                    "[FileOps] Delete cancelled or failed for {} paths",
+                    valid_paths.len()
+                );
+                return;
             }
+
             let mut parents = HashSet::new();
             for path in &valid_paths {
                 if let Some(parent) = path.parent() {
