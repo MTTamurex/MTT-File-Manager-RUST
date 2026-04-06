@@ -176,13 +176,16 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                 tree_state: &app.sidebar_tree,
             };
 
-            let output = egui::ScrollArea::vertical()
+            let output = egui::ScrollArea::both()
                 .id_salt("sidebar_scroll")
                 .auto_shrink([false, false])
-                .enable_scrolling(false) // We handle scroll ourselves for smooth animation
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
                 .vertical_scroll_offset(scroll_offset)
-                .show(ui, |ui| render_sidebar(ui, &mut sidebar_ctx));
+                .show(ui, |ui| {
+                    // Let content overflow horizontally (deep tree nesting)
+                    ui.set_min_width(ui.available_width());
+                    render_sidebar(ui, &mut sidebar_ctx)
+                });
 
             // sidebar_ctx borrow released — safe to mutate sidebar_tree again
 
@@ -195,11 +198,16 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                 app.sidebar_tree.scroll_visual_y = max_scroll;
             }
 
-            // If ScrollArea was scrolled by egui internally (e.g. scroll_to_me),
-            // sync our target to match.
+            // Egui also processes scroll delta internally (1x speed) on top of
+            // our forced offset.  Undo its contribution so only our 5x-smoothed
+            // version applies, but allow genuine external changes (scrollbar drag,
+            // scroll_to_me) to pass through.
             let actual_offset = output.state.offset.y;
-            let our_offset = app.sidebar_tree.scroll_visual_y;
-            if (actual_offset - our_offset).abs() > 2.0 {
+            let egui_native_drift = actual_offset - scroll_offset;
+            if scroll_delta != 0.0 && pointer_in_sidebar && egui_native_drift.abs() > 0.5 {
+                // This drift is from egui double-processing the same wheel event — ignore it.
+            } else if egui_native_drift.abs() > 2.0 {
+                // Genuine external scroll (scrollbar drag, etc.) — sync to it.
                 app.sidebar_tree.scroll_target_y = actual_offset;
                 app.sidebar_tree.scroll_visual_y = actual_offset;
             }

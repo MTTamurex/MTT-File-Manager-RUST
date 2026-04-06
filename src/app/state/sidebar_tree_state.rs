@@ -29,8 +29,6 @@ pub struct SidebarTreeState {
     tx: mpsc::Sender<LoadResult>,
     /// Channel receiver for background results (drained each frame).
     rx: mpsc::Receiver<LoadResult>,
-    /// The last path we auto-scrolled to (prevents re-scrolling every frame).
-    pub last_synced_path: Option<PathBuf>,
     /// Smooth scroll: the target offset (where the user wants to go).
     pub scroll_target_y: f32,
     /// Smooth scroll: the visual offset (smoothly animates toward target).
@@ -46,7 +44,6 @@ impl SidebarTreeState {
             loading: HashSet::new(),
             tx,
             rx,
-            last_synced_path: None,
             scroll_target_y: 0.0,
             scroll_visual_y: 0.0,
         }
@@ -76,33 +73,6 @@ impl SidebarTreeState {
             self.expanded.insert(path.to_path_buf());
             if !self.children.contains_key(path) && !self.loading.contains(path) {
                 self.start_loading(path);
-            }
-        }
-    }
-
-    /// Expand all ancestors of `target` so the tree reveals it.
-    /// Returns paths that need loading (not yet cached).
-    pub fn expand_to_path(&mut self, target: &Path) {
-        let mut ancestors: Vec<PathBuf> = Vec::new();
-        let mut current = target.to_path_buf();
-
-        // Collect all ancestors up to the drive root
-        while let Some(parent) = current.parent() {
-            // Stop at drive root (e.g. C:\)
-            if parent == current {
-                break;
-            }
-            ancestors.push(parent.to_path_buf());
-            current = parent.to_path_buf();
-        }
-
-        // Expand from root toward leaf
-        for ancestor in ancestors.iter().rev() {
-            if !self.expanded.contains(ancestor) {
-                self.expanded.insert(ancestor.clone());
-            }
-            if !self.children.contains_key(ancestor) && !self.loading.contains(ancestor) {
-                self.start_loading(ancestor);
             }
         }
     }
