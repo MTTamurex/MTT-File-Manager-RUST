@@ -55,17 +55,19 @@ pub fn render_texture_with_overlay(
     let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
     let is_pdf = extension.eq_ignore_ascii_case("pdf");
     let is_image = crate::infrastructure::windows::is_image_extension(extension);
+    let preview_launch_allowed = !crate::domain::file_entry::is_path_inside_archive(&file.path);
 
     let media_rect = image_resp.rect;
     let hover_pos = ui.input(|i| i.pointer.hover_pos());
     let is_hovered = hover_pos.is_some_and(|pos| media_rect.contains(pos));
 
-    if is_hovered && (is_pdf || is_image) {
+    if preview_launch_allowed && is_hovered && (is_pdf || is_image) {
         draw_search_overlay(ui, media_rect, svg_manager);
     }
 
     // Area de clique = todo o thumbnail (PDF ou imagem)
-    if is_pdf
+    if preview_launch_allowed
+        && is_pdf
         && ui
             .interact(
                 media_rect,
@@ -75,7 +77,8 @@ pub fn render_texture_with_overlay(
             .clicked()
     {
         crate::pdf_viewer::open_pdf_viewer(file.path.clone());
-    } else if is_image
+    } else if preview_launch_allowed
+        && is_image
         && ui
             .interact(
                 media_rect,
@@ -111,12 +114,14 @@ pub fn render_gif_preview(
         let media_rect = image_resp.rect;
         let hover_pos = ui.input(|i| i.pointer.hover_pos());
         let is_hovered = hover_pos.is_some_and(|pos| media_rect.contains(pos));
+        let preview_launch_allowed = !crate::domain::file_entry::is_path_inside_archive(&file.path);
 
-        if is_hovered {
+        if preview_launch_allowed && is_hovered {
             draw_search_overlay(ui, media_rect, svg_manager);
         }
 
-        if ui
+        if preview_launch_allowed
+            && ui
             .interact(
                 media_rect,
                 egui::Id::new("gif_thumb_overlay"),

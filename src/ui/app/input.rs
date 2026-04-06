@@ -28,7 +28,12 @@ fn handle_space_preview_action(app: &mut ImageViewerApp, ctx: &egui::Context) ->
         return false;
     }
 
-    app.trigger_selected_preview_overlay_action()
+    if !app.should_consume_space_for_selected_preview_overlay_action() {
+        return false;
+    }
+
+    let _ = app.trigger_selected_preview_overlay_action();
+    true
 }
 
 pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {

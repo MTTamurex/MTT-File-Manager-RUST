@@ -122,6 +122,7 @@ pub fn render_fallback(
         // IS FILE (or Archive)
         // Force is_folder=false for archives to get the archive icon
         let treat_as_folder = file.is_dir && !file.is_archive();
+        let is_virtual_archive_path = crate::domain::file_entry::is_path_inside_archive(&file.path);
 
         // First try non-blocking: returns cached Jumbo icon if available.
         let icon = item_icon_loader.get_or_load_icon_sized(
@@ -133,9 +134,7 @@ pub fn render_fallback(
         ).or_else(|| {
             // Jumbo not cached yet — trigger async extraction and show Large
             // fallback in the meantime.
-            let path_lower = file.path.to_string_lossy().to_lowercase();
-            let is_virtual = crate::domain::file_entry::path_contains_archive_segment(&path_lower);
-            item_icon_loader.enqueue_jumbo_icon(&file.path, is_virtual);
+            item_icon_loader.enqueue_jumbo_icon(&file.path, is_virtual_archive_path);
             // Try Large as immediate fallback.
             item_icon_loader.get_or_load_icon_sized(
                 ui.ctx(),
@@ -155,7 +154,7 @@ pub fn render_fallback(
             let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
             let is_pdf = extension.eq_ignore_ascii_case("pdf");
             let is_image = crate::infrastructure::windows::is_image_extension(extension);
-            if is_pdf || is_image {
+            if !is_virtual_archive_path && (is_pdf || is_image) {
                 let media_rect = image_resp.rect;
                 let hover_pos = ui.input(|i| i.pointer.hover_pos());
                 let is_hovered = hover_pos.is_some_and(|pos| media_rect.contains(pos));

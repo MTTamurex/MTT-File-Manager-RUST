@@ -147,6 +147,12 @@ pub fn path_contains_archive_segment(path_lower: &str) -> bool {
     false
 }
 
+/// Checks whether a concrete path points to a virtual entry inside an archive.
+#[inline]
+pub fn is_path_inside_archive(path: &Path) -> bool {
+    path_contains_archive_segment(&path.to_string_lossy().to_ascii_lowercase())
+}
+
 /// Splits a path that traverses an archive into (archive_file, internal_relative_path).
 /// E.g.: `"C:\dl\archive.zip\folder\VR.nfo"` → `Some(("C:\dl\archive.zip", "folder\VR.nfo"))`
 /// Returns `None` if the path does not contain an archive segment.
@@ -265,4 +271,26 @@ pub enum SyncStatus {
     Syncing,          // Currently syncing (blue arrows)
     Pinned,           // "Always keep on this device" (Green check)
     LocallyAvailable, // Downloaded on demand (Green outline)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_path_inside_archive;
+    use std::path::Path;
+
+    #[test]
+    fn detects_virtual_archive_entry_paths() {
+        assert!(is_path_inside_archive(Path::new(
+            r"C:\Temp\archive.zip\folder\file.pdf"
+        )));
+        assert!(is_path_inside_archive(Path::new(
+            r"C:\Temp\archive.tar.gz\folder\cover.jpg"
+        )));
+    }
+
+    #[test]
+    fn ignores_regular_files_and_archive_roots() {
+        assert!(!is_path_inside_archive(Path::new(r"C:\Temp\archive.zip")));
+        assert!(!is_path_inside_archive(Path::new(r"C:\Temp\folder\file.pdf")));
+    }
 }
