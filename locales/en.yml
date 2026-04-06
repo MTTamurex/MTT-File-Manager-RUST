@@ -352,6 +352,7 @@ pdfviewer:
 drive_slot:
   free_of: "%{free_val} %{free_unit} free of %{total_val} %{total_unit}"
 extract:
+  title: "Extracting items"
   items_extracted: "extracted"
   preparing: "Preparing…"
   cancel_tooltip: "Cancel"
