@@ -36,11 +36,7 @@ pub(super) fn normalize_path_for_compare(path: &str) -> String {
 }
 
 pub(super) fn activate_search_result(app: &mut ImageViewerApp, full_path: &str, is_dir: bool) {
-    app.global_search.active = false;
-    app.global_search.focus_request = false;
-    app.global_search.size_cache.clear();
-    app.global_search.tooltip_texture_cache.clear();
-    app.global_search.metadata_cache.clear();
+    app.close_global_search();
 
     if is_dir {
         app.navigate_to(full_path);
@@ -72,11 +68,7 @@ pub(super) fn activate_search_result(app: &mut ImageViewerApp, full_path: &str, 
 }
 
 pub(super) fn open_file_with_default(app: &mut ImageViewerApp, full_path: &str, is_dir: bool) {
-    app.global_search.active = false;
-    app.global_search.focus_request = false;
-    app.global_search.size_cache.clear();
-    app.global_search.tooltip_texture_cache.clear();
-    app.global_search.metadata_cache.clear();
+    app.close_global_search();
 
     if is_dir {
         app.navigate_to(full_path);

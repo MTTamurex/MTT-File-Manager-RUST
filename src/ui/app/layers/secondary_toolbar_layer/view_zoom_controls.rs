@@ -48,6 +48,20 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
 
     ui.separator();
 
+    if widgets::toggle_icon_button(
+        ui,
+        &mut app.svg_icon_manager,
+        "search_computer",
+        app.global_search.active,
+        &t!("secondary_toolbar.global_search"),
+    )
+    .clicked()
+    {
+        app.toggle_global_search();
+    }
+
+    ui.separator();
+
     ui.scope(|ui| {
         if matches!(app.view_mode, ViewMode::List) {
             ui.disable();

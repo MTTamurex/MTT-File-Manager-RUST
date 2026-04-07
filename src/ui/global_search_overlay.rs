@@ -1,5 +1,5 @@
 //! Global search overlay modal (Spotlight-style).
-//! Activated via Ctrl+Shift+F.
+//! Activated via Ctrl+Shift+F or the secondary toolbar button.
 
 use crate::app::global_search_state::GlobalSearchCategory;
 use crate::app::state::ImageViewerApp;
@@ -73,24 +73,13 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
         });
 
     if close_from_backdrop {
-        app.global_search.active = false;
-        app.global_search.focus_request = false;
-        app.global_search.size_cache.clear();
-        app.global_search.tooltip_texture_cache.clear();
-        app.global_search.metadata_cache.clear();
+        app.close_global_search();
         return;
     }
 
     // ESC closes
     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-        app.global_search.active = false;
-        app.global_search.focus_request = false;
-        app.global_search.pending_query_dispatch_at = None;
-        app.global_search.in_flight_query = None;
-        app.global_search.in_flight_started_at = None;
-        app.global_search.size_cache.clear();
-        app.global_search.tooltip_texture_cache.clear();
-        app.global_search.metadata_cache.clear();
+        app.close_global_search();
         return;
     }
 

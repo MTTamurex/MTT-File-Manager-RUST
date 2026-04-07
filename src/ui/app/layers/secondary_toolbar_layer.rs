@@ -44,9 +44,22 @@ pub(crate) fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egu
                 } else {
                     6.0
                 };
-                // Includes sort controls, folder-position toggle, lock, and view/zoom controls.
-                let content_width =
-                    action_button_count * 28.0 + 30.0 + 110.0 + 28.0 + 40.0 + 2.0 * 28.0 + 80.0 + 80.0 + 4.0 * 8.0 + 17.0 * 12.0;
+                let separator_count = 5.0;
+                let total_item_count = action_button_count + 14.0;
+                let gap_count = total_item_count - 1.0;
+                // Includes action buttons, sort controls, folder-position toggle,
+                // lock, view buttons, global-search button, and zoom controls.
+                let content_width = action_button_count * 28.0
+                    + 30.0
+                    + 110.0
+                    + 40.0
+                    + 28.0
+                    + 2.0 * 28.0
+                    + 28.0
+                    + 80.0
+                    + 80.0
+                    + separator_count * 8.0
+                    + gap_count * 12.0;
                 let available = ui.available_width();
                 let left_pad = ((available - content_width) / 2.0).max(0.0);
                 ui.add_space(left_pad);
