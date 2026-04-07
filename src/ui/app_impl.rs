@@ -218,6 +218,7 @@ impl eframe::App for ImageViewerApp {
                     crate::app::navigation_state::ThemeMode::Dark => ctx.set_visuals(egui::Visuals::dark()),
                     crate::app::navigation_state::ThemeMode::Light => ctx.set_visuals(egui::Visuals::light()),
                 }
+                crate::ui::theme::apply_scroll_style(ctx);
                 self.save_preferences();
                 self.force_save_preferences();
             }

@@ -93,14 +93,36 @@ pub(super) fn render_custom_scrollbar(
         return;
     }
 
-    let scrollbar_w = 12.0;
-    let scrollbar_rect = Rect::from_min_max(
-        viewport_rect.right_top() - egui::vec2(scrollbar_w, 0.0),
+    // Floating scrollbar dimensions (matches egui ScrollStyle config)
+    const RESTING_W: f32 = 3.0;
+    const HOVER_W: f32 = 8.0;
+    const MARGIN: f32 = 2.0;
+
+    // Wide interaction zone so hover detection is easy
+    let interact_rect = Rect::from_min_max(
+        viewport_rect.right_top() - egui::vec2(HOVER_W + MARGIN * 2.0, 0.0),
         viewport_rect.right_bottom(),
     );
 
-    ui.painter()
-        .rect_filled(scrollbar_rect, 0.0, Color32::from_gray(245));
+    let interact = ui.interact(
+        interact_rect,
+        ui.id().with("scrollbar"),
+        Sense::click_and_drag(),
+    );
+
+    let is_hovered = interact.hovered() || interact.dragged();
+    // Pointer anywhere in viewport = "active" state (show handle like egui's ScrollArea)
+    let pointer_in_viewport = ui.input(|i| {
+        i.pointer.hover_pos()
+            .map(|p| viewport_rect.contains(p))
+            .unwrap_or(false)
+    });
+    let bar_w = if is_hovered { HOVER_W } else { RESTING_W };
+
+    let scrollbar_rect = Rect::from_min_max(
+        egui::pos2(viewport_rect.right() - bar_w - MARGIN, viewport_rect.top()),
+        egui::pos2(viewport_rect.right() - MARGIN, viewport_rect.bottom()),
+    );
 
     let handle_h = (viewport_h / total_content_height * viewport_h)
         .max(30.0)
@@ -108,14 +130,8 @@ pub(super) fn render_custom_scrollbar(
     let travel = (viewport_h - handle_h).max(1.0);
     let handle_y = (current_scroll / max_scroll) * travel;
     let handle_rect = Rect::from_min_size(
-        scrollbar_rect.min + egui::vec2(2.0, handle_y),
-        egui::vec2(scrollbar_w - 4.0, handle_h),
-    );
-
-    let interact = ui.interact(
-        scrollbar_rect,
-        ui.id().with("scrollbar"),
-        Sense::click_and_drag(),
+        scrollbar_rect.min + egui::vec2(0.0, handle_y),
+        egui::vec2(bar_w, handle_h),
     );
 
     if interact.clicked() {
@@ -132,12 +148,50 @@ pub(super) fn render_custom_scrollbar(
         *target_scroll = target_scroll.clamp(0.0, max_scroll);
     }
 
-    let color = if interact.dragged() {
-        Color32::from_gray(150)
-    } else if interact.hovered() {
-        Color32::from_gray(180)
+    // Track background — use egui's configured scroll style opacities
+    let scroll_style = &ui.style().spacing.scroll;
+    let bg_opacity = if interact.dragged() || interact.hovered() {
+        scroll_style.interact_background_opacity
     } else {
-        Color32::from_gray(200)
+        scroll_style.dormant_background_opacity
     };
-    ui.painter().rect_filled(handle_rect, 4.0, color);
+    if bg_opacity > 0.0 {
+        ui.painter()
+            .rect_filled(scrollbar_rect, 4.0, Color32::from_black_alpha((bg_opacity * 255.0) as u8));
+    }
+
+    // Handle — use egui's exact scroll handle color and opacity
+    let handle_opacity = if interact.dragged() {
+        scroll_style.interact_handle_opacity
+    } else if is_hovered {
+        scroll_style.interact_handle_opacity
+    } else if pointer_in_viewport {
+        scroll_style.active_handle_opacity
+    } else {
+        scroll_style.dormant_handle_opacity
+    };
+
+    // Animate opacity for smooth transitions
+    let opacity_id = ui.id().with("scrollbar_opacity");
+    let dt = ui.input(|i| i.predicted_dt).min(0.05);
+    let opacity = ui.ctx().data_mut(|d| {
+        let current = d.get_temp_mut_or_insert_with::<f32>(opacity_id, || 0.0_f32);
+        let speed = if handle_opacity > *current { 12.0 } else { 6.0 };
+        *current += (handle_opacity - *current) * (dt * speed).min(1.0);
+        if (*current - handle_opacity).abs() < 0.01 { *current = handle_opacity; }
+        *current
+    });
+
+    if opacity > 0.005 {
+        let base_color = ui.visuals().widgets.inactive.fg_stroke.color;
+        let color = Color32::from_rgba_unmultiplied(
+            base_color.r(), base_color.g(), base_color.b(),
+            (opacity * 255.0) as u8,
+        );
+        ui.painter().rect_filled(handle_rect, bar_w / 2.0, color);
+    }
+
+    if (opacity - handle_opacity).abs() > 0.01 {
+        ui.ctx().request_repaint();
+    }
 }

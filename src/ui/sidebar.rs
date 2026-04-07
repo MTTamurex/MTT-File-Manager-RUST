@@ -70,9 +70,9 @@ pub enum SidebarAction {
     TreeToggleExpand(std::path::PathBuf),
 }
 
-/// Renders the sidebar with drives and computer view
-pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<SidebarAction> {
-    let t_start = std::time::Instant::now();
+/// Renders the fixed top section of the sidebar (This PC + Quick Access).
+/// This section does NOT scroll — it stays pinned at the top.
+pub fn render_sidebar_fixed_top(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<SidebarAction> {
     let mut action = None;
     ui.add_space(10.0);
 
@@ -141,7 +141,6 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
     ui.add_space(8.0);
 
     // === QUICK ACCESS ===
-    let t_quick_access = std::time::Instant::now();
     // Track the start Y for drag-to-pin zone detection
     let qa_section_start_y = ui.cursor().top();
 
@@ -321,6 +320,13 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
 
     ui.add_space(8.0);
     ui.separator();
+
+    action
+}
+
+/// Renders the scrollable drives section of the sidebar (drives + folder trees).
+pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<SidebarAction> {
+    let mut action = None;
     ui.add_space(8.0);
 
     let t_drives = std::time::Instant::now();
@@ -553,14 +559,11 @@ pub fn render_sidebar(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<Sid
     render_drive_group(&t!("sidebar.local_disks"), local_drives);
     render_drive_group(&t!("sidebar.network_drives"), network_drives);
 
-    let total_ms = t_start.elapsed().as_millis();
-    if total_ms > 50 {
+    let drives_ms = t_drives.elapsed().as_millis();
+    if drives_ms > 50 {
         log::warn!(
-            "[PERF-SIDEBAR] total={}ms header={}ms quick_access={}ms drives={}ms | disks={} pinned={}",
-            total_ms,
-            t_quick_access.duration_since(t_start).as_millis(),
-            t_drives.duration_since(t_quick_access).as_millis(),
-            t_start.elapsed().as_millis().saturating_sub(t_drives.duration_since(t_start).as_millis()),
+            "[PERF-SIDEBAR] drives={}ms | disks={} pinned={}",
+            drives_ms,
             ctx.disks.len(),
             ctx.pinned_folders.len(),
         );

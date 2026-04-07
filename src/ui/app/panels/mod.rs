@@ -96,7 +96,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
             egui::Color32::WHITE
         }))
         .show(ctx, |ui| {
-            use crate::ui::sidebar::{render_sidebar, SidebarContext};
+            use crate::ui::sidebar::{render_sidebar_fixed_top, render_sidebar_drives, SidebarContext};
 
             let is_computer_view = app.navigation_state.is_computer_view;
             let is_folder_dragging = app.is_item_dragging && app.drag_payload_is_single_directory;
@@ -176,15 +176,18 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                 tree_state: &app.sidebar_tree,
             };
 
+            // ── Fixed top: This PC + Quick Access (does not scroll) ──
+            let top_action = render_sidebar_fixed_top(ui, &mut sidebar_ctx);
+
+            // ── Scrollable bottom: Drives + folder trees ──
             let output = egui::ScrollArea::both()
                 .id_salt("sidebar_scroll")
                 .auto_shrink([false, false])
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
                 .vertical_scroll_offset(scroll_offset)
                 .show(ui, |ui| {
-                    // Let content overflow horizontally (deep tree nesting)
                     ui.set_min_width(ui.available_width());
-                    render_sidebar(ui, &mut sidebar_ctx)
+                    render_sidebar_drives(ui, &mut sidebar_ctx)
                 });
 
             // sidebar_ctx borrow released — safe to mutate sidebar_tree again
@@ -212,7 +215,8 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                 app.sidebar_tree.scroll_visual_y = actual_offset;
             }
 
-            output.inner
+            // Prefer fixed top action; fall back to drives action
+            top_action.or(output.inner)
         });
 
     // Consume focus flag after rendering so it only fires once

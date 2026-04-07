@@ -34,16 +34,24 @@ pub fn render_drive_tree(
     let root = Path::new(drive_path);
     let mut action: Option<SidebarTreeAction> = None;
 
+    let tree_state = ctx.tree_state;
+    let current_path = ctx.current_path;
+    let is_renaming = ctx.is_renaming;
+
     // If the drive root is expanded, render its children
-    if ctx.tree_state.is_expanded(root) {
-        if ctx.tree_state.is_loading(root) && ctx.tree_state.get_children(root).is_none() {
+    if tree_state.is_expanded(root) {
+        if tree_state.is_loading(root) && tree_state.get_children(root).is_none() {
             // Show loading indicator
             render_loading_row(ui, 1);
-        } else if let Some(children) = ctx.tree_state.get_children(root) {
-            // Clone to avoid borrow conflict with ctx.icon_loader
-            let children_owned: Vec<FolderNode> = children.to_vec();
-            for node in &children_owned {
-                render_tree_node(ui, node, 1, ctx, &mut action);
+        } else if let Some(children) = tree_state.get_children(root) {
+            for node in children {
+                let mut node_ctx = SidebarTreeContext {
+                    tree_state,
+                    current_path,
+                    icon_loader: &mut *ctx.icon_loader,
+                    is_renaming,
+                };
+                render_tree_node(ui, node, 1, &mut node_ctx, &mut action);
             }
         }
     }
@@ -69,8 +77,10 @@ fn render_tree_node(
 
     // Allocate row — use max of available width and content width so deep nodes
     // push the ScrollArea's content wider, enabling horizontal scroll.
+    // Approximate text width with per-char estimate (avoids font shaping every frame).
+    let approx_text_width = node.name.len() as f32 * 7.0;
     let content_min_width = indent + ARROW_WIDTH + ICON_SIZE + 4.0
-        + ui.fonts(|f| f.layout_no_wrap(node.name.clone(), egui::FontId::proportional(11.0), Color32::WHITE).size().x)
+        + approx_text_width
         + 8.0; // right padding
     let row_width = ui.available_width().max(content_min_width);
     let (rect, response) =
@@ -182,9 +192,17 @@ fn render_tree_node(
         if is_loading && ctx.tree_state.get_children(&node.path).is_none() {
             render_loading_row(ui, depth + 1);
         } else if let Some(children) = ctx.tree_state.get_children(&node.path) {
-            let children_owned: Vec<FolderNode> = children.to_vec();
-            for child in &children_owned {
-                render_tree_node(ui, child, depth + 1, ctx, action);
+            let tree_state = ctx.tree_state;
+            let current_path = ctx.current_path;
+            let is_renaming = ctx.is_renaming;
+            for child in children {
+                let mut child_ctx = SidebarTreeContext {
+                    tree_state,
+                    current_path,
+                    icon_loader: &mut *ctx.icon_loader,
+                    is_renaming,
+                };
+                render_tree_node(ui, child, depth + 1, &mut child_ctx, action);
             }
         }
     }
@@ -206,53 +224,3 @@ fn render_loading_row(ui: &mut egui::Ui, depth: usize) {
     }
 }
 
-/// Render an expand/collapse arrow for a drive root in the sidebar.
-/// This is called from `sidebar.rs` to prepend an arrow to the existing drive row.
-/// Returns `true` if the arrow was clicked.
-pub fn render_drive_expand_arrow(
-    ui: &mut egui::Ui,
-    rect: Rect,
-    drive_path: &str,
-    tree_state: &SidebarTreeState,
-) -> bool {
-    let root = Path::new(drive_path);
-    let is_expanded = tree_state.is_expanded(root);
-    let is_loading = tree_state.is_loading(root);
-
-    // We don't know yet if a drive has subfolders — always show the arrow
-    let arrow_text = if is_loading {
-        "…"
-    } else if is_expanded {
-        "▾"
-    } else {
-        "▸"
-    };
-
-    let arrow_rect = Rect::from_center_size(
-        Pos2::new(rect.min.x + 6.0, rect.center().y),
-        egui::vec2(12.0, ROW_HEIGHT),
-    );
-
-    let pointer_pos = ui.input(|inp| inp.pointer.hover_pos());
-    let arrow_hovered = pointer_pos
-        .map(|p| arrow_rect.expand(2.0).contains(p))
-        .unwrap_or(false);
-
-    let arrow_color = if arrow_hovered {
-        ui.visuals().text_color()
-    } else {
-        Color32::from_gray(140)
-    };
-
-    ui.painter().text(
-        arrow_rect.center(),
-        egui::Align2::CENTER_CENTER,
-        arrow_text,
-        egui::FontId::proportional(10.0),
-        arrow_color,
-    );
-
-    // Check if user clicked in the arrow zone
-    let clicked = ui.input(|inp| inp.pointer.primary_clicked());
-    clicked && arrow_hovered
-}

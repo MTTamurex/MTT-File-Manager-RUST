@@ -163,6 +163,7 @@ impl ImageViewerApp {
             crate::app::navigation_state::ThemeMode::Dark => ctx.set_visuals(egui::Visuals::dark()),
             crate::app::navigation_state::ThemeMode::Light => ctx.set_visuals(egui::Visuals::light()),
         }
+        crate::ui::theme::apply_scroll_style(&ctx);
 
         // Load folder locks from database
         let folder_locks = disk_cache.get_all_folder_locks();
