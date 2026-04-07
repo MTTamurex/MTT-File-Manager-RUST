@@ -12,6 +12,7 @@ pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 crate::app::navigation_state::ThemeMode::Dark => ctx.set_visuals(egui::Visuals::dark()),
                 crate::app::navigation_state::ThemeMode::Light => ctx.set_visuals(egui::Visuals::light()),
             }
+            crate::ui::theme::apply_scroll_style(ctx);
 
             // Frame 1: Apply saved geometry while window is hidden
             if app.layout.saved_is_maximized {

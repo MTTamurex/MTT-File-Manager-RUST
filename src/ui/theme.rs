@@ -1,4 +1,4 @@
-use eframe::egui::Color32;
+use eframe::egui::{self, Color32};
 
 // === SPACING ===
 pub const PADDING_XS: f32 = 2.0;
@@ -84,6 +84,35 @@ pub const TEXTURE_CACHE_SIZE: usize = 200;
 pub const ICON_CACHE_SIZE: usize = 100;
 
 pub const METADATA_CACHE_SIZE: usize = 512;
+
+// === SCROLL STYLE ===
+
+/// Apply a unified floating scrollbar style: thin by default, expands on hover,
+/// neutral gray handle (dark and light mode). Call after every `ctx.set_visuals()`.
+pub fn apply_scroll_style(ctx: &egui::Context) {
+    ctx.style_mut(|style| {
+        let s = &mut style.spacing.scroll;
+        s.floating = true;
+        s.bar_width = 8.0;           // Max width when hovered
+        s.floating_width = 3.0;      // Thin resting width
+        s.floating_allocated_width = 0.0;
+        s.handle_min_length = 20.0;
+        s.bar_inner_margin = 2.0;
+        s.bar_outer_margin = 0.0;
+        // Use foreground (fg_stroke) color — always contrasts with background
+        s.foreground_color = true;
+        // Resting: nearly invisible
+        s.dormant_background_opacity = 0.0;
+        s.dormant_handle_opacity = 0.0;
+        // Active (pointer in scroll area): subtle hint
+        s.active_background_opacity = 0.0;
+        s.active_handle_opacity = 0.4;
+        // Interacting (hovering/dragging the bar itself): clearly visible
+        s.interact_background_opacity = 0.04;
+        s.interact_handle_opacity = 0.7;
+    });
+}
+
 // === ICONS (Remix Icon Mappings) ===
 pub const ICON_ARROW_LEFT: &str = "\u{EA64}"; // Left Arrow
 pub const ICON_ARROW_RIGHT: &str = "\u{EA6E}"; // Right Arrow

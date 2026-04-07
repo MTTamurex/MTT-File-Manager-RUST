@@ -347,13 +347,35 @@ fn render_scrollbar(
         return;
     }
 
-    let scroll_bar_w = 4.0;
-    let scroll_bar_rect = Rect::from_min_max(
+    // Floating scrollbar dimensions (matches egui ScrollStyle config)
+    const RESTING_W: f32 = 3.0;
+    const HOVER_W: f32 = 8.0;
+    const MARGIN: f32 = 2.0;
+
+    // Wide interaction zone so hover detection is easy
+    let interact_rect = Rect::from_min_max(
         egui::pos2(
-            viewport_rect.right() - scroll_bar_w - 2.0,
+            viewport_rect.right() - HOVER_W - MARGIN * 2.0,
             viewport_rect.top(),
         ),
-        egui::pos2(viewport_rect.right() - 2.0, viewport_rect.bottom()),
+        egui::pos2(viewport_rect.right(), viewport_rect.bottom()),
+    );
+
+    let scroll_id = ui.id().with("list_scrollbar");
+    let response = ui.interact(interact_rect, scroll_id, Sense::click_and_drag());
+
+    let is_hovered = response.hovered() || response.dragged();
+    // Pointer anywhere in viewport = "active" state (show handle like egui's ScrollArea)
+    let pointer_in_viewport = ui.input(|i| {
+        i.pointer.hover_pos()
+            .map(|p| viewport_rect.contains(p))
+            .unwrap_or(false)
+    });
+    let bar_w = if is_hovered { HOVER_W } else { RESTING_W };
+
+    let scroll_bar_rect = Rect::from_min_max(
+        egui::pos2(viewport_rect.right() - bar_w - MARGIN, viewport_rect.top()),
+        egui::pos2(viewport_rect.right() - MARGIN, viewport_rect.bottom()),
     );
 
     let handle_h = (viewport_h / total_content_height * viewport_h)
@@ -363,15 +385,10 @@ fn render_scrollbar(
     let handle_top = (current_scroll / max_scroll) * travel;
     let handle_rect = Rect::from_min_size(
         egui::pos2(scroll_bar_rect.left(), viewport_rect.top() + handle_top),
-        egui::vec2(scroll_bar_w, handle_h),
+        egui::vec2(bar_w, handle_h),
     );
 
-    // Interaction: click_and_drag for both track-click and handle drag
-    let scroll_id = ui.id().with("list_scrollbar");
-    let response = ui.interact(scroll_bar_rect, scroll_id, Sense::click_and_drag());
-
     if response.clicked() {
-        // TRACK-CLICK: Jump to clicked position
         if let Some(click_pos) = ui.input(|i| i.pointer.interact_pos()) {
             let relative_y = click_pos.y - scroll_bar_rect.top();
             let target_handle_top = relative_y - (handle_h / 2.0);
@@ -385,18 +402,52 @@ fn render_scrollbar(
         *ctx.mut_scroll_offset_y = ctx.mut_scroll_offset_y.clamp(0.0, max_scroll);
     }
 
-    // Draw track
-    ui.painter()
-        .rect_filled(scroll_bar_rect, 0.0, Color32::from_black_alpha(10));
-    // Draw handle
-    let handle_color = if response.dragged() {
-        Color32::from_gray(100)
-    } else if response.hovered() {
-        Color32::from_gray(150)
+    // Track background — use egui's configured scroll style opacities
+    let scroll_style = &ui.style().spacing.scroll;
+    let bg_opacity = if response.dragged() || response.hovered() {
+        scroll_style.interact_background_opacity
     } else {
-        Color32::from_gray(200)
+        scroll_style.dormant_background_opacity
     };
-    ui.painter().rect_filled(handle_rect, 2.0, handle_color);
+    if bg_opacity > 0.0 {
+        ui.painter()
+            .rect_filled(scroll_bar_rect, 4.0, Color32::from_black_alpha((bg_opacity * 255.0) as u8));
+    }
+
+    // Handle — use egui's exact scroll handle color and opacity
+    let handle_opacity = if response.dragged() {
+        scroll_style.interact_handle_opacity
+    } else if is_hovered {
+        scroll_style.interact_handle_opacity
+    } else if pointer_in_viewport {
+        scroll_style.active_handle_opacity
+    } else {
+        scroll_style.dormant_handle_opacity
+    };
+
+    // Animate opacity for smooth transitions
+    let opacity_id = ui.id().with("list_scrollbar_opacity");
+    let dt = ui.input(|i| i.predicted_dt).min(0.05);
+    let opacity = ui.ctx().data_mut(|d| {
+        let current = d.get_temp_mut_or_insert_with::<f32>(opacity_id, || 0.0_f32);
+        let speed = if handle_opacity > *current { 12.0 } else { 6.0 };
+        *current += (handle_opacity - *current) * (dt * speed).min(1.0);
+        if (*current - handle_opacity).abs() < 0.01 { *current = handle_opacity; }
+        *current
+    });
+
+    if opacity > 0.005 {
+        let base_color = ui.visuals().widgets.inactive.fg_stroke.color;
+        let handle_color = Color32::from_rgba_unmultiplied(
+            base_color.r(), base_color.g(), base_color.b(),
+            (opacity * 255.0) as u8,
+        );
+        ui.painter().rect_filled(handle_rect, bar_w / 2.0, handle_color);
+    }
+
+    if (opacity - handle_opacity).abs() > 0.01 {
+        ui.ctx().request_repaint();
+    }
 }
 
 /// Handles prefetch of thumbnails for items near the viewport

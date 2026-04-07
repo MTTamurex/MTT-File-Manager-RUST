@@ -16,7 +16,8 @@ pub struct FolderNode {
 /// Result sent back from the background loading thread.
 struct LoadResult {
     parent: PathBuf,
-    children: Vec<FolderNode>,
+    /// `None` = I/O error (permission denied, etc.); `Some(vec)` = successful enumeration.
+    children: Option<Vec<FolderNode>>,
 }
 
 /// State for the hierarchical folder tree displayed in the sidebar.
@@ -126,22 +127,19 @@ impl SidebarTreeState {
         self.start_loading(path);
     }
 
-    /// Spawn a background thread to enumerate subdirectories of `path`.
+    /// Queue a background task (on rayon's thread pool) to enumerate subdirectories.
     fn start_loading(&mut self, path: &Path) {
         self.loading.insert(path.to_path_buf());
         let parent = path.to_path_buf();
         let tx = self.tx.clone();
 
-        std::thread::Builder::new()
-            .name("sidebar-tree-load".into())
-            .spawn(move || {
-                let children = enumerate_subfolders(&parent);
-                let _ = tx.send(LoadResult {
-                    parent,
-                    children,
-                });
-            })
-            .ok();
+        rayon::spawn(move || {
+            let children = enumerate_subfolders(&parent);
+            let _ = tx.send(LoadResult {
+                parent,
+                children,
+            });
+        });
     }
 
     /// Drain all completed background loads. Call once per frame from the update loop.
@@ -149,21 +147,31 @@ impl SidebarTreeState {
         let mut any = false;
         while let Ok(result) = self.rx.try_recv() {
             self.loading.remove(&result.parent);
-            let has_children = !result.children.is_empty();
-            self.children.insert(result.parent.clone(), result.children);
 
-            // Update the parent's has_subfolders in its own parent's children list
-            // so the arrow disappears for empty folders.
-            if !has_children {
-                if let Some(grandparent) = result.parent.parent() {
-                    if let Some(siblings) = self.children.get_mut(grandparent) {
-                        if let Some(node) = siblings.iter_mut().find(|n| n.path == result.parent) {
-                            node.has_subfolders = Some(false);
+            match result.children {
+                Some(children) => {
+                    let has_children = !children.is_empty();
+                    self.children.insert(result.parent.clone(), children);
+
+                    // Update the parent's has_subfolders in its own parent's children list
+                    // so the arrow disappears for empty folders.
+                    if !has_children {
+                        if let Some(grandparent) = result.parent.parent() {
+                            if let Some(siblings) = self.children.get_mut(grandparent) {
+                                if let Some(node) = siblings.iter_mut().find(|n| n.path == result.parent) {
+                                    node.has_subfolders = Some(false);
+                                }
+                            }
                         }
+                        // Also collapse it since there's nothing to show
+                        self.expanded.remove(&result.parent);
                     }
                 }
-                // Also collapse it since there's nothing to show
-                self.expanded.remove(&result.parent);
+                None => {
+                    // I/O error — collapse the node but don't mark has_subfolders=false
+                    // so the arrow stays and the user can retry later.
+                    self.expanded.remove(&result.parent);
+                }
             }
 
             any = true;
@@ -186,15 +194,19 @@ fn entries_to_folder_nodes(entries: &[crate::domain::file_entry::FileEntry]) -> 
             has_subfolders: None,
         })
         .collect();
-    folders.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    folders.sort_by(|a, b| natord::compare_ignore_case(&a.name, &b.name));
     folders
 }
 
 /// List immediate subdirectories of `parent`, sorted alphabetically.
-fn enumerate_subfolders(parent: &Path) -> Vec<FolderNode> {
+/// Returns `None` on I/O error (permission denied, etc.).
+fn enumerate_subfolders(parent: &Path) -> Option<Vec<FolderNode>> {
     let read_dir = match std::fs::read_dir(parent) {
         Ok(rd) => rd,
-        Err(_) => return Vec::new(),
+        Err(e) => {
+            eprintln!("sidebar-tree: cannot read {}: {}", parent.display(), e);
+            return None;
+        }
     };
 
     let mut folders: Vec<FolderNode> = Vec::new();
@@ -224,10 +236,9 @@ fn enumerate_subfolders(parent: &Path) -> Vec<FolderNode> {
         });
     }
 
-    // Sort case-insensitive
-    folders.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    folders.sort_by(|a, b| natord::compare_ignore_case(&a.name, &b.name));
 
-    folders
+    Some(folders)
 }
 
 /// Check Windows hidden/system attributes.
