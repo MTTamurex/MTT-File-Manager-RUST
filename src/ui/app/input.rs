@@ -461,6 +461,20 @@ fn handle_quick_search(app: &mut ImageViewerApp, ctx: &egui::Context) {
         );
     }
 
+    // Never treat typing inside text fields (toolbar search, global search,
+    // address edits, inline editors, etc.) as Explorer-style quick search.
+    if ctx.wants_keyboard_input() {
+        let active_tab = app.tab_manager.active_mut();
+        if !active_tab.quick_search_buffer.is_empty() {
+            active_tab.quick_search_buffer.clear();
+            log::debug!(
+                "[QUICK_SEARCH] Buffer cleared because a text input has focus (Tab {})",
+                active_tab.id
+            );
+        }
+        return;
+    }
+
     // Capture text input events (alphanumeric, space, etc.)
     let text_input = ctx.input(|i| {
         i.events.iter().find_map(|event| {
