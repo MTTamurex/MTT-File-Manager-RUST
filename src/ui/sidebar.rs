@@ -373,8 +373,8 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
             let (mut rect, response) =
                 ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), Sense::click());
 
-            rect.min.x = ui.clip_rect().min.x;
-            rect.max.x = ui.clip_rect().max.x;
+            rect.min.x = ui.max_rect().min.x;
+            rect.max.x = ui.max_rect().max.x;
 
             // Track arrow click zone for this drive row
             let arrow_zone = Rect::from_min_size(
