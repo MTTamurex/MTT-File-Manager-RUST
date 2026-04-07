@@ -515,7 +515,11 @@ impl ImageViewerApp {
             pinned_folders,
 
             // SIDEBAR FOLDER TREE
-            sidebar_tree: crate::app::state::sidebar_tree_state::SidebarTreeState::new(directory_cache.clone()),
+            sidebar_tree: {
+                let mut tree = crate::app::state::sidebar_tree_state::SidebarTreeState::new(directory_cache.clone());
+                tree.set_show_hidden(show_hidden_files);
+                tree
+            },
 
             scroll_request: crate::app::state::ScrollRequest::None,
 

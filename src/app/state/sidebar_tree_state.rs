@@ -11,6 +11,8 @@ pub struct FolderNode {
     pub name: String,
     /// `None` = not yet probed, `Some(true)` = has subdirectories (show expand arrow).
     pub has_subfolders: Option<bool>,
+    /// Whether this folder has the Windows FILE_ATTRIBUTE_HIDDEN flag.
+    pub is_hidden: bool,
 }
 
 /// Result sent back from the background loading thread.
@@ -34,6 +36,8 @@ pub struct SidebarTreeState {
     rx: mpsc::Receiver<LoadResult>,
     /// Shared directory cache from the central panel — avoids duplicate read_dir.
     dir_cache: Arc<DirectoryCache>,
+    /// Whether hidden files/folders are currently shown.
+    show_hidden: bool,
     /// Smooth scroll: the target offset (where the user wants to go).
     pub scroll_target_y: f32,
     /// Smooth scroll: the visual offset (smoothly animates toward target).
@@ -50,6 +54,7 @@ impl SidebarTreeState {
             tx,
             rx,
             dir_cache,
+            show_hidden: false,
             scroll_target_y: 0.0,
             scroll_visual_y: 0.0,
         }
@@ -67,6 +72,26 @@ impl SidebarTreeState {
 
     pub fn get_children(&self, path: &Path) -> Option<&[FolderNode]> {
         self.children.get(path).map(|v| v.as_slice())
+    }
+
+    pub fn show_hidden(&self) -> bool {
+        self.show_hidden
+    }
+
+    /// Update show_hidden flag. If changed, invalidates all cached children
+    /// so they are re-loaded with the new filter.
+    pub fn set_show_hidden(&mut self, show: bool) {
+        if self.show_hidden != show {
+            self.show_hidden = show;
+            // Re-load all currently expanded directories
+            let expanded: Vec<PathBuf> = self.expanded.iter().cloned().collect();
+            self.children.clear();
+            for path in expanded {
+                if !self.loading.contains(&path) {
+                    self.load_children(&path);
+                }
+            }
+        }
     }
 
     // ── Mutations ────────────────────────────────────────────────────
@@ -105,9 +130,10 @@ impl SidebarTreeState {
     /// Try the shared directory cache first (instant); fall back to background thread.
     fn load_children(&mut self, path: &Path) {
         let path_buf = path.to_path_buf();
+        let show_hidden = self.show_hidden;
         // Fast path: reuse the central panel's directory cache
         if let Some(entries) = self.dir_cache.get(&path_buf) {
-            let children = entries_to_folder_nodes(&entries);
+            let children = entries_to_folder_nodes(&entries, show_hidden);
             // Simulate a completed load — update in place
             let has_children = !children.is_empty();
             self.children.insert(path_buf.clone(), children);
@@ -132,9 +158,10 @@ impl SidebarTreeState {
         self.loading.insert(path.to_path_buf());
         let parent = path.to_path_buf();
         let tx = self.tx.clone();
+        let show_hidden = self.show_hidden;
 
         rayon::spawn(move || {
-            let children = enumerate_subfolders(&parent);
+            let children = enumerate_subfolders(&parent, show_hidden);
             let _ = tx.send(LoadResult {
                 parent,
                 children,
@@ -183,15 +210,17 @@ impl SidebarTreeState {
 // ── Folder Enumeration (runs on background thread) ───────────────────
 
 /// Convert cached FileEntry list into FolderNode list (synchronous, no I/O).
-fn entries_to_folder_nodes(entries: &[crate::domain::file_entry::FileEntry]) -> Vec<FolderNode> {
+fn entries_to_folder_nodes(entries: &[crate::domain::file_entry::FileEntry], show_hidden: bool) -> Vec<FolderNode> {
     let mut folders: Vec<FolderNode> = entries
         .iter()
         .filter(|e| e.is_dir)
-        .filter(|e| !is_hidden_or_system(&e.path))
+        .filter(|e| !is_system(&e.path))
+        .filter(|e| show_hidden || !is_hidden(&e.path))
         .map(|e| FolderNode {
             path: e.path.clone(),
             name: e.name.clone(),
             has_subfolders: None,
+            is_hidden: is_hidden(&e.path),
         })
         .collect();
     folders.sort_by(|a, b| natord::compare_ignore_case(&a.name, &b.name));
@@ -200,7 +229,7 @@ fn entries_to_folder_nodes(entries: &[crate::domain::file_entry::FileEntry]) -> 
 
 /// List immediate subdirectories of `parent`, sorted alphabetically.
 /// Returns `None` on I/O error (permission denied, etc.).
-fn enumerate_subfolders(parent: &Path) -> Option<Vec<FolderNode>> {
+fn enumerate_subfolders(parent: &Path, show_hidden: bool) -> Option<Vec<FolderNode>> {
     let read_dir = match std::fs::read_dir(parent) {
         Ok(rd) => rd,
         Err(e) => {
@@ -224,15 +253,22 @@ fn enumerate_subfolders(parent: &Path) -> Option<Vec<FolderNode>> {
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().into_owned();
 
-        // Skip hidden/system folders (Windows attribute check)
-        if is_hidden_or_system(&path) {
+        // Always skip system folders
+        if is_system(&path) {
+            continue;
+        }
+
+        let hidden = is_hidden(&path);
+        // Skip hidden folders unless show_hidden is enabled
+        if hidden && !show_hidden {
             continue;
         }
 
         folders.push(FolderNode {
             path,
             name,
-            has_subfolders: None, // resolved lazily when expanded
+            has_subfolders: None,
+            is_hidden: hidden,
         });
     }
 
@@ -241,27 +277,37 @@ fn enumerate_subfolders(parent: &Path) -> Option<Vec<FolderNode>> {
     Some(folders)
 }
 
-/// Check Windows hidden/system attributes.
+/// Check Windows hidden attribute only.
 #[cfg(windows)]
-fn is_hidden_or_system(path: &Path) -> bool {
+fn is_hidden(path: &Path) -> bool {
     use std::os::windows::fs::MetadataExt;
-
     const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
-    const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
-
     match std::fs::metadata(path) {
-        Ok(meta) => {
-            let attrs = meta.file_attributes();
-            (attrs & FILE_ATTRIBUTE_HIDDEN) != 0 || (attrs & FILE_ATTRIBUTE_SYSTEM) != 0
-        }
-        Err(_) => true, // Treat inaccessible as hidden
+        Ok(meta) => (meta.file_attributes() & FILE_ATTRIBUTE_HIDDEN) != 0,
+        Err(_) => true,
+    }
+}
+
+/// Check Windows system attribute only.
+#[cfg(windows)]
+fn is_system(path: &Path) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
+    match std::fs::metadata(path) {
+        Ok(meta) => (meta.file_attributes() & FILE_ATTRIBUTE_SYSTEM) != 0,
+        Err(_) => true,
     }
 }
 
 #[cfg(not(windows))]
-fn is_hidden_or_system(path: &Path) -> bool {
+fn is_hidden(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
         .map(|n| n.starts_with('.'))
         .unwrap_or(false)
+}
+
+#[cfg(not(windows))]
+fn is_system(_path: &Path) -> bool {
+    false
 }
