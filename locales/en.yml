@@ -276,6 +276,7 @@ secondary_toolbar:
   disabled_suffix: "(Disabled)"
   list: "List"
   grid: "Grid"
+  global_search: "Global search on this computer"
   zoom: "Zoom"
 drag_drop:
   copy: "Copy"

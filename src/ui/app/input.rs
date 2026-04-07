@@ -48,12 +48,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         // Prevent routing shortcuts/quick-search to the main file views.
         if app.global_search.active {
             if ctx.input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::F)) {
-                app.global_search.active = false;
-                app.global_search.focus_request = false;
-                app.global_search.pending_query_dispatch_at = None;
-                app.global_search.size_cache.clear();
-                app.global_search.tooltip_texture_cache.clear();
-                app.global_search.metadata_cache.clear();
+                app.close_global_search();
                 user_active = true;
             }
 
@@ -279,33 +274,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
         // Ctrl + Shift + F: Global Search
         if ctx.input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::F)) {
-            app.global_search.active = !app.global_search.active;
-            app.global_search.selected_index = None;
-            if app.global_search.active {
-                app.global_search.focus_request = true;
-                app.global_search.query.clear();
-                app.global_search.results.clear();
-                app.global_search.results_generation += 1;
-                app.global_search.loading = false;
-                app.global_search.pending_query_dispatch_at = None;
-                app.global_search.has_more_results = false;
-                app.global_search.requested_offset = 0;
-                app.global_search.requested_limit = 200;
-                // Check service availability
-                if let Err(e) = app
-                    .global_search
-                    .sender
-                    .send(crate::workers::global_search_worker::GlobalSearchRequest::CheckStatus)
-                {
-                    log::error!("[GLOBAL-SEARCH] Failed to queue status check: {}", e);
-                }
-            } else {
-                app.global_search.focus_request = false;
-                app.global_search.pending_query_dispatch_at = None;
-                app.global_search.has_more_results = false;
-                app.global_search.requested_offset = 0;
-                app.global_search.requested_limit = 200;
-            }
+            app.toggle_global_search();
             user_active = true;
         }
 
