@@ -88,6 +88,7 @@ fn render_tree_node(
 
     if ui.is_rect_visible(rect) {
         let dark_mode = ui.visuals().dark_mode;
+        let hidden_opacity = if node.is_hidden { 0.5 } else { 1.0 };
 
         // Row background
         if is_selected {
@@ -119,7 +120,7 @@ fn render_tree_node(
                 ui.visuals().text_color()
             } else {
                 Color32::from_gray(140)
-            };
+            }.gamma_multiply(hidden_opacity);
 
             ui.painter().text(
                 arrow_rect.center(),
@@ -145,7 +146,7 @@ fn render_tree_node(
                 icon.id(),
                 icon_rect,
                 Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
-                Color32::WHITE,
+                Color32::WHITE.gamma_multiply(hidden_opacity),
             );
             cursor_x += ICON_SIZE + 4.0;
         } else {
@@ -157,7 +158,7 @@ fn render_tree_node(
             crate::ui::theme::selection_text_color(dark_mode)
         } else {
             ui.visuals().text_color()
-        };
+        }.gamma_multiply(hidden_opacity);
 
         ui.painter().text(
             Pos2::new(cursor_x, rect.center().y),

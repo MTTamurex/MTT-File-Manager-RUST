@@ -140,6 +140,7 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                     app.save_preferences();
                     app.directory_cache.clear();
                     app.load_folder(true);
+                    app.sidebar_tree.set_show_hidden(app.show_hidden_files);
                 }
                 _ => {}
             }
