@@ -397,6 +397,10 @@ pub fn parse_usn_records(
                     let is_dir = (file_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
                     index.insert_record(frn, &name, parent_frn, is_dir);
                 }
+                // Track that the parent directory's contents changed.
+                // This enables CheckPathsModified to detect external changes
+                // via USN journal without any disk I/O on the client side.
+                index.dir_modified_at.insert(parent_frn, std::time::Instant::now());
             } else {
                 // Initial enumeration: just insert
                 let is_dir = (file_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;

@@ -123,10 +123,92 @@ impl ImageViewerApp {
 
         // If items were cleared (by MoveCompleted event) and this is a regular folder view,
         // trigger a reload to fetch fresh content
-        let needs_reload = self.items.is_empty()
+        let mut needs_reload = self.items.is_empty()
             && !self.navigation_state.is_computer_view
             && !self.navigation_state.is_recycle_bin_view
             && !self.navigation_state.current_path.is_empty();
+
+        // TAB-SWITCH STALENESS CHECK: Even when the tab has cached items,
+        // verify the directory hasn't changed while the tab was inactive.
+        // Without this, changes made externally (e.g., in Windows Explorer)
+        // won't be visible until the consistency probe catches up (up to 30s).
+        if !needs_reload
+            && !self.items.is_empty()
+            && !self.navigation_state.is_computer_view
+            && !self.navigation_state.is_recycle_bin_view
+            && !self.navigation_state.current_path.is_empty()
+        {
+            let tab_path = std::path::PathBuf::from(&self.navigation_state.current_path);
+
+            // 1) Check in-memory dirty registry (free, no I/O)
+            let is_dirty = self.directory_dirty_registry.is_dirty(&tab_path);
+
+            // 2) Fast-path for NTFS: ask the search service (no disk I/O).
+            //    The service runs with admin privileges and tracks USN journal
+            //    changes with dir_modified_at timestamps per directory FRN.
+            //    Threshold of 120s covers any reasonable tab-away duration.
+            let mut service_checked = false;
+            let is_stale = if is_dirty {
+                true
+            } else if crate::infrastructure::onedrive::is_onedrive_path(&tab_path) {
+                false
+            } else if self.global_search.available {
+                // Try the search service first (NTFS fast path, ~1-2ms via named pipe)
+                let path_str = self.navigation_state.current_path.clone();
+                match crate::infrastructure::global_search::check_paths_modified(
+                    &[path_str],
+                    120,
+                ) {
+                    Ok(modified) => {
+                        service_checked = true;
+                        !modified.is_empty()
+                    }
+                    Err(e) => {
+                        log::debug!(
+                            "[TAB] Search service check_paths_modified failed, falling back to mtime: {}",
+                            e
+                        );
+                        // Fall through to mtime check
+                        if let Some(cached_at_ms) = self.directory_cache.cached_at_ms(&tab_path) {
+                            let dir_mtime_ms = std::fs::metadata(&tab_path)
+                                .ok()
+                                .and_then(|m| m.modified().ok())
+                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map(|d| d.as_millis() as u64)
+                                .unwrap_or(0);
+                            dir_mtime_ms > cached_at_ms
+                        } else {
+                            false
+                        }
+                    }
+                }
+            } else if let Some(cached_at_ms) = self.directory_cache.cached_at_ms(&tab_path) {
+                // Fallback: compare directory mtime against cache timestamp.
+                // Skip for OneDrive paths where metadata calls may block on cloud hydration.
+                let dir_mtime_ms = std::fs::metadata(&tab_path)
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                dir_mtime_ms > cached_at_ms
+            } else {
+                // No cache entry at all — load_folder will handle it
+                false
+            };
+
+            if is_stale {
+                log::info!(
+                    "[TAB] Tab-switch staleness detected for {:?}, scheduling reload (dirty={}, service_checked={})",
+                    tab_path,
+                    is_dirty,
+                    service_checked
+                );
+                self.directory_dirty_registry.mark_dirty(&tab_path);
+                self.directory_cache.invalidate(&tab_path);
+                needs_reload = true;
+            }
+        }
 
         if needs_reload {
             log::debug!(

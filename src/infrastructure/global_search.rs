@@ -150,6 +150,42 @@ pub fn get_status() -> Result<IndexStatusInfo, String> {
     result
 }
 
+/// Timeout for the lightweight CheckPathsModified request.
+const CHECK_PATHS_TIMEOUT_MS: u64 = 2_000;
+
+/// Ask the search service which of the given directory paths have been
+/// modified (via USN journal) within the last `threshold_secs` seconds.
+/// Returns the subset of paths that changed. Useful for tab-switch staleness
+/// detection on NTFS volumes without any disk I/O in the app process.
+pub fn check_paths_modified(paths: &[String], threshold_secs: u32) -> Result<Vec<String>, String> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let pipe = open_pipe()?;
+
+    let result = (|| {
+        let request = SearchRequest::CheckPathsModified {
+            paths: paths.to_vec(),
+            threshold_secs,
+        };
+        write_message(pipe, &request)?;
+        let response = read_validated_response(pipe, CHECK_PATHS_TIMEOUT_MS)?;
+
+        match response {
+            SearchResponse::PathsModified { modified } => Ok(modified),
+            SearchResponse::Error(e) => Err(e),
+            _ => Err("Unexpected response type".into()),
+        }
+    })();
+
+    unsafe {
+        let _ = CloseHandle(pipe);
+    }
+
+    result
+}
+
 fn open_pipe() -> Result<HANDLE, String> {
     let pipe_name_wide: Vec<u16> = PIPE_NAME.encode_utf16().chain(std::iter::once(0)).collect();
 
