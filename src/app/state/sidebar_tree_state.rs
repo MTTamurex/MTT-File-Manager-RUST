@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
+use std::time::Instant;
 
 use crate::infrastructure::directory_cache::DirectoryCache;
 
@@ -42,6 +43,8 @@ pub struct SidebarTreeState {
     pub scroll_target_y: f32,
     /// Smooth scroll: the visual offset (smoothly animates toward target).
     pub scroll_visual_y: f32,
+    /// Last time we refreshed all expanded directories to catch external changes.
+    last_full_refresh: Instant,
 }
 
 impl SidebarTreeState {
@@ -57,6 +60,7 @@ impl SidebarTreeState {
             show_hidden: false,
             scroll_target_y: 0.0,
             scroll_visual_y: 0.0,
+            last_full_refresh: Instant::now(),
         }
     }
 
@@ -123,6 +127,42 @@ impl SidebarTreeState {
         self.expanded.retain(|p| !p.starts_with(&drive_prefix));
         self.children.retain(|p, _| !p.starts_with(&drive_prefix));
         self.loading.retain(|p| !p.starts_with(&drive_prefix));
+    }
+
+    /// Periodically re-enumerates all expanded directories to detect external
+    /// changes (e.g. folders created/deleted by other applications).
+    ///
+    /// The per-folder `notify` watcher only watches the content panel's current
+    /// directory, so sidebar-expanded paths elsewhere won't receive events.
+    /// This method bridges that gap with a lightweight periodic check.
+    ///
+    /// Returns `true` if a refresh was triggered (caller should request repaint).
+    pub fn refresh_expanded_if_stale(&mut self) -> bool {
+        const REFRESH_INTERVAL_SECS: u64 = 3;
+
+        if self.expanded.is_empty()
+            || self.last_full_refresh.elapsed().as_secs() < REFRESH_INTERVAL_SECS
+        {
+            return false;
+        }
+        self.last_full_refresh = Instant::now();
+
+        // Invalidate the DirectoryCache so the background thread does a real
+        // re-enumeration instead of replaying stale cache entries.
+        for path in &self.expanded {
+            self.dir_cache.invalidate(path);
+        }
+
+        // Fire background loads for all expanded directories.
+        // Do NOT remove existing children — they stay visible until `poll_loaded()`
+        // atomically replaces them with the fresh result (zero flicker).
+        let expanded: Vec<PathBuf> = self.expanded.iter().cloned().collect();
+        for path in &expanded {
+            if !self.loading.contains(path) {
+                self.start_loading(path);
+            }
+        }
+        true
     }
 
     // ── Background Loading ───────────────────────────────────────────

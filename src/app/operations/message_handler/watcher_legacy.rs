@@ -298,6 +298,7 @@ impl ImageViewerApp {
 
         for folder_path in &folders_with_changed_contents {
             self.invalidate_folder_size_cache(folder_path);
+            self.sidebar_tree.clear_children(folder_path);
         }
 
         if !folders_with_changed_contents.is_empty() {

@@ -8,6 +8,8 @@ pub enum SidebarTreeAction {
     NavigateTo(String),
     /// User clicked the expand/collapse arrow on a node.
     ToggleExpand(std::path::PathBuf),
+    /// Items were dropped onto a tree node folder.
+    DropItemsTo(String),
 }
 
 /// Shared context references needed for tree rendering.
@@ -16,6 +18,8 @@ pub struct SidebarTreeContext<'a> {
     pub current_path: &'a str,
     pub icon_loader: &'a mut crate::ui::icon_loader::IconLoader,
     pub is_renaming: bool,
+    /// Whether an item drag is currently in progress (from the main content area).
+    pub is_item_dragging: bool,
 }
 
 const ROW_HEIGHT: f32 = 24.0;
@@ -45,11 +49,13 @@ pub fn render_drive_tree(
             render_loading_row(ui, 1);
         } else if let Some(children) = tree_state.get_children(root) {
             for node in children {
+                let is_item_dragging = ctx.is_item_dragging;
                 let mut node_ctx = SidebarTreeContext {
                     tree_state,
                     current_path,
                     icon_loader: &mut *ctx.icon_loader,
                     is_renaming,
+                    is_item_dragging,
                 };
                 render_tree_node(ui, node, 1, &mut node_ctx, &mut action);
             }
@@ -90,11 +96,27 @@ fn render_tree_node(
         let dark_mode = ui.visuals().dark_mode;
         let hidden_opacity = if node.is_hidden { 0.5 } else { 1.0 };
 
+        // Detect if the pointer is hovering this row during an external item drag.
+        // We check hover_pos manually because egui's response.hovered() won't fire
+        // when the drag originated from a different widget.
+        let drag_hover = ctx.is_item_dragging
+            && ui.input(|inp| inp.pointer.hover_pos())
+                .map(|p| rect.contains(p))
+                .unwrap_or(false);
+
         // Row background
-        if is_selected {
+        if drag_hover {
+            // Blue border to indicate valid drop target (matches content panel style)
+            ui.painter().rect_stroke(
+                rect,
+                0.0,
+                egui::Stroke::new(2.0, Color32::from_rgb(24, 122, 255)),
+                egui::StrokeKind::Inside,
+            );
+        } else if is_selected {
             ui.painter()
                 .rect_filled(rect, 0.0, crate::ui::theme::selection_color(dark_mode));
-        } else if response.hovered() {
+        } else if response.hovered() && !ctx.is_item_dragging {
             ui.painter()
                 .rect_filled(rect, 0.0, crate::ui::theme::selection_hover_color(dark_mode));
         }
@@ -170,7 +192,7 @@ fn render_tree_node(
     }
 
     // ── Handle clicks ──
-    if response.clicked() && action.is_none() && !ctx.is_renaming {
+    if response.clicked() && action.is_none() && !ctx.is_renaming && !ctx.is_item_dragging {
         // Determine if click was on the arrow area
         let click_pos = ui.input(|inp| inp.pointer.interact_pos());
         let arrow_end_x = rect.min.x + indent + ARROW_WIDTH;
@@ -188,6 +210,20 @@ fn render_tree_node(
         }
     }
 
+    // ── Handle drop from external item drag ──
+    if ctx.is_item_dragging && action.is_none() {
+        let pointer_over = ui.input(|inp| inp.pointer.hover_pos())
+            .map(|p| rect.contains(p))
+            .unwrap_or(false);
+        let released = ui.input(|inp| inp.pointer.primary_released());
+
+        if released && pointer_over {
+            *action = Some(SidebarTreeAction::DropItemsTo(
+                node.path.to_string_lossy().into_owned(),
+            ));
+        }
+    }
+
     // ── Recurse into children (if expanded) ──
     if is_expanded && action.is_none() {
         if is_loading && ctx.tree_state.get_children(&node.path).is_none() {
@@ -196,12 +232,14 @@ fn render_tree_node(
             let tree_state = ctx.tree_state;
             let current_path = ctx.current_path;
             let is_renaming = ctx.is_renaming;
+            let is_item_dragging = ctx.is_item_dragging;
             for child in children {
                 let mut child_ctx = SidebarTreeContext {
                     tree_state,
                     current_path,
                     icon_loader: &mut *ctx.icon_loader,
                     is_renaming,
+                    is_item_dragging,
                 };
                 render_tree_node(ui, child, depth + 1, &mut child_ctx, action);
             }

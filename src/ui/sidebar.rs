@@ -68,6 +68,8 @@ pub enum SidebarAction {
     CancelDriveRename,
     /// Toggle expand/collapse of a folder tree node
     TreeToggleExpand(std::path::PathBuf),
+    /// Items were dropped onto a sidebar folder/drive (move or copy)
+    DropItemsTo(String),
 }
 
 /// Renders the fixed top section of the sidebar (This PC + Quick Access).
@@ -384,10 +386,25 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
 
             if ui.is_rect_visible(rect) {
                 let dark_mode = ui.visuals().dark_mode;
-                if is_selected {
+
+                // Detect pointer hovering this drive row during an external item drag.
+                let drag_hover = ctx.is_item_dragging
+                    && ui.input(|inp| inp.pointer.hover_pos())
+                        .map(|p| rect.contains(p))
+                        .unwrap_or(false);
+
+                if drag_hover {
+                    // Blue border to indicate valid drop target (matches content panel style)
+                    ui.painter().rect_stroke(
+                        rect,
+                        0.0,
+                        egui::Stroke::new(2.0, Color32::from_rgb(24, 122, 255)),
+                        egui::StrokeKind::Inside,
+                    );
+                } else if is_selected {
                     ui.painter()
                         .rect_filled(rect, 0.0, crate::ui::theme::selection_color(dark_mode));
-                } else if response.hovered() {
+                } else if response.hovered() && !ctx.is_item_dragging {
                     ui.painter()
                         .rect_filled(rect, 0.0, crate::ui::theme::selection_hover_color(dark_mode));
                 }
@@ -514,7 +531,7 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                         new_label: buf,
                     });
                 }
-            } else if response.clicked() && !ctx.is_renaming {
+            } else if response.clicked() && !ctx.is_renaming && !ctx.is_item_dragging {
                 // Detect if click was on the expand arrow area
                 let click_pos = ui.input(|inp| inp.pointer.interact_pos());
                 let clicked_arrow = click_pos
@@ -528,6 +545,19 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
             } else if response.secondary_clicked() && !ctx.is_renaming {
                 action = Some(SidebarAction::OpenDriveContextMenu(disk_path.to_string()));
             }
+
+            // ── Handle drop from external item drag onto drive root ──
+            if ctx.is_item_dragging && action.is_none() {
+                let pointer_over = ui.input(|inp| inp.pointer.hover_pos())
+                    .map(|p| rect.contains(p))
+                    .unwrap_or(false);
+                let released = ui.input(|inp| inp.pointer.primary_released());
+
+                if released && pointer_over {
+                    action = Some(SidebarAction::DropItemsTo(disk_path.to_string()));
+                }
+            }
+
             ui.add_space(2.0);
 
             // ── Folder tree under this drive (if expanded) ──
@@ -537,6 +567,7 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                     current_path: ctx.current_path,
                     icon_loader: ctx.icon_loader,
                     is_renaming: ctx.is_renaming,
+                    is_item_dragging: ctx.is_item_dragging,
                 };
                 if let Some(tree_action) =
                     crate::ui::sidebar_tree::render_drive_tree(ui, disk_path, &mut tree_ctx)
@@ -547,6 +578,9 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                         }
                         crate::ui::sidebar_tree::SidebarTreeAction::ToggleExpand(path) => {
                             action = Some(SidebarAction::TreeToggleExpand(path));
+                        }
+                        crate::ui::sidebar_tree::SidebarTreeAction::DropItemsTo(path) => {
+                            action = Some(SidebarAction::DropItemsTo(path));
                         }
                     }
                 }
