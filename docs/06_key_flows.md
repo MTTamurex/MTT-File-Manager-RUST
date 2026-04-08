@@ -93,6 +93,8 @@ Send ThumbnailData via channel → UI loads as GPU texture
 
 **Key files**: `workers/thumbnail/extraction/stage1_image_crate.rs` through `stage5_media_foundation.rs`, `workers/thumbnail/queue.rs`
 
+**Codec requirements for video thumbnails**: Stages 3, 4, and 5 depend on video codecs registered on the system. MP4 (H.264), WMV, and AVI work natively on Windows 10/11. For MKV, WEBM, HEVC, VP9, and AV1, the user must install a codec pack such as [K-Lite Codec Pack Standard](https://codecguide.com/download_kl.htm). See the [README — Video Thumbnail Codecs](../README.md#video-thumbnail-codecs) section for details.
+
 ## 5. Context Menu
 
 **Trigger**: Right-click on a file or folder.

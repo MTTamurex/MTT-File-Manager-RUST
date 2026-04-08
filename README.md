@@ -98,6 +98,7 @@ HighPerformance GPU selection is a preference only. On hybrid systems the app wi
 ### Runtime Dependencies
 - **libmpv-2.dll** — Required for video playback
 - **pdfium.dll** — Required for PDF viewer
+- **Video codecs** — Required for video thumbnail extraction (see [Video Thumbnail Codecs](#video-thumbnail-codecs) below)
 
 ## Installation
 
@@ -300,6 +301,38 @@ MTT-File-Manager-RUST/
 ├── docs/                             # Technical documentation
 └── benches/                          # Benchmarks
 ```
+
+## Video Thumbnail Codecs
+
+The thumbnail pipeline uses 3 Windows APIs for video files: **Shell API** (Stage 3), **IThumbnailCache** (Stage 4), and **Media Foundation** (Stage 5). All three require video codecs to be registered on the system.
+
+### What works out of the box (Windows 10/11)
+- **MP4 (H.264/AVC)**, **WMV**, **AVI** — native Windows codecs
+
+### What requires installation
+
+| Format | Without codecs | With K-Lite Codec Pack |
+|--------|---------------|------------------------|
+| MP4 H.264 | ✅ Works | ✅ Works |
+| MP4 HEVC/H.265 | ❌ Fails | ✅ Works |
+| MKV (any codec) | ❌ Fails | ✅ Works |
+| WEBM VP9/AV1 | ❌ Fails | ✅ Works |
+| FLV | ❌ Fails | ✅ Works |
+
+### Recommended: K-Lite Codec Pack
+
+**[Download K-Lite Codec Pack (Standard)](https://codecguide.com/download_kl.htm)** — includes LAV Filters which register:
+- **Thumbnail handlers** for Windows Shell (enables Stages 3 and 4)
+- **Media Foundation decoders** (enables Stage 5)
+- Support for **HEVC/H.265**, **VP9**, **AV1**, **MKV**, **WEBM**, **FLV**, and more
+
+### Alternative: HEVC only
+
+If you only need H.265/HEVC support without a full codec pack:
+- **[HEVC Video Extensions](https://apps.microsoft.com/detail/9nmzlz57r3t7)** from the Microsoft Store (paid, ~$0.99)
+- **HEVC Video Extensions from Device Manufacturer** (free, bundled with some hardware)
+
+> **Note**: Without the appropriate codecs installed, all video thumbnail stages will fail silently and the file will display a generic icon instead.
 
 ## Troubleshooting
 
