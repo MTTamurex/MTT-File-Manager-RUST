@@ -154,7 +154,8 @@ pub fn render_fallback(
             let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
             let is_pdf = extension.eq_ignore_ascii_case("pdf");
             let is_image = crate::infrastructure::windows::is_image_extension(extension);
-            if !is_virtual_archive_path && (is_pdf || is_image) {
+            let is_text = crate::text_viewer::is_text_extension(extension);
+            if !is_virtual_archive_path && (is_pdf || is_image || is_text) {
                 let media_rect = image_resp.rect;
                 let hover_pos = ui.input(|i| i.pointer.hover_pos());
                 let is_hovered = hover_pos.is_some_and(|pos| media_rect.contains(pos));
@@ -208,6 +209,8 @@ pub fn render_fallback(
                         crate::pdf_viewer::open_pdf_viewer(file.path.clone());
                     } else if is_image {
                         crate::image_viewer::open_image_viewer(file.path.clone());
+                    } else if is_text {
+                        crate::text_viewer::open_text_viewer(file.path.clone());
                     }
                 }
             }

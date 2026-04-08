@@ -14,6 +14,7 @@ enum SelectedPreviewOverlayAction {
     PlayMedia(std::path::PathBuf),
     OpenPdf(std::path::PathBuf),
     OpenImage(std::path::PathBuf),
+    OpenText(std::path::PathBuf),
 }
 
 impl ImageViewerApp {
@@ -135,8 +136,9 @@ impl ImageViewerApp {
         let is_audio = crate::infrastructure::windows::is_audio_extension(&ext);
         let is_pdf = ext.eq_ignore_ascii_case("pdf");
         let is_image = crate::infrastructure::windows::is_image_extension(&ext);
+        let is_text = crate::text_viewer::is_text_extension(&ext);
 
-        if !is_video && !is_audio && !is_pdf && !is_image {
+        if !is_video && !is_audio && !is_pdf && !is_image && !is_text {
             return SelectedPreviewOverlayAction::None;
         }
 
@@ -149,8 +151,10 @@ impl ImageViewerApp {
             SelectedPreviewOverlayAction::PlayMedia(path)
         } else if is_pdf {
             SelectedPreviewOverlayAction::OpenPdf(path)
-        } else {
+        } else if is_image {
             SelectedPreviewOverlayAction::OpenImage(path)
+        } else {
+            SelectedPreviewOverlayAction::OpenText(path)
         }
     }
 
@@ -176,6 +180,10 @@ impl ImageViewerApp {
             }
             SelectedPreviewOverlayAction::OpenImage(path) => {
                 crate::image_viewer::open_image_viewer(path);
+                true
+            }
+            SelectedPreviewOverlayAction::OpenText(path) => {
+                crate::text_viewer::open_text_viewer(path);
                 true
             }
             SelectedPreviewOverlayAction::BlockedInArchive
