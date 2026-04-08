@@ -6,7 +6,7 @@ use std::time::Instant;
 use crate::infrastructure::directory_cache::DirectoryCache;
 
 /// A single folder node in the sidebar tree.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FolderNode {
     pub path: PathBuf,
     pub name: String,
@@ -136,14 +136,16 @@ impl SidebarTreeState {
     /// directory, so sidebar-expanded paths elsewhere won't receive events.
     /// This method bridges that gap with a lightweight periodic check.
     ///
-    /// Returns `true` if a refresh was triggered (caller should request repaint).
-    pub fn refresh_expanded_if_stale(&mut self) -> bool {
-        const REFRESH_INTERVAL_SECS: u64 = 3;
+    /// Fires background re-enumeration for all expanded directories.
+    /// Does NOT request repaint — `poll_loaded()` handles that only when data
+    /// actually changed, avoiding unnecessary repaint churn.
+    pub fn refresh_expanded_if_stale(&mut self) {
+        const REFRESH_INTERVAL_SECS: u64 = 5;
 
         if self.expanded.is_empty()
             || self.last_full_refresh.elapsed().as_secs() < REFRESH_INTERVAL_SECS
         {
-            return false;
+            return;
         }
         self.last_full_refresh = Instant::now();
 
@@ -162,7 +164,6 @@ impl SidebarTreeState {
                 self.start_loading(path);
             }
         }
-        true
     }
 
     // ── Background Loading ───────────────────────────────────────────
@@ -218,6 +219,13 @@ impl SidebarTreeState {
             match result.children {
                 Some(children) => {
                     let has_children = !children.is_empty();
+
+                    // Only update + repaint if children actually changed.
+                    let changed = self.children.get(&result.parent) != Some(&children);
+                    if !changed {
+                        continue;
+                    }
+
                     self.children.insert(result.parent.clone(), children);
 
                     // Update the parent's has_subfolders in its own parent's children list

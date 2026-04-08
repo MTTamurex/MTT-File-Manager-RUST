@@ -107,9 +107,7 @@ impl eframe::App for ImageViewerApp {
             }
             // Periodically re-enumerate expanded sidebar directories to catch
             // external changes (the per-folder notify watcher doesn't cover them).
-            if self.sidebar_tree.refresh_expanded_if_stale() {
-                ctx.request_repaint();
-            }
+            self.sidebar_tree.refresh_expanded_if_stale();
 
             let t3 = std::time::Instant::now();
             // Flush debounced preferences (max once per second)
