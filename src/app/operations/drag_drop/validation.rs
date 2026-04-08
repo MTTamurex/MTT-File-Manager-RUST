@@ -25,7 +25,7 @@ impl ImageViewerApp {
         vec![item.path.clone()]
     }
 
-    pub(super) fn is_valid_drop_target(&self, target: &Path) -> bool {
+    pub(crate) fn is_valid_drop_target(&self, target: &Path) -> bool {
         if self.drag_payload_paths.is_empty() {
             return false;
         }

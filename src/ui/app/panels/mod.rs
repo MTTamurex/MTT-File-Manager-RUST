@@ -297,6 +297,23 @@ fn handle_sidebar_action(app: &mut ImageViewerApp, action: SidebarAction) {
         SidebarAction::TreeToggleExpand(path) => {
             app.sidebar_tree.toggle_expand(&path);
         }
+        SidebarAction::DropItemsTo(path) => {
+            if app.is_item_dragging {
+                let target = std::path::PathBuf::from(&path);
+                if app.is_valid_drop_target(&target) {
+                    app.drag_target_folder = Some(target);
+                    let (ctrl, shift) = app.ui_ctx.input(|inp| {
+                        (
+                            inp.modifiers.ctrl || inp.modifiers.command,
+                            inp.modifiers.shift,
+                        )
+                    });
+                    app.complete_item_drag(ctrl, shift);
+                } else {
+                    app.cancel_item_drag();
+                }
+            }
+        }
     }
 }
 
