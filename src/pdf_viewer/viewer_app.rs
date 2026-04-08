@@ -91,12 +91,8 @@ pub struct PdfViewerApp {
 impl PdfViewerApp {
     pub fn new(path: PathBuf, dark_mode: bool) -> Result<Self, String> {
         let text_renderer = PdfRenderer::open(&path)?;
-        let total_pages = text_renderer.page_count();
-
-        let mut page_sizes = Vec::with_capacity(total_pages as usize);
-        for i in 0..total_pages {
-            page_sizes.push(text_renderer.page_size(i).unwrap_or((612.0, 792.0)));
-        }
+        let page_sizes = text_renderer.page_sizes().to_vec();
+        let total_pages = page_sizes.len() as u32;
 
         Ok(Self {
             worker_path: path,

@@ -4,7 +4,6 @@
 //! thread so the UI stays fluid.  Results are sent back via channel and
 //! the egui context is poked to trigger a repaint.
 
-use super::renderer::PdfRenderer;
 use crossbeam_channel::{Receiver, Sender};
 use eframe::egui;
 use std::collections::HashMap;
@@ -78,10 +77,12 @@ fn worker_loop(
     repaint: egui::Context,
     init_error: Arc<std::sync::Mutex<Option<String>>>,
 ) {
-    let _renderer = match PdfRenderer::open(&path) {
-        Ok(r) => r,
+    // Keep a persistent Pdfium + document handle open for the lifetime of
+    // this worker, avoiding repeated file open/close on every render.
+    let pdfium = match super::renderer::pdfium() {
+        Ok(p) => p,
         Err(err) => {
-            log::error!("[PDF-RENDER] failed to open {}: {err}", path.display());
+            log::error!("[PDF-RENDER] failed to init pdfium: {err}");
             if let Ok(mut slot) = init_error.lock() {
                 *slot = Some(err);
             }
@@ -89,20 +90,14 @@ fn worker_loop(
             return;
         }
     };
-
-    // Keep a persistent Pdfium + document handle open for the lifetime of
-    // this worker, avoiding repeated file open/close on every render.
-    let pdfium = match super::renderer::pdfium() {
-        Ok(p) => p,
-        Err(err) => {
-            log::error!("[PDF-RENDER] failed to init pdfium: {err}");
-            return;
-        }
-    };
     let document = match pdfium.load_pdf_from_file(&path, None) {
         Ok(d) => d,
         Err(err) => {
             log::error!("[PDF-RENDER] failed to load document: {err}");
+            if let Ok(mut slot) = init_error.lock() {
+                *slot = Some(format!("LoadPdf: {err}"));
+            }
+            repaint.request_repaint();
             return;
         }
     };

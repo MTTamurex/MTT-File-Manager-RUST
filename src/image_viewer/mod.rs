@@ -136,25 +136,48 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
 
     let external_open_rx = ipc::start_open_request_server();
 
-    let sequence = match indexer::build_sequence(&path) {
-        Ok(sequence) => sequence,
-        Err(err) => {
-            log::warn!(
-                "[IMAGE-VIEWER] failed to build sequence for '{}': {}",
-                path.display(),
-                err
-            );
-            indexer::ImageSequence::single(path.clone())
-        }
-    };
-
-    let start_index = sequence.current_index.min(sequence.entries.len().saturating_sub(1));
-    let title_name = sequence
-        .entries
-        .get(start_index)
-        .and_then(|p| p.file_name())
+    let title_name = path
+        .file_name()
         .map(|v| v.to_string_lossy().to_string())
         .unwrap_or_else(|| rust_i18n::t!("imageviewer.title").to_string());
+
+    let startup_preview = loader::decode_cached_preview_frame(&path, 2048)
+        .map(|frame| (path.clone(), frame));
+
+    let (startup_sequence_rx, initial_sequence) = {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let path_clone = path.clone();
+
+        let startup_sequence_rx = match std::thread::Builder::new()
+            .name("image-viewer-startup-seq".into())
+            .spawn(move || {
+                let sequence = match indexer::build_sequence(&path_clone) {
+                    Ok(sequence) => sequence,
+                    Err(err) => {
+                        log::warn!(
+                            "[IMAGE-VIEWER] failed to build startup sequence for '{}': {}",
+                            path_clone.display(),
+                            err
+                        );
+                        indexer::ImageSequence::single(path_clone)
+                    }
+                };
+
+                let _ = tx.send(sequence);
+            }) {
+            Ok(_) => Some(rx),
+            Err(err) => {
+                log::warn!(
+                    "[IMAGE-VIEWER] failed to spawn startup sequence builder for '{}': {}",
+                    path.display(),
+                    err
+                );
+                None
+            }
+        };
+
+        (startup_sequence_rx, indexer::ImageSequence::single(path.clone()))
+    };
 
     let mut viewport = eframe::egui::ViewportBuilder::default()
         .with_title(rust_i18n::t!("imageviewer.title_with_file", name = title_name).to_string())
@@ -194,9 +217,11 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
         options,
         Box::new(move |_cc| {
             Ok(Box::new(app::DedicatedImageViewerApp::new(
-                sequence,
+                initial_sequence,
                 external_open_rx,
                 dark_mode,
+                startup_sequence_rx,
+                startup_preview,
             )))
         }),
     )

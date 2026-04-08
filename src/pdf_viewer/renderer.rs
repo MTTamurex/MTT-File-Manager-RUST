@@ -49,7 +49,7 @@ pub struct PdfTextSegment {
 /// A loaded PDF document ready for page rendering.
 pub struct PdfRenderer {
     path: PathBuf,
-    page_count: u32,
+    page_sizes: Vec<(f32, f32)>,
 }
 
 /// A rendered PDF page as raw RGBA pixels.
@@ -62,32 +62,29 @@ pub struct RenderedPage {
 impl PdfRenderer {
     /// Open a PDF file from disk.
     pub fn open(path: &Path) -> Result<Self, String> {
-        let page_count = with_document(path, |document| {
-            u32::try_from(document.pages().len())
-                .map_err(|_| "Page count exceeds supported range".to_string())
+        let page_sizes = with_document(path, |document| {
+            let page_count = document.pages().len();
+            let mut page_sizes = Vec::with_capacity(page_count as usize);
+
+            for index in 0..page_count {
+                let page = document
+                    .pages()
+                    .get(index as PdfPageIndex)
+                    .map_err(|e| e.to_string())?;
+                page_sizes.push((page.width().value, page.height().value));
+            }
+
+            Ok(page_sizes)
         })?;
 
         Ok(Self {
             path: path.to_path_buf(),
-            page_count,
+            page_sizes,
         })
     }
 
-    /// Total number of pages in the document.
-    #[inline]
-    pub fn page_count(&self) -> u32 {
-        self.page_count
-    }
-
-    /// Natural size (width, height) of a page in device-independent pixels.
-    pub fn page_size(&self, index: u32) -> Result<(f32, f32), String> {
-        with_document(&self.path, |document| {
-            let page = document
-                .pages()
-                .get(index as PdfPageIndex)
-                .map_err(|e| e.to_string())?;
-            Ok((page.width().value, page.height().value))
-        })
+    pub fn page_sizes(&self) -> &[(f32, f32)] {
+        &self.page_sizes
     }
 
     pub fn page_text_segments(&self, index: u32) -> Result<Vec<PdfTextSegment>, String> {
