@@ -177,6 +177,38 @@ pub(super) fn handle_client(
                 }
             }
         }
+        SearchRequest::CheckPathsModified {
+            paths,
+            threshold_secs,
+        } => {
+            let threshold_dur = std::time::Duration::from_secs(threshold_secs as u64);
+            let now = std::time::Instant::now();
+            let indices_lock = indices.read();
+
+            let mut modified = Vec::new();
+            for path_str in &paths {
+                // Determine which volume index to query from the drive letter.
+                let drive_letter = match path_str.chars().next() {
+                    Some(c) if c.is_ascii_alphabetic() => c.to_ascii_uppercase(),
+                    _ => continue,
+                };
+
+                if let Some(vol) = indices_lock.iter().find(|v| v.drive_letter == drive_letter) {
+                    if !matches!(vol.state, IndexState::Ready) {
+                        continue;
+                    }
+                    if let Some(frn) = vol.resolve_path_to_frn(path_str) {
+                        if let Some(&modified_at) = vol.dir_modified_at.get(&frn) {
+                            if now.duration_since(modified_at) <= threshold_dur {
+                                modified.push(path_str.clone());
+                            }
+                        }
+                    }
+                }
+            }
+
+            let _ = send_response(pipe, &SearchResponse::PathsModified { modified });
+        }
     }
 }
 

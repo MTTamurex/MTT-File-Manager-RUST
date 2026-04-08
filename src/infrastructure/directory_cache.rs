@@ -104,6 +104,13 @@ impl DirectoryCache {
         }
     }
 
+    /// Returns the cache timestamp (Unix milliseconds) for a path without cloning entries.
+    /// Useful for lightweight staleness checks (e.g., tab switch mtime validation).
+    pub fn cached_at_ms(&self, path: &PathBuf) -> Option<u64> {
+        let cache = self.inner.lock().ok()?;
+        cache.peek(path).map(|cached| cached.cached_at_ms)
+    }
+
     pub fn stats(&self) -> (usize, usize) {
         if let Ok(cache) = self.inner.lock() {
             let total_items: usize = cache.iter().map(|(_, v)| v.entries.len()).sum();

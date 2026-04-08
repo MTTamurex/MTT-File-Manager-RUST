@@ -11,6 +11,9 @@ pub const MAX_QUERY_TEXT_LEN: usize = 4096;
 /// buggy service from flooding the client with millions of entries.
 pub const MAX_RESULT_ITEMS: usize = 10_000;
 
+/// Maximum number of paths in a CheckPathsModified request.
+pub const MAX_CHECK_PATHS: usize = 64;
+
 /// Requests sent from the app to the search service.
 #[derive(Serialize, Deserialize, Debug)]
 pub enum SearchRequest {
@@ -26,6 +29,13 @@ pub enum SearchRequest {
     Ping,
     /// Ask the service to warm its in-memory index (bring paged-out memory back to RAM).
     WarmIndex,
+    /// Ask the service which of the given directory paths have been modified
+    /// (via USN journal) within the last `threshold_secs` seconds.
+    /// This allows the app to detect external changes without disk I/O.
+    CheckPathsModified {
+        paths: Vec<String>,
+        threshold_secs: u32,
+    },
 }
 
 impl SearchRequest {
@@ -43,6 +53,15 @@ impl SearchRequest {
                 return Err(format!(
                     "limit too large ({}, max {})",
                     limit, MAX_RESULT_ITEMS
+                ));
+            }
+        }
+        if let SearchRequest::CheckPathsModified { paths, .. } = self {
+            if paths.len() > MAX_CHECK_PATHS {
+                return Err(format!(
+                    "too many paths ({}, max {})",
+                    paths.len(),
+                    MAX_CHECK_PATHS
                 ));
             }
         }
@@ -65,6 +84,8 @@ pub enum SearchResponse {
     Pong,
     /// Acknowledge that index warming has started (or is already in progress).
     WarmStarted,
+    /// Directories from the request that have been modified within the threshold.
+    PathsModified { modified: Vec<String> },
     /// Error message.
     Error(String),
 }

@@ -70,6 +70,10 @@ pub struct VolumeIndex {
     pub pending_additions: HashSet<u64>,
     /// FRNs removed since the last DB persist.
     pub pending_removals: HashSet<u64>,
+    /// Tracks when each directory was last modified (child created/deleted/renamed).
+    /// Used by CheckPathsModified to detect external changes without disk I/O.
+    /// Key: parent directory FRN, Value: monotonic instant of last modification.
+    pub dir_modified_at: HashMap<u64, std::time::Instant>,
 }
 
 impl VolumeIndex {
@@ -84,6 +88,7 @@ impl VolumeIndex {
             state: IndexState::NotStarted,
             pending_additions: HashSet::new(),
             pending_removals: HashSet::new(),
+            dir_modified_at: HashMap::new(),
         }
     }
 
@@ -127,6 +132,7 @@ impl VolumeIndex {
         self.names.clear();
         self.pending_additions.clear();
         self.pending_removals.clear();
+        self.dir_modified_at.clear();
     }
 
     /// Reset change tracking (call after a full `save_volume` persist).
@@ -161,6 +167,44 @@ impl VolumeIndex {
         let slot_size = std::mem::size_of::<u64>() + std::mem::size_of::<FileRecord>() + 1;
         let map_est = self.records.capacity() * slot_size;
         (arena_used, arena_cap, map_est)
+    }
+
+    /// The NTFS root directory's File Reference Number.
+    const ROOT_FRN: u64 = 5;
+
+    /// Resolve a filesystem path (e.g., `C:\Users\foo`) to the FRN of the
+    /// directory, walking path components through the index.
+    /// Returns `None` if any component is not found in the records.
+    pub fn resolve_path_to_frn(&self, path: &str) -> Option<u64> {
+        // Expect "X:\..." where X matches our drive letter
+        let path = path.strip_prefix(|c: char| c.eq_ignore_ascii_case(&self.drive_letter))?;
+        let path = path.strip_prefix(":\\")?;
+
+        if path.is_empty() {
+            return Some(Self::ROOT_FRN);
+        }
+
+        let mut current_frn = Self::ROOT_FRN;
+
+        for component in path.split('\\') {
+            if component.is_empty() {
+                continue;
+            }
+            // Find a child record whose parent is current_frn and whose name
+            // matches the component (case-insensitive, like NTFS).
+            let child_frn = self.records.iter().find_map(|(&frn, record)| {
+                if record.parent_ref == current_frn {
+                    let name = self.names.get(record.name_ref());
+                    if name.eq_ignore_ascii_case(component) {
+                        return Some(frn);
+                    }
+                }
+                None
+            });
+            current_frn = child_frn?;
+        }
+
+        Some(current_frn)
     }
 }
 
