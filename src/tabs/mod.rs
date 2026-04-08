@@ -10,6 +10,7 @@ use crate::application::navigation::NavigationHistory;
 use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
 use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use rustc_hash::FxHashSet;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -66,6 +67,10 @@ pub struct TabState {
     pub quick_search_buffer: String,
     /// Last keystroke time for quick search timeout
     pub quick_search_last_input: std::time::Instant,
+    /// Sidebar tree: which folders are expanded (per-tab)
+    pub sidebar_expanded: HashSet<PathBuf>,
+    /// Sidebar tree: scroll position (per-tab)
+    pub sidebar_scroll_y: f32,
 }
 
 impl TabState {
@@ -97,6 +102,8 @@ impl TabState {
             folders_position: FoldersPosition::First,
             quick_search_buffer: String::new(),
             quick_search_last_input: std::time::Instant::now(),
+            sidebar_expanded: HashSet::new(),
+            sidebar_scroll_y: 0.0,
         }
     }
 
@@ -133,6 +140,8 @@ impl TabState {
             folders_position: FoldersPosition::First,
             quick_search_buffer: String::new(),
             quick_search_last_input: std::time::Instant::now(),
+            sidebar_expanded: HashSet::new(),
+            sidebar_scroll_y: 0.0,
         }
     }
 
@@ -224,6 +233,8 @@ impl TabState {
         self.scroll_offset_y = 0.0;
         self.total_items = 0;
         self.quick_search_buffer.clear();
+        self.sidebar_expanded.clear();
+        self.sidebar_scroll_y = 0.0;
         self
     }
 }
@@ -315,6 +326,8 @@ impl TabManager {
         new_tab.sort_mode = current.sort_mode;
         new_tab.sort_descending = current.sort_descending;
         new_tab.folders_position = current.folders_position;
+        new_tab.sidebar_expanded = current.sidebar_expanded.clone();
+        new_tab.sidebar_scroll_y = current.sidebar_scroll_y;
 
         self.next_id += 1;
 
@@ -397,6 +410,8 @@ impl TabManager {
             reopened.sort_mode = tab.sort_mode;
             reopened.sort_descending = tab.sort_descending;
             reopened.folders_position = tab.folders_position;
+            reopened.sidebar_expanded = tab.sidebar_expanded;
+            reopened.sidebar_scroll_y = tab.sidebar_scroll_y;
 
             self.next_id += 1;
 

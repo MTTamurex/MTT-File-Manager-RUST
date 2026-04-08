@@ -34,6 +34,10 @@ impl ImageViewerApp {
         active.sort_descending = self.sort_descending;
         active.folders_position = self.folders_position;
 
+        // Save per-tab sidebar state (expanded nodes + scroll position)
+        active.sidebar_expanded = self.sidebar_tree.snapshot_expanded();
+        active.sidebar_scroll_y = self.sidebar_tree.snapshot_scroll_y();
+
         // On Windows, Path::new(COMPUTER_VIEW_ID).file_name() is None
         if active.is_computer_view {
             active.title = COMPUTER_VIEW_ID.to_string();
@@ -114,6 +118,14 @@ impl ImageViewerApp {
             self.sort_mode = active.sort_mode;
             self.sort_descending = active.sort_descending;
             self.folders_position = active.folders_position;
+        }
+
+        // Restore per-tab sidebar state (expanded nodes + scroll position)
+        {
+            let active = self.tab_manager.active();
+            let sidebar_expanded = active.sidebar_expanded.clone();
+            let sidebar_scroll_y = active.sidebar_scroll_y;
+            self.sidebar_tree.restore_expanded(sidebar_expanded, sidebar_scroll_y);
         }
 
         // Apply folder lock if the destination tab's folder has locked preferences
