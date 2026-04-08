@@ -8,6 +8,7 @@ pub mod image_viewer;
 pub mod infrastructure;
 pub mod pdf_viewer;
 pub mod tabs;
+pub mod text_viewer;
 pub mod ui;
 pub mod video_player;
 pub mod workers;

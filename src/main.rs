@@ -132,6 +132,14 @@ fn main() -> eframe::Result<()> {
             log::error!("[PDF-VIEWER] missing path argument for --pdf-viewer");
             return Ok(());
         }
+        if flag_str.eq_ignore_ascii_case("--text-viewer") {
+            if let Some(path_arg) = args.next() {
+                return mtt_file_manager::text_viewer::run_standalone(PathBuf::from(path_arg));
+            }
+
+            log::error!("[TEXT-VIEWER] missing path argument for --text-viewer");
+            return Ok(());
+        }
         if flag_str.eq_ignore_ascii_case("--video-player") {
             if let Some(path_arg) = args.next() {
                 let mut position: f64 = 0.0;
