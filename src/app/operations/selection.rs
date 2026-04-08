@@ -17,6 +17,35 @@ enum SelectedPreviewOverlayAction {
 }
 
 impl ImageViewerApp {
+    /// Keeps the visible focus index aligned with the currently selected file.
+    ///
+    /// When filtering or sorting changes the current `items` snapshot, the old
+    /// numeric `selected_item` index may now point to a different row/tile. The
+    /// preview panel should continue following `selected_file`, but the list/grid
+    /// focus ring must only appear if that same file is still visible.
+    pub fn reconcile_visible_selection_index(&mut self) {
+        let resolved_index = self.selected_file.as_ref().and_then(|selected| {
+            self.items
+                .iter()
+                .position(|item| item.path == selected.path)
+        });
+
+        if self.selected_item == resolved_index {
+            return;
+        }
+
+        self.selected_item = resolved_index;
+
+        if self.multi_selection.len() <= 1 {
+            self.selection_anchor = resolved_index;
+        }
+
+        if resolved_index.is_none() {
+            self.scroll_to_selected = false;
+            self.scroll_request = crate::app::state::ScrollRequest::None;
+        }
+    }
+
     /// Kill the standalone video player process if one is running.
     pub fn kill_video_player_process(&mut self) {
         if let Some(mut child) = self.video_player_process.take() {

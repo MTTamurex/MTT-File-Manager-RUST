@@ -33,6 +33,8 @@ impl ImageViewerApp {
         if !self.search_query.is_empty() {
             self.sort_items();
         }
+
+        self.reconcile_visible_selection_index();
     }
 
     /// Sorts items based on the current mode and folder position preference.
@@ -50,5 +52,6 @@ impl ImageViewerApp {
             self.sort_descending,
             self.folders_position,
         );
+        self.reconcile_visible_selection_index();
     }
 }
