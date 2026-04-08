@@ -28,6 +28,8 @@ pub struct DedicatedImageViewerApp {
     pub(super) cache: WindowCache,
     pub(super) prefetch: PrefetchEngine,
     pub(super) external_open_rx: std::sync::mpsc::Receiver<std::path::PathBuf>,
+    pub(super) startup_sequence_rx: Option<std::sync::mpsc::Receiver<ImageSequence>>,
+    pub(super) startup_preview: Option<(std::path::PathBuf, loader::DecodedFrame)>,
     pub(super) requested_jobs: HashSet<usize>,
     pub(super) texture_serial: u64,
     pub(super) texture: Option<egui::TextureHandle>,
@@ -61,6 +63,8 @@ impl DedicatedImageViewerApp {
         sequence: ImageSequence,
         external_open_rx: std::sync::mpsc::Receiver<std::path::PathBuf>,
         dark_mode: bool,
+        startup_sequence_rx: Option<std::sync::mpsc::Receiver<ImageSequence>>,
+        startup_preview: Option<(std::path::PathBuf, loader::DecodedFrame)>,
     ) -> Self {
         let worker_count = std::thread::available_parallelism()
             .map(|v| v.get())
@@ -77,6 +81,8 @@ impl DedicatedImageViewerApp {
             cache,
             prefetch: PrefetchEngine::new(worker_count, DEFAULT_CACHE_RADIUS),
             external_open_rx,
+            startup_sequence_rx,
+            startup_preview,
             requested_jobs: HashSet::new(),
             texture_serial: 0,
             texture: None,
@@ -152,6 +158,8 @@ impl DedicatedImageViewerApp {
             self.prefetch.set_repaint_ctx(ctx.clone());
         }
         self.prefetch.set_center(start_index);
+        self.startup_sequence_rx = None;
+        self.startup_preview = None;
         self.requested_jobs.clear();
         self.texture = None;
         self.last_error = None;
@@ -188,6 +196,47 @@ impl DedicatedImageViewerApp {
         if let Some(path) = latest_path {
             self.open_requested_path(path, ctx);
         }
+    }
+
+    fn poll_startup_sequence(&mut self, ctx: &egui::Context) {
+        let recv_result = self.startup_sequence_rx.as_ref().map(|rx| rx.try_recv());
+
+        match recv_result {
+            Some(Ok(sequence)) => {
+                self.startup_sequence_rx = None;
+                self.apply_startup_sequence(sequence, ctx);
+            }
+            Some(Err(std::sync::mpsc::TryRecvError::Disconnected)) => {
+                self.startup_sequence_rx = None;
+            }
+            Some(Err(std::sync::mpsc::TryRecvError::Empty)) | None => {}
+        }
+    }
+
+    fn apply_startup_sequence(&mut self, sequence: ImageSequence, ctx: &egui::Context) {
+        let Some(current_path) = self.current_path().cloned() else {
+            return;
+        };
+
+        let Some(new_index) = sequence
+            .entries
+            .iter()
+            .position(|path| paths_eq_case_insensitive(path, &current_path))
+        else {
+            return;
+        };
+
+        self.sequence = sequence;
+        self.current_index = new_index;
+        self.cache = WindowCache::new(DEFAULT_CACHE_RADIUS);
+        self.prefetch = PrefetchEngine::new(self.worker_count, DEFAULT_CACHE_RADIUS);
+        if self.repaint_ctx_set {
+            self.prefetch.set_repaint_ctx(ctx.clone());
+        }
+        self.prefetch.set_center(new_index);
+        self.requested_jobs.clear();
+        self.filmstrip.reset();
+        ctx.request_repaint();
     }
 
     pub(super) fn current_path(&self) -> Option<&std::path::PathBuf> {
@@ -294,6 +343,22 @@ impl DedicatedImageViewerApp {
         };
 
         self.upload_frame(ctx, self.current_index, frame);
+    }
+
+    fn try_show_startup_preview(&mut self, ctx: &egui::Context) {
+        let Some((preview_path, frame)) = self.startup_preview.take() else {
+            return;
+        };
+
+        let Some(current_path) = self.current_path() else {
+            return;
+        };
+
+        if !paths_eq_case_insensitive(current_path, &preview_path) {
+            return;
+        }
+
+        self.upload_frame(ctx, self.current_index, Arc::new(frame));
     }
 
     fn handle_prefetch_results(&mut self, ctx: &egui::Context) {
@@ -453,6 +518,7 @@ impl eframe::App for DedicatedImageViewerApp {
         }
 
         self.handle_external_open_requests(ctx);
+        self.poll_startup_sequence(ctx);
         self.handle_shortcuts(ctx);
         self.sync_window_title(ctx);
 
@@ -467,6 +533,7 @@ impl eframe::App for DedicatedImageViewerApp {
         }
 
         if self.texture.is_none() {
+            self.try_show_startup_preview(ctx);
             self.try_show_cached_current(ctx);
         }
 
@@ -501,5 +568,10 @@ impl eframe::App for DedicatedImageViewerApp {
             ctx.request_repaint_after(Duration::from_millis(200));
         }
     }
+}
+
+fn paths_eq_case_insensitive(a: &std::path::Path, b: &std::path::Path) -> bool {
+    a.to_string_lossy()
+        .eq_ignore_ascii_case(&b.to_string_lossy())
 }
 
