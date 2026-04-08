@@ -82,6 +82,40 @@ impl SidebarTreeState {
         self.show_hidden
     }
 
+    /// Snapshot the per-tab sidebar state (expanded nodes + scroll position).
+    /// Used by `sync_to_tab()` to persist sidebar state per tab.
+    pub fn snapshot_expanded(&self) -> HashSet<PathBuf> {
+        self.expanded.clone()
+    }
+
+    /// Return the current scroll target (for per-tab persistence).
+    pub fn snapshot_scroll_y(&self) -> f32 {
+        self.scroll_target_y
+    }
+
+    /// Restore per-tab sidebar state (expanded nodes + scroll position).
+    /// Used by `sync_from_tab()` when switching to a tab.
+    /// Children for newly expanded nodes are loaded on demand; children
+    /// for nodes that are no longer expanded are kept in cache for reuse.
+    pub fn restore_expanded(&mut self, expanded: HashSet<PathBuf>, scroll_y: f32) {
+        self.expanded = expanded;
+        self.scroll_target_y = scroll_y;
+        self.scroll_visual_y = scroll_y;
+
+        // Ensure children are loaded for all expanded directories.
+        // If they're already cached, this is a no-op; otherwise
+        // a background load is triggered.
+        let to_load: Vec<PathBuf> = self
+            .expanded
+            .iter()
+            .filter(|p| !self.children.contains_key(p.as_path()) && !self.loading.contains(p.as_path()))
+            .cloned()
+            .collect();
+        for path in to_load {
+            self.load_children(&path);
+        }
+    }
+
     /// Update show_hidden flag. If changed, invalidates all cached children
     /// so they are re-loaded with the new filter.
     pub fn set_show_hidden(&mut self, show: bool) {
