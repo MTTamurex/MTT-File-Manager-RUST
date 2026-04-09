@@ -69,7 +69,69 @@ impl Drop for SingleInstanceGuard {
     }
 }
 
+/// Maximum file size for the image viewer (512 MB).
+const MAX_IMAGE_FILE_SIZE: u64 = 512 * 1024 * 1024;
+
+/// SEC: Validate the image path before opening. Blocks null bytes, path traversal,
+/// UNC/network paths, non-image extensions, and oversized files.
+fn validate_image_path(path: &Path) -> Result<(), String> {
+    let path_str = path.to_string_lossy();
+
+    // 1. Null bytes
+    if path_str.contains('\0') {
+        return Err("Path contains null bytes".into());
+    }
+
+    // 2. Path traversal
+    for component in path.components() {
+        if matches!(
+            component,
+            std::path::Component::ParentDir | std::path::Component::CurDir
+        ) {
+            return Err(format!(
+                "Path traversal component '{}' not allowed",
+                component.as_os_str().to_string_lossy()
+            ));
+        }
+    }
+
+    // 3. Block UNC / network paths
+    if path_str.starts_with("\\\\") || path_str.starts_with("//") || path_str.starts_with("\\\\?\\UNC\\") {
+        return Err("Network/UNC paths are not allowed".into());
+    }
+
+    // 4. Extension whitelist
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    if !crate::infrastructure::windows::is_image_extension(ext) {
+        return Err(format!("Unsupported image extension: '{}'", ext));
+    }
+
+    // 5. File existence
+    if !path.is_file() {
+        return Err(format!("File not found: '{}'", path.display()));
+    }
+
+    // 6. File size
+    if let Ok(meta) = std::fs::metadata(path) {
+        if meta.len() > MAX_IMAGE_FILE_SIZE {
+            return Err(format!(
+                "File too large: {:.1} MB (max {} MB)",
+                meta.len() as f64 / (1024.0 * 1024.0),
+                MAX_IMAGE_FILE_SIZE / (1024 * 1024)
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 pub fn open_image_viewer(path: PathBuf) {
+    // SEC: Validate path before spawning child process.
+    if let Err(e) = validate_image_path(&path) {
+        log::error!("[IMAGE-VIEWER] path validation failed for '{}': {}", path.display(), e);
+        return;
+    }
+
     match ipc::send_open_request(&path) {
         Ok(true) => return,
         Ok(false) => {}
@@ -107,6 +169,12 @@ pub fn open_image_viewer(path: PathBuf) {
 }
 
 pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
+    // SEC: Validate again in child process (defense in depth).
+    if let Err(e) = validate_image_path(&path) {
+        log::error!("[IMAGE-VIEWER] path validation failed in standalone: {}", e);
+        return Ok(());
+    }
+
     apply_saved_locale();
 
     let _guard = match SingleInstanceGuard::try_acquire() {

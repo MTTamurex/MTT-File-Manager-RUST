@@ -108,6 +108,8 @@ pub(crate) fn index_non_ntfs_volume(
                     );
                 }
                 scanned_index.clear_pending();
+                // SEC: Prune stale dir_modified_at entries.
+                scanned_index.prune_old_modifications(std::time::Duration::from_secs(600));
 
                 let records = stats.records_indexed;
                 {

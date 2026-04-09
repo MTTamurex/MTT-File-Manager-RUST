@@ -1,7 +1,8 @@
 mod fts;
 mod sync;
 
-use std::os::windows::process::CommandExt;
+use std::ffi::OsStr;
+use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use parking_lot::Mutex;
 
@@ -24,35 +25,156 @@ pub struct IndexDb {
 }
 
 /// Get the database file path.
+///
+/// SEC: Hardcode `C:\ProgramData` instead of reading `%PROGRAMDATA%` env var.
+/// A LocalSystem service always uses this path, and an attacker could redirect
+/// the env var to an attacker-controlled directory to inject a malicious database.
 pub fn get_db_path() -> Result<PathBuf, String> {
-    let base = std::env::var("PROGRAMDATA").unwrap_or_else(|_| r"C:\ProgramData".to_string());
-    let dir = Path::new(&base).join("MTT-File-Manager");
+    let dir = Path::new(r"C:\ProgramData").join("MTT-File-Manager");
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("Failed to create ProgramData directory {:?}: {}", dir, e))?;
 
-    let dir_str = dir.to_string_lossy().to_string();
-    let acl_commands: &[&[&str]] = &[
-        &[&dir_str, "/inheritance:r"],
-        &[&dir_str, "/grant:r", "*S-1-5-18:(OI)(CI)F"],
-        &[&dir_str, "/grant:r", "*S-1-5-32-544:(OI)(CI)F"],
-        &[&dir_str, "/grant:r", "*S-1-5-32-545:(OI)(CI)RX"],
-    ];
-    for args in acl_commands {
-        let status = std::process::Command::new("icacls")
-            .args(*args)
-            .creation_flags(0x08000000) // CREATE_NO_WINDOW
-            .status()
-            .map_err(|e| format!("Failed to execute icacls for {:?}: {}", dir, e))?;
+    // SEC: Apply ACLs via Win32 API directly, not via icacls subprocess.
+    // Shelling out to icacls from a LocalSystem service is a DLL hijacking vector
+    // and also has a TOCTOU window between directory creation and ACL application.
+    harden_directory_acl(&dir)?;
 
-        if !status.success() {
-            return Err(format!(
-                "ACL hardening failed for {:?} with args {:?}: {}",
-                dir, args, status
+    Ok(dir.join("search_index.db"))
+}
+
+/// Apply explicit DACL to the database directory using Win32 API.
+/// Grants: SYSTEM (Full), Administrators (Full), Users (Read+Execute).
+/// Removes inherited permissions.
+fn harden_directory_acl(dir: &Path) -> Result<(), String> {
+    use windows::Win32::Security::Authorization::{
+        SetNamedSecurityInfoW, SE_FILE_OBJECT,
+        SET_ACCESS,
+        SetEntriesInAclW, EXPLICIT_ACCESS_W, TRUSTEE_W,
+        TRUSTEE_IS_SID, TRUSTEE_IS_WELL_KNOWN_GROUP,
+    };
+    use windows::Win32::Security::{
+        ACL as WIN_ACL, ACE_FLAGS,
+        DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+    };
+    use windows::Win32::Foundation::LocalFree;
+    use windows::core::PCWSTR;
+
+    // Build well-known SIDs inline (same pattern as pipe_io.rs).
+    // SYSTEM: S-1-5-18 (revision=1, count=1, authority=5, sub=18)
+    let mut sid_system = [0u8; 12];
+    sid_system[0] = 1; // Revision
+    sid_system[1] = 1; // SubAuthorityCount
+    sid_system[7] = 5; // Identifier authority
+    sid_system[8..12].copy_from_slice(&18u32.to_le_bytes()); // sub-authority: 18
+
+    // Administrators: S-1-5-32-544 (revision=1, count=2, authority=5, sub=[32, 544])
+    let mut sid_admins = [0u8; 16];
+    sid_admins[0] = 1;
+    sid_admins[1] = 2;
+    sid_admins[7] = 5;
+    sid_admins[8..12].copy_from_slice(&32u32.to_le_bytes());
+    sid_admins[12..16].copy_from_slice(&544u32.to_le_bytes());
+
+    // Users: S-1-5-32-545 (revision=1, count=2, authority=5, sub=[32, 545])
+    let mut sid_users = [0u8; 16];
+    sid_users[0] = 1;
+    sid_users[1] = 2;
+    sid_users[7] = 5;
+    sid_users[8..12].copy_from_slice(&32u32.to_le_bytes());
+    sid_users[12..16].copy_from_slice(&545u32.to_le_bytes());
+
+    // FILE_ALL_ACCESS for SYSTEM and Administrators
+    const FILE_ALL_ACCESS: u32 = 0x001F01FF;
+    // FILE_GENERIC_READ | FILE_GENERIC_EXECUTE for Users
+    const FILE_GENERIC_READ_EXECUTE: u32 = 0x001200A9;
+
+    // CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE = sub-containers and objects inherit
+    let inheritance = ACE_FLAGS(3u32);
+
+    let entries = [
+        EXPLICIT_ACCESS_W {
+            grfAccessPermissions: FILE_ALL_ACCESS,
+            grfAccessMode: SET_ACCESS,
+            grfInheritance: inheritance,
+            Trustee: TRUSTEE_W {
+                TrusteeForm: TRUSTEE_IS_SID,
+                TrusteeType: TRUSTEE_IS_WELL_KNOWN_GROUP,
+                ptstrName: windows::core::PWSTR(sid_system.as_mut_ptr() as *mut u16),
+                ..Default::default()
+            },
+        },
+        EXPLICIT_ACCESS_W {
+            grfAccessPermissions: FILE_ALL_ACCESS,
+            grfAccessMode: SET_ACCESS,
+            grfInheritance: inheritance,
+            Trustee: TRUSTEE_W {
+                TrusteeForm: TRUSTEE_IS_SID,
+                TrusteeType: TRUSTEE_IS_WELL_KNOWN_GROUP,
+                ptstrName: windows::core::PWSTR(sid_admins.as_mut_ptr() as *mut u16),
+                ..Default::default()
+            },
+        },
+        EXPLICIT_ACCESS_W {
+            grfAccessPermissions: FILE_GENERIC_READ_EXECUTE,
+            grfAccessMode: SET_ACCESS,
+            grfInheritance: inheritance,
+            Trustee: TRUSTEE_W {
+                TrusteeForm: TRUSTEE_IS_SID,
+                TrusteeType: TRUSTEE_IS_WELL_KNOWN_GROUP,
+                ptstrName: windows::core::PWSTR(sid_users.as_mut_ptr() as *mut u16),
+                ..Default::default()
+            },
+        },
+    ];
+
+    // Build the new ACL from the explicit entries.
+    let mut new_acl = std::ptr::null_mut::<WIN_ACL>();
+    let result = unsafe {
+        SetEntriesInAclW(Some(&entries), None, &mut new_acl)
+    };
+    if result.0 != 0 {
+        return Err(format!(
+            "SetEntriesInAclW failed with error code {}",
+            result.0
+        ));
+    }
+
+    // Apply the ACL to the directory. PROTECTED_DACL_SECURITY_INFORMATION removes
+    // inherited ACEs (equivalent to `icacls /inheritance:r`).
+    let dir_wide: Vec<u16> = OsStr::new(dir.as_os_str())
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let set_result = unsafe {
+        SetNamedSecurityInfoW(
+            PCWSTR(dir_wide.as_ptr()),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            None,
+            None,
+            Some(new_acl as *const _),
+            None,
+        )
+    };
+
+    // Free the ACL allocated by SetEntriesInAclW.
+    if !new_acl.is_null() {
+        unsafe {
+            LocalFree(Some(
+                windows::Win32::Foundation::HLOCAL(new_acl as *mut _),
             ));
         }
     }
 
-    Ok(dir.join("search_index.db"))
+    if set_result.0 != 0 {
+        return Err(format!(
+            "SetNamedSecurityInfoW failed with error code {}",
+            set_result.0
+        ));
+    }
+
+    Ok(())
 }
 
 impl IndexDb {

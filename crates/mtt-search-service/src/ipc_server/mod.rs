@@ -2,7 +2,7 @@ mod handler;
 mod pipe_io;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use parking_lot::RwLock;
 
@@ -25,8 +25,6 @@ const PIPE_OPEN_MODE: u32 = 0x40000003;
 const MAX_ACTIVE_CLIENTS: u32 = 8;
 /// Maximum payload size for incoming requests (64 KB).
 const MAX_REQUEST_PAYLOAD: usize = 64 * 1024;
-/// Maximum search query text length in bytes.
-const MAX_QUERY_TEXT_LEN: usize = 1024;
 /// Maximum results per query page.
 const MAX_QUERY_RESULTS: usize = 10_000;
 /// Maximum query offset to avoid pathological skip scans.
@@ -41,6 +39,7 @@ pub fn run_ipc_server(
     db_path: std::path::PathBuf,
 ) {
     let is_warming = Arc::new(AtomicBool::new(false));
+    let last_warm_epoch_secs = Arc::new(AtomicU64::new(0));
     let active_clients = Arc::new(AtomicU32::new(0));
     let security_policy = Arc::new(IpcSecurityPolicy::from_env());
 
@@ -61,15 +60,30 @@ pub fn run_ipc_server(
         eprintln!("[IPC] Security policy: status metrics redaction is enabled");
     }
 
+    // SEC: The first pipe instance uses FILE_FLAG_FIRST_PIPE_INSTANCE to detect
+    // pre-emptive pipe squatting (another process created the pipe before us).
+    let mut first_instance = true;
+
     loop {
         if shutdown.load(Ordering::Relaxed) {
             break;
         }
 
-        let pipe = match pipe_io::create_pipe() {
-            Ok(p) => p,
+        let pipe = match pipe_io::create_pipe(first_instance) {
+            Ok(p) => {
+                first_instance = false;
+                p
+            }
             Err(e) => {
-                eprintln!("[IPC] Failed to create pipe: {}", e);
+                if first_instance {
+                    eprintln!(
+                        "[IPC] SECURITY: Failed to create first pipe instance — \
+                         another process may have squatted the pipe name: {}",
+                        e
+                    );
+                } else {
+                    eprintln!("[IPC] Failed to create pipe: {}", e);
+                }
                 std::thread::sleep(std::time::Duration::from_secs(1));
                 continue;
             }
@@ -94,12 +108,15 @@ pub fn run_ipc_server(
             break;
         }
 
-        // Rate limiting: reject if too many concurrent clients
-        let current = active_clients.load(Ordering::Relaxed);
-        if current >= MAX_ACTIVE_CLIENTS {
+        // SEC: Atomic rate limiting -- fetch_add first, then rollback if over limit.
+        // This closes the TOCTOU race where multiple threads could pass a load+compare
+        // check simultaneously before any of them incremented the counter.
+        let prev = active_clients.fetch_add(1, Ordering::AcqRel);
+        if prev >= MAX_ACTIVE_CLIENTS {
+            active_clients.fetch_sub(1, Ordering::Release);
             eprintln!(
                 "[IPC] Rate limit: rejecting connection ({}/{} active)",
-                current, MAX_ACTIVE_CLIENTS
+                prev, MAX_ACTIVE_CLIENTS
             );
             // Try to send an error response before disconnecting
             let _ = pipe_io::send_response(
@@ -114,11 +131,10 @@ pub fn run_ipc_server(
             continue;
         }
 
-        active_clients.fetch_add(1, Ordering::Relaxed);
-
         // Handle each client concurrently so one slow query doesn't block all connections.
         let indices_for_client = indices.clone();
         let warming_for_client = is_warming.clone();
+        let warm_epoch_for_client = last_warm_epoch_secs.clone();
         let active_for_client = active_clients.clone();
         let policy_for_client = security_policy.clone();
         let fts_for_client = fts_searcher.clone();
@@ -163,7 +179,7 @@ pub fn run_ipc_server(
             });
 
             if let Err(e) = catch_unwind(AssertUnwindSafe(|| {
-                handler::handle_client(pipe, &indices_for_client, &warming_for_client, &policy_for_client, &fts_for_client)
+                handler::handle_client(pipe, &indices_for_client, &warming_for_client, &warm_epoch_for_client, &policy_for_client, &fts_for_client)
             })) {
                 eprintln!("[IPC] Client handler panic: {:?}", e);
             }
@@ -180,7 +196,7 @@ pub fn run_ipc_server(
                     let _ = CloseHandle(pipe);
                 }
             }
-            active_for_client.fetch_sub(1, Ordering::Relaxed);
+            active_for_client.fetch_sub(1, Ordering::Release);
         });
     }
 

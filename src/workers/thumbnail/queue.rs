@@ -504,7 +504,7 @@ mod tests {
         queue.push_with_index(path_a.clone(), 1, 64, IOPriority::Prefetch, Some(2), 0);
         queue.push_with_index(path_b.clone(), 1, 64, IOPriority::Prefetch, Some(1), 0);
 
-        let (path, _, _, _, _, _) = queue.pop().unwrap();
+        let (path, _, _, _, _, _, _) = queue.pop().unwrap();
         assert_eq!(path, path_b);
     }
 
@@ -522,7 +522,7 @@ mod tests {
         // Should only get one back, with merged/upgraded fields
         let result = queue.pop();
         assert!(result.is_some());
-        let (p, g, size, priority, modified, source) = result.unwrap();
+        let (p, g, size, priority, modified, source, _) = result.unwrap();
         assert_eq!(p, path);
         assert_eq!(g, 2);
         assert_eq!(size, 256);
@@ -546,7 +546,7 @@ mod tests {
 
         let result = queue.pop();
         assert!(result.is_some());
-        let (p, g, size, priority, modified, source) = result.unwrap();
+        let (p, g, size, priority, modified, source, _) = result.unwrap();
         assert_eq!(p, path);
         assert_eq!(g, 3);
         assert_eq!(size, 128);

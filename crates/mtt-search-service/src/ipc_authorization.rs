@@ -30,12 +30,12 @@ pub struct AuthorizedSearchPage {
     pub total_matches: Option<u32>,
 }
 
-struct PipeImpersonationGuard {
+pub(crate) struct PipeImpersonationGuard {
     active: bool,
 }
 
 impl PipeImpersonationGuard {
-    fn new(pipe: HANDLE) -> Result<Self, String> {
+    pub(crate) fn new(pipe: HANDLE) -> Result<Self, String> {
         unsafe {
             ImpersonateNamedPipeClient(pipe)
                 .map_err(|e| format!("ImpersonateNamedPipeClient failed: {}", e))?;
@@ -54,7 +54,7 @@ impl Drop for PipeImpersonationGuard {
     }
 }
 
-fn current_client_can_read_path(full_path: &str) -> bool {
+pub(crate) fn current_client_can_read_path(full_path: &str) -> bool {
     let wide_path: Vec<u16> = OsStr::new(full_path)
         .encode_wide()
         .chain(std::iter::once(0))

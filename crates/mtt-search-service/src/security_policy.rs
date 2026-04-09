@@ -4,9 +4,12 @@ pub struct IpcSecurityPolicy {
 }
 
 impl IpcSecurityPolicy {
+    /// SEC: Status metrics are redacted by default to prevent information leakage
+    /// (per-volume file counts, internal error strings, filesystem paths).
+    /// Set `MTT_SEARCH_EXPOSE_STATUS_METRICS=1` to opt out for debugging.
     pub fn from_env() -> Self {
         Self {
-            redact_status_metrics: env_flag_enabled("MTT_SEARCH_REDACT_STATUS_METRICS"),
+            redact_status_metrics: !env_flag_enabled("MTT_SEARCH_EXPOSE_STATUS_METRICS"),
         }
     }
 }

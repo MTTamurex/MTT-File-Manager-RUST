@@ -396,6 +396,15 @@ pub(crate) fn index_volume(
                 }
             }
             last_persist = std::time::Instant::now();
+
+            // SEC: Prune stale dir_modified_at entries to prevent unbounded memory growth.
+            // 10 minutes is generous enough to cover any realistic CheckPathsModified threshold.
+            {
+                let mut indices_lock = indices.write();
+                if let Some(vol) = indices_lock.iter_mut().find(|v| v.drive_letter == drive_letter) {
+                    vol.prune_old_modifications(std::time::Duration::from_secs(600));
+                }
+            }
         }
     }
 

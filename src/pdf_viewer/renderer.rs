@@ -213,7 +213,8 @@ fn pdfium_library_candidates() -> Vec<PathBuf> {
         }
     }
 
-    candidates.push(Pdfium::pdfium_platform_library_name_at_path("./"));
+    // SEC: Do NOT search the current working directory ("./") for pdfium.dll.
+    // A malicious DLL in CWD would be loaded and executed (DLL planting attack).
     candidates
 }
 

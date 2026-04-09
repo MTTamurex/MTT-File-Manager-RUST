@@ -141,6 +141,17 @@ impl VolumeIndex {
         self.pending_removals.clear();
     }
 
+    /// SEC: Remove `dir_modified_at` entries older than `max_age` to prevent
+    /// unbounded memory growth from long-running incremental USN updates.
+    pub fn prune_old_modifications(&mut self, max_age: std::time::Duration) {
+        let now = std::time::Instant::now();
+        self.dir_modified_at.retain(|_frn, ts| {
+            now.checked_duration_since(*ts)
+                .map(|age| age <= max_age)
+                .unwrap_or(false)
+        });
+    }
+
     /// Compact the arena: rebuild with only the names referenced by current
     /// records.  Eliminates dead space from duplicate MFT name attributes
     /// (long name + 8.3 short name for the same FRN) and incremental overwrites.
