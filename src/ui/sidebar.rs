@@ -561,7 +561,11 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
             ui.add_space(2.0);
 
             // ── Folder tree under this drive (if expanded) ──
-            if is_expanded && action.is_none() {
+            // Always render the tree for visual consistency. Only capture
+            // tree actions when no drive-row action was already captured
+            // this frame — prevents the tree from disappearing for one
+            // frame when a drive is clicked (visible "blink").
+            if is_expanded {
                 let mut tree_ctx = crate::ui::sidebar_tree::SidebarTreeContext {
                     tree_state: ctx.tree_state,
                     current_path: ctx.current_path,
@@ -572,15 +576,17 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                 if let Some(tree_action) =
                     crate::ui::sidebar_tree::render_drive_tree(ui, disk_path, &mut tree_ctx)
                 {
-                    match tree_action {
-                        crate::ui::sidebar_tree::SidebarTreeAction::NavigateTo(path) => {
-                            action = Some(SidebarAction::NavigateTo(path));
-                        }
-                        crate::ui::sidebar_tree::SidebarTreeAction::ToggleExpand(path) => {
-                            action = Some(SidebarAction::TreeToggleExpand(path));
-                        }
-                        crate::ui::sidebar_tree::SidebarTreeAction::DropItemsTo(path) => {
-                            action = Some(SidebarAction::DropItemsTo(path));
+                    if action.is_none() {
+                        match tree_action {
+                            crate::ui::sidebar_tree::SidebarTreeAction::NavigateTo(path) => {
+                                action = Some(SidebarAction::NavigateTo(path));
+                            }
+                            crate::ui::sidebar_tree::SidebarTreeAction::ToggleExpand(path) => {
+                                action = Some(SidebarAction::TreeToggleExpand(path));
+                            }
+                            crate::ui::sidebar_tree::SidebarTreeAction::DropItemsTo(path) => {
+                                action = Some(SidebarAction::DropItemsTo(path));
+                            }
                         }
                     }
                 }
