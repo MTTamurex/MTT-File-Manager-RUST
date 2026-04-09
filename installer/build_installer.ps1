@@ -76,6 +76,35 @@ foreach ($file in $requiredFiles) {
     Write-Host "  OK  $relative ($([math]::Round($size / 1MB, 1)) MB)" -ForegroundColor Green
 }
 
+# SEC: Verify integrity of third-party DLLs before packaging.
+# Update these hashes when upgrading the corresponding libraries.
+$dllHashes = @{
+    "$RepoRoot\target\release\pdfium.dll"   = "7167AEE6BB3D2724EE62FD83BBEB8883EDC786A6E1999782857D4952536A0ED3"
+    "$RepoRoot\target\release\libmpv-2.dll"  = "87F088C280C7E582D969BAE474485D6999868A8B87ED599A01A6384E2F4D9392"
+}
+
+$hashFailed = $false
+foreach ($entry in $dllHashes.GetEnumerator()) {
+    $actual = (Get-FileHash -Path $entry.Key -Algorithm SHA256).Hash
+    $relative = $entry.Key.Replace("$RepoRoot\", "")
+    if ($actual -ne $entry.Value) {
+        Write-Host "  FAIL  $relative" -ForegroundColor Red
+        Write-Host "        Expected: $($entry.Value)" -ForegroundColor Red
+        Write-Host "        Actual:   $actual" -ForegroundColor Red
+        $hashFailed = $true
+    } else {
+        Write-Host "  HASH  $relative OK" -ForegroundColor Green
+    }
+}
+
+if ($hashFailed) {
+    throw @"
+DLL integrity check failed. The DLLs in target\release\ do not match the
+expected hashes. If you intentionally upgraded a library, update the hashes
+in build_installer.ps1.
+"@
+}
+
 # ── Step 3: Run Inno Setup compiler ──────────────────────────────────
 Write-Host "`n[3/3] Compiling installer..." -ForegroundColor Yellow
 
