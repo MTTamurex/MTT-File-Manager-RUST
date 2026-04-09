@@ -52,8 +52,7 @@ impl PageTexture {
 
 pub struct PdfViewerApp {
     worker_path: PathBuf,
-    pub(super) text_renderer: PdfRenderer,
-    worker: Option<RenderWorker>,
+    pub(super) worker: Option<RenderWorker>,
 
     pub(super) total_pages: u32,
     /// Natural (unrotated) page sizes in DIP.
@@ -90,13 +89,12 @@ pub struct PdfViewerApp {
 
 impl PdfViewerApp {
     pub fn new(path: PathBuf, dark_mode: bool) -> Result<Self, String> {
-        let text_renderer = PdfRenderer::open(&path)?;
-        let page_sizes = text_renderer.page_sizes().to_vec();
+        let renderer = PdfRenderer::open(&path)?;
+        let page_sizes = renderer.page_sizes().to_vec();
         let total_pages = page_sizes.len() as u32;
 
         Ok(Self {
             worker_path: path,
-            text_renderer,
             worker: None,
             total_pages,
             page_sizes,
@@ -161,6 +159,16 @@ impl PdfViewerApp {
             }
             self.cache_bytes += new_entry.byte_size();
             self.textures.insert(r.page_idx, new_entry);
+        }
+
+        // Receive eagerly-extracted text segments from the worker.
+        for r in worker.drain_text_segment_results() {
+            self.page_text.insert(r.page_idx, r.segments);
+        }
+
+        // Receive bounded-text results and finalise pending selections.
+        for r in worker.drain_bounded_text_results() {
+            self.receive_bounded_text(r.page_idx, r.text);
         }
     }
 

@@ -48,7 +48,6 @@ pub struct PdfTextSegment {
 
 /// A loaded PDF document ready for page rendering.
 pub struct PdfRenderer {
-    path: PathBuf,
     page_sizes: Vec<(f32, f32)>,
 }
 
@@ -62,23 +61,23 @@ pub struct RenderedPage {
 impl PdfRenderer {
     /// Open a PDF file from disk.
     pub fn open(path: &Path) -> Result<Self, String> {
-        let page_sizes = with_document(path, |document| {
-            let page_count = document.pages().len();
-            let mut page_sizes = Vec::with_capacity(page_count as usize);
+        let pdfium = pdfium()?;
+        let document = pdfium
+            .load_pdf_from_file(path, None)
+            .map_err(|e| format!("LoadPdf: {e}"))?;
 
-            for index in 0..page_count {
-                let page = document
-                    .pages()
-                    .get(index as PdfPageIndex)
-                    .map_err(|e| e.to_string())?;
-                page_sizes.push((page.width().value, page.height().value));
-            }
+        let page_count = document.pages().len();
+        let mut page_sizes = Vec::with_capacity(page_count as usize);
 
-            Ok(page_sizes)
-        })?;
+        for index in 0..page_count {
+            let page = document
+                .pages()
+                .get(index as PdfPageIndex)
+                .map_err(|e| e.to_string())?;
+            page_sizes.push((page.width().value, page.height().value));
+        }
 
         Ok(Self {
-            path: path.to_path_buf(),
             page_sizes,
         })
     }
@@ -86,65 +85,6 @@ impl PdfRenderer {
     pub fn page_sizes(&self) -> &[(f32, f32)] {
         &self.page_sizes
     }
-
-    pub fn page_text_segments(&self, index: u32) -> Result<Vec<PdfTextSegment>, String> {
-        with_document(&self.path, |document| {
-            let page = document
-                .pages()
-                .get(index as PdfPageIndex)
-                .map_err(|e| e.to_string())?;
-            let text = page.text().map_err(|e| format!("LoadText: {e}"))?;
-
-            let mut segments = Vec::new();
-
-            for character in text.chars().iter() {
-                let Some(content) = character.unicode_string() else {
-                    continue;
-                };
-
-                if content.trim().is_empty() {
-                    continue;
-                }
-
-                let bounds = character
-                    .loose_bounds()
-                    .or_else(|_| character.tight_bounds())
-                    .map_err(|e| format!("GetCharBounds: {e}"))?;
-
-                segments.push(PdfTextSegment {
-                    bounds: pdfium_rect_to_bounds(bounds),
-                });
-            }
-
-            Ok(segments)
-        })
-    }
-
-    pub fn page_text_in_bounds(&self, index: u32, bounds: PdfTextBounds) -> Result<String, String> {
-        with_document(&self.path, |document| {
-            let page = document
-                .pages()
-                .get(index as PdfPageIndex)
-                .map_err(|e| e.to_string())?;
-            let text = page.text().map_err(|e| format!("LoadText: {e}"))?;
-
-            Ok(text.inside_rect(PdfRect::new_from_values(
-                bounds.bottom,
-                bounds.left,
-                bounds.top,
-                bounds.right,
-            )))
-        })
-    }
-}
-
-fn with_document<T>(path: &Path, op: impl FnOnce(&PdfDocument<'_>) -> Result<T, String>) -> Result<T, String> {
-    let pdfium = pdfium()?;
-    let document = pdfium
-        .load_pdf_from_file(path, None)
-        .map_err(|e| format!("LoadPdf: {e}"))?;
-
-    op(&document)
 }
 
 /// Execute an operation with a timeout. Spawns a worker thread and waits
@@ -218,7 +158,7 @@ fn pdfium_library_candidates() -> Vec<PathBuf> {
     candidates
 }
 
-fn pdfium_rect_to_bounds(rect: PdfRect) -> PdfTextBounds {
+pub(super) fn pdfium_rect_to_bounds(rect: PdfRect) -> PdfTextBounds {
     PdfTextBounds::from_points(
         rect.left().value,
         rect.right().value,
