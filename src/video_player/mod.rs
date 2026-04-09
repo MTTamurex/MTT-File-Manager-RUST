@@ -7,7 +7,7 @@
 //! mpv creates its own native window (no `wid` embedding), so all native features
 //! work: keyboard shortcuts, OSC, window management via OSC buttons.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 
 use rfd::FileDialog;
@@ -16,10 +16,75 @@ use rfd::FileDialog;
 const STANDALONE_OSC_SCRIPT_OPTS: &str =
     "osc-scalewindowed=1,osc-scalefullscreen=1,osc-scaleforcedwindow=1,osc-windowcontrols=yes";
 
+/// Maximum file size for the video player (50 GB).
+const MAX_VIDEO_FILE_SIZE: u64 = 50 * 1024 * 1024 * 1024;
+
+/// SEC: Validate the video/audio path before opening. Blocks null bytes, path traversal,
+/// UNC/network paths, non-media extensions, and oversized files.
+fn validate_video_path(path: &Path) -> Result<(), String> {
+    let path_str = path.to_string_lossy();
+
+    // 1. Null bytes
+    if path_str.contains('\0') {
+        return Err("Path contains null bytes".into());
+    }
+
+    // 2. Path traversal
+    for component in path.components() {
+        if matches!(
+            component,
+            std::path::Component::ParentDir | std::path::Component::CurDir
+        ) {
+            return Err(format!(
+                "Path traversal component '{}' not allowed",
+                component.as_os_str().to_string_lossy()
+            ));
+        }
+    }
+
+    // 3. Block UNC / network paths
+    if path_str.starts_with("\\\\") || path_str.starts_with("//") || path_str.starts_with("\\\\?\\UNC\\") {
+        return Err("Network/UNC paths are not allowed".into());
+    }
+
+    // 4. Extension whitelist (video + audio, since mpv plays both)
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let ext_lower = ext.to_lowercase();
+    if !crate::infrastructure::windows::is_video_extension(&ext_lower)
+        && !crate::infrastructure::windows::is_audio_extension(&ext_lower)
+    {
+        return Err(format!("Unsupported media extension: '{}'", ext));
+    }
+
+    // 5. File existence
+    if !path.is_file() {
+        return Err(format!("File not found: '{}'", path.display()));
+    }
+
+    // 6. File size
+    if let Ok(meta) = std::fs::metadata(path) {
+        if meta.len() > MAX_VIDEO_FILE_SIZE {
+            return Err(format!(
+                "File too large: {:.1} GB (max {} GB)",
+                meta.len() as f64 / (1024.0 * 1024.0 * 1024.0),
+                MAX_VIDEO_FILE_SIZE / (1024 * 1024 * 1024)
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 /// Spawn a standalone video player process for the given file.
 ///
 /// Returns the `Child` handle so the caller can track/kill the process.
 pub fn open_video_player(path: PathBuf, position: f64, volume: f32) -> Option<Child> {
+    // SEC: Validate path before spawning child process.
+    if let Err(e) = validate_video_path(&path) {
+        log::error!("[VIDEO-PLAYER] path validation failed for '{}': {}", path.display(), e);
+        return None;
+    }
+
     let exe = match std::env::current_exe() {
         Ok(v) => v,
         Err(err) => {
@@ -57,9 +122,9 @@ pub fn open_video_player(path: PathBuf, position: f64, volume: f32) -> Option<Ch
 fn resolve_mpv_ui_config_dir() -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
 
-    if let Ok(cwd) = std::env::current_dir() {
-        candidates.push(cwd.join("mpv_ui").join("portable_config"));
-    }
+    // SEC: Do NOT search CWD for config — an attacker could plant a malicious
+    // config directory if the app is launched from an untrusted location.
+    // Only search relative to the executable's own directory.
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_dir) = exe.parent() {
             candidates.push(exe_dir.join("mpv_ui").join("portable_config"));
@@ -331,6 +396,12 @@ unsafe extern "system" fn enum_set_icon(
 /// Creates a native mpv window (borderless) with the custom OSC providing
 /// window controls (close, minimize, maximize). No eframe wrapper needed.
 pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Result<()> {
+    // SEC: Validate again in child process (defense in depth).
+    if let Err(e) = validate_video_path(&path) {
+        log::error!("[VIDEO-PLAYER] path validation failed in standalone: {}", e);
+        return Ok(());
+    }
+
     let title_name = path
         .file_name()
         .map(|v| v.to_string_lossy().to_string())

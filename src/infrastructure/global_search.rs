@@ -6,7 +6,7 @@ use windows::Win32::Foundation::{CloseHandle, ERROR_PIPE_BUSY, HANDLE};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, ReadFile, WriteFile, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_NONE, OPEN_EXISTING,
 };
-use windows::Win32::System::Pipes::PeekNamedPipe;
+use windows::Win32::System::Pipes::{GetNamedPipeServerProcessId, PeekNamedPipe};
 
 const SEARCH_PIPE_IO_TIMEOUT_MS: u64 = 8_000;
 const CONTROL_PIPE_IO_TIMEOUT_MS: u64 = 5_000;
@@ -207,7 +207,16 @@ fn open_pipe() -> Result<HANDLE, String> {
                 FILE_ATTRIBUTE_NORMAL,
                 None,
             ) {
-                Ok(handle) => return Ok(handle),
+                Ok(handle) => {
+                    // SEC: Verify the server process is the legitimate search service.
+                    // A rogue process could squat the pipe name and impersonate the service.
+                    if let Err(e) = verify_server_process(handle) {
+                        log::warn!("[SEARCH-CLIENT] Pipe server verification failed: {}", e);
+                        let _ = CloseHandle(handle);
+                        return Err(format!("Pipe server verification failed: {}", e));
+                    }
+                    return Ok(handle);
+                }
                 Err(e) => {
                     let code = e.code();
                     if code == ERROR_PIPE_BUSY.to_hresult() {
@@ -224,6 +233,61 @@ fn open_pipe() -> Result<HANDLE, String> {
     }
 
     Err(last_error)
+}
+
+/// SEC: Verify that the named pipe server belongs to the legitimate search service.
+/// Gets the server PID and checks that its executable is `mtt-search-service.exe`.
+fn verify_server_process(pipe: HANDLE) -> Result<(), String> {
+    let mut server_pid: u32 = 0;
+    unsafe {
+        GetNamedPipeServerProcessId(pipe, &mut server_pid)
+            .map_err(|e| format!("GetNamedPipeServerProcessId failed: {}", e))?;
+    }
+
+    if server_pid == 0 {
+        return Err("Server PID is 0".into());
+    }
+
+    // Open the process and query its image name.
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
+        PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    let process = unsafe {
+        OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, server_pid)
+            .map_err(|e| format!("OpenProcess({}) failed: {}", server_pid, e))?
+    };
+
+    let mut buf = [0u16; 512];
+    let mut len = buf.len() as u32;
+    let result = unsafe {
+        QueryFullProcessImageNameW(
+            process,
+            PROCESS_NAME_FORMAT(0),
+            windows::core::PWSTR(buf.as_mut_ptr()),
+            &mut len,
+        )
+    };
+    unsafe {
+        let _ = CloseHandle(process);
+    }
+    result.map_err(|e| format!("QueryFullProcessImageNameW failed: {}", e))?;
+
+    let image_path = String::from_utf16_lossy(&buf[..len as usize]);
+    let file_name = image_path
+        .rsplit('\\')
+        .next()
+        .unwrap_or("")
+        .to_lowercase();
+
+    if file_name != "mtt-search-service.exe" {
+        return Err(format!(
+            "Server process is '{}', expected 'mtt-search-service.exe'",
+            file_name
+        ));
+    }
+
+    Ok(())
 }
 
 fn write_message<T: serde::Serialize>(pipe: HANDLE, msg: &T) -> Result<(), String> {

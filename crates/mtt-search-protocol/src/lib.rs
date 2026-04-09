@@ -5,7 +5,7 @@ pub const PIPE_NAME: &str = r"\\.\pipe\MTTFileManagerSearch";
 
 /// Maximum accepted query text length (bytes). Anything longer is likely
 /// malformed or a deliberate abuse attempt, so we reject it early.
-pub const MAX_QUERY_TEXT_LEN: usize = 4096;
+pub const MAX_QUERY_TEXT_LEN: usize = 1024;
 
 /// Maximum result items we accept per response. Prevents a compromised or
 /// buggy service from flooding the client with millions of entries.
@@ -148,7 +148,6 @@ pub fn decode_message<T: for<'de> Deserialize<'de>>(data: &[u8]) -> Result<T, St
     use bincode::Options;
     bincode::DefaultOptions::new()
         .with_fixint_encoding()
-        .allow_trailing_bytes()
         .with_limit(data.len() as u64)
         .deserialize(data)
         .map_err(|e| format!("deserialization failed: {}", e))

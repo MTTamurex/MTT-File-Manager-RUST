@@ -15,7 +15,12 @@ use mtt_search_protocol::*;
 
 use super::{MAX_REQUEST_PAYLOAD, PIPE_BUFFER_SIZE, PIPE_MAX_INSTANCES, PIPE_OPEN_MODE};
 
-pub(super) fn create_pipe() -> Result<HANDLE, String> {
+/// FILE_FLAG_FIRST_PIPE_INSTANCE (0x00080000): causes CreateNamedPipeW to fail
+/// if a pipe with this name already exists. Prevents pre-emptive pipe squatting
+/// where an attacker creates the pipe before the service starts.
+const FILE_FLAG_FIRST_PIPE_INSTANCE: u32 = 0x00080000;
+
+pub(super) fn create_pipe(first_instance: bool) -> Result<HANDLE, String> {
     unsafe {
         // Build an explicit DACL that grants access only to BUILTIN\Users and SYSTEM.
         // This replaces the previous NULL DACL (which allowed ALL access, including
@@ -132,9 +137,17 @@ pub(super) fn create_pipe() -> Result<HANDLE, String> {
 
         let pipe_name: Vec<u16> = PIPE_NAME.encode_utf16().chain(std::iter::once(0)).collect();
 
+        // SEC: On the first instance, include FILE_FLAG_FIRST_PIPE_INSTANCE so that
+        // CreateNamedPipeW fails if the pipe name is already taken (pipe squatting).
+        let open_mode = if first_instance {
+            PIPE_OPEN_MODE | FILE_FLAG_FIRST_PIPE_INSTANCE
+        } else {
+            PIPE_OPEN_MODE
+        };
+
         let pipe = CreateNamedPipeW(
             PCWSTR(pipe_name.as_ptr()),
-            FILE_FLAGS_AND_ATTRIBUTES(PIPE_OPEN_MODE),
+            FILE_FLAGS_AND_ATTRIBUTES(open_mode),
             PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, // BYTE mode + reject network clients
             PIPE_MAX_INSTANCES,
             PIPE_BUFFER_SIZE,

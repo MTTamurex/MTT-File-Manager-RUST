@@ -1,23 +1,30 @@
 use std::hint::black_box;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use parking_lot::RwLock;
 
 use windows::Win32::Foundation::HANDLE;
 
 use crate::file_index::{IndexState, VolumeIndex};
-use crate::ipc_authorization::{collect_authorized_fts_page, collect_authorized_search_page};
+use crate::ipc_authorization::{
+    collect_authorized_fts_page, collect_authorized_search_page,
+    current_client_can_read_path, PipeImpersonationGuard,
+};
 use crate::index_db;
 use crate::security_policy::IpcSecurityPolicy;
 use mtt_search_protocol::*;
 
 use super::pipe_io::{read_message, send_response};
-use super::{MAX_QUERY_OFFSET, MAX_QUERY_RESULTS, MAX_QUERY_TEXT_LEN};
+use super::{MAX_QUERY_OFFSET, MAX_QUERY_RESULTS};
+
+/// Minimum seconds between WarmIndex operations to prevent DoS via repeated warm requests.
+const WARM_COOLDOWN_SECS: u64 = 60;
 
 pub(super) fn handle_client(
     pipe: HANDLE,
     indices: &Arc<RwLock<Vec<VolumeIndex>>>,
     is_warming: &Arc<AtomicBool>,
+    last_warm_epoch_secs: &Arc<AtomicU64>,
     security_policy: &IpcSecurityPolicy,
     fts_searcher: &Option<Arc<index_db::FtsSearcher>>,
 ) {
@@ -50,6 +57,17 @@ pub(super) fn handle_client(
             // Respond immediately so the client is not blocked.
             let _ = send_response(pipe, &SearchResponse::WarmStarted);
 
+            // SEC: Cooldown to prevent DoS via repeated WarmIndex requests.
+            // If a warm completed within the last 60 seconds, skip.
+            let now_epoch = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let last_warm = last_warm_epoch_secs.load(Ordering::Relaxed);
+            if now_epoch.saturating_sub(last_warm) < WARM_COOLDOWN_SECS {
+                return;
+            }
+
             // Only spawn the warming thread if one is not already running.
             if is_warming
                 .compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed)
@@ -57,6 +75,7 @@ pub(super) fn handle_client(
             {
                 let indices_clone = indices.clone();
                 let warming_flag = is_warming.clone();
+                let warm_epoch = last_warm_epoch_secs.clone();
                 std::thread::spawn(move || {
                     eprintln!("[IPC] WarmIndex: warming in-memory index...");
                     let start = std::time::Instant::now();
@@ -64,9 +83,6 @@ pub(super) fn handle_client(
                         let lock = indices_clone.read();
                         let mut touched = 0u64;
                         for vol in lock.iter() {
-                            // Touch the contiguous arena buffer to bring pages into RAM.
-                            // This is much more cache-friendly than the old per-record
-                            // String approach because all name data is contiguous.
                             let arena_bytes = vol.names.as_bytes();
                             for chunk in arena_bytes.chunks(4096) {
                                 black_box(&chunk[0]);
@@ -79,6 +95,12 @@ pub(super) fn handle_client(
                             start.elapsed().as_secs_f64()
                         );
                     }
+                    // Record completion timestamp for cooldown.
+                    let done_epoch = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    warm_epoch.store(done_epoch, Ordering::Relaxed);
                     warming_flag.store(false, Ordering::SeqCst);
                 });
             }
@@ -181,12 +203,33 @@ pub(super) fn handle_client(
             paths,
             threshold_secs,
         } => {
+            // SEC: Impersonate the connecting client before checking any paths.
+            // Without this, any local user could probe modification times of
+            // directories they have no read access to (information disclosure).
+            let _guard = match PipeImpersonationGuard::new(pipe) {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!("[IPC] CheckPathsModified impersonation failed: {}", e);
+                    let _ = send_response(
+                        pipe,
+                        &SearchResponse::Error("Authorization failed".to_string()),
+                    );
+                    return;
+                }
+            };
+
             let threshold_dur = std::time::Duration::from_secs(threshold_secs as u64);
             let now = std::time::Instant::now();
             let indices_lock = indices.read();
 
             let mut modified = Vec::new();
             for path_str in &paths {
+                // SEC: Verify the client has read access to this path before
+                // revealing whether it was recently modified.
+                if !current_client_can_read_path(path_str) {
+                    continue;
+                }
+
                 // Determine which volume index to query from the drive letter.
                 let drive_letter = match path_str.chars().next() {
                     Some(c) if c.is_ascii_alphabetic() => c.to_ascii_uppercase(),
@@ -199,7 +242,12 @@ pub(super) fn handle_client(
                     }
                     if let Some(frn) = vol.resolve_path_to_frn(path_str) {
                         if let Some(&modified_at) = vol.dir_modified_at.get(&frn) {
-                            if now.duration_since(modified_at) <= threshold_dur {
+                            // SEC: Use checked_duration_since to avoid panic on
+                            // non-monotonic clock edge cases (rare QPC hardware bugs).
+                            let age = now
+                                .checked_duration_since(modified_at)
+                                .unwrap_or(std::time::Duration::MAX);
+                            if age <= threshold_dur {
                                 modified.push(path_str.clone());
                             }
                         }
@@ -234,7 +282,13 @@ fn build_status_response(indices: &[VolumeIndex], security_policy: &IpcSecurityP
                     IndexState::NotStarted => "not_started".to_string(),
                     IndexState::Scanning => "scanning".to_string(),
                     IndexState::Ready => "ready".to_string(),
-                    IndexState::Error(e) => format!("error: {}", e),
+                    // SEC: Redact internal error details to prevent information leakage
+                    // (filesystem paths, driver names, OS error codes). Log the real
+                    // error server-side for diagnostics.
+                    IndexState::Error(e) => {
+                        eprintln!("[IPC] Volume {} status error (redacted from client): {}", vol.drive_letter, e);
+                        "error".to_string()
+                    }
                 },
                 files_indexed: count,
             });

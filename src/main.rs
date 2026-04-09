@@ -74,6 +74,15 @@ fn has_stderr_console() -> bool {
 }
 
 fn main() -> eframe::Result<()> {
+    // SEC: Remove the current working directory from the default DLL search order.
+    // Prevents DLL planting attacks (e.g. malicious pdfium.dll or libmpv-2.dll in CWD).
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows::Win32::System::LibraryLoader::SetDefaultDllDirectories;
+        use windows::Win32::System::LibraryLoader::LOAD_LIBRARY_SEARCH_DEFAULT_DIRS;
+        let _ = SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    }
+
     // When running without a console (installed binary launched from shortcut),
     // reduce the default log level. Background worker threads continuously emit
     // log::info! which formats a String and acquires the global Stderr mutex.

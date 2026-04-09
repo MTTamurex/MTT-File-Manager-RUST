@@ -35,6 +35,15 @@ pub(crate) fn redact_paths(msg: &str) -> String {
 }
 
 fn main() {
+    // SEC: Remove the current working directory from the default DLL search order.
+    // Prevents DLL planting attacks when running as LocalSystem.
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows::Win32::System::LibraryLoader::SetDefaultDllDirectories;
+        use windows::Win32::System::LibraryLoader::LOAD_LIBRARY_SEARCH_DEFAULT_DIRS;
+        let _ = SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    }
+
     let args: Vec<String> = std::env::args().collect();
 
     match args.get(1).map(|s| s.as_str()) {

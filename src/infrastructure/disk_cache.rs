@@ -16,6 +16,57 @@ mod preferences;
 mod shell_icons;
 mod thumbnails_repo;
 
+/// SEC: Get the SID string (e.g. "S-1-5-21-...") for the current process user.
+/// Uses the process token instead of %USERNAME% env var to avoid spoofing.
+fn get_current_user_sid_string() -> Option<String> {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::Security::{
+        GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER,
+    };
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    unsafe {
+        let mut token = windows::Win32::Foundation::HANDLE::default();
+        OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).ok()?;
+
+        // Query required buffer size.
+        let mut needed = 0u32;
+        let _ = GetTokenInformation(token, TokenUser, None, 0, &mut needed);
+        if needed == 0 {
+            let _ = CloseHandle(token);
+            return None;
+        }
+
+        let mut buf = vec![0u8; needed as usize];
+        let ok = GetTokenInformation(
+            token,
+            TokenUser,
+            Some(buf.as_mut_ptr() as *mut _),
+            needed,
+            &mut needed,
+        );
+        let _ = CloseHandle(token);
+        ok.ok()?;
+
+        let user_info = &*(buf.as_ptr() as *const TOKEN_USER);
+        let sid = user_info.User.Sid;
+
+        // Convert SID to string.
+        use windows::Win32::Security::Authorization::ConvertSidToStringSidW;
+        let mut sid_str_ptr = windows::core::PWSTR::null();
+        ConvertSidToStringSidW(sid, &mut sid_str_ptr).ok()?;
+
+        let sid_string = sid_str_ptr.to_string().ok();
+
+        // Free the string allocated by ConvertSidToStringSidW.
+        windows::Win32::Foundation::LocalFree(Some(
+            windows::Win32::Foundation::HLOCAL(sid_str_ptr.as_ptr() as *mut _),
+        ));
+
+        sid_string
+    }
+}
+
 /// Allowed table targets for batch-delete operations.
 /// Using an enum instead of raw &str prevents SQL injection through
 /// table or column names.
@@ -75,17 +126,22 @@ pub struct ThumbnailDiskCache {
 
 impl ThumbnailDiskCache {
     fn harden_directory_permissions(cache_dir: &Path) -> bool {
-        let Ok(username) = std::env::var("USERNAME") else {
-            log::warn!(
-                "[DISK-CACHE] USERNAME env not available; skipping ACL hardening for {:?}",
-                cache_dir
-            );
-            return false;
+        // SEC: Use the current user's SID instead of %USERNAME% env var.
+        // The env var can be spoofed; the SID from the process token is authoritative.
+        let sid_string = match get_current_user_sid_string() {
+            Some(s) => s,
+            None => {
+                log::warn!(
+                    "[DISK-CACHE] Failed to get current user SID; skipping ACL hardening for {:?}",
+                    cache_dir
+                );
+                return false;
+            }
         };
 
         use std::os::windows::process::CommandExt;
         let dir_str = cache_dir.to_string_lossy().to_string();
-        let grant_arg = format!("{}:(OI)(CI)F", username);
+        let grant_arg = format!("*{}:(OI)(CI)F", sid_string);
 
         for args in [
             vec![dir_str.as_str(), "/inheritance:r"],
