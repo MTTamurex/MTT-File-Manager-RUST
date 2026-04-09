@@ -220,40 +220,50 @@ pub(super) fn handle_client(
 
             let threshold_dur = std::time::Duration::from_secs(threshold_secs as u64);
             let now = std::time::Instant::now();
-            let indices_lock = indices.read();
 
-            let mut modified = Vec::new();
-            for path_str in &paths {
-                // SEC: Verify the client has read access to this path before
-                // revealing whether it was recently modified.
-                if !current_client_can_read_path(path_str) {
-                    continue;
-                }
-
-                // Determine which volume index to query from the drive letter.
-                let drive_letter = match path_str.chars().next() {
-                    Some(c) if c.is_ascii_alphabetic() => c.to_ascii_uppercase(),
-                    _ => continue,
-                };
-
-                if let Some(vol) = indices_lock.iter().find(|v| v.drive_letter == drive_letter) {
-                    if !matches!(vol.state, IndexState::Ready) {
-                        continue;
-                    }
-                    if let Some(frn) = vol.resolve_path_to_frn(path_str) {
-                        if let Some(&modified_at) = vol.dir_modified_at.get(&frn) {
-                            // SEC: Use checked_duration_since to avoid panic on
-                            // non-monotonic clock edge cases (rare QPC hardware bugs).
-                            let age = now
-                                .checked_duration_since(modified_at)
-                                .unwrap_or(std::time::Duration::MAX);
-                            if age <= threshold_dur {
-                                modified.push(path_str.clone());
-                            }
+            // ── Snapshot modification times under lock, then release before
+            // authorization ── CreateFileW (inside current_client_can_read_path)
+            // can block on AV, cloud filters, or FUSE mounts. Holding the
+            // RwLock during those calls would block index writers (USN journal
+            // incremental updates). Instead we snapshot the cheap index lookups
+            // under a short lock and defer the slow I/O authorization to after
+            // the lock is released — the same pattern used by
+            // collect_authorized_search_page.
+            let candidates: Vec<(String, bool)> = {
+                let indices_lock = indices.read();
+                paths
+                    .iter()
+                    .filter_map(|path_str| {
+                        let drive_letter = match path_str.chars().next() {
+                            Some(c) if c.is_ascii_alphabetic() => c.to_ascii_uppercase(),
+                            _ => return None,
+                        };
+                        let vol = indices_lock
+                            .iter()
+                            .find(|v| v.drive_letter == drive_letter)?;
+                        if !matches!(vol.state, IndexState::Ready) {
+                            return None;
                         }
-                    }
-                }
-            }
+                        let frn = vol.resolve_path_to_frn(path_str)?;
+                        let &modified_at = vol.dir_modified_at.get(&frn)?;
+                        let age = now
+                            .checked_duration_since(modified_at)
+                            .unwrap_or(std::time::Duration::MAX);
+                        Some((path_str.clone(), age <= threshold_dur))
+                    })
+                    .collect()
+            }; // indices_lock released here
+
+            // SEC: Verify the client has read access to each candidate path
+            // before revealing whether it was recently modified. This runs
+            // WITHOUT the index lock held.
+            let modified: Vec<String> = candidates
+                .into_iter()
+                .filter(|(path_str, recently_modified)| {
+                    *recently_modified && current_client_can_read_path(path_str)
+                })
+                .map(|(path_str, _)| path_str)
+                .collect();
 
             let _ = send_response(pipe, &SearchResponse::PathsModified { modified });
         }

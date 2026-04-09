@@ -147,7 +147,7 @@ impl ThumbnailDiskCache {
             vec![dir_str.as_str(), "/inheritance:r"],
             vec![dir_str.as_str(), "/grant:r", grant_arg.as_str()],
         ] {
-            match std::process::Command::new("icacls")
+            match std::process::Command::new(r"C:\Windows\System32\icacls.exe")
                 .args(&args)
                 .creation_flags(0x08000000) // CREATE_NO_WINDOW
                 .status()
