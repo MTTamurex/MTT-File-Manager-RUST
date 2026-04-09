@@ -236,7 +236,12 @@ fn open_pipe() -> Result<HANDLE, String> {
 }
 
 /// SEC: Verify that the named pipe server belongs to the legitimate search service.
-/// Gets the server PID and checks that its executable is `mtt-search-service.exe`.
+/// Gets the server PID via `GetNamedPipeServerProcessId`, then uses
+/// `CreateToolhelp32Snapshot` to look up the executable name for that PID.
+///
+/// Unlike `OpenProcess` + `QueryFullProcessImageNameW`, the ToolHelp snapshot
+/// approach works across privilege boundaries (normal user → LocalSystem process)
+/// because it reads from a kernel-level process table snapshot.
 fn verify_server_process(pipe: HANDLE) -> Result<(), String> {
     let mut server_pid: u32 = 0;
     unsafe {
@@ -248,42 +253,60 @@ fn verify_server_process(pipe: HANDLE) -> Result<(), String> {
         return Err("Server PID is 0".into());
     }
 
-    // Open the process and query its image name.
-    use windows::Win32::System::Threading::{
-        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
-        PROCESS_QUERY_LIMITED_INFORMATION,
-    };
-    let process = unsafe {
-        OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, server_pid)
-            .map_err(|e| format!("OpenProcess({}) failed: {}", server_pid, e))?
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW,
+        PROCESSENTRY32W, TH32CS_SNAPPROCESS,
     };
 
-    let mut buf = [0u16; 512];
-    let mut len = buf.len() as u32;
+    let snapshot = unsafe {
+        CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+            .map_err(|e| format!("CreateToolhelp32Snapshot failed: {}", e))?
+    };
+
+    let mut entry = PROCESSENTRY32W {
+        dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+        ..Default::default()
+    };
+
     let result = unsafe {
-        QueryFullProcessImageNameW(
-            process,
-            PROCESS_NAME_FORMAT(0),
-            windows::core::PWSTR(buf.as_mut_ptr()),
-            &mut len,
-        )
+        let mut found = false;
+        if Process32FirstW(snapshot, &mut entry).is_ok() {
+            loop {
+                if entry.th32ProcessID == server_pid {
+                    let nul_pos = entry
+                        .szExeFile
+                        .iter()
+                        .position(|&c| c == 0)
+                        .unwrap_or(entry.szExeFile.len());
+                    let exe_name =
+                        String::from_utf16_lossy(&entry.szExeFile[..nul_pos]).to_lowercase();
+
+                    found = true;
+                    if exe_name != "mtt-search-service.exe" {
+                        let _ = CloseHandle(snapshot);
+                        return Err(format!(
+                            "Server process is '{}', expected 'mtt-search-service.exe'",
+                            exe_name
+                        ));
+                    }
+                    break;
+                }
+                if Process32NextW(snapshot, &mut entry).is_err() {
+                    break;
+                }
+            }
+        }
+        found
     };
+
     unsafe {
-        let _ = CloseHandle(process);
+        let _ = CloseHandle(snapshot);
     }
-    result.map_err(|e| format!("QueryFullProcessImageNameW failed: {}", e))?;
 
-    let image_path = String::from_utf16_lossy(&buf[..len as usize]);
-    let file_name = image_path
-        .rsplit('\\')
-        .next()
-        .unwrap_or("")
-        .to_lowercase();
-
-    if file_name != "mtt-search-service.exe" {
+    if !result {
         return Err(format!(
-            "Server process is '{}', expected 'mtt-search-service.exe'",
-            file_name
+            "Could not find process with PID {} in snapshot",
+            server_pid
         ));
     }
 
